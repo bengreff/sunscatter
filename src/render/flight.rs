@@ -1234,10 +1234,11 @@ impl RenderState {
 
                         let fuel_bar_height = 80.0;
                         let bar_width = 20.0;
-                        let (fuel_rect, _) = ui.allocate_exact_size(
+                        let (fuel_rect, fuel_resp) = ui.allocate_exact_size(
                             egui::vec2(bar_width, fuel_bar_height),
                             egui::Sense::hover()
                         );
+                        fuel_resp.on_hover_text(format!("Current stage fuel: {:.0}%", fuel_frac * 100.0));
 
                         let fuel_painter = ui.painter();
                         fuel_painter.rect_filled(fuel_rect, 2.0, egui::Color32::from_rgb(40, 40, 50));
@@ -1272,10 +1273,11 @@ impl RenderState {
 
                         let mono_bar_height = 80.0;
                         let bar_width = 20.0;
-                        let (mono_rect, _) = ui.allocate_exact_size(
+                        let (mono_rect, mono_resp) = ui.allocate_exact_size(
                             egui::vec2(bar_width, mono_bar_height),
                             egui::Sense::hover()
                         );
+                        mono_resp.on_hover_text(format!("Monopropellant: {:.0}%", mono_frac * 100.0));
 
                         let mono_painter = ui.painter();
                         mono_painter.rect_filled(mono_rect, 2.0, egui::Color32::from_rgb(40, 40, 50));
@@ -1314,10 +1316,11 @@ impl RenderState {
 
                         let elec_bar_height = 80.0;
                         let bar_width = 20.0;
-                        let (elec_rect, _) = ui.allocate_exact_size(
+                        let (elec_rect, elec_resp) = ui.allocate_exact_size(
                             egui::vec2(bar_width, elec_bar_height),
                             egui::Sense::hover()
                         );
+                        elec_resp.on_hover_text(format!("{:.0} / {:.0} Wh", stored, max));
 
                         let elec_painter = ui.painter();
                         elec_painter.rect_filled(elec_rect, 2.0, egui::Color32::from_rgb(40, 40, 50));
@@ -1380,10 +1383,11 @@ impl RenderState {
 
                             let food_bar_height = 80.0;
                             let bar_width = 20.0;
-                            let (food_rect, _) = ui.allocate_exact_size(
+                            let (food_rect, food_resp) = ui.allocate_exact_size(
                                 egui::vec2(bar_width, food_bar_height),
                                 egui::Sense::hover()
                             );
+                            food_resp.on_hover_text(format!("{:.1} days at {:.1} kg/day ({} crew)", food_days, crew as f64 * 1.5, crew));
 
                             let food_painter = ui.painter();
                             food_painter.rect_filled(food_rect, 2.0, egui::Color32::from_rgb(40, 40, 50));
