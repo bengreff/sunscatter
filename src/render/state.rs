@@ -48,6 +48,7 @@ pub struct RenderState {
     pub fps: f32,              // Frames per second (smoothed)
     pub ship_velocity: f64,    // Current velocity (m/s)
     pub ship_altitude: f64,    // Current altitude (m)
+    pub ship_vertical_speed: f64, // Radial velocity (m/s, positive = ascending)
     pub ship_throttle: f64,    // Current throttle (0.0 to 1.0)
     pub ship_soi_name: String, // Current SOI body name
     pub ship_time_to_intercept: Option<f64>, // Time to next SOI transition (seconds)
@@ -499,6 +500,7 @@ impl RenderState {
             fps: 0.0,
             ship_velocity: 0.0,
             ship_altitude: 0.0,
+            ship_vertical_speed: 0.0,
             ship_throttle: 0.0,
             ship_soi_name: String::new(),
             ship_time_to_intercept: None,

@@ -1295,6 +1295,13 @@ fn render_flight_frame(
     let distance_from_soi = (game.flight.ship.rel_position[0].powi(2) + game.flight.ship.rel_position[1].powi(2)).sqrt();
     let soi_body = &game.solar_system.bodies[game.flight.ship.soi_body];
     let altitude = distance_from_soi - soi_body.radius;
+    let vertical_speed = if distance_from_soi > 0.01 {
+        let r_hat = [game.flight.ship.rel_position[0] / distance_from_soi,
+                     game.flight.ship.rel_position[1] / distance_from_soi];
+        game.flight.ship.rel_velocity[0] * r_hat[0] + game.flight.ship.rel_velocity[1] * r_hat[1]
+    } else {
+        0.0
+    };
 
     let patched_traj_raw = game.flight.ship.get_patched_trajectory(&game.solar_system);
     let time_to_intercept = patched_traj_raw.as_ref()
@@ -1691,6 +1698,7 @@ fn render_flight_frame(
         patched_trajectory,
         velocity,
         altitude,
+        vertical_speed,
         soi_body_name: soi_body.name.clone(),
         throttle: game.flight.ship.throttle,
         time_to_intercept,

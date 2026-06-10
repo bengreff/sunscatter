@@ -235,6 +235,7 @@ pub struct ShipRenderData {
     pub patched_trajectory: Vec<OrbitSegmentData>,
     pub velocity: f64,
     pub altitude: f64,
+    pub vertical_speed: f64,   // m/s, positive = ascending, negative = descending
     pub soi_body_name: String,
     pub throttle: f64,
     pub time_to_intercept: Option<f64>,

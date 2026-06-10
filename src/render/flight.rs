@@ -60,6 +60,7 @@ impl RenderState {
         let vessel_delta_v = self.vessel_delta_v;
         let vessel_current_stage = self.vessel_current_stage;
 
+        let ship_vertical_speed = self.ship_vertical_speed;
         let ship_acceleration = self.ship_acceleration;
         let ship_speed_fraction_c = self.ship_speed_fraction_c;
         let ship_lorentz_gamma = self.ship_lorentz_gamma;
@@ -454,6 +455,25 @@ impl RenderState {
                         ui.add_space(20.0);
                         ui.label(egui::RichText::new("ALT").size(11.0).color(egui::Color32::GRAY));
                         ui.label(egui::RichText::new(&alt_str).size(13.0).strong().color(egui::Color32::WHITE));
+
+                        // Vertical speed (useful for landing)
+                        if ship_altitude < 100_000.0 {
+                            ui.add_space(20.0);
+                            let vs_color = if ship_vertical_speed < -10.0 {
+                                egui::Color32::from_rgb(220, 100, 100)
+                            } else if ship_vertical_speed > 10.0 {
+                                egui::Color32::from_rgb(100, 200, 100)
+                            } else {
+                                egui::Color32::WHITE
+                            };
+                            let vs_str = if ship_vertical_speed.abs() >= 1000.0 {
+                                format!("{:+.1} km/s", ship_vertical_speed / 1000.0)
+                            } else {
+                                format!("{:+.1} m/s", ship_vertical_speed)
+                            };
+                            ui.label(egui::RichText::new("V/S").size(11.0).color(egui::Color32::GRAY));
+                            ui.label(egui::RichText::new(vs_str).size(13.0).strong().color(vs_color));
+                        }
 
                         if ship_is_relativistic || ship_grav_time_factor < 0.999 {
                             ui.add_space(10.0);

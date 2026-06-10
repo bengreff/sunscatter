@@ -196,6 +196,7 @@ impl RenderState {
         if let Some(s) = ship {
             self.ship_velocity = s.velocity;
             self.ship_altitude = s.altitude;
+            self.ship_vertical_speed = s.vertical_speed;
             self.ship_throttle = s.throttle;
             self.ship_soi_name = s.soi_body_name.clone();
             self.ship_time_to_intercept = s.time_to_intercept;
