@@ -23,6 +23,7 @@
             grid_height: 7.0,
             reactor: Some((
                 output_watts: 500000000.0,
+                waste_heat_watts: 214000000.0, // 214 MW (30% of 714 MW reaction power)
             )),
             resources: {},
         ),
@@ -44,6 +45,7 @@
             grid_height: 9.0,
             reactor: Some((
                 output_watts: 1600000000.0,
+                waste_heat_watts: 686000000.0, // 686 MW (30% of 2.3 GW reaction power)
             )),
             resources: {},
         ),
@@ -65,6 +67,7 @@
             grid_height: 7.0,
             reactor: Some((
                 output_watts: 10000000000.0,
+                waste_heat_watts: 6700000000.0, // 6.7 GW (40% of 16.7 GW reaction power)
             )),
             resources: {},
         ),
@@ -86,6 +89,7 @@
             grid_height: 9.0,
             reactor: Some((
                 output_watts: 30000000000.0,
+                waste_heat_watts: 20000000000.0, // 20 GW (40% of 50 GW reaction power)
             )),
             resources: {},
         ),
@@ -107,6 +111,7 @@
             grid_height: 7.0,
             reactor: Some((
                 output_watts: 800000000000.0,
+                waste_heat_watts: 141000000000.0, // 141 GW (15% of 941 GW reaction power)
                 // ~37.6 g/hr antimatter + 37.6 g/hr LH2 = 75.2 g/hr total mass
                 // flow, split 50/50.  Reactor produces no power if either fuel
                 // runs out.
@@ -137,6 +142,7 @@
             grid_height: 9.0,
             reactor: Some((
                 output_watts: 2500000000000.0,
+                waste_heat_watts: 441000000000.0, // 441 GW (15% of 2.94 TW reaction power)
                 // ~118 g/hr antimatter + 118 g/hr LH2 = 236 g/hr total mass
                 // flow, split 50/50.  Reactor produces no power if either fuel
                 // runs out.

@@ -307,30 +307,146 @@ The power system already tracks generation, batteries, and pod draw (`src/parts/
 
 ## Phase 5 — Radiators + thermal model (vessel-wide pool)
 
-Biggest gap. Reactor RON descriptions reference radiators that don't exist as parts.
+Reactor RON descriptions reference radiators that don't exist as parts. Per-part aero heating
+(Phase 6) already exists in `parts/vessel.rs::update_part_temperatures`. This phase adds a
+ship-wide waste-heat pool that integrates with the per-part field via a spillover mechanism.
 
-- [ ] Add `RadiatorData { heat_rejection_w, operating_temp_k, deployable: bool }` to `definition.rs`.
-- [ ] Add vessel-level thermal state: `pooled_heat_j: f64`, `pooled_capacity_j_per_k: f64`. (Vessel-wide pool — radiator placement doesn't matter, matches the abstraction level of the existing power system.)
-- [ ] **New file** `data/parts/radiators.ron` — three tech tiers from `docs/part_ideas.md`:
-  - Heat-pipe panels (fission era, low rejection, low mass)
-  - Liquid droplet radiators (fusion era, deployable, mid-high)
-  - Phononic/graphene fins (antimatter era, very high T, high rejection)
-- [ ] Per-tick thermal update:
-  - Heat sources: reactor waste = `output_watts × (1 - efficiency)` (fission≈0.7, fusion≈0.5, AM≈0.3); interstellar engines when firing add a fraction of fuel power.
-  - Heat sinks: sum of active radiators' `heat_rejection_w`.
-  - `pooled_heat_j += (sources - sinks) × dt`; clamp ≥ 0.
-  - Pool temperature `T = pooled_heat_j / pooled_capacity_j_per_k + ambient`.
-  - If T > critical (~1500 K): auto-trip all reactors and electric/fusion/AM engines until T drops. HUD: "Overheating — radiator deficit".
-- [ ] HUD: thermal gauge alongside power-budget bar.
-- [ ] Spec: new `openspec/specs/game/vessels/thermal/spec.md`.
+Design decisions (locked):
+- **Accumulation:** ship-wide thermal pool (`thermal_pool_temp` on FlightVessel).
+- **Integration:** excess pool heat past a damage threshold distributes to per-part temps weighted
+  by thermal mass. Same destruction path as aero heating.
+- **Failure mode:** reactor trip + cascading effects. Reactors auto-shut at trip temp; require
+  manual battery-powered restart once pool cools below restart-hysteresis temp. Parts only melt
+  past damage threshold.
+- **Parts:** 3 tiers × 4 sizes = 12 deployable radiator wings, radial-attach, category Utility.
+- **UI:** editor stats bar + part tooltips + flight HUD thermal bar.
 
-## Phase 6 — Hull thermal tolerance (reentry + sustained heat)
+### 5.1 Data model (`src/parts/definition.rs`)
+- [ ] `EngineData.waste_heat_watts: f64` (serde default 0) — heat generated at 100% throttle.
+- [ ] `ReactorData.waste_heat_watts: f64` (serde default 0) — constant heat while running.
+- [ ] New `RadiatorData { tier: RadiatorTier, rejection_watts: f64, deploy_time_sec: f64 }`.
+- [ ] New `RadiatorTier` enum: `HeatPipe | Droplet | Phononic`.
+- [ ] `PartDefinition.radiator: Option<RadiatorData>` (serde default None).
 
-- [ ] Aerodynamic heating in atmosphere: forward-facing parts accumulate heat proportional to `0.5 × ρ × v³`. Heat shields have much higher tolerance + ablative behavior (mass loss model).
-- [ ] Track per-part temperature (separate from the vessel pool, since reentry heating is localized).
-- [ ] Parts whose `temperature_k` exceeds `max_heat_tolerance` for sustained time → `part.destroyed = true`. Decoupler-like ejection.
-- [ ] Spec: extend `openspec/specs/game/vessels/thermal/spec.md` (or new `physics/aerothermal/spec.md`).
+### 5.2 Runtime state (`src/parts/vessel.rs`)
+- [ ] `FlightVessel.thermal_pool_temp: f64` (K, init 300, serde default 300).
+- [ ] `FlightVessel.thermal_pool_capacity: f64` (J/K, recomputed in `recalculate_mass`).
+- [ ] `FlightPart.is_radiator: bool` (serde default false). Reuses existing `deploy_fraction` /
+      `deploy_target` for stowed↔deployed animation.
+- [ ] `FlightVessel.reactors_tripped: bool` (serde default false) — global flag; trips all
+      reactors at once.
+- [ ] `from_blueprint` populates these for radiator parts.
+
+### 5.3 Thermal update loop (`src/parts/vessel.rs`)
+- [ ] New `FlightVessel::update_thermal_pool(&mut self, dt, part_defs) -> ThermalStatus`.
+  - `gen_W = Σ engine.waste_heat × throttle (if active) + Σ reactor.waste_heat (if running and not tripped)`
+  - `reject_W = Σ radiator.rejection_watts × deploy_fraction` (only non-destroyed/non-decoupled)
+  - `net_W = gen_W − reject_W`
+  - `dT = net_W / pool_capacity × dt`; pool_temp = max(AMBIENT_300K, pool_temp + dT)
+  - **Reactor trip cascade**: at `pool_temp ≥ REACTOR_TRIP_TEMP (1200K)`, set `reactors_tripped = true`.
+  - **Per-part spillover**: if `pool_temp > PART_DAMAGE_TEMP (1500K)`, distribute excess wattage
+    above threshold proportionally to each part's thermal mass into `part.temperature`. Existing
+    `destroy_overheated_parts` handles melting.
+  - **Restart hysteresis**: once `pool_temp < REACTOR_RESTART_TEMP (800K)`, `reactors_tripped`
+    may be cleared by a manual user action.
+- [ ] Reuse existing `update_solar_deploy` for radiator deploy animation OR add a sibling
+      `update_radiator_deploy` with a slower deploy speed (5s vs 2s for solar).
+
+### 5.4 Game tick wiring (`src/app.rs`)
+- [ ] Call `update_thermal_pool` after `update_power` each tick.
+- [ ] When `reactors_tripped == true`, skip reactor power generation in `update_power`.
+- [ ] Manual reactor restart action consumes 100,000 Wh of battery power and clears
+      `reactors_tripped` (similar to existing reactor-startup model in design doc).
+
+### 5.5 Radiator parts (`data/parts/radiators.ron`)
+- [ ] 12 parts (3 tiers × 4 sizes), radial-attach, `category: Utility`.
+
+| Tier | Tiny | Small | Medium | Large | Mass scale | Tech node |
+|------|------|-------|--------|-------|------------|-----------|
+| Heat Pipe Panel | 50 MW | 250 MW | 1 GW | 4 GW | 8 kg/m² | radiator_heat_pipe |
+| Liquid Metal Droplet | 1 GW | 5 GW | 20 GW | 80 GW | 3 kg/m² | radiator_droplet |
+| Phononic Metamaterial | 35 GW | 175 GW | 700 GW | 2.8 TW | 1.5 kg/m² | radiator_phononic |
+
+- Grid sizes: Tiny 1×2, Small 1×4, Medium 1×8, Large 1×16 (stowed).
+- Wing extends perpendicular to body when deployed (visual area grows ~10× via `deploy_fraction`).
+- `max_heat_tolerance` per tier: Heat Pipe 1500K, Droplet 2800K, Phononic 6500K. Survive their own
+  operating temperatures but explode in atmosphere if deployed at speed (handled by existing
+  per-part aero heating).
+- `deploy_time_sec`: 5.0 (radiators are slow to deploy vs 2.0 for solar panels).
+
+### 5.6 Engine + reactor waste-heat values (RON edits)
+- [ ] `data/parts/engines_interstellar.ron`: add `waste_heat_watts` per engine using doc table:
+      Orion 60e9, Daedalus S1 1.05e12, Daedalus S2 250e9, Z-Pinch Probe 160e9, Z-Pinch Advanced 500e9,
+      AM-Cat 300e9, AM Torch 300e9, Gamma Conversion 150e9.
+- [ ] `data/parts/reactors_interstellar.ron`: add `waste_heat_watts` per reactor:
+      Fission Small 214e6, Fission Large 686e6, Fusion Small 6.7e9, Fusion Large 20e9,
+      AM Small 141e9, AM Large 441e9.
+- [ ] `data/parts/reactors_small.ron`: leave at 0 (small fission reactors are RTG-scale, negligible).
+
+### 5.7 Save/load (`src/save/mod.rs`)
+- [ ] Already covered by `#[serde(default)]` on FlightVessel / FlightPart.
+
+### 5.8 Editor UI (`src/editor/ui.rs`, `src/editor/state.rs`)
+- [ ] Stats bar: new "Thermal: X.X / Y.Y GW" row alongside ΔV / TWR / Power.
+  - Green if `gen ≤ reject`, yellow within 10% margin, red if `gen > reject`.
+- [ ] Part-info panel: show "Waste heat: X MW (at 100% throttle)" for engines/reactors with
+      `waste_heat_watts > 0`.
+- [ ] Part-info panel: show "Rejection: X MW (when deployed)" + Tier for radiator parts.
+
+### 5.9 Flight HUD (`src/render/flight.rs`)
+- [ ] Add a thermal pool bar near the existing heat bar. Color thresholds at 800K (green→yellow),
+      1200K (yellow→orange, "REACTOR TRIP"), 1500K (orange→red, "PART DAMAGE").
+- [ ] Notification when reactors trip.
+- [ ] Radiator part right-click menu: "Deploy" / "Retract" (mirrors solar panel pattern).
+- [ ] Manual reactor restart button visible when `reactors_tripped == true`.
+
+### 5.10 Rendering (`src/render/scene/mod.rs` + `src/editor/render.rs`)
+- [ ] New `generate_radiator_vertices()` dispatched for parts with `radiator.is_some()`.
+- [ ] Stowed: thin stripe along part body, tier-colored.
+- [ ] Deployed: wing extends perpendicular based on `deploy_fraction`.
+- [ ] Tier visuals: Heat Pipe = striped warm-grey, Droplet = silver-shimmer, Phononic = cyan emissive.
+- [ ] Optional heat tint based on `pool_temp` (uses existing `apply_heat_tint`).
+
+### 5.11 Spec updates
+- [ ] `openspec/specs/game/physics/interstellar/spec.md`: add Radiator Systems section.
+- [ ] `openspec/specs/game/physics/aerodynamic_heating/spec.md`: append Waste Heat Integration.
+- [ ] `openspec/specs/game/editor/parts/spec.md`: thermal stats row + tooltips.
+- [ ] `openspec/specs/game/vessels/spec.md`: deploy state for radiators, reactor trip/restart cascade.
+
+### 5.12 Verification
+- [ ] `cargo check` clean.
+- [ ] Sanity-test in editor: Orion + Fission Large + ~10 Heat Pipe Large = balanced (matches doc burden).
+- [ ] Sanity-test in flight: igniting Orion with no radiators → reactor trip within 20s.
+
+## Phase 6 — Per-part aerodynamic heating (COMPLETE — see `physics/aerodynamic_heating/spec.md`)
 
 ## Execution order
 
-1 → 2 → 3 → 4 → 5 → 6. Phases 1–4 are independent and incremental wins. Phase 5 establishes the vessel-wide thermal pool; Phase 6 layers localized hull heating on top.
+1 → 2 → 3 → 4 → 5. Phase 5 sub-steps run in numerical order (5.1 → 5.12).
+
+## Review (Phase 5 — Radiators + thermal model)
+
+**Status:** Implemented and compiles clean; `cargo test` passes all suites (lib + integration).
+
+**What landed:**
+- `EngineData.waste_heat_watts`, `ReactorData.waste_heat_watts`, `RadiatorData { tier, rejection_watts, deploy_time_sec }`, `RadiatorTier` enum (`HeatPipe | Droplet | Phononic`), `PartDefinition.radiator: Option<RadiatorData>`.
+- `FlightVessel.thermal_pool_temp / thermal_pool_capacity / reactors_tripped`. Pool capacity is `dry_mass_kg × 500 J/(kg·K)`, recomputed in `recalculate_mass`.
+- `FlightPart.is_radiator / radiator_rejection_watts / radiator_deploy_time_sec`; reuses existing `deploy_target / deploy_fraction`.
+- `FlightVessel::update_thermal_pool` and `restart_reactors`. Cascade thresholds: trip at 1200 K, restart allowed below 800 K (hysteresis), per-part spillover above 1500 K via thermal-mass-weighted distribution into `part.temperature`.
+- Reactor power generation gated on `!reactors_tripped` in both `update_power` phases.
+- Game tick wiring: `update_thermal_pool` called once per tick after `update_power` (skips per-part spillover when on-rails since reactors don't run there anyway).
+- 12 radiator parts in `data/parts/radiators.ron` (3 tiers × Tiny/Small/Medium/Large), procedural rendering with stowed strip + deployed wings (tier-colored), tech-tree gated.
+- Waste-heat values added to all 8 interstellar engines and all 6 interstellar reactors per `docs/part_ideas.md`.
+- Editor stats bar: new "Thermal: X / Y" row colored green / yellow / red; engine and reactor tooltips show waste heat; radiator tooltips show tier, rejection capacity, and deploy time.
+- Flight HUD: thermal-pool bar with 800/1200/1500 K thresholds, "TRIP" indicator + Restart button while tripped, per-part panel deploy/retract for radiators.
+- New `RenderRequest::RadiatorDeploy` and `RenderRequest::ReactorRestart` plumbed through the existing request channel.
+- Specs updated: `physics/interstellar/spec.md` (RadiatorData, EngineData/ReactorData waste heat, full radiator part table), `physics/aerodynamic_heating/spec.md` (Waste-Heat Pool Integration section), `editor/parts/spec.md` (engine/reactor/radiator info + thermal stats row), `vessels/spec.md` (radiator deploy + reactor restart).
+
+**Numbers sanity check (matches doc burden table):**
+- Orion Pulse + Vulcan = 60.7 GW waste heat → 15× Heat Pipe Large = 60 GW reject, 2,220 t. Doc: 2,259 t. ✓
+- Daedalus S1 + Tokamak = 1,070 GW → 14× Droplet Large = 1,120 GW, 798 t. Doc: 764 t. ✓
+- AM Torch + Penning = 441 GW → 13× Phononic Tiny = 455 GW, 4.7 t. Doc: 4.6 t. ✓
+
+**Not done / honest caveats:**
+- Did not start the dev server to visually verify the wing rendering or the trip→restart flow at runtime. `cargo check` and `cargo test` are clean; the data flow is wired end-to-end through the existing request channels (mirrors the solar-panel deploy pattern), but a real flight session has not been driven. Recommend a play-test before relying on tuning numbers.
+- Radiator visuals are procedural (no sprite atlas entries). The wing extends symmetrically as flat rectangles plus a glow strip past 70% deploy; no animation polish beyond `deploy_fraction` interpolation.

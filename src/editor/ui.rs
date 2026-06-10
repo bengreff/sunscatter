@@ -163,6 +163,10 @@ pub fn render_part_info(ui: &mut egui::Ui, def: &crate::parts::PartDefinition, i
             ui.label("Throttleable: No");
         }
 
+        if engine.waste_heat_watts > 0.0 {
+            ui.label(format!("Waste heat: {} (full throttle)", format_power(engine.waste_heat_watts)));
+        }
+
         // TWR calculation for this engine alone
         ui.separator();
         ui.label("Single Engine TWR:");
@@ -216,6 +220,26 @@ pub fn render_part_info(ui: &mut egui::Ui, def: &crate::parts::PartDefinition, i
         ui.separator();
         ui.heading("Reactor Stats");
         ui.label(format!("Output: {}", format_power(reactor.output_watts)));
+        if reactor.waste_heat_watts > 0.0 {
+            ui.label(format!("Waste heat: {}", format_power(reactor.waste_heat_watts)));
+        }
+    }
+
+    // Radiator info
+    if let Some(ref radiator) = def.radiator {
+        ui.separator();
+        ui.heading("Radiator");
+        let tier = match radiator.tier {
+            crate::parts::RadiatorTier::HeatPipe => "Heat Pipe (1,200 K)",
+            crate::parts::RadiatorTier::Droplet  => "Liquid Droplet (2,500 K)",
+            crate::parts::RadiatorTier::Phononic => "Phononic Metamaterial (6,000 K)",
+        };
+        ui.label(format!("Tier: {}", tier));
+        ui.label(format!("Rejection: {} (deployed)", format_power(radiator.rejection_watts)));
+        ui.label(format!("Deploy time: {:.1} s", radiator.deploy_time_sec));
+        ui.label(egui::RichText::new("Deployable wing — stows for launch / atmospheric flight.")
+            .color(egui::Color32::from_rgb(180, 180, 180))
+            .small());
     }
 
     // Shield info
@@ -398,6 +422,30 @@ pub fn render_editor_ui(
                         .color(cost_color));
                 }
 
+                // Thermal balance: waste heat vs radiator rejection
+                if stats.waste_heat_gen > 0.0 || stats.waste_heat_reject > 0.0 {
+                    ui.separator();
+                    let gen = stats.waste_heat_gen;
+                    let rej = stats.waste_heat_reject;
+                    let color = if rej >= gen {
+                        egui::Color32::from_rgb(100, 200, 100) // green: balanced
+                    } else if rej >= gen * 0.9 {
+                        egui::Color32::from_rgb(220, 200, 80) // yellow: marginal
+                    } else {
+                        egui::Color32::from_rgb(220, 80, 80)  // red: deficit
+                    };
+                    ui.label(egui::RichText::new(format!(
+                        "Thermal: {} / {}",
+                        format_power(gen),
+                        format_power(rej),
+                    )).color(color))
+                    .on_hover_text(
+                        "Waste heat generated (engines + reactors at full throttle) vs. radiator rejection capacity\n\
+                         (sum of all radiators when fully deployed). Exceeding capacity in flight will trip reactors\n\
+                         at 1200 K and start melting parts past 1500 K."
+                    );
+                }
+
                 ui.separator();
 
                 // Resources (smaller text)
@@ -465,7 +513,7 @@ pub fn render_editor_ui(
             egui::ScrollArea::vertical().show(ui, |ui| {
                 let category = editor.selected_category;
 
-                if category == PartCategory::Interstellar {
+                if category == PartCategory::Heat || category == PartCategory::Interstellar {
                     // Flat list for Interstellar (no size sub-grouping)
                     let parts: Vec<_> = part_defs.by_category(category)
                         .into_iter()
@@ -725,6 +773,7 @@ pub fn render_editor_ui(
         egui::SidePanel::right("info_panel")
             .default_width(200.0)
             .show(ctx, |ui| {
+                egui::ScrollArea::vertical().show(ui, |ui| {
                 // Show part definition info when selected from palette
                 if let Some(ref def_id) = editor.selected_part_def {
                     if let Some(def) = part_defs.get(def_id) {
@@ -1049,6 +1098,22 @@ pub fn render_editor_ui(
                                 ui.label(format!("Output: {:.0} W", rtg.output_watts));
                             }
 
+                            // Radiator deploy/retract in editor
+                            if def.radiator.is_some() {
+                                let label = if part.deployed { "Retract" } else { "Deploy" };
+                                if ui.button(label).clicked() {
+                                    let new_state = !part.deployed;
+                                    if let Some(p) = editor.parts.get_mut(&part_id) {
+                                        p.deployed = new_state;
+                                    }
+                                    if let Some(mid) = part.mirror_partner {
+                                        if let Some(mp) = editor.parts.get_mut(&mid) {
+                                            mp.deployed = new_state;
+                                        }
+                                    }
+                                }
+                            }
+
                             // Decoupler info
                             if def.decoupler.is_some() {
                                 ui.separator();
@@ -1323,6 +1388,7 @@ pub fn render_editor_ui(
                         }
                     }
                 }
+                }); // ScrollArea
             });
     }
 

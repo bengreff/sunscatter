@@ -145,7 +145,7 @@
             prerequisites: ["heavy_fission", "nuclear_pulse"],
             col: 7,
             row: 2,
-            unlocks_parts: ["Prometheus", "Vulcan"],
+            unlocks_parts: ["Prometheus", "Vulcan", "Heat Pipe Panel T", "Heat Pipe Panel S", "Heat Pipe Panel M", "Heat Pipe Panel L"],
             unlocks_buildings: [],
         ),
         (
@@ -167,7 +167,7 @@
             prerequisites: ["fusion_probe"],
             col: 9,
             row: 2,
-            unlocks_parts: ["Z-Pinch Advanced", "Daedalus Stage 1", "Daedalus Stage 2", "Fusion Sphere M", "Fusion Sphere L"],
+            unlocks_parts: ["Z-Pinch Advanced", "Daedalus Stage 1", "Daedalus Stage 2", "Fusion Sphere M", "Fusion Sphere L", "Droplet Radiator T", "Droplet Radiator S", "Droplet Radiator M", "Droplet Radiator L"],
             unlocks_buildings: [],
         ),
         (
@@ -200,7 +200,7 @@
             prerequisites: ["am_production", "geodesic_shielding"],
             col: 12,
             row: 2,
-            unlocks_parts: ["Antimatter Torch"],
+            unlocks_parts: ["Antimatter Torch", "Phononic Emitter T", "Phononic Emitter S", "Phononic Emitter M", "Phononic Emitter L"],
             unlocks_buildings: [ParticleAcceleratorMk3],
         ),
         (

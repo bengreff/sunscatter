@@ -63,6 +63,7 @@ pub enum PartCategory {
     Aerodynamic,
     Utility,
     Electricity,
+    Heat,
     Interstellar,
     Cargo,
 }
@@ -77,6 +78,7 @@ impl PartCategory {
             PartCategory::Aerodynamic => "Aerodynamic",
             PartCategory::Utility => "Utility",
             PartCategory::Electricity => "Electricity",
+            PartCategory::Heat => "Heat",
             PartCategory::Interstellar => "Interstellar",
             PartCategory::Cargo => "Cargo",
         }
@@ -91,6 +93,7 @@ impl PartCategory {
             PartCategory::Aerodynamic,
             PartCategory::Utility,
             PartCategory::Electricity,
+            PartCategory::Heat,
             PartCategory::Interstellar,
             PartCategory::Cargo,
         ]
@@ -167,6 +170,8 @@ pub struct EngineData {
     pub secondary_fuel_fraction: f64,  // Fraction of total mass flow that is secondary fuel (0.0-1.0)
     #[serde(default)]
     pub mass_flow_kg_s: Option<f64>,  // Total mass flow at vacuum full throttle (kg/s), auto-computed if absent
+    #[serde(default)]
+    pub waste_heat_watts: f64,  // Heat generated when firing at full throttle (Watts). Scales with throttle.
 }
 
 impl EngineData {
@@ -367,6 +372,9 @@ pub struct ReactorData {
     /// they only produce power while their fuel reserves are non-zero.
     #[serde(default)]
     pub fuel: Option<ReactorFuelData>,
+    /// Waste heat generated when running (Watts). Constant while the reactor is producing power.
+    #[serde(default)]
+    pub waste_heat_watts: f64,
 }
 
 /// Per-reactor fuel-consumption configuration. Used by antimatter reactors,
@@ -406,6 +414,33 @@ pub struct ShieldData {
 pub struct ParachuteData {
     pub deployed_width: f64,  // Deployed canopy diameter in grid squares
 }
+
+/// Greenhouse data (food production for life support)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GreenhouseData {
+    pub food_production_rate: f64,  // kg of food per day
+}
+
+/// Radiator tier for waste-heat rejection
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RadiatorTier {
+    HeatPipe,   // Fission era, ~1200K operating temp
+    Droplet,    // Fusion era, ~2500K operating temp
+    Phononic,   // Antimatter era, ~6000K operating temp
+}
+
+/// Radiator-specific data
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RadiatorData {
+    pub tier: RadiatorTier,
+    /// Heat rejection capacity at full deployment (Watts)
+    pub rejection_watts: f64,
+    /// Time to fully deploy / retract the wing (seconds)
+    #[serde(default = "default_radiator_deploy_time")]
+    pub deploy_time_sec: f64,
+}
+
+fn default_radiator_deploy_time() -> f64 { 5.0 }
 
 /// Fairing-specific data
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -487,7 +522,11 @@ pub struct PartDefinition {
     #[serde(default)]
     pub shield: Option<ShieldData>,
     #[serde(default)]
+    pub radiator: Option<RadiatorData>,
+    #[serde(default)]
     pub parachute: Option<ParachuteData>,
+    #[serde(default)]
+    pub greenhouse: Option<GreenhouseData>,
     #[serde(default)]
     pub resources: HashMap<String, f64>,
     // Thermal properties

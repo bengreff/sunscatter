@@ -175,7 +175,19 @@ The info panel SHALL display: name, description, size, mass (tonnes and kg), cos
 
 ### Requirement: Engine info
 
-For engines, the info panel SHALL display: propellant type (including secondary propellant if present, e.g. "D+He3 + Antimatter"), thrust (vacuum and sea level), specific impulse (vacuum and sea level), per-component mass flow rates at vacuum (e.g. "LOX: 47.3 kg/s", "RP-1: 18.6 kg/s"), gimbal range (or "Fixed" if 0), throttleable status, and single-engine vacuum TWR on Earth. Mass flow rates are formatted as g/s for very small flows, kg/s for normal, t/s for huge.
+For engines, the info panel SHALL display: propellant type (including secondary propellant if present, e.g. "D+He3 + Antimatter"), thrust (vacuum and sea level), specific impulse (vacuum and sea level), per-component mass flow rates at vacuum (e.g. "LOX: 47.3 kg/s", "RP-1: 18.6 kg/s"), gimbal range (or "Fixed" if 0), throttleable status, single-engine vacuum TWR on Earth, and waste heat at full throttle (only when `engine.waste_heat_watts > 0`). Mass flow rates are formatted as g/s for very small flows, kg/s for normal, t/s for huge.
+
+### Requirement: Reactor info
+
+For reactors, the info panel SHALL display: continuous power output and (when non-zero) waste heat in Watts via SI-prefix formatting (MW / GW / TW).
+
+### Requirement: Radiator info
+
+For radiators, the info panel SHALL display: tier label (Heat Pipe / Liquid Droplet / Phononic Metamaterial) with operating temperature, full-deployment rejection capacity, deploy time, and a note that the wing must be deployed in vacuum.
+
+### Requirement: Thermal stats row
+
+The editor stats bar SHALL display a "Thermal: X / Y" row when any placed part has `waste_heat_watts > 0` or `radiator.rejection_watts > 0`. X is the sum of engine + reactor waste heat (engines at full throttle); Y is the sum of radiator rejection capacity (assuming all deployed). The row is colored green when `Y ≥ X`, yellow within a 10% margin, red on deficit. Tooltip explains the thermal cascade thresholds.
 
 ### Requirement: Tank info for palette selection
 

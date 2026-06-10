@@ -52,6 +52,9 @@ impl RenderState {
         let vessel_electricity_max = self.vessel_electricity_max;
         let vessel_power_generation = self.vessel_power_generation;
         let vessel_power_consumption = self.vessel_power_consumption;
+        let vessel_food_days = self.vessel_food_days;
+        let vessel_total_crew = self.vessel_total_crew;
+        let vessel_is_starving = self.vessel_is_starving;
         let vessel_thrust_kn = self.vessel_thrust_kn;
         let vessel_drag_kn = self.vessel_drag_kn;
         let vessel_delta_v = self.vessel_delta_v;
@@ -69,6 +72,10 @@ impl RenderState {
         let ship_g_force = self.ship_g_force;
         let ship_temperature = self.ship_temperature;
         let ship_heat_fraction = self.ship_heat_fraction;
+        let thermal_pool_temp = self.thermal_pool_temp;
+        let thermal_pool_gen_w = self.thermal_pool_gen_w;
+        let thermal_pool_reject_w = self.thermal_pool_reject_w;
+        let reactors_tripped = self.reactors_tripped;
         let selected_flight_part = self.selected_flight_part;
         let flight_parts_cache = &self.flight_parts_cache;
         let ap_markers = &self.ap_markers;
@@ -100,6 +107,9 @@ impl RenderState {
         let mut decouple_req: Option<usize> = None;
         let mut fairing_deploy_req: Option<usize> = None;
         let mut solar_deploy_req: Option<(usize, bool)> = None;
+        let mut radiator_deploy_req: Option<(usize, bool)> = None;
+        let mut shield_toggle_req: Option<(usize, bool)> = None;
+        let mut reactor_restart_req: bool = false;
         let mut parachute_deploy_req: Option<usize> = None;
         let mut parachute_cut_req: Option<usize> = None;
         let ship_in_atmosphere = self.ship_in_atmosphere;
@@ -1144,6 +1154,64 @@ impl RenderState {
                                 }
                             }
                         }
+
+                        // Waste-heat pool bar (shown when pool warm OR reactors tripped)
+                        if thermal_pool_temp > 400.0 || reactors_tripped {
+                            ui.add_space(12.0);
+                            ui.label(egui::RichText::new("WASTE").size(10.0).color(egui::Color32::GRAY));
+                            ui.add_space(3.0);
+                            ui.label(egui::RichText::new(format!("{}K", thermal_pool_temp as i32))
+                                .size(11.0)
+                                .color(egui::Color32::WHITE));
+                            ui.add_space(3.0);
+
+                            let pool_bar_height = 80.0;
+                            let pool_bar_width = 20.0;
+                            let (pool_rect, _) = ui.allocate_exact_size(
+                                egui::vec2(pool_bar_width, pool_bar_height),
+                                egui::Sense::hover()
+                            );
+                            let p = ui.painter();
+                            p.rect_filled(pool_rect, 2.0, egui::Color32::from_rgb(40, 40, 50));
+                            // Map 300 K → 0%, 1500 K → 100%
+                            let pool_frac = ((thermal_pool_temp - 300.0) / 1200.0).clamp(0.0, 1.0) as f32;
+                            let pool_fill = pool_bar_height * pool_frac;
+                            let pool_fill_rect = egui::Rect::from_min_size(
+                                egui::pos2(pool_rect.min.x, pool_rect.max.y - pool_fill),
+                                egui::vec2(pool_bar_width, pool_fill),
+                            );
+                            // Thresholds: 800 K → 0.417, 1200 K → 0.75, 1500 K → 1.0
+                            let pool_color = if pool_frac < 0.417 {
+                                egui::Color32::from_rgb(100, 200, 100)
+                            } else if pool_frac < 0.75 {
+                                egui::Color32::from_rgb(220, 200, 80)
+                            } else if pool_frac < 1.0 {
+                                egui::Color32::from_rgb(220, 140, 40)
+                            } else {
+                                egui::Color32::from_rgb(220, 60, 60)
+                            };
+                            p.rect_filled(pool_fill_rect, 2.0, pool_color);
+                            p.rect_stroke(pool_rect, 2.0, egui::Stroke::new(1.0, egui::Color32::GRAY));
+
+                            if reactors_tripped {
+                                ui.add_space(4.0);
+                                ui.label(egui::RichText::new("TRIP").size(9.0)
+                                    .color(egui::Color32::from_rgb(255, 100, 100)).strong());
+                                let can_restart = thermal_pool_temp < 800.0;
+                                ui.add_enabled_ui(can_restart, |ui| {
+                                    if ui.small_button("Restart").clicked() {
+                                        reactor_restart_req = true;
+                                    }
+                                });
+                            } else if thermal_pool_gen_w > thermal_pool_reject_w && thermal_pool_gen_w > 0.0 {
+                                ui.add_space(4.0);
+                                let deficit_w = thermal_pool_gen_w - thermal_pool_reject_w;
+                                ui.label(egui::RichText::new(format!("+{}", format_power_si(deficit_w)))
+                                    .size(8.0)
+                                    .color(egui::Color32::from_rgb(220, 140, 40)))
+                                    .on_hover_text("Net heat input (generation exceeds rejection)");
+                            }
+                        }
                     });
                 });
 
@@ -1286,6 +1354,57 @@ impl RenderState {
                         }
                     }
 
+
+                    // Food bar (if crew aboard)
+                    if let Some(food_days) = vessel_food_days {
+                        if vessel_total_crew.unwrap_or(0) > 0 {
+                            ui.add_space(10.0);
+                            ui.label(egui::RichText::new("FOOD").size(10.0).color(egui::Color32::GRAY));
+                            ui.add_space(3.0);
+
+                            let crew = vessel_total_crew.unwrap_or(0);
+                            let days_text = if food_days > 999.0 {
+                                format!("{:.0}d", food_days)
+                            } else {
+                                format!("{:.1}d", food_days)
+                            };
+                            let label_color = if vessel_is_starving {
+                                egui::Color32::from_rgb(255, 60, 60)
+                            } else {
+                                egui::Color32::WHITE
+                            };
+                            ui.label(egui::RichText::new(format!("{} ({})", days_text, crew))
+                                .size(11.0)
+                                .color(label_color));
+                            ui.add_space(3.0);
+
+                            let food_bar_height = 80.0;
+                            let bar_width = 20.0;
+                            let (food_rect, _) = ui.allocate_exact_size(
+                                egui::vec2(bar_width, food_bar_height),
+                                egui::Sense::hover()
+                            );
+
+                            let food_painter = ui.painter();
+                            food_painter.rect_filled(food_rect, 2.0, egui::Color32::from_rgb(40, 40, 50));
+
+                            let frac = (food_days / 60.0).clamp(0.0, 1.0) as f32;
+                            let food_fill = food_bar_height * frac;
+                            let food_fill_rect = egui::Rect::from_min_size(
+                                egui::pos2(food_rect.min.x, food_rect.max.y - food_fill),
+                                egui::vec2(bar_width, food_fill)
+                            );
+                            let food_color = if food_days > 30.0 {
+                                egui::Color32::from_rgb(80, 200, 100)
+                            } else if food_days > 7.0 {
+                                egui::Color32::from_rgb(220, 180, 60)
+                            } else {
+                                egui::Color32::from_rgb(220, 60, 60)
+                            };
+                            food_painter.rect_filled(food_fill_rect, 2.0, food_color);
+                            food_painter.rect_stroke(food_rect, 2.0, egui::Stroke::new(1.0, egui::Color32::GRAY));
+                        }
+                    }
 
                     // XFER button anchored at bottom
                     ui.with_layout(egui::Layout::bottom_up(egui::Align::Center), |ui| {
@@ -1445,7 +1564,9 @@ impl RenderState {
                         .collapsible(false)
                         .resizable(false)
                         .default_width(200.0)
+                        .max_height(ctx.screen_rect().height() * 0.7)
                         .show(ctx, |ui| {
+                        egui::ScrollArea::vertical().show(ui, |ui| {
                             ui.label(format!("Mass: {:.3} t", part.dry_mass));
 
                             // Engine info
@@ -1468,6 +1589,8 @@ impl RenderState {
                                 let status_text = if part.engine_enabled {
                                     if part.engine_active {
                                         egui::RichText::new("Active").color(egui::Color32::from_rgb(100, 220, 100))
+                                    } else if part.engine_no_power {
+                                        egui::RichText::new("No Power").color(egui::Color32::from_rgb(200, 140, 220))
                                     } else {
                                         egui::RichText::new("No Fuel").color(egui::Color32::from_rgb(220, 180, 80))
                                     }
@@ -1475,6 +1598,10 @@ impl RenderState {
                                     egui::RichText::new("Disabled").color(egui::Color32::from_rgb(220, 80, 80))
                                 };
                                 ui.label(status_text);
+
+                                if let Some(wh) = part.engine_waste_heat {
+                                    ui.label(format!("Waste heat: {}", format_power_si(wh)));
+                                }
 
                                 let btn_label = if part.engine_enabled { "Deactivate" } else { "Activate" };
                                 if ui.button(btn_label).clicked() {
@@ -1553,6 +1680,27 @@ impl RenderState {
                                 }
                             }
 
+                            // Radiator info
+                            if part.is_radiator {
+                                ui.separator();
+                                let tier_label = match part.radiator_tier {
+                                    Some(crate::parts::RadiatorTier::HeatPipe) => "Heat Pipe Radiator",
+                                    Some(crate::parts::RadiatorTier::Droplet)  => "Droplet Radiator",
+                                    Some(crate::parts::RadiatorTier::Phononic) => "Phononic Emitter",
+                                    None => "Radiator",
+                                };
+                                ui.label(egui::RichText::new(tier_label).strong());
+                                if let Some(rejection) = part.radiator_rejection_watts {
+                                    ui.label(format!("Rejection: {}", format_power_si(rejection)));
+                                }
+                                let deploy_pct = (part.deploy_fraction * 100.0) as i32;
+                                ui.label(format!("Deployed: {}%", deploy_pct));
+                                let label = if part.deploy_fraction >= 0.5 { "Retract" } else { "Deploy" };
+                                if ui.button(label).clicked() {
+                                    radiator_deploy_req = Some((part.part_index, part.deploy_fraction < 0.5));
+                                }
+                            }
+
                             // RTG info
                             if let Some(output) = part.rtg_output {
                                 ui.separator();
@@ -1565,6 +1713,9 @@ impl RenderState {
                                 ui.separator();
                                 ui.label(egui::RichText::new("Reactor").strong());
                                 ui.label(format!("Output: {}", format_power_si(output)));
+                                if let Some(wh) = part.reactor_waste_heat {
+                                    ui.label(format!("Waste heat: {}", format_power_si(wh)));
+                                }
                             }
 
                             // Shield info
@@ -1578,6 +1729,15 @@ impl RenderState {
                                 if let Some(power) = part.shield_power {
                                     if power > 0.0 {
                                         ui.label(format!("Power Draw: {}", format_power_si(power)));
+                                        if part.shield_active {
+                                            ui.label(egui::RichText::new("Active").color(egui::Color32::from_rgb(100, 220, 100)));
+                                        } else {
+                                            ui.label(egui::RichText::new("Inactive").color(egui::Color32::from_rgb(160, 160, 160)));
+                                        }
+                                        let btn_label = if part.shield_active { "Deactivate" } else { "Activate" };
+                                        if ui.button(btn_label).clicked() {
+                                            shield_toggle_req = Some((part.part_index, !part.shield_active));
+                                        }
                                     } else {
                                         ui.label("Power Draw: None (passive)");
                                     }
@@ -1639,6 +1799,7 @@ impl RenderState {
                                     }
                                 }
                             }
+                        }); // ScrollArea
                         });
                 }
             }
@@ -2197,6 +2358,15 @@ impl RenderState {
         }
         if let Some((part_index, deploy)) = solar_deploy_req {
             self.render_requests.push(RenderRequest::SolarDeploy { part_index, deploy });
+        }
+        if let Some((part_index, deploy)) = radiator_deploy_req {
+            self.render_requests.push(RenderRequest::RadiatorDeploy { part_index, deploy });
+        }
+        if let Some((part_index, active)) = shield_toggle_req {
+            self.render_requests.push(RenderRequest::ShieldToggle { part_index, active });
+        }
+        if reactor_restart_req {
+            self.render_requests.push(RenderRequest::ReactorRestart);
         }
         if let Some(part_index) = parachute_deploy_req {
             self.render_requests.push(RenderRequest::ParachuteDeploy { part_index });

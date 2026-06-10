@@ -175,7 +175,7 @@ fn pack_atlas(sprite_dir: &Path, out_dir: &Path) {
         for e in entries.iter_mut() {
             let nw = (e.width / 2).max(1);
             let nh = (e.height / 2).max(1);
-            e.image = image::imageops::resize(&e.image, nw, nh, image::imageops::FilterType::Nearest);
+            e.image = image::imageops::resize(&e.image, nw, nh, image::imageops::FilterType::Lanczos3);
             e.width = nw;
             e.height = nh;
         }

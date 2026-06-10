@@ -79,6 +79,22 @@ fn generate_sprite_quad(
     vertices.push(Vertex::sprite([x - half_w, y + half_h], [u0, v0], tint));
 }
 
+/// Render a radiator using the same stowed/deployed logic as solar panels.
+/// Stowed (deploy_fraction 0): grey base rectangle (narrow mast).
+/// Deploying: sprite reveals from the bottom upward, same as solar panels.
+/// Fully deployed (deploy_fraction 1): full sprite visible.
+fn generate_radiator_partial(
+    vertices: &mut Vec<Vertex>,
+    rect: &crate::render::sprites::SpriteRect,
+    def: &PartDefinition,
+    x: f32,
+    y: f32,
+    deploy_fraction: f64,
+    alpha: f32,
+) {
+    generate_solar_panel_partial(vertices, rect, def, x, y, deploy_fraction, alpha);
+}
+
 /// Render a partially deployed solar panel.
 /// When deploy_fraction < 1.0, draws a grey base rectangle at the bottom and a partial
 /// sprite quad showing only the deployed portion. When deploy_fraction == 0.0, only the base.
@@ -326,9 +342,11 @@ pub fn generate_part_vertices(
         if let Some(atlas) = sprite_atlas {
             if def.fairing.is_none() {
                 if let Some(rect) = atlas.parts.get(&def.id) {
-                    // Solar panel partial deployment in editor
-                    if def.solar_panel.is_some() && !part.deployed {
+                    // Solar panel / radiator partial deployment in editor
+                    if (def.solar_panel.is_some() || def.radiator.is_some()) && !part.deployed {
                         generate_solar_panel_partial(&mut vertices, rect, def, x, y, 0.0, 1.0);
+                    } else if def.radiator.is_some() && part.deployed {
+                        generate_radiator_partial(&mut vertices, rect, def, x, y, 1.0, 1.0);
                     } else {
                         let (sp_hw, sp_hh, sp_ox, sp_oy) = sprite_placement(def, Some(rect));
                         let sp_x = x + sp_ox;
@@ -1585,6 +1603,13 @@ pub fn generate_part_shape_vertices(
                         generate_solar_panel_partial(vertices, rect, def, x, y, frac, alpha);
                         return;
                     }
+                }
+
+                // Radiator deployment: sprite stretches horizontally
+                if def.radiator.is_some() {
+                    let frac = deploy_fraction.unwrap_or(0.0);
+                    generate_radiator_partial(vertices, rect, def, x, y, frac, alpha);
+                    return;
                 }
 
                 let (sp_hw, sp_hh, sp_ox, sp_oy) = sprite_placement(def, Some(rect));

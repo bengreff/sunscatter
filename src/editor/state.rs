@@ -19,6 +19,8 @@ pub struct ShipStats {
     pub electricity_capacity: f64,  // Total battery Wh
     pub power_generation: f64,      // Total watts (solar + RTG)
     pub power_consumption: f64,     // Total watts (pods)
+    pub waste_heat_gen: f64,        // Total waste heat at full throttle (W)
+    pub waste_heat_reject: f64,     // Total radiator rejection capacity if all deployed (W)
 }
 
 /// Resource amount tracking
@@ -1258,6 +1260,19 @@ impl EditorState {
             // Reactor generation
             if let Some(ref reactor) = def.reactor {
                 stats.power_generation += reactor.output_watts;
+                stats.waste_heat_gen += reactor.waste_heat_watts;
+            }
+
+            // Engine waste heat (at full throttle)
+            if let Some(ref engine) = def.engine {
+                if !self.is_editor_engine_covered(part_id, part_defs) {
+                    stats.waste_heat_gen += engine.waste_heat_watts;
+                }
+            }
+
+            // Radiator rejection (if fully deployed)
+            if let Some(ref radiator) = def.radiator {
+                stats.waste_heat_reject += radiator.rejection_watts;
             }
 
             // Pod power consumption

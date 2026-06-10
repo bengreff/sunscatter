@@ -174,3 +174,98 @@ When `temperature > 350K`, a vertical heat bar SHALL be shown (uses hottest part
 ### Requirement: Temperature readout in bottom panel
 
 When `heat_fraction > 0.01`, temperature readout ("{temp}K") SHALL appear in the bottom panel after altitude, colored by heat bar thresholds.
+
+## Waste-Heat Pool Integration
+
+Per-part aero heating (above) is independent of, but couples through spillover with, the
+ship-wide waste-heat pool driven by interstellar engines, reactors, and radiators.
+
+### Requirement: Thermal pool state on FlightVessel
+
+`FlightVessel` SHALL have:
+- `thermal_pool_temp: f64` — Kelvin, init 300, serde default 300.
+- `thermal_pool_capacity: f64` — J/K, recomputed in `recalculate_mass` as
+  `dry_mass_kg × 500 J/(kg·K)`.
+- `reactors_tripped: bool` — global flag set when the pool crosses the trip threshold.
+
+### Requirement: Thermal pool constants
+
+`FlightVessel` SHALL define:
+- `POOL_AMBIENT_TEMP = 300.0 K` — minimum / equilibrium temperature.
+- `REACTOR_TRIP_TEMP = 1200.0 K` — at or above, all reactors trip.
+- `REACTOR_RESTART_TEMP = 800.0 K` — manual restart allowed below this (hysteresis).
+- `PART_DAMAGE_TEMP = 1500.0 K` — above this, excess heat spills into per-part temps.
+- `SPILL_TIME_CONSTANT_SEC = 10.0` — pool-to-part bleed rate.
+
+### Requirement: Thermal pool update each tick
+
+`FlightVessel::update_thermal_pool(dt, part_defs)` SHALL be called once per game tick after
+`update_power`. It computes:
+1. `gen_W` = sum over non-destroyed/non-decoupled parts of:
+   - `engine.waste_heat_watts × throttle` (when `part.engine_active == true`)
+   - `reactor.waste_heat_watts` (when not tripped)
+2. `reject_W` = sum over deployed radiators of `radiator.rejection_watts × deploy_fraction`.
+3. `dT = (gen_W − reject_W) / thermal_pool_capacity × dt`; pool temp clamped to ambient.
+
+### Requirement: Reactor trip cascade
+
+When `thermal_pool_temp >= REACTOR_TRIP_TEMP`, `reactors_tripped` SHALL be set to `true`.
+While tripped, `update_power` SHALL skip all reactor power generation (both fuel-consuming
+and constant-output reactors) and `update_thermal_pool` SHALL skip reactor waste-heat
+generation. The flag is sticky — it does not auto-clear when the pool cools.
+
+### Requirement: Manual reactor restart
+
+`FlightVessel::restart_reactors(cost_wh)` SHALL clear `reactors_tripped` when:
+- `reactors_tripped == true`,
+- `thermal_pool_temp < REACTOR_RESTART_TEMP`,
+- vessel stored electricity `>= cost_wh`.
+
+On success, `cost_wh` is drained proportionally across battery parts. The flight HUD wires
+this via a `RenderRequest::ReactorRestart` button visible only while tripped.
+
+### Requirement: Per-part spillover above damage threshold
+
+When `thermal_pool_temp > PART_DAMAGE_TEMP`, excess heat SHALL bleed into per-part
+temperatures using a time-constant model:
+- `spill_W = (thermal_pool_temp − PART_DAMAGE_TEMP) × thermal_pool_capacity / SPILL_TIME_CONSTANT_SEC`
+- For each non-destroyed/non-decoupled part with width `w`:
+  - `part_thermal_mass = w × SKIN_THERMAL_MASS_PER_METER`
+  - `share = part_thermal_mass / sum_thermal_mass`
+  - `dT_part = spill_W × share × dt / (part_thermal_mass × specific_heat)`
+  - `part.temperature = max(AMBIENT, part.temperature + dT_part)`
+- The same wattage is subtracted from the pool so energy is conserved.
+
+Existing `destroy_overheated_parts` then handles destruction when any part exceeds its
+`max_heat_tolerance` — the destruction path is shared with aero heating.
+
+### Requirement: Radiator deploy state
+
+Radiator parts (`PartDefinition.radiator.is_some()`) SHALL share the existing `deploy_target`
+/ `deploy_fraction` fields with solar panels. `update_solar_deploy` animates both kinds:
+solar panels deploy at 0.5/sec (2s full); radiators deploy at `1 / deploy_time_sec` (5s by
+default). Deployed radiators contribute rejection capacity scaled by `deploy_fraction`;
+stowed radiators contribute zero. Deploying in atmosphere does not get special handling —
+the existing per-part aero heating uses the part's hitbox width which doesn't grow with
+deployment, so the destruction risk is realized via the part's relatively low
+`max_heat_tolerance` (1500K / 2800K / 6500K per tier).
+
+### Requirement: Thermal pool surfaced in HUD
+
+`ShipRenderData` SHALL carry `thermal_pool_temp`, `thermal_pool_gen_w`,
+`thermal_pool_reject_w`, and `reactors_tripped`. The flight HUD SHALL show a vertical
+waste-heat bar near the existing per-part heat bar when `thermal_pool_temp > 400 K` or
+`reactors_tripped`, with color thresholds at 800K (green→yellow), 1200K (yellow→orange,
+"TRIP"), and 1500K (orange→red).
+
+### Requirement: Editor thermal stats
+
+`ShipStats` SHALL carry `waste_heat_gen` and `waste_heat_reject` (Watts, computed as the
+sum across all placed parts assuming engines at full throttle and radiators fully deployed).
+The editor stats bar SHALL display a "Thermal: X / Y" row colored green (`reject ≥ gen`),
+yellow (within 10% margin), or red (deficit).
+
+### Requirement: On-rails behavior
+
+While on rails (`Ship::on_rails == true`), reactors do not run per existing model — so
+`gen_W` typically falls to 0 and the pool decays to ambient via residual radiator capacity.

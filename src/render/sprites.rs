@@ -344,40 +344,53 @@ fn build_sprite_atlas(
         }
     }
 
-    // Sphere sprites are exempt from the halve loop below. They're rendered
-    // with fine geodesic-panel detail, and the player can zoom in on them at
-    // close range — halving leaves them visibly pixelated. Engines and
-    // other large parts are less detail-critical and absorb the halving fine.
-    const HIGH_RES_SPRITES: &[&str] = &[
-        "tank_sphere_s", "tank_sphere_m", "tank_sphere_l",
-        "tank_am_sphere_s", "tank_am_sphere_m", "tank_am_sphere_l",
-    ];
+    // Tiered pre-scaling: keep small/medium sprites at full resolution for
+    // crisp detail; scale down large sprites and sphere tanks to fit within
+    // the GPU texture limit without the iterative halving that used to
+    // destroy quality.
+    for entry in entries.iter_mut() {
+        let is_sphere = entry.id.starts_with("tank_sphere_")
+            || entry.id.starts_with("tank_am_sphere_");
+        let max_dim_px = entry.width.max(entry.height);
+        let scale: f64 = if is_sphere {
+            0.25
+        } else if max_dim_px > 2160 {
+            0.4
+        } else {
+            1.0
+        };
+        if scale < 1.0 {
+            let new_w = ((entry.width as f64 * scale) as u32).max(1);
+            let new_h = ((entry.height as f64 * scale) as u32).max(1);
+            log::info!(
+                "Pre-scaling '{}' from {}x{} to {}x{} ({:.0}%)",
+                entry.id, entry.width, entry.height, new_w, new_h, scale * 100.0
+            );
+            entry.image = image::imageops::resize(
+                &entry.image, new_w, new_h, image::imageops::FilterType::Lanczos3,
+            );
+            entry.width = new_w;
+            entry.height = new_h;
+        }
+    }
 
     let (mut packed, mut atlas_height) = shelf_pack(&mut entries, atlas_width);
 
-    // Halve all NON-EXEMPT sprites until the atlas fits a target height. The
-    // target is intentionally well below the GPU's `max_dim`: at max_dim the
-    // cached atlas PNG decodes to ~1 GB of raw RGBA on startup (15 s on Apple
-    // Silicon). 8192 keeps the cached atlas decode under ~1 s for ordinary
-    // sprites; spheres bypass this so they retain full source resolution at
-    // the cost of a somewhat taller atlas (around 16384×12000).
-    let target_height = max_dim.min(8192);
+    // Safety-net halving: if the atlas still exceeds the GPU texture limit
+    // after pre-scaling, halve all sprites with Lanczos3 until it fits.
+    // With the tiered pre-scale above this loop should rarely fire.
+    let target_height = max_dim;
     loop {
         if atlas_height <= target_height { break; }
         let mut halved_any = false;
         for entry in entries.iter_mut() {
-            if HIGH_RES_SPRITES.contains(&entry.id.as_str()) {
-                continue;
-            }
             let new_w = (entry.width / 2).max(1);
             let new_h = (entry.height / 2).max(1);
-            // Don't halve below a useful floor (no point: sprite becomes a
-            // pixel and packing won't get meaningfully smaller).
             if new_w < 8 || new_h < 8 {
                 continue;
             }
             entry.image = image::imageops::resize(
-                &entry.image, new_w, new_h, image::imageops::FilterType::Nearest,
+                &entry.image, new_w, new_h, image::imageops::FilterType::Lanczos3,
             );
             entry.width = new_w;
             entry.height = new_h;
@@ -392,7 +405,7 @@ fn build_sprite_atlas(
             break;
         }
         log::info!(
-            "Sprite atlas {}x{} > target {}; halved non-exempt sprites and repacking",
+            "Sprite atlas {}x{} > target {}; halved sprites and repacking",
             atlas_width, atlas_height, target_height
         );
         let result = shelf_pack(&mut entries, atlas_width);
@@ -527,8 +540,8 @@ fn upload_atlas_to_gpu(
         label: Some("Sprite Sampler"),
         address_mode_u: wgpu::AddressMode::ClampToEdge,
         address_mode_v: wgpu::AddressMode::ClampToEdge,
-        mag_filter: wgpu::FilterMode::Nearest,
-        min_filter: wgpu::FilterMode::Nearest,
+        mag_filter: wgpu::FilterMode::Linear,
+        min_filter: wgpu::FilterMode::Linear,
         ..Default::default()
     });
 
@@ -751,8 +764,8 @@ fn create_dummy_atlas(device: &wgpu::Device, queue: &wgpu::Queue) -> SpriteAtlas
     let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
     let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
         label: Some("Dummy Sprite Sampler"),
-        mag_filter: wgpu::FilterMode::Nearest,
-        min_filter: wgpu::FilterMode::Nearest,
+        mag_filter: wgpu::FilterMode::Linear,
+        min_filter: wgpu::FilterMode::Linear,
         ..Default::default()
     });
 

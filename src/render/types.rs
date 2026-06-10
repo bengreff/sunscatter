@@ -18,6 +18,12 @@ pub enum RenderRequest {
     FairingDeploy { part_index: usize },
     /// Deploy or retract a solar panel.
     SolarDeploy { part_index: usize, deploy: bool },
+    /// Deploy or retract a radiator wing.
+    RadiatorDeploy { part_index: usize, deploy: bool },
+    /// Toggle an active shield on/off.
+    ShieldToggle { part_index: usize, active: bool },
+    /// Manually re-ignite tripped reactors after a thermal cascade.
+    ReactorRestart,
     /// Deploy a parachute.
     ParachuteDeploy { part_index: usize },
     /// Cut a deployed parachute.
@@ -157,6 +163,7 @@ pub struct ShipPartRenderData {
     pub engine_isp_vac: Option<f64>,     // s
     pub engine_isp_asl: Option<f64>,     // s
     pub engine_enabled: bool,
+    pub engine_no_power: bool,
     pub propellant_name: Option<String>,
     // Tank info
     pub fuel_type_name: Option<String>,
@@ -177,10 +184,12 @@ pub struct ShipPartRenderData {
     pub rtg_output: Option<f64>,        // Constant watts
     // Reactor info
     pub reactor_output: Option<f64>,    // Constant watts
+    pub reactor_waste_heat: Option<f64>, // Watts
     // Shield info
     pub shield_type: Option<String>,    // "Whipple", "FRES", "Geodesic"
     pub shield_max_c: Option<f64>,      // Max velocity as fraction of c
     pub shield_power: Option<f64>,      // Base power draw in watts
+    pub shield_active: bool,
     // Decoupler info
     pub is_decoupler: bool,
     pub crossfeed_enabled: bool,
@@ -196,9 +205,14 @@ pub struct ShipPartRenderData {
     pub is_fairing: bool,
     pub fairing_shape: Option<crate::parts::FairingShape>,
     pub fairing_half: Option<crate::parts::FairingHalf>,
-    // Solar panel deployment
+    // Solar panel / radiator deployment
     pub deploy_fraction: f64,
     pub is_solar_panel: bool,
+    pub is_radiator: bool,
+    pub radiator_tier: Option<crate::parts::RadiatorTier>,
+    pub radiator_rejection_watts: Option<f64>,
+    // Engine waste heat
+    pub engine_waste_heat: Option<f64>,  // Watts
     // Parachute info
     pub is_parachute: bool,
     pub parachute_deployed: bool,
@@ -248,10 +262,19 @@ pub struct ShipRenderData {
     pub stages: Option<Vec<Vec<StagedPartInfo>>>,  // Full stage data for UI
     pub stage_delta_vs: Option<Vec<f64>>,  // Per-stage delta-v (m/s, vacuum)
     pub stage_burn_times: Option<Vec<f64>>,  // Per-stage burn time at 100% thrust (seconds)
-    // Thermal state
+    // Thermal state (per-part aero heating, hottest part)
     pub temperature: f64,       // Kelvin
     pub heat_fraction: f32,     // 0.0-1.0 normalized for visual effects
     pub heat_flux: f64,         // W/m² for HUD display
+    // Ship-wide waste-heat pool (engines + reactors vs radiators)
+    pub thermal_pool_temp: f64,       // Kelvin
+    pub thermal_pool_gen_w: f64,      // Waste heat generated this tick (W)
+    pub thermal_pool_reject_w: f64,   // Radiator rejection capacity active this tick (W)
+    pub reactors_tripped: bool,       // True when thermal cascade has shut down reactors
+    // Life support
+    pub food_days: Option<f64>,        // Days of food remaining (None if no crew)
+    pub total_crew: Option<u32>,       // Living crew count
+    pub is_starving: bool,             // True when food == 0 and crew > 0
     // Landing zone state
     pub below_landing_altitude: bool,
     // RCS state

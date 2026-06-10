@@ -38,6 +38,19 @@ pub struct FlightVessel {
     // Extra dry mass added as cargo payload (tonnes). Used by trade route dv computation
     // to make cargo reduce ship delta-v. Not consumed as fuel.
     pub extra_dry_mass_tonnes: f64,
+
+    // Ship-wide thermal pool (waste heat from engines/reactors, rejected by radiators)
+    pub thermal_pool_temp: f64,        // Kelvin, init AMBIENT_TEMPERATURE
+    pub thermal_pool_capacity: f64,    // J/K, recomputed in recalculate_mass
+
+    // Reactor trip cascade: when pool temp passes REACTOR_TRIP_TEMP, all reactors trip and
+    // produce no power until manually restarted (after hysteresis cooldown).
+    pub reactors_tripped: bool,
+
+    // Life support
+    pub food_stored: f64,         // kg of food currently aboard
+    pub total_crew: u32,          // living crew count across all pods
+    pub starvation_timer: f64,    // seconds continuously at zero food
 }
 
 impl Default for FlightVessel {
@@ -62,6 +75,12 @@ impl Default for FlightVessel {
             current_stage: 0,
             last_decouple_force: 0.0,
             extra_dry_mass_tonnes: 0.0,
+            thermal_pool_temp: 300.0,
+            thermal_pool_capacity: 0.0,
+            reactors_tripped: false,
+            food_stored: 0.0,
+            total_crew: 0,
+            starvation_timer: 0.0,
         }
     }
 }
@@ -123,11 +142,16 @@ pub struct FlightPart {
     pub electricity: f64,      // Current stored Wh
     pub max_electricity: f64,  // Capacity Wh
 
-    // Solar panel deployment
+    // Solar panel deployment (also used by radiators — see is_radiator)
     pub is_solar_panel: bool,         // true if this part has solar panel data
     pub deploy_fraction: f64,     // 0.0 = retracted, 1.0 = fully deployed
     pub deploy_target: bool,      // desired state (false = retract, true = deploy)
     pub mirror_partner: Option<usize>, // index of mirror partner in parts vec
+
+    // Radiator state (waste heat rejection)
+    pub is_radiator: bool,            // true if this part has radiator data
+    pub radiator_rejection_watts: f64, // Rated rejection at full deployment (from RadiatorData)
+    pub radiator_deploy_time_sec: f64, // Seconds to fully deploy/retract
 
     // Parachute state
     pub is_parachute: bool,
@@ -140,6 +164,15 @@ pub struct FlightPart {
     // Cargo container manifest
     pub cargo_buildings: Vec<String>,  // BuildingType display names loaded in cargo
     pub cargo_payloads: Vec<crate::colony::ContractPayload>,  // Contract payloads
+
+    // Electric engine power gating
+    pub engine_no_power: bool,  // true when engine has fuel but no electricity
+
+    // Shield activation
+    pub shield_active: bool,    // true when active shield is drawing power
+
+    // Life support — per-pod crew tracking
+    pub crew_count: u32,        // living crew currently in this pod (0 for non-pods)
 }
 
 impl Default for FlightPart {
@@ -182,6 +215,9 @@ impl Default for FlightPart {
             deploy_fraction: 0.0,
             deploy_target: false,
             mirror_partner: None,
+            is_radiator: false,
+            radiator_rejection_watts: 0.0,
+            radiator_deploy_time_sec: 5.0,
             is_parachute: false,
             parachute_deployed: false,
             parachute_spent: false,
@@ -190,6 +226,9 @@ impl Default for FlightPart {
             parachute_fully_deployed: false,
             cargo_buildings: Vec::new(),
             cargo_payloads: Vec::new(),
+            engine_no_power: false,
+            shield_active: false,
+            crew_count: 0,
         }
     }
 }
@@ -221,7 +260,9 @@ impl FlightVessel {
             !p.destroyed && !p.decoupled &&
             part_defs.get(&p.definition_id)
                 .and_then(|d| d.pod.as_ref())
-                .map_or(false, |pod| pod.can_control)
+                .map_or(false, |pod| {
+                    pod.can_control && (pod.crew_capacity == 0 || p.crew_count > 0)
+                })
         })
     }
 
@@ -424,6 +465,9 @@ impl FlightVessel {
                 deploy_fraction: 0.0,
                 deploy_target: false,
                 mirror_partner: None,
+                is_radiator: def.radiator.is_some(),
+                radiator_rejection_watts: def.radiator.as_ref().map(|r| r.rejection_watts).unwrap_or(0.0),
+                radiator_deploy_time_sec: def.radiator.as_ref().map(|r| r.deploy_time_sec).unwrap_or(5.0),
                 is_parachute: def.parachute.is_some(),
                 parachute_deployed: false,
                 parachute_spent: false,
@@ -434,6 +478,9 @@ impl FlightVessel {
                 parachute_fully_deployed: false,
                 cargo_buildings: bp_part.cargo_buildings.clone(),
                 cargo_payloads: bp_part.cargo_payloads.clone(),
+                engine_no_power: false,
+                shield_active: false,
+                crew_count: def.pod.as_ref().map(|p| p.crew_capacity).unwrap_or(0),
             };
 
             // Set engine data if this is an engine
@@ -517,6 +564,9 @@ impl FlightVessel {
         // Convert blueprint stages to part indices
         let stages = blueprint.stages.clone();
 
+        let initial_crew: u32 = parts.iter().map(|p| p.crew_count).sum();
+        let initial_food = initial_crew as f64 * 1.5 * 30.0;
+
         Ok(FlightVessel {
             rel_position: spawn_position,
             rel_velocity: spawn_velocity,
@@ -537,6 +587,12 @@ impl FlightVessel {
             current_stage: 0,
             last_decouple_force: 0.0,
             extra_dry_mass_tonnes: 0.0,
+            thermal_pool_temp: 300.0,
+            thermal_pool_capacity: (dry_mass * 1000.0).max(1.0) * 500.0,
+            reactors_tripped: false,
+            total_crew: initial_crew,
+            food_stored: initial_food,
+            starvation_timer: 0.0,
         })
     }
 
@@ -544,6 +600,7 @@ impl FlightVessel {
     /// (call after resource consumption or staging)
     pub fn recalculate_mass(&mut self, part_defs: &PartDefinitions) {
         self.total_mass = 0.0;
+        self.dry_mass = 0.0;
         let mut com = [0.0, 0.0];
 
         for part in &self.parts {
@@ -557,9 +614,14 @@ impl FlightVessel {
             let part_mass = base_mass + resource_mass + part.cargo_extra_mass_tonnes();
 
             self.total_mass += part_mass;
+            self.dry_mass += base_mass;
             com[0] += part.local_position[0] * part_mass;
             com[1] += part.local_position[1] * part_mass;
         }
+
+        // Ship-wide thermal pool capacity: dry mass × average specific heat.
+        // 500 J/(kg·K) is a rough average for metallic spacecraft structure.
+        self.thermal_pool_capacity = (self.dry_mass * 1000.0).max(1.0) * 500.0;
 
         if self.total_mass > 0.0 {
             self.center_of_mass[0] = com[0] / self.total_mass;
@@ -728,7 +790,23 @@ impl FlightVessel {
                 None => true,
             };
 
-            self.parts[i].engine_active = fuel_available > 0.001 && ox_ok && secondary_ok;
+            let fuel_ok = fuel_available > 0.001 && ox_ok && secondary_ok;
+            if fuel_ok {
+                let power_req = part_defs.get(&self.parts[i].definition_id)
+                    .and_then(|d| d.engine.as_ref())
+                    .map(|e| e.power_required)
+                    .unwrap_or(0.0);
+                if power_req > 0.0 && self.total_electricity() <= 0.0 {
+                    self.parts[i].engine_active = false;
+                    self.parts[i].engine_no_power = true;
+                } else {
+                    self.parts[i].engine_active = true;
+                    self.parts[i].engine_no_power = false;
+                }
+            } else {
+                self.parts[i].engine_active = false;
+                self.parts[i].engine_no_power = false;
+            }
         }
     }
 
@@ -1423,16 +1501,21 @@ impl FlightVessel {
         let mut consumption = 0.0_f64;
 
         // Phase 1: Fuel-consuming reactors (mutable; runs only if fuel available).
+        // Skipped entirely while the thermal cascade has tripped reactors offline.
         // Collect demands first to avoid borrowing both immutably and mutably.
-        let fueled_reactor_demands: Vec<(ReactorFuelData, f64)> = self.parts.iter()
-            .filter(|p| !p.destroyed && !p.decoupled)
-            .filter_map(|p| {
-                let def = part_defs.get(&p.definition_id)?;
-                let reactor = def.reactor.as_ref()?;
-                let fuel = reactor.fuel.as_ref()?;
-                Some((fuel.clone(), reactor.output_watts))
-            })
-            .collect();
+        let fueled_reactor_demands: Vec<(ReactorFuelData, f64)> = if self.reactors_tripped {
+            Vec::new()
+        } else {
+            self.parts.iter()
+                .filter(|p| !p.destroyed && !p.decoupled)
+                .filter_map(|p| {
+                    let def = part_defs.get(&p.definition_id)?;
+                    let reactor = def.reactor.as_ref()?;
+                    let fuel = reactor.fuel.as_ref()?;
+                    Some((fuel.clone(), reactor.output_watts))
+                })
+                .collect()
+        };
         for (fuel_data, output_watts) in &fueled_reactor_demands {
             if self.try_consume_reactor_fuel(fuel_data, dt) {
                 generation += output_watts;
@@ -1460,8 +1543,9 @@ impl FlightVessel {
 
             // Reactor: constant output for fuel-less reactors (fission RTG-style).
             // Fuel-consuming reactors (e.g. antimatter) are handled in Phase 1.
+            // Tripped reactors (waste-heat cascade) produce no power.
             if let Some(ref reactor) = def.reactor {
-                if reactor.fuel.is_none() {
+                if reactor.fuel.is_none() && !self.reactors_tripped {
                     generation += reactor.output_watts;
                 }
             }
@@ -1477,6 +1561,20 @@ impl FlightVessel {
             if let Some(ref pod) = def.pod {
                 if pod.power_draw > 0.0 {
                     consumption += pod.power_draw;
+                }
+            }
+
+            // Electric engine power draw (when active)
+            if let Some(ref engine) = def.engine {
+                if engine.power_required > 0.0 && part.engine_active {
+                    consumption += engine.power_required;
+                }
+            }
+
+            // Shield power draw (when active)
+            if let Some(ref shield) = def.shield {
+                if shield.power_base_watts > 0.0 && part.shield_active {
+                    consumption += shield.power_base_watts;
                 }
             }
         }
@@ -1497,23 +1595,233 @@ impl FlightVessel {
             }
         }
 
+        // Auto-deactivate shields when batteries are completely drained
+        if net_wh < 0.0 && self.total_electricity() <= 0.0 {
+            for part in &mut self.parts {
+                if part.destroyed || part.decoupled { continue; }
+                part.shield_active = false;
+            }
+        }
+
         (generation, consumption)
     }
 
-    /// Animate solar panel deployment/retraction
-    pub fn update_solar_deploy(&mut self, dt: f64) {
-        const DEPLOY_SPEED: f64 = 0.5; // fraction per second (2s full deploy)
-        for part in &mut self.parts {
+    /// Update life support: greenhouses produce food, crew consumes it, starvation kills crew.
+    pub fn update_life_support(&mut self, dt: f64, part_defs: &PartDefinitions) {
+        if self.total_crew == 0 { return; }
+
+        const CREW_FOOD_KG_PER_DAY: f64 = 1.5;
+        const STARVATION_GRACE_SECS: f64 = 7.0 * 86400.0;
+        const KILL_INTERVAL_SECS: f64 = 86400.0;
+
+        let mut production_kg_per_day = 0.0;
+        for part in &self.parts {
             if part.destroyed || part.decoupled { continue; }
-            let target = if part.deploy_target { 1.0 } else { 0.0 };
-            if (part.deploy_fraction - target).abs() > 1e-6 {
-                if part.deploy_fraction < target {
-                    part.deploy_fraction = (part.deploy_fraction + DEPLOY_SPEED * dt).min(1.0);
-                } else {
-                    part.deploy_fraction = (part.deploy_fraction - DEPLOY_SPEED * dt).max(0.0);
+            let Some(def) = part_defs.get(&part.definition_id) else { continue };
+            if let Some(ref gh) = def.greenhouse {
+                let has_power = part.electricity > 0.0
+                    || def.pod.as_ref().map(|p| p.power_draw <= 0.0).unwrap_or(true);
+                if has_power {
+                    production_kg_per_day += gh.food_production_rate;
                 }
             }
         }
+
+        let consumption_kg_per_day = self.total_crew as f64 * CREW_FOOD_KG_PER_DAY;
+        let net_kg_per_sec = (production_kg_per_day - consumption_kg_per_day) / 86400.0;
+        self.food_stored = (self.food_stored + net_kg_per_sec * dt).max(0.0);
+
+        if self.food_stored <= 0.0 {
+            self.starvation_timer += dt;
+            if self.starvation_timer > STARVATION_GRACE_SECS {
+                let excess = self.starvation_timer - STARVATION_GRACE_SECS;
+                let kills = (excess / KILL_INTERVAL_SECS) as u32;
+                let alive: u32 = self.parts.iter()
+                    .filter(|p| !p.destroyed && !p.decoupled)
+                    .map(|p| p.crew_count)
+                    .sum();
+                let already_dead = self.parts.iter()
+                    .filter(|p| !p.destroyed && !p.decoupled)
+                    .filter_map(|p| {
+                        let def = part_defs.get(&p.definition_id)?;
+                        let cap = def.pod.as_ref()?.crew_capacity;
+                        Some(cap.saturating_sub(p.crew_count))
+                    })
+                    .sum::<u32>();
+                let need_to_kill = kills.saturating_sub(already_dead);
+                let mut remaining = need_to_kill.min(alive);
+                if remaining > 0 {
+                    for part in &mut self.parts {
+                        if remaining == 0 { break; }
+                        if part.destroyed || part.decoupled || part.crew_count == 0 { continue; }
+                        let kill = remaining.min(part.crew_count);
+                        part.crew_count -= kill;
+                        remaining -= kill;
+                    }
+                    self.total_crew = self.parts.iter()
+                        .filter(|p| !p.destroyed && !p.decoupled)
+                        .map(|p| p.crew_count)
+                        .sum();
+                }
+            }
+        } else {
+            self.starvation_timer = 0.0;
+        }
+    }
+
+    /// Animate solar panel deployment/retraction. Radiators use the same `deploy_fraction`
+    /// field with a slower deploy speed (see `radiator_deploy_time_sec`).
+    pub fn update_solar_deploy(&mut self, dt: f64) {
+        const SOLAR_DEPLOY_SPEED: f64 = 0.5; // fraction per second (2s full deploy)
+        for part in &mut self.parts {
+            if part.destroyed || part.decoupled { continue; }
+            let target = if part.deploy_target { 1.0 } else { 0.0 };
+            if (part.deploy_fraction - target).abs() <= 1e-6 { continue; }
+            let speed = if part.is_radiator {
+                1.0 / part.radiator_deploy_time_sec.max(0.1)
+            } else {
+                SOLAR_DEPLOY_SPEED
+            };
+            if part.deploy_fraction < target {
+                part.deploy_fraction = (part.deploy_fraction + speed * dt).min(1.0);
+            } else {
+                part.deploy_fraction = (part.deploy_fraction - speed * dt).max(0.0);
+            }
+        }
+    }
+
+    // --- Waste-heat thermal pool constants ---
+
+    /// Ambient (and minimum) pool temperature, in Kelvin.
+    pub const POOL_AMBIENT_TEMP: f64 = 300.0;
+    /// Above this pool temperature, all reactors trip offline.
+    pub const REACTOR_TRIP_TEMP: f64 = 1200.0;
+    /// Below this, the player may manually re-ignite tripped reactors (hysteresis gap).
+    pub const REACTOR_RESTART_TEMP: f64 = 800.0;
+    /// Above this, excess pool heat spills into per-part temperatures (parts can melt).
+    pub const PART_DAMAGE_TEMP: f64 = 1500.0;
+    /// Time constant (seconds) controlling how quickly excess pool heat above
+    /// `PART_DAMAGE_TEMP` is bled into per-part temperatures.
+    const SPILL_TIME_CONSTANT_SEC: f64 = 10.0;
+
+    /// Update the ship-wide thermal pool: accumulate engine + reactor waste heat,
+    /// reject via deployed radiators, trip reactors past the threshold, and spill
+    /// excess heat into per-part temperatures past the damage threshold.
+    ///
+    /// Returns the new pool temperature in Kelvin (for HUD display).
+    pub fn update_thermal_pool(
+        &mut self,
+        dt: f64,
+        part_defs: &PartDefinitions,
+    ) -> f64 {
+        if dt <= 0.0 || self.thermal_pool_capacity <= 0.0 {
+            return self.thermal_pool_temp;
+        }
+
+        // --- Generation: engines firing at current throttle + non-tripped reactors ---
+        let mut gen_w = 0.0_f64;
+        for part in &self.parts {
+            if part.destroyed || part.decoupled { continue; }
+            let Some(def) = part_defs.get(&part.definition_id) else { continue; };
+
+            if let Some(ref engine) = def.engine {
+                if part.engine_active && engine.waste_heat_watts > 0.0 {
+                    gen_w += engine.waste_heat_watts * self.throttle.clamp(0.0, 1.0);
+                }
+            }
+
+            if let Some(ref reactor) = def.reactor {
+                if reactor.waste_heat_watts > 0.0 && !self.reactors_tripped {
+                    // Fuel-consuming reactors only generate waste heat while their fuel is
+                    // available, but `update_power` already gated that — here we just
+                    // mirror the not-tripped state for both reactor families.
+                    gen_w += reactor.waste_heat_watts;
+                }
+            }
+        }
+
+        // --- Rejection: sum of deployed radiator capacities, scaled by deploy_fraction ---
+        let mut reject_w = 0.0_f64;
+        for part in &self.parts {
+            if part.destroyed || part.decoupled { continue; }
+            if !part.is_radiator { continue; }
+            if part.radiator_rejection_watts <= 0.0 { continue; }
+            reject_w += part.radiator_rejection_watts * part.deploy_fraction.clamp(0.0, 1.0);
+        }
+
+        // --- Pool temperature integration ---
+        let net_w = gen_w - reject_w;
+        let d_temp = net_w / self.thermal_pool_capacity * dt;
+        self.thermal_pool_temp = (self.thermal_pool_temp + d_temp).max(Self::POOL_AMBIENT_TEMP);
+
+        // --- Cascading trip ---
+        if !self.reactors_tripped && self.thermal_pool_temp >= Self::REACTOR_TRIP_TEMP {
+            self.reactors_tripped = true;
+            log::info!(
+                "Waste-heat cascade: reactors tripped at pool temp {:.0}K (gen {:.2} GW, reject {:.2} GW)",
+                self.thermal_pool_temp, gen_w * 1e-9, reject_w * 1e-9,
+            );
+        }
+
+        // --- Per-part spillover past damage threshold ---
+        if self.thermal_pool_temp > Self::PART_DAMAGE_TEMP {
+            // Convert temperature overage back into wattage, drained on a time constant.
+            let excess_temp = self.thermal_pool_temp - Self::PART_DAMAGE_TEMP;
+            let spill_w = excess_temp * self.thermal_pool_capacity / Self::SPILL_TIME_CONSTANT_SEC;
+
+            // Total thermal mass to distribute against (kg).
+            let mut total_thermal_mass = 0.0_f64;
+            for part in &self.parts {
+                if part.destroyed || part.decoupled { continue; }
+                let Some(def) = part_defs.get(&part.definition_id) else { continue; };
+                total_thermal_mass += def.width() * Self::SKIN_THERMAL_MASS_PER_METER;
+            }
+            if total_thermal_mass > 0.0 {
+                for part in &mut self.parts {
+                    if part.destroyed || part.decoupled { continue; }
+                    let Some(def) = part_defs.get(&part.definition_id) else { continue; };
+                    let part_thermal_mass = def.width() * Self::SKIN_THERMAL_MASS_PER_METER;
+                    if part_thermal_mass <= 0.0 { continue; }
+                    let share = part_thermal_mass / total_thermal_mass;
+                    let part_dq = spill_w * share * dt;
+                    let d_temp_part = part_dq / (part_thermal_mass * def.specific_heat);
+                    part.temperature = (part.temperature + d_temp_part)
+                        .max(Self::POOL_AMBIENT_TEMP);
+                }
+                // Remove that energy from the pool so it doesn't double-count.
+                let drained = spill_w * dt;
+                let d_temp_pool = drained / self.thermal_pool_capacity;
+                self.thermal_pool_temp = (self.thermal_pool_temp - d_temp_pool)
+                    .max(Self::POOL_AMBIENT_TEMP);
+            }
+        }
+
+        self.thermal_pool_temp
+    }
+
+    /// Manually re-ignite tripped reactors. Returns `true` if the restart succeeded.
+    /// Requires the pool temperature to be below `REACTOR_RESTART_TEMP` and consumes
+    /// `cost_wh` from stored battery electricity.
+    pub fn restart_reactors(&mut self, cost_wh: f64) -> bool {
+        if !self.reactors_tripped { return false; }
+        if self.thermal_pool_temp > Self::REACTOR_RESTART_TEMP { return false; }
+        // Atomic check + drain across all batteries.
+        let available = self.total_electricity();
+        if available < cost_wh { return false; }
+        // Drain proportionally (mirrors update_power's distribution).
+        if cost_wh > 0.0 {
+            let max_elec = self.max_electricity();
+            if max_elec > 0.0 {
+                for part in &mut self.parts {
+                    if part.destroyed || part.decoupled || part.max_electricity <= 0.0 { continue; }
+                    let fraction = part.max_electricity / max_elec;
+                    part.electricity = (part.electricity - cost_wh * fraction).max(0.0);
+                }
+            }
+        }
+        self.reactors_tripped = false;
+        log::info!("Reactors re-ignited (pool at {:.0}K)", self.thermal_pool_temp);
+        true
     }
 
     /// Animate parachute deployment and update full-deployment state based on altitude
@@ -2580,6 +2888,12 @@ impl FlightVessel {
                 current_stage: 0,
                 last_decouple_force: 0.0,
                 extra_dry_mass_tonnes: 0.0,
+                thermal_pool_temp: 300.0,
+                thermal_pool_capacity: (dry_mass * 1000.0).max(1.0) * 500.0,
+                reactors_tripped: false,
+                food_stored: 0.0,
+                total_crew: 0,
+                starvation_timer: 0.0,
             };
 
             result.push((debris_vessel, debris_com));
@@ -2950,6 +3264,12 @@ impl FlightVessel {
                     current_stage: 0,
                     last_decouple_force: 0.0,
                     extra_dry_mass_tonnes: 0.0,
+                    thermal_pool_temp: 300.0,
+                    thermal_pool_capacity: (half_shell_mass * 1000.0).max(1.0) * 500.0,
+                    reactors_tripped: false,
+                    food_stored: 0.0,
+                    total_crew: 0,
+                    starvation_timer: 0.0,
                 };
 
                 result.push((debris_vessel, com_offset, half));
@@ -3058,6 +3378,12 @@ impl FlightVessel {
             current_stage: 0,
             last_decouple_force: 0.0,
             extra_dry_mass_tonnes: 0.0,
+            thermal_pool_temp: 300.0,
+            thermal_pool_capacity: (dry_mass * 1000.0_f64).max(1.0) * 500.0,
+            reactors_tripped: false,
+            food_stored: 0.0,
+            total_crew: 0,
+            starvation_timer: 0.0,
         };
 
         Some((debris_vessel, debris_com))
@@ -3440,6 +3766,9 @@ pub fn create_default_vessel(
             deploy_fraction: 0.0,
             deploy_target: false,
             mirror_partner: None,
+            is_radiator: false,
+            radiator_rejection_watts: 0.0,
+            radiator_deploy_time_sec: 5.0,
             is_parachute: false,
             parachute_deployed: false,
             parachute_spent: false,
@@ -3448,6 +3777,9 @@ pub fn create_default_vessel(
             parachute_fully_deployed: false,
             cargo_buildings: Vec::new(),
             cargo_payloads: Vec::new(),
+            engine_no_power: false,
+            shield_active: false,
+            crew_count: 0,
         }],
         root_part_index: 0,
         total_mass: 2.0,
@@ -3462,5 +3794,11 @@ pub fn create_default_vessel(
         current_stage: 0,
         last_decouple_force: 0.0,
         extra_dry_mass_tonnes: 0.0,
+        thermal_pool_temp: 300.0,
+        thermal_pool_capacity: 1.0e6,
+        reactors_tripped: false,
+        food_stored: 0.0,
+        total_crew: 0,
+        starvation_timer: 0.0,
     }
 }

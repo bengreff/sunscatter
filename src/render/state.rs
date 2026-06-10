@@ -74,9 +74,19 @@ pub struct RenderState {
     pub ship_soi_surface_gravity: f64,     // m/s², for TWR
     pub ship_g_force: f64,                 // Felt acceleration in g's (thrust + drag, not gravity)
     // Thermal state
-    pub ship_temperature: f64,            // Kelvin
+    pub ship_temperature: f64,            // Kelvin (hottest part — aero/spillover heat)
     pub ship_heat_fraction: f32,          // 0.0-1.0, for visual effects
     pub ship_heat_flux: f64,              // W/m², for HUD display
+    // Ship-wide waste-heat pool (separate from per-part aero temperature)
+    pub thermal_pool_temp: f64,           // Kelvin
+    pub thermal_pool_gen_w: f64,          // Waste heat generated this tick (W)
+    pub thermal_pool_reject_w: f64,       // Radiator rejection this tick (W)
+    pub reactors_tripped: bool,           // True when thermal cascade has shut down reactors
+    // Life support
+    pub vessel_food_days: Option<f64>,     // Days of food remaining
+    pub vessel_total_crew: Option<u32>,    // Living crew count
+    pub vessel_is_starving: bool,          // True when food == 0 and crew > 0
+    pub reactor_restart_request: bool,    // UI -> game request to attempt restart
     pub ship_below_landing_altitude: bool, // Whether warp > 10x should be blocked
     pub ship_velocity_direction: [f64; 2], // Normalized velocity unit vector for prograde arrow
     // Relativistic state
@@ -514,6 +524,14 @@ impl RenderState {
             ship_temperature: 300.0,
             ship_heat_fraction: 0.0,
             ship_heat_flux: 0.0,
+            thermal_pool_temp: 300.0,
+            thermal_pool_gen_w: 0.0,
+            thermal_pool_reject_w: 0.0,
+            reactors_tripped: false,
+            vessel_food_days: None,
+            vessel_total_crew: None,
+            vessel_is_starving: false,
+            reactor_restart_request: false,
             ship_below_landing_altitude: false,
             ship_velocity_direction: [0.0, 0.0],
             ship_speed_fraction_c: 0.0,

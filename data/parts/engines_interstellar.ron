@@ -35,6 +35,7 @@
                 gimbal_range: 0.0,
                 propellant: NuclearPulse,
                 alternator_power: 50000000.0,
+                waste_heat_watts: 60000000000.0, // 60 GW — Orion pulse (2% of 3 TW reaction power)
             )),
             resources: {},
         ),
@@ -68,6 +69,7 @@
                 gimbal_range: 0.0,
                 propellant: FusionFuel,
                 alternator_power: 100000000.0,
+                waste_heat_watts: 1050000000000.0, // 1.05 TW — Daedalus S1 (3% of 35 TW reaction)
             )),
             resources: {},
         ),
@@ -101,6 +103,7 @@
                 gimbal_range: 0.0,
                 propellant: FusionFuel,
                 alternator_power: 50000000.0,
+                waste_heat_watts: 250000000000.0, // 250 GW — Daedalus S2 (2.5% of 10 TW reaction)
             )),
             resources: {},
         ),
@@ -134,6 +137,7 @@
                 gimbal_range: 0.0,
                 propellant: FusionFuel,
                 alternator_power: 20000000.0,
+                waste_heat_watts: 160000000000.0, // 160 GW — Z-Pinch Probe (4% of 4 TW reaction)
             )),
             resources: {},
         ),
@@ -167,6 +171,7 @@
                 gimbal_range: 0.0,
                 propellant: FusionFuel,
                 alternator_power: 80000000.0,
+                waste_heat_watts: 500000000000.0, // 500 GW — Z-Pinch Advanced (2% of 25 TW reaction)
             )),
             resources: {},
         ),
@@ -202,6 +207,7 @@
                 alternator_power: 200000000.0,
                 secondary_propellant: Some(Antimatter),
                 secondary_fuel_fraction: 0.0024,
+                waste_heat_watts: 300000000000.0, // 300 GW — AM-Cat Fusion (0.5% of 60 TW reaction)
             )),
             resources: {},
         ),
@@ -237,6 +243,7 @@
                 alternator_power: 500000000.0,
                 secondary_propellant: Some(Hydrogen),
                 secondary_fuel_fraction: 0.5,
+                waste_heat_watts: 300000000000.0, // 300 GW — AM Torch (0.1% of 300 TW reaction)
             )),
             resources: {},
         ),
@@ -272,6 +279,7 @@
                 alternator_power: 1000000000.0,
                 secondary_propellant: Some(Hydrogen),
                 secondary_fuel_fraction: 0.5,
+                waste_heat_watts: 150000000000.0, // 150 GW — Gamma Converter (0.05% of 300 TW reaction)
             )),
             resources: {},
         ),

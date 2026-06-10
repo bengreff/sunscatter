@@ -17,6 +17,7 @@ pub const PARTS_RON: &[(&str, &str)] = &[
     ("pods.ron",                   include_str!("../../data/parts/pods.ron")),
     ("probes.ron",                 include_str!("../../data/parts/probes.ron")),
     ("quarters.ron",               include_str!("../../data/parts/quarters.ron")),
+    ("radiators.ron",              include_str!("../../data/parts/radiators.ron")),
     ("rcs.ron",                    include_str!("../../data/parts/rcs.ron")),
     ("reactors_interstellar.ron",  include_str!("../../data/parts/reactors_interstellar.ron")),
     ("reactors_small.ron",         include_str!("../../data/parts/reactors_small.ron")),

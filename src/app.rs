@@ -754,7 +754,23 @@ fn render_flight_frame(
                 power_consumption = cons;
             }
 
-            // Animate solar panel deployment
+            // Ship-wide waste-heat pool: engines + reactors generate, deployed radiators reject,
+            // pool temp can trip reactors and spill into per-part temperatures past damage threshold.
+            if !game.flight.ship.on_rails {
+                vessel.update_thermal_pool(effective_dt, &game.part_definitions);
+            } else {
+                // On-rails: no reactors running, so pool decays toward ambient via rejection capacity.
+                // Snap to ambient when very close to avoid tiny drift over long warps.
+                let drift = vessel.update_thermal_pool(effective_dt, &game.part_definitions);
+                if (drift - 300.0).abs() < 0.1 {
+                    vessel.thermal_pool_temp = 300.0;
+                }
+            }
+
+            // Life support: greenhouse food production, crew consumption, starvation
+            vessel.update_life_support(effective_dt, &game.part_definitions);
+
+            // Animate solar panel + radiator deployment
             vessel.update_solar_deploy(effective_dt);
 
             // Animate parachute deployment and auto-retract
@@ -1529,6 +1545,7 @@ fn render_flight_frame(
                         engine_isp_vac,
                         engine_isp_asl,
                         engine_enabled: p.engine_enabled,
+                        engine_no_power: p.engine_no_power,
                         propellant_name,
                         fuel_type_name,
                         fuel_current,
@@ -1547,9 +1564,11 @@ fn render_flight_frame(
                         })),
                         rtg_output: def.and_then(|d| d.rtg.as_ref().map(|r| r.output_watts)),
                         reactor_output: def.and_then(|d| d.reactor.as_ref().map(|r| r.output_watts)),
+                        reactor_waste_heat: def.and_then(|d| d.reactor.as_ref().filter(|r| r.waste_heat_watts > 0.0).map(|r| r.waste_heat_watts)),
                         shield_type: def.and_then(|d| d.shield.as_ref().map(|s| format!("{:?}", s.shield_type))),
                         shield_max_c: def.and_then(|d| d.shield.as_ref().map(|s| s.max_velocity_c)),
                         shield_power: def.and_then(|d| d.shield.as_ref().map(|s| s.power_base_watts)),
+                        shield_active: p.shield_active,
                         is_decoupler: def.map(|d| d.decoupler.is_some()).unwrap_or(false),
                         crossfeed_enabled: p.crossfeed_enabled,
                         gimbal_angle: p.gimbal_angle,
@@ -1562,6 +1581,10 @@ fn render_flight_frame(
                         fairing_half: p.fairing_half,
                         deploy_fraction: p.deploy_fraction,
                         is_solar_panel: def.map(|d| d.solar_panel.is_some()).unwrap_or(false),
+                        is_radiator: p.is_radiator,
+                        radiator_tier: def.and_then(|d| d.radiator.as_ref().map(|r| r.tier)),
+                        radiator_rejection_watts: def.and_then(|d| d.radiator.as_ref().map(|r| r.rejection_watts)),
+                        engine_waste_heat: def.and_then(|d| d.engine.as_ref().filter(|e| e.waste_heat_watts > 0.0).map(|e| e.waste_heat_watts)),
                         is_parachute: p.is_parachute,
                         parachute_deployed: p.parachute_deployed,
                         parachute_spent: p.parachute_spent,
@@ -1695,6 +1718,36 @@ fn render_flight_frame(
         temperature: effective_temp,
         heat_fraction,
         heat_flux: game.flight.ship.heat_flux,
+        thermal_pool_temp: game.flight.vessel.as_ref().map(|v| v.thermal_pool_temp).unwrap_or(300.0),
+        thermal_pool_gen_w: game.flight.vessel.as_ref().map(|v| {
+            // Engines firing + reactors running (mirror update_thermal_pool's logic for display).
+            let mut g = 0.0_f64;
+            for p in &v.parts {
+                if p.destroyed || p.decoupled { continue; }
+                let Some(def) = game.part_definitions.get(&p.definition_id) else { continue; };
+                if let Some(ref e) = def.engine {
+                    if p.engine_active { g += e.waste_heat_watts * v.throttle.clamp(0.0, 1.0); }
+                }
+                if let Some(ref r) = def.reactor {
+                    if !v.reactors_tripped { g += r.waste_heat_watts; }
+                }
+            }
+            g
+        }).unwrap_or(0.0),
+        thermal_pool_reject_w: game.flight.vessel.as_ref().map(|v| {
+            v.parts.iter().filter(|p| !p.destroyed && !p.decoupled && p.is_radiator)
+                .map(|p| p.radiator_rejection_watts * p.deploy_fraction.clamp(0.0, 1.0))
+                .sum()
+        }).unwrap_or(0.0),
+        reactors_tripped: game.flight.vessel.as_ref().map(|v| v.reactors_tripped).unwrap_or(false),
+        food_days: game.flight.vessel.as_ref().and_then(|v| {
+            if v.total_crew > 0 {
+                let consumption_per_day = v.total_crew as f64 * 1.5;
+                Some(v.food_stored / consumption_per_day)
+            } else { None }
+        }),
+        total_crew: game.flight.vessel.as_ref().map(|v| v.total_crew),
+        is_starving: game.flight.vessel.as_ref().map(|v| v.food_stored <= 0.0 && v.total_crew > 0).unwrap_or(false),
         rcs_direction: rcs_direction_for_render,
         rcs_translate: rcs_translate_for_render,
         below_landing_altitude: game.flight.ship.below_landing_altitude(&game.solar_system)
@@ -2793,6 +2846,32 @@ fn render_flight_frame(
                             }
                         }
                     }
+                }
+            }
+            RenderRequest::RadiatorDeploy { part_index, deploy } => {
+                if let Some(ref mut vessel) = game.flight.vessel {
+                    if part_index < vessel.parts.len() && vessel.parts[part_index].is_radiator {
+                        vessel.parts[part_index].deploy_target = deploy;
+                        if let Some(mirror_idx) = vessel.parts[part_index].mirror_partner {
+                            if mirror_idx < vessel.parts.len() && vessel.parts[mirror_idx].is_radiator {
+                                vessel.parts[mirror_idx].deploy_target = deploy;
+                            }
+                        }
+                    }
+                }
+            }
+            RenderRequest::ShieldToggle { part_index, active } => {
+                if let Some(ref mut vessel) = game.flight.vessel {
+                    if part_index < vessel.parts.len() {
+                        vessel.parts[part_index].shield_active = active;
+                    }
+                }
+            }
+            RenderRequest::ReactorRestart => {
+                if let Some(ref mut vessel) = game.flight.vessel {
+                    // 100,000 Wh restart charge from batteries — matches design-doc
+                    // reactor cold-start values (Fusion Small).
+                    vessel.restart_reactors(100_000.0);
                 }
             }
             RenderRequest::ParachuteDeploy { part_index } => {
@@ -4010,6 +4089,7 @@ fn build_vessel_part_render_data(
                 engine_isp_vac: if is_engine { Some(p.engine_isp_vac) } else { None },
                 engine_isp_asl: if is_engine { Some(p.engine_isp_asl) } else { None },
                 engine_enabled: p.engine_enabled,
+                engine_no_power: p.engine_no_power,
                 propellant_name: p.propellant_type.map(|pt| pt.display_name().to_string()),
                 fuel_type_name: None,
                 fuel_current: None,
@@ -4024,9 +4104,11 @@ fn build_vessel_part_render_data(
                 solar_output: None, // Inactive vessels don't compute solar output
                 rtg_output: def.and_then(|d| d.rtg.as_ref().map(|r| r.output_watts)),
                 reactor_output: def.and_then(|d| d.reactor.as_ref().map(|r| r.output_watts)),
+                reactor_waste_heat: def.and_then(|d| d.reactor.as_ref().filter(|r| r.waste_heat_watts > 0.0).map(|r| r.waste_heat_watts)),
                 shield_type: def.and_then(|d| d.shield.as_ref().map(|s| format!("{:?}", s.shield_type))),
                 shield_max_c: def.and_then(|d| d.shield.as_ref().map(|s| s.max_velocity_c)),
                 shield_power: def.and_then(|d| d.shield.as_ref().map(|s| s.power_base_watts)),
+                shield_active: p.shield_active,
                 is_decoupler: def.map(|d| d.decoupler.is_some()).unwrap_or(false),
                 crossfeed_enabled: p.crossfeed_enabled,
                 gimbal_angle: 0.0,
@@ -4039,6 +4121,10 @@ fn build_vessel_part_render_data(
                 fairing_half: p.fairing_half,
                 deploy_fraction: p.deploy_fraction,
                 is_solar_panel: def.map(|d| d.solar_panel.is_some()).unwrap_or(false),
+                is_radiator: p.is_radiator,
+                radiator_tier: def.and_then(|d| d.radiator.as_ref().map(|r| r.tier)),
+                radiator_rejection_watts: def.and_then(|d| d.radiator.as_ref().map(|r| r.rejection_watts)),
+                engine_waste_heat: def.and_then(|d| d.engine.as_ref().filter(|e| e.waste_heat_watts > 0.0).map(|e| e.waste_heat_watts)),
                 is_parachute: p.is_parachute,
                 parachute_deployed: p.parachute_deployed,
                 parachute_spent: p.parachute_spent,

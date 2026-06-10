@@ -119,3 +119,30 @@ The tracking station sidebar shows an "X" delete button next to each vessel's "F
 - `background_vessel_at_screen_pos()`, `background_vessel_screen_positions` field on `RenderState`
 - Background vessel geometry in `update_bodies_orbits_ship_and_vessels()`
 - `TrackingVesselData`, `TrackingStationAction` in `src/render/types.rs`
+
+## Radiator Deploy and Thermal Cascade
+
+### Requirement: Radiator deploy state
+
+`FlightPart` SHALL carry `is_radiator: bool`, `radiator_rejection_watts: f64`, and
+`radiator_deploy_time_sec: f64`. Deploy animation reuses the existing `deploy_target` /
+`deploy_fraction` pair (shared with solar panels). `update_solar_deploy(dt)` selects the
+appropriate deploy rate per part type: solar panels at 0.5/sec; radiators at
+`1 / radiator_deploy_time_sec`.
+
+### Requirement: Radiator deploy request
+
+`RenderRequest::RadiatorDeploy { part_index, deploy }` SHALL toggle a radiator part's
+`deploy_target`. The request mirrors to the part's `mirror_partner` if both are radiators.
+
+### Requirement: Reactor restart request
+
+`RenderRequest::ReactorRestart` SHALL invoke `FlightVessel::restart_reactors(100_000.0)`,
+which clears `reactors_tripped` if the pool is below `REACTOR_RESTART_TEMP` and ≥100,000 Wh
+of stored battery electricity is drained proportionally across battery parts. The HUD shows
+this button only while `reactors_tripped == true`.
+
+### Requirement: Tripped reactors produce no power
+
+`update_power` SHALL gate both fuel-consuming and constant-output reactor generation on
+`!self.reactors_tripped`. Solar panels, RTGs, and engine alternators are unaffected.

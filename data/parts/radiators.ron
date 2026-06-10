@@ -1,0 +1,287 @@
+// Radiator Definitions
+// Twelve radiators across three tech tiers (Heat Pipe, Droplet, Phononic) × four sizes.
+// All radiators are deployable wings — stowed during launch/burn, extended in vacuum.
+// Heat rejection scales with deploy_fraction. Operating temperatures determine
+// max_heat_tolerance — radiators survive their own design temp but no higher.
+//
+// Tier reference (from docs/part_ideas.md):
+//   Heat Pipe Panel:        1,200 K,  216 kW/m²,  8 kg/m²  (fission era)
+//   Liquid Metal Droplet:   2,500 K,  4.2 MW/m²,  3 kg/m²  (fusion era)
+//   Phononic Metamaterial:  6,000 K,  145 MW/m²,  1.5 kg/m² (antimatter era)
+//
+// Mass and rejection wattage scale with effective deployed panel area. Stowed dimensions
+// are 1 grid wide × {2,4,8,16} grid tall for Tiny/Small/Medium/Large.
+
+(
+    parts: [
+        // ============================================
+        // HEAT PIPE PANELS — Fission Era (1,200 K)
+        // Sodium/lithium heat pipes in carbon-carbon composite sheets.
+        // ============================================
+
+        (
+            id: "radiator_heatpipe_tiny",
+            name: "Heat Pipe Panel T",
+            description: "Sodium/lithium heat-pipe radiator panel for probe-scale fission reactors. Deploys to a thin 232 m² wing of carbon-carbon composite. Operating temperature 1,200 K — bright cherry red in vacuum.",
+            category: Heat,
+            mass: 1.85,
+            cost: 8000,
+            size: Tiny,
+            shape: Rectangle,
+            grid_width: 1.0,
+            grid_height: 2.0,
+            radiator: Some((
+                tier: HeatPipe,
+                rejection_watts: 50000000.0,
+                deploy_time_sec: 5.0,
+            )),
+            max_heat_tolerance: 1500.0,
+            emissivity: 0.92,
+            resources: {},
+        ),
+
+        (
+            id: "radiator_heatpipe_small",
+            name: "Heat Pipe Panel S",
+            description: "Sodium/lithium heat-pipe radiator for crewed fission-era ships. 1,160 m² deployed area sheds a quarter gigawatt of reactor waste heat. Glows cherry red when working hard.",
+            category: Heat,
+            mass: 9.3,
+            cost: 25000,
+            size: Small,
+            shape: Rectangle,
+            grid_width: 1.0,
+            grid_height: 4.0,
+            radiator: Some((
+                tier: HeatPipe,
+                rejection_watts: 250000000.0,
+                deploy_time_sec: 5.0,
+            )),
+            max_heat_tolerance: 1500.0,
+            emissivity: 0.92,
+            resources: {},
+        ),
+
+        (
+            id: "radiator_heatpipe_medium",
+            name: "Heat Pipe Panel M",
+            description: "Heavy heat-pipe radiator wing for Orion-class fission vessels. 4,600 m² of carbon-carbon panel rejecting 1 GW of waste heat. The defining silhouette of fission-era interstellar ships — long red-glowing wings extended in both directions.",
+            category: Heat,
+            mass: 37.0,
+            cost: 80000,
+            size: Medium,
+            shape: Rectangle,
+            grid_width: 1.0,
+            grid_height: 8.0,
+            radiator: Some((
+                tier: HeatPipe,
+                rejection_watts: 1000000000.0,
+                deploy_time_sec: 5.0,
+            )),
+            max_heat_tolerance: 1500.0,
+            emissivity: 0.92,
+            resources: {},
+        ),
+
+        (
+            id: "radiator_heatpipe_large",
+            name: "Heat Pipe Panel L",
+            description: "Capital-class heat-pipe radiator wing. 18,500 m² of panel area rejects 4 gigawatts of fission waste heat — enough that an Orion + Fission Large only needs fifteen of these to stay cool. Mass dominated by the wing structure (148 t of carbon-carbon).",
+            category: Heat,
+            mass: 148.0,
+            cost: 250000,
+            size: Large,
+            shape: Rectangle,
+            grid_width: 1.0,
+            grid_height: 16.0,
+            radiator: Some((
+                tier: HeatPipe,
+                rejection_watts: 4000000000.0,
+                deploy_time_sec: 5.0,
+            )),
+            max_heat_tolerance: 1500.0,
+            emissivity: 0.92,
+            resources: {},
+        ),
+
+        // ============================================
+        // LIQUID METAL DROPLET RADIATORS — Fusion Era (2,500 K)
+        // Tin/lithium droplets sprayed into vacuum, radiating freely,
+        // magnetically recollected. No solid radiating surface.
+        // ============================================
+
+        (
+            id: "radiator_droplet_tiny",
+            name: "Droplet Radiator T",
+            description: "Compact liquid-tin droplet radiator. Magnetic emitter sprays a curtain of molten metal droplets into vacuum where they radiate freely at 2,500 K, then a collector electrode recaptures them. No solid radiating surface means no melting-point limit — only the working fluid matters.",
+            category: Heat,
+            mass: 0.71,
+            cost: 25000,
+            size: Tiny,
+            shape: Rectangle,
+            grid_width: 1.0,
+            grid_height: 2.0,
+            radiator: Some((
+                tier: Droplet,
+                rejection_watts: 1000000000.0,
+                deploy_time_sec: 5.0,
+            )),
+            max_heat_tolerance: 2800.0,
+            emissivity: 0.95,
+            resources: {},
+        ),
+
+        (
+            id: "radiator_droplet_small",
+            name: "Droplet Radiator S",
+            description: "Mid-scale tin droplet radiator. 1,190 m² of effective radiating curtain rejects 5 GW of fusion waste heat. Curtain glows bright orange-yellow in flight — visible from kilometers away.",
+            category: Heat,
+            mass: 3.57,
+            cost: 80000,
+            size: Small,
+            shape: Rectangle,
+            grid_width: 1.0,
+            grid_height: 4.0,
+            radiator: Some((
+                tier: Droplet,
+                rejection_watts: 5000000000.0,
+                deploy_time_sec: 5.0,
+            )),
+            max_heat_tolerance: 2800.0,
+            emissivity: 0.95,
+            resources: {},
+        ),
+
+        (
+            id: "radiator_droplet_medium",
+            name: "Droplet Radiator M",
+            description: "Heavy lithium droplet radiator for Daedalus-class fusion drives. 4,760 m² curtain at 2,500 K rejects 20 GW per wing. Glows from cherry-red near the emitter to bright orange across the curtain to dim cherry at the collector.",
+            category: Heat,
+            mass: 14.3,
+            cost: 250000,
+            size: Medium,
+            shape: Rectangle,
+            grid_width: 1.0,
+            grid_height: 8.0,
+            radiator: Some((
+                tier: Droplet,
+                rejection_watts: 20000000000.0,
+                deploy_time_sec: 5.0,
+            )),
+            max_heat_tolerance: 2800.0,
+            emissivity: 0.95,
+            resources: {},
+        ),
+
+        (
+            id: "radiator_droplet_large",
+            name: "Droplet Radiator L",
+            description: "Capital-class lithium droplet radiator. 19,000 m² curtain rejects 80 gigawatts of fusion waste heat. Daedalus-class ships need only a handful of these to balance their thermal load.",
+            category: Heat,
+            mass: 57.0,
+            cost: 700000,
+            size: Large,
+            shape: Rectangle,
+            grid_width: 1.0,
+            grid_height: 16.0,
+            radiator: Some((
+                tier: Droplet,
+                rejection_watts: 80000000000.0,
+                deploy_time_sec: 5.0,
+            )),
+            max_heat_tolerance: 2800.0,
+            emissivity: 0.95,
+            resources: {},
+        ),
+
+        // ============================================
+        // PHONONIC METAMATERIAL RADIATORS — Antimatter Era (6,000 K)
+        // Engineered atomic lattices channel thermal phonons into coherent
+        // radiative emission. Strong-force-scale bonding survives stellar
+        // photosphere temperatures. Self-repairing lattice.
+        // ============================================
+
+        (
+            id: "radiator_phononic_tiny",
+            name: "Phononic Emitter T",
+            description: "Compact phononic-metamaterial radiator. Engineered atomic lattice channels thermal phonons into coherent radiative emission at 6,000 K — hot enough to glow brilliant white-blue, the color of an O-type star photosphere. Self-repairing under stellar fluence.",
+            category: Heat,
+            mass: 0.36,
+            cost: 200000,
+            size: Tiny,
+            shape: Rectangle,
+            grid_width: 1.0,
+            grid_height: 2.0,
+            radiator: Some((
+                tier: Phononic,
+                rejection_watts: 35000000000.0,
+                deploy_time_sec: 5.0,
+            )),
+            max_heat_tolerance: 6500.0,
+            emissivity: 0.99,
+            resources: {},
+        ),
+
+        (
+            id: "radiator_phononic_small",
+            name: "Phononic Emitter S",
+            description: "Standard phononic radiator wing. 1,200 m² of metamaterial lattice rejects 175 GW at 6,000 K. A single Tiny phononic emitter outperforms a Large heat-pipe radiator by an order of magnitude — antimatter-era ships shed gigawatts from panels small enough to fit on a probe.",
+            category: Heat,
+            mass: 1.81,
+            cost: 700000,
+            size: Small,
+            shape: Rectangle,
+            grid_width: 1.0,
+            grid_height: 4.0,
+            radiator: Some((
+                tier: Phononic,
+                rejection_watts: 175000000000.0,
+                deploy_time_sec: 5.0,
+            )),
+            max_heat_tolerance: 6500.0,
+            emissivity: 0.99,
+            resources: {},
+        ),
+
+        (
+            id: "radiator_phononic_medium",
+            name: "Phononic Emitter M",
+            description: "Heavy phononic radiator for capital antimatter vessels. 4,800 m² lattice wing rejecting 700 GW at stellar-photosphere temperatures. The wing itself appears to glow with the same blue-white intensity as a hot O-class star.",
+            category: Heat,
+            mass: 7.24,
+            cost: 2500000,
+            size: Medium,
+            shape: Rectangle,
+            grid_width: 1.0,
+            grid_height: 8.0,
+            radiator: Some((
+                tier: Phononic,
+                rejection_watts: 700000000000.0,
+                deploy_time_sec: 5.0,
+            )),
+            max_heat_tolerance: 6500.0,
+            emissivity: 0.99,
+            resources: {},
+        ),
+
+        (
+            id: "radiator_phononic_large",
+            name: "Phononic Emitter L",
+            description: "The largest radiator wing ever fielded — a 19,300 m² phononic lattice radiating 2.8 terawatts of antimatter waste heat. Burns brighter than the parent star at close range. Self-repairs as the lattice ablates.",
+            category: Heat,
+            mass: 28.9,
+            cost: 8000000,
+            size: Large,
+            shape: Rectangle,
+            grid_width: 1.0,
+            grid_height: 16.0,
+            radiator: Some((
+                tier: Phononic,
+                rejection_watts: 2800000000000.0,
+                deploy_time_sec: 5.0,
+            )),
+            max_heat_tolerance: 6500.0,
+            emissivity: 0.99,
+            resources: {},
+        ),
+    ],
+)

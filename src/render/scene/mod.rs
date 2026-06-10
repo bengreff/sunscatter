@@ -222,6 +222,13 @@ impl RenderState {
             self.ship_temperature = s.temperature;
             self.ship_heat_fraction = s.heat_fraction;
             self.ship_heat_flux = s.heat_flux;
+            self.thermal_pool_temp = s.thermal_pool_temp;
+            self.thermal_pool_gen_w = s.thermal_pool_gen_w;
+            self.thermal_pool_reject_w = s.thermal_pool_reject_w;
+            self.reactors_tripped = s.reactors_tripped;
+            self.vessel_food_days = s.food_days;
+            self.vessel_total_crew = s.total_crew;
+            self.vessel_is_starving = s.is_starving;
             self.ship_below_landing_altitude = s.below_landing_altitude;
             self.ship_velocity_direction = s.velocity_direction;
             self.ship_speed_fraction_c = s.speed_fraction_c;
@@ -1179,7 +1186,7 @@ impl RenderState {
                                 crate::editor::generate_part_shape_vertices(
                                     &mut part_verts, def, 0.0, 0.0, 1.0,
                                     Some(&self.sprite_atlas),
-                                    if part_data.is_solar_panel { Some(part_data.deploy_fraction) } else { None },
+                                    if part_data.is_solar_panel || part_data.is_radiator { Some(part_data.deploy_fraction) } else { None },
                                 );
                             }
 
@@ -1660,7 +1667,7 @@ impl RenderState {
                                 crate::editor::generate_part_shape_vertices(
                                     &mut part_verts, def, 0.0, 0.0, 1.0,
                                     Some(&self.sprite_atlas),
-                                    if part_data.is_solar_panel { Some(part_data.deploy_fraction) } else { None },
+                                    if part_data.is_solar_panel || part_data.is_radiator { Some(part_data.deploy_fraction) } else { None },
                                 );
                             }
 

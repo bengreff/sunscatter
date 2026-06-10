@@ -79,6 +79,30 @@ Antimatter reactors (`reactor_am_small`, `reactor_am_large`) SHALL set `fuel.pri
 - `max_velocity_c: f64` — maximum rated velocity as fraction of c
 - `power_base_watts: f64` — base power consumption (0 for passive Whipple)
 
+### Requirement: RadiatorData
+
+`PartDefinition` SHALL support `radiator: Option<RadiatorData>`. `RadiatorData` contains:
+- `tier: RadiatorTier` — enum with variants `HeatPipe`, `Droplet`, `Phononic`
+- `rejection_watts: f64` — heat rejection at full deployment (Watts)
+- `deploy_time_sec: f64` — seconds to fully deploy/retract (serde default 5.0)
+
+Radiators reject `rejection_watts × deploy_fraction` per tick from the ship-wide waste-heat pool.
+See `physics/aerodynamic_heating/spec.md` for the integration with per-part temperatures.
+
+### Requirement: EngineData waste heat
+
+`EngineData` SHALL support an optional `waste_heat_watts: f64` field (serde default 0.0).
+When non-zero and `engine_active == true`, the engine contributes
+`waste_heat_watts × throttle` to the ship-wide thermal pool each tick. Chemical, NTR, and
+electric engines leave this at 0; interstellar engines set it according to the doc table
+(`docs/part_ideas.md` "Engine waste heat notes").
+
+### Requirement: ReactorData waste heat
+
+`ReactorData` SHALL support an optional `waste_heat_watts: f64` field (serde default 0.0).
+When non-zero and the reactor is producing power (i.e. not tripped and fuel available),
+the reactor contributes `waste_heat_watts` to the ship-wide thermal pool each tick.
+
 ## Interstellar Engines
 
 All interstellar engines are vacuum-only (`thrust_asl: 0`, `isp_asl: 0`), `shape: Trapezoid`, `category: Interstellar`, `size: XL`.
@@ -218,6 +242,35 @@ Spherical cryogenic D+He3 tanks for bulk fusion-stage propellant. Structural den
 | tank_sphere_m | Fusion Sphere M | 40x40 | 29.384 | 3695.0 | ~584 t |
 | tank_sphere_l | Fusion Sphere L | 60x60 | 80.972 | 10182.3 | ~1,609 t |
 
+## Radiators
+
+All radiators are `category: Interstellar`, `shape: Rectangle`, deployable wings. Twelve parts
+across three tier × four sizes. Mass and rejection scale with deployed wing area.
+
+| ID | Name | Tier | Size | Grid | Mass (t) | Rejection |
+|----|------|------|------|------|----------|-----------|
+| radiator_heatpipe_tiny | Heat Pipe Panel T | HeatPipe | Tiny | 1x2 | 1.85 | 50 MW |
+| radiator_heatpipe_small | Heat Pipe Panel S | HeatPipe | Small | 1x4 | 9.3 | 250 MW |
+| radiator_heatpipe_medium | Heat Pipe Panel M | HeatPipe | Medium | 1x8 | 37 | 1 GW |
+| radiator_heatpipe_large | Heat Pipe Panel L | HeatPipe | Large | 1x16 | 148 | 4 GW |
+| radiator_droplet_tiny | Droplet Radiator T | Droplet | Tiny | 1x2 | 0.71 | 1 GW |
+| radiator_droplet_small | Droplet Radiator S | Droplet | Small | 1x4 | 3.57 | 5 GW |
+| radiator_droplet_medium | Droplet Radiator M | Droplet | Medium | 1x8 | 14.3 | 20 GW |
+| radiator_droplet_large | Droplet Radiator L | Droplet | Large | 1x16 | 57 | 80 GW |
+| radiator_phononic_tiny | Phononic Emitter T | Phononic | Tiny | 1x2 | 0.36 | 35 GW |
+| radiator_phononic_small | Phononic Emitter S | Phononic | Small | 1x4 | 1.81 | 175 GW |
+| radiator_phononic_medium | Phononic Emitter M | Phononic | Medium | 1x8 | 7.24 | 700 GW |
+| radiator_phononic_large | Phononic Emitter L | Phononic | Large | 1x16 | 28.9 | 2.8 TW |
+
+`max_heat_tolerance` per tier matches operating temp: Heat Pipe 1500K, Droplet 2800K,
+Phononic 6500K. Deployed radiators expose the full wing area to per-part aero heating
+(via existing `update_part_temperatures`) and tear off if deployed at speed in atmosphere.
+
+Tech-tree gating:
+- `interstellar_fission` unlocks all four Heat Pipe sizes.
+- `fusion_full` unlocks all four Droplet sizes.
+- `am_torch` unlocks all four Phononic sizes.
+
 ## Attachment Diameters
 
 Interstellar parts attach at their top edge. Engines (trapezoid shape) have a narrower top attachment and wider bottom exhaust. Reactors and shields (rectangle shape) have equal top and bottom width. All values in grid squares (1 grid square = 0.5m).
@@ -270,6 +323,7 @@ Note: Engine hitbox widths are set to the next odd integer above `grid_width` (f
 - `data/parts/engines_interstellar.ron` — 8 interstellar engines
 - `data/parts/reactors_interstellar.ron` — 6 interstellar reactors
 - `data/parts/shields.ron` — 9 shields (3 types × 3 sizes)
+- `data/parts/radiators.ron` — 12 radiators (3 tiers × 4 sizes), procedural rendering, deployable wings
 - `data/parts/tanks_fusion.ron` — 3 fusion spheres (`category: FuelTanks`)
 - `data/parts/tanks_antimatter.ron` — 4 Penning-array antimatter tanks (Tiny/Small/Medium/Large, unlocked by `am_catalyzed`) plus 3 endgame antimatter spheres (S/M/L, unlocked by `bulk_am_storage`). All `category: FuelTanks`, locked to Antimatter.
 - `data/parts/tanks_pulse.ron` — 4 nuclear pulse magazines (Tiny/Small/Medium/Large), `category: FuelTanks`, locked to NuclearPulse, unlocked by the `nuclear_pulse` tech node
