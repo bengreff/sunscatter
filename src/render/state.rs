@@ -3,6 +3,18 @@ use wgpu::util::DeviceExt;
 use winit::window::Window;
 
 use crate::ship::AutopilotTarget;
+
+pub struct Notification {
+    pub text: String,
+    pub color: [u8; 3],
+    pub remaining: f64, // seconds left before removal
+}
+
+impl Notification {
+    pub fn new(text: impl Into<String>, color: [u8; 3], duration: f64) -> Self {
+        Self { text: text.into(), color, remaining: duration }
+    }
+}
 use super::camera::Camera;
 use super::textures::BodyTextureMap;
 use super::types::{
@@ -90,6 +102,7 @@ pub struct RenderState {
     pub reactor_restart_request: bool,    // UI -> game request to attempt restart
     pub quicksave_requested: bool,        // F5 keyboard shortcut
     pub quickload_requested: bool,        // F9 keyboard shortcut
+    pub notifications: Vec<Notification>, // Timed fade-out notifications
     pub ship_below_landing_altitude: bool, // Whether warp > 10x should be blocked
     pub ship_velocity_direction: [f64; 2], // Normalized velocity unit vector for prograde arrow
     // Relativistic state
@@ -538,6 +551,7 @@ impl RenderState {
             reactor_restart_request: false,
             quicksave_requested: false,
             quickload_requested: false,
+            notifications: Vec::new(),
             ship_below_landing_altitude: false,
             ship_velocity_direction: [0.0, 0.0],
             ship_speed_fraction_c: 0.0,

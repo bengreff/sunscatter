@@ -233,6 +233,21 @@ impl RenderState {
                 }
             });
 
+            // Notifications (fade-out messages at top-center)
+            if !self.notifications.is_empty() {
+                egui::Area::new(egui::Id::new("notifications_area"))
+                    .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 40.0))
+                    .show(ctx, |ui| {
+                        for notif in &self.notifications {
+                            let alpha = (notif.remaining.min(1.0) * 255.0) as u8;
+                            let color = egui::Color32::from_rgba_unmultiplied(
+                                notif.color[0], notif.color[1], notif.color[2], alpha);
+                            ui.label(egui::RichText::new(&notif.text)
+                                .size(16.0).strong().color(color));
+                        }
+                    });
+            }
+
             // Bottom panel for autopilot buttons and velocity/altitude display
             egui::TopBottomPanel::bottom("flight_info_panel")
                 .frame(egui::Frame::none().fill(egui::Color32::from_rgba_unmultiplied(20, 20, 30, 200)))

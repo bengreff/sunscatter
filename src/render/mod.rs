@@ -32,5 +32,6 @@ pub use types::{
     TradeAction, Vertex, HYPERBOLIC_RENDER_MARGIN,
 };
 pub use scene::StarRenderData;
+pub use state::Notification;
 pub use trade_ui::RouteCreationState;
 pub use crate::save::QuicksaveInfo;

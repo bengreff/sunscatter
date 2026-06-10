@@ -534,6 +534,12 @@ fn render_flight_frame(
     // Use actual frame time, clamped to avoid spiral-of-death on hitches
     let dt = (frame_dt as f64).clamp(0.0001, 0.1);
 
+    // Tick notification timers
+    for n in &mut render_state.notifications {
+        n.remaining -= dt;
+    }
+    render_state.notifications.retain(|n| n.remaining > 0.0);
+
     // Sync earth_index for render state
     render_state.earth_index = game.solar_system.earth_index;
 
@@ -681,10 +687,13 @@ fn render_flight_frame(
         if game.flight.ship.soi_body != prev_soi {
             let body_name = game.solar_system.bodies[game.flight.ship.soi_body].name.clone();
             game.notifications.push(crate::colony::Notification {
-                kind: crate::colony::NotificationKind::SoiTransition { body_name },
+                kind: crate::colony::NotificationKind::SoiTransition { body_name: body_name.clone() },
                 time: game.solar_system.time,
                 read: false,
             });
+            render_state.notifications.push(
+                crate::render::Notification::new(
+                    format!("Entering {} SOI", body_name), [100, 180, 255], 4.0));
             game.warp_index = 0;
         }
 
@@ -756,6 +765,7 @@ fn render_flight_frame(
 
             // Ship-wide waste-heat pool: engines + reactors generate, deployed radiators reject,
             // pool temp can trip reactors and spill into per-part temperatures past damage threshold.
+            let was_tripped = vessel.reactors_tripped;
             if !game.flight.ship.on_rails {
                 vessel.update_thermal_pool(effective_dt, &game.part_definitions);
             } else {
@@ -767,8 +777,22 @@ fn render_flight_frame(
                 }
             }
 
+            // Reactor trip notification
+            if vessel.reactors_tripped && !was_tripped {
+                render_state.notifications.push(
+                    crate::render::Notification::new(
+                        "REACTOR TRIP — thermal overload", [255, 100, 100], 5.0));
+            }
+
             // Life support: greenhouse food production, crew consumption, starvation
+            let prev_crew = vessel.total_crew;
             vessel.update_life_support(effective_dt, &game.part_definitions);
+            if vessel.total_crew < prev_crew {
+                let lost = prev_crew - vessel.total_crew;
+                render_state.notifications.push(
+                    crate::render::Notification::new(
+                        format!("Crew lost: {} died from starvation", lost), [255, 80, 80], 5.0));
+            }
 
             // Animate solar panel + radiator deployment
             vessel.update_solar_deploy(effective_dt);
@@ -2751,7 +2775,11 @@ fn render_flight_frame(
                         game.flight.active_maneuver_nodes = render_state.maneuver_nodes.clone();
                         let save = SaveGame::from_game(game, name);
                         match save.write_quicksave() {
-                            Ok(index) => log::info!("Quicksaved #{}", index),
+                            Ok(index) => {
+                                log::info!("Quicksaved #{}", index);
+                                render_state.notifications.push(
+                                    crate::render::Notification::new("Game saved", [100, 200, 100], 2.0));
+                            }
                             Err(e) => log::error!("Quicksave failed: {}", e),
                         }
                         *quicksaves_dirty = true;
@@ -2811,7 +2839,11 @@ fn render_flight_frame(
                     game.flight.active_maneuver_nodes = render_state.maneuver_nodes.clone();
                     let save = SaveGame::from_game(game, name);
                     match save.write_quicksave() {
-                        Ok(index) => log::info!("Quicksaved #{} (F5)", index),
+                        Ok(index) => {
+                            log::info!("Quicksaved #{} (F5)", index);
+                            render_state.notifications.push(
+                                crate::render::Notification::new("Game saved", [100, 200, 100], 2.0));
+                        }
                         Err(e) => log::error!("Quicksave failed: {}", e),
                     }
                     *quicksaves_dirty = true;
