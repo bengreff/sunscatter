@@ -118,6 +118,7 @@ pub struct EditorState {
     pub confirm_delete_blueprint: Option<String>,
     pub hovered_part: Option<PlacedPartId>,
     pub part_to_delete: Option<PlacedPartId>,
+    pub show_shortcuts_help: bool,
 
     // Dragging state
     pub dragging_part: Option<PlacedPartId>,
@@ -171,6 +172,7 @@ impl EditorState {
             show_load_dialog: false,
             confirm_delete_blueprint: None,
             hovered_part: None,
+            show_shortcuts_help: false,
             part_to_delete: None,
             dragging_part: None,
             drag_start_pos: None,

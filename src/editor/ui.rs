@@ -1437,8 +1437,46 @@ pub fn render_editor_ui(
         .show(ctx, |ui| {
             ui.horizontal(|ui| {
                 ui.label("Click part to select • Click build area to place • Right-click to deselect • Scroll to zoom • Drag to pan");
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui.small_button("?").on_hover_text("Keyboard shortcuts").clicked() {
+                        editor.show_shortcuts_help = !editor.show_shortcuts_help;
+                    }
+                });
             });
         });
+
+    // Keyboard shortcuts popup
+    if editor.show_shortcuts_help {
+        egui::Window::new("Keyboard Shortcuts")
+            .id(egui::Id::new("editor_shortcuts_help"))
+            .collapsible(false)
+            .resizable(false)
+            .default_width(280.0)
+            .show(ctx, |ui| {
+                ui.heading("Editor");
+                ui.label("Arrow Keys — Pan camera");
+                ui.label("Scroll — Zoom in/out");
+                ui.label("R — Rotate part 90°");
+                ui.label("Delete / Backspace — Delete selected part");
+                ui.label("Right-click — Deselect / cancel placement");
+                ui.label("Click part in palette — Select for placement");
+                ui.label("Click placed part — Select for info/editing");
+                ui.separator();
+                ui.heading("Flight");
+                ui.label("Space — Activate next stage");
+                ui.label("Shift / Ctrl — Throttle up / down");
+                ui.label("Z / X — Full throttle / zero throttle");
+                ui.label("W/A/S/D — RCS translation");
+                ui.label("Q / E — Rotate left / right");
+                ui.label("R — Toggle RCS");
+                ui.label("` (backtick) — Focus on ship");
+                ui.label("[ / ] — Previous / next vessel");
+                ui.separator();
+                if ui.button("Close").clicked() {
+                    editor.show_shortcuts_help = false;
+                }
+            });
+    }
 
     // Save dialog
     if editor.show_save_dialog {
