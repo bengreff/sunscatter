@@ -389,8 +389,9 @@ pub fn render_editor_ui(
                 // Large stats: Mass, Thrust, TWR
                 ui.style_mut().override_text_style = Some(egui::TextStyle::Heading);
 
-                // Mass
-                ui.label(format!("Mass: {:.2} t", stats.wet_mass));
+                // Mass (wet/dry)
+                ui.label(format!("Mass: {:.2} t", stats.wet_mass))
+                    .on_hover_text(format!("Wet: {:.2} t / Dry: {:.2} t", stats.wet_mass, stats.dry_mass));
                 ui.separator();
 
                 // Thrust
@@ -437,11 +438,15 @@ pub fn render_editor_ui(
                     editor.twr_settings.show_asl = !editor.twr_settings.show_asl;
                 }
 
-                // Delta-v
+                // Delta-v + total burn time
                 let total_dv: f64 = stage_delta_vs.iter().sum();
                 if total_dv > 0.0 {
                     ui.separator();
-                    ui.label(format!("Δv: {}", format_delta_v(total_dv)));
+                    let total_burn: f64 = stage_burn_times.iter().sum();
+                    let dv_label = ui.label(format!("Δv: {}", format_delta_v(total_dv)));
+                    if total_burn > 0.0 {
+                        dv_label.on_hover_text(format!("Total burn: {}", format_duration(total_burn)));
+                    }
                 }
 
                 // Vessel cost
