@@ -314,14 +314,35 @@ impl RenderState {
 
                                     ui.horizontal(|ui| {
                                         ui.vertical(|ui| {
+                                            let name_color = if vessel.is_debris {
+                                                egui::Color32::from_rgb(140, 140, 140)
+                                            } else {
+                                                egui::Color32::WHITE
+                                            };
                                             let name_text = egui::RichText::new(&vessel.name)
-                                                .color(egui::Color32::WHITE)
+                                                .color(name_color)
                                                 .size(13.0);
                                             if ui.add(egui::Label::new(name_text).sense(egui::Sense::click())).clicked() {
                                                 ts_action = TrackingStationAction::FocusVessel(vessel.id);
                                             }
-                                            ui.label(egui::RichText::new(format!("SOI: {}", body_name))
-                                                .size(11.0)
+                                            let mut info = format!("SOI: {}", body_name);
+                                            if let Some(ref orbit) = vessel.orbit {
+                                                if orbit.eccentricity < 1.0 && orbit.semi_major_axis > 0.0 {
+                                                    let body_radius = body_info.get(vessel.soi_body)
+                                                        .map(|b| b.radius_m).unwrap_or(0.0);
+                                                    let ap = orbit.semi_major_axis * (1.0 + orbit.eccentricity) - body_radius;
+                                                    let pe = orbit.semi_major_axis * (1.0 - orbit.eccentricity) - body_radius;
+                                                    if ap > 0.0 && pe > -body_radius * 0.5 {
+                                                        let fmt = |v: f64| -> String {
+                                                            if v >= 1e6 { format!("{:.0}Mm", v/1e6) }
+                                                            else { format!("{:.0}km", v/1000.0) }
+                                                        };
+                                                        info = format!("{} • {} / {}", body_name, fmt(ap), fmt(pe));
+                                                    }
+                                                }
+                                            }
+                                            ui.label(egui::RichText::new(info)
+                                                .size(10.0)
                                                 .color(egui::Color32::GRAY));
                                         });
 
