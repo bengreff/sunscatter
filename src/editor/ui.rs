@@ -328,6 +328,32 @@ pub fn render_editor_ui(
                 }
             });
 
+            // Launch warnings
+            if can_launch {
+                let has_control = editor.parts.values().any(|p| {
+                    part_defs.get(&p.definition_id)
+                        .and_then(|d| d.pod.as_ref())
+                        .map_or(false, |pod| pod.can_control)
+                });
+                let has_engine = editor.parts.values().any(|p| {
+                    part_defs.get(&p.definition_id)
+                        .map_or(false, |d| d.engine.is_some())
+                });
+                let has_fuel = editor.parts.values().any(|p| {
+                    p.fuel_type != crate::parts::FuelType::Empty && p.fill_fraction > 0.0
+                });
+                let warn_color = egui::Color32::from_rgb(220, 180, 60);
+                if !has_control {
+                    ui.label(egui::RichText::new("⚠ No command pod").size(10.0).color(warn_color));
+                }
+                if !has_engine {
+                    ui.label(egui::RichText::new("⚠ No engines").size(10.0).color(warn_color));
+                }
+                if has_engine && !has_fuel {
+                    ui.label(egui::RichText::new("⚠ No fuel loaded").size(10.0).color(warn_color));
+                }
+            }
+
             ui.separator();
 
             // Contracts button
