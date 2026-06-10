@@ -146,3 +146,68 @@ this button only while `reactors_tripped == true`.
 
 `update_power` SHALL gate both fuel-consuming and constant-output reactor generation on
 `!self.reactors_tripped`. Solar panels, RTGs, and engine alternators are unaffected.
+
+## Electric Engine Power Gating
+
+### Requirement: Electric engines require power
+
+`update_engine_states` SHALL check `EngineData.power_required` for each engine. If
+`power_required > 0.0` and `total_electricity() <= 0.0`, the engine is set `engine_active = false`
+and `engine_no_power = true`. The flight HUD displays "No Power" (purple) for such engines,
+distinct from "No Fuel" (yellow).
+
+### Requirement: Electric engine power consumption
+
+`update_power` SHALL add `engine.power_required` to consumption for each active engine with
+`power_required > 0.0`. This drains batteries while electric engines fire.
+
+## Shield Activation
+
+### Requirement: Shield toggle
+
+Active shields (FRES, Geodesic) with `power_base_watts > 0` have a `shield_active: bool` field
+on `FlightPart` (default false). The flight HUD provides Activate/Deactivate buttons.
+`RenderRequest::ShieldToggle { part_index, active }` sets the field.
+
+### Requirement: Shield power consumption
+
+`update_power` SHALL add `shield.power_base_watts` to consumption for each part where
+`shield_active == true` and `power_base_watts > 0.0`.
+
+### Requirement: Shield auto-deactivation
+
+After battery distribution in `update_power`, if `total_electricity() <= 0.0` and net power is
+negative, all shield parts have `shield_active` set to false.
+
+### Requirement: Whipple shields are passive
+
+Whipple shields have `power_base_watts = 0.0` and are always on. No toggle is shown in the HUD.
+
+## Life Support
+
+### Requirement: Greenhouse food production
+
+`GreenhouseData { food_production_rate: f64 }` on `PartDefinition` specifies kg of food produced
+per day. Greenhouses require power (checked via `part.electricity > 0` as proxy).
+
+### Requirement: Crew food consumption
+
+Each crew member consumes 1.5 kg of food per day. `FlightVessel.food_stored` tracks current food
+in kg. Ships launch with 30 days of food per crew member.
+
+### Requirement: Starvation
+
+When `food_stored` reaches 0, `starvation_timer` accumulates elapsed time. After 7 days of
+continuous starvation, one crew member dies per day (picked from the first pod with
+`crew_count > 0`). `total_crew` is recomputed after each death.
+
+### Requirement: Control loss from crew death
+
+`has_control()` requires crewed pods (`crew_capacity > 0`) to have `crew_count > 0` to provide
+control. Probe cores (`crew_capacity == 0, can_control == true`) always provide control regardless
+of crew state.
+
+### Requirement: Food HUD indicator
+
+The flight HUD left panel shows a FOOD bar when `total_crew > 0`, displaying days of food
+remaining. Color thresholds: green > 30 days, yellow > 7 days, red < 7 days.
