@@ -544,7 +544,7 @@ impl FlightVessel {
         // Calculate moment of inertia (simplified: sum of m*r^2)
         let mut moment_of_inertia = 0.0;
         for (i, bp_part) in blueprint.parts.iter().enumerate() {
-            let def = part_defs.get(&bp_part.definition_id).unwrap();
+            let Some(def) = part_defs.get(&bp_part.definition_id) else { continue };
             // Use actual part mass (dry + fuel + cargo buildings)
             let base_mass = def.mass;
             let resource_mass: f64 = parts[i].resources.values().sum::<f64>() * 0.001;
