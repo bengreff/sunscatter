@@ -456,6 +456,11 @@ impl RenderState {
                         ui.label(egui::RichText::new("ALT").size(11.0).color(egui::Color32::GRAY));
                         ui.label(egui::RichText::new(&alt_str).size(13.0).strong().color(egui::Color32::WHITE));
 
+                        if ship_in_atmosphere {
+                            ui.label(egui::RichText::new("ATM").size(10.0)
+                                .color(egui::Color32::from_rgb(100, 180, 255)));
+                        }
+
                         // Vertical speed (useful for landing)
                         if ship_altitude < 100_000.0 {
                             ui.add_space(20.0);
