@@ -8,6 +8,16 @@ use std::collections::{HashMap, HashSet, VecDeque};
 /// Grid snap size in meters
 const GRID_SIZE: f64 = 0.5;
 
+const MAX_UNDO_HISTORY: usize = 50;
+
+#[derive(Clone, Debug)]
+struct UndoSnapshot {
+    parts: HashMap<PlacedPartId, PlacedPart>,
+    stages: Vec<Vec<PlacedPartId>>,
+    root_part: Option<PlacedPartId>,
+    next_part_id: PlacedPartId,
+}
+
 /// Ship statistics calculated from placed parts
 #[derive(Debug, Clone, Default)]
 pub struct ShipStats {
@@ -110,6 +120,10 @@ pub struct EditorState {
     pub stages: Vec<Vec<PlacedPartId>>,
     pub staging_selected_engine: Option<PlacedPartId>,
 
+    // Undo history (snapshot before each mutation)
+    undo_stack: Vec<UndoSnapshot>,
+    pub ctrl_held: bool,
+
     // UI state
     pub vessel_name: String,
     pub show_save_dialog: bool,
@@ -173,6 +187,8 @@ impl EditorState {
             confirm_delete_blueprint: None,
             hovered_part: None,
             show_shortcuts_help: false,
+            undo_stack: Vec::new(),
+            ctrl_held: false,
             part_to_delete: None,
             dragging_part: None,
             drag_start_pos: None,
@@ -653,6 +669,7 @@ impl EditorState {
 
     /// Place a part at the current ghost position
     pub fn place_part(&mut self, part_defs: &PartDefinitions) -> bool {
+        self.save_undo();
         let Some(ref def_id) = self.selected_part_def else {
             return false;
         };
@@ -761,6 +778,7 @@ impl EditorState {
 
     /// Delete a part (and its mirror partner if linked)
     pub fn delete_part(&mut self, part_id: PlacedPartId) {
+        self.save_undo();
         // Exit fairing build mode if deleting the fairing being built
         if self.fairing_build_mode.as_ref().map(|b| b.part_id) == Some(part_id) {
             self.fairing_build_mode = None;
@@ -1147,6 +1165,34 @@ impl EditorState {
     }
 
     /// Check if the vessel is ready to launch
+    pub fn save_undo(&mut self) {
+        let snapshot = UndoSnapshot {
+            parts: self.parts.clone(),
+            stages: self.stages.clone(),
+            root_part: self.root_part,
+            next_part_id: self.next_part_id,
+        };
+        self.undo_stack.push(snapshot);
+        if self.undo_stack.len() > MAX_UNDO_HISTORY {
+            self.undo_stack.remove(0);
+        }
+    }
+
+    pub fn undo(&mut self) {
+        if let Some(snapshot) = self.undo_stack.pop() {
+            self.parts = snapshot.parts;
+            self.stages = snapshot.stages;
+            self.root_part = snapshot.root_part;
+            self.next_part_id = snapshot.next_part_id;
+            self.selected_placed_part = None;
+            self.dragging_part = None;
+        }
+    }
+
+    pub fn can_undo(&self) -> bool {
+        !self.undo_stack.is_empty()
+    }
+
     pub fn can_launch(&self) -> bool {
         self.root_part.is_some() && !self.parts.is_empty()
     }

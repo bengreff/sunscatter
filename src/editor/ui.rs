@@ -1458,6 +1458,7 @@ pub fn render_editor_ui(
                 ui.label("Scroll — Zoom in/out");
                 ui.label("R — Rotate part 90°");
                 ui.label("Delete / Backspace — Delete selected part");
+                ui.label("Ctrl+Z — Undo last action");
                 ui.label("Right-click — Deselect / cancel placement");
                 ui.label("Click part in palette — Select for placement");
                 ui.label("Click placed part — Select for info/editing");

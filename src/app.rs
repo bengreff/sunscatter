@@ -4749,6 +4749,9 @@ fn handle_editor_keyboard(
             winit::keyboard::NamedKey::ArrowRight => {
                 game.editor.keys_held.right = pressed;
             }
+            winit::keyboard::NamedKey::Control => {
+                game.editor.ctrl_held = pressed;
+            }
             winit::keyboard::NamedKey::Delete | winit::keyboard::NamedKey::Backspace if pressed => {
                 if let Some(part_id) = game.editor.selected_placed_part {
                     game.editor.delete_part(part_id);
@@ -4771,6 +4774,7 @@ fn handle_editor_keyboard(
                             .rem_euclid(std::f64::consts::TAU);
                     } else if let Some(part_id) = game.editor.selected_placed_part {
                         // Placed part selected: rotate it in place (with overlap check)
+                        game.editor.save_undo();
                         if let Some(part) = game.editor.parts.get(&part_id) {
                             let new_rot = (part.rotation - std::f64::consts::FRAC_PI_2)
                                 .rem_euclid(std::f64::consts::TAU);
@@ -4815,6 +4819,9 @@ fn handle_editor_keyboard(
                             }
                         }
                     }
+                }
+                "z" | "Z" if game.editor.ctrl_held => {
+                    game.editor.undo();
                 }
                 _ => {}
             }
