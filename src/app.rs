@@ -2795,6 +2795,38 @@ fn render_flight_frame(
                 }
                 PauseAction::Resume | PauseAction::None => {}
             }
+
+            // F5 quicksave (keyboard shortcut, works while unpaused)
+            if render_state.quicksave_requested {
+                render_state.quicksave_requested = false;
+                if let Some(ref name) = game.save_name {
+                    game.flight.active_maneuver_nodes = render_state.maneuver_nodes.clone();
+                    let save = SaveGame::from_game(game, name);
+                    match save.write_quicksave() {
+                        Ok(index) => log::info!("Quicksaved #{} (F5)", index),
+                        Err(e) => log::error!("Quicksave failed: {}", e),
+                    }
+                    *quicksaves_dirty = true;
+                }
+            }
+
+            // F9 quickload (keyboard shortcut — loads most recent quicksave)
+            if render_state.quickload_requested {
+                render_state.quickload_requested = false;
+                if let Some(ref name) = game.save_name {
+                    let quicksaves = SaveGame::list_quicksaves(name);
+                    if let Some(latest) = quicksaves.first() {
+                        match SaveGame::load_quicksave(name, &latest.filename) {
+                            Ok(save) => {
+                                save.restore_to_game(game);
+                                render_state.maneuver_nodes = game.flight.active_maneuver_nodes.clone();
+                                log::info!("Quickloaded (F9): {}", latest.filename);
+                            }
+                            Err(e) => log::error!("Quickload failed: {}", e),
+                        }
+                    }
+                }
+            }
         }
         Err(wgpu::SurfaceError::Lost) => {
             println!("Surface lost, resizing...");
@@ -4566,6 +4598,12 @@ fn handle_flight_keyboard(
             }
             winit::keyboard::NamedKey::Shift => game.flight.ship_input.throttle_up = pressed,
             winit::keyboard::NamedKey::Control => game.flight.ship_input.throttle_down = pressed,
+            winit::keyboard::NamedKey::F5 => {
+                if pressed { render_state.quicksave_requested = true; }
+            }
+            winit::keyboard::NamedKey::F9 => {
+                if pressed { render_state.quickload_requested = true; }
+            }
             _ => {}
         }
     }

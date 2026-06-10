@@ -87,6 +87,8 @@ pub struct RenderState {
     pub vessel_total_crew: Option<u32>,    // Living crew count
     pub vessel_is_starving: bool,          // True when food == 0 and crew > 0
     pub reactor_restart_request: bool,    // UI -> game request to attempt restart
+    pub quicksave_requested: bool,        // F5 keyboard shortcut
+    pub quickload_requested: bool,        // F9 keyboard shortcut
     pub ship_below_landing_altitude: bool, // Whether warp > 10x should be blocked
     pub ship_velocity_direction: [f64; 2], // Normalized velocity unit vector for prograde arrow
     // Relativistic state
@@ -532,6 +534,8 @@ impl RenderState {
             vessel_total_crew: None,
             vessel_is_starving: false,
             reactor_restart_request: false,
+            quicksave_requested: false,
+            quickload_requested: false,
             ship_below_landing_altitude: false,
             ship_velocity_direction: [0.0, 0.0],
             ship_speed_fraction_c: 0.0,
