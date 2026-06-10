@@ -320,7 +320,15 @@ pub fn render_editor_ui(
 
             ui.separator();
 
-            // Launch button
+            // Vessel name + Launch button
+            ui.horizontal(|ui| {
+                ui.label("Name:");
+                let name_field = ui.add(egui::TextEdit::singleline(&mut editor.vessel_name)
+                    .desired_width(120.0));
+                if name_field.changed() && editor.vessel_name.is_empty() {
+                    editor.vessel_name = "Untitled Vessel".to_string();
+                }
+            });
             let can_launch = editor.can_launch();
             ui.add_enabled_ui(can_launch, |ui| {
                 if ui.button("🚀 Launch").clicked() {
