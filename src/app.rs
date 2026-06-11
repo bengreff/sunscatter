@@ -675,6 +675,16 @@ fn render_flight_frame(
             game.flight.ship.throttle = 0.0;
         }
 
+        // Inject nearby procedural stars when ship is in galactic frame
+        if game.flight.ship.soi_body == 0 {
+            let ship_pos = game.flight.ship.rel_position;
+            let search_radius = 2.0 * crate::bodies::LIGHT_YEAR;
+            let nearby = game.galaxy.stars_near(ship_pos, search_radius, game.solar_system.time);
+            for (sx, sy, si, star, _pos) in &nearby {
+                game.solar_system.inject_star(star, (*sx, *sy, *si));
+            }
+        }
+
         // Update ship physics (gimbal torque always applied in update_flying)
         let has_flight_vessel = game.flight.vessel.is_some();
         let prev_soi = game.flight.ship.soi_body;

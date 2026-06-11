@@ -117,6 +117,8 @@ pub struct SavedVessel {
     pub maneuver_nodes: Vec<ManeuverNode>,
     #[serde(default)]
     pub is_debris: bool,
+    #[serde(default)]
+    pub interstellar_star_key: Option<(u16, u16, u32)>,
 }
 
 /// Metadata about a save file (for the load game UI)
@@ -172,6 +174,7 @@ impl Default for SavedVessel {
             vessel: None,
             maneuver_nodes: Vec::new(),
             is_debris: false,
+            interstellar_star_key: None,
         }
     }
 }
@@ -192,10 +195,11 @@ impl SaveGame {
         vessels.push(SavedVessel {
             id: game.flight.active_vessel_id,
             name: game.flight.active_vessel_name.clone(),
-            ship: active_ship,
+            ship: active_ship.clone(),
             vessel: game.flight.vessel.clone(),
             maneuver_nodes: game.flight.active_maneuver_nodes.clone(),
             is_debris: false,
+            interstellar_star_key: game.solar_system.dynamic_star_keys.get(&active_ship.soi_body).copied(),
         });
 
         // Save all inactive vessels
@@ -207,6 +211,7 @@ impl SaveGame {
                 vessel: tracked.vessel.clone(),
                 maneuver_nodes: tracked.maneuver_nodes.clone(),
                 is_debris: tracked.is_debris,
+                interstellar_star_key: game.solar_system.dynamic_star_keys.get(&tracked.ship.soi_body).copied(),
             });
         }
 
@@ -735,27 +740,50 @@ impl SaveGame {
         // Merge blueprints
         game.blueprints.merge_blueprints(self.blueprints);
 
-        // Restore vessels
-        let mut vessels_iter = self.vessels.into_iter();
+        // Re-inject dynamic stars needed by saved vessels before restoring soi_body indices
+        let mut star_remap: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
+        for sv in &self.vessels {
+            if let Some(key) = sv.interstellar_star_key {
+                let old_soi = sv.ship.soi_body;
+                if !star_remap.contains_key(&old_soi) {
+                    let coord = crate::bodies::SectorCoord { x: key.0, y: key.1 };
+                    let stars = game.galaxy.get_sector(coord).to_vec();
+                    if let Some(star_data) = stars.get(key.2 as usize) {
+                        let new_idx = game.solar_system.inject_star(star_data, key);
+                        star_remap.insert(old_soi, new_idx);
+                    }
+                }
+            }
+        }
 
-        // First vessel is the active one
+        // Restore vessels, remapping soi_body for interstellar ships
+        let mut vessels_iter = self.vessels.into_iter();
         if let Some(active) = vessels_iter.next() {
-            game.flight.ship = active.ship;
+            let mut ship = active.ship;
+            if let Some(&new_idx) = star_remap.get(&ship.soi_body) {
+                ship.soi_body = new_idx;
+            }
+            game.flight.ship = ship;
             game.flight.vessel = active.vessel;
             game.flight.active_vessel_id = active.id;
             game.flight.active_vessel_name = active.name;
             game.flight.active_maneuver_nodes = active.maneuver_nodes;
         }
 
-        // Remaining are inactive
         game.flight.inactive_vessels = vessels_iter
-            .map(|sv| TrackedVessel {
-                id: sv.id,
-                name: sv.name,
-                ship: sv.ship,
-                vessel: sv.vessel,
-                maneuver_nodes: sv.maneuver_nodes,
-                is_debris: sv.is_debris,
+            .map(|sv| {
+                let mut ship = sv.ship;
+                if let Some(&new_idx) = star_remap.get(&ship.soi_body) {
+                    ship.soi_body = new_idx;
+                }
+                TrackedVessel {
+                    id: sv.id,
+                    name: sv.name,
+                    ship,
+                    vessel: sv.vessel,
+                    maneuver_nodes: sv.maneuver_nodes,
+                    is_debris: sv.is_debris,
+                }
             })
             .collect();
 

@@ -231,6 +231,57 @@ impl GalaxyState {
         entry.stars.as_slice()
     }
 
+    /// Find procedural stars within `radius` meters of `pos` at the given simulation time.
+    /// Returns (sector_coord, star_index_in_sector, star, current_position).
+    pub fn stars_near(&mut self, pos: [f64; 2], radius: f64, time: f64) -> Vec<(u16, u16, u32, ProceduralStar, [f64; 2])> {
+        use crate::bodies::{SECTOR_SIDE_METERS, SECTOR_GRID_HALF_METERS, SECTOR_GRID_SIZE, G, galactic_enclosed_mass};
+
+        let mut results = Vec::new();
+        let sector_radius = (radius / SECTOR_SIDE_METERS).ceil() as i64 + 1;
+
+        let center_sx = ((pos[0] + SECTOR_GRID_HALF_METERS) / SECTOR_SIDE_METERS).floor() as i64;
+        let center_sy = ((pos[1] + SECTOR_GRID_HALF_METERS) / SECTOR_SIDE_METERS).floor() as i64;
+
+        for dy in -sector_radius..=sector_radius {
+            for dx in -sector_radius..=sector_radius {
+                let sx = center_sx + dx;
+                let sy = center_sy + dy;
+                if sx < 0 || sx >= SECTOR_GRID_SIZE as i64 || sy < 0 || sy >= SECTOR_GRID_SIZE as i64 {
+                    continue;
+                }
+                let coord = crate::bodies::SectorCoord { x: sx as u16, y: sy as u16 };
+                let stars: Vec<ProceduralStar> = self.get_sector(coord).to_vec();
+                for (i, star) in stars.iter().enumerate() {
+                    let mu = G * galactic_enclosed_mass(star.semi_major_axis);
+                    let n = (mu / star.semi_major_axis.powi(3)).sqrt();
+                    let mean_anomaly = star.mean_anomaly_0 + n * time;
+                    let e = star.eccentricity as f64;
+                    let ea = solve_kepler_nr(mean_anomaly, e);
+                    let nu = if e < 1.0 {
+                        2.0 * ((1.0 + e).sqrt() * (ea / 2.0).sin()).atan2(
+                            (1.0 - e).sqrt() * (ea / 2.0).cos())
+                    } else {
+                        2.0 * ((e + 1.0).sqrt() * (ea / 2.0).tanh()).atan2((e - 1.0).sqrt())
+                    };
+                    let r = if e < 1.0 {
+                        star.semi_major_axis * (1.0 - e * ea.cos())
+                    } else {
+                        star.semi_major_axis.abs() * (e * ea.cosh() - 1.0)
+                    };
+                    let angle = nu + star.arg_periapsis as f64;
+                    let star_pos = [r * angle.cos(), r * angle.sin()];
+                    let dx = star_pos[0] - pos[0];
+                    let dy = star_pos[1] - pos[1];
+                    let dist = (dx * dx + dy * dy).sqrt();
+                    if dist < radius {
+                        results.push((sx as u16, sy as u16, i as u32, star.clone(), star_pos));
+                    }
+                }
+            }
+        }
+        results
+    }
+
     /// Advance frame counter and evict stale sectors.
     pub fn tick(&mut self) {
         self.frame_counter += 1;

@@ -402,6 +402,10 @@ pub struct SolarSystem {
     pub moon_index: usize,
     /// Sector assignment for each body (parallel to `bodies`), not serialized
     pub body_sectors: Vec<Option<SectorCoord>>,
+    /// Indices of dynamically-injected star bodies (appended to `bodies` at runtime)
+    pub dynamic_star_indices: Vec<usize>,
+    /// Maps body index → (sector_x, sector_y, star_index) for dynamic stars
+    pub dynamic_star_keys: std::collections::HashMap<usize, (u16, u16, u32)>,
 }
 
 impl SolarSystem {
@@ -1054,7 +1058,7 @@ impl SolarSystem {
         let earth_index = bodies.iter().position(|b| b.name == "Earth").expect("Earth not found");
         let moon_index = bodies.iter().position(|b| b.name == "Moon").expect("Moon not found");
 
-        let mut ss = Self { bodies, time: 0.0, sun_index, earth_index, moon_index, body_sectors: vec![] };
+        let mut ss = Self { bodies, time: 0.0, sun_index, earth_index, moon_index, body_sectors: vec![], dynamic_star_indices: Vec::new(), dynamic_star_keys: std::collections::HashMap::new() };
         ss.init_sectors();
         ss
     }
@@ -1120,6 +1124,59 @@ impl SolarSystem {
                 self.body_sectors[i] = position_to_sector(self.body_position(i));
             }
         }
+    }
+
+    /// Inject a procedural star as a dynamic CelestialBody.
+    /// Returns the body index. Never removes bodies during a session to keep indices stable.
+    pub fn inject_star(&mut self, star: &crate::galaxy::ProceduralStar, key: (u16, u16, u32)) -> usize {
+        // Check if already injected
+        for (&idx, existing_key) in &self.dynamic_star_keys {
+            if *existing_key == key {
+                return idx;
+            }
+        }
+
+        let enclosed_mass = galactic_enclosed_mass(star.semi_major_axis);
+        let soi = calculate_soi(star.semi_major_axis, star.mass, enclosed_mass) / 20.0;
+
+        let star_color = [star.color[0], star.color[1], star.color[2], 1.0];
+        let body = CelestialBody {
+            name: format!("Star {}-{}-{}", key.0, key.1, key.2),
+            description: format!("{} star, {:.2} solar masses", star.star_type.display_name(), star.mass / 1.989e30),
+            mass: star.mass,
+            radius: star.radius_m,
+            color: star_color,
+            parent: Some(0), // Orbits Sgr A*
+            orbit: Some(Orbit {
+                semi_major_axis: star.semi_major_axis,
+                eccentricity: star.eccentricity as f64,
+                argument_of_periapsis: star.arg_periapsis as f64,
+                mean_anomaly_at_epoch: star.mean_anomaly_0,
+            }),
+            soi_radius: soi,
+            atmosphere: None,
+            sidereal_period: None,
+            accretion_disc: None,
+            galactic_mass_profile: false,
+            mineable_resources: vec![],
+            atmospheric_resources: vec![],
+            habitability_score: 0,
+            is_gas_giant: false,
+        };
+
+        let idx = self.bodies.len();
+        self.bodies.push(body);
+        self.body_sectors.push(None);
+        self.dynamic_star_indices.push(idx);
+        self.dynamic_star_keys.insert(idx, key);
+
+        log::info!("Injected dynamic star body at index {}: {:?}", idx, key);
+        idx
+    }
+
+    /// Check if a body index is a dynamically-injected star
+    pub fn is_dynamic_star(&self, body_index: usize) -> bool {
+        self.dynamic_star_indices.contains(&body_index)
     }
 
     /// Advance time

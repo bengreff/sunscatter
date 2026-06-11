@@ -242,6 +242,7 @@ pub fn build() -> SaveGame {
         vessel: None,
         maneuver_nodes: Vec::new(),
         is_debris: false,
+        interstellar_star_key: None,
     };
 
     // Dyson swarm — partially built around the Sun.
