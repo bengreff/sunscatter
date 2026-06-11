@@ -123,6 +123,7 @@ pub struct EditorState {
     // Undo history (snapshot before each mutation)
     undo_stack: Vec<UndoSnapshot>,
     pub ctrl_held: bool,
+    pub launch_body: usize,  // body index to launch from (default: Earth)
 
     // UI state
     pub vessel_name: String,
@@ -189,6 +190,7 @@ impl EditorState {
             show_shortcuts_help: false,
             undo_stack: Vec::new(),
             ctrl_held: false,
+            launch_body: 4, // Earth index (updated at runtime)
             part_to_delete: None,
             dragging_part: None,
             drag_start_pos: None,

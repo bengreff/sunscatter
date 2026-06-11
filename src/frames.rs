@@ -1491,6 +1491,21 @@ pub fn render_editor_frame(
         .map(|name| name.to_string())
         .collect();
 
+    // Build launch sites: Earth + colonies with launchpads
+    let mut launch_sites: Vec<(usize, String)> = vec![
+        (game.solar_system.earth_index, "Earth".to_string()),
+    ];
+    for colony in &game.colony_manager.colonies {
+        if colony.body_index != game.solar_system.earth_index
+            && colony.buildings.iter().any(|b| b.building_type == crate::colony::BuildingType::Launchpad && b.operational)
+        {
+            let name = game.solar_system.bodies.get(colony.body_index)
+                .map(|b| b.name.clone())
+                .unwrap_or_else(|| format!("Body {}", colony.body_index));
+            launch_sites.push((colony.body_index, name));
+        }
+    }
+
     let result = render_state.render_editor(&vertices, |ctx| {
         action = render_editor_ui(
             ctx,
@@ -1506,6 +1521,7 @@ pub fn render_editor_frame(
             vessel_cost,
             &game.contracts,
             &game.tech_tree,
+            &launch_sites,
         );
 
         // Contract board window
@@ -1569,8 +1585,9 @@ pub fn render_editor_frame(
     // Handle editor actions
     match action {
         EditorAction::Launch => {
-            game.flight.recover_vessels_on_launchpad(&game.solar_system);
-            match game.launch_from_editor() {
+            let launch_body = game.editor.launch_body;
+            game.flight.recover_vessels_on_launchpad(&game.solar_system, launch_body);
+            match game.launch_from_editor(launch_body) {
                 Ok(()) => {
                     // Zoom camera to see the vessel on the surface
                     if let Some(ref vessel) = game.flight.vessel {

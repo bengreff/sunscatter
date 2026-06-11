@@ -286,6 +286,7 @@ pub fn render_editor_ui(
     vessel_cost: f64,
     contracts: &crate::colony::ContractManager,
     tech_tree: &crate::colony::TechTree,
+    launch_sites: &[(usize, String)],
 ) -> EditorAction {
     let mut action = EditorAction::None;
 
@@ -320,13 +321,27 @@ pub fn render_editor_ui(
 
             ui.separator();
 
-            // Vessel name + Launch button
+            // Vessel name + Launch site + Launch button
             ui.horizontal(|ui| {
                 ui.label("Name:");
                 let name_field = ui.add(egui::TextEdit::singleline(&mut editor.vessel_name)
                     .desired_width(120.0));
                 if name_field.changed() && editor.vessel_name.is_empty() {
                     editor.vessel_name = "Untitled Vessel".to_string();
+                }
+                if launch_sites.len() > 1 {
+                    ui.separator();
+                    let current_name = launch_sites.iter()
+                        .find(|(idx, _)| *idx == editor.launch_body)
+                        .map(|(_, n)| n.as_str())
+                        .unwrap_or("Earth");
+                    egui::ComboBox::from_id_source("launch_site")
+                        .selected_text(format!("Launch: {}", current_name))
+                        .show_ui(ui, |ui| {
+                            for (idx, name) in launch_sites {
+                                ui.selectable_value(&mut editor.launch_body, *idx, name);
+                            }
+                        });
                 }
             });
             let can_launch = editor.can_launch();

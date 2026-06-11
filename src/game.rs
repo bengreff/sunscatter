@@ -354,15 +354,14 @@ impl FlightState {
 
     /// Remove inactive vessels that are landed on the launchpad.
     /// Called before launching a new vessel to clear the pad.
-    pub fn recover_vessels_on_launchpad(&mut self, solar_system: &crate::bodies::SolarSystem) {
-        let earth_index = solar_system.earth_index;
-        let earth_radius = solar_system.bodies[earth_index].radius;
-        let half_angle = (LAUNCHPAD_BOTTOM_WIDTH * 0.5) / earth_radius;
+    pub fn recover_vessels_on_launchpad(&mut self, solar_system: &crate::bodies::SolarSystem, launch_body: usize) {
+        let body_radius = solar_system.bodies[launch_body].radius;
+        let half_angle = (LAUNCHPAD_BOTTOM_WIDTH * 0.5) / body_radius;
 
         self.inactive_vessels.retain(|v| {
-            let dominated_by_earth = v.ship.soi_body == earth_index;
-            let is_landed = matches!(v.ship.state, crate::ship::ShipState::Landed { body_index, .. } if body_index == earth_index);
-            if dominated_by_earth && is_landed {
+            let on_launch_body = v.ship.soi_body == launch_body;
+            let is_landed = matches!(v.ship.state, crate::ship::ShipState::Landed { body_index, .. } if body_index == launch_body);
+            if on_launch_body && is_landed {
                 let angle = v.ship.rel_position[1].atan2(v.ship.rel_position[0]);
                 let angle_diff = angle - LAUNCHPAD_SURFACE_ANGLE;
                 let angle_diff = angle_diff - (angle_diff / std::f64::consts::TAU).round() * std::f64::consts::TAU;
@@ -633,7 +632,7 @@ impl Game {
     }
 
     /// Launch a vessel from the editor
-    pub fn launch_from_editor(&mut self) -> Result<(), String> {
+    pub fn launch_from_editor(&mut self, body_index: usize) -> Result<(), String> {
         // Build blueprint from editor state
         let blueprint = self.editor.to_blueprint(&self.part_definitions)?;
 
@@ -658,25 +657,21 @@ impl Game {
         }
         self.company.money -= cost;
 
-        // Get spawn position (on launchpad)
-        let earth_idx = self.solar_system.earth_index;
-        let earth = &self.solar_system.bodies[earth_idx];
-
-        // Surface angle (spawn at launchpad location)
+        // Get spawn position (on launchpad of target body)
+        let launch_body = &self.solar_system.bodies[body_index];
         let surface_angle = LAUNCHPAD_SURFACE_ANGLE;
 
         // Create flight vessel first to get bounding height
         let vessel = FlightVessel::from_blueprint(
             &blueprint,
             &self.part_definitions,
-            [0.0, 0.0], // Temporary, will set below
-            [0.0, 0.0], // Stationary relative to Earth surface
-            earth_idx,
+            [0.0, 0.0],
+            [0.0, 0.0],
+            body_index,
         )?;
 
-        let surface_distance = earth.radius + LAUNCHPAD_HEIGHT + vessel.bottom_extent();
+        let surface_distance = launch_body.radius + LAUNCHPAD_HEIGHT + vessel.bottom_extent();
 
-        // Position on the surface
         let spawn_position = [
             surface_distance * surface_angle.cos(),
             surface_distance * surface_angle.sin(),
@@ -688,18 +683,16 @@ impl Game {
             &self.part_definitions,
             spawn_position,
             [0.0, 0.0],
-            earth_idx,
+            body_index,
         )?;
 
-        // Build weld connections
         let _weld_connections = vessel.find_weld_connections(&self.part_definitions);
 
-        // Update ship state to match vessel
         self.flight.ship.rel_position = spawn_position;
         self.flight.ship.rel_velocity = [0.0, 0.0];
-        self.flight.ship.rotation = surface_angle; // Point up from surface
+        self.flight.ship.rotation = surface_angle;
         self.flight.ship.rotational_velocity = 0.0;
-        self.flight.ship.soi_body = earth_idx;
+        self.flight.ship.soi_body = body_index;
         self.flight.ship.throttle = 0.0;
         self.flight.ship.on_rails = false;
         self.flight.ship.cached_orbit = None;
@@ -708,7 +701,7 @@ impl Game {
         self.flight.ship.proper_time = 0.0;
         self.flight.ship.mission_time = 0.0;
         self.flight.ship.state = crate::ship::ShipState::Landed {
-            body_index: earth_idx,
+            body_index,
             surface_angle,
         };
 
