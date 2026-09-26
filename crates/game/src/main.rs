@@ -40,6 +40,8 @@ fn main() {
     let mut app = App::new();
     let demo = demo::Demo::from_env();
     let demo_mode = demo.is_some();
+    // Offscreen demos render into an image: don't show an empty window.
+    let offscreen = demo_mode && std::env::var_os("SUNSCATTER_DEMO_OFFSCREEN").is_some();
     if let Some(demo) = demo {
         app.insert_resource(demo);
     }
@@ -49,6 +51,7 @@ fn main() {
                 title: "Sunscatter v0.2 — Earth–Moon prototype".into(),
                 // The demo measures frame times: don't wait for the display.
                 present_mode: if demo_mode { PresentMode::AutoNoVsync } else { PresentMode::AutoVsync },
+                visible: !offscreen,
                 ..default()
             }),
             ..default()
