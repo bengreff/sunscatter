@@ -35,8 +35,12 @@ pub struct Source {
 pub struct World {
     pub eph: Arc<Ephemeris>,
     pub sources: Vec<Source>,
-    /// Gravity sources whose acceleration at the vessel is below this (m/s²)
-    /// at the start of a segment are not simulated for that segment (D023).
+    /// Gravity sources whose tidal acceleration at the vessel relative to its
+    /// anchor is below this (m/s²) are cut: they pull the vessel as they pull
+    /// the anchor (D023, `forces::ActiveSources`). The neglected acceleration
+    /// is below this per source, so at most `cutoff·t²/2` of drift per source
+    /// (~500 m over a year at 1e-12; typically far less, since tidal terms
+    /// mostly oscillate).
     pub cutoff: f64,
     /// Sources with anchor zones, smallest zone first (anchor policy order).
     pub anchor_order: Vec<usize>,
@@ -80,7 +84,7 @@ impl World {
             let zone = |i: usize| sources[i].anchor_zone.map_or(f64::INFINITY, |z| z.enter);
             zone(a).total_cmp(&zone(b))
         });
-        Ok(World { eph, sources, cutoff: 1e-11, anchor_order })
+        Ok(World { eph, sources, cutoff: 1e-12, anchor_order })
     }
 
     pub fn source(&self, node: NodeId) -> Option<&Source> {

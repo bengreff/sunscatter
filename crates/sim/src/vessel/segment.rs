@@ -8,6 +8,7 @@
 //! step size) is stored and the step limit (`horizon`) never changes.
 
 use super::anchor::preferred_anchor;
+use crate::ephem::Snapshot;
 use crate::forces::{altitude_above, ActiveSources, DragModel, ForceContext};
 use crate::frame::NodeId;
 use crate::integrate::{hermite5, Dopri5, StepSample, StepState, Tolerance};
@@ -115,6 +116,11 @@ impl Segment {
         self.samples.last().map_or(0.0, |s| s.s.t)
     }
 
+    /// The gravity sources simulated in full so far (only ever grows).
+    pub fn active_sources(&self) -> &ActiveSources {
+        &self.active
+    }
+
     pub fn finished(&self) -> bool {
         self.end.is_some()
     }
@@ -163,7 +169,7 @@ impl Segment {
                 self.end = Some(self.limit_end(world));
                 return;
             }
-            self.maybe_reanchor(world);
+            self.after_step(world);
         }
     }
 
@@ -173,31 +179,43 @@ impl Segment {
         SegmentEnd { t: self.horizon, kind: if at_ephemeris_end { EndKind::EphemerisEnd } else { EndKind::Horizon } }
     }
 
-    /// Switches anchor at a step boundary if the policy prefers another one.
-    /// An exact change of coordinates: the physics is unaffected.
-    fn maybe_reanchor(&mut self, world: &World) {
-        if self.fixed_anchor {
-            return;
+    /// At a step boundary: re-anchors if the precision policy prefers another
+    /// anchor (an exact change of coordinates), and adds the gravity sources
+    /// that now pass the cutoff (a flyby). Sources are never removed within
+    /// a segment. Both are decided from the stored state only, so chunked
+    /// integration still equals a single pass.
+    fn after_step(&mut self, world: &World) {
+        let snap = world.snapshot(self.t0.add_seconds(self.state.t));
+        let reanchored = self.maybe_reanchor(world, &snap);
+        let selected = ActiveSources::select(world, &snap, self.anchor, self.state.r.value());
+        let grew = self.active.add(&selected);
+        if reanchored || grew {
+            let (r, v) = (self.state.r.value(), self.state.v.value());
+            self.state.a = self.context(world).accel_with(&snap, r, v);
         }
-        let t = self.t0.add_seconds(self.state.t);
-        let snap = world.snapshot(t);
+        if reanchored {
+            let s = StepSample { t: self.state.t, r: self.state.r.value(), v: self.state.v.value(), a: self.state.a };
+            self.samples.push(Sample { anchor: self.anchor, s });
+        }
+    }
+
+    /// Switches anchor if the policy prefers another one (the caller
+    /// recomputes the acceleration). Returns whether it switched.
+    fn maybe_reanchor(&mut self, world: &World, snap: &Snapshot) -> bool {
+        if self.fixed_anchor {
+            return false;
+        }
         let r = self.state.r.value();
-        let next = preferred_anchor(world, &snap, self.anchor, r);
+        let next = preferred_anchor(world, snap, self.anchor, r);
         if next == self.anchor {
-            return;
+            return false;
         }
         let shift = snap.relative(self.anchor, next);
         let (r_new, v_new) = (r + shift.r, self.state.v.value() + shift.v);
         self.anchor = next;
-        let a_new = self.context(world).accel_with(&snap, r_new, v_new);
-        self.state = StepState {
-            t: self.state.t,
-            r: Compensated::new(r_new),
-            v: Compensated::new(v_new),
-            a: a_new,
-            h: self.state.h,
-        };
-        self.samples.push(Sample { anchor: next, s: StepSample { t: self.state.t, r: r_new, v: v_new, a: a_new } });
+        self.state.r = Compensated::new(r_new);
+        self.state.v = Compensated::new(v_new);
+        true
     }
 
     /// First contact with a surface between two samples, by bisection on the

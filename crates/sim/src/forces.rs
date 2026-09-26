@@ -5,6 +5,12 @@
 //! anchor's *kinematic* acceleration from its ephemeris. That subtraction is
 //! exact for any anchor, so the choice of anchor cannot change the physics
 //! (checked by the anchor-invariance tests).
+//!
+//! Sources whose tidal acceleration is below the world cutoff are *cut*
+//! (D023): the vessel feels their pull at the anchor instead of at itself, so
+//! their share of `a_anchor` cancels and only the tidal term, bounded by the
+//! cutoff, is neglected. (Dropping a cut source's pull altogether would leave
+//! its full pull on the anchor as a fictitious force on the vessel.)
 
 use crate::ephem::Snapshot;
 use crate::frame::{BodyFixed, NodeId, Vec3};
@@ -21,26 +27,51 @@ pub struct DragModel {
     pub mass: f64,
 }
 
-/// The set of gravity sources simulated for a segment (after the cutoff).
+/// The gravity sources simulated in full (indices into `World::sources`,
+/// sorted). Every other source is *cut*: it pulls the vessel exactly as it
+/// pulls the anchor, so only its tidal term (the difference) is neglected.
+/// A segment only ever adds sources ([`ActiveSources::add`]), at step
+/// boundaries, so the set is part of the stored integrator state.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ActiveSources(pub Vec<usize>);
 
 impl ActiveSources {
-    /// Sources whose acceleration at the vessel exceeds the world cutoff.
-    /// Decided once per segment from the start state, so it is deterministic.
+    /// The anchor (if it is a source) and every source whose tidal
+    /// acceleration at the vessel relative to the anchor,
+    /// `|g_s(vessel) − g_s(anchor)|`, is at least the world cutoff.
     pub fn select(world: &World, snap: &Snapshot, anchor: NodeId, r: DVec3) -> Self {
         let keep = world
             .sources
             .iter()
             .enumerate()
-            .filter(|(_, s)| {
-                let d = (r - snap.relative_r(s.node, anchor)).length();
-                s.gm / (d * d) >= world.cutoff
-            })
+            .filter(|(_, s)| s.node == anchor || tidal(s.gm, snap.relative_r(s.node, anchor), r) >= world.cutoff)
             .map(|(i, _)| i)
             .collect();
         ActiveSources(keep)
     }
+
+    /// Adds the sources of `other`. Returns whether the set grew.
+    pub fn add(&mut self, other: &ActiveSources) -> bool {
+        let before = self.0.len();
+        for &i in &other.0 {
+            if let Err(pos) = self.0.binary_search(&i) {
+                self.0.insert(pos, i);
+            }
+        }
+        self.0.len() != before
+    }
+}
+
+/// Point-mass gravity at `d` from a source.
+fn point_gravity(gm: f64, d: DVec3) -> DVec3 {
+    let d2 = d.length_squared();
+    -d * (gm / (d2 * d2.sqrt()))
+}
+
+/// Magnitude of a source's tidal acceleration at `r` relative to the origin
+/// (the anchor), for a source at `r_s`.
+fn tidal(gm: f64, r_s: DVec3, r: DVec3) -> f64 {
+    (point_gravity(gm, r - r_s) - point_gravity(gm, -r_s)).length()
 }
 
 /// Everything the dynamics need for one evaluation.
@@ -64,10 +95,19 @@ impl ForceContext<'_> {
         let root = self.world.eph.root();
         let anchor_kin = snap.relative(self.anchor, root);
         let mut a = -anchor_kin.a + self.thrust;
-        for &i in &self.active.0 {
-            let s = &self.world.sources[i];
+        let mut active = self.active.0.iter().peekable();
+        for (i, s) in self.world.sources.iter().enumerate() {
             // Positions only, except where a velocity is needed (drag, 1PN).
-            let d = r - snap.relative_r(s.node, self.anchor);
+            let r_s = snap.relative_r(s.node, self.anchor);
+            if active.next_if_eq(&&i).is_none() {
+                // Cut: it pulls the vessel as it pulls the anchor, which
+                // cancels its share of the anchor's acceleration (rule 1).
+                if s.node != self.anchor {
+                    a += point_gravity(s.gm, -r_s);
+                }
+                continue;
+            }
+            let d = r - r_s;
             let d2 = d.length_squared();
             a -= d * (s.gm / (d2 * d2.sqrt()));
             if let Some(p) = &s.physical {
