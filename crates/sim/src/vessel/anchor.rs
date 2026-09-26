@@ -12,10 +12,10 @@ use glam::DVec3;
 /// The preferred anchor for a vessel at `r` (relative to `current`): the
 /// smallest anchor zone containing it, with hysteresis; otherwise the root.
 pub fn preferred_anchor(world: &World, snap: &Snapshot, current: NodeId, r: DVec3) -> NodeId {
-    let mut zoned: Vec<_> = world.sources.iter().filter_map(|s| s.anchor_zone.map(|z| (s, z))).collect();
-    zoned.sort_by(|a, b| a.1.enter.total_cmp(&b.1.enter));
-    for (src, zone) in zoned {
-        let d = (r - snap.relative(src.node, current).r).length();
+    for &i in &world.anchor_order {
+        let src = &world.sources[i];
+        let Some(zone) = src.anchor_zone else { continue };
+        let d = (r - snap.relative_r(src.node, current)).length();
         let limit = if src.node == current { zone.exit } else { zone.enter };
         if d < limit {
             return src.node;

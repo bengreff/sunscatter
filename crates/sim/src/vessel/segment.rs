@@ -188,7 +188,7 @@ impl Segment {
                 altitude_above(world, &snap, self.anchor, src.node, r).0 - self.contact_height
             };
             let radius = src.physical.as_ref().map_or(0.0, |p| p.radius_eq);
-            let d = (b.s.r - snap_b.relative(src.node, self.anchor).r).length();
+            let d = (b.s.r - snap_b.relative_r(src.node, self.anchor)).length();
             if d > radius + 200_000.0 || alt(b.s.t) >= 0.0 {
                 continue;
             }
@@ -204,6 +204,21 @@ impl Segment {
             return Some((hi, src.node));
         }
         None
+    }
+
+    /// Drops samples the vessel has passed, keeping the one at or before `t`
+    /// (still needed to interpolate at `t`). Bounds memory over long coasts;
+    /// evaluation at or after `t` is unchanged.
+    pub fn prune_before(&mut self, t: f64) {
+        let first_after = self.samples.partition_point(|s| s.s.t <= t);
+        if first_after > 1 {
+            // Keep a pre-switch duplicate pair together (same time, two anchors).
+            let mut keep_from = first_after - 1;
+            while keep_from > 0 && self.samples[keep_from - 1].s.t == self.samples[keep_from].s.t {
+                keep_from -= 1;
+            }
+            self.samples.drain(..keep_from);
+        }
     }
 
     /// State at local time `t`: (anchor, r, v). `None` if not computed yet.

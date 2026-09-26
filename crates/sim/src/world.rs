@@ -35,12 +35,14 @@ pub struct World {
     /// Gravity sources whose acceleration at the vessel is below this (m/s²)
     /// at the start of a segment are not simulated for that segment (D023).
     pub cutoff: f64,
+    /// Sources with anchor zones, smallest zone first (anchor policy order).
+    pub anchor_order: Vec<usize>,
 }
 
 impl World {
     /// The Solar System world for the Earth–Moon prototype.
     pub fn sol(eph: Arc<Ephemeris>) -> Self {
-        let sources = eph
+        let sources: Vec<Source> = eph
             .bodies()
             .map(|id| {
                 let n = eph.node(id);
@@ -61,7 +63,12 @@ impl World {
             })
             .collect();
         debug_assert!(eph.nodes().iter().any(|n| n.kind == NodeKind::Barycenter));
-        World { eph, sources, cutoff: 1e-11 }
+        let mut anchor_order: Vec<usize> = (0..sources.len()).filter(|&i| sources[i].anchor_zone.is_some()).collect();
+        anchor_order.sort_by(|&a, &b| {
+            let zone = |i: usize| sources[i].anchor_zone.map_or(f64::INFINITY, |z| z.enter);
+            zone(a).total_cmp(&zone(b))
+        });
+        World { eph, sources, cutoff: 1e-11, anchor_order }
     }
 
     pub fn source(&self, node: NodeId) -> Option<&Source> {

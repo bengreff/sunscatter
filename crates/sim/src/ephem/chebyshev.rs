@@ -43,6 +43,31 @@ impl ChebTable {
         (k as usize, 2.0 * local / self.seg_len as f64 - 1.0)
     }
 
+    /// Position only. Uses exactly the arithmetic of [`ChebTable::eval`]'s
+    /// position part, so the two agree bit for bit.
+    pub fn eval_r(&self, t: Epoch) -> DVec3 {
+        let (k, tau) = self.locate(t);
+        let n = self.degree + 1;
+        let mut tn = [0.0; MAX_DEGREE + 1];
+        tn[0] = 1.0;
+        if n > 1 {
+            tn[1] = tau;
+        }
+        for j in 2..n {
+            tn[j] = 2.0 * tau * tn[j - 1] - tn[j - 2];
+        }
+        let mut out = [0.0f64; 3];
+        for axis in 0..3 {
+            let c = &self.coeffs[(k * 3 + axis) * n..(k * 3 + axis + 1) * n];
+            let mut p = 0.0;
+            for j in 0..n {
+                p += c[j] * tn[j];
+            }
+            out[axis] = p;
+        }
+        DVec3::from_array(out)
+    }
+
     pub fn eval(&self, t: Epoch) -> Kinematics {
         let (k, tau) = self.locate(t);
         let n = self.degree + 1;
@@ -153,6 +178,7 @@ mod tests {
             assert!((k.r - r).length() < 1e-3, "r err {} at {t}", (k.r - r).length());
             assert!((k.v - v).length() < 1e-8, "v err at {t}");
             assert!((k.a - a).length() < 1e-12, "a err at {t}");
+            assert_eq!(k.r, tab.eval_r(Epoch::J2000.add_seconds(t)), "position paths must agree bitwise");
         }
     }
 

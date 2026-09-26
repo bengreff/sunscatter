@@ -30,8 +30,8 @@ jobs:
       - name: File size limit
         shell: bash
         run: tools/check_file_sizes.sh
-      - name: Clippy (sim, tools)
-        run: cargo clippy -p sim -p ephem-tool --all-targets -- -D warnings
+      - name: Clippy (workspace)
+        run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Tests (sim)
         run: cargo test -p sim
       - name: Build game

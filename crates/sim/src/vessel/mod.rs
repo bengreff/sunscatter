@@ -310,6 +310,7 @@ impl Vessel {
             budget -= chunk;
         }
         let reach = want.min(segment.computed_until());
+        segment.prune_before(reach);
         let end = segment.end;
         let new_time = segment.t0.add_seconds(reach);
         self.advance_attitude(new_time, controls);
@@ -336,6 +337,40 @@ impl Vessel {
             t = t.add_seconds(TICK);
         }
         self.attitude = self.attitude.propagate_free(until.seconds_since(t));
+    }
+
+    /// Extends the current coast (if any) until `until`, with at most
+    /// `max_steps` new integration steps. The drawn trajectory *is* this
+    /// segment, so looking ahead never changes where the vessel will go.
+    pub fn extend_coast(&mut self, world: &World, until: Epoch, max_steps: usize) {
+        if let Phase::Coasting { segment } = &mut self.phase {
+            let want = until.seconds_since(segment.t0);
+            let mut budget = max_steps;
+            while segment.computed_until() < want && !segment.finished() && budget > 0 {
+                let chunk = budget.min(256);
+                segment.extend(world, chunk);
+                budget -= chunk;
+            }
+        }
+    }
+
+    /// The coast that would follow if thrust stopped now (for predictions
+    /// while powered). Not integrated yet; the caller extends it.
+    pub fn coast_from_now(&self, world: &World) -> Segment {
+        let (anchor, r, v) = self.state(world);
+        Segment::new(
+            world,
+            self.time,
+            CoastStart {
+                anchor,
+                r,
+                v,
+                drag: Some(self.drag()),
+                contact_height: self.params.contact_height,
+                horizon: COAST_HORIZON,
+                fixed_anchor: false,
+            },
+        )
     }
 
     /// The current coast segment, if coasting (for drawing the trajectory).

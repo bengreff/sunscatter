@@ -75,6 +75,16 @@ impl Motion {
         }
     }
 
+    /// Position only (bit-identical to `eval(t).r`).
+    pub fn eval_r(&self, t: Epoch) -> DVec3 {
+        match self {
+            Motion::Root => DVec3::ZERO,
+            Motion::Linear(l) => l.r0 + l.v * t.seconds_since(l.epoch),
+            Motion::Rails(r) => r.eval(t).r,
+            Motion::Table(c) => c.eval_r(t),
+        }
+    }
+
     pub fn kind_name(&self) -> &'static str {
         match self {
             Motion::Root => "root",
@@ -182,7 +192,12 @@ impl Ephemeris {
     /// Evaluates every node relative to its parent once, for many relative
     /// queries at the same time (one force evaluation touches every source).
     pub fn snapshot(&self, t: Epoch) -> Snapshot<'_> {
-        Snapshot { eph: self, t, local: self.nodes.iter().map(|n| n.motion.eval(t)).collect() }
+        Snapshot {
+            eph: self,
+            t,
+            local_r: self.nodes.iter().map(|n| n.motion.eval_r(t)).collect(),
+            full: std::cell::RefCell::new(vec![None; self.nodes.len()]),
+        }
     }
 
     /// Ids of all nodes that are physical bodies.
@@ -191,29 +206,56 @@ impl Ephemeris {
     }
 }
 
-/// All nodes' kinematics relative to their parents at one instant.
+/// All nodes' positions relative to their parents at one instant, with full
+/// kinematics (velocity, acceleration) evaluated lazily for the nodes that
+/// need them. Positions from `relative_r` and `relative(..).r` are identical.
 pub struct Snapshot<'a> {
     eph: &'a Ephemeris,
     pub t: Epoch,
-    local: Vec<Kinematics>,
+    local_r: Vec<DVec3>,
+    full: std::cell::RefCell<Vec<Option<Kinematics>>>,
 }
 
 impl Snapshot<'_> {
-    /// Same as [`Ephemeris::relative`], from the cached per-node values.
-    pub fn relative(&self, of: NodeId, about: NodeId) -> Kinematics {
+    fn local_full(&self, i: usize) -> Kinematics {
+        if let Some(k) = self.full.borrow()[i] {
+            return k;
+        }
+        let k = self.eph.nodes[i].motion.eval(self.t);
+        self.full.borrow_mut()[i] = Some(k);
+        k
+    }
+
+    /// Walks from both nodes to their lowest common ancestor, summing `f`.
+    fn walk<T: Copy + std::ops::Add<Output = T> + std::ops::Sub<Output = T>>(
+        &self,
+        of: NodeId,
+        about: NodeId,
+        zero: T,
+        f: impl Fn(usize) -> T,
+    ) -> T {
         let (mut a, mut b) = (of, about);
-        let mut acc_a = Kinematics::default();
-        let mut acc_b = Kinematics::default();
+        let (mut acc_a, mut acc_b) = (zero, zero);
         while a != b {
             if self.eph.depth[a.0 as usize] >= self.eph.depth[b.0 as usize] {
-                acc_a = acc_a + self.local[a.0 as usize];
+                acc_a = acc_a + f(a.0 as usize);
                 a = self.eph.node(a).parent.expect("walked past root");
             } else {
-                acc_b = acc_b + self.local[b.0 as usize];
+                acc_b = acc_b + f(b.0 as usize);
                 b = self.eph.node(b).parent.expect("walked past root");
             }
         }
         acc_a - acc_b
+    }
+
+    /// Same as [`Ephemeris::relative`] (full kinematics).
+    pub fn relative(&self, of: NodeId, about: NodeId) -> Kinematics {
+        self.walk(of, about, Kinematics::default(), |i| self.local_full(i))
+    }
+
+    /// Position of `of` relative to `about` (cheap: no derivatives).
+    pub fn relative_r(&self, of: NodeId, about: NodeId) -> DVec3 {
+        self.walk(of, about, DVec3::ZERO, |i| self.local_r[i])
     }
 }
 
@@ -259,6 +301,7 @@ mod tests {
         let snap = e.snapshot(t);
         for (x, y) in [(2, 1), (2, 3), (3, 2), (0, 2)] {
             assert_eq!(snap.relative(NodeId(x), NodeId(y)), e.relative(NodeId(x), NodeId(y), t));
+            assert_eq!(snap.relative_r(NodeId(x), NodeId(y)), e.relative(NodeId(x), NodeId(y), t).r);
         }
     }
 }

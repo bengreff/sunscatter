@@ -1,12 +1,17 @@
 [package]
 name = "game"
+description = "Sunscatter v0.2 prototype: Bevy app (rendering, input, UI) over the sim crate."
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
+publish = false
 
 [dependencies]
 sim = { path = "../sim" }
+bevy = "0.19.1"
+bevy_egui = "0.42"
+glam.workspace = true
 
 [lints]
 workspace = true

@@ -127,6 +127,23 @@ fn chunked_extension_is_bit_identical() {
 }
 
 #[test]
+fn pruning_passed_samples_does_not_change_evaluation() {
+    let w = world();
+    let (earth, mu) = earth(&w);
+    let (r, v) = leo(mu);
+    let mut full = coast(&w, earth, r, v, false);
+    full.extend(&w, 500);
+    let mut pruned = full.clone();
+    let cut = full.computed_until() * 0.4;
+    pruned.prune_before(cut);
+    assert!(pruned.samples.len() < full.samples.len());
+    for k in 0..=100 {
+        let t = cut + (full.computed_until() - cut) * k as f64 / 100.0;
+        assert_eq!(full.eval(t), pruned.eval(t), "t = {t}");
+    }
+}
+
+#[test]
 fn time_warp_does_not_change_the_state() {
     // Advancing a coasting vessel in many small frames or one huge jump must
     // give bit-identical states at the same time.

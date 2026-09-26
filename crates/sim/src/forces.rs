@@ -34,7 +34,7 @@ impl ActiveSources {
             .iter()
             .enumerate()
             .filter(|(_, s)| {
-                let d = (r - snap.relative(s.node, anchor).r).length();
+                let d = (r - snap.relative_r(s.node, anchor)).length();
                 s.gm / (d * d) >= world.cutoff
             })
             .map(|(i, _)| i)
@@ -66,8 +66,8 @@ impl ForceContext<'_> {
         let mut a = -anchor_kin.a + self.thrust;
         for &i in &self.active.0 {
             let s = &self.world.sources[i];
-            let k = snap.relative(s.node, self.anchor);
-            let d = r - k.r;
+            // Positions only, except where a velocity is needed (drag, 1PN).
+            let d = r - snap.relative_r(s.node, self.anchor);
             let d2 = d.length_squared();
             a -= d * (s.gm / (d2 * d2.sqrt()));
             if let Some(p) = &s.physical {
@@ -75,18 +75,21 @@ impl ForceContext<'_> {
                     a += j2_accel(d, s.gm, p.j2, p.radius_eq, p.rotation.pole(snap.t));
                 }
                 if let (Some(atm), Some(drag)) = (p.atmosphere, self.drag) {
-                    let fixed = p.rotation.to_fixed(Vec3::from_raw(d), snap.t);
-                    let alt = p.altitude(fixed);
-                    let rho = atm.density(alt);
-                    if rho > 0.0 {
-                        let v_air = k.v + p.rotation.omega(snap.t).raw().cross(d);
-                        let v_rel = v - v_air;
-                        a -= v_rel * (0.5 * rho * v_rel.length() * drag.cd_area / drag.mass);
+                    // Cheap spherical bound before the exact ellipsoid altitude.
+                    if d2.sqrt() - p.radius_eq < atm.top {
+                        let fixed = p.rotation.to_fixed(Vec3::from_raw(d), snap.t);
+                        let rho = atm.density(p.altitude(fixed));
+                        if rho > 0.0 {
+                            let body_v = snap.relative(s.node, self.anchor).v;
+                            let v_air = body_v + p.rotation.omega(snap.t).raw().cross(d);
+                            let v_rel = v - v_air;
+                            a -= v_rel * (0.5 * rho * v_rel.length() * drag.cd_area / drag.mass);
+                        }
                     }
                 }
             }
             if s.relativistic {
-                a += schwarzschild_accel(d, v - k.v, s.gm);
+                a += schwarzschild_accel(d, v - snap.relative(s.node, self.anchor).v, s.gm);
             }
         }
         a
@@ -104,7 +107,7 @@ pub fn altitude_above(
 ) -> (f64, Vec3<BodyFixed>) {
     let src = world.source(body).expect("body is a source");
     let p = src.physical.as_ref().expect("body has physical data");
-    let d = r - snap.relative(body, anchor).r;
+    let d = r - snap.relative_r(body, anchor);
     let fixed = p.rotation.to_fixed(Vec3::from_raw(d), snap.t);
     (p.altitude(fixed), fixed)
 }
