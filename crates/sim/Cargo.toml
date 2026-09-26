@@ -1,0 +1,15 @@
+[package]
+name = "sim"
+description = "Sunscatter simulation core: time, frames, ephemerides, integrators, vessel dynamics. No engine dependencies."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+glam.workspace = true
+libm.workspace = true
+serde.workspace = true
+
+[lints]
+workspace = true

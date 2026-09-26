@@ -1,0 +1,13 @@
+[package]
+name = "ephem-tool"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+sim = { path = "../sim" }
+
+[lints]
+workspace = true

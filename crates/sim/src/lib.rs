@@ -1,0 +1,17 @@
+//! Sunscatter simulation core.
+//!
+//! Pure Rust, f64, deterministic, no engine dependencies. See
+//! `docs/design/motion-model.md` for the model this crate implements.
+//!
+//! Rules for everything in this crate:
+//! * all transcendental math goes through [`math`] (libm-backed); no `mul_add`;
+//! * bodies are pure functions of time (see [`ephem`]);
+//! * vectors carry their frame kind ([`frame`]); relative quantities are formed
+//!   through the lowest common ancestor in the frame tree, never by subtracting
+//!   two large absolute coordinates.
+
+pub mod frame;
+pub mod integrate;
+pub mod kepler;
+pub mod math;
+pub mod time;

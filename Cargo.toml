@@ -1,0 +1,30 @@
+[workspace]
+resolver = "2"
+members = ["crates/sim", "crates/game", "crates/ephem-tool"]
+exclude = ["archive"]
+
+[workspace.package]
+version = "0.2.0"
+edition = "2021"
+license = "MIT"
+rust-version = "1.98"
+
+[workspace.dependencies]
+glam = { version = "0.32", features = ["serde"] }
+libm = "0.2.16"
+serde = { version = "1", features = ["derive"] }
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+# Deterministic simulation: never let a fused multiply-add sneak in via clippy suggestions.
+suboptimal_flops = "allow"
+too_many_lines = "warn"
+
+# Bevy is slow unoptimized; optimize dependencies even in dev builds.
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.dev]
+opt-level = 1
