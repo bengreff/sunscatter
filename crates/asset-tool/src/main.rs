@@ -1,4 +1,4 @@
-//! Offline asset baking: terrain heights, colour maps and the star catalogue (D046).
+//! Offline asset baking: terrain heights, colour maps, water masks and the star catalogue (D046).
 //!
 //! ```text
 //! cargo run -p asset-tool --release -- <earth|moon|stars|all|check> [options]
@@ -11,6 +11,7 @@
 //! | Output | Source |
 //! |---|---|
 //! | `data/bodies/earth/height.png` | NOAA ETOPO 2022, 60″ surface elevation GeoTIFF |
+//! | `data/bodies/earth/water.png` | ETOPO 2022 as above: cells below sea level flood-filled from the open ocean (see [`water`]) |
 //! | `data/bodies/earth/color.jpg` | NASA Blue Marble Next Generation, July 2004, base (no relief shading) |
 //! | `data/bodies/moon/height.png` | LRO LOLA LDEM_64 via the NASA SVS CGI Moon Kit (`ldem_64_uint.tif`) |
 //! | `data/bodies/moon/color.jpg` | LROC WAC Hapke-normalised mosaic via the CGI Moon Kit (2025 colour map) |
@@ -18,10 +19,12 @@
 //!
 //! Map format (see [`grid`]): equirectangular, `w = 2h`, left edge −180°, row 0 at the
 //! north edge, pixel-centred. Heights are 16-bit grayscale PNG, `u16 = round(m) + 32768`.
-//! Colours are sRGB JPEG. All resampling is an area average (colour in linear light).
+//! Colours are sRGB JPEG. Water masks are 8-bit grayscale PNG, the sea fraction of
+//! each pixel (0 land, 255 sea). All resampling is an area average (colour in linear light).
 //!
-//! Options: `--height-width N` / `--color-width N` override the output widths (the
-//! defaults are the committed resolutions), `--only height|color` bakes one map, and
+//! Options: `--height-width N` / `--color-width N` / `--water-width N` override the
+//! output widths (the defaults are the committed resolutions), `--only
+//! height|color|water` bakes one map, and
 //! `--previews` writes small PNG previews to `data/external/previews/`.
 //!
 //! `check` prints spot heights (Everest, Challenger Deep, LC-39A, Tycho) from the
@@ -33,6 +36,7 @@ mod grid;
 mod resample;
 mod source;
 mod stars;
+mod water;
 
 use std::path::Path;
 
@@ -44,10 +48,12 @@ fn main() {
     let opts = bodies::Opts {
         height_w: int("--height-width"),
         color_w: int("--color-width"),
-        only_heights: flag("--only").map(|o| match o.as_str() {
-            "height" => true,
-            "color" => false,
-            _ => panic!("--only must be height or color"),
+        water_w: int("--water-width"),
+        only: flag("--only").map(|o| match o.as_str() {
+            "height" => bodies::Map::Height,
+            "color" => bodies::Map::Color,
+            "water" => bodies::Map::Water,
+            _ => panic!("--only must be height, color or water"),
         }),
         previews: args.iter().any(|a| a == "--previews"),
     };
@@ -67,7 +73,7 @@ fn main() {
             println!("    decoded {}×{}", t.w, t.h);
         }
         _ => {
-            eprintln!("usage: asset-tool <earth|moon|stars|all|check> [--height-width N] [--color-width N] [--only height|color] [--previews] | inspect <file>");
+            eprintln!("usage: asset-tool <earth|moon|stars|all|check> [--height-width N] [--color-width N] [--water-width N] [--only height|color|water] [--previews] | inspect <file>");
             std::process::exit(2);
         }
     }

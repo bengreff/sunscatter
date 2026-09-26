@@ -1,13 +1,14 @@
-//! Earth and Moon: heightmaps and colour maps.
+//! Earth and Moon: heightmaps, colour maps and (Earth) the water mask.
 
 use std::path::{Path, PathBuf};
 
 use tiff::decoder::DecodingResult;
 
 use crate::color::{linear_lut, resample_rgb, write_jpeg, write_preview};
-use crate::grid::{encode_height, write_height_png, HeightMap};
+use crate::grid::{encode_height, pixel_of, write_height_png, HeightMap};
 use crate::resample::resample_area;
 use crate::source::{check_global_geotiff, fetch, read_tiff, EXTERNAL};
+use crate::water::{coverage, ocean_mask, write_mask_png, SEED_DEPTH_M};
 
 const ETOPO_URL: &str = "https://www.ngdc.noaa.gov/mgg/global/relief/ETOPO2022/data/60s/60s_surface_elev_gtif/ETOPO_2022_v1_60s_N90W180_surface.tif";
 const BMNG_URL: &str = "https://assets.science.nasa.gov/content/dam/science/esd/eo/images/bmng/bmng-base/july/world.200407.3x21600x10800_geo.tif";
@@ -17,6 +18,8 @@ const LROC_URL: &str = "https://svs.gsfc.nasa.gov/vis/a000000/a004700/a004720/lr
 /// Default output widths (height = width / 2). See the A3 notes in the plan for why.
 const EARTH_HEIGHT_W: usize = 8192;
 const EARTH_COLOR_W: usize = 8192;
+/// Matches the colour map, so coastlines in both agree.
+const EARTH_WATER_W: usize = 8192;
 const MOON_HEIGHT_W: usize = 4096;
 const MOON_COLOR_W: usize = 8192;
 const JPEG_QUALITY: u8 = 90;
@@ -84,6 +87,14 @@ fn bake_color<T: Copy + Into<u32>>(
     }
 }
 
+/// One of a body's baked maps.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Map {
+    Height,
+    Color,
+    Water,
+}
+
 /// Command-line options for the body bakes.
 #[derive(Clone, Copy, Default)]
 pub struct Opts {
@@ -91,39 +102,78 @@ pub struct Opts {
     pub height_w: Option<usize>,
     /// Override the colour map width.
     pub color_w: Option<usize>,
-    /// Bake only the heights (`Some(true)`) or only the colours (`Some(false)`).
-    pub only_heights: Option<bool>,
+    /// Override the water mask width.
+    pub water_w: Option<usize>,
+    /// Bake only this map.
+    pub only: Option<Map>,
     /// Write small previews to `data/external/previews/`.
     pub previews: bool,
 }
 
-pub fn earth(o: Opts) {
-    if o.only_heights != Some(false) {
-        earth_heights(o);
+impl Opts {
+    fn wants(&self, m: Map) -> bool {
+        self.only.is_none_or(|o| o == m)
     }
-    if o.only_heights != Some(true) {
+}
+
+pub fn earth(o: Opts) {
+    if o.wants(Map::Height) || o.wants(Map::Water) {
+        earth_heights_and_water(o);
+    }
+    if o.wants(Map::Color) {
         earth_color(o);
     }
 }
 
 pub fn moon(o: Opts) {
-    if o.only_heights != Some(false) {
+    if o.wants(Map::Height) {
         moon_heights(o);
     }
-    if o.only_heights != Some(true) {
+    if o.wants(Map::Color) {
         moon_color(o);
     }
 }
 
-fn earth_heights(o: Opts) {
-    println!("Earth heights (ETOPO 2022 60″ surface)");
+/// Heights and the water mask both come from ETOPO, read once.
+fn earth_heights_and_water(o: Opts) {
+    println!("Earth heights and water (ETOPO 2022 60″ surface)");
     let path = fetch(ETOPO_URL, "ETOPO_2022_v1_60s_N90W180_surface.tif");
     check_global_geotiff(&path);
     let t = read_tiff(&path);
     let DecodingResult::F32(src) = t.data else { panic!("ETOPO: expected float32 samples") };
-    bake_heights("earth", t.w, t.h, o.height_w.unwrap_or(EARTH_HEIGHT_W), o.previews, |j, buf| {
-        buf.copy_from_slice(&src[j * t.w..(j + 1) * t.w]);
-    });
+    if o.wants(Map::Height) {
+        bake_heights("earth", t.w, t.h, o.height_w.unwrap_or(EARTH_HEIGHT_W), o.previews, |j, buf| {
+            buf.copy_from_slice(&src[j * t.w..(j + 1) * t.w]);
+        });
+    }
+    if o.wants(Map::Water) {
+        // ETOPO heights are relative to mean sea level, Earth's sea level (body.ron).
+        bake_water("earth", &src, t.w, t.h, 0.0, o.water_w.unwrap_or(EARTH_WATER_W), o.previews);
+    }
+}
+
+/// Flood-fills the open sea at source resolution and writes `water.png` (see
+/// [`crate::water`]).
+fn bake_water(body: &str, heights: &[f32], w: usize, h: usize, sea: f32, dst_w: usize, previews: bool) {
+    let dst_h = dst_w / 2;
+    println!("  flood-filling the sea from cells below {sea} − {SEED_DEPTH_M} m");
+    let mask = ocean_mask(heights, w, h, sea, SEED_DEPTH_M);
+    let below = heights.iter().filter(|&&z| z < sea).count();
+    let sea_cells = mask.iter().filter(|&&m| m == 1).count();
+    println!(
+        "  sea {:.1} % of cells; {} cells below sea level left as land",
+        100.0 * sea_cells as f64 / mask.len() as f64,
+        below - sea_cells
+    );
+    println!("  resampling water {w}×{h} → {dst_w}×{dst_h}");
+    let cov = coverage(&mask, w, h, dst_w, dst_h);
+    let path = out_dir(body).join("water.png");
+    write_mask_png(&path, dst_w, dst_h, &cov);
+    report_size(&path, dst_w, dst_h);
+    if previews {
+        let rgb: Vec<u8> = cov.iter().flat_map(|&c| [c; 3]).collect();
+        write_preview(&preview_path(&format!("{body}_water.png")), dst_w, dst_h, &rgb, 1024);
+    }
 }
 
 fn earth_color(o: Opts) {
@@ -164,8 +214,13 @@ fn moon_color(o: Opts) {
     }
 }
 
-/// Prints spot heights from the committed maps.
+/// Prints spot heights (and water fractions) from the committed maps.
 pub fn check() {
+    let water = Path::new("data/bodies/earth/water.png").exists().then(|| {
+        let img = image::open("data/bodies/earth/water.png").expect("open water.png").into_luma8();
+        let (w, h) = (img.width() as usize, img.height() as usize);
+        (w, h, img.into_raw())
+    });
     let earth = Path::new("data/bodies/earth/height.png");
     if earth.exists() {
         let m = HeightMap::load(earth);
@@ -176,9 +231,17 @@ pub fn check() {
             ("KSC LC-39A", 28.608, -80.604),
             ("Dead Sea", 31.5, 35.5),
             ("Amsterdam", 52.37, 4.9),
+            ("Caspian Sea", 42.0, 51.0),
+            ("Black Sea", 43.0, 34.0),
+            ("Lake Superior", 47.7, -87.5),
+            ("North Sea", 55.0, 3.0),
         ] {
             let (lo, hi) = m.min_max_near(lon, lat, 1);
-            println!("  {name:<16} {:>6} m (3×3 range {lo} .. {hi})", m.sample(lon, lat));
+            let sea = water.as_ref().map_or(String::new(), |(w, h, d)| {
+                let (i, j) = pixel_of(lon, lat, *w, *h);
+                format!(", water {:.2}", f32::from(d[j * w + i]) / 255.0)
+            });
+            println!("  {name:<16} {:>6} m (3×3 range {lo} .. {hi}){sea}", m.sample(lon, lat));
         }
     }
     let moon = Path::new("data/bodies/moon/height.png");
