@@ -201,6 +201,7 @@ pub fn draw_overlay(
     defs: Res<BodyDefs>,
     cam: Query<(&Camera, &Transform, &Projection), With<MainCamera>>,
     window: Query<&Window, With<PrimaryWindow>>,
+    tracked: Res<crate::tracking::Tracked>,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
     let Some(v) = view(&cam) else { return Ok(()) };
@@ -231,7 +232,7 @@ pub fn draw_overlay(
             let diamond = vec![d(0.0, -1.0), d(1.0, 0.0), d(0.0, 1.0), d(-1.0, 0.0)];
             painter.add(egui::Shape::convex_polygon(diamond, egui_color(color, 1.0), egui::Stroke::NONE));
         }
-        let name = if active { "Active vessel".to_string() } else { format!("Vessel {}", i + 1) };
+        let name = if active { format!("{} (active)", tracked.name(i)) } else { tracked.name(i) };
         let rpx = v.radius_px(c, SHIP_SIZE) as f32;
         targets.push(Target { name, pos: s, radius: rpx.max(6.0) });
     }

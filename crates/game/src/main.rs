@@ -23,6 +23,7 @@ mod tracking;
 mod trajectory;
 
 use bevy::prelude::*;
+use bevy::window::PresentMode;
 use bevy_egui::{EguiPlugin, EguiPrimaryContextPass};
 
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
@@ -35,12 +36,19 @@ enum Stage {
 
 fn main() {
     let mut app = App::new();
-    if let Some(demo) = demo::Demo::from_env() {
+    let demo = demo::Demo::from_env();
+    let demo_mode = demo.is_some();
+    if let Some(demo) = demo {
         app.insert_resource(demo);
     }
     app.insert_resource(ClearColor(Color::BLACK))
         .add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window { title: "Sunscatter v0.2 — Earth–Moon prototype".into(), ..default() }),
+            primary_window: Some(Window {
+                title: "Sunscatter v0.2 — Earth–Moon prototype".into(),
+                // The demo measures frame times: don't wait for the display.
+                present_mode: if demo_mode { PresentMode::AutoNoVsync } else { PresentMode::AutoVsync },
+                ..default()
+            }),
             ..default()
         }))
         .add_plugins(EguiPlugin::default())
