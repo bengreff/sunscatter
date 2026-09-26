@@ -59,6 +59,9 @@ pub struct DetailDef {
     pub scale_m: f32,
     /// Brightness variation (0..1).
     pub strength: f32,
+    /// Distance (m) over which the layer fades out (default 400 × scale).
+    #[serde(default)]
+    pub fade_m: Option<f32>,
     /// Colour on steep slopes.
     pub rock_color: [f32; 3],
     /// Snow above this height (m) at the equator, lower towards the poles.

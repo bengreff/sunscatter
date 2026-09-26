@@ -36,6 +36,8 @@ const MAX_LEVEL: u8 = 19;
 /// Chunk builds started per frame, and in flight at once.
 const SPAWNS_PER_FRAME: usize = 16;
 const MAX_IN_FLIGHT: usize = 64;
+/// Tessellation sag limit (m) for bodies with an atmosphere (see `lod`).
+const MAX_SAG_ATMOSPHERE: f64 = 50.0;
 /// Unused chunks are dropped after this many frames.
 const EVICT_AFTER: u32 = 240;
 
@@ -61,6 +63,8 @@ pub struct TerrainBody {
     name: String,
     /// Heightmap resolution (m per sample at the equator).
     height_res: f64,
+    /// Largest allowed sag of a chunk's flat triangles below the ellipsoid (m).
+    max_sag: f64,
     shape: Shape,
     /// Heights from data; used when terrain elevation is enabled.
     heights: Option<HeightFn>,
@@ -120,7 +124,7 @@ pub fn setup(
             shape: Vec4::new(
                 p.radius_eq as f32,
                 p.radius_polar as f32,
-                detail.map_or(1.0, |d| d.scale_m * 400.0),
+                detail.map_or(1.0, |d| d.fade_m.unwrap_or(d.scale_m * 400.0)),
                 detail.map_or(0.0, |d| d.strength),
             ),
             rock: detail.map_or(Vec4::ZERO, |d| v4(d.rock_color, d.snow_line_m.unwrap_or(-1.0))),
@@ -145,6 +149,7 @@ pub fn setup(
             node: *node,
             name: sim.world.eph.node(*node).name.clone(),
             height_res: heights.as_ref().map_or(f64::INFINITY, |h| h.1),
+            max_sag: if def.atmosphere.is_some() { MAX_SAG_ATMOSPHERE } else { f64::INFINITY },
             shape,
             heights: heights.map(|h| h.0),
             material,

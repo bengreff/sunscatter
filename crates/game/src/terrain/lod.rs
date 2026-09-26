@@ -67,6 +67,12 @@ impl TerrainBody {
             return false;
         }
         let s = spacing(self, key.level);
+        // Flat triangles sag below the true surface; an atmosphere's
+        // aerial perspective depends strongly on the depth it ends at, so
+        // keep the sag small wherever the body is drawn.
+        if s * s / (8.0 * self.shape.radius_eq) > self.max_sag {
+            return true;
+        }
         let relief = if self.displaced && s > self.height_res { ERROR_RELIEF } else { 0.0 };
         let err = s * (ERROR_BASE + relief) + c.max_height.min(s) * relief;
         err / (d - c.radius).max(1.0) * ctx.focal > ctx.threshold
