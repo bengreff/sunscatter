@@ -119,6 +119,7 @@ pub fn parse_body(text: &str, dir: &Path) -> Result<BodyDef, DataError> {
             atmosphere: p.atmosphere,
             solid: p.solid,
             sea_level: p.sea_level,
+            terrain: None,
         },
         anchor_zone: p.anchor_zone,
         relativistic: p.relativistic,
@@ -126,7 +127,24 @@ pub fn parse_body(text: &str, dir: &Path) -> Result<BodyDef, DataError> {
     })
 }
 
-/// Loads `<dir>/body.ron`.
+impl BodyDef {
+    /// Loads the heightmap into `physical.terrain` (shared per process, see
+    /// [`crate::terrain::load_shared`]). A missing file is not an error: the
+    /// body keeps its smooth ellipsoid and a warning is printed. A file that
+    /// exists but cannot be decoded is an error.
+    pub fn load_terrain(&mut self) -> Result<(), DataError> {
+        let Some(path) = &self.heightmap else { return Ok(()) };
+        if !path.exists() {
+            eprintln!("warning: {} not found; {} uses its smooth ellipsoid", path.display(), self.physical.name);
+            return Ok(());
+        }
+        let map = crate::terrain::load_shared(path).map_err(|message| DataError { path: path.clone(), message })?;
+        self.physical.terrain = Some(map);
+        Ok(())
+    }
+}
+
+/// Loads `<dir>/body.ron` (without terrain; see [`BodyDef::load_terrain`]).
 pub fn load_body(dir: &Path) -> Result<BodyDef, DataError> {
     let path = dir.join(BODY_FILE);
     let text = std::fs::read_to_string(&path).map_err(|e| DataError { path, message: e.to_string() })?;
@@ -209,7 +227,17 @@ mod tests {
             "moon" => "Moon",
             _ => "Sun",
         };
-        BodyPhysical { name: name.into(), radius_eq, radius_polar, j2, rotation, atmosphere, solid, sea_level }
+        BodyPhysical {
+            name: name.into(),
+            radius_eq,
+            radius_polar,
+            j2,
+            rotation,
+            atmosphere,
+            solid,
+            sea_level,
+            terrain: None,
+        }
     }
 
     fn bits(p: &BodyPhysical) -> Vec<u64> {

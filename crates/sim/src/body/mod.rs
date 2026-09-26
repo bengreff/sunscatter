@@ -8,8 +8,10 @@ pub use data::{default_bodies_dir, load_body, parse_body, BodyDef, DataError};
 
 use crate::frame::{BodyFixed, Inertial, Vec3};
 use crate::math;
+use crate::terrain::{self, Heightmap};
 use crate::time::Epoch;
 use glam::DVec3;
+use std::sync::Arc;
 
 /// IAU-style rotation model: pole right ascension/declination with linear
 /// precession terms, and prime-meridian angle `W = w0 + w_rate * t`.
@@ -106,9 +108,38 @@ pub struct BodyPhysical {
     /// Height of a solid ocean surface above the reference (m), if any
     /// (D037: oceans are solid at sea level).
     pub sea_level: Option<f64>,
+    /// Terrain heights relative to the reference ellipsoid (D047), shared
+    /// between clones of the world. `None`: the smooth ellipsoid.
+    pub terrain: Option<Arc<Heightmap>>,
 }
 
 impl BodyPhysical {
+    /// Height (m) of the solid surface above the reference ellipsoid at
+    /// latitude/longitude (rad): the terrain, raised to sea level where the
+    /// body has an ocean (oceans are solid, D037).
+    pub fn surface_height_latlon(&self, lat: f64, lon: f64) -> f64 {
+        let h = self.terrain.as_ref().map_or(0.0, |t| t.sample(lat, lon));
+        self.sea_level.map_or(h, |sea| h.max(sea))
+    }
+
+    /// [`Self::surface_height_latlon`] in the direction of a body-fixed vector.
+    pub fn surface_height(&self, dir: Vec3<BodyFixed>) -> f64 {
+        let (lat, lon) = terrain::lat_lon(dir.raw());
+        self.surface_height_latlon(lat, lon)
+    }
+
+    /// Height of a body-fixed point above the solid surface (terrain or sea) (m).
+    /// This is what contact and landing use; [`Self::altitude`] (above the
+    /// ellipsoid) is what the atmosphere uses.
+    pub fn altitude_above_surface(&self, p: Vec3<BodyFixed>) -> f64 {
+        self.altitude(p) - self.surface_height(p)
+    }
+
+    /// Body-fixed point `height` above the solid surface at latitude/longitude (rad).
+    pub fn ground_point(&self, lat: f64, lon: f64, height: f64) -> Vec3<BodyFixed> {
+        self.surface_point(lat, lon, self.surface_height_latlon(lat, lon) + height)
+    }
+
     /// Height above the reference ellipsoid of a body-fixed point (m).
     /// Uses the geocentric-radius approximation (exact on the axes and equator;
     /// < 1 m off elsewhere for Earth's flattening at low altitude).

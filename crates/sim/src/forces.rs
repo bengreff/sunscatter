@@ -96,7 +96,8 @@ impl ForceContext<'_> {
     }
 }
 
-/// Altitude of a vessel above a body's reference surface, and its body-fixed
+/// Altitude of a vessel above a body's solid surface (terrain, or sea level
+/// where the body has an ocean), and its body-fixed
 /// position, from an anchor-relative position.
 pub fn altitude_above(
     world: &World,
@@ -109,5 +110,5 @@ pub fn altitude_above(
     let p = src.physical.as_ref().expect("body has physical data");
     let d = r - snap.relative_r(body, anchor);
     let fixed = p.rotation.to_fixed(Vec3::from_raw(d), snap.t);
-    (p.altitude(fixed), fixed)
+    (p.altitude_above_surface(fixed), fixed)
 }

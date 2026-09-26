@@ -5818,6 +5818,7 @@ version = "0.2.0"
 dependencies = [
  "glam 0.32.1",
  "libm",
+ "png",
  "ron 0.10.1",
  "serde",
 ]

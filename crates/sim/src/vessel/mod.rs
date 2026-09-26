@@ -102,7 +102,7 @@ impl Vessel {
         let src = world.find(body).expect("known body");
         let p = src.physical.as_ref().expect("physical body");
         let deg = math::PI / 180.0;
-        let fixed = p.surface_point(lat_deg * deg, lon_deg * deg, params.contact_height);
+        let fixed = p.ground_point(lat_deg * deg, lon_deg * deg, params.contact_height);
         let att_fixed = quat_z_to(fixed.raw().normalize());
         let mut v = Vessel {
             params,
@@ -260,9 +260,8 @@ impl Vessel {
     fn touch_down(&mut self, world: &World, body: NodeId, fixed: Vec3<BodyFixed>, speed: f64) {
         let p = world.source(body).and_then(|s| s.physical.as_ref()).expect("physical");
         let dir = fixed.raw().normalize();
-        let lat = math::asin(dir.z);
-        let lon = math::atan2(dir.y, dir.x);
-        let on_ground = p.surface_point(lat, lon, self.params.contact_height);
+        let (lat, lon) = crate::terrain::lat_lon(dir);
+        let on_ground = p.ground_point(lat, lon, self.params.contact_height);
         self.phase = if speed <= self.params.safe_touchdown_speed {
             Phase::Landed { body, fixed: on_ground, att_fixed: quat_z_to(dir) }
         } else {

@@ -11,6 +11,7 @@ glam.workspace = true
 libm.workspace = true
 serde.workspace = true
 ron = "0.10"
+png = "0.18"
 
 [lints]
 workspace = true

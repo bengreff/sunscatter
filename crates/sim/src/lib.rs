@@ -20,6 +20,7 @@ pub mod kepler;
 pub mod math;
 pub mod save;
 pub mod sol;
+pub mod terrain;
 pub mod time;
 pub mod vessel;
 pub mod world;

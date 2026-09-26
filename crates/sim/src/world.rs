@@ -57,7 +57,13 @@ impl World {
         for id in eph.bodies() {
             let n = eph.node(id);
             let body_dir = dir.join(body_dir_name(&n.name));
-            let def = if body_dir.join(BODY_FILE).exists() { Some(load_body(&body_dir)?) } else { None };
+            let def = if body_dir.join(BODY_FILE).exists() {
+                let mut def = load_body(&body_dir)?;
+                def.load_terrain()?;
+                Some(def)
+            } else {
+                None
+            };
             if let Some(d) = &def {
                 if d.physical.name != n.name {
                     let message = format!("name {:?} does not match ephemeris node {:?}", d.physical.name, n.name);
