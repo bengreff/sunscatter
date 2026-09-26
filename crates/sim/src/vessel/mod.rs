@@ -128,7 +128,8 @@ impl Vessel {
         vessel
     }
 
-    fn drag(&self) -> DragModel {
+    /// The drag model in use (with the parachute's area once deployed).
+    pub fn drag(&self) -> DragModel {
         let extra = if self.chute_deployed { self.params.chute_cd_area } else { 0.0 };
         DragModel { cd_area: self.params.cd_area + extra, mass: self.params.mass }
     }
