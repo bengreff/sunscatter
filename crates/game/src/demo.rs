@@ -31,8 +31,8 @@ enum Step {
     Map,
     MoonFar,
     MoonClose,
-    /// The Moon's night side from Earth's direction (Earthshine, eye
-    /// adaptation): near new Moon on the demo date.
+    /// The Moon's night side from Earth's direction, near new Moon on the
+    /// demo date: it must be dark (Earthshine is ~14 stops below sunlight).
     MoonNight,
     Perf(usize),
     Deorbit,
@@ -404,11 +404,10 @@ pub fn run(
             }
         }
         Step::MoonNight => {
-            // Eye adaptation brightens at 1 stop/s: give it time.
-            if demo.timer > 14.0 && !demo.shot_taken {
+            if demo.timer > 2.0 && !demo.shot_taken {
                 demo.shot_taken = true;
-                demo.shot(&mut commands, "moon_night_adapted");
-            } else if demo.timer > 16.0 {
+                demo.shot(&mut commands, "moon_night");
+            } else if demo.timer > 4.0 {
                 settings.set_if_neq(GraphicsSettings::preset(Tier::Minimal));
                 rig.focus = Focus::Ship;
                 rig.distance = 3.0e6;

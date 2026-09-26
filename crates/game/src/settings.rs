@@ -2,8 +2,6 @@
 //! feature toggles and quality knobs. Every toggle can be changed on its own;
 //! changing anything applies live (no restart).
 
-use bevy::math::cubic_splines::LinearSpline;
-use bevy::post_process::auto_exposure::{AutoExposure, AutoExposureCompensationCurve};
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
@@ -74,9 +72,6 @@ pub struct GraphicsSettings {
     pub msaa: MsaaLevel,
     /// Planetshine (Earthshine on the Moon, moonlight on Earth; D055).
     pub earthshine: bool,
-    /// Eye adaptation: exposure brightens slowly in dark scenes (D055); on
-    /// from Low up. Minimal keeps the fixed exposure.
-    pub eye_adaptation: bool,
 }
 
 impl GraphicsSettings {
@@ -95,7 +90,6 @@ impl GraphicsSettings {
             shadows: false,
             msaa: MsaaLevel::Off,
             earthshine: false,
-            eye_adaptation: false,
         };
         match tier {
             Tier::Minimal => base,
@@ -105,7 +99,6 @@ impl GraphicsSettings {
                 atmosphere: AtmosphereQuality::Lut,
                 star_magnitude: 5.0,
                 msaa: MsaaLevel::X2,
-                eye_adaptation: true,
                 ..base
             },
             Tier::Medium => GraphicsSettings {
@@ -117,7 +110,6 @@ impl GraphicsSettings {
                 star_magnitude: 6.0,
                 bloom: true,
                 msaa: MsaaLevel::X4,
-                eye_adaptation: true,
                 ..base
             },
             Tier::High => GraphicsSettings {
@@ -133,7 +125,6 @@ impl GraphicsSettings {
                 shadows: true,
                 msaa: MsaaLevel::X4,
                 earthshine: true,
-                eye_adaptation: true,
                 ..base
             },
             Tier::Ultra => GraphicsSettings { terrain_error_px: 1.0, star_magnitude: 8.0, ..Self::preset(Tier::High) },
@@ -170,20 +161,11 @@ pub fn apply(
     mut commands: Commands,
     cams: Query<Entity, With<crate::camera::MainCamera>>,
     mut lights: Query<&mut DirectionalLight, With<crate::scene::SunLight>>,
-    mut curves: ResMut<Assets<AutoExposureCompensationCurve>>,
-    mut curve: Local<Option<Handle<AutoExposureCompensationCurve>>>,
 ) {
     if !settings.is_changed() {
         return;
     }
-    use crate::lighting::{compensation_points, metering_range, BRIGHTEN_SPEED, DARKEN_SPEED, METERING_FILTER};
     use bevy::post_process::bloom::Bloom;
-    let curve = curve
-        .get_or_insert_with(|| {
-            let points = compensation_points().map(|(x, y)| Vec2::new(x, y));
-            curves.add(AutoExposureCompensationCurve::from_curve(LinearSpline::new(points)).expect("a valid curve"))
-        })
-        .clone();
     let s = *settings;
     for cam in &cams {
         let mut e = commands.entity(cam);
@@ -196,18 +178,6 @@ pub fn apply(
             e.insert(Bloom { intensity: 0.12, max_mip_dimension: 256, ..Bloom::NATURAL });
         } else {
             e.remove::<Bloom>();
-        }
-        if s.eye_adaptation {
-            e.insert(AutoExposure {
-                range: metering_range(),
-                filter: METERING_FILTER,
-                speed_brighten: BRIGHTEN_SPEED,
-                speed_darken: DARKEN_SPEED,
-                compensation_curve: curve.clone(),
-                ..default()
-            });
-        } else {
-            e.remove::<AutoExposure>();
         }
     }
     for mut l in &mut lights {

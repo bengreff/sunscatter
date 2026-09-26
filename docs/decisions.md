@@ -239,10 +239,10 @@ It lists tracked vessels (and later asteroids), lets you focus and switch to a v
 - On hover, the heaviest object under the cursor wins (a planet over its moons).
 - Details: [map-view-lighting-controls.md](features/map-view-lighting-controls.md).
 
-**D055: Lighting is physical and per body, with eye adaptation.** *Decided, 2026-09-26.*
+**D055: Lighting is physical and per body, at a fixed exposure.** *Decided, 2026-09-26; exposure revised the same day.*
 - Stars have a luminosity in data. Each lit object receives flux L/(4πd²) from every nearby star at *its own* position, plus light reflected by nearby bodies (albedo, phase angle) and eclipses.
 - A single global light evaluated at the camera is not allowed (it was KSP's interstellar lighting bug, and ours for Earthshine).
-- Exposure adapts automatically, slowly and within limits, so a close-up of a night side can show Earthshine.
+- Exposure is fixed (no eye adaptation): night sides are realistically dark. Eye adaptation was built and removed on the owner's review, because it lit night sides up and made day sides blinding.
 
 **D056: Orbit lines end after one revolution about the dominant body.** *Decided, 2026-09-26.*
 - A line runs until it has swept 360° about its dominant body, with that body dominant throughout; after a change of dominant body, counting restarts. There are caps on length, and the length is a setting.

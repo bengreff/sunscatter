@@ -89,43 +89,6 @@ pub fn planetshine(at: DVec3, body: DVec3, r: f64, albedo: f64, e_star: f64, to_
     e_star * albedo * 2.0 / 3.0 * (r / d).powi(2) * lambert_phase(alpha)
 }
 
-/// Eye adaptation (D055). At the fixed exposure (EV100 14.5) a sunlit
-/// scene's mean exposed luminance, as Bevy's auto exposure meters it, is
-/// about 2^DAYLIGHT_LOG_LUM (calibrated on the demo views: with it and the
-/// dead zone below, every daylight view matches the fixed exposure). Auto exposure
-/// keeps daylight scenes there (no change) and brightens darker ones by at
-/// most MAX_BRIGHTEN_STOPS − DEAD_ZONE_STOPS, slowly: enough to show
-/// Earthshine on the Moon's night side (~7 lux, ~14 stops below sunlight)
-/// in a close-up, while a sunlit scene keeps night sides near-black.
-pub const DAYLIGHT_LOG_LUM: f32 = -6.0;
-pub const MAX_BRIGHTEN_STOPS: f32 = 15.0;
-/// No adaptation within this many stops below daylight: a sunlit Moon on
-/// black space (no bright sky in view) meters 1–2 stops darker than a
-/// daylight scene on Earth and must not be brightened.
-pub const DEAD_ZONE_STOPS: f32 = 3.0;
-
-/// Exposure compensation (log2) for a metered mean `x`: equal to `x` within
-/// the dead zone (so the correction, compensation − mean, is zero), flat at
-/// its bottom below it (so darker scenes are brightened). Given to Bevy as
-/// a linear spline through these points.
-pub fn compensation_points() -> [(f32, f32); 3] {
-    let (lo, d) = (DAYLIGHT_LOG_LUM - MAX_BRIGHTEN_STOPS, DAYLIGHT_LOG_LUM);
-    [(lo, d - DEAD_ZONE_STOPS), (d - DEAD_ZONE_STOPS, d - DEAD_ZONE_STOPS), (d, d)]
-}
-/// The share of pixels metered, low..high of the cumulative histogram.
-/// Bevy counts pixels darker than the range (black space) towards these
-/// percentages, so the default 10–90% cut the bright centre of a small
-/// Moon on black and metered only its dim limb: keep (almost) all.
-pub const METERING_FILTER: std::ops::RangeInclusive<f32> = 0.0..=0.98;
-/// Adaptation speeds (stops per second): slow to brighten, quicker back.
-pub const BRIGHTEN_SPEED: f32 = 1.0;
-pub const DARKEN_SPEED: f32 = 3.0;
-
-/// The metering range (log2 exposed luminance) given to auto exposure.
-pub fn metering_range() -> std::ops::RangeInclusive<f32> {
-    (DAYLIGHT_LOG_LUM - MAX_BRIGHTEN_STOPS)..=DAYLIGHT_LOG_LUM
-}
-
 /// What one body receives: its sunlight relative to the flux at `camera`,
 /// the body most likely to eclipse the star there, and the brightest
 /// planetshine (reflector index, lux at the body's centre).
@@ -299,51 +262,6 @@ mod tests {
         let moved: Vec<Sphere> = bodies.iter().map(|b| Sphere { centre: b.centre + shift, ..*b }).collect();
         let (_, moved_shine) = body_light(0, &moved, sun + shift, lm).shine.expect("moonshine");
         assert!((moved_shine - moonshine).abs() < 1e-9 * moonshine);
-    }
-
-    /// The correction (stops) auto exposure settles at for a scene whose mean
-    /// exposed log luminance is `mean` (Bevy's rule: compensation(clamped
-    /// mean) − clamped mean, with our compensation curve).
-    fn adapted_stops(mean: f32) -> f32 {
-        let r = metering_range();
-        let x = mean.clamp(*r.start(), *r.end());
-        let comp = x.max(DAYLIGHT_LOG_LUM - DEAD_ZONE_STOPS);
-        comp - x
-    }
-
-    #[test]
-    fn eye_adaptation_leaves_daylight_alone_and_brightens_dark_scenes_within_limits() {
-        // Mean exposed luminance of the scene, in stops relative to daylight.
-        let stops = |rel: f32| adapted_stops(DAYLIGHT_LOG_LUM + rel);
-        // (scene relative to daylight, expected correction)
-        let cases = [(0.0, 0.0), (3.0, 0.0), (-2.0, 0.0), (-3.0, 0.0), (-4.0, 1.0), (-14.0, 11.0), (-30.0, 12.0)];
-        for (rel, expected) in cases {
-            assert!((stops(rel) - expected).abs() < 1e-5, "{rel}: {}", stops(rel));
-        }
-        // Earthshine on the Moon (7 lux vs ~128,000 lux sunlight, ~14 stops)
-        // is brought to within the dead zone of daylight.
-        let earthshine = (7.0f32 / 128_000.0).log2();
-        assert!(earthshine + stops(earthshine) >= -DEAD_ZONE_STOPS - 1e-4, "{earthshine}");
-        // The spline points given to Bevy match the rule.
-        let p = compensation_points();
-        assert_eq!(p[1].0, DAYLIGHT_LOG_LUM - DEAD_ZONE_STOPS);
-        assert_eq!(p[2], (DAYLIGHT_LOG_LUM, DAYLIGHT_LOG_LUM));
-    }
-
-    #[test]
-    fn a_ship_in_earths_shadow_is_dark_but_sees_moonlight() {
-        let sun = DVec3::new(-AU, 0.0, 0.0);
-        let lm = luminous_power(3.828e26, 93.0);
-        let earth = Sphere { centre: DVec3::ZERO, radius: EARTH_R, albedo: 0.3 };
-        let moon = Sphere { centre: DVec3::new(3.844e8, 0.0, 0.0), radius: 1.737e6, albedo: 0.12 };
-        let night = DVec3::new(6.778e6, 0.0, 0.0);
-        let (visible, shine) = object_light(night, sun, SUN_R, lm, &[earth, moon]);
-        assert_eq!(visible, 0.0);
-        assert!(shine > 0.05, "full-Moon light on the night side: {shine}");
-        let day = DVec3::new(-6.778e6, 0.0, 0.0);
-        let (visible, shine) = object_light(day, sun, SUN_R, lm, &[earth, moon]);
-        assert_eq!(visible, 1.0);
-        assert!(shine > 1000.0, "Earthshine from the lit Earth below: {shine}");
     }
 
     #[test]
