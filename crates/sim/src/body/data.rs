@@ -284,7 +284,8 @@ mod tests {
     #[test]
     fn bad_files_report_their_path() {
         let e = parse_body("(physical: (name: 3))", Path::new("x")).unwrap_err();
-        assert!(e.to_string().starts_with("x/body.ron"), "{e}");
+        let expected = Path::new("x").join(BODY_FILE).display().to_string();
+        assert!(e.to_string().starts_with(&expected), "{e}");
         assert!(load_body(Path::new("/nonexistent/body")).is_err());
     }
 }
