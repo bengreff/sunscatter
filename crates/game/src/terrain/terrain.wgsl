@@ -1,6 +1,8 @@
 // Terrain surface: StandardMaterial lighting with the body's colour map
 // looked up per fragment from the body-fixed direction (no UV seams or pole
-// pinching), a close-range procedural detail layer, and water shading.
+// pinching), a close-range procedural detail layer, and water shading from
+// the body's water mask, also looked up per fragment (so it does not change
+// with the LOD level; CPU mirror and tests in water.rs).
 
 #import bevy_pbr::{
     pbr_fragment::pbr_input_from_standard_material,
@@ -34,7 +36,7 @@ struct TerrainParams {
     snow: vec4<f32>,
     // rgb: water tint, w: water roughness.
     ocean: vec4<f32>,
-    // x: detail on, y: glint on, z: has colour map, w: unused.
+    // x: detail on, y: glint on, z: has colour map, w: has water mask.
     flags: vec4<u32>,
     // rgb: base colour without a map.
     base: vec4<f32>,
@@ -43,6 +45,8 @@ struct TerrainParams {
 @group(#{MATERIAL_BIND_GROUP}) @binding(100) var<uniform> terrain: TerrainParams;
 @group(#{MATERIAL_BIND_GROUP}) @binding(101) var color_map: texture_2d<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(102) var color_sampler: sampler;
+@group(#{MATERIAL_BIND_GROUP}) @binding(103) var water_map: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(104) var water_sampler: sampler;
 
 const PI: f32 = 3.14159265;
 
@@ -94,20 +98,24 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     let lon = atan2(dir.y, dir.x);
     let uv = vec2((lon + PI) / (2.0 * PI), (0.5 * PI - lat) / PI);
 
+    let dx = vec2(wrap_d(dpdx(uv.x)), dpdx(uv.y));
+    let dy = vec2(wrap_d(dpdy(uv.x)), dpdy(uv.y));
     var color = terrain.base.rgb;
     if terrain.flags.z != 0u {
-        let dx = vec2(wrap_d(dpdx(uv.x)), dpdx(uv.y));
-        let dy = vec2(wrap_d(dpdy(uv.x)), dpdy(uv.y));
         color = textureSampleGrad(color_map, color_sampler, uv, dx, dy).rgb;
     }
+    // Sea fraction; the baked coverage is sharpened into a clean coastline.
+    var water = 0.0;
+    if terrain.flags.w != 0u {
+        water = smoothstep(0.3, 0.7, textureSampleGrad(water_map, water_sampler, uv, dx, dy).r);
+    }
 
-    let water = in.color.r;
     let height = in.color.g * 10000.0;
     let up = dir; // close enough to the ellipsoid normal for shading rules
     var roughness = terrain.snow.w;
 
     // Close-range detail: brightness variation, rock on slopes, snow.
-    if terrain.flags.x != 0u && water < 0.5 {
+    if terrain.flags.x != 0u && water < 1.0 {
         let dist = length(in.world_position.xyz);
         let fade = clamp(1.0 - dist / terrain.shape.z, 0.0, 1.0);
         if fade > 0.0 {
@@ -132,15 +140,13 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
                 let snow = smoothstep(line - 400.0, line + 400.0, height + (n - 0.5) * 600.0) * (1.0 - rockiness * 0.7);
                 detailed = mix(detailed, terrain.snow.rgb, snow);
             }
-            color = mix(color, detailed, fade);
+            color = mix(color, detailed, fade * (1.0 - water));
         }
     }
 
-    if water > 0.5 {
-        color *= terrain.ocean.rgb;
-        if terrain.flags.y != 0u {
-            roughness = terrain.ocean.w;
-        }
+    color = mix(color, color * terrain.ocean.rgb, water);
+    if terrain.flags.y != 0u {
+        roughness = mix(roughness, terrain.ocean.w, water);
     }
 
     pbr_input.material.base_color = vec4(color, 1.0);

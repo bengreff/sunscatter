@@ -9,9 +9,6 @@ use std::sync::Arc;
 /// Vertices per chunk side (32 × 32 quads).
 pub const GRID: usize = 33;
 
-/// Terrain this far below sea level (m) is shaded as water.
-const WATER_DEPTH: f64 = 5.0;
-
 /// Height above the reference ellipsoid (m) at a body-fixed unit direction.
 pub type HeightFn = Arc<dyn Fn(DVec3) -> f64 + Send + Sync>;
 
@@ -82,20 +79,19 @@ impl Shape {
         (a * b) / (b * b * (1.0 - s * s) + a * a * s * s).sqrt()
     }
 
-    /// Surface height (m) and whether it is water.
-    pub fn surface_height(&self, dir: DVec3) -> (f64, bool) {
+    /// Surface height (m): terrain, raised to sea level where below it.
+    /// Where the sea is drawn is the water mask's job (`water`), per fragment.
+    pub fn surface_height(&self, dir: DVec3) -> f64 {
         let h = self.height.as_ref().map_or(0.0, |f| f(dir));
         match self.sea_level {
-            // Shallow basins and coastal land sampled just below sea level
-            // are raised to it but shaded as land.
-            Some(sea) if h < sea => (sea, h < sea - WATER_DEPTH),
-            _ => (h, false),
+            Some(sea) => h.max(sea),
+            None => h,
         }
     }
 
-    pub fn surface_point(&self, dir: DVec3) -> (DVec3, f64, bool) {
-        let (h, water) = self.surface_height(dir);
-        (dir * (self.ellipsoid_radius(dir) + h), h, water)
+    pub fn surface_point(&self, dir: DVec3) -> (DVec3, f64) {
+        let h = self.surface_height(dir);
+        (dir * (self.ellipsoid_radius(dir) + h), h)
     }
 }
 
@@ -113,7 +109,7 @@ pub struct ChunkData {
     /// wrapped to [0, 256) so they stay precise in f32 (the shader's noise
     /// is periodic with that period).
     pub detail: Vec<[f32; 2]>,
-    /// r: water mask, g: height / 10 km.
+    /// g: height / 10 km (r, b unused).
     pub colors: Vec<[f32; 4]>,
     pub indices: Vec<u32>,
 }
@@ -134,9 +130,9 @@ pub fn build(key: ChunkKey, shape: &Shape) -> ChunkData {
         for i in 0..s {
             let (a, b) = key.face_coords((i as f64 - 1.0) * step, (j as f64 - 1.0) * step);
             let dir = direction(key.face, a, b);
-            let (p, h, water) = shape.surface_point(dir);
+            let (p, h) = shape.surface_point(dir);
             pts.push(p);
-            info.push((a, b, h, water, dir));
+            info.push((a, b, h, dir));
         }
     }
     let at = |i: usize, j: usize| pts[j * s + i];
@@ -155,7 +151,7 @@ pub fn build(key: ChunkKey, shape: &Shape) -> ChunkData {
     for j in 1..=g {
         for i in 1..=g {
             let p = at(i, j);
-            let (a, b, h, water, dir) = info[j * s + i];
+            let (a, b, h, dir) = info[j * s + i];
             let n = (at(i + 1, j) - at(i - 1, j)).cross(at(i, j + 1) - at(i, j - 1)).normalize_or(dir);
             let n = if n.dot(dir) < 0.0 { -n } else { n };
             out.radius = out.radius.max((p - center).length());
@@ -163,7 +159,7 @@ pub fn build(key: ChunkKey, shape: &Shape) -> ChunkData {
             out.positions.push((p - center).as_vec3().to_array());
             out.normals.push(n.as_vec3().to_array());
             out.detail.push([wrap(a * face_m), wrap(b * face_m)]);
-            out.colors.push([f32::from(u8::from(water)), (h / 10_000.0) as f32, 0.0, 1.0]);
+            out.colors.push([0.0, (h / 10_000.0) as f32, 0.0, 1.0]);
         }
     }
     for j in 0..g - 1 {
@@ -250,7 +246,8 @@ mod tests {
     #[test]
     fn ocean_is_solid_at_sea_level() {
         let shape = Shape { sea_level: Some(0.0), height: Some(Arc::new(|_| -4000.0)), ..sphere() };
-        let (h, water) = shape.surface_height(DVec3::X);
-        assert_eq!((h, water), (0.0, true));
+        assert_eq!(shape.surface_height(DVec3::X), 0.0);
+        let land = Shape { sea_level: Some(0.0), height: Some(Arc::new(|_| 120.0)), ..sphere() };
+        assert_eq!(land.surface_height(DVec3::X), 120.0);
     }
 }

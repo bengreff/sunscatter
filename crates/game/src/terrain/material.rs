@@ -1,5 +1,5 @@
 //! The terrain material (StandardMaterial plus our fragment shader) and the
-//! colour-map loader (decoded, resized to the settings cap and mipmapped on
+//! colour-map loader (the water mask's is in `water`) (decoded, resized to the settings cap and mipmapped on
 //! a background task).
 
 use bevy::asset::RenderAssetUsages;
@@ -35,6 +35,10 @@ pub struct TerrainExt {
     #[texture(101)]
     #[sampler(102)]
     pub color_map: Option<Handle<Image>>,
+    /// Sea fraction (`water::WaterMask`), looked up per fragment.
+    #[texture(103)]
+    #[sampler(104)]
+    pub water_map: Option<Handle<Image>>,
 }
 
 impl MaterialExtension for TerrainExt {

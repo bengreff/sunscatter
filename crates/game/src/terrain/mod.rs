@@ -7,6 +7,7 @@
 mod lod;
 mod material;
 pub mod mesh;
+pub mod water;
 
 pub use lod::update;
 
@@ -71,8 +72,8 @@ pub struct TerrainBody {
     material: Handle<TerrainMaterial>,
     chunks: HashMap<ChunkKey, Chunk>,
     pending: HashMap<ChunkKey, Task<ChunkData>>,
-    color_task: Option<Task<Option<Image>>>,
-    /// Colour-map width currently loaded or loading.
+    color_task: Option<Task<Maps>>,
+    /// Colour-map (and water-mask) width currently loaded or loading.
     color_width: u32,
     /// Elevation shown (the settings value when chunks were built).
     displaced: bool,
@@ -135,7 +136,7 @@ pub fn setup(
         };
         let material = materials.add(ExtendedMaterial {
             base: StandardMaterial { perceptual_roughness: def.roughness, reflectance: 0.3, ..default() },
-            extension: TerrainExt { params, color_map: None },
+            extension: TerrainExt { params, color_map: None, water_map: None },
         });
         let shape = Shape {
             radius_eq: p.radius_eq,
@@ -170,8 +171,14 @@ fn body_matrix(sim: &SimState, node: NodeId) -> DMat3 {
     DMat3::from_cols(col(DVec3::X), col(DVec3::Y), col(DVec3::Z))
 }
 
-/// Starts colour-map loads when the texture size setting changes, and
-/// installs finished ones.
+/// A body's surface maps, loaded together at the texture size setting.
+struct Maps {
+    color: Option<Image>,
+    water: Option<Image>,
+}
+
+/// Starts colour-map and water-mask loads when the texture size setting
+/// changes, and installs finished ones.
 pub fn update_textures(
     settings: Res<GraphicsSettings>,
     mut terrain: ResMut<Terrain>,
@@ -179,20 +186,33 @@ pub fn update_textures(
     mut materials: ResMut<Assets<TerrainMaterial>>,
 ) {
     for body in &mut terrain.bodies {
-        let Some(file) = body.def.color_map.clone() else { continue };
+        let color = body.def.color_map.clone();
+        let water = body.def.ocean.as_ref().and_then(|o| o.mask.clone());
+        if color.is_none() && water.is_none() {
+            continue;
+        }
         if body.color_width != settings.texture_size && body.color_task.is_none() {
             body.color_width = settings.texture_size;
-            let path = body_visual::body_dir(&body.name).join(file);
+            let dir = body_visual::body_dir(&body.name);
             let width = settings.texture_size;
-            body.color_task =
-                Some(AsyncComputeTaskPool::get().spawn(async move { material::load_color_map(path, width) }));
+            body.color_task = Some(AsyncComputeTaskPool::get().spawn(async move {
+                Maps {
+                    color: color.and_then(|f| material::load_color_map(dir.join(f), width)),
+                    water: water.and_then(|f| water::load_water_map(&dir.join(f), width)),
+                }
+            }));
         }
         if let Some(task) = body.color_task.as_mut() {
-            if let Some(result) = check_ready(task) {
+            if let Some(maps) = check_ready(task) {
                 body.color_task = None;
-                if let (Some(img), Some(mut mat)) = (result, materials.get_mut(&body.material)) {
+                let Some(mut mat) = materials.get_mut(&body.material) else { continue };
+                if let Some(img) = maps.color {
                     mat.extension.color_map = Some(images.add(img));
                     mat.extension.params.flags.z = 1;
+                }
+                if let Some(img) = maps.water {
+                    mat.extension.water_map = Some(images.add(img));
+                    mat.extension.params.flags.w = 1;
                 }
             }
         }

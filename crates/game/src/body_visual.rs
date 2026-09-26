@@ -50,6 +50,10 @@ pub struct OceanDef {
     pub roughness: f32,
     /// Tint applied to the colour map under water (multiplier).
     pub tint: [f32; 3],
+    /// Water mask (8-bit sea fraction, baked by `asset-tool`), relative to
+    /// the body dir. Without one no water is drawn.
+    #[serde(default)]
+    pub mask: Option<String>,
 }
 
 /// Close-range procedural detail layered over the colour map.
@@ -139,6 +143,14 @@ mod tests {
     fn shipped_definitions_parse() {
         for name in ["Earth", "Moon", "Sun"] {
             assert!(super::load(name).is_some(), "{name}");
+        }
+        // Every referenced map exists.
+        for name in ["Earth", "Moon", "Sun"] {
+            let def = super::load(name).unwrap();
+            let mask = def.ocean.and_then(|o| o.mask);
+            for file in [def.color_map, mask].into_iter().flatten() {
+                assert!(super::body_dir(name).join(&file).exists(), "{name}: {file}");
+            }
         }
     }
 }
