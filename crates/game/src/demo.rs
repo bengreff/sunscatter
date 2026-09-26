@@ -90,6 +90,8 @@ pub struct Demo {
     timer: f64,
     shots: u32,
     shot_taken: bool,
+    /// The camera yaw before the low ascent view looked back over land.
+    land_view: Option<f64>,
     perf: PerfSample,
     capture: Option<Capture>,
     /// A benchmark was started and its results are pending.
@@ -124,6 +126,7 @@ impl Demo {
             timer: 0.0,
             shots: 0,
             shot_taken: false,
+            land_view: None,
             perf: PerfSample::default(),
             capture: None,
             benching: false,
@@ -285,7 +288,23 @@ pub fn run(
             let up = r.normalize();
             let pitch = (1.4 * (alt / 50_000.0).clamp(0.0, 1.0).sqrt()).min(1.35);
             point(&mut sim, up * pitch.cos() + horizontal(r, v) * pitch.sin());
+            // At 10 km, look north along the Florida coast from above and
+            // behind the ship: the view where the ground showed hard-edged
+            // dark patches (land against sky-reflecting ocean).
+            if alt > 10_000.0 && demo.land_view.is_none() {
+                demo.land_view = Some(rig.yaw);
+                let (e1, e2) = camera::basis(up);
+                let north = up.cross(DVec3::Z.cross(up)).normalize();
+                let back = -north;
+                rig.yaw = back.dot(e2).atan2(back.dot(e1));
+                rig.pitch = 0.35;
+                rig.distance = 80.0;
+                demo.capture("ascent_10km_coast");
+            }
             if alt > 20_000.0 && !demo.shot_taken {
+                if let Some(yaw) = demo.land_view {
+                    (rig.yaw, rig.pitch) = (yaw, 0.25);
+                }
                 rig.distance = 80.0;
                 demo.shot_taken = true;
                 demo.capture("ascent_20km");
