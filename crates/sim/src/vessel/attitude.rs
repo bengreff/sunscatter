@@ -7,7 +7,7 @@
 use crate::math;
 use glam::{DQuat, DVec3};
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Attitude {
     /// Rotation from vessel body axes to inertial axes. Body +Z is the nose.
     pub q: DQuat,

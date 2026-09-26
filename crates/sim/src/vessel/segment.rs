@@ -21,13 +21,13 @@ pub fn coast_tolerance() -> Tolerance {
     Tolerance { abs_r: 1e-2, abs_v: 1e-5, rel: 1e-11, h_min: 1e-4, h_max: 6.0 * 3600.0 }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Sample {
     pub anchor: NodeId,
     pub s: StepSample,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum EndKind {
     /// Reached a body's surface (minus the vessel's contact height).
     Surface { body: NodeId },
@@ -35,13 +35,13 @@ pub enum EndKind {
     Horizon,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct SegmentEnd {
     pub t: f64,
     pub kind: EndKind,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Segment {
     /// Epoch of local time 0.
     pub t0: Epoch,
@@ -59,7 +59,7 @@ pub struct Segment {
 }
 
 /// Initial conditions and settings of a coast.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct CoastStart {
     pub anchor: NodeId,
     pub r: DVec3,

@@ -18,6 +18,7 @@ pub mod gen;
 pub mod integrate;
 pub mod kepler;
 pub mod math;
+pub mod save;
 pub mod sol;
 pub mod time;
 pub mod vessel;

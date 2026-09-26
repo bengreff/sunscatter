@@ -14,7 +14,7 @@ use crate::world::World;
 use glam::DVec3;
 
 /// Aerodynamic properties used for drag (isotropic in the prototype).
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct DragModel {
     /// Drag coefficient times reference area (m²).
     pub cd_area: f64,
@@ -22,7 +22,7 @@ pub struct DragModel {
 }
 
 /// The set of gravity sources simulated for a segment (after the cutoff).
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ActiveSources(pub Vec<usize>);
 
 impl ActiveSources {

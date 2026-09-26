@@ -31,7 +31,7 @@ pub const TICK: f64 = 0.02;
 /// Coast integration horizon (s): effectively unbounded within the game window.
 pub const COAST_HORIZON: f64 = 60.0 * 365.25 * 86_400.0;
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct VesselParams {
     pub mass: f64,
     pub cd_area: f64,
@@ -61,7 +61,7 @@ impl VesselParams {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Controls {
     /// Throttle in [0, 1].
     pub throttle: f64,
@@ -71,7 +71,7 @@ pub struct Controls {
     pub chute: bool,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum Phase {
     Landed { body: NodeId, fixed: Vec3<BodyFixed>, att_fixed: DQuat },
     Powered { anchor: NodeId, r: DVec3, v: DVec3 },
@@ -79,7 +79,7 @@ pub enum Phase {
     Crashed { body: NodeId, fixed: Vec3<BodyFixed>, speed: f64 },
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Vessel {
     pub params: VesselParams,
     pub phase: Phase,
