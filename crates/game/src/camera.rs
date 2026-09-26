@@ -6,7 +6,7 @@
 //! f32 camera-relative coordinates).
 
 use crate::state::SimState;
-use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll};
+use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll, MouseScrollUnit};
 use bevy::prelude::*;
 use bevy_egui::input::EguiWantsInput;
 use glam::DVec3;
@@ -44,6 +44,9 @@ impl Default for CameraRig {
         }
     }
 }
+
+/// Zoom per trackpad pixel, in wheel lines (the prototype used 1.0, far too fast).
+const TRACKPAD_LINES_PER_PIXEL: f64 = 0.25;
 
 #[derive(Component)]
 pub struct MainCamera;
@@ -88,7 +91,13 @@ pub fn read_input(
             rig.pitch = (rig.pitch + f64::from(motion.delta.y) * 0.005).clamp(-1.55, 1.55);
         }
         if scroll.delta.y != 0.0 {
-            rig.distance = (rig.distance * 1.15_f64.powf(-f64::from(scroll.delta.y))).clamp(5.0, 5.0e9);
+            // Trackpads report pixels, many per gesture: scale them to about a
+            // quarter of a wheel line each so zooming is controllable.
+            let lines = match scroll.unit {
+                MouseScrollUnit::Line => f64::from(scroll.delta.y),
+                MouseScrollUnit::Pixel => f64::from(scroll.delta.y) * TRACKPAD_LINES_PER_PIXEL,
+            };
+            rig.distance = (rig.distance * 1.15_f64.powf(-lines)).clamp(5.0, 5.0e12);
         }
     }
     if keys.just_pressed(KeyCode::Backquote) {

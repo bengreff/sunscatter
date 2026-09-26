@@ -10,10 +10,12 @@ mod body_visual;
 mod camera;
 mod demo;
 mod hud;
+mod map;
 mod scene;
 mod settings;
 mod settings_ui;
 mod state;
+mod trajectory;
 
 use bevy::prelude::*;
 use bevy_egui::{EguiPlugin, EguiPrimaryContextPass};
@@ -44,6 +46,7 @@ fn main() {
         .init_resource::<settings::GraphicsSettings>()
         .init_resource::<settings_ui::SettingsUi>()
         .init_resource::<bench::Bench>()
+        .init_resource::<map::MapMode>()
         .configure_sets(Update, (Stage::Input, Stage::Simulate, Stage::Camera, Stage::Scene).chain())
         .add_systems(Startup, (scene::setup, camera::setup))
         .add_systems(
@@ -62,7 +65,7 @@ fn main() {
                 .in_set(Stage::Input),
         )
         .add_systems(Update, (state::advance, state::update_prediction).chain().in_set(Stage::Simulate))
-        .add_systems(Update, camera::update.in_set(Stage::Camera))
+        .add_systems(Update, (camera::update, map::update_mode).chain().in_set(Stage::Camera))
         .add_systems(
             Update,
             (
@@ -70,10 +73,11 @@ fn main() {
                 atmosphere::update,
                 scene::update_ships,
                 scene::update_ground,
-                scene::draw_trajectory,
+                trajectory::draw,
+                map::draw_body_orbits,
             )
                 .in_set(Stage::Scene),
         )
-        .add_systems(EguiPrimaryContextPass, (hud::draw, settings_ui::draw))
+        .add_systems(EguiPrimaryContextPass, (map::draw_overlay, hud::draw, settings_ui::draw).chain())
         .run();
 }

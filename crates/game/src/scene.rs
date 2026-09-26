@@ -7,8 +7,7 @@
 use crate::atmosphere;
 use crate::body_visual::{self, BodyVisualDef};
 use crate::camera::CameraRig;
-use crate::hud::{PlotFrame, UiState};
-use crate::state::{Prediction, SimState};
+use crate::state::SimState;
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::NoFrustumCulling;
 use bevy::light::atmosphere::ScatteringMedium;
@@ -19,7 +18,6 @@ use glam::{DMat3, DQuat, DVec3};
 use sim::body::BodyPhysical;
 use sim::frame::{NodeId, Vec3 as FVec3};
 use sim::time::Epoch;
-use sim::vessel::Segment;
 use sim::world::World;
 
 #[derive(Component)]
@@ -115,7 +113,6 @@ pub struct BodyDefs {
 }
 
 impl BodyDefs {
-    #[allow(dead_code)] // used by map mode (next commit)
     pub fn get(&self, node: NodeId) -> Option<&BodyVisualDef> {
         self.defs.iter().find(|(n, _)| *n == node).map(|(_, d)| d)
     }
@@ -252,58 +249,4 @@ pub fn update_ground(
         mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
         mesh.insert_indices(Indices::U32(indices));
     }
-}
-
-/// Earth–Moon rotating basis at `t` (x → Moon, z → orbit normal).
-fn rotating_basis(world: &World, t: Epoch) -> DMat3 {
-    let (earth, moon) = (world.find("Earth").map(|s| s.node), world.find("Moon").map(|s| s.node));
-    let (Some(e), Some(m)) = (earth, moon) else { return DMat3::IDENTITY };
-    let k = world.eph.relative(m, e, t);
-    let x = k.r.normalize();
-    let z = k.r.cross(k.v).normalize();
-    DMat3::from_cols(x, z.cross(x), z)
-}
-
-/// Number of points used to draw a trajectory.
-const TRAJECTORY_POINTS: usize = 600;
-
-/// Draws the future part of the stored segment (coasting) or the background
-/// prediction (powered), resampled at uniform times with the segment's own
-/// interpolation, so the line starts exactly at the ship and stays smooth.
-pub fn draw_trajectory(
-    sim: Res<SimState>,
-    rig: Res<CameraRig>,
-    pred: Res<Prediction>,
-    ui: Res<UiState>,
-    mut gizmos: Gizmos,
-) {
-    let seg: Option<&Segment> = sim.ship().segment().or(pred.segment.as_ref());
-    let Some(seg) = seg else { return };
-    let Some(earth) = sim.world.find("Earth").map(|s| s.node) else { return };
-    let t_start = sim.clock.seconds_since(seg.t0).max(seg.samples.first().map_or(0.0, |s| s.s.t));
-    let t_end = seg.computed_until();
-    if t_end <= t_start {
-        return;
-    }
-    let earth_now = sim.world.snapshot(sim.clock).relative_r(earth, rig.anchor);
-    let basis_now = match ui.plot_frame {
-        PlotFrame::EarthInertial => DMat3::IDENTITY,
-        PlotFrame::EarthMoonRotating => rotating_basis(&sim.world, sim.clock),
-    };
-    // While powered the prediction was computed a moment ago; join it to the
-    // ship's current position so the line always starts at the ship.
-    let (ship_anchor, ship_r, _) = sim.ship().state(&sim.world);
-    let ship_now = sim.world.snapshot(sim.clock).relative_r(ship_anchor, rig.anchor) + ship_r - rig.cam_pos;
-    let resampled = (0..TRAJECTORY_POINTS).filter_map(|k| {
-        let t = t_start + (t_end - t_start) * k as f64 / (TRAJECTORY_POINTS - 1) as f64;
-        let (anchor, r, _) = seg.eval(t)?;
-        let epoch = seg.t0.add_seconds(t);
-        let rel_earth = r + sim.world.eph.relative(anchor, earth, epoch).r;
-        let plotted = match ui.plot_frame {
-            PlotFrame::EarthInertial => rel_earth,
-            PlotFrame::EarthMoonRotating => basis_now * (rotating_basis(&sim.world, epoch).transpose() * rel_earth),
-        };
-        Some((plotted + earth_now - rig.cam_pos).as_vec3())
-    });
-    gizmos.linestrip(std::iter::once(ship_now.as_vec3()).chain(resampled), Color::srgb(1.0, 0.85, 0.2));
 }

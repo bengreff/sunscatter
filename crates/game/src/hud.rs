@@ -78,7 +78,7 @@ pub fn pick_bodies(
     }
 }
 
-fn fmt_dist(m: f64) -> String {
+pub fn fmt_dist(m: f64) -> String {
     if !m.is_finite() {
         "∞".into()
     } else if m.abs() >= 1.0e6 {
