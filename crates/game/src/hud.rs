@@ -78,7 +78,7 @@ pub fn pick_bodies(
     rig: Res<CameraRig>,
     mut ui: ResMut<UiState>,
 ) {
-    if keys.just_pressed(KeyCode::Tab) {
+    if keys.just_pressed(KeyCode::Tab) && !egui.wants_any_keyboard_input() {
         ui.plot_frame = match ui.plot_frame {
             PlotFrame::EarthInertial => PlotFrame::EarthMoonRotating,
             PlotFrame::EarthMoonRotating => PlotFrame::EarthInertial,
@@ -153,8 +153,7 @@ pub fn draw(
     mut contexts: EguiContexts,
     fps: Res<FpsMeter>,
     mut sim: ResMut<SimState>,
-    mut rig: ResMut<CameraRig>,
-    mut ui: ResMut<UiState>,
+    ui: Res<UiState>,
     mut iface: ResMut<InterfaceSettings>,
     station: Res<crate::tracking::TrackingStation>,
 ) -> Result {
@@ -209,7 +208,6 @@ pub fn draw(
     }
     let sim = sim.into_inner();
     let (anchor, r, _) = sim.ship().state_at(&sim.world, sim.clock);
-    let snap = sim.world.snapshot(sim.clock);
     // Readouts are relative to the dominant body, like the navball's.
     let eph = &sim.world.eph;
     let dominant = crate::relations::Dominance::new(eph, sim.clock).of(eph, sim.clock, anchor, r, None, None);
@@ -226,24 +224,6 @@ pub fn draw(
         ui_.monospace(format!("{} fps   {} vessel(s)", fps.text(), sim.fleet.len()));
     });
 
-    if let Some((node, pos)) = ui.menu {
-        let mut open = true;
-        let name = sim.world.eph.node(node).name.clone();
-        let dist = (snap.relative(node, anchor).r - r).length();
-        egui::Window::new(name).open(&mut open).fixed_pos([pos.x, pos.y]).resizable(false).collapsible(false).show(
-            ctx,
-            |ui_| {
-                ui_.monospace(format!("distance {}", crate::format::distance(dist)));
-                if ui_.button("Focus").clicked() {
-                    camera::focus_body(&mut rig, sim, node);
-                    ui.menu = None;
-                }
-            },
-        );
-        if !open {
-            ui.menu = None;
-        }
-    }
     Ok(())
 }
 
@@ -263,7 +243,7 @@ fn flight_panel(ui_: &mut egui::Ui, sim: &SimState, near: Option<sim::frame::Nod
     if let Some(body) = near.and_then(|b| sim.world.source(b)) {
         let k = snap.relative(body.node, anchor);
         let rel = r - k.r;
-        let p = body.physical.as_ref().expect("surface body");
+        let Some(p) = body.physical.as_ref() else { return };
         let fixed = p.rotation.to_fixed(sim::frame::Vec3::from_raw(rel), sim.clock);
         let alt = p.altitude(fixed);
         let above_ground = p.altitude_above_surface(fixed);
@@ -295,6 +275,36 @@ fn flight_panel(ui_: &mut egui::Ui, sim: &SimState, near: Option<sim::frame::Nod
         if c.sas { "on" } else { "off" },
         if ship.chute_deployed { "DEPLOYED" } else { "stowed" }
     ));
+}
+
+/// The double-click body menu (in flight and in the tracking station).
+pub fn draw_body_menu(
+    mut contexts: EguiContexts,
+    sim: Res<SimState>,
+    mut rig: ResMut<CameraRig>,
+    mut ui: ResMut<UiState>,
+) -> Result {
+    let Some((node, pos)) = ui.menu else { return Ok(()) };
+    let ctx = contexts.ctx_mut()?;
+    let (anchor, r, _) = sim.ship().state_at(&sim.world, sim.clock);
+    let snap = sim.world.snapshot(sim.clock);
+    let mut open = true;
+    let name = sim.world.eph.node(node).name.clone();
+    let dist = (snap.relative(node, anchor).r - r).length();
+    egui::Window::new(name).open(&mut open).fixed_pos([pos.x, pos.y]).resizable(false).collapsible(false).show(
+        ctx,
+        |ui_| {
+            ui_.monospace(format!("distance {}", crate::format::distance(dist)));
+            if ui_.button("Focus").clicked() {
+                camera::focus_body(&mut rig, &sim, node);
+                ui.menu = None;
+            }
+        },
+    );
+    if !open {
+        ui.menu = None;
+    }
+    Ok(())
 }
 
 #[cfg(test)]

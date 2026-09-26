@@ -130,7 +130,14 @@ fn main() {
         )
         .add_systems(
             EguiPrimaryContextPass,
-            (tracking::draw, saves::draw, interface::pause::draw, interface::help::draw, interface::toasts::draw)
+            (
+                tracking::draw,
+                hud::draw_body_menu,
+                saves::draw,
+                interface::pause::draw,
+                interface::help::draw,
+                interface::toasts::draw,
+            )
                 .chain()
                 .after(hud::draw),
         )

@@ -122,11 +122,13 @@ pub fn read_input(
             }
         }
     }
-    if keys.just_pressed(KeyCode::Backquote) {
+    // Typing (a save name) does not move the camera.
+    let typing = egui.wants_any_keyboard_input();
+    if keys.just_pressed(KeyCode::Backquote) && !typing {
         rig.focus = Focus::Ship;
         rig.distance = 60.0;
     }
-    if keys.just_pressed(KeyCode::KeyF) {
+    if keys.just_pressed(KeyCode::KeyF) && !typing {
         if let Some(body) = nearest_body(&sim) {
             focus_body_near_ship(&mut rig, &sim, body);
         }

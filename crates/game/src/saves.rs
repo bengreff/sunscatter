@@ -23,6 +23,9 @@ pub const QUICKSAVE: &str = "quicksave";
 pub struct SaveUi {
     pub open: bool,
     name: String,
+    /// The name is the suggested default (replaced by a fresh one on
+    /// opening), not something the player typed.
+    name_is_default: bool,
     list: Vec<SaveEntry>,
     /// Re-read the directory on the next draw.
     stale: bool,
@@ -64,6 +67,16 @@ pub fn list_saves(dir: &Path) -> Vec<SaveEntry> {
         .collect();
     out.sort_by(|a, b| b.modified.cmp(&a.modified).then_with(|| a.name.cmp(&b.name)));
     out
+}
+
+/// The suggested save name: the game date and time, made unique among
+/// `taken` with a suffix.
+pub fn default_save_name((y, mo, d, h, mi, _): (i64, u32, u32, u32, u32, f64), taken: &[&str]) -> String {
+    let base = format!("{y}-{mo:02}-{d:02}_{h:02}{mi:02}");
+    (1..)
+        .map(|k| if k == 1 { base.clone() } else { format!("{base}-{k}") })
+        .find(|n| !taken.contains(&n.as_str()))
+        .expect("an unused name exists")
 }
 
 /// A file name for a save: letters, digits, `-` and `_` kept, spaces and
@@ -193,11 +206,18 @@ pub fn draw(
     let dir = persist.dirs.saves.clone();
     if std::mem::take(&mut ui.stale) {
         ui.list = list_saves(&dir);
+        if ui.name.is_empty() || ui.name_is_default {
+            let taken: Vec<&str> = ui.list.iter().map(|e| e.name.as_str()).collect();
+            ui.name = default_save_name(sim.clock.to_calendar(), &taken);
+            ui.name_is_default = true;
+        }
     }
     let (mut open, mut save_as, mut to_load, mut to_delete) = (true, false, None, None);
     egui::Window::new("Saves (F6)").open(&mut open).default_width(360.0).show(ctx, |w| {
         w.horizontal(|w| {
-            w.text_edit_singleline(&mut ui.name);
+            if w.text_edit_singleline(&mut ui.name).changed() {
+                ui.name_is_default = false;
+            }
             save_as = w.button("Save as…").clicked();
         });
         w.label(egui::RichText::new(dir.display().to_string()).weak().small());
@@ -250,6 +270,15 @@ pub fn draw(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn default_names_are_the_game_time_and_unique() {
+        let t = (2030, 1, 1, 17, 5, 0.0);
+        assert_eq!(default_save_name(t, &[]), "2030-01-01_1705");
+        assert_eq!(default_save_name(t, &["2030-01-01_1705"]), "2030-01-01_1705-2");
+        assert_eq!(default_save_name(t, &["2030-01-01_1705", "2030-01-01_1705-2"]), "2030-01-01_1705-3");
+        assert_eq!(sanitize(&default_save_name(t, &[])).as_deref(), Some("2030-01-01_1705"));
+    }
 
     #[test]
     fn names_are_sanitised() {

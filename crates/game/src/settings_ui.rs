@@ -102,14 +102,31 @@ pub fn draw(
         ui_.separator();
         let tab = ui.tab;
         egui::ScrollArea::vertical().max_height(560.0).show(ui_, |ui_| match tab {
-            SettingsTab::Graphics => graphics_tab(ui_, &mut ui, &mut settings, &mut bench),
+            // Each tab edits a copy, written back only if it changed: a
+            // `&mut` through ResMut marks it changed every frame, which
+            // re-applied graphics settings every frame while open.
+            SettingsTab::Graphics => {
+                let mut g = *settings;
+                graphics_tab(ui_, &mut ui, &mut g, &mut bench);
+                settings.set_if_neq(g);
+            }
             SettingsTab::Orbits => {
                 let eph = &sim.world.eph;
                 let bodies: Vec<_> = eph.bodies().map(|n| (n, eph.node(n).name.clone())).collect();
-                crate::trajectory::settings::settings_ui(ui_, &mut orbits, &bodies);
+                let mut o = orbits.clone();
+                crate::trajectory::settings::settings_ui(ui_, &mut o, &bodies);
+                orbits.set_if_neq(o);
             }
-            SettingsTab::Controls => controls_tab(ui_, &mut controls),
-            SettingsTab::Interface => interface_tab(ui_, &mut iface),
+            SettingsTab::Controls => {
+                let mut c = *controls;
+                controls_tab(ui_, &mut c);
+                controls.set_if_neq(c);
+            }
+            SettingsTab::Interface => {
+                let mut i = iface.clone();
+                interface_tab(ui_, &mut i);
+                iface.set_if_neq(i);
+            }
         });
     });
     ui.open = open;

@@ -159,12 +159,22 @@ pub fn nav_state(sim: &SimState, tracked: &Tracked, nav: &mut Navball) -> Option
     let ship = rules::ship_axes(vessel.attitude.q);
     let in_atmosphere = p.atmosphere.is_some_and(|a| alt < a.top);
     let orbit = relations::orbit_about(&sim.world, t, anchor, r, v, body);
-    let (time_to_ap, time_to_pe) = orbit.map_or((None, None), |o| rules::time_to_apsides(&o.elements, o.mu));
+    // On the ground the "orbit" is the surface's rotation, with the ship at
+    // its apoapsis: noise flipped the time to Ap between 0 and a period.
+    let grounded = matches!(vessel.phase, Phase::Landed { .. } | Phase::Crashed { .. });
+    let (time_to_ap, time_to_pe) = match orbit.filter(|_| !grounded) {
+        Some(o) => rules::time_to_apsides(&o.elements, o.mu),
+        None => (None, None),
+    };
     Some(NavState {
         mode: nav.mode,
         ship,
         local,
-        markers: rules::markers(rel, v_mode, target.as_ref().map(|(_, tr, _)| *tr - r)),
+        markers: if grounded {
+            rules::markers(rel, DVec3::ZERO, target.as_ref().map(|(_, tr, _)| *tr - r))
+        } else {
+            rules::markers(rel, v_mode, target.as_ref().map(|(_, tr, _)| *tr - r))
+        },
         angles: rules::attitude_angles(&ship, &local),
         speed: v_mode.length(),
         altitude: rules::mode_altitude(nav.mode, above_terrain, alt),

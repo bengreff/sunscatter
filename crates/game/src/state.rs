@@ -113,13 +113,14 @@ pub fn read_controls(
     time: Res<Time>,
     egui: Res<bevy_egui::input::EguiWantsInput>,
     menu: Res<crate::interface::pause::PauseMenu>,
+    station: Res<crate::tracking::TrackingStation>,
     mut sim: ResMut<SimState>,
 ) {
     let dt = time.delta_secs_f64();
     let c = &mut sim.controls;
-    // Typing in a text field (e.g. a save name) or the pause menu does not
-    // fly the ship.
-    if egui.wants_any_keyboard_input() || menu.open {
+    // Typing in a text field (e.g. a save name), the pause menu and the
+    // tracking station (R would reset the ship unseen) do not fly the ship.
+    if egui.wants_any_keyboard_input() || menu.open || station.open {
         c.rotate = DVec3::ZERO;
         return;
     }
