@@ -72,6 +72,7 @@ fn main() {
         .init_resource::<interface::pause::PauseMenu>()
         .init_resource::<interface::pause::LaunchSnapshot>()
         .init_resource::<interface::help::Help>()
+        .init_resource::<interface::toasts::Toasts>()
         .init_resource::<settings::GraphicsSettings>()
         .init_resource::<settings_ui::SettingsUi>()
         .init_resource::<bench::Bench>()
@@ -130,7 +131,9 @@ fn main() {
         )
         .add_systems(
             EguiPrimaryContextPass,
-            (tracking::draw, saves::draw, interface::pause::draw, interface::help::draw).chain().after(hud::draw),
+            (tracking::draw, saves::draw, interface::pause::draw, interface::help::draw, interface::toasts::draw)
+                .chain()
+                .after(hud::draw),
         )
         .run();
 }

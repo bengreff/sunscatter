@@ -5,6 +5,7 @@
 pub mod help;
 pub mod layout;
 pub mod pause;
+pub mod toasts;
 
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};

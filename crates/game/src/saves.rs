@@ -6,6 +6,7 @@
 //! are not saved: loading resets warp to 1x and tracks every vessel.
 
 use crate::camera::{CameraRig, Focus};
+use crate::interface::toasts::Toasts;
 use crate::persist::Persist;
 use crate::state::{Prediction, SimState};
 use crate::tracking::Tracked;
@@ -17,14 +18,11 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 pub const QUICKSAVE: &str = "quicksave";
-/// How long a confirmation or error stays on screen (s).
-const TOAST_SECONDS: f64 = 3.0;
 
 #[derive(Resource, Default)]
 pub struct SaveUi {
     pub open: bool,
     name: String,
-    toast: Option<(String, bool, f64)>,
     list: Vec<SaveEntry>,
     /// Re-read the directory on the next draw.
     stale: bool,
@@ -37,13 +35,9 @@ impl SaveUi {
         self.stale = true;
     }
 
-    fn notify(&mut self, now: f64, text: String, error: bool) {
-        if error {
-            warn!("{text}");
-        } else {
-            info!("{text}");
-        }
-        self.toast = Some((text, error, now + TOAST_SECONDS));
+    /// Posts a message and refreshes the list (its contents changed).
+    fn notify(&mut self, toasts: &mut Toasts, now: f64, text: String, error: bool) {
+        toasts.push(now, text, error);
         self.stale = true;
     }
 }
@@ -146,6 +140,7 @@ pub fn keys(
     time: Res<Time>,
     persist: Res<Persist>,
     mut ui: ResMut<SaveUi>,
+    mut toasts: ResMut<Toasts>,
     mut sim: ResMut<SimState>,
     mut pred: ResMut<Prediction>,
     mut tracked: ResMut<Tracked>,
@@ -158,17 +153,17 @@ pub fn keys(
     let path = save_path(&persist.dirs.saves, QUICKSAVE);
     if keys.just_pressed(KeyCode::F5) {
         match save(&sim, &path) {
-            Ok(()) => ui.notify(now, "Quicksaved".into(), false),
-            Err(e) => ui.notify(now, format!("Quicksave failed: {e}"), true),
+            Ok(()) => ui.notify(&mut toasts, now, "Quicksaved".into(), false),
+            Err(e) => ui.notify(&mut toasts, now, format!("Quicksave failed: {e}"), true),
         }
     }
     if keys.just_pressed(KeyCode::F9) {
         match load(&mut sim, &path) {
             Ok(()) => {
                 after_load(&sim, &mut pred, &mut tracked, &mut rig);
-                ui.notify(now, "Quickloaded".into(), false);
+                ui.notify(&mut toasts, now, "Quickloaded".into(), false);
             }
-            Err(e) => ui.notify(now, format!("Quickload failed: {e}"), true),
+            Err(e) => ui.notify(&mut toasts, now, format!("Quickload failed: {e}"), true),
         }
     }
     if keys.just_pressed(KeyCode::F6) {
@@ -177,13 +172,14 @@ pub fn keys(
     }
 }
 
-/// The save list window and the confirmation toast.
+/// The save list window.
 #[allow(clippy::too_many_arguments)]
 pub fn draw(
     mut contexts: EguiContexts,
     time: Res<Time>,
     persist: Res<Persist>,
     mut ui: ResMut<SaveUi>,
+    mut toasts: ResMut<Toasts>,
     mut sim: ResMut<SimState>,
     mut pred: ResMut<Prediction>,
     mut tracked: ResMut<Tracked>,
@@ -191,16 +187,6 @@ pub fn draw(
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
     let now = time.elapsed_secs_f64();
-    if let Some((text, error, until)) = &ui.toast {
-        if now > *until {
-            ui.toast = None;
-        } else {
-            let color = if *error { egui::Color32::from_rgb(255, 120, 100) } else { egui::Color32::WHITE };
-            egui::Area::new("save_toast".into()).anchor(egui::Align2::CENTER_TOP, [0.0, 44.0]).show(ctx, |a| {
-                egui::Frame::popup(a.style()).show(a, |a| a.label(egui::RichText::new(text.as_str()).color(color)));
-            });
-        }
-    }
     if !ui.open {
         return Ok(());
     }
@@ -237,25 +223,25 @@ pub fn draw(
     if save_as {
         match sanitize(&ui.name) {
             Some(name) => match save(&sim, &save_path(&dir, &name)) {
-                Ok(()) => ui.notify(now, format!("Saved \"{name}\""), false),
-                Err(e) => ui.notify(now, format!("Save failed: {e}"), true),
+                Ok(()) => ui.notify(&mut toasts, now, format!("Saved \"{name}\""), false),
+                Err(e) => ui.notify(&mut toasts, now, format!("Save failed: {e}"), true),
             },
-            None => ui.notify(now, "Enter a save name".into(), true),
+            None => ui.notify(&mut toasts, now, "Enter a save name".into(), true),
         }
     }
     if let Some(e) = to_load.and_then(|k| ui.list.get(k).cloned()) {
         match load(&mut sim, &e.path) {
             Ok(()) => {
                 after_load(&sim, &mut pred, &mut tracked, &mut rig);
-                ui.notify(now, format!("Loaded \"{}\"", e.name), false);
+                ui.notify(&mut toasts, now, format!("Loaded \"{}\"", e.name), false);
             }
-            Err(err) => ui.notify(now, format!("Cannot load \"{}\": {err}", e.name), true),
+            Err(err) => ui.notify(&mut toasts, now, format!("Cannot load \"{}\": {err}", e.name), true),
         }
     }
     if let Some(e) = to_delete.and_then(|k| ui.list.get(k).cloned()) {
         match std::fs::remove_file(&e.path) {
-            Ok(()) => ui.notify(now, format!("Deleted \"{}\"", e.name), false),
-            Err(err) => ui.notify(now, format!("Cannot delete \"{}\": {err}", e.name), true),
+            Ok(()) => ui.notify(&mut toasts, now, format!("Deleted \"{}\"", e.name), false),
+            Err(err) => ui.notify(&mut toasts, now, format!("Cannot delete \"{}\": {err}", e.name), true),
         }
     }
     Ok(())
