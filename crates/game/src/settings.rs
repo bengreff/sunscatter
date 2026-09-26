@@ -70,7 +70,7 @@ pub struct GraphicsSettings {
     pub flare: bool,
     pub shadows: bool,
     pub msaa: MsaaLevel,
-    /// Earthshine on the Moon and ships.
+    /// Planetshine (Earthshine on the Moon, moonlight on Earth; D055).
     pub earthshine: bool,
 }
 

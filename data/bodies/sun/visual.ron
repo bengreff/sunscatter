@@ -5,7 +5,9 @@
     emissive: Some((
         color: (1.0, 0.96, 0.9),
         luminance: 2.0e6,
-        // Solar constant 1361 W/m² ≈ 128,000 lux above the atmosphere.
-        illuminance_1au: 128000.0,
+        // IAU nominal solar luminosity; ~93 lm/W for sunlight gives
+        // ~126,600 lux at 1 AU above the atmosphere (D055).
+        luminosity_w: 3.828e26,
+        luminous_efficacy: 93.0,
     )),
 )

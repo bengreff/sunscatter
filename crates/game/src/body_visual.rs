@@ -110,8 +110,10 @@ pub struct EmissiveDef {
     /// Surface luminance used for rendering (cd/m², artistic: bright enough
     /// for bloom, not the physical 1.6e9).
     pub luminance: f32,
-    /// Illuminance at 1 AU (lux) for the light this body casts.
-    pub illuminance_1au: f32,
+    /// Luminosity (W) of the light this body casts (D055).
+    pub luminosity_w: f64,
+    /// Luminous efficacy of its spectrum (lm/W).
+    pub luminous_efficacy: f64,
 }
 
 /// Directory holding per-body data.

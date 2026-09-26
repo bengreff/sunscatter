@@ -230,7 +230,7 @@ It lists tracked vessels (and later asteroids), lets you focus and switch to a v
 - Adding a body means adding its directory and an ephemeris entry, with no code change.
 
 **D052: Rendering uses physical light units and Bevy's built-in atmosphere.** *Decided, 2026-09-26 (autonomous session; for the owner's review).*
-- Physical units: sunlight is 128,000 lux at 1 AU. How light reaches each object and how exposure works: D055.
+- Physical units: sunlight is about 126,600 lux at 1 AU, from the Sun's luminosity in data. How light reaches each object and how exposure works: D055.
 - Atmospheres use Bevy's Hillaire 2020 implementation (raymarched from Medium up), with scattering coefficients and scale heights as data. We work around its runtime-toggling bugs rather than maintain our own scattering, unless it proves insufficient.
 
 **D054: Map view is decided per object, by pixel size.** *Decided, 2026-09-26. Replaces D049 and D053.*

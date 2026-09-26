@@ -59,7 +59,7 @@ pub fn setup(
             atmosphere::spawn(&mut commands, &mut media, src.node, mean, a);
         }
         if let Some(e) = &def.emissive {
-            defs.light_source = Some((src.node, e.illuminance_1au));
+            defs.light_source = Some((src.node, crate::lighting::luminous_power(e.luminosity_w, e.luminous_efficacy)));
         }
         // Bodies with a surface are drawn by the terrain system.
         if def.emissive.is_none() {
@@ -86,7 +86,7 @@ pub fn setup(
     }
     .build();
     commands.spawn((SunLight, DirectionalLight { illuminance: 128_000.0, ..default() }, cascades, Transform::IDENTITY));
-    commands.insert_resource(GlobalAmbientLight { brightness: 30.0, ..default() });
+    commands.insert_resource(GlobalAmbientLight { brightness: 0.0, ..default() });
     commands.insert_resource(defs);
     commands.insert_resource(Assets3d {
         ship_mesh: meshes.add(Cuboid::new(3.0, 3.0, 10.0)),
@@ -96,11 +96,12 @@ pub fn setup(
 }
 
 /// Visual definitions of the bodies that have one, and which body lights
-/// the scene (with its illuminance at 1 AU).
+/// the scene.
 #[derive(Resource, Default)]
 pub struct BodyDefs {
     pub defs: Vec<(NodeId, BodyVisualDef)>,
-    pub light_source: Option<(NodeId, f32)>,
+    /// The star lighting the scene and its luminous power (lm).
+    pub light_source: Option<(NodeId, f64)>,
 }
 
 impl BodyDefs {
@@ -108,9 +109,6 @@ impl BodyDefs {
         self.defs.iter().find(|(n, _)| *n == node).map(|(_, d)| d)
     }
 }
-
-/// One astronomical unit (m).
-const AU: f64 = 1.495_978_707e11;
 
 fn physical(world: &World, node: NodeId) -> Option<&BodyPhysical> {
     world.source(node).and_then(|s| s.physical.as_ref())
@@ -140,10 +138,12 @@ pub fn update_bodies(
             rotation: q.as_quat(),
             scale: Vec3::new(p.radius_eq as f32, p.radius_polar as f32, p.radius_eq as f32),
         };
-        if let Some((_, lux)) = defs.light_source.filter(|(n, _)| *n == body.0) {
+        if let Some((_, lm)) = defs.light_source.filter(|(n, _)| *n == body.0) {
             if let Ok((mut lt, mut l)) = light.single_mut() {
+                // The shared light carries the flux at the camera; each lit
+                // body rescales it to its own distance (lighting.rs).
                 *lt = Transform::IDENTITY.looking_to(-pos.normalize().as_vec3(), Vec3::Z);
-                l.illuminance = lux * (AU / pos.length()).powi(2) as f32;
+                l.illuminance = crate::lighting::flux(lm, pos.length()) as f32;
             }
         }
     }

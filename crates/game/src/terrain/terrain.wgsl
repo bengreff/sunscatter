@@ -18,6 +18,7 @@
 #import bevy_pbr::{
     forward_io::{VertexOutput, FragmentOutput},
     pbr_functions::{apply_pbr_lighting, main_pass_post_lighting_processing},
+    mesh_view_bindings::view,
 }
 #endif
 
@@ -40,6 +41,13 @@ struct TerrainParams {
     flags: vec4<u32>,
     // rgb: base colour without a map.
     base: vec4<f32>,
+    // Lighting (D055): the star (centre, radius), the body that can eclipse
+    // it, planetshine (reflector centre, lux here), and rgb shine colour +
+    // w this body's sunlight relative to the shared light's.
+    star: vec4<f32>,
+    occluder: vec4<f32>,
+    shine: vec4<f32>,
+    light: vec4<f32>,
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(100) var<uniform> terrain: TerrainParams;
@@ -49,6 +57,41 @@ struct TerrainParams {
 @group(#{MATERIAL_BIND_GROUP}) @binding(104) var water_sampler: sampler;
 
 const PI: f32 = 3.14159265;
+
+// Area of overlap of two discs (radii r1, r2, centres d apart); mirrors
+// `lighting::disc_overlap` (tested there).
+fn disc_overlap(r1: f32, r2: f32, d: f32) -> f32 {
+    if d >= r1 + r2 {
+        return 0.0;
+    }
+    if d <= abs(r1 - r2) {
+        let r = min(r1, r2);
+        return PI * r * r;
+    }
+    let a1 = acos(clamp((d * d + r1 * r1 - r2 * r2) / (2.0 * d * r1), -1.0, 1.0));
+    let a2 = acos(clamp((d * d + r2 * r2 - r1 * r1) / (2.0 * d * r2), -1.0, 1.0));
+    return r1 * r1 * (a1 - sin(a1) * cos(a1)) + r2 * r2 * (a2 - sin(a2) * cos(a2));
+}
+
+// Fraction of the star's disc visible from `p` past the occluder; mirrors
+// `lighting::eclipse_factor`.
+fn eclipse(p: vec3<f32>) -> f32 {
+    let r = terrain.occluder.w;
+    if r <= 0.0 {
+        return 1.0;
+    }
+    let to_star = terrain.star.xyz - p;
+    let ds = length(to_star);
+    let to_c = terrain.occluder.xyz - p;
+    let dc = length(to_c);
+    if dc <= r || dc >= ds || dot(to_c, to_star) <= 0.0 {
+        return 1.0;
+    }
+    let s_ang = asin(clamp(terrain.star.w / ds, 0.0, 1.0));
+    let o_ang = asin(clamp(r / dc, 0.0, 1.0));
+    let sep = acos(clamp(dot(to_c / dc, to_star / ds), -1.0, 1.0));
+    return clamp(1.0 - disc_overlap(s_ang, o_ang, sep) / (PI * s_ang * s_ang), 0.0, 1.0);
+}
 
 fn hash2(p: vec2<f32>) -> f32 {
     let q = fract(p * vec2(0.1031, 0.1030));
@@ -158,6 +201,17 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
 #else
     var out: FragmentOutput;
     out.color = apply_pbr_lighting(pbr_input);
+    // Sunlight at this body's own distance, dimmed where another body
+    // hides the star (D055: never the flux at the camera).
+    let sun = terrain.light.w * eclipse(in.world_position.xyz);
+    var lit = out.color.rgb * sun;
+    // Planetshine: a Lambert term from the reflecting body.
+    if terrain.shine.w > 0.0 {
+        let l = normalize(terrain.shine.xyz - in.world_position.xyz);
+        let n = normalize(in.world_normal);
+        lit += color * terrain.light.rgb * terrain.shine.w * max(dot(n, l), 0.0) / PI * view.exposure;
+    }
+    out.color = vec4(lit, out.color.a);
     out.color = main_pass_post_lighting_processing(pbr_input, out.color);
 #endif
     return out;

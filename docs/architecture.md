@@ -26,7 +26,7 @@ A short map to search before building anything: who owns what, the frame order, 
 | Nearest body, display primary, osculating orbit (vessels and bodies), orbit size | `game::relations` | display only, never physics |
 | Map view: what is visible/hoverable, per object | `game::map_view` (rule, D054); `game::map` gathers sizes and draws | pure functions + table tests |
 | Orbit-line length (dominance, revolutions) | `game::trajectory` (to be written, D056) | display only |
-| Lighting: flux per object, exposure | `game::sky`, `game::atmosphere` (to be reworked, D055) | |
+| Lighting: star flux per object, eclipses, planetshine (D055) | `game::lighting` (rules; fills the terrain uniforms; the shader mirrors `eclipse_factor`) | ambient/starlight in `game::sky`; exposure fixed (eye adaptation to come) |
 | Camera pose and limits, zoom, collision with surfaces and the ship | `game::camera` | terrain via `sim::forces::altitude_above` |
 | Navball: attitude, markers, mode, flight readouts | `game::navball` (rules in `navball::rules`) | |
 | A vessel's state at the clock (for drawing) | `sim::vessel::Vessel::state_at` | never integrates (rule 4) |

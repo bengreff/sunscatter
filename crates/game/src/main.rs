@@ -11,6 +11,7 @@ mod camera;
 mod demo;
 mod hud;
 mod interface;
+mod lighting;
 mod map;
 mod map_view;
 mod navball;
@@ -80,17 +81,13 @@ fn main() {
         .add_plugins(persist::PersistPlugin)
         .add_plugins(navball::NavballPlugin)
         .configure_sets(Update, (Stage::Input, Stage::Simulate, Stage::Camera, Stage::Scene).chain())
-        .add_systems(
-            Startup,
-            (scene::setup, terrain::setup, sky::setup_stars, sky::setup_earthshine, camera::setup).chain(),
-        )
+        .add_systems(Startup, (scene::setup, terrain::setup, sky::setup_stars, camera::setup).chain())
         .add_systems(
             Update,
             (
                 interface::pause::keys,
                 interface::help::keys,
                 state::read_controls,
-                interface::pause::track_launch,
                 hud::measure_fps,
                 settings_ui::toggle,
                 demo::run,
@@ -104,7 +101,10 @@ fn main() {
                 .in_set(Stage::Input),
         )
         .add_systems(Update, (saves::keys, tracking::update).chain().after(state::read_controls).in_set(Stage::Input))
-        .add_systems(Update, (state::advance, state::update_prediction).chain().in_set(Stage::Simulate))
+        .add_systems(
+            Update,
+            (interface::pause::track_launch, state::advance, state::update_prediction).chain().in_set(Stage::Simulate),
+        )
         .add_systems(Update, (camera::update, map::update, demo::check_map_view).chain().in_set(Stage::Camera))
         .add_systems(
             Update,
@@ -113,10 +113,9 @@ fn main() {
                 atmosphere::update,
                 atmosphere::update_sky_light,
                 scene::update_ships,
-                terrain::update,
+                (terrain::update, lighting::update_terrain).chain(),
                 terrain::update_textures,
                 sky::update_stars,
-                sky::update_earthshine,
                 sky::update_ambient,
                 trajectory::draw,
                 map::draw_body_orbits,

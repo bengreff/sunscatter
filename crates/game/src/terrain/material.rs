@@ -26,6 +26,17 @@ pub struct TerrainParams {
     pub ocean: Vec4,
     pub flags: UVec4,
     pub base: Vec4,
+    /// Lighting (D055, `lighting.rs`). xyz: the star's centre relative to
+    /// the camera, w: its radius (m).
+    pub star: Vec4,
+    /// The body that can eclipse the star here: centre, radius (w = 0: none).
+    pub occluder: Vec4,
+    /// Planetshine: the reflecting body's centre, w: illuminance (lux) at
+    /// this body's centre.
+    pub shine: Vec4,
+    /// rgb: planetshine colour; w: this body's sunlight relative to the
+    /// shared light's (flux at the body / flux at the camera).
+    pub light: Vec4,
 }
 
 #[derive(Asset, AsBindGroup, Reflect, Debug, Clone, Default)]

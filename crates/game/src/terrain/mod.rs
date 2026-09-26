@@ -89,6 +89,11 @@ pub struct Terrain {
 }
 
 impl Terrain {
+    /// Each terrain body and its material (for per-body lighting).
+    pub fn materials(&self) -> impl Iterator<Item = (NodeId, &Handle<TerrainMaterial>)> {
+        self.bodies.iter().map(|b| (b.node, &b.material))
+    }
+
     /// Chunks or colour maps are still being built.
     pub fn busy(&self) -> bool {
         self.bodies.iter().any(|b| !b.pending.is_empty() || b.color_task.is_some())
@@ -132,6 +137,8 @@ pub fn setup(
             snow: detail.map_or(v4([1.0; 3], def.roughness), |d| v4(d.snow_color, def.roughness)),
             ocean: def.ocean.as_ref().map_or(Vec4::ONE, |o| v4(o.tint, o.roughness)),
             base: v4(def.base_color, 1.0),
+            // Full sunlight until lighting.rs fills in the real values.
+            light: Vec4::ONE,
             ..default()
         };
         let material = materials.add(ExtendedMaterial {
