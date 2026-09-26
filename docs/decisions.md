@@ -221,16 +221,7 @@ The prototype showed no blocking issues and plenty of performance headroom: 11 v
 - All visuals are data-driven for any body.
 - Every feature's cost is measured.
 
-**D049: Map mode switches on automatically.** *Decided, 2026-09-26.*
-- It activates when the active ship covers less than about one pixel on screen, which is several km away.
-- Map mode shows the following, all with hover names and highlights:
-  - orbit lines for the ship, bodies and tracked objects
-  - Ap/Pe markers
-  - an icon for the ship
-  - icons for bodies smaller than a pixel
-- There is no separate map-view key.
-
-**D050: The tracking station is a separate screen that is always in map mode.** *Decided, 2026-09-26.*
+**D050: The tracking station is a separate screen that shows the map.** *Decided, 2026-09-26.*
 It lists tracked vessels (and later asteroids), lets you focus and switch to a vessel, and draws on ideas from KSP and v0.1's tracking station.
 
 **D051: Each body is a data directory with separate sim and game files.** *Decided, 2026-09-26 (autonomous session; for the owner's review).*
@@ -239,13 +230,24 @@ It lists tracked vessels (and later asteroids), lets you focus and switch to a v
 - Adding a body means adding its directory and an ephemeris entry, with no code change.
 
 **D052: Rendering uses physical light units and Bevy's built-in atmosphere.** *Decided, 2026-09-26 (autonomous session; for the owner's review).*
-- Sunlight is 128,000 lux at 1 AU and falls off as 1/r². The camera is HDR with a fixed exposure (EV 14.5) for now; eye adaptation is a later option.
+- Physical units: sunlight is 128,000 lux at 1 AU. How light reaches each object and how exposure works: D055.
 - Atmospheres use Bevy's Hillaire 2020 implementation (raymarched from Medium up), with scattering coefficients and scale heights as data. We work around its runtime-toggling bugs rather than maintain our own scattering, unless it proves insufficient.
 
-**D053: Map mode shows orbits by context, like KSP.** *Decided, 2026-09-26 (autonomous session; for the owner's review).*
-- Inside a body's anchor zone, map mode shows its moons' orbits (and, near a moon, that moon's own orbit). Outside all zones it shows the planets' orbits.
-- Showing every orbit at once drew heliocentric orbits as straight lines across the view near Earth.
-- The ship's trajectory is drawn for one revolution.
+**D054: Map view is decided per object, by pixel size.** *Decided, 2026-09-26. Replaces D049 and D053.*
+- An object (body or vessel) is in map view when its sprite is under 1 px and its orbit radius is at least 1 px, with hysteresis. Sizes use one scale: pixels per metre at the camera's distance to its focus.
+- Its icon, orbit line, hover ring and name, and Ap/Pe markers are shown only while it is in map view. There is no global map mode and no map-view key.
+- On hover, the heaviest object under the cursor wins (a planet over its moons).
+- Details: [map-view-lighting-controls.md](features/map-view-lighting-controls.md).
+
+**D055: Lighting is physical and per body, with eye adaptation.** *Decided, 2026-09-26.*
+- Stars have a luminosity in data. Each lit object receives flux L/(4πd²) from every nearby star at *its own* position, plus light reflected by nearby bodies (albedo, phase angle) and eclipses.
+- A single global light evaluated at the camera is not allowed (it was KSP's interstellar lighting bug, and ours for Earthshine).
+- Exposure adapts automatically, slowly and within limits, so a close-up of a night side can show Earthshine.
+
+**D056: Orbit lines end after one revolution about the dominant body.** *Decided, 2026-09-26.*
+- A line runs until it has swept 360° about its dominant body, with that body dominant throughout; after a change of dominant body, counting restarts. There are caps on length, and the length is a setting.
+- "Dominant" means tidal/relative dominance (Laplace-sphere style), not raw force, so the Moon's dominant body is Earth.
+- This is display logic only; physics never uses it (rule 1).
 
 ---
 
