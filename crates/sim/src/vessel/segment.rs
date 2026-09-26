@@ -33,6 +33,9 @@ pub enum EndKind {
     Surface { body: NodeId },
     /// Reached the maximum horizon.
     Horizon,
+    /// The integration could not continue (non-finite state or force). The
+    /// segment ends at its last good sample; the vessel stays there.
+    Failed,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -121,7 +124,7 @@ impl Segment {
             }
             let prev = *self.samples.last().expect("segment has a first sample");
             let t0 = self.t0;
-            let sample = {
+            let step = {
                 // Field-level borrows: the context reads `active`/`drag` while
                 // the integrator mutates `state`.
                 let ctx = ForceContext {
@@ -132,6 +135,10 @@ impl Segment {
                     thrust: DVec3::ZERO,
                 };
                 integ.step(&|t: f64, r, v| ctx.accel(t0.add_seconds(t), r, v), &mut self.state, self.horizon)
+            };
+            let Ok(sample) = step else {
+                self.end = Some(SegmentEnd { t: prev.s.t, kind: EndKind::Failed });
+                return;
             };
             let new = Sample { anchor: self.anchor, s: sample };
             if let Some((t_hit, body)) = self.find_contact(world, &prev, &new) {

@@ -237,11 +237,17 @@ impl Vessel {
         }
         while self.time.add_seconds(TICK) <= target {
             self.chute_deployed |= controls.chute;
+            let attitude_before = self.attitude;
             self.attitude.control_tick(controls.rotate, controls.sas, self.params.max_ang_accel, TICK);
             let thrust =
                 self.attitude.nose() * (controls.throttle.clamp(0.0, 1.0) * self.params.max_thrust / self.params.mass);
             let Phase::Powered { anchor, r, v } = self.phase else { unreachable!() };
-            let (r1, v1) = self.integrate_tick(world, anchor, r, v, thrust);
+            // A tick that cannot be integrated (non-finite state) leaves the
+            // vessel where it is, like a failed coast segment.
+            let Some((r1, v1)) = self.integrate_tick(world, anchor, r, v, thrust) else {
+                self.attitude = attitude_before;
+                return;
+            };
             self.time = self.time.add_seconds(TICK);
             self.phase = Phase::Powered { anchor, r: r1, v: v1 };
             self.tick_accel = Some((v1 - v) / TICK);
@@ -252,7 +258,15 @@ impl Vessel {
     }
 
     /// Integrates one tick with constant thrust (adaptive substeps, exact end).
-    fn integrate_tick(&self, world: &World, anchor: NodeId, r: DVec3, v: DVec3, thrust: DVec3) -> (DVec3, DVec3) {
+    /// `None` if the integration fails (non-finite state or force).
+    fn integrate_tick(
+        &self,
+        world: &World,
+        anchor: NodeId,
+        r: DVec3,
+        v: DVec3,
+        thrust: DVec3,
+    ) -> Option<(DVec3, DVec3)> {
         let snap = world.snapshot(self.time);
         let active = ActiveSources::select(world, &snap, anchor, r);
         let ctx = ForceContext { world, anchor, active: &active, drag: Some(self.drag()), thrust };
@@ -261,9 +275,9 @@ impl Vessel {
         let integ = Dopri5::new(Tolerance { h_max: TICK, ..coast_tolerance() });
         let mut st = integ.start(&f, 0.0, r, v, TICK);
         while st.t < TICK {
-            integ.step(&f, &mut st, TICK);
+            integ.step(&f, &mut st, TICK).ok()?;
         }
-        (st.r.value(), st.v.value())
+        Some((st.r.value(), st.v.value()))
     }
 
     /// Checks ground contact in powered flight; lands or crashes if touching.

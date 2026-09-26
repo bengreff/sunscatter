@@ -7,7 +7,7 @@ use sim::frame::NodeId;
 use sim::kepler::Elements;
 use sim::sol;
 use sim::time::Epoch;
-use sim::vessel::{CoastStart, Controls, Phase, Segment, Vessel, VesselParams};
+use sim::vessel::{CoastStart, Controls, EndKind, Phase, Segment, SegmentEnd, Vessel, VesselParams};
 use sim::world::World;
 use std::sync::Arc;
 
@@ -163,6 +163,20 @@ fn time_warp_does_not_change_the_state() {
     fast.advance(&w, end, &controls, usize::MAX);
     assert_eq!(slow.time, fast.time);
     assert_eq!(slow.state(&w), fast.state(&w));
+}
+
+/// A non-finite state ends the segment (it used to retry the step forever).
+#[test]
+fn nan_initial_state_ends_the_segment_instead_of_hanging() {
+    let w = world();
+    let (earth, mu) = earth(&w);
+    let (r, v) = leo(mu);
+    let mut seg = coast(&w, earth, DVec3::new(f64::NAN, r.y, r.z), v, false);
+    seg.extend(&w, 10);
+    assert_eq!(seg.end, Some(SegmentEnd { t: 0.0, kind: EndKind::Failed }));
+    // A vessel in that state stops at its time; advancing returns.
+    let mut vessel = Vessel::coasting(&w, t0(), earth, DVec3::new(f64::NAN, r.y, r.z), v, VesselParams::block());
+    assert_eq!(vessel.advance(&w, t0().add_seconds(60.0), &Controls::default(), usize::MAX), t0());
 }
 
 trait MinEpoch {

@@ -119,6 +119,12 @@ pub struct Dopri5 {
     pub tol: Tolerance,
 }
 
+/// The integration cannot continue: the error estimate or the new state is
+/// not finite (NaN or infinite state, or a singular force). Returned instead of
+/// retrying forever; the state is left at the last accepted step.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct NonFinite;
+
 // Butcher tableau (Dormand & Prince 1980).
 const C: [f64; 7] = [0.0, 1.0 / 5.0, 3.0 / 10.0, 4.0 / 5.0, 8.0 / 9.0, 1.0, 1.0];
 const A: [[f64; 6]; 7] = [
@@ -151,13 +157,19 @@ impl Dopri5 {
     }
 
     /// Takes one accepted step (retrying internally on rejection), never going
-    /// past `t_limit`. Returns the new endpoint sample.
-    pub fn step<D: Dynamics>(&self, dyn_: &D, st: &mut StepState, t_limit: f64) -> StepSample {
+    /// past `t_limit`. Returns the new endpoint sample, or [`NonFinite`] (with
+    /// `st` unchanged) when the step cannot be computed.
+    pub fn step<D: Dynamics>(&self, dyn_: &D, st: &mut StepState, t_limit: f64) -> Result<StepSample, NonFinite> {
         loop {
             let remaining = t_limit - st.t;
             let clamped = st.h >= remaining;
             let h = if clamped { remaining } else { st.h };
             let (dr, dv, a1, err) = self.attempt(dyn_, st, h);
+            // A NaN error compares false everywhere: without this the step
+            // size grows and the step is retried forever.
+            if !err.is_finite() || !(dr.is_finite() && dv.is_finite() && a1.is_finite()) {
+                return Err(NonFinite);
+            }
             let factor = (0.9 * libm::pow(err.max(1e-10), -0.2)).clamp(0.2, 5.0);
             if err <= 1.0 || h <= self.tol.h_min {
                 st.r.add(dr);
@@ -169,7 +181,7 @@ impl Dopri5 {
                 if !clamped {
                     st.h = (h * factor).clamp(self.tol.h_min, self.tol.h_max);
                 }
-                return StepSample { t: st.t, r: st.r.value(), v: st.v.value(), a: st.a };
+                return Ok(StepSample { t: st.t, r: st.r.value(), v: st.v.value(), a: st.a });
             }
             st.h = (h * factor).clamp(self.tol.h_min, self.tol.h_max);
         }
@@ -307,7 +319,7 @@ mod tests {
         let mut st = integ.start(&f, 0.0, r0, v0, 10.0);
         let mut steps = 0;
         while st.t < period {
-            integ.step(&f, &mut st, period);
+            integ.step(&f, &mut st, period).unwrap();
             steps += 1;
         }
         let err = (st.r.value() - r0).length();
@@ -325,7 +337,7 @@ mod tests {
         let mut single = integ.start(&f, 0.0, r0, v0, 10.0);
         let mut single_samples = Vec::new();
         while single.t < end {
-            single_samples.push(integ.step(&f, &mut single, end));
+            single_samples.push(integ.step(&f, &mut single, end).unwrap());
         }
 
         // Resume from stored state after an arbitrary number of steps.
@@ -334,15 +346,28 @@ mod tests {
         for chunk in [7usize, 1, 50, 3] {
             let mut resumed = chunked; // a copy, as if loaded from storage
             for _ in 0..chunk {
-                chunked_samples.push(integ.step(&f, &mut resumed, end));
+                chunked_samples.push(integ.step(&f, &mut resumed, end).unwrap());
             }
             chunked = resumed;
         }
         while chunked.t < end {
-            chunked_samples.push(integ.step(&f, &mut chunked, end));
+            chunked_samples.push(integ.step(&f, &mut chunked, end).unwrap());
         }
         assert_eq!(single_samples, chunked_samples);
         assert_eq!(single, chunked);
+    }
+
+    #[test]
+    fn non_finite_state_is_an_error_not_a_hang() {
+        let integ = Dopri5::new(Tolerance::default());
+        let f = kepler_dyn();
+        let mut st = integ.start(&f, 0.0, DVec3::new(f64::NAN, 7e6, 0.0), DVec3::new(0.0, 0.0, 7e3), 10.0);
+        let before = st;
+        assert_eq!(integ.step(&f, &mut st, 1e4), Err(NonFinite));
+        assert_eq!(st.t, before.t);
+        // A singular force (at the centre) fails the same way.
+        let mut st = integ.start(&f, 0.0, DVec3::ZERO, DVec3::ZERO, 10.0);
+        assert_eq!(integ.step(&f, &mut st, 1e4), Err(NonFinite));
     }
 
     #[test]
