@@ -24,7 +24,7 @@ Read them before changing anything, by section where the doc is long.
 ## Next
 1. **Ask the owner to play it** and report; in particular the dark ground patches (ask for a quicksave, F5, if they recur: it reproduces the exact view) and the surface flashing (geomorphing should have fixed LOD pops).
 2. **Eye adaptation** works (on from Low up; `moon_night_adapted` demo view). Tuning knobs in `lighting` (`DAYLIGHT_LOG_LUM` -6.0, 3-stop dead zone, 0–98% metering, speeds).
-3. Haze strength at 10–20 km altitude (the ground looks fully blue). Not the aerial-perspective range: 1,000 km instead of 400 km changed nothing visible. Check the Mie/Rayleigh data in `data/bodies/earth/visual.ron` against Hillaire's values, and the ground albedo.
+3. Haze strength at 10–20 km altitude (the ground looks fully blue). Not the aerial-perspective range: 1,000 km instead of 400 km changed nothing visible. The Mie/Rayleigh/ozone data in `data/bodies/earth/visual.ron` match Hillaire 2020 exactly; suspect the ground's brightness instead (the Blue Marble colour map in linear light may be darker than real surface albedo), and compare with photos from 10–20 km.
 4. Windows: `backhouse` is reachable but has **no Rust toolchain or checkout**; installing Rust and the MSVC build tools needs the owner's go-ahead.
 5. Then the next milestone items (burn planner, ship systems) per `docs/vision.md` and the owner.
 
