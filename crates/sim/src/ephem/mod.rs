@@ -179,9 +179,41 @@ impl Ephemeris {
         self.relative(of, self.root(), t)
     }
 
+    /// Evaluates every node relative to its parent once, for many relative
+    /// queries at the same time (one force evaluation touches every source).
+    pub fn snapshot(&self, t: Epoch) -> Snapshot<'_> {
+        Snapshot { eph: self, t, local: self.nodes.iter().map(|n| n.motion.eval(t)).collect() }
+    }
+
     /// Ids of all nodes that are physical bodies.
     pub fn bodies(&self) -> impl Iterator<Item = NodeId> + '_ {
         self.nodes.iter().enumerate().filter(|(_, n)| n.kind == NodeKind::Body).map(|(i, _)| NodeId(i as u16))
+    }
+}
+
+/// All nodes' kinematics relative to their parents at one instant.
+pub struct Snapshot<'a> {
+    eph: &'a Ephemeris,
+    pub t: Epoch,
+    local: Vec<Kinematics>,
+}
+
+impl Snapshot<'_> {
+    /// Same as [`Ephemeris::relative`], from the cached per-node values.
+    pub fn relative(&self, of: NodeId, about: NodeId) -> Kinematics {
+        let (mut a, mut b) = (of, about);
+        let mut acc_a = Kinematics::default();
+        let mut acc_b = Kinematics::default();
+        while a != b {
+            if self.eph.depth[a.0 as usize] >= self.eph.depth[b.0 as usize] {
+                acc_a = acc_a + self.local[a.0 as usize];
+                a = self.eph.node(a).parent.expect("walked past root");
+            } else {
+                acc_b = acc_b + self.local[b.0 as usize];
+                b = self.eph.node(b).parent.expect("walked past root");
+            }
+        }
+        acc_a - acc_b
     }
 }
 
@@ -224,5 +256,9 @@ mod tests {
         assert_eq!(a1_about_b.r, DVec3::new(2e12, 15.0, 0.0));
         assert_eq!(e.relative(NodeId(3), NodeId(2), t).r, -a1_about_b.r);
         assert_eq!(e.relative(NodeId(1), NodeId(1), t).r, DVec3::ZERO);
+        let snap = e.snapshot(t);
+        for (x, y) in [(2, 1), (2, 3), (3, 2), (0, 2)] {
+            assert_eq!(snap.relative(NodeId(x), NodeId(y)), e.relative(NodeId(x), NodeId(y), t));
+        }
     }
 }

@@ -12,6 +12,7 @@
 
 pub mod body;
 pub mod ephem;
+pub mod forces;
 pub mod frame;
 pub mod gen;
 pub mod integrate;
@@ -19,3 +20,5 @@ pub mod kepler;
 pub mod math;
 pub mod sol;
 pub mod time;
+pub mod vessel;
+pub mod world;
