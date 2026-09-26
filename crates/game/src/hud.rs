@@ -167,6 +167,7 @@ pub fn draw(
                 "drag  orbit camera    scroll  zoom",
                 "F  focus nearest body   `  focus ship   double-click body  menu",
                 "Tab  plotting frame     F2  spawn 10 test ships",
+                "[ / ]  previous / next vessel   F7  tracking station",
             ] {
                 ui_.monospace(line);
             }

@@ -37,6 +37,7 @@ enum Step {
     Landed,
     Sunset,
     Done,
+    Tracking,
 }
 
 /// Capturing one view in every tier.
@@ -199,6 +200,7 @@ pub fn run(
     mut bench: ResMut<Bench>,
     mut pause: ResMut<SimPause>,
     terrain: Res<Terrain>,
+    mut station: ResMut<crate::tracking::TrackingStation>,
     mut exit: MessageWriter<AppExit>,
 ) {
     let Some(mut demo) = demo else { return };
@@ -434,7 +436,7 @@ pub fn run(
             let up = r.normalize();
             let elevation = to_sun.dot(up).asin().to_degrees();
             if demo.shot_taken {
-                demo.next(Step::Done);
+                demo.next(Step::Tracking);
             } else if elevation > 4.0 || elevation < -0.5 {
                 sim.warp = if elevation > 12.0 || elevation < -0.5 { 6 } else { 5 };
             } else {
@@ -447,6 +449,18 @@ pub fn run(
                 rig.distance = 40.0;
                 demo.shot_taken = true;
                 demo.capture("sunset");
+            }
+        }
+        Step::Tracking => {
+            // A few vessels in orbit to list in the tracking station.
+            if !station.open {
+                sim.spawn_test_ships(3);
+                station.open = true;
+            }
+            if !demo.shot_taken && demo.timer > 1.5 {
+                demo.shot(&mut commands, "tracking_station");
+                demo.shot_taken = true;
+                demo.next(Step::Done);
             }
         }
         Step::Done => {

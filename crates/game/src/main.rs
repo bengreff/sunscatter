@@ -18,6 +18,7 @@ mod settings_ui;
 mod sky;
 mod state;
 mod terrain;
+mod tracking;
 mod trajectory;
 
 use bevy::prelude::*;
@@ -52,6 +53,8 @@ fn main() {
         .init_resource::<settings_ui::SettingsUi>()
         .init_resource::<bench::Bench>()
         .init_resource::<map::MapMode>()
+        .init_resource::<tracking::Tracked>()
+        .init_resource::<tracking::TrackingStation>()
         // After the settings defaults: replaces them with the saved settings.
         .add_plugins(persist::PersistPlugin)
         .configure_sets(Update, (Stage::Input, Stage::Simulate, Stage::Camera, Stage::Scene).chain())
@@ -74,6 +77,7 @@ fn main() {
                 .chain()
                 .in_set(Stage::Input),
         )
+        .add_systems(Update, tracking::update.after(state::read_controls).in_set(Stage::Input))
         .add_systems(Update, (state::advance, state::update_prediction).chain().in_set(Stage::Simulate))
         .add_systems(Update, (camera::update, map::update_mode).chain().in_set(Stage::Camera))
         .add_systems(
@@ -94,5 +98,6 @@ fn main() {
                 .in_set(Stage::Scene),
         )
         .add_systems(EguiPrimaryContextPass, (sky::draw_flare, map::draw_overlay, hud::draw, settings_ui::draw).chain())
+        .add_systems(EguiPrimaryContextPass, tracking::draw.after(hud::draw))
         .run();
 }

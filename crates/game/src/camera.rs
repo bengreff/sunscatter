@@ -14,7 +14,10 @@ use sim::frame::NodeId;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Focus {
+    /// The active vessel.
     Ship,
+    /// Another vessel by fleet index (the tracking station).
+    Vessel(usize),
     Body(NodeId),
 }
 
@@ -113,7 +116,12 @@ pub fn read_input(
 
 /// The surface body closest to the active ship (by altitude).
 pub fn nearest_body(sim: &SimState) -> Option<NodeId> {
-    let (anchor, r, _) = sim.ship().state(&sim.world);
+    nearest_body_to(sim, sim.active)
+}
+
+/// The surface body closest to vessel `i` (by altitude).
+pub fn nearest_body_to(sim: &SimState, i: usize) -> Option<NodeId> {
+    let (anchor, r, _) = sim.fleet[i].state(&sim.world);
     let snap = sim.world.snapshot(sim.clock);
     sim.world
         .surfaces()
@@ -166,6 +174,12 @@ pub fn update(sim: Res<SimState>, mut rig: ResMut<CameraRig>, mut cam: Query<&mu
         Focus::Ship => {
             let near = nearest_body(&sim).map_or(DVec3::ZERO, |b| snap.relative(b, anchor).r);
             (ship_r, (ship_r - near).normalize())
+        }
+        Focus::Vessel(i) => {
+            let (va, vr, _) = sim.fleet[i].state(&sim.world);
+            let r = snap.relative_r(va, anchor) + vr;
+            let near = nearest_body_to(&sim, i).map_or(DVec3::ZERO, |b| snap.relative(b, anchor).r);
+            (r, (r - near).normalize())
         }
         Focus::Body(b) => (snap.relative(b, anchor).r, body_up(&sim, b)),
     };
