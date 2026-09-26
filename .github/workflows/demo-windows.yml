@@ -8,6 +8,11 @@ name: Demo (Windows, software GPU)
 
 on:
   workflow_dispatch:
+    inputs:
+      validation:
+        description: "Enable the D3D12 debug layer (WGPU_VALIDATION) for diagnostics"
+        type: boolean
+        default: false
   schedule:
     - cron: "0 5 * * 1" # Mondays 05:00 UTC
 
@@ -35,10 +40,17 @@ jobs:
           SUNSCATTER_DEMO_OFFSCREEN: "1"
           WGPU_BACKEND: dx12
           WGPU_FORCE_FALLBACK_ADAPTER: "1"
+          WGPU_VALIDATION: ${{ inputs.validation && '1' || '0' }}
+          WGPU_DEBUG: ${{ inputs.validation && '1' || '0' }}
         run: |
           set -o pipefail
           mkdir -p demo-out
           timeout 75m target/release/game.exe 2>&1 | tee demo-out/demo.log
+          # Bevy exits cleanly on a lost device, so check the outcome ourselves.
+          if grep -q "DeviceLost" demo-out/demo.log; then echo "::error::GPU device lost"; exit 1; fi
+          n=$(ls demo-out/*.png 2>/dev/null | wc -l)
+          echo "screenshots: $n"
+          [ "$n" -gt 0 ] || { echo "::error::no screenshots"; exit 1; }
       - name: Upload screenshots and log
         if: always()
         uses: actions/upload-artifact@v4
