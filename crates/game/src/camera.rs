@@ -95,13 +95,12 @@ pub fn read_input(
         }
         if scroll.delta.y != 0.0 {
             // Trackpads report pixels, many per gesture: scale them to a
-            // fraction of a wheel line each (default a quarter) so zooming is
-            // controllable.
+            // fraction of a wheel line each so zooming is controllable.
             let lines = match scroll.unit {
                 MouseScrollUnit::Line => f64::from(scroll.delta.y),
-                MouseScrollUnit::Pixel => f64::from(scroll.delta.y) * controls.trackpad_zoom_speed,
+                MouseScrollUnit::Pixel => f64::from(scroll.delta.y) * controls.trackpad_lines_per_px,
             };
-            rig.distance = (rig.distance * 1.15_f64.powf(-lines)).clamp(5.0, 5.0e12);
+            rig.distance = zoom(rig.distance, lines, controls.wheel_zoom);
         }
     }
     if keys.just_pressed(KeyCode::Backquote) {
@@ -113,6 +112,16 @@ pub fn read_input(
             focus_body_near_ship(&mut rig, &sim, body);
         }
     }
+}
+
+/// Closest and farthest camera distances from the focus (m).
+pub const MIN_DISTANCE: f64 = 5.0;
+pub const MAX_DISTANCE: f64 = 5.0e12;
+
+/// The focus distance after zooming in by `lines` wheel lines, each a factor
+/// of `per_line`.
+pub fn zoom(distance: f64, lines: f64, per_line: f64) -> f64 {
+    (distance * per_line.powf(-lines)).clamp(MIN_DISTANCE, MAX_DISTANCE)
 }
 
 /// The body nearest the active ship (see [`relations::nearest_body`]).
@@ -184,5 +193,27 @@ pub fn update(sim: Res<SimState>, mut rig: ResMut<CameraRig>, mut cam: Query<&mu
     rig.up = up;
     if let Ok(mut t) = cam.single_mut() {
         *t = Transform::IDENTITY.looking_to((-d).as_vec3(), up.as_vec3());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn zoom_table() {
+        // (distance, lines, per line, expected)
+        let cases = [
+            (1000.0, 1.0, 1.072, 1000.0 / 1.072),
+            (1000.0, -1.0, 1.072, 1072.0),
+            (1000.0, 0.0, 1.072, 1000.0),
+            (6.0, 10.0, 1.072, MIN_DISTANCE),
+            (4.0e12, -10.0, 1.072, MAX_DISTANCE),
+        ];
+        for (d, lines, per_line, expected) in cases {
+            assert!((zoom(d, lines, per_line) - expected).abs() < 1e-9 * expected, "{d} {lines}");
+        }
+        // Two lines at the new speed equal one at the old (1.15 per line).
+        assert!((zoom(1000.0, 2.0, 1.072) / (1000.0 / 1.15) - 1.0).abs() < 1e-3);
     }
 }

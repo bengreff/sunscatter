@@ -47,13 +47,17 @@ impl Dirs {
 #[derive(Resource, Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ControlsSettings {
-    /// Zoom per trackpad pixel, in mouse-wheel lines.
-    pub trackpad_zoom_speed: f64,
+    /// Zoom factor per mouse-wheel line.
+    pub wheel_zoom: f64,
+    /// Zoom per trackpad pixel, in mouse-wheel lines. (Renamed from
+    /// `trackpad_zoom_speed` when zoom was halved, so old files that saved
+    /// the old default get the new one.)
+    pub trackpad_lines_per_px: f64,
 }
 
 impl Default for ControlsSettings {
     fn default() -> Self {
-        ControlsSettings { trackpad_zoom_speed: 0.25 }
+        ControlsSettings { wheel_zoom: 1.072, trackpad_lines_per_px: 0.125 }
     }
 }
 
@@ -186,7 +190,7 @@ mod tests {
         assert_eq!(SettingsFile::read(&path), Ok(None));
         let s = SettingsFile {
             graphics: GraphicsSettings { bloom: false, ..GraphicsSettings::preset(Tier::Ultra) },
-            controls: ControlsSettings { trackpad_zoom_speed: 0.1 },
+            controls: ControlsSettings { wheel_zoom: 1.2, trackpad_lines_per_px: 0.1 },
         };
         s.write(&path).unwrap();
         assert_eq!(SettingsFile::read(&path), Ok(Some(s)));
@@ -202,9 +206,12 @@ mod tests {
         std::fs::write(&path, "(graphics: (tier: Some(Nonsense").unwrap();
         assert_eq!(load(&path), SettingsFile::default());
         // Missing fields take their defaults (files from older builds).
-        let partial = SettingsFile::from_ron("(controls: (trackpad_zoom_speed: 0.5))").unwrap();
+        let partial = SettingsFile::from_ron("(controls: (trackpad_lines_per_px: 0.5))").unwrap();
         assert_eq!(partial.graphics, GraphicsSettings::default());
-        assert_eq!(partial.controls.trackpad_zoom_speed, 0.5);
+        assert_eq!(partial.controls, ControlsSettings { trackpad_lines_per_px: 0.5, ..ControlsSettings::default() });
+        // A renamed key from an older build is ignored, not an error.
+        let old = SettingsFile::from_ron("(controls: (trackpad_zoom_speed: 0.25))").unwrap();
+        assert_eq!(old.controls, ControlsSettings::default());
         let partial = SettingsFile::from_ron("(graphics: (bloom: false))").unwrap();
         assert_eq!(partial.graphics, GraphicsSettings { bloom: false, ..GraphicsSettings::default() });
         let _ = std::fs::remove_dir_all(&dir);
