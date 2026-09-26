@@ -2,7 +2,7 @@
 
 A SessionStart hook loads this file automatically after `/clear` or at startup. It is kept current by `/handoff`.
 
-*Updated 2026-09-26, after the visual pass and the owner's first fix list.*
+*Updated 2026-09-26, after steps 1–2 of the fix round, the navball and the water mask.*
 
 ## Read, in this order
 
@@ -17,27 +17,24 @@ Read them before changing anything, by section where the doc is long.
 8. Only if needed: the Review of `docs/plans/v0.2-visual-pass-and-foundations.md` (measurements, known issues).
 
 ## State
-- `main` is green in CI (macOS and Windows). The owner approved the feature doc; implementation has **not** started.
-- Done so far in this round:
-  - `game::relations` owns nearest body, primary and osculating orbit;
-  - a decision-reference check runs in CI;
-  - the architecture map.
+- Steps 1 and 2 of the feature doc are done and pushed, plus the navball and the water mask (built by agents). All verified by tests and a full hidden demo run (all demo assertions pass; 11 vessels ~300 fps at 1x, ~195 fps at 1,000,000x):
+  - `game::map_view`: the per-object map-view rule (D054), with occlusion by nearer discs; `game::map` draws from it. Planets and Pluto got `body.ron` (IAU radius and rotation, not solid, no J2) so the rule knows their size.
+  - Zoom at half speed (`ControlsSettings::wheel_zoom`, `trackpad_lines_per_px`); `hud::FpsMeter` (0.5 s windows).
+  - `Vessel::state_at(world, clock)`: vessels drawn at the clock (ground jitter while thrusting).
+  - Camera collision (`camera::accept`, `pull_in`, `clearance`, `min_distance`).
+  - `game::navball` (playable; seen in the demo screenshots).
+  - Water mask: `data/bodies/earth/water.png` from ETOPO flood-filled from the open sea, looked up per fragment. **Not yet seen on screen**: no demo view shows a coastline in daylight. Add a coast view (or the zoom-sweep step of §9) and check it.
+- Known leftovers: `terrain::material::load_color_map` passes a full mip chain to `Image::new`, which trips a debug assertion in debug builds (not hit yet). Lakes above sea level get no water shading. Navball target picker lives in the navball panel only.
 
 ## Build order (from the feature doc)
-1. The map-view rule (pure function plus table tests) → icons, orbit lines, hover ring and name, hover priority. Also 2x slower zoom and the fps readout averaged over 0.5 s.
-2. Vessels drawn at the clock time (fixes the ground jitter while thrusting); camera collision with bodies and ships.
-3. Lighting (D055): per-body flux from star luminosity, planetshine, eclipses, eye adaptation.
+1. ~~Map-view rule, zoom, fps.~~ Done.
+2. ~~Vessels at the clock time; camera collision.~~ Done.
+3. Lighting (D055): per-body flux from star luminosity, planetshine, eclipses, eye adaptation. **Next.**
 4. Orbit-line length (D056), with settings.
-5. The Esc pause menu and settings screen, the GUI theme and HUD layout (warp arrows at the top), the full-screen tracking station.
-6. Surface flicker: a baked water mask (asset tool) and geomorphing.
-
-These two can run in parallel, each in its own area:
-- an agent builds the **navball** (`game::navball`);
-- an agent adds the **water mask** in `asset-tool` and `data/`.
-
-The lead does everything else.
+5. The Esc pause menu and settings screen, the GUI theme and HUD layout (warp arrows at the top), the full-screen tracking station (clicking an icon focuses it).
+6. Surface flicker: ~~water mask~~ (done, unverified on screen), geomorphing, sky/atmosphere cross-fade at the top, aerial perspective range.
 
 ## How to work
 - Refactor as you touch: move each rule into a tested pure function first, then change the behaviour.
-- Verify with the demo (see CLAUDE.md for the quick options). Don't open windows while the owner is using the machine unless asked.
+- Verify with the demo, offscreen (`SUNSCATTER_DEMO_OFFSCREEN=1` now hides the window). One game window at a time; subagents never run the demo (see process.md).
 - At the end of a big session: fill in the plan or feature review, update this file, and try `ssh backhouse` for a Windows run (skip it if it doesn't connect).
