@@ -7,6 +7,11 @@ license.workspace = true
 rust-version.workspace = true
 publish = false
 
+[features]
+# Faster incremental builds while iterating: `cargo run -p game --features dev`.
+# Never use for release/distribution builds.
+dev = ["bevy/dynamic_linking"]
+
 [dependencies]
 sim = { path = "../sim" }
 bevy = "0.19.1"
