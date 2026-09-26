@@ -7,7 +7,7 @@ use sim::ephem::Ephemeris;
 use sim::kepler::Elements;
 use sim::sol;
 use sim::time::Epoch;
-use sim::vessel::{quat_z_to, Controls, Phase, Vessel, VesselParams};
+use sim::vessel::{quat_z_to, Controls, Phase, Vessel, VesselId, VesselParams};
 use sim::world::World;
 use std::sync::Arc;
 
@@ -59,7 +59,7 @@ fn pad_to_orbit_then_parachute_landing() {
     let w = world();
     let earth = w.find("Earth").unwrap();
     let start = sol::sol_epoch().add_seconds(86_400.0);
-    let ship = Vessel::landed_at(&w, "Earth", 28.6082, -80.6041, start, VesselParams::block());
+    let ship = Vessel::landed_at(&w, VesselId(1), "Earth", 28.6082, -80.6041, start, VesselParams::block());
     let mut f = Flight { w: &w, ship, t: start, mu: earth.gm, re: sim::body::earth().radius_eq };
     let mut controls = Controls { throttle: 1.0, sas: true, ..Default::default() };
 

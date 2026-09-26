@@ -17,14 +17,14 @@
 
 use crate::ephem::{fnv1a64, Ephemeris};
 use crate::time::Epoch;
-use crate::vessel::{Controls, Vessel};
+use crate::vessel::{Controls, Vessel, VesselIds};
 use crate::world::World;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::path::Path;
 
 /// Version of the save format. Loading any other version is an error.
-pub const SAVE_VERSION: u32 = 1;
+pub const SAVE_VERSION: u32 = 2;
 
 /// Which ephemeris a save was made against. Vessel states are only
 /// meaningful (and only reproducible) with the same body motions.
@@ -49,6 +49,8 @@ pub struct SaveGame {
     /// The game clock (vessels may trail it by less than one tick).
     pub clock: Epoch,
     pub vessels: Vec<Vessel>,
+    /// The vessel id counter, so ids of deleted vessels are never reused.
+    pub vessel_ids: VesselIds,
     /// Index of the active vessel in `vessels`.
     pub active: usize,
     /// The controls latched for the active vessel.
@@ -94,12 +96,20 @@ impl From<std::io::Error> for SaveError {
 
 impl SaveGame {
     /// Captures the state (clones the vessels).
-    pub fn capture(world: &World, clock: Epoch, vessels: &[Vessel], active: usize, controls: Controls) -> Self {
+    pub fn capture(
+        world: &World,
+        clock: Epoch,
+        vessels: &[Vessel],
+        vessel_ids: VesselIds,
+        active: usize,
+        controls: Controls,
+    ) -> Self {
         SaveGame {
             version: SAVE_VERSION,
             ephemeris: EphemerisId::of(&world.eph),
             clock,
             vessels: vessels.to_vec(),
+            vessel_ids,
             active,
             controls,
         }
@@ -136,6 +146,12 @@ impl SaveGame {
         let save: SaveGame = ron::from_str(text).map_err(|e| SaveError::Format(e.to_string()))?;
         if save.active >= save.vessels.len() && !save.vessels.is_empty() {
             return Err(SaveError::Format(format!("active vessel {} out of range", save.active)));
+        }
+        let mut seen = std::collections::BTreeSet::new();
+        for v in &save.vessels {
+            if !save.vessel_ids.issued(v.id()) || !seen.insert(v.id()) {
+                return Err(SaveError::Format(format!("vessel id {} duplicated or not issued", v.id())));
+            }
         }
         Ok(save)
     }

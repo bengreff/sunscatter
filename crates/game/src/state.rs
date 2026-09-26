@@ -9,7 +9,7 @@ use sim::ephem::Ephemeris;
 use sim::kepler::Elements;
 use sim::sol;
 use sim::time::Epoch;
-use sim::vessel::{Controls, Phase, Segment, Vessel, VesselParams, TICK};
+use sim::vessel::{Controls, Phase, Segment, Vessel, VesselIds, VesselParams, TICK};
 use sim::world::World;
 use std::sync::Arc;
 
@@ -36,6 +36,8 @@ const LOOKAHEAD_STEPS_PER_FRAME: usize = 1_500;
 pub struct SimState {
     pub world: World,
     pub fleet: Vec<Vessel>,
+    /// Hands out vessel ids (saved, so ids are never reused).
+    pub vessel_ids: VesselIds,
     pub active: usize,
     pub clock: Epoch,
     pub warp: usize,
@@ -55,10 +57,13 @@ impl SimState {
         let world = load_world();
         // Start in daylight over Florida: 2030-01-01 17:00 TDB.
         let clock = sol::sol_epoch().add_seconds(17.0 * 3600.0);
-        let ship = Vessel::landed_at(&world, "Earth", PAD_LAT, PAD_LON, clock, VesselParams::block());
+        let mut vessel_ids = VesselIds::default();
+        let ship =
+            Vessel::landed_at(&world, vessel_ids.allocate(), "Earth", PAD_LAT, PAD_LON, clock, VesselParams::block());
         SimState {
             world,
             fleet: vec![ship],
+            vessel_ids,
             active: 0,
             clock,
             warp: 0,
@@ -87,7 +92,8 @@ impl SimState {
     }
 
     pub fn reset(&mut self) {
-        let ship = Vessel::landed_at(&self.world, "Earth", PAD_LAT, PAD_LON, self.clock, VesselParams::block());
+        let id = self.vessel_ids.allocate();
+        let ship = Vessel::landed_at(&self.world, id, "Earth", PAD_LAT, PAD_LON, self.clock, VesselParams::block());
         self.fleet[self.active] = ship;
         self.controls = Controls { sas: true, ..Default::default() };
         self.warp = 0;
@@ -106,7 +112,8 @@ impl SimState {
                 mean_anomaly: 0.7 * k as f64,
             };
             let (r, v) = el.to_state(earth.gm);
-            self.fleet.push(Vessel::coasting(&self.world, self.clock, earth.node, r, v, VesselParams::block()));
+            let id = self.vessel_ids.allocate();
+            self.fleet.push(Vessel::coasting(&self.world, id, self.clock, earth.node, r, v, VesselParams::block()));
         }
     }
 }

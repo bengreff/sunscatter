@@ -26,7 +26,7 @@ fn a_coast_started_near_the_ephemeris_end_stops_at_the_end() {
     let (earth, r, v) = leo(&w);
     let t0 = w.end().add_seconds(-6.0 * 3600.0);
     PAST_END_CALLS.with(|c| c.set(0));
-    let mut ship = Vessel::coasting(&w, t0, earth, r, v, VesselParams::block());
+    let mut ship = Vessel::coasting(&w, VesselId(1), t0, earth, r, v, VesselParams::block());
     let reached = ship.advance(&w, w.end().add_seconds(86_400.0), &Controls::default(), usize::MAX);
     assert!(reached.seconds_since(w.end()).abs() < 1e-6, "stopped {} s from the end", reached.seconds_since(w.end()));
     assert!(reached <= w.end());
@@ -57,7 +57,7 @@ fn a_segment_ended_at_its_horizon_is_continued() {
     let w = world();
     let (earth, r, v) = leo(&w);
     let t0 = sol::sol_epoch().add_seconds(86_400.0);
-    let mut ship = Vessel::coasting(&w, t0, earth, r, v, VesselParams::block());
+    let mut ship = Vessel::coasting(&w, VesselId(1), t0, earth, r, v, VesselParams::block());
     let start =
         CoastStart { anchor: earth, r, v, drag: None, contact_height: 0.0, horizon: 100.0, fixed_anchor: false };
     ship.phase = Phase::Coasting { segment: Box::new(Segment::new(&w, t0, start)) };
@@ -72,7 +72,7 @@ fn attitude_after_frames_and_jump(controls: Controls, omega0: DVec3) -> (Vessel,
     let w = world();
     let (earth, r, v) = leo(&w);
     let t0 = sol::sol_epoch().add_seconds(86_400.0);
-    let mut frames = Vessel::coasting(&w, t0, earth, r, v, VesselParams::block());
+    let mut frames = Vessel::coasting(&w, VesselId(1), t0, earth, r, v, VesselParams::block());
     frames.attitude.omega = omega0;
     let mut jump = frames.clone();
     for k in 1..=600 {

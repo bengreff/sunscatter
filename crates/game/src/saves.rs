@@ -96,7 +96,7 @@ pub fn save_path(dir: &Path, name: &str) -> PathBuf {
 }
 
 pub fn save(sim: &SimState, path: &Path) -> Result<(), SaveError> {
-    SaveGame::capture(&sim.world, sim.clock, &sim.fleet, sim.active, sim.controls).write(path)
+    SaveGame::capture(&sim.world, sim.clock, &sim.fleet, sim.vessel_ids, sim.active, sim.controls).write(path)
 }
 
 /// Loads `path` into `sim` (warp back to 1x). On error `sim` is unchanged.
@@ -112,6 +112,7 @@ pub fn load(sim: &mut SimState, path: &Path) -> Result<(), SaveError> {
 /// Puts a (checked, non-empty) save into `sim`, warp back to 1x.
 pub fn restore(sim: &mut SimState, save: SaveGame) {
     sim.fleet = save.vessels;
+    sim.vessel_ids = save.vessel_ids;
     sim.active = save.active;
     sim.clock = save.clock;
     sim.controls = save.controls;

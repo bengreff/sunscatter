@@ -203,7 +203,7 @@ impl Navball {
 mod tests {
     use super::*;
     use sim::kepler::Elements;
-    use sim::vessel::VesselParams;
+    use sim::vessel::{VesselId, VesselParams};
     use std::sync::Arc;
 
     fn world() -> World {
@@ -216,14 +216,14 @@ mod tests {
     fn g_load_is_one_on_the_pad_zero_in_orbit_and_thrust_when_powered() {
         let w = world();
         let t = sim::sol::sol_epoch();
-        let pad = Vessel::landed_at(&w, "Earth", 28.6, -80.6, t, VesselParams::block());
+        let pad = Vessel::landed_at(&w, VesselId(1), "Earth", 28.6, -80.6, t, VesselParams::block());
         let g = rules::g_load(proper_accel(&w, t, &pad, 0.0));
         assert!((g - 1.0).abs() < 0.01, "pad {g}");
 
         let earth = w.find("Earth").expect("Earth").clone();
         let el = Elements { a: 6_778_137.0, e: 0.001, i: 0.9, raan: 0.3, argp: 0.0, mean_anomaly: 1.0 };
         let (r, v) = el.to_state(earth.gm);
-        let leo = Vessel::coasting(&w, t, earth.node, r, v, VesselParams::block());
+        let leo = Vessel::coasting(&w, VesselId(1), t, earth.node, r, v, VesselParams::block());
         let g = rules::g_load(proper_accel(&w, t, &leo, 0.0));
         assert!(g < 1e-6, "coasting in vacuum {g}");
 

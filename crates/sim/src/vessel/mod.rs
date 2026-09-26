@@ -12,10 +12,12 @@
 
 mod anchor;
 mod attitude;
+mod id;
 mod segment;
 
 pub use anchor::preferred_anchor;
 pub use attitude::{quat_from_rotvec, quat_z_to, Attitude};
+pub use id::{VesselId, VesselIds};
 pub use segment::{coast_tolerance, CoastStart, EndKind, Sample, Segment, SegmentEnd};
 
 use crate::forces::{altitude_above, ActiveSources, DragModel, ForceContext};
@@ -81,6 +83,8 @@ pub enum Phase {
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Vessel {
+    /// Stable identity (never reused; see [`VesselIds`]).
+    id: VesselId,
     pub params: VesselParams,
     pub phase: Phase,
     /// The vessel's current time (it may trail the game clock by < one tick).
@@ -110,13 +114,22 @@ fn body_to_inertial(world: &World, body: NodeId, t: Epoch) -> DQuat {
 
 impl Vessel {
     /// A vessel standing upright on a body's surface at latitude/longitude (deg).
-    pub fn landed_at(world: &World, body: &str, lat_deg: f64, lon_deg: f64, t: Epoch, params: VesselParams) -> Self {
+    pub fn landed_at(
+        world: &World,
+        id: VesselId,
+        body: &str,
+        lat_deg: f64,
+        lon_deg: f64,
+        t: Epoch,
+        params: VesselParams,
+    ) -> Self {
         let src = world.find(body).expect("known body");
         let p = src.physical.as_ref().expect("physical body");
         let deg = math::PI / 180.0;
         let fixed = p.ground_point(lat_deg * deg, lon_deg * deg, params.contact_height);
         let att_fixed = quat_z_to(fixed.raw().normalize());
         let mut v = Vessel {
+            id,
             params,
             phase: Phase::Landed { body: src.node, fixed, att_fixed },
             time: t,
@@ -130,8 +143,17 @@ impl Vessel {
     }
 
     /// A vessel coasting from `(r, v)` relative to `anchor` at `t`.
-    pub fn coasting(world: &World, t: Epoch, anchor: NodeId, r: DVec3, v: DVec3, params: VesselParams) -> Self {
+    pub fn coasting(
+        world: &World,
+        id: VesselId,
+        t: Epoch,
+        anchor: NodeId,
+        r: DVec3,
+        v: DVec3,
+        params: VesselParams,
+    ) -> Self {
         let mut vessel = Vessel {
+            id,
             params,
             phase: Phase::Powered { anchor, r, v },
             time: t,
@@ -142,6 +164,11 @@ impl Vessel {
         };
         vessel.start_coast(world);
         vessel
+    }
+
+    /// The vessel's stable identity.
+    pub fn id(&self) -> VesselId {
+        self.id
     }
 
     /// The drag model in use (with the parachute's area once deployed).

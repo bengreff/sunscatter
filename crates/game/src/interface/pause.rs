@@ -90,7 +90,8 @@ pub fn track_launch(sim: Res<SimState>, mut snapshot: ResMut<LaunchSnapshot>) {
             !(0.0..1.0).contains(&age)
         });
         if fresh {
-            snapshot.0 = Some(SaveGame::capture(&sim.world, sim.clock, &sim.fleet, sim.active, sim.controls));
+            snapshot.0 =
+                Some(SaveGame::capture(&sim.world, sim.clock, &sim.fleet, sim.vessel_ids, sim.active, sim.controls));
         }
     }
 }

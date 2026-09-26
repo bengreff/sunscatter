@@ -8,7 +8,7 @@ use sim::frame::{BodyFixed, Vec3};
 use sim::sol;
 use sim::terrain::Heightmap;
 use sim::time::Epoch;
-use sim::vessel::{Controls, Phase, Vessel, VesselParams};
+use sim::vessel::{Controls, Phase, Vessel, VesselId, VesselParams};
 use sim::world::World;
 use std::sync::Arc;
 
@@ -47,7 +47,7 @@ fn parachute_drop(w: &World, lat: f64, lon: f64, above_ground: f64) -> Vessel {
     let r = e.rotation.to_inertial(fixed, t).raw();
     let v = e.rotation.omega(t).raw().cross(r);
     let node = w.find("Earth").unwrap().node;
-    let mut ship = Vessel::coasting(w, t, node, r, v, VesselParams::block());
+    let mut ship = Vessel::coasting(w, VesselId(1), t, node, r, v, VesselParams::block());
     let controls = Controls { chute: true, sas: true, ..Default::default() };
     ship.advance(w, t.add_seconds(3_600.0), &controls, usize::MAX);
     ship
@@ -76,9 +76,9 @@ fn landing_on_a_mountain_versus_the_sea() {
 fn vessels_start_on_the_terrain() {
     let w = plateau_world();
     let contact = VesselParams::block().contact_height;
-    let high = Vessel::landed_at(&w, "Earth", 30.0, 0.0, t0(), VesselParams::block());
+    let high = Vessel::landed_at(&w, VesselId(1), "Earth", 30.0, 0.0, t0(), VesselParams::block());
     assert!((landed_height(&w, &high) - (3_000.0 + contact)).abs() < 1e-6);
-    let sea = Vessel::landed_at(&w, "Earth", -30.0, 0.0, t0(), VesselParams::block());
+    let sea = Vessel::landed_at(&w, VesselId(1), "Earth", -30.0, 0.0, t0(), VesselParams::block());
     assert!((landed_height(&w, &sea) - contact).abs() < 1e-6);
     // Standing still is not contact: the vessel stays landed.
     let mut v = high.clone();
@@ -100,7 +100,7 @@ fn falling_onto_a_mountain_is_detected_at_its_height() {
     let fixed = e.ground_point(25.0 * DEG, 40.0 * DEG, 2_000.0);
     let r = e.rotation.to_inertial(fixed, t).raw();
     let v = e.rotation.omega(t).raw().cross(r);
-    let mut ship = Vessel::coasting(&w, t, w.find("Earth").unwrap().node, r, v, VesselParams::block());
+    let mut ship = Vessel::coasting(&w, VesselId(1), t, w.find("Earth").unwrap().node, r, v, VesselParams::block());
     ship.advance(&w, t.add_seconds(600.0), &Controls::default(), usize::MAX);
     match ship.phase {
         Phase::Crashed { fixed, .. } => assert!((e.altitude(fixed) - 3_005.0).abs() < 1e-6),
@@ -134,7 +134,7 @@ fn shipped_heightmaps_have_the_expected_landmarks() {
         assert!(deep < -9_000.0, "{deep}");
         assert!(pad.abs() < 20.0, "{pad}");
         assert_eq!(e.surface_height_latlon(11.3733 * DEG, 142.5917 * DEG), 0.0, "sea is solid at 0");
-        let ship = Vessel::landed_at(&w, "Earth", 27.9881, 86.925, t0(), VesselParams::block());
+        let ship = Vessel::landed_at(&w, VesselId(1), "Earth", 27.9881, 86.925, t0(), VesselParams::block());
         let Phase::Landed { fixed, .. } = ship.phase else { unreachable!() };
         assert!((e.altitude(fixed) - everest - 5.0).abs() < 1.0);
     }
