@@ -1,14 +1,19 @@
 //! Scripted demo flight (set `SUNSCATTER_DEMO=<screenshot dir>`): flies the
 //! same pad → orbit → de-orbit → parachute profile as the sim scenario test,
-//! through the real app loop, saving screenshots at each stage. Used to verify
-//! the prototype end to end and as a reproducible showcase.
+//! through the real app loop. At each key view it freezes the clock and
+//! captures every graphics tier; at the pad and in orbit it runs the graphics
+//! benchmark (every tier, each feature alone). Used to verify the game end to
+//! end, to judge visuals, and as a reproducible showcase.
 //!
 //! The script drives the same controls a player would, except that it holds
 //! attitude directly (magic attitude hold) like the scenario test.
 
+use crate::bench::{self, Bench};
 use crate::camera::{self, CameraRig, Focus};
 use crate::hud::{PlotFrame, UiState};
-use crate::state::SimState;
+use crate::settings::{GraphicsSettings, Tier};
+use crate::state::{SimPause, SimState};
+use crate::terrain::Terrain;
 use bevy::app::AppExit;
 use bevy::prelude::*;
 use bevy::render::view::screenshot::{save_to_disk, Screenshot};
@@ -23,12 +28,27 @@ enum Step {
     Coast,
     Circularize,
     Orbit,
-    Moon,
+    Map,
+    MoonFar,
+    MoonClose,
     Perf(usize),
     Deorbit,
     Fall,
+    Landed,
+    Sunset,
     Done,
 }
+
+/// Capturing one view in every tier.
+struct Capture {
+    view: &'static str,
+    tier: usize,
+    timer: f64,
+}
+
+/// Longest wait for terrain and textures to settle before a shot (s).
+const SETTLE_MAX: f64 = 12.0;
+const SETTLE_MIN: f64 = 1.2;
 
 #[derive(Resource)]
 pub struct Demo {
@@ -42,6 +62,15 @@ pub struct Demo {
     shots: u32,
     shot_taken: bool,
     perf: PerfSample,
+    capture: Option<Capture>,
+    /// A benchmark was started and its results are pending.
+    benching: bool,
+    /// Graphics tier used while flying (between captures).
+    flying_tier: Tier,
+    /// End the demo after this step (`SUNSCATTER_DEMO_STOP_AFTER`, e.g. `Pad`).
+    stop_after: Option<String>,
+    /// Run the graphics benchmark (off with `SUNSCATTER_DEMO_NO_BENCH`).
+    bench: bool,
 }
 
 /// Frame statistics for one warp level of the performance stage.
@@ -67,6 +96,11 @@ impl Demo {
             shots: 0,
             shot_taken: false,
             perf: PerfSample::default(),
+            capture: None,
+            benching: false,
+            flying_tier: Tier::Medium,
+            stop_after: std::env::var("SUNSCATTER_DEMO_STOP_AFTER").ok(),
+            bench: std::env::var_os("SUNSCATTER_DEMO_NO_BENCH").is_none(),
         })
     }
 
@@ -83,9 +117,15 @@ impl Demo {
 
     fn next(&mut self, step: Step) {
         info!("demo step {:?} -> {:?}", self.step, step);
-        self.step = step;
+        let stop = self.stop_after.as_deref().is_some_and(|s| s.eq_ignore_ascii_case(&format!("{:?}", self.step)));
+        self.step = if stop { Step::Done } else { step };
         self.timer = 0.0;
         self.shot_taken = false;
+    }
+
+    /// Starts capturing `view` in every tier (the clock is frozen meanwhile).
+    fn capture(&mut self, view: &'static str) {
+        self.capture = Some(Capture { view, tier: 0, timer: 0.0 });
     }
 }
 
@@ -99,8 +139,39 @@ fn horizontal(r: DVec3, v: DVec3) -> DVec3 {
     }
 }
 
+/// Runs the capture sub-state; returns true while it is busy.
+fn run_capture(
+    demo: &mut Demo,
+    commands: &mut Commands,
+    dt: f64,
+    settings: &mut GraphicsSettings,
+    terrain: &Terrain,
+    pause: &mut SimPause,
+) -> bool {
+    let Some(cap) = demo.capture.as_mut() else { return false };
+    pause.0 = true;
+    let tier = Tier::ALL[cap.tier];
+    if cap.timer == 0.0 {
+        *settings = GraphicsSettings::preset(tier);
+    }
+    cap.timer += dt;
+    let settled = cap.timer > SETTLE_MIN && !terrain.busy();
+    if settled || cap.timer > SETTLE_MAX {
+        let name = format!("{}_{}", cap.view, tier.name().to_lowercase());
+        cap.tier += 1;
+        cap.timer = 0.0;
+        if cap.tier == Tier::ALL.len() {
+            demo.capture = None;
+            *settings = GraphicsSettings::preset(demo.flying_tier);
+            pause.0 = false;
+        }
+        demo.shot(commands, &name);
+    }
+    true
+}
+
 /// Runs before the simulation each frame.
-#[allow(clippy::too_many_lines)]
+#[allow(clippy::too_many_lines, clippy::too_many_arguments)]
 pub fn run(
     mut commands: Commands,
     time: Res<Time>,
@@ -108,31 +179,52 @@ pub fn run(
     mut sim: ResMut<SimState>,
     mut rig: ResMut<CameraRig>,
     mut ui: ResMut<UiState>,
+    mut settings: ResMut<GraphicsSettings>,
+    mut bench: ResMut<Bench>,
+    mut pause: ResMut<SimPause>,
+    terrain: Res<Terrain>,
     mut exit: MessageWriter<AppExit>,
 ) {
     let Some(mut demo) = demo else { return };
-    demo.timer += time.delta_secs_f64();
+    let dt = time.delta_secs_f64();
+    if run_capture(&mut demo, &mut commands, dt, &mut settings, &terrain, &mut pause) {
+        return;
+    }
+    if demo.benching {
+        pause.0 = true;
+        if bench.running() {
+            return;
+        }
+        info!("demo benchmark results\n{}", bench::markdown(&bench));
+        let file = demo.dir.join(format!("bench_{}.md", bench.view));
+        if let Err(e) = std::fs::write(&file, bench::markdown(&bench)) {
+            error!("{}: {e}", file.display());
+        }
+        demo.benching = false;
+        pause.0 = false;
+    }
+    demo.timer += dt;
     let earth = sim.world.find("Earth").expect("Earth").clone();
-    let re = sim::body::earth().radius_eq;
+    let re = earth.physical.as_ref().expect("Earth is physical").radius_eq;
     let (_, r, v) = sim.ship().state(&sim.world);
     let el = Elements::from_state(r, v, earth.gm);
     let alt = r.length() - re;
-    let wait_shot = |demo: &mut Demo, commands: &mut Commands, name: &str, after: f64| -> bool {
-        if !demo.shot_taken && demo.timer > after {
-            demo.shot(commands, name);
-            demo.shot_taken = true;
-        }
-        demo.shot_taken && demo.timer > after + 0.5
-    };
     let point = |sim: &mut SimState, dir: DVec3| {
         let a = sim.active;
         sim.fleet[a].attitude.q = quat_z_to(dir.normalize());
         sim.fleet[a].attitude.omega = DVec3::ZERO;
     };
+    let moon = sim.world.find("Moon").map(|s| s.node);
     match demo.step {
         Step::Pad => {
             rig.distance = 40.0;
-            if wait_shot(&mut demo, &mut commands, "pad", 1.5) {
+            if demo.timer > 1.0 && !demo.shot_taken {
+                demo.shot_taken = true;
+                demo.capture("pad");
+            } else if demo.shot_taken && demo.bench && !demo.benching && bench.results.is_empty() {
+                bench.start("pad", *settings);
+                demo.benching = true;
+            } else if demo.shot_taken && (!demo.bench || !bench.results.is_empty()) {
                 sim.controls.throttle = 1.0;
                 sim.warp = 3;
                 demo.next(Step::Ascent);
@@ -144,8 +236,8 @@ pub fn run(
             point(&mut sim, up * pitch.cos() + horizontal(r, v) * pitch.sin());
             if alt > 20_000.0 && !demo.shot_taken {
                 rig.distance = 80.0;
-                demo.shot(&mut commands, "ascent");
                 demo.shot_taken = true;
+                demo.capture("ascent_20km");
             }
             if el.apoapsis() - re > 300_000.0 {
                 sim.controls.throttle = 0.0;
@@ -170,22 +262,54 @@ pub fn run(
             if el.periapsis() - re > 250_000.0 {
                 sim.controls.throttle = 0.0;
                 sim.warp = 0;
-                rig.distance = 2.5e6;
-                rig.pitch = 0.6;
+                rig.focus = Focus::Ship;
+                rig.distance = 60.0;
+                rig.pitch = 0.12;
                 demo.next(Step::Orbit);
             }
         }
         Step::Orbit => {
-            if wait_shot(&mut demo, &mut commands, "orbit_with_prediction", 1.0) {
+            if !demo.shot_taken {
+                demo.shot_taken = true;
+                demo.capture("orbit_day");
+            } else if demo.bench && !demo.benching && bench.view != "orbit" {
+                bench.start("orbit", *settings);
+                demo.benching = true;
+            } else {
                 ui.plot_frame = PlotFrame::EarthInertial;
-                if let Some(moon) = sim.world.find("Moon").map(|s| s.node) {
-                    camera::focus_body(&mut rig, &sim, moon);
-                }
-                demo.next(Step::Moon);
+                rig.distance = 2.5e7;
+                rig.pitch = 0.9;
+                demo.next(Step::Map);
             }
         }
-        Step::Moon => {
-            if wait_shot(&mut demo, &mut commands, "moon_focus", 1.0) {
+        Step::Map => {
+            if !demo.shot_taken {
+                demo.shot_taken = true;
+                demo.capture("map");
+            } else {
+                if let Some(moon) = moon {
+                    camera::focus_body(&mut rig, &sim, moon);
+                    rig.distance = 3.0 * 1_737_400.0;
+                }
+                demo.next(Step::MoonFar);
+            }
+        }
+        Step::MoonFar => {
+            if !demo.shot_taken {
+                demo.shot_taken = true;
+                demo.capture("moon_orbit");
+            } else {
+                rig.distance = 1_737_400.0 + 12_000.0;
+                rig.pitch -= 0.3;
+                demo.next(Step::MoonClose);
+            }
+        }
+        Step::MoonClose => {
+            if !demo.shot_taken {
+                demo.shot_taken = true;
+                demo.capture("moon_close");
+            } else {
+                settings.set_if_neq(GraphicsSettings::preset(Tier::Minimal));
                 rig.focus = Focus::Ship;
                 rig.distance = 3.0e6;
                 sim.spawn_test_ships(10);
@@ -193,12 +317,12 @@ pub fn run(
             }
         }
         Step::Perf(level) => {
-            // 11 vessels in flight; measure frame times at 1x, 1000x, 1e6x.
+            // 11 vessels in flight; measure frame times at 1x, 1000x, 1e6x
+            // (Minimal graphics, like the prototype's measurements).
             // (At 1e6x this stage spans ~46 days: the demo orbit must be high
             // enough that drag does not decay it meanwhile.)
             const LEVELS: [usize; 3] = [0, 6, 9];
             sim.warp = LEVELS[level];
-            let dt = time.delta_secs_f64();
             let clock = sim.clock;
             let limited = sim.compute_limited;
             let p = &mut demo.perf;
@@ -228,6 +352,7 @@ pub fn run(
                     demo.next(Step::Perf(level + 1));
                 } else {
                     sim.fleet.truncate(1);
+                    *settings = GraphicsSettings::preset(demo.flying_tier);
                     rig.distance = 60.0;
                     sim.warp = 3;
                     sim.controls.throttle = 1.0;
@@ -265,7 +390,7 @@ pub fn run(
                 Phase::Landed { .. } => {
                     info!("demo: landed safely");
                     sim.warp = 0;
-                    demo.next(Step::Done);
+                    demo.next(Step::Landed);
                 }
                 Phase::Crashed { speed, .. } => {
                     error!("demo: crashed at {speed:.1} m/s");
@@ -274,8 +399,41 @@ pub fn run(
                 _ => {}
             }
         }
+        Step::Landed => {
+            if !demo.shot_taken && demo.timer > 1.0 {
+                demo.shot(&mut commands, "landed");
+                demo.shot_taken = true;
+            }
+            if demo.shot_taken && demo.timer > 1.5 {
+                demo.next(Step::Sunset);
+            }
+        }
+        Step::Sunset => {
+            // Warp until the Sun is low, then look towards it.
+            let snap = sim.world.snapshot(sim.clock);
+            let (anchor, r, _) = sim.ship().state(&sim.world);
+            let sun = sim.world.find("Sun").map(|s| s.node).expect("Sun");
+            let to_sun = (snap.relative_r(sun, anchor) - r).normalize();
+            let up = r.normalize();
+            let elevation = to_sun.dot(up).asin().to_degrees();
+            if demo.shot_taken {
+                demo.next(Step::Done);
+            } else if elevation > 4.0 || elevation < -0.5 {
+                sim.warp = if elevation > 12.0 || elevation < -0.5 { 6 } else { 5 };
+            } else {
+                sim.warp = 0;
+                let (e1, e2) = camera::basis(up);
+                let away = -(to_sun - up * to_sun.dot(up));
+                rig.yaw = away.dot(e2).atan2(away.dot(e1));
+                rig.pitch = 0.05;
+                rig.distance = 40.0;
+                demo.shot_taken = true;
+                demo.capture("sunset");
+            }
+        }
         Step::Done => {
-            if wait_shot(&mut demo, &mut commands, "landed", 1.0) {
+            // Screenshots are written asynchronously; give the last one time.
+            if demo.timer > 3.0 {
                 exit.write(AppExit::Success);
             }
         }

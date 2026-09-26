@@ -103,6 +103,17 @@ pub fn primary(eph: &Ephemeris, node: NodeId) -> Option<NodeId> {
     }
 }
 
+/// The smallest anchor zone containing the camera (the body whose system
+/// the player is looking at), if any.
+fn context_body(sim: &SimState, rig: &CameraRig) -> Option<NodeId> {
+    let snap = sim.world.snapshot(sim.clock);
+    sim.world.anchor_order.iter().map(|&i| &sim.world.sources[i]).find_map(|s| {
+        let zone = s.anchor_zone?;
+        let d = (rig.cam_pos - snap.relative_r(s.node, rig.anchor)).length();
+        (d < zone.enter).then_some(s.node)
+    })
+}
+
 /// Orbit lines of every body about its primary, over one period ahead
 /// (from the ephemeris where it covers the period, else the osculating conic).
 pub fn draw_body_orbits(
@@ -120,8 +131,19 @@ pub fn draw_body_orbits(
     }
     let eph = &sim.world.eph;
     let snap = sim.world.snapshot(sim.clock);
+    let context = context_body(&sim, &rig);
     for node in eph.bodies() {
         let Some(p) = primary(eph, node) else { continue };
+        // Like KSP: inside a body's zone, show its moons' orbits (and, near
+        // a moon, the moon's own orbit); outside all zones, the planets'.
+        let has_zone = |n: NodeId| sim.world.source(n).is_some_and(|s| s.anchor_zone.is_some());
+        let relevant = match context {
+            Some(c) => p == c || (node == c && has_zone(p)),
+            None => !has_zone(p),
+        };
+        if !relevant {
+            continue;
+        }
         // The rotating frame is Earth–Moon: skip orbits about Earth there.
         if ui.plot_frame == PlotFrame::EarthMoonRotating && eph.node(p).name == "Earth" {
             continue;

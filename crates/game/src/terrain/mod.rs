@@ -83,6 +83,13 @@ pub struct Terrain {
     pub drawn: usize,
 }
 
+impl Terrain {
+    /// Chunks or colour maps are still being built.
+    pub fn busy(&self) -> bool {
+        self.bodies.iter().any(|b| !b.pending.is_empty() || b.color_task.is_some())
+    }
+}
+
 /// Terrain heights for a body, from the simulation (one owner of the
 /// sampling math, so the rendered surface is the physical one).
 fn height_fn(sim: &SimState, node: NodeId) -> Option<(HeightFn, f64)> {

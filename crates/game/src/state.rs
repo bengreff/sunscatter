@@ -154,9 +154,16 @@ pub fn read_controls(keys: Res<ButtonInput<KeyCode>>, time: Res<Time>, mut sim: 
     }
 }
 
+/// Freezes the clock (used by the demo while it captures every graphics tier).
+#[derive(Resource, Default)]
+pub struct SimPause(pub bool);
+
 /// Advances every vessel to the new clock. Time warp only changes how far the
 /// clock moves per frame; each vessel's physics is independent of it.
-pub fn advance(time: Res<Time>, mut sim: ResMut<SimState>) {
+pub fn advance(time: Res<Time>, pause: Res<SimPause>, mut sim: ResMut<SimState>) {
+    if pause.0 {
+        return;
+    }
     let level = sim.effective_warp();
     let warp = WARP_LEVELS[level];
     // Rotation input is only honoured at physics warp.

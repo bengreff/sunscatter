@@ -144,8 +144,12 @@ impl GraphicsSettings {
 }
 
 impl Default for GraphicsSettings {
+    /// The default tier, or `SUNSCATTER_TIER=<name>` if set.
     fn default() -> Self {
-        Self::preset(Tier::default())
+        let from_env = std::env::var("SUNSCATTER_TIER")
+            .ok()
+            .and_then(|name| Tier::ALL.into_iter().find(|t| t.name().eq_ignore_ascii_case(&name)));
+        Self::preset(from_env.unwrap_or_default())
     }
 }
 

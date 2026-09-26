@@ -44,6 +44,7 @@ fn main() {
         .add_plugins((terrain::TerrainPlugin, sky::SkyPlugin, atmosphere::AtmosphereFixPlugin))
         .insert_resource(state::SimState::new())
         .init_resource::<state::Prediction>()
+        .init_resource::<state::SimPause>()
         .init_resource::<camera::CameraRig>()
         .init_resource::<hud::UiState>()
         .init_resource::<settings::GraphicsSettings>()

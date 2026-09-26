@@ -123,11 +123,13 @@ pub fn draw(
             let k = snap.relative(body.node, anchor);
             let rel = r - k.r;
             let p = body.physical.as_ref().expect("surface body");
-            let alt = p.altitude(p.rotation.to_fixed(sim::frame::Vec3::from_raw(rel), sim.clock));
+            let fixed = p.rotation.to_fixed(sim::frame::Vec3::from_raw(rel), sim.clock);
+            let alt = p.altitude(fixed);
+            let above_ground = p.altitude_above_surface(fixed);
             let v_orb = v - k.v;
             let v_srf = v_orb - p.rotation.omega(sim.clock).raw().cross(rel);
             let el = Elements::from_state(rel, v_orb, body.gm);
-            ui_.monospace(format!("{:<6} alt {}", body.name, fmt_dist(alt)));
+            ui_.monospace(format!("{:<6} alt {}  (terrain {})", body.name, fmt_dist(alt), fmt_dist(above_ground)));
             ui_.monospace(format!("surface speed {:.1} m/s", v_srf.length()));
             ui_.monospace(format!("orbital speed {:.1} m/s", v_orb.length()));
             ui_.monospace(format!(
