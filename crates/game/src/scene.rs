@@ -216,15 +216,6 @@ pub fn update_ground(
     }
 }
 
-/// Cached trajectory points (per plotting frame) so the per-sample ephemeris
-/// lookups happen only when the segment grows, not every frame.
-#[derive(Default)]
-pub struct TrajectoryCache {
-    key: Option<(f64, f64, f64, PlotFrame, usize)>,
-    /// Points relative to Earth, in the plotting frame's own coordinates.
-    points: Vec<(f64, DVec3)>,
-}
-
 /// Earth–Moon rotating basis at `t` (x → Moon, z → orbit normal).
 fn rotating_basis(world: &World, t: Epoch) -> DMat3 {
     let (earth, moon) = (world.find("Earth").map(|s| s.node), world.find("Moon").map(|s| s.node));
@@ -235,50 +226,46 @@ fn rotating_basis(world: &World, t: Epoch) -> DMat3 {
     DMat3::from_cols(x, z.cross(x), z)
 }
 
+/// Number of points used to draw a trajectory.
+const TRAJECTORY_POINTS: usize = 600;
+
+/// Draws the future part of the stored segment (coasting) or the background
+/// prediction (powered), resampled at uniform times with the segment's own
+/// interpolation, so the line starts exactly at the ship and stays smooth.
 pub fn draw_trajectory(
     sim: Res<SimState>,
     rig: Res<CameraRig>,
     pred: Res<Prediction>,
     ui: Res<UiState>,
-    mut cache: Local<TrajectoryCache>,
     mut gizmos: Gizmos,
 ) {
     let seg: Option<&Segment> = sim.ship().segment().or(pred.segment.as_ref());
     let Some(seg) = seg else { return };
     let Some(earth) = sim.world.find("Earth").map(|s| s.node) else { return };
-    // Keyed on the stored time span: extension and pruning both change it.
-    let (first, last) = (seg.samples.first().map_or(0.0, |s| s.s.t), seg.computed_until());
-    let key = (seg.t0.to_seconds_f64(), first, last, ui.plot_frame, sim.active);
-    if cache.key != Some(key) {
-        let stride = (seg.samples.len() / 4000).max(1);
-        cache.points = seg
-            .samples
-            .iter()
-            .step_by(stride)
-            .map(|s| {
-                let t = seg.t0.add_seconds(s.s.t);
-                let rel = s.s.r + sim.world.eph.relative(s.anchor, earth, t).r;
-                let p = match ui.plot_frame {
-                    PlotFrame::EarthInertial => rel,
-                    PlotFrame::EarthMoonRotating => rotating_basis(&sim.world, t).transpose() * rel,
-                };
-                (s.s.t, p)
-            })
-            .collect();
-        cache.key = Some(key);
+    let t_start = sim.clock.seconds_since(seg.t0).max(seg.samples.first().map_or(0.0, |s| s.s.t));
+    let t_end = seg.computed_until();
+    if t_end <= t_start {
+        return;
     }
-    let now = sim.clock.seconds_since(seg.t0);
-    let earth_now = sim.world.snapshot(sim.clock).relative(earth, rig.anchor).r;
-    let basis = match ui.plot_frame {
+    let earth_now = sim.world.snapshot(sim.clock).relative_r(earth, rig.anchor);
+    let basis_now = match ui.plot_frame {
         PlotFrame::EarthInertial => DMat3::IDENTITY,
         PlotFrame::EarthMoonRotating => rotating_basis(&sim.world, sim.clock),
     };
-    // Start the line at the ship itself (a powered prediction was computed a
-    // moment ago, so its first point trails the ship slightly).
-    let (anchor, r, _) = sim.ship().state(&sim.world);
-    let ship_now = (sim.world.snapshot(sim.clock).relative(anchor, rig.anchor).r + r - rig.cam_pos).as_vec3();
-    let points = std::iter::once(ship_now).chain(
-        cache.points.iter().filter(|(t, _)| *t >= now).map(|(_, p)| (basis * *p + earth_now - rig.cam_pos).as_vec3()),
-    );
-    gizmos.linestrip(points, Color::srgb(1.0, 0.85, 0.2));
+    // While powered the prediction was computed a moment ago; join it to the
+    // ship's current position so the line always starts at the ship.
+    let (ship_anchor, ship_r, _) = sim.ship().state(&sim.world);
+    let ship_now = sim.world.snapshot(sim.clock).relative_r(ship_anchor, rig.anchor) + ship_r - rig.cam_pos;
+    let resampled = (0..TRAJECTORY_POINTS).filter_map(|k| {
+        let t = t_start + (t_end - t_start) * k as f64 / (TRAJECTORY_POINTS - 1) as f64;
+        let (anchor, r, _) = seg.eval(t)?;
+        let epoch = seg.t0.add_seconds(t);
+        let rel_earth = r + sim.world.eph.relative(anchor, earth, epoch).r;
+        let plotted = match ui.plot_frame {
+            PlotFrame::EarthInertial => rel_earth,
+            PlotFrame::EarthMoonRotating => basis_now * (rotating_basis(&sim.world, epoch).transpose() * rel_earth),
+        };
+        Some((plotted + earth_now - rig.cam_pos).as_vec3())
+    });
+    gizmos.linestrip(std::iter::once(ship_now.as_vec3()).chain(resampled), Color::srgb(1.0, 0.85, 0.2));
 }
