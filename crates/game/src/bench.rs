@@ -59,8 +59,19 @@ impl Bench {
         self.current.is_some() || !self.queue.is_empty()
     }
 
+    /// Starts measuring every configuration, or only those named in
+    /// `SUNSCATTER_BENCH_ONLY` (a developer filter: comma-separated label
+    /// fragments, run in that order).
     pub fn start(&mut self, view: &str, current: GraphicsSettings) {
         let mut q = configurations();
+        if let Ok(only) = std::env::var("SUNSCATTER_BENCH_ONLY") {
+            // A comma-separated list of labels, run in that order.
+            let all = q;
+            q = only
+                .split(',')
+                .filter_map(|want| all.iter().find(|(label, _)| label.contains(want.trim())).cloned())
+                .collect();
+        }
         q.reverse();
         self.queue = q;
         self.current = None;

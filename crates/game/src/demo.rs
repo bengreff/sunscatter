@@ -124,9 +124,12 @@ impl Demo {
         self.shot_taken = false;
     }
 
-    /// Starts capturing `view` in every tier (the clock is frozen meanwhile).
+    /// Starts capturing `view` in every tier (the clock is frozen meanwhile),
+    /// unless `SUNSCATTER_DEMO_NO_CAPTURE` is set (benchmark-only runs).
     fn capture(&mut self, view: &'static str) {
-        self.capture = Some(Capture { view, tier: 0, timer: 0.0 });
+        if std::env::var_os("SUNSCATTER_DEMO_NO_CAPTURE").is_none() {
+            self.capture = Some(Capture { view, tier: 0, timer: 0.0 });
+        }
     }
 }
 
