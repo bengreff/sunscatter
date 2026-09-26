@@ -19,8 +19,12 @@ pub const WARP_LEVELS: [f64; 10] = [1.0, 2.0, 3.0, 4.0, 10.0, 100.0, 1e3, 1e4, 1
 pub const MAX_PHYSICS_WARP: usize = 3;
 
 /// Launch site: LC-39A, Kennedy Space Center.
+/// The launch pad: Kennedy Space Center, on Merritt Island about 6 km west
+/// of LC-39A. At the committed maps' resolution (~2 km water mask, ~5 km
+/// colour map) LC-39A's barrier island is not resolved and the pad would sit
+/// in the surf; a proper launch-site data patch is future work.
 pub const PAD_LAT: f64 = 28.6082;
-pub const PAD_LON: f64 = -80.6041;
+pub const PAD_LON: f64 = -80.66;
 
 /// Per-vessel, per-frame integration budgets (steps, ~7 µs each) so a frame
 /// never stalls. When a coast can't keep up, the clock is held back: warp is

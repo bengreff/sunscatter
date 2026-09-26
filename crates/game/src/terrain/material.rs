@@ -50,6 +50,11 @@ pub struct TerrainParams {
     /// rgb: planetshine colour; w: this body's sunlight relative to the
     /// shared light's (flux at the body / flux at the camera).
     pub light: Vec4,
+    /// Ground textures (`ground.rs`): x > 0 when loaded; y, z: fine and
+    /// coarse tile sizes in detail-uv units.
+    pub ground: Vec4,
+    /// Mean linear colour of each ground layer.
+    pub ground_means: [Vec4; 5],
 }
 
 #[derive(Asset, AsBindGroup, Reflect, Debug, Clone, Default)]
@@ -63,6 +68,13 @@ pub struct TerrainExt {
     #[texture(103)]
     #[sampler(104)]
     pub water_map: Option<Handle<Image>>,
+    /// Ground layers (colour, normal), as 2D texture arrays.
+    #[texture(105, dimension = "2d_array")]
+    #[sampler(106)]
+    pub ground_color: Option<Handle<Image>>,
+    #[texture(107, dimension = "2d_array")]
+    #[sampler(108)]
+    pub ground_normal: Option<Handle<Image>>,
 }
 
 impl MaterialExtension for TerrainExt {

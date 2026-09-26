@@ -7,6 +7,7 @@
 #import bevy_pbr::{
     pbr_fragment::pbr_input_from_standard_material,
     pbr_functions::alpha_discard,
+    mesh_view_bindings::globals,
 }
 
 #ifdef PREPASS_PIPELINE
@@ -50,6 +51,10 @@ struct TerrainParams {
     occluder: vec4<f32>,
     shine: vec4<f32>,
     light: vec4<f32>,
+    // Ground textures: x > 0 loaded; y, z fine and coarse tile (detail uv).
+    ground: vec4<f32>,
+    // Mean linear colour of each ground layer.
+    ground_means: array<vec4<f32>, 5>,
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(100) var<uniform> terrain: TerrainParams;
@@ -57,6 +62,10 @@ struct TerrainParams {
 @group(#{MATERIAL_BIND_GROUP}) @binding(102) var color_sampler: sampler;
 @group(#{MATERIAL_BIND_GROUP}) @binding(103) var water_map: texture_2d<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(104) var water_sampler: sampler;
+@group(#{MATERIAL_BIND_GROUP}) @binding(105) var ground_color: texture_2d_array<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(106) var ground_color_sampler: sampler;
+@group(#{MATERIAL_BIND_GROUP}) @binding(107) var ground_normal: texture_2d_array<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(108) var ground_normal_sampler: sampler;
 
 const PI: f32 = 3.14159265;
 
@@ -172,6 +181,45 @@ fn vertex(vertex: TerrainVertex) -> VertexOutput {
 }
 #endif
 
+// Ground layers, in `ground::LAYERS` order.
+const GRASS: i32 = 0;
+const SOIL: i32 = 1;
+const SAND: i32 = 2;
+const ROCK: i32 = 3;
+const SNOW: i32 = 4;
+
+// Wave height gradient (d/du, d/dv) at detail-uv `p` and time `t`: a few
+// sines whose wave vectors are whole multiples of 2π/256, so they repeat
+// exactly with the detail uv's 256-unit wrap (no seam).
+fn wave_slope(p: vec2<f32>, t: f32) -> vec2<f32> {
+    let base = 6.2831853 / 256.0;
+    var g = vec2(0.0);
+    let ks = array<vec2<f32>, 4>(vec2(1024.0, 310.0), vec2(-700.0, 1300.0), vec2(2300.0, -900.0), vec2(400.0, 3100.0));
+    let amps = array<f32, 4>(0.0009, 0.0007, 0.0004, 0.0003);
+    let speeds = array<f32, 4>(0.9, 1.1, 1.6, 2.0);
+    for (var i = 0; i < 4; i++) {
+        let k = ks[i] * base;
+        let ph = dot(k, p) + speeds[i] * t;
+        g += amps[i] * k * cos(ph);
+    }
+    return g;
+}
+
+// Perturbs normal `n` by tangent-space normal `tn` (x along +u, y along +v),
+// with the frame built from screen derivatives of position and uv.
+fn perturb(n: vec3<f32>, dp1: vec3<f32>, dp2: vec3<f32>, duv1: vec2<f32>, duv2: vec2<f32>, tn: vec3<f32>) -> vec3<f32> {
+    let dp2perp = cross(dp2, n);
+    let dp1perp = cross(n, dp1);
+    let t = dp2perp * duv1.x + dp1perp * duv2.x;
+    let b = dp2perp * duv1.y + dp1perp * duv2.y;
+    let m = max(dot(t, t), dot(b, b));
+    if m <= 0.0 {
+        return n;
+    }
+    let s = inverseSqrt(m);
+    return normalize(t * s * tn.x + b * s * tn.y + n * tn.z);
+}
+
 @fragment
 fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> FragmentOutput {
     var pbr_input = pbr_input_from_standard_material(in, is_front);
@@ -191,43 +239,90 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     }
     // Sea fraction; the baked coverage is sharpened into a clean coastline.
     var water = 0.0;
+    var coast = 0.0;
     if terrain.flags.w != 0u {
-        water = smoothstep(0.3, 0.7, textureSampleGrad(water_map, water_sampler, uv, dx, dy).r);
+        let raw = textureSampleGrad(water_map, water_sampler, uv, dx, dy).r;
+        water = smoothstep(0.3, 0.7, raw);
+        // A beach band on the land side of the coastline.
+        coast = smoothstep(0.02, 0.3, raw) * (1.0 - water);
     }
+    // Screen derivatives for the ground textures and normal perturbation
+    // (taken here, in uniform control flow).
+    let fine_uv = in.uv / terrain.ground.y;
+    let coarse_uv = in.uv / terrain.ground.z;
+    let fdx = dpdx(fine_uv);
+    let fdy = dpdy(fine_uv);
+    let cdx = dpdx(coarse_uv);
+    let cdy = dpdy(coarse_uv);
+    let dp1 = dpdx(in.world_position.xyz);
+    let dp2 = dpdy(in.world_position.xyz);
+    let duv1 = dpdx(in.uv);
+    let duv2 = dpdy(in.uv);
 
     let height = in.color.g * 10000.0;
     let up = dir; // close enough to the ellipsoid normal for shading rules
     var roughness = terrain.snow.w;
 
-    // Close-range detail: brightness variation, rock on slopes, snow.
-    if terrain.flags.x != 0u && water < 1.0 {
-        let dist = length(in.world_position.xyz);
-        let fade = clamp(1.0 - dist / terrain.shape.z, 0.0, 1.0);
-        if fade > 0.0 {
-            let n = fbm(in.uv, 4);
-            let fine = fbm(in.uv * 16.0, 3);
-            // The finest octaves (tens of cm) only right around the camera.
-            let near = clamp(1.0 - dist / (terrain.shape.z * 0.05), 0.0, 1.0);
-            var micro = 0.5;
-            if near > 0.0 {
-                micro = mix(0.5, fbm(in.uv * 128.0, 2), near);
+    // Close range: ground textures chosen per fragment from the colour map
+    // (green: grass, bright and dry: sand), the coast (beach), slope (rock)
+    // and snow line; each used relative to its mean colour, so the satellite
+    // colour stays and only the detail comes from the texture.
+    let dist = length(in.world_position.xyz);
+    let fade = select(0.0, clamp(1.0 - dist / terrain.shape.z, 0.0, 1.0), terrain.flags.x != 0u);
+    var n_out = normalize(pbr_input.N);
+    if fade > 0.0 && water < 1.0 {
+        let n = fbm(in.uv, 3);
+        let lum = dot(color, vec3(0.2126, 0.7152, 0.0722));
+        let slope = 1.0 - clamp(dot(normalize(in.world_normal), normalize(rel)), 0.0, 1.0);
+        let rockiness = smoothstep(0.08, 0.25, slope + (n - 0.5) * 0.1);
+        var snow = 0.0;
+        if terrain.rock.w > 0.0 {
+            let line = terrain.rock.w * pow(max(cos(lat), 0.0), 1.5);
+            snow = smoothstep(line - 400.0, line + 400.0, height + (n - 0.5) * 600.0) * (1.0 - rockiness * 0.7);
+        }
+        snow = max(snow, smoothstep(0.45, 0.6, lum));
+        var w = array<f32, 5>(0.0, 0.0, 0.0, 0.0, 0.0);
+        let green = clamp((color.g - max(color.r, color.b)) / (lum + 0.01) * 3.0, 0.0, 1.0);
+        let dry = clamp((color.r - color.b) / (lum + 0.01), 0.0, 1.0) * smoothstep(0.06, 0.18, lum);
+        w[ROCK] = rockiness;
+        w[SNOW] = snow * (1.0 - rockiness);
+        let rest = max(1.0 - w[ROCK] - w[SNOW], 0.0);
+        w[SAND] = rest * max(coast, dry * (1.0 - green));
+        // Patches at ~80 m and ~10 m: clearings of bare soil in grassland,
+        // so a single 5 km colour-map pixel is not one uniform field.
+        let cover = fbm(in.uv * 0.5 + vec2(31.0, 7.0), 3) * 0.7 + fbm(in.uv * 4.0 + vec2(3.0, 11.0), 2) * 0.3;
+        let clearing = smoothstep(0.52, 0.62, cover) * 0.8;
+        w[GRASS] = (rest - w[SAND]) * green * (1.0 - clearing);
+        w[SOIL] = max(rest - w[SAND] - w[GRASS], 0.0);
+        var rel_col = vec3(0.0);
+        var tn = vec3(0.0);
+        for (var i = 0; i < 5; i++) {
+            if w[i] > 0.001 {
+                let f = textureSampleGrad(ground_color, ground_color_sampler, fine_uv, i, fdx, fdy).rgb;
+                let c = textureSampleGrad(ground_color, ground_color_sampler, coarse_uv, i, cdx, cdy).rgb;
+                let mean = max(terrain.ground_means[i].rgb, vec3(0.01));
+                rel_col += w[i] * (f / mean) * mix(vec3(1.0), c / mean, 0.5);
+                let nf = textureSampleGrad(ground_normal, ground_normal_sampler, fine_uv, i, fdx, fdy).xyz * 2.0 - 1.0;
+                tn += w[i] * nf;
             }
-            let variation =
-                1.0 + terrain.shape.w * ((n - 0.5) * 2.0 + (fine - 0.5) * 1.6 + (micro - 0.5) * 1.2);
-            // Patches of slightly different hue (drier / lusher ground).
-            let hue = fbm(in.uv + vec2(17.0, 3.0), 2);
-            color = mix(color, color * vec3(1.15, 1.05, 0.8), smoothstep(0.4, 0.7, hue) * terrain.shape.w);
-            let slope = 1.0 - clamp(dot(normalize(in.world_normal), normalize(rel)), 0.0, 1.0);
-            let rockiness = smoothstep(0.08, 0.25, slope + (n - 0.5) * 0.1);
-            var detailed = mix(color, terrain.rock.rgb, rockiness * 0.8) * variation;
-            if terrain.rock.w > 0.0 {
-                let line = terrain.rock.w * pow(max(cos(lat), 0.0), 1.5);
-                let snow = smoothstep(line - 400.0, line + 400.0, height + (n - 0.5) * 600.0) * (1.0 - rockiness * 0.7);
-                detailed = mix(detailed, terrain.snow.rgb, snow);
-            }
-            color = mix(color, detailed, fade * (1.0 - water));
+        }
+        if terrain.ground.x > 0.0 {
+            // Snow and rock take their own colour; the others keep the map's.
+            let base = mix(color, terrain.rock.rgb, w[ROCK] * 0.6);
+            let base2 = mix(base, terrain.snow.rgb, w[SNOW]);
+            // Lighter and darker patches (uneven cover, moisture).
+            let tone = 1.0 + (fbm(in.uv * 1.5 + vec2(5.0, 19.0), 3) - 0.5) * 0.7;
+            color = mix(color, base2 * rel_col * tone, fade * (1.0 - water));
+            let tn_n = normalize(vec3(tn.xy * fade * (1.0 - water), max(tn.z, 0.1)));
+            n_out = perturb(n_out, dp1, dp2, duv1, duv2, tn_n);
         }
     }
+    // Waves on water, near the camera.
+    if water > 0.0 && fade > 0.0 {
+        let g = wave_slope(in.uv, globals.time) * 3.0 * fade * water;
+        n_out = perturb(n_out, dp1, dp2, duv1, duv2, normalize(vec3(-g.x, -g.y, 1.0)));
+    }
+    pbr_input.N = n_out;
 
     color = mix(color, color * terrain.ocean.rgb, water);
     if terrain.flags.y != 0u {

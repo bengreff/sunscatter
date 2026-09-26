@@ -99,6 +99,8 @@ pub struct Demo {
     land_view: Option<f64>,
     /// The settings screen's shot was taken (the Menu step).
     menu_shot: bool,
+    /// The top-down pad view was captured.
+    pad_top_done: bool,
     perf: PerfSample,
     capture: Option<Capture>,
     /// A benchmark was started and its results are pending.
@@ -135,6 +137,7 @@ impl Demo {
             shot_taken: false,
             land_view: None,
             menu_shot: false,
+            pad_top_done: false,
             perf: PerfSample::default(),
             capture: None,
             benching: false,
@@ -279,16 +282,25 @@ pub fn run(
     let moon = sim.world.find("Moon").map(|s| s.node);
     match demo.step {
         Step::Pad => {
-            rig.distance = 40.0;
+            if !demo.pad_top_done {
+                rig.distance = 40.0;
+            }
             if demo.timer > 1.0 && !demo.shot_taken {
                 demo.shot_taken = true;
                 demo.capture("pad");
+            } else if demo.shot_taken && !demo.pad_top_done {
+                // Straight down from 300 m: ground texture and contrast.
+                demo.pad_top_done = true;
+                rig.pitch = 1.5;
+                rig.distance = 300.0;
+                demo.capture("pad_top");
             } else if demo.shot_taken && demo.bench && !demo.benching && bench.results.is_empty() {
                 bench.start("pad", *settings);
                 demo.benching = true;
             } else if demo.shot_taken && (!demo.bench || !bench.results.is_empty()) {
                 sim.controls.throttle = 1.0;
                 sim.warp = 3;
+                (rig.pitch, rig.distance) = (0.25, 40.0);
                 demo.next(Step::Ascent);
             }
         }

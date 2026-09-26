@@ -4,6 +4,7 @@
 //! surface never has holes. Chunk transforms are camera-relative, computed
 //! from f64 every frame.
 
+mod ground;
 mod lod;
 mod material;
 pub mod mesh;
@@ -118,8 +119,10 @@ pub fn setup(
     sim: Res<SimState>,
     defs: Res<BodyDefs>,
     mut materials: ResMut<Assets<TerrainMaterial>>,
+    mut images: ResMut<Assets<Image>>,
 ) {
     let mut terrain = Terrain::default();
+    let ground = ground::load().map(|g| (images.add(g.color), images.add(g.normal), g.means));
     for (node, def) in &defs.defs {
         if def.emissive.is_some() {
             continue;
@@ -139,11 +142,21 @@ pub fn setup(
             base: v4(def.base_color, 1.0),
             // Full sunlight until lighting.rs fills in the real values.
             light: Vec4::ONE,
+            // Tiles of 5 m and 40 m for a 40 m detail scale (they divide the
+            // detail uv's 256-unit wrap, so there is no seam).
+            ground: Vec4::new(if ground.is_some() { 1.0 } else { 0.0 }, 0.125, 1.0, 0.0),
+            ground_means: ground.as_ref().map_or([Vec4::ONE; 5], |g| g.2),
             ..default()
         };
         let material = materials.add(ExtendedMaterial {
             base: StandardMaterial { perceptual_roughness: def.roughness, reflectance: 0.3, ..default() },
-            extension: TerrainExt { params, color_map: None, water_map: None },
+            extension: TerrainExt {
+                params,
+                color_map: None,
+                water_map: None,
+                ground_color: ground.as_ref().map(|g| g.0.clone()),
+                ground_normal: ground.as_ref().map(|g| g.1.clone()),
+            },
         });
         let shape = Shape {
             radius_eq: p.radius_eq,
