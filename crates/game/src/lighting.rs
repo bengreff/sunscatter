@@ -90,12 +90,14 @@ pub fn planetshine(at: DVec3, body: DVec3, r: f64, albedo: f64, e_star: f64, to_
 }
 
 /// Eye adaptation (D055). At the fixed exposure (EV100 14.5) a sunlit
-/// scene's mean exposed luminance is about 2^DAYLIGHT_LOG_LUM. Auto exposure
+/// scene's mean exposed luminance, as Bevy's auto exposure meters it, is
+/// about 2^DAYLIGHT_LOG_LUM (provisional: calibrated by eye on the pad view;
+/// -2.2 from a hand estimate overexposed everything by ~4 stops). Auto exposure
 /// keeps daylight scenes there (no change) and brightens darker ones by at
 /// most MAX_BRIGHTEN_STOPS, slowly: enough to show Earthshine on the Moon's
 /// night side (~7 lux, ~14 stops below sunlight) in a close-up, while a
 /// sunlit scene keeps night sides near-black.
-pub const DAYLIGHT_LOG_LUM: f32 = -2.2;
+pub const DAYLIGHT_LOG_LUM: f32 = -6.0;
 pub const MAX_BRIGHTEN_STOPS: f32 = 15.0;
 /// Adaptation speeds (stops per second): slow to brighten, quicker back.
 pub const BRIGHTEN_SPEED: f32 = 1.0;

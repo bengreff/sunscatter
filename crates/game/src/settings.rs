@@ -75,6 +75,8 @@ pub struct GraphicsSettings {
     /// Planetshine (Earthshine on the Moon, moonlight on Earth; D055).
     pub earthshine: bool,
     /// Eye adaptation: exposure brightens slowly in dark scenes (D055).
+    /// Off in every tier until it is calibrated: some views (the whole
+    /// Moon after a dark map view) still come out overexposed.
     pub eye_adaptation: bool,
 }
 
@@ -104,7 +106,6 @@ impl GraphicsSettings {
                 atmosphere: AtmosphereQuality::Lut,
                 star_magnitude: 5.0,
                 msaa: MsaaLevel::X2,
-                eye_adaptation: true,
                 ..base
             },
             Tier::Medium => GraphicsSettings {
@@ -116,7 +117,6 @@ impl GraphicsSettings {
                 star_magnitude: 6.0,
                 bloom: true,
                 msaa: MsaaLevel::X4,
-                eye_adaptation: true,
                 ..base
             },
             Tier::High => GraphicsSettings {
@@ -132,7 +132,6 @@ impl GraphicsSettings {
                 shadows: true,
                 msaa: MsaaLevel::X4,
                 earthshine: true,
-                eye_adaptation: true,
                 ..base
             },
             Tier::Ultra => GraphicsSettings { terrain_error_px: 1.0, star_magnitude: 8.0, ..Self::preset(Tier::High) },
