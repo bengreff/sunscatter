@@ -200,7 +200,7 @@ pub fn vessel_info(sim: &SimState, i: usize) -> VesselInfo {
     let mut info = VesselInfo { primary, status, apsides: None, period: None };
     let flying = matches!(vessel.phase, Phase::Powered { .. } | Phase::Coasting { .. });
     if let (true, Some(body)) = (flying, primary.and_then(|p| sim.world.source(p))) {
-        let (anchor, r, v) = vessel.state(&sim.world);
+        let (anchor, r, v) = vessel.state_at(&sim.world, sim.clock);
         if let Some(o) = crate::relations::orbit_about(&sim.world, sim.clock, anchor, r, v, body.node) {
             let radius = body.physical.as_ref().map_or(0.0, |p| p.radius_eq);
             info.apsides = Some((o.elements.periapsis() - radius, o.elements.apoapsis() - radius));
@@ -276,7 +276,7 @@ pub fn draw(
             Action::Close => ts.open = false,
             Action::FocusVessel(i) => {
                 let primary = camera::nearest_body_to(&sim, i);
-                let (anchor, r, _) = sim.fleet[i].state(&sim.world);
+                let (anchor, r, _) = sim.fleet[i].state_at(&sim.world, sim.clock);
                 let from =
                     primary.map_or(1.0e7, |p| (r - sim.world.snapshot(sim.clock).relative(p, anchor).r).length());
                 rig.focus = Focus::Vessel(i);

@@ -239,3 +239,45 @@ fn coast_segment_matches_golden_hash() {
 }
 
 const COAST_GOLDEN: u64 = 0xa1972777eba62ac1;
+
+/// A powered vessel trails the clock by up to a tick; shown at the clock
+/// (`state_at`), it lands within millimetres of where the next tick puts it,
+/// so the ground no longer jumps by v·dt each frame while thrusting.
+#[test]
+fn powered_vessel_shown_at_the_clock_is_continuous() {
+    let w = world();
+    let mut ship = Vessel::landed_at(&w, "Earth", 28.5, -80.6, t0(), VesselParams::block());
+    let full = Controls { throttle: 1.0, sas: true, ..Controls::default() };
+    let mut clock = t0();
+    // 20 s of climb, advanced by uneven frames as the game does.
+    for k in 0..1500 {
+        clock = clock.add_seconds(if k % 3 == 0 { 0.007 } else { 0.0163 });
+        ship.advance(&w, clock, &full, usize::MAX);
+    }
+    assert!(matches!(ship.phase, Phase::Powered { .. }));
+    assert_eq!(ship.state_at(&w, ship.time), ship.state(&w));
+    let mut worst = 0.0f64;
+    let mut speed = 0.0f64;
+    for _ in 0..200 {
+        let next = ship.time.add_seconds(sim::vessel::TICK);
+        let (anchor, shown, _) = ship.state_at(&w, next);
+        ship.advance(&w, next, &full, usize::MAX);
+        let (a2, actual, v) = ship.state(&w);
+        assert_eq!((anchor, ship.time), (a2, next));
+        worst = worst.max((shown - actual).length());
+        speed = v.length();
+    }
+    // Showing the tick state instead would be off by v·TICK (metres).
+    assert!(speed * sim::vessel::TICK > 1.0, "speed {speed}");
+    assert!(worst < 1e-3, "worst gap {worst} m");
+}
+
+/// Landed vessels are shown at the clock too (the body turns under them).
+#[test]
+fn landed_vessel_state_at_follows_the_rotation() {
+    let w = world();
+    let ship = Vessel::landed_at(&w, "Earth", 0.0, 0.0, t0(), VesselParams::block());
+    let (_, r0, v0) = ship.state(&w);
+    let (_, r1, _) = ship.state_at(&w, t0().add_seconds(0.01));
+    assert!(((r1 - r0) - v0 * 0.01).length() < 1e-4);
+}

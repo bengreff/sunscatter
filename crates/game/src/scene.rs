@@ -164,7 +164,7 @@ pub fn update_ships(
             continue;
         };
         seen[ship.0] = true;
-        let (anchor, r, _) = vessel.state(&sim.world);
+        let (anchor, r, _) = vessel.state_at(&sim.world, sim.clock);
         let pos = snap.relative(anchor, rig.anchor).r + r - rig.cam_pos;
         *t = Transform { translation: pos.as_vec3(), rotation: vessel.attitude.q.as_quat(), scale: Vec3::ONE };
         mat.0 = if ship.0 == sim.active { assets.active_mat.clone() } else { assets.ship_mat.clone() };

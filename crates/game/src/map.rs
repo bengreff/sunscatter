@@ -109,7 +109,7 @@ pub fn update(
         objects.push(object(ObjectId::Body(node), c, radius, orbit, eph.node(node).gm));
     }
     for (i, vessel) in sim.fleet.iter().enumerate() {
-        let (anchor, r, _) = vessel.state(world);
+        let (anchor, r, _) = vessel.state_at(world, sim.clock);
         let c = snap.relative_r(anchor, rig.anchor) + r - rig.cam_pos;
         let orbit = crate::relations::vessel_orbit(world, sim.clock, vessel).map(|o| o.radius());
         let mut o = object(ObjectId::Vessel(i), c, VESSEL_RADIUS, orbit, 0.0);

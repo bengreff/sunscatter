@@ -73,7 +73,7 @@ pub fn body_orbit(eph: &Ephemeris, t: Epoch, node: NodeId) -> Option<(NodeId, Or
 
 /// A vessel's osculating orbit about its nearest body.
 pub fn vessel_orbit(world: &World, t: Epoch, vessel: &Vessel) -> Option<Orbit> {
-    let (anchor, r, v) = vessel.state(world);
+    let (anchor, r, v) = vessel.state_at(world, t);
     let body = nearest_body(world, t, anchor, r)?;
     orbit_about(world, t, anchor, r, v, body)
 }

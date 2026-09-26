@@ -131,14 +131,14 @@ pub fn nearest_body(sim: &SimState) -> Option<NodeId> {
 
 /// The body nearest vessel `i`.
 pub fn nearest_body_to(sim: &SimState, i: usize) -> Option<NodeId> {
-    let (anchor, r, _) = sim.fleet[i].state(&sim.world);
+    let (anchor, r, _) = sim.fleet[i].state_at(&sim.world, sim.clock);
     relations::nearest_body(&sim.world, sim.clock, anchor, r)
 }
 
 /// Focus a body with the camera placed just beyond the ship, looking at the
 /// body along the body→ship line.
 pub fn focus_body_near_ship(rig: &mut CameraRig, sim: &SimState, body: NodeId) {
-    let (anchor, r, _) = sim.ship().state(&sim.world);
+    let (anchor, r, _) = sim.ship().state_at(&sim.world, sim.clock);
     let snap = sim.world.snapshot(sim.clock);
     let rel = r - snap.relative(body, anchor).r;
     let radius = sim.world.source(body).and_then(|s| s.physical.as_ref()).map_or(1.0e6, |p| p.radius_eq);
@@ -170,7 +170,7 @@ pub fn basis(up: DVec3) -> (DVec3, DVec3) {
 }
 
 pub fn update(sim: Res<SimState>, mut rig: ResMut<CameraRig>, mut cam: Query<&mut Transform, With<MainCamera>>) {
-    let (anchor, ship_r, _) = sim.ship().state(&sim.world);
+    let (anchor, ship_r, _) = sim.ship().state_at(&sim.world, sim.clock);
     let snap = sim.world.snapshot(sim.clock);
     let (target, up) = match rig.focus {
         Focus::Ship => {
@@ -178,7 +178,7 @@ pub fn update(sim: Res<SimState>, mut rig: ResMut<CameraRig>, mut cam: Query<&mu
             (ship_r, (ship_r - near).normalize())
         }
         Focus::Vessel(i) => {
-            let (va, vr, _) = sim.fleet[i].state(&sim.world);
+            let (va, vr, _) = sim.fleet[i].state_at(&sim.world, sim.clock);
             let r = snap.relative_r(va, anchor) + vr;
             let near = nearest_body_to(&sim, i).map_or(DVec3::ZERO, |b| snap.relative(b, anchor).r);
             (r, (r - near).normalize())

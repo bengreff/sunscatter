@@ -87,6 +87,11 @@ pub struct Vessel {
     pub time: Epoch,
     pub attitude: Attitude,
     pub chute_deployed: bool,
+    /// Mean acceleration over the last powered tick, relative to the anchor
+    /// (display only: [`Vessel::state_at`] carries a powered vessel from its
+    /// own time to the clock with it). `None` outside powered flight.
+    #[serde(default)]
+    pub tick_accel: Option<DVec3>,
 }
 
 /// Rotation matrix taking body-fixed axes of `body` to inertial axes at `t`.
@@ -110,6 +115,7 @@ impl Vessel {
             time: t,
             attitude: Attitude { q: DQuat::IDENTITY, omega: DVec3::ZERO },
             chute_deployed: false,
+            tick_accel: None,
         };
         v.sync_landed_attitude(world);
         v
@@ -123,6 +129,7 @@ impl Vessel {
             time: t,
             attitude: Attitude { q: quat_z_to(r.normalize()), omega: DVec3::ZERO },
             chute_deployed: false,
+            tick_accel: None,
         };
         vessel.start_coast(world);
         vessel
@@ -146,17 +153,39 @@ impl Vessel {
         self.attitude = Attitude { q: (b2i * att_fixed).normalize(), omega: rot.omega(self.time).raw() };
     }
 
-    /// Current (anchor, r, v). Landed/crashed vessels report their body as anchor.
+    /// Current (anchor, r, v) at the vessel's own time. Landed/crashed vessels
+    /// report their body as anchor.
     pub fn state(&self, world: &World) -> (NodeId, DVec3, DVec3) {
+        self.state_at(world, self.time)
+    }
+
+    /// (anchor, r, v) at `t`, for display at the game clock, which may lead
+    /// the vessel's own time by up to a tick. Landed and crashed vessels and
+    /// coasts are evaluated exactly at `t`. A powered vessel is carried from
+    /// its last tick with that tick's mean acceleration (a polynomial in the
+    /// stored tick, not an integration: rule 4); the next tick replaces it,
+    /// off by at most the change in acceleration × dt²/2 (millimetres).
+    pub fn state_at(&self, world: &World, t: Epoch) -> (NodeId, DVec3, DVec3) {
         match &self.phase {
             Phase::Landed { body, fixed, .. } | Phase::Crashed { body, fixed, .. } => {
                 let rot = world.source(*body).and_then(|s| s.physical.as_ref()).expect("physical").rotation;
-                let r = rot.to_inertial(*fixed, self.time).raw();
-                (*body, r, rot.omega(self.time).raw().cross(r))
+                let r = rot.to_inertial(*fixed, t).raw();
+                (*body, r, rot.omega(t).raw().cross(r))
             }
-            Phase::Powered { anchor, r, v } => (*anchor, *r, *v),
+            Phase::Powered { anchor, r, v } => {
+                let dt = t.seconds_since(self.time);
+                match self.tick_accel {
+                    Some(a) if dt > 0.0 && dt <= 2.0 * TICK => {
+                        (*anchor, *r + *v * dt + a * (0.5 * dt * dt), *v + a * dt)
+                    }
+                    _ => (*anchor, *r, *v),
+                }
+            }
             Phase::Coasting { segment } => {
-                segment.eval(self.time.seconds_since(segment.t0)).expect("vessel time is inside its segment")
+                let local = t.seconds_since(segment.t0);
+                let own = self.time.seconds_since(segment.t0);
+                let covered = local >= 0.0 && local <= segment.computed_until();
+                segment.eval(if covered { local } else { own }).expect("vessel time is inside its segment")
             }
         }
     }
@@ -194,6 +223,7 @@ impl Vessel {
             let (anchor, r, v) = self.state(world);
             self.sync_landed_attitude(world);
             self.phase = Phase::Powered { anchor, r, v };
+            self.tick_accel = None;
             return;
         }
         self.time = target;
@@ -214,6 +244,7 @@ impl Vessel {
             let (r1, v1) = self.integrate_tick(world, anchor, r, v, thrust);
             self.time = self.time.add_seconds(TICK);
             self.phase = Phase::Powered { anchor, r: r1, v: v1 };
+            self.tick_accel = Some((v1 - v) / TICK);
             if self.check_contact(world) {
                 return;
             }
@@ -295,6 +326,7 @@ impl Vessel {
         if controls.throttle > 0.0 {
             let (anchor, r, v) = self.state(world);
             self.phase = Phase::Powered { anchor, r, v };
+            self.tick_accel = None;
             return;
         }
         if controls.chute && !self.chute_deployed {

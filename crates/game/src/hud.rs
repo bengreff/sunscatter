@@ -135,7 +135,7 @@ pub fn draw(
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
     let ship = sim.ship();
-    let (anchor, r, v) = ship.state(&sim.world);
+    let (anchor, r, v) = ship.state_at(&sim.world, sim.clock);
     let snap = sim.world.snapshot(sim.clock);
     let near = camera::nearest_body(&sim);
     let (y, mo, d, h, mi, s) = sim.clock.to_calendar();

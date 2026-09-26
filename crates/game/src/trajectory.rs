@@ -152,7 +152,7 @@ pub fn draw(
         if active {
             // While powered the prediction was computed a moment ago; join it
             // to the ship's current position so the line starts at the ship.
-            let (ship_anchor, ship_r, _) = sim.ship().state(&sim.world);
+            let (ship_anchor, ship_r, _) = sim.ship().state_at(&sim.world, sim.clock);
             let ship_now = sim.world.snapshot(sim.clock).relative_r(ship_anchor, rig.anchor) + ship_r - rig.cam_pos;
             gizmos.linestrip(std::iter::once(ship_now.as_vec3()).chain(resampled), Color::srgb(1.0, 0.85, 0.2));
         } else {
