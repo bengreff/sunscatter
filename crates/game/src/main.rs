@@ -59,6 +59,7 @@ fn main() {
         .init_resource::<state::SimPause>()
         .init_resource::<camera::CameraRig>()
         .init_resource::<hud::UiState>()
+        .init_resource::<hud::FpsMeter>()
         .init_resource::<settings::GraphicsSettings>()
         .init_resource::<settings_ui::SettingsUi>()
         .init_resource::<bench::Bench>()
@@ -77,6 +78,7 @@ fn main() {
             Update,
             (
                 state::read_controls,
+                hud::measure_fps,
                 settings_ui::toggle,
                 demo::run,
                 bench::run,

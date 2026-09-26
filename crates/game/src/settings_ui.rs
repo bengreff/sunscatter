@@ -33,6 +33,7 @@ pub fn draw(
     mut settings: ResMut<GraphicsSettings>,
     mut bench: ResMut<Bench>,
     terrain: Res<crate::terrain::Terrain>,
+    fps: Res<crate::hud::FpsMeter>,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
     if ui.overlay || bench.running() {
@@ -42,7 +43,7 @@ pub fn draw(
         let tier = settings.tier.map_or("Custom", Tier::name);
         egui::Area::new("perf".into()).anchor(egui::Align2::RIGHT_TOP, [-10.0, 10.0]).show(ctx, |ui_| {
             egui::Frame::popup(ui_.style()).show(ui_, |ui_| {
-                ui_.monospace(format!("{:.0} fps  {:.2} ms (worst {:.1})", 1.0 / avg, avg * 1e3, worst * 1e3));
+                ui_.monospace(format!("{} fps  {:.2} ms (worst {:.1})", fps.text(), avg * 1e3, worst * 1e3));
                 ui_.monospace(format!("graphics: {tier}   terrain chunks: {}", terrain.drawn));
                 if bench.running() {
                     let (d, t) = bench.progress();

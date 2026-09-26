@@ -25,6 +25,43 @@ pub struct UiState {
     last_click: Option<(f64, Vec2)>,
 }
 
+/// The fps readout is averaged over windows at least this long (s).
+pub const FPS_WINDOW: f64 = 0.5;
+
+/// A steady fps readout: frames over the last window of at least
+/// [`FPS_WINDOW`] seconds, divided by its length, updated once per window.
+#[derive(Resource, Default)]
+pub struct FpsMeter {
+    frames: u32,
+    elapsed: f64,
+    fps: Option<f64>,
+}
+
+impl FpsMeter {
+    pub fn tick(&mut self, dt: f64) {
+        self.frames += 1;
+        self.elapsed += dt;
+        if self.elapsed >= FPS_WINDOW {
+            self.fps = Some(f64::from(self.frames) / self.elapsed);
+            (self.frames, self.elapsed) = (0, 0.0);
+        }
+    }
+
+    /// The last complete window's rate (`None` before the first one ends).
+    pub fn fps(&self) -> Option<f64> {
+        self.fps
+    }
+
+    /// For display: "60" or "--".
+    pub fn text(&self) -> String {
+        self.fps().map_or_else(|| "--".into(), |f| format!("{f:.0}"))
+    }
+}
+
+pub fn measure_fps(time: Res<Time>, mut meter: ResMut<FpsMeter>) {
+    meter.tick(time.delta_secs_f64());
+}
+
 /// Double-click on a body opens its menu. Tab toggles the plotting frame.
 #[allow(clippy::too_many_arguments)]
 pub fn pick_bodies(
@@ -91,7 +128,7 @@ pub fn fmt_dist(m: f64) -> String {
 
 pub fn draw(
     mut contexts: EguiContexts,
-    time: Res<Time>,
+    fps: Res<FpsMeter>,
     sim: Res<SimState>,
     mut rig: ResMut<CameraRig>,
     mut ui: ResMut<UiState>,
@@ -154,7 +191,7 @@ pub fn draw(
             PlotFrame::EarthMoonRotating => "Earth–Moon rotating",
         };
         ui_.monospace(format!("anchor {anchor_name}   plot {frame}"));
-        ui_.monospace(format!("{:.0} fps   {} vessel(s)", 1.0 / time.delta_secs().max(1e-6), sim.fleet.len()));
+        ui_.monospace(format!("{} fps   {} vessel(s)", fps.text(), sim.fleet.len()));
     });
 
     egui::Window::new("Controls").anchor(egui::Align2::LEFT_BOTTOM, [10.0, -10.0]).default_open(false).show(
@@ -195,4 +232,27 @@ pub fn draw(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fps_is_frames_over_at_least_half_a_second() {
+        // Frame times exact in binary, so window ends are exact.
+        let mut m = FpsMeter::default();
+        for _ in 0..3 {
+            m.tick(0.125);
+        }
+        assert_eq!(m.fps(), None, "not a full window yet");
+        m.tick(0.125);
+        assert_eq!(m.fps(), Some(8.0));
+        // One slow frame lowers the next window's average, not to 1/dt.
+        m.tick(0.125);
+        m.tick(0.125);
+        assert_eq!(m.fps(), Some(8.0), "held between updates");
+        m.tick(0.25);
+        assert_eq!(m.fps(), Some(6.0));
+    }
 }
