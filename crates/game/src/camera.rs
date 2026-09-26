@@ -11,7 +11,10 @@ use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll, MouseSc
 use bevy::prelude::*;
 use bevy_egui::input::EguiWantsInput;
 use glam::DVec3;
+use sim::ephem::Snapshot;
+use sim::forces::altitude_above;
 use sim::frame::NodeId;
+use sim::world::World;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Focus {
@@ -89,6 +92,7 @@ pub fn read_input(
     mut rig: ResMut<CameraRig>,
 ) {
     if !egui.wants_any_pointer_input() {
+        let old = (rig.yaw, rig.pitch, rig.distance);
         if buttons.pressed(MouseButton::Left) || buttons.pressed(MouseButton::Right) {
             rig.yaw -= f64::from(motion.delta.x) * 0.005;
             rig.pitch = (rig.pitch + f64::from(motion.delta.y) * 0.005).clamp(-1.55, 1.55);
@@ -100,7 +104,20 @@ pub fn read_input(
                 MouseScrollUnit::Line => f64::from(scroll.delta.y),
                 MouseScrollUnit::Pixel => f64::from(scroll.delta.y) * controls.trackpad_lines_per_px,
             };
-            rig.distance = zoom(rig.distance, lines, controls.wheel_zoom);
+            rig.distance = zoom(rig.distance, lines, controls.wheel_zoom).max(min_distance(rig.focus));
+        }
+        // A rotation or zoom into a surface is refused: the camera stops.
+        let new = (rig.yaw, rig.pitch, rig.distance);
+        if new != old {
+            let (anchor, target, up) = focus_frame(&sim, &rig);
+            let snap = sim.world.snapshot(sim.clock);
+            let clear = |(yaw, pitch, distance): (f64, f64, f64)| {
+                let p = target + view_dir(up, yaw, pitch) * distance;
+                clearance(&sim.world, &snap, anchor, p) - surface_margin(distance)
+            };
+            if !accept(clear(old), clear(new)) {
+                (rig.yaw, rig.pitch, rig.distance) = old;
+            }
         }
     }
     if keys.just_pressed(KeyCode::Backquote) {
@@ -117,6 +134,72 @@ pub fn read_input(
 /// Closest and farthest camera distances from the focus (m).
 pub const MIN_DISTANCE: f64 = 5.0;
 pub const MAX_DISTANCE: f64 = 5.0e12;
+/// Closest camera distance to a vessel: outside its bounding sphere.
+pub const VESSEL_MIN_DISTANCE: f64 = 1.2 * crate::map::VESSEL_RADIUS;
+
+/// Closest allowed distance to a focus (a body's surface is handled by
+/// [`clearance`] instead).
+pub fn min_distance(focus: Focus) -> f64 {
+    match focus {
+        Focus::Ship | Focus::Vessel(_) => VESSEL_MIN_DISTANCE,
+        Focus::Body(_) => MIN_DISTANCE,
+    }
+}
+
+/// Height the camera keeps above any surface (m) at a focus distance.
+pub fn surface_margin(distance: f64) -> f64 {
+    (0.002 * distance).max(2.0)
+}
+
+/// Whether a camera move is allowed, from the clearance (m, negative when
+/// too close) before and after: it stays clear, or it moves out of a
+/// surface it was already too close to (the surface can move under it).
+pub fn accept(old: f64, new: f64) -> bool {
+    new >= 0.0 || new >= old
+}
+
+/// The distance along the view ray to place the camera: `distance` if clear
+/// there, else the farthest clear point between `min` and `distance`, so a
+/// surface rising behind the camera pushes it towards the focus. `clear(s)`
+/// is the clearance at distance `s`. If the focus side is not clear either,
+/// `distance` is kept (nothing better exists on this ray).
+pub fn pull_in(distance: f64, min: f64, clear: impl Fn(f64) -> f64) -> f64 {
+    if clear(distance) >= 0.0 || clear(min) < 0.0 {
+        return distance;
+    }
+    let (mut lo, mut hi) = (min, distance);
+    for _ in 0..40 {
+        let mid = 0.5 * (lo + hi);
+        if clear(mid) >= 0.0 {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    lo
+}
+
+/// Height of point `p` (relative to `anchor`) above the nearest surface:
+/// the terrain of solid bodies (sim's surface, the one physics and rendering
+/// use) and the sphere of the others.
+pub fn clearance(world: &World, snap: &Snapshot, anchor: NodeId, p: DVec3) -> f64 {
+    world
+        .sources
+        .iter()
+        .filter_map(|s| {
+            let body = s.physical.as_ref()?;
+            let d = (p - snap.relative_r(s.node, anchor)).length() - body.radius_eq;
+            // Terrain only matters near the surface (it is under 20 km high).
+            Some(if body.solid && d < 50_000.0 { altitude_above(world, snap, anchor, s.node, p).0 } else { d })
+        })
+        .fold(f64::INFINITY, f64::min)
+}
+
+/// Unit vector from the focus to the camera.
+pub fn view_dir(up: DVec3, yaw: f64, pitch: f64) -> DVec3 {
+    let (e1, e2) = basis(up);
+    (e1 * yaw.cos() + e2 * yaw.sin()) * pitch.cos() + up * pitch.sin()
+}
 
 /// The focus distance after zooming in by `lines` wheel lines, each a factor
 /// of `per_line`.
@@ -169,27 +252,37 @@ pub fn basis(up: DVec3) -> (DVec3, DVec3) {
     (e1, up.cross(e1))
 }
 
-pub fn update(sim: Res<SimState>, mut rig: ResMut<CameraRig>, mut cam: Query<&mut Transform, With<MainCamera>>) {
+/// The camera frame's anchor, the focus position in it and the camera's up.
+fn focus_frame(sim: &SimState, rig: &CameraRig) -> (NodeId, DVec3, DVec3) {
     let (anchor, ship_r, _) = sim.ship().state_at(&sim.world, sim.clock);
     let snap = sim.world.snapshot(sim.clock);
     let (target, up) = match rig.focus {
         Focus::Ship => {
-            let near = nearest_body(&sim).map_or(DVec3::ZERO, |b| snap.relative(b, anchor).r);
+            let near = nearest_body(sim).map_or(DVec3::ZERO, |b| snap.relative(b, anchor).r);
             (ship_r, (ship_r - near).normalize())
         }
         Focus::Vessel(i) => {
             let (va, vr, _) = sim.fleet[i].state_at(&sim.world, sim.clock);
             let r = snap.relative_r(va, anchor) + vr;
-            let near = nearest_body_to(&sim, i).map_or(DVec3::ZERO, |b| snap.relative(b, anchor).r);
+            let near = nearest_body_to(sim, i).map_or(DVec3::ZERO, |b| snap.relative(b, anchor).r);
             (r, (r - near).normalize())
         }
-        Focus::Body(b) => (snap.relative(b, anchor).r, body_up(&sim, b)),
+        Focus::Body(b) => (snap.relative(b, anchor).r, body_up(sim, b)),
     };
-    let (e1, e2) = basis(up);
-    let (cp, sp) = (rig.pitch.cos(), rig.pitch.sin());
-    let d = (e1 * rig.yaw.cos() + e2 * rig.yaw.sin()) * cp + up * sp;
+    (anchor, target, up)
+}
+
+pub fn update(sim: Res<SimState>, mut rig: ResMut<CameraRig>, mut cam: Query<&mut Transform, With<MainCamera>>) {
+    let (anchor, target, up) = focus_frame(&sim, &rig);
+    let snap = sim.world.snapshot(sim.clock);
+    let d = view_dir(up, rig.yaw, rig.pitch);
+    // The focus moved a surface into the view ray: slide in, keeping the
+    // chosen distance for when the way is clear again.
+    let margin = surface_margin(rig.distance);
+    let clear = |s: f64| clearance(&sim.world, &snap, anchor, target + d * s) - margin;
+    let distance = pull_in(rig.distance, min_distance(rig.focus), clear);
     rig.anchor = anchor;
-    rig.cam_pos = target + d * rig.distance;
+    rig.cam_pos = target + d * distance;
     rig.up = up;
     if let Ok(mut t) = cam.single_mut() {
         *t = Transform::IDENTITY.looking_to((-d).as_vec3(), up.as_vec3());
@@ -215,5 +308,75 @@ mod tests {
         }
         // Two lines at the new speed equal one at the old (1.15 per line).
         assert!((zoom(1000.0, 2.0, 1.072) / (1000.0 / 1.15) - 1.0).abs() < 1e-3);
+    }
+
+    /// Clearance above a 1,000 m sphere at the origin with a 200 m mountain
+    /// around +x, minus the margin.
+    fn world_clear(p: DVec3, distance: f64) -> f64 {
+        let mountain = 200.0 * (p.normalize().dot(DVec3::X) - 0.9).max(0.0) * 10.0;
+        p.length() - 1000.0 - mountain - surface_margin(distance)
+    }
+
+    #[test]
+    fn zooming_or_rotating_into_terrain_is_refused() {
+        // (case, clearance before, after, accepted)
+        let cases = [
+            ("clear to clear", 50.0, 20.0, true),
+            ("zoom into the ground", 5.0, -1.0, false),
+            ("already too close, moving out", -3.0, -1.0, true),
+            ("already too close, moving in", -3.0, -4.0, false),
+            ("exactly at the margin", 1.0, 0.0, true),
+        ];
+        for (case, old, new, expected) in cases {
+            assert_eq!(accept(old, new), expected, "{case}");
+        }
+    }
+
+    #[test]
+    fn orbiting_below_a_mountain_stops_at_its_slope() {
+        // Ship 20 m above the plain at +z; the camera swings down towards the
+        // mountain at +x, 300 m away.
+        let target = DVec3::new(0.0, 0.0, 1020.0);
+        let up = DVec3::Z;
+        let d = 300.0;
+        let clear = |pitch: f64| world_clear(target + view_dir(up, 0.0, pitch) * d, d);
+        let mut pitch: f64 = 0.8;
+        let mut stopped = false;
+        while pitch > -1.5 {
+            let next = pitch - 0.01;
+            if !accept(clear(pitch), clear(next)) {
+                stopped = true;
+                break;
+            }
+            pitch = next;
+        }
+        assert!(stopped, "the camera went into the ground");
+        assert!(clear(pitch) >= 0.0 && pitch < 0.2, "stopped at pitch {pitch}");
+    }
+
+    #[test]
+    fn a_rising_surface_pulls_the_camera_in() {
+        let target = DVec3::new(0.0, 0.0, 1050.0);
+        let dir = DVec3::new(0.6, 0.0, -0.8);
+        let clear = |s: f64| world_clear(target + dir * s, 100.0);
+        // 100 m out along a descending ray is underground; 10 m is not.
+        assert!(clear(100.0) < 0.0 && clear(10.0) > 0.0);
+        let s = pull_in(100.0, 10.0, clear);
+        assert!(clear(s).abs() < 1e-6 && s < 100.0 && s > 10.0, "{s}");
+        assert_eq!(pull_in(30.0, 10.0, |_| 1.0), 30.0, "clear: unchanged");
+        assert_eq!(pull_in(30.0, 10.0, |_| -1.0), 30.0, "nothing clear on the ray");
+    }
+
+    #[test]
+    fn the_camera_stays_outside_the_ship() {
+        let d = zoom(20.0, 30.0, 1.072).max(min_distance(Focus::Ship));
+        assert_eq!(d, 1.2 * crate::map::VESSEL_RADIUS);
+        assert_eq!(min_distance(Focus::Body(NodeId(3))), MIN_DISTANCE);
+    }
+
+    #[test]
+    fn margin_grows_with_distance() {
+        assert_eq!(surface_margin(60.0), 2.0);
+        assert_eq!(surface_margin(1.0e6), 2000.0);
     }
 }
