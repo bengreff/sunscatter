@@ -1,13 +1,20 @@
 # Handoff: read this first in a fresh session
 
+A SessionStart hook loads this file automatically after `/clear` or at startup. It is kept current by `/handoff`.
+
 *Updated 2026-09-26, after the visual pass and the owner's first fix list.*
 
 ## Read, in this order
-1. `CLAUDE.md` (rules and commands).
-2. `docs/architecture.md`: who owns what. Check it before writing any new function.
-3. `docs/features/map-view-lighting-controls.md`: **the spec you are implementing.** All of its questions are answered.
-4. `docs/decisions.md`, D045–D057 (the recent ones; D054–D057 come from this fix round).
-5. Only if needed: the Review section of `docs/plans/v0.2-visual-pass-and-foundations.md` (measurements, known issues).
+
+Read them before changing anything, by section where the doc is long.
+1. `CLAUDE.md`: rules and commands.
+2. `docs/vision.md`: pillars and non-goals.
+3. `docs/process.md`: how we work (docs, tests, agents, context resets).
+4. `docs/architecture.md`: who owns what. Check it before writing any new function.
+5. `docs/decisions.md`: skim all of it; read D045–D057 closely.
+6. `docs/features/map-view-lighting-controls.md`: **the spec being implemented now.**
+7. Only when touching motion or physics: `docs/design/motion-model.md`.
+8. Only if needed: the Review of `docs/plans/v0.2-visual-pass-and-foundations.md` (measurements, known issues).
 
 ## State
 - `main` is green in CI (macOS and Windows). The owner approved the feature doc; implementation has **not** started.

@@ -3,7 +3,7 @@
 Real-scale 3D spaceflight, mission-design and logistics game in Rust. Being rebuilt from scratch; v0.1 (2D) is archived in `archive/v0.1/` — do not edit it.
 
 ## Read first
-- `docs/plans/HANDOFF.md` — **start here in a fresh session**: what to read, current state, next steps.
+- `docs/plans/HANDOFF.md` — **start here in a fresh session** (auto-loaded by a SessionStart hook): reading order, current state, next steps. `/handoff` updates it before a `/clear`.
 - `docs/vision.md` — pillars and non-goals. `docs/decisions.md` — what is decided (check before proposing).
 - `docs/design/motion-model.md` — how bodies and ships move (no SOIs, frame tree, precision, determinism).
 - `docs/plans/` — the current build plan; check items off as you go.
@@ -26,7 +26,7 @@ Real-scale 3D spaceflight, mission-design and logistics game in Rust. Being rebu
 - `cargo clippy -p sim -p ephem-tool -p asset-tool --all-targets -- -D warnings`, `cargo fmt --all`, `tools/check_file_sizes.sh`.
 - CI: a fast `sim` job (no Bevy; fmt, file sizes, decision references, clippy, tests) and a separate `game` job, on macOS and Windows. `tools/check_decision_refs.sh` fails on citations of deleted (superseded) decisions.
 - Windows: at the end of a big session, try `ssh backhouse` (the owner's PC) and run the demo there; if it doesn't connect, skip it.
-- Hooks (`.claude/settings.json`, scripts in `tools/hooks/`): `cargo check` of the owning crate after editing a `.rs` file, `cargo test -p sim` on stop. Failures are fed back (exit 2).
+- Hooks (`.claude/settings.json`, scripts in `tools/hooks/`): the handoff is loaded at session start, `cargo check` of the owning crate runs after editing a `.rs` file, and `cargo test -p sim` runs on stop. Failures are fed back (exit 2).
 
 ## Non-negotiable rules
 1. **Physics has no reference bodies.** Anchors/frames exist only for precision or display; changing them must not change trajectories (invariance tests enforce this). Never add SOI logic.

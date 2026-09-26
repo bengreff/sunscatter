@@ -61,7 +61,11 @@ Before designing a solution to a hard problem, **look at how others solved it.**
 - Hooks run `cargo check`, clippy and the tests. A task is done when those pass, and for visual work, when there is a screenshot or recording.
 - Build any non-trivial chunk in this order: a plan (with a design doc first only if the mechanic needs one), then implementation with tests, then an independent review. The review must reproduce what it reports.
 - When something is corrected, turn the lesson into a type, test, lint or hook. Write it as prose only as a last resort.
-- **Context resets.** Long sessions degrade. At a natural break (a feature done, a spec agreed, or a large context), Claude updates `docs/plans/HANDOFF.md`: what to read, current state, next steps. The owner then runs `/clear`, and the new session starts with "Read docs/plans/HANDOFF.md". Claude cannot clear itself. Everything a new session needs must already be in the repo (docs, decisions, specs), never only in the conversation.
+- **Context resets.** Long sessions degrade.
+  - At a natural break (a feature done, a spec agreed, or a large context), the owner runs `/handoff`. Claude updates `docs/plans/HANDOFF.md` (state, next steps, gotchas), writes any agreed decisions or specs into the repo, verifies, commits and pushes.
+  - The owner then runs `/clear`. A SessionStart hook (`tools/hooks/session_start.sh`) loads the handoff into the new session, which reads the listed docs and continues.
+  - Claude cannot clear itself, but it asks for a reset when its context gets large.
+  - Everything a session needs lives in the repo, never only in the conversation.
 - **Keep the lead's context small.** Delegate broad searches, long logs and screenshot sweeps to subagents that report conclusions. Read files by the section you need, not whole.
 - **Parallel agents** only get disjoint areas (a crate, a new module, a data directory). The lead owns shared files (`main.rs`, plans, `decisions.md`) and merges. Agents rebase before every push. Never build two worktrees into one target directory (compile-time paths such as `CARGO_MANIFEST_DIR` get baked into the other checkout).
 - **Visual checks are also assertions.** The demo checks what it can in code (for example: the camera is outside every body, nothing is hovered outside map view), and the screenshots are for judging the look.
