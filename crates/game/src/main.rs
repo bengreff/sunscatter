@@ -11,6 +11,7 @@ mod camera;
 mod demo;
 mod hud;
 mod map;
+mod persist;
 mod scene;
 mod settings;
 mod settings_ui;
@@ -51,6 +52,8 @@ fn main() {
         .init_resource::<settings_ui::SettingsUi>()
         .init_resource::<bench::Bench>()
         .init_resource::<map::MapMode>()
+        // After the settings defaults: replaces them with the saved settings.
+        .add_plugins(persist::PersistPlugin)
         .configure_sets(Update, (Stage::Input, Stage::Simulate, Stage::Camera, Stage::Scene).chain())
         .add_systems(
             Startup,

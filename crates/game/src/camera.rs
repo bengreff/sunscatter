@@ -45,9 +45,6 @@ impl Default for CameraRig {
     }
 }
 
-/// Zoom per trackpad pixel, in wheel lines (the prototype used 1.0, far too fast).
-const TRACKPAD_LINES_PER_PIXEL: f64 = 0.25;
-
 #[derive(Component)]
 pub struct MainCamera;
 
@@ -76,6 +73,7 @@ pub fn setup(mut commands: Commands, demo: Option<ResMut<crate::demo::Demo>>, mu
 }
 
 /// Mouse drag orbits, scroll zooms; F focuses the nearest body, backtick the ship.
+#[allow(clippy::too_many_arguments)]
 pub fn read_input(
     keys: Res<ButtonInput<KeyCode>>,
     buttons: Res<ButtonInput<MouseButton>>,
@@ -83,6 +81,7 @@ pub fn read_input(
     scroll: Res<AccumulatedMouseScroll>,
     egui: Res<EguiWantsInput>,
     sim: Res<SimState>,
+    controls: Res<crate::persist::ControlsSettings>,
     mut rig: ResMut<CameraRig>,
 ) {
     if !egui.wants_any_pointer_input() {
@@ -91,11 +90,12 @@ pub fn read_input(
             rig.pitch = (rig.pitch + f64::from(motion.delta.y) * 0.005).clamp(-1.55, 1.55);
         }
         if scroll.delta.y != 0.0 {
-            // Trackpads report pixels, many per gesture: scale them to about a
-            // quarter of a wheel line each so zooming is controllable.
+            // Trackpads report pixels, many per gesture: scale them to a
+            // fraction of a wheel line each (default a quarter) so zooming is
+            // controllable.
             let lines = match scroll.unit {
                 MouseScrollUnit::Line => f64::from(scroll.delta.y),
-                MouseScrollUnit::Pixel => f64::from(scroll.delta.y) * TRACKPAD_LINES_PER_PIXEL,
+                MouseScrollUnit::Pixel => f64::from(scroll.delta.y) * controls.trackpad_zoom_speed,
             };
             rig.distance = (rig.distance * 1.15_f64.powf(-lines)).clamp(5.0, 5.0e12);
         }

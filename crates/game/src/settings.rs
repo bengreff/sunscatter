@@ -47,7 +47,9 @@ pub enum MsaaLevel {
 }
 
 /// Individual graphics features. Tiers are presets of this struct.
+/// Fields missing from a settings file take the default tier's values.
 #[derive(Resource, Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct GraphicsSettings {
     pub tier: Option<Tier>,
     /// Displaced terrain LOD (otherwise a smooth ellipsoid).
