@@ -233,6 +233,20 @@ The prototype showed no blocking issues and plenty of performance headroom: 11 v
 **D050: The tracking station is a separate screen that is always in map mode.** *Decided, 2026-09-26.*
 It lists tracked vessels (and later asteroids), lets you focus and switch to a vessel, and draws on ideas from KSP and v0.1's tracking station.
 
+**D051: Each body is a data directory with separate sim and game files.** *Decided, 2026-09-26 (autonomous session; for the owner's review).*
+- `data/bodies/<body>/` holds `body.ron` (physical data, read by `sim`), `visual.ron` (looks, read by `game`), and the committed maps (`height.png`, `color.jpg`).
+- The heightmap and sea level are physical data; the renderer gets heights from `sim`, so there is one owner of the surface.
+- Adding a body means adding its directory and an ephemeris entry, with no code change.
+
+**D052: Rendering uses physical light units and Bevy's built-in atmosphere.** *Decided, 2026-09-26 (autonomous session; for the owner's review).*
+- Sunlight is 128,000 lux at 1 AU and falls off as 1/r². The camera is HDR with a fixed exposure (EV 14.5) for now; eye adaptation is a later option.
+- Atmospheres use Bevy's Hillaire 2020 implementation (raymarched from Medium up), with scattering coefficients and scale heights as data. We work around its runtime-toggling bugs rather than maintain our own scattering, unless it proves insufficient.
+
+**D053: Map mode shows orbits by context, like KSP.** *Decided, 2026-09-26 (autonomous session; for the owner's review).*
+- Inside a body's anchor zone, map mode shows its moons' orbits (and, near a moon, that moon's own orbit). Outside all zones it shows the planets' orbits.
+- Showing every orbit at once drew heliocentric orbits as straight lines across the view near Earth.
+- The ship's trajectory is drawn for one revolution.
+
 ---
 
 ## Open questions
