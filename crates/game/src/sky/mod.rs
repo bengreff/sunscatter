@@ -3,9 +3,11 @@
 //! in `lighting`.
 
 mod flare;
+mod haze;
 mod stars;
 
 pub use flare::draw as draw_flare;
+pub use haze::install as install_haze;
 pub use stars::{setup as setup_stars, update as update_stars};
 
 use crate::camera::CameraRig;

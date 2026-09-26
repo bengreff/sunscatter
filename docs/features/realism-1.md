@@ -37,12 +37,13 @@ Out of scope: parts and structure, staging, life support, ablation, a launch-sit
 2. The colour map is used as albedo; Blue Marble is sRGB-encoded and dark. If it is sampled as linear, or is simply darker than real ground albedo (0.1–0.25 for land), the in-scatter dominates the reflected light and the ground looks fully blue.
 3. The aerosol (Mie) density and scale height in `visual.ron` against Hillaire's reference and against photos.
 
-**Fix (the simpler thing that works):** our own **per-fragment aerial perspective on the terrain** (and on ships), replacing Bevy's aerial perspective for them; Bevy keeps drawing the sky.
-- `sim`-free and pure: `game::haze::aerial(view ray, sun directions, atmosphere data, haze strength) -> (transmittance, inscatter)`: an analytic integral through the exponential Rayleigh + Mie layers (Chapman-style optical depth along the ray, single scattering with the sun's transmittance at the midpoint). No distance limit, so no edge. Mirrored in WGSL by a function with the same inputs; a table test pins the Rust version and the shader is checked by the demo.
-- Ground albedo: the colour map is decoded as sRGB, then scaled so that its land mean matches a physical land albedo in `visual.ron` (`land_albedo: 0.18` for Earth). A test checks the decode.
-- **Haze setting** (Graphics tab): strength 0–200 %, default 100 % = the physical value. It scales the aerosol optical depth only (Rayleigh stays physical), and lives in `GraphicsSettings`.
-- **Acceptance:** demo views at 10 km, 20 km and 30 km beside reference photos (high-altitude balloon and U-2 photos, noted in the feature review); no hard edge in a horizon sweep at 1, 10, 30 and 100 km; the Minimal tier has no aerial perspective at all and costs nothing.
-- **Fallback if the analytic integral does not match the sky well at the horizon:** exponential height fog tinted with the sky colour at the horizon, from the same data (simpler still).
+**Measured (2026-09-26):** Bevy's in-scatter at 10–25 km is within ~1.3× of a single-scattering estimate with Hillaire's coefficients (sun behind the camera doubles Rayleigh backscatter), so the haze is roughly physical. The colour map's vegetation near the pad is dark (0.037 linear albedo in green; mid-latitude land averages 0.10, plausible) and its **open ocean is 0.002**, far darker than real water. Inside an atmosphere every tier uses Bevy's LUT mode (Medium/High switch to it), so the 400 km clamp hit everyone.
+
+**Built (simpler than our own aerial perspective):**
+- `game::sky::haze` installs our copy of Bevy's `render_sky.wgsl` over the embedded one: pixels beyond the LUT's range are raymarched (no edge), and the **haze setting** (Graphics tab, 0–2, default 1 = physical, not part of the tiers) scales the aerial perspective as if the air along the view ray were that many times as dense. `SUNSCATTER_HAZE` sets it for demo comparisons.
+- The atmosphere's ground follows the reference ellipsoid below the camera (it sat at the mean radius: 2 km below the pad, 14 km above the poles; ground below it got no haze and no sun).
+- Open water's albedo is physical data (`ocean.albedo` in `visual.ron`: water-leaving reflectance 0.003/0.008/0.03); the colour map under water is raised to it.
+- Still to judge by the owner: whether the default should stay physical (1.0).
 
 ### 1b. Procedural sub-sample terrain detail in `sim` (D059)
 

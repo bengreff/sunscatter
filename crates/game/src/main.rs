@@ -96,6 +96,7 @@ fn main() {
                 bench::run,
                 settings::apply,
                 atmosphere::apply_settings,
+                sky::install_haze,
                 camera::read_input,
                 hud::pick_bodies,
             )

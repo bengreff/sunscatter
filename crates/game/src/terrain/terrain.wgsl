@@ -38,7 +38,7 @@ struct TerrainParams {
     rock: vec4<f32>,
     // rgb: snow colour, w: surface roughness.
     snow: vec4<f32>,
-    // rgb: water tint, w: water roughness.
+    // rgb: open-water albedo (linear), w: water roughness.
     ocean: vec4<f32>,
     // x: detail on, y: glint on, z: has colour map, w: has water mask.
     flags: vec4<u32>,
@@ -324,7 +324,7 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     }
     pbr_input.N = n_out;
 
-    color = mix(color, color * terrain.ocean.rgb, water);
+    color = mix(color, max(color, terrain.ocean.rgb), water);
     if terrain.flags.y != 0u {
         roughness = mix(roughness, terrain.ocean.w, water);
     }

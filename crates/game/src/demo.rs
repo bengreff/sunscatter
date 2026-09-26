@@ -214,7 +214,7 @@ fn run_capture(
     pause.0 = true;
     let tier = Tier::ALL[cap.tier];
     if cap.timer == 0.0 {
-        *settings = GraphicsSettings::preset(tier);
+        *settings = settings.with_preset(tier);
     }
     cap.timer += dt;
     let settled = cap.timer > SETTLE_MIN && !terrain.busy();
@@ -224,7 +224,7 @@ fn run_capture(
         cap.timer = 0.0;
         if cap.tier == Tier::ALL.len() {
             demo.capture = None;
-            *settings = GraphicsSettings::preset(demo.flying_tier);
+            *settings = settings.with_preset(demo.flying_tier);
             pause.0 = false;
         }
         demo.shot(commands, &name);
@@ -474,7 +474,7 @@ pub fn run(
                     demo.next(Step::Perf(level + 1));
                 } else {
                     sim.fleet.truncate(1);
-                    *settings = GraphicsSettings::preset(demo.flying_tier);
+                    *settings = settings.with_preset(demo.flying_tier);
                     rig.distance = 60.0;
                     sim.warp = 3;
                     sim.controls.throttle = 1.0;

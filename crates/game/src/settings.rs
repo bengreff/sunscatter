@@ -72,6 +72,10 @@ pub struct GraphicsSettings {
     pub msaa: MsaaLevel,
     /// Planetshine (Earthshine on the Moon, moonlight on Earth; D055).
     pub earthshine: bool,
+    /// Haze strength: the aerial perspective on the ground and ships, as a
+    /// multiple of the physical air density along the view ray (1 =
+    /// physical). Not part of the tiers.
+    pub haze: f32,
 }
 
 impl GraphicsSettings {
@@ -90,6 +94,7 @@ impl GraphicsSettings {
             shadows: false,
             msaa: MsaaLevel::Off,
             earthshine: false,
+            haze: 1.0,
         };
         match tier {
             Tier::Minimal => base,
@@ -132,6 +137,12 @@ impl GraphicsSettings {
         .with_tier(tier)
     }
 
+    /// Tier `tier` with this settings' choices that are not part of the
+    /// tiers (haze) kept.
+    pub fn with_preset(&self, tier: Tier) -> Self {
+        GraphicsSettings { haze: self.haze, ..Self::preset(tier) }
+    }
+
     fn with_tier(self, tier: Tier) -> Self {
         GraphicsSettings { tier: Some(tier), ..self }
     }
@@ -140,18 +151,20 @@ impl GraphicsSettings {
     pub fn matching_tier(&self) -> Option<Tier> {
         Tier::ALL.into_iter().find(|&t| {
             let p = Self::preset(t);
-            GraphicsSettings { tier: None, ..p } == GraphicsSettings { tier: None, ..*self }
+            GraphicsSettings { tier: None, haze: self.haze, ..p } == GraphicsSettings { tier: None, ..*self }
         })
     }
 }
 
 impl Default for GraphicsSettings {
-    /// The default tier, or `SUNSCATTER_TIER=<name>` if set.
+    /// The default tier, or `SUNSCATTER_TIER=<name>` if set; the haze from
+    /// `SUNSCATTER_HAZE=<strength>` if set (for demo comparisons).
     fn default() -> Self {
         let from_env = std::env::var("SUNSCATTER_TIER")
             .ok()
             .and_then(|name| Tier::ALL.into_iter().find(|t| t.name().eq_ignore_ascii_case(&name)));
-        Self::preset(from_env.unwrap_or_default())
+        let haze = std::env::var("SUNSCATTER_HAZE").ok().and_then(|h| h.parse().ok()).unwrap_or(1.0);
+        GraphicsSettings { haze, ..Self::preset(from_env.unwrap_or_default()) }
     }
 }
 
@@ -194,6 +207,9 @@ mod tests {
         for t in Tier::ALL {
             assert_eq!(GraphicsSettings::preset(t).matching_tier(), Some(t));
         }
+        let hazy = GraphicsSettings { haze: 0.5, ..GraphicsSettings::preset(Tier::Low) };
+        assert_eq!(hazy.matching_tier(), Some(Tier::Low), "haze is not part of the tiers");
+        assert_eq!(hazy.with_preset(Tier::High).haze, 0.5);
         let custom = GraphicsSettings { bloom: false, ..GraphicsSettings::preset(Tier::Ultra) };
         assert_eq!(custom.matching_tier(), None);
     }

@@ -245,3 +245,11 @@ fn ball_colour_is_continuous_across_the_horizon() {
     assert!(ball_colour(2.0 * HORIZON_BLEND)[2] > 200.0);
     assert!(ball_colour(-2.0 * HORIZON_BLEND)[0] > 150.0);
 }
+
+#[test]
+fn a_line_on_the_rim_is_drawn_whatever_the_noise() {
+    for z in [1e-12, -1e-12, 1e-9, -1e-9, 0.0] {
+        assert!(faces_viewer(z), "{z}");
+    }
+    assert!(!faces_viewer(-0.01));
+}

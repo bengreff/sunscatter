@@ -146,21 +146,22 @@ impl BodyPhysical {
     pub fn altitude(&self, p: Vec3<BodyFixed>) -> f64 {
         let r = p.raw();
         let d = r.length();
-        let sin_lat = r.z / d;
-        let cos2 = 1.0 - sin_lat * sin_lat;
+        d - self.ellipsoid_radius(r.z / d)
+    }
+
+    /// Radius of the reference ellipsoid (m) in a direction whose sine of
+    /// geocentric latitude is `sin_lat`.
+    pub fn ellipsoid_radius(&self, sin_lat: f64) -> f64 {
         let (a, b) = (self.radius_eq, self.radius_polar);
-        let surface = (a * b) / (b * b * cos2 + a * a * sin_lat * sin_lat).sqrt();
-        d - surface
+        let s2 = sin_lat * sin_lat;
+        (a * b) / (b * b * (1.0 - s2) + a * a * s2).sqrt()
     }
 
     /// Body-fixed position of a point at geodetic-ish latitude/longitude (rad)
     /// on the ellipsoid surface plus `height` along the radial direction.
     pub fn surface_point(&self, lat: f64, lon: f64, height: f64) -> Vec3<BodyFixed> {
         let dir = DVec3::new(math::cos(lat) * math::cos(lon), math::cos(lat) * math::sin(lon), math::sin(lat));
-        let (a, b) = (self.radius_eq, self.radius_polar);
-        let s = dir.z;
-        let surface = (a * b) / (b * b * (1.0 - s * s) + a * a * s * s).sqrt();
-        Vec3::from_raw(dir * (surface + height))
+        Vec3::from_raw(dir * (self.ellipsoid_radius(dir.z) + height))
     }
 }
 

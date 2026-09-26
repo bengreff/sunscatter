@@ -138,7 +138,7 @@ pub fn setup(
             ),
             rock: detail.map_or(Vec4::ZERO, |d| v4(d.rock_color, d.snow_line_m.unwrap_or(-1.0))),
             snow: detail.map_or(v4([1.0; 3], def.roughness), |d| v4(d.snow_color, def.roughness)),
-            ocean: def.ocean.as_ref().map_or(Vec4::ONE, |o| v4(o.tint, o.roughness)),
+            ocean: def.ocean.as_ref().map_or(Vec4::ONE, |o| v4(o.albedo, o.roughness)),
             base: v4(def.base_color, 1.0),
             // Full sunlight until lighting.rs fills in the real values.
             light: Vec4::ONE,

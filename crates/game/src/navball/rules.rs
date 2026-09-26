@@ -182,6 +182,14 @@ pub fn ball_project(ship: &Ship, d: DVec3) -> (f64, f64, f64) {
     (d.dot(ship.right), d.dot(ship.up), d.dot(ship.forward))
 }
 
+/// Whether a point at ball depth `z` (from `ball_project`) is drawn. Points
+/// on the rim count as in front: with the nose at the zenith (landed) the
+/// horizon line lies on the rim, and a test at exactly 0 drew it as flickering
+/// dashes from attitude noise.
+pub fn faces_viewer(z: f64) -> bool {
+    z > -1e-6
+}
+
 /// The direction shown at disc point (`x`, `y`) of the front hemisphere.
 pub fn ball_unproject(ship: &Ship, x: f64, y: f64) -> DVec3 {
     let z = (1.0 - x * x - y * y).max(0.0).sqrt();

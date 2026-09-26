@@ -48,8 +48,11 @@ fn default_icon() -> [f32; 3] {
 #[derive(Clone, Debug, Deserialize)]
 pub struct OceanDef {
     pub roughness: f32,
-    /// Tint applied to the colour map under water (multiplier).
-    pub tint: [f32; 3],
+    /// Linear albedo of open water (water-leaving reflectance, without the
+    /// surface's Fresnel reflection, which the lighting adds). The colour
+    /// map under water is raised to at least this: Blue Marble's open ocean
+    /// is ~0.002, far darker than real water, so the haze swamped it.
+    pub albedo: [f32; 3],
     /// Water mask (8-bit sea fraction, baked by `asset-tool`), relative to
     /// the body dir. Without one no water is drawn.
     #[serde(default)]

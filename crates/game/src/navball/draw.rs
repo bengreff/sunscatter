@@ -258,7 +258,7 @@ fn curve(
     let mut run = Vec::new();
     for d in dirs {
         let (x, y, z) = rules::ball_project(ship, d);
-        if z > 0.0 {
+        if rules::faces_viewer(z) {
             run.push(at(x, y));
         } else if run.len() > 1 {
             painter.add(Shape::line(std::mem::take(&mut run), stroke));

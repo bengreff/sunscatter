@@ -5,7 +5,9 @@
     albedo: 0.30,
     roughness: 0.85,
     icon_color: (0.45, 0.65, 1.0),
-    ocean: Some((roughness: 0.12, tint: (0.9, 0.95, 1.0), mask: Some("water.png"))),
+    // Open ocean's water-leaving reflectance (π·Rrs for clear water: ~0.03 at
+    // 443 nm, ~0.008 at 555 nm, ~0.003 at 670 nm).
+    ocean: Some((roughness: 0.12, albedo: (0.003, 0.008, 0.03), mask: Some("water.png"))),
     detail: Some((
         scale_m: 40.0,
         strength: 0.5,

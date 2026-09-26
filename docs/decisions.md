@@ -102,7 +102,7 @@ The game is about realistic progression across many simultaneous missions, not o
 **D023: Spheres of influence are replaced by the motion model.** *Decided, 2026-09-25.*
 - The physics has no reference bodies. Anchors exist only for precision, and a CI test checks that trajectories are the same under different anchor choices.
 - The body tree clusters distant subtrees into point masses.
-- **Gravity sources below a threshold acceleration are not simulated at all.**
+- **Gravity sources whose tidal acceleration (relative to the anchor) is below a threshold are not simulated in full:** they pull the vessel exactly as they pull the anchor, so they cancel. The set is re-checked every step and only grows within a segment.
 - Rails-or-table is decided by measuring how well a fit matches.
 - See [design/motion-model.md](design/motion-model.md).
 

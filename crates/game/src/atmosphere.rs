@@ -101,11 +101,32 @@ pub fn spawn(
     commands.spawn((BodyAtmosphere(node, atmosphere.clone()), atmosphere, Transform::IDENTITY));
 }
 
-/// Keeps atmospheres at their bodies' camera-relative centres.
-pub fn update(sim: Res<SimState>, rig: Res<CameraRig>, mut atmos: Query<(&BodyAtmosphere, &mut Transform)>) {
+/// Keeps atmospheres at their bodies' camera-relative centres, with their
+/// ground on the reference ellipsoid below the camera.
+///
+/// Bevy's atmosphere is a sphere. At the mean radius, ground on the
+/// ellipsoid sat kilometres above or below its "ground" (2 km above at the
+/// pad, 14 km below at the poles): air near the surface was too thin, and
+/// ground below the sphere got no haze and no sun (dark far ground).
+pub fn update(
+    sim: Res<SimState>,
+    rig: Res<CameraRig>,
+    mut atmos: Query<(&mut BodyAtmosphere, &mut Transform, Option<&mut Atmosphere>)>,
+) {
     let snap = sim.world.snapshot(sim.clock);
-    for (a, mut t) in &mut atmos {
-        t.translation = (snap.relative_r(a.0, rig.anchor) - rig.cam_pos).as_vec3();
+    for (mut a, mut t, live) in &mut atmos {
+        let centre = snap.relative_r(a.0, rig.anchor);
+        t.translation = (centre - rig.cam_pos).as_vec3();
+        let Some(p) = sim.world.source(a.0).and_then(|s| s.physical.as_ref()) else { continue };
+        let up = (rig.cam_pos - centre).normalize_or_zero();
+        let ground = p.ellipsoid_radius(up.dot(p.rotation.pole(sim.clock))) as f32;
+        if (ground - a.1.inner_radius).abs() > 1.0 {
+            let thickness = a.1.outer_radius - a.1.inner_radius;
+            (a.1.inner_radius, a.1.outer_radius) = (ground, ground + thickness);
+            if let Some(mut live) = live {
+                (live.inner_radius, live.outer_radius) = (a.1.inner_radius, a.1.outer_radius);
+            }
+        }
     }
 }
 
