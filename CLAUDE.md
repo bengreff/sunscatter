@@ -7,11 +7,13 @@ Real-scale 3D spaceflight, mission-design and logistics game in Rust. Being rebu
 - `docs/design/motion-model.md` — how bodies and ships move (no SOIs, frame tree, precision, determinism).
 - `docs/plans/` — the current build plan; check items off as you go.
 - `docs/process.md` — doc types, research strategy (KSP mods, Principia, …), engineering rules.
+- `docs/architecture.md` — **who owns what** (search it before writing a new function about bodies, orbits, visibility, lighting or time), frame order, where tests live.
+- `docs/features/` — the spec for the feature you are building, if one exists.
 
 ## Layout
 - `crates/sim` — simulation core. **No engine dependencies.** f64, frame-typed, deterministic.
 - `crates/game` — Bevy app (rendering, input, UI). Converts sim state to camera-relative f32 each frame.
-- `crates/ephem-tool` — offline ephemeris generation (DE440 → our tables in `data/ephemeris/`).
+- `crates/ephem-tool`, `crates/asset-tool` — offline generation of committed data (`data/`).
 
 ## Commands
 - `cargo test -p sim` — fast sim tests (run constantly).
@@ -21,7 +23,8 @@ Real-scale 3D spaceflight, mission-design and logistics game in Rust. Being rebu
 - `cargo run -p sim --release --example bench_coast` — coast integration cost per step.
 - `cargo run -p ephem-tool --release -- sol` — regenerate the Solar System ephemeris (needs `data/external/de440s.bsp`; see the tool's docs). The golden tests fail if the shipped file and code disagree.
 - `cargo clippy -p sim -p ephem-tool -p asset-tool --all-targets -- -D warnings`, `cargo fmt --all`, `tools/check_file_sizes.sh`.
-- CI: a fast `sim` job (no Bevy) and a separate `game` job, on macOS and Windows. `Demo (Windows, software GPU)` tries the demo on WARP (manual; not yet working, see plan B5).
+- CI: a fast `sim` job (no Bevy; fmt, file sizes, decision references, clippy, tests) and a separate `game` job, on macOS and Windows. `tools/check_decision_refs.sh` fails on citations of deleted (superseded) decisions.
+- Windows: at the end of a big session, try `ssh backhouse` (the owner's PC) and run the demo there; if it doesn't connect, skip it.
 - Hooks (`.claude/settings.json`, scripts in `tools/hooks/`): `cargo check` of the owning crate after editing a `.rs` file, `cargo test -p sim` on stop. Failures are fed back (exit 2).
 
 ## Non-negotiable rules
@@ -32,3 +35,5 @@ Real-scale 3D spaceflight, mission-design and logistics game in Rust. Being rebu
 5. **One owner per piece of math** (one Kepler solver: `sim::kepler`).
 6. Tests come with the code. Small commits, one purpose each, pushed to `main`. Every commit passes fmt, clippy, tests.
 7. Describe features honestly: *design / skeleton / playable / polished*.
+8. **Game rules are pure functions with table tests** (visibility, hover, camera limits, lighting, orbit-line length); Bevy systems only wire them up. One owner per rule (`docs/architecture.md`).
+9. **Superseded decisions are deleted**, and everything citing them is updated in the same commit (CI checks the citations).

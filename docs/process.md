@@ -61,6 +61,9 @@ Before designing a solution to a hard problem, **look at how others solved it.**
 - Hooks run `cargo check`, clippy and the tests. A task is done when those pass, and for visual work, when there is a screenshot or recording.
 - Build any non-trivial chunk in this order: a plan (with a design doc first only if the mechanic needs one), then implementation with tests, then an independent review. The review must reproduce what it reports.
 - When something is corrected, turn the lesson into a type, test, lint or hook. Write it as prose only as a last resort.
+- **Parallel agents** only get disjoint areas (a crate, a new module, a data directory). The lead owns shared files (`main.rs`, plans, `decisions.md`) and merges. Agents rebase before every push. Never build two worktrees into one target directory (compile-time paths such as `CARGO_MANIFEST_DIR` get baked into the other checkout).
+- **Visual checks are also assertions.** The demo checks what it can in code (for example: the camera is outside every body, nothing is hovered outside map view), and the screenshots are for judging the look.
+- **Windows.** CI builds and tests on Windows but has no GPU. At the end of a big session, run the demo on the owner's Windows PC over SSH (`backhouse`); if it isn't reachable, skip it.
 
 ## Versioning
 
