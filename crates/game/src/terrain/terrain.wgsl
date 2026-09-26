@@ -64,17 +64,18 @@ fn noise(p: vec2<f32>, period: f32) -> f32 {
     return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
 }
 
-// Five octaves; coordinates wrap at 256, so each octave's period is 256·2^k.
-fn fbm(p: vec2<f32>) -> f32 {
+// `octaves` octaves, normalised to [0, 1]; coordinates wrap at 256, so each
+// octave's period is 256·2^k.
+fn fbm(p: vec2<f32>, octaves: i32) -> f32 {
     var sum = 0.0;
     var amp = 0.5;
     var freq = 1.0;
-    for (var k = 0; k < 5; k++) {
+    for (var k = 0; k < octaves; k++) {
         sum += amp * noise(p * freq, 256.0 * freq);
         amp *= 0.5;
         freq *= 2.0;
     }
-    return sum;
+    return sum / (1.0 - amp * 2.0 + 1e-6);
 }
 
 // Wraps a derivative of the longitude coordinate across the seam.
@@ -110,14 +111,18 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
         let dist = length(in.world_position.xyz);
         let fade = clamp(1.0 - dist / terrain.shape.z, 0.0, 1.0);
         if fade > 0.0 {
-            let n = fbm(in.uv);
-            let fine = fbm(in.uv * 16.0);
-            // The finest octave (a few cm to m) only right around the camera.
-            let micro = mix(0.5, fbm(in.uv * 128.0), clamp(1.0 - dist / (terrain.shape.z * 0.05), 0.0, 1.0));
+            let n = fbm(in.uv, 4);
+            let fine = fbm(in.uv * 16.0, 3);
+            // The finest octaves (tens of cm) only right around the camera.
+            let near = clamp(1.0 - dist / (terrain.shape.z * 0.05), 0.0, 1.0);
+            var micro = 0.5;
+            if near > 0.0 {
+                micro = mix(0.5, fbm(in.uv * 128.0, 2), near);
+            }
             let variation =
                 1.0 + terrain.shape.w * ((n - 0.5) * 2.0 + (fine - 0.5) * 1.6 + (micro - 0.5) * 1.2);
             // Patches of slightly different hue (drier / lusher ground).
-            let hue = fbm(in.uv + vec2(17.0, 3.0));
+            let hue = fbm(in.uv + vec2(17.0, 3.0), 2);
             color = mix(color, color * vec3(1.15, 1.05, 0.8), smoothstep(0.4, 0.7, hue) * terrain.shape.w);
             let slope = 1.0 - clamp(dot(normalize(in.world_normal), normalize(rel)), 0.0, 1.0);
             let rockiness = smoothstep(0.08, 0.25, slope + (n - 0.5) * 0.1);

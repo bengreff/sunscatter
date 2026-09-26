@@ -158,6 +158,8 @@ pub fn apply_settings(
     }
 }
 
+type SkyLightCamera = (Entity, Has<AtmosphereEnvironmentMapLight>, Option<Mut<'static, AtmosphereSettings>>);
+
 /// Sky light (ambient and reflections from Bevy's atmosphere environment
 /// map) only inside an atmosphere: from above it, the map would still show
 /// a lit sky and tint everything blue.
@@ -166,7 +168,7 @@ pub fn update_sky_light(
     sim: Res<SimState>,
     rig: Res<CameraRig>,
     mut commands: Commands,
-    cams: Query<(Entity, Has<AtmosphereEnvironmentMapLight>), With<MainCamera>>,
+    mut cams: Query<SkyLightCamera, With<MainCamera>>,
     atmos: Query<&BodyAtmosphere>,
 ) {
     let snap = sim.world.snapshot(sim.clock);
@@ -174,11 +176,19 @@ pub fn update_sky_light(
         && atmos
             .iter()
             .any(|a| (rig.cam_pos - snap.relative_r(a.0, rig.anchor)).length() < f64::from(a.1.outer_radius));
-    for (cam, has) in &cams {
+    for (cam, has, atmo) in &mut cams {
         if inside && !has {
             commands.entity(cam).insert(AtmosphereEnvironmentMapLight::default());
         } else if !inside && has {
             commands.entity(cam).remove::<AtmosphereEnvironmentMapLight>();
+        }
+        // "Raymarched" is adaptive: inside an atmosphere the lookup tables
+        // are accurate and much cheaper; from outside, raymarching is needed.
+        if let Some(mut a) = atmo.filter(|_| settings.atmosphere == AtmosphereQuality::Raymarched) {
+            let want = if inside { AtmosphereMode::LookupTexture } else { AtmosphereMode::Raymarched };
+            if a.rendering_method as u32 != want as u32 {
+                a.rendering_method = want;
+            }
         }
     }
 }
