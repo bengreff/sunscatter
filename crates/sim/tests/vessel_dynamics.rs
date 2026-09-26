@@ -212,3 +212,30 @@ fn falling_without_parachute_crashes() {
     vessel.advance(&w, t.add_seconds(600.0), &Controls::default(), usize::MAX);
     assert!(matches!(vessel.phase, Phase::Crashed { .. }), "{:?}", vessel.phase);
 }
+
+/// Cross-platform determinism of vessel coasts: CI runs this on macOS
+/// (ARM64) and Windows (x86-64). If it changes intentionally, update the hash.
+#[test]
+fn coast_segment_matches_golden_hash() {
+    let w = world();
+    let (earth, mu) = earth(&w);
+    let (r, v) = leo(mu);
+    let mut seg = Segment::new(
+        &w,
+        t0(),
+        CoastStart { anchor: earth, r, v, drag: None, contact_height: 0.0, horizon: 1e9, fixed_anchor: false },
+    );
+    seg.extend(&w, 2000);
+    let mut bytes = Vec::new();
+    for s in &seg.samples {
+        bytes.extend_from_slice(&s.anchor.0.to_le_bytes());
+        for x in [s.s.t, s.s.r.x, s.s.r.y, s.s.r.z, s.s.v.x, s.s.v.y, s.s.v.z] {
+            bytes.extend_from_slice(&x.to_bits().to_le_bytes());
+        }
+    }
+    let hash = sim::ephem::fnv1a64(&bytes);
+    println!("coast golden hash: {hash:#018x}");
+    assert_eq!(hash, COAST_GOLDEN, "coast output changed (or differs on this platform)");
+}
+
+const COAST_GOLDEN: u64 = 0xa1972777eba62ac1;
