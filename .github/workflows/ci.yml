@@ -9,8 +9,10 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  test:
-    name: test (${{ matrix.os }})
+  # Fast feedback: everything except Bevy. Only `-p sim -p ephem-tool -p asset-tool`
+  # (never `--workspace`, which would build Bevy for clippy).
+  sim:
+    name: sim (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
@@ -18,21 +20,43 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
-        with:
-          lfs: true
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.98.1"
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: sim
       - name: Format
         run: cargo fmt --all --check
       - name: File size limit
         shell: bash
         run: tools/check_file_sizes.sh
-      - name: Clippy (workspace)
-        run: cargo clippy --workspace --all-targets --locked -- -D warnings
-      - name: Tests (sim)
-        run: cargo test -p sim --locked
+      - name: Clippy (sim, ephem-tool, asset-tool)
+        run: cargo clippy -p sim -p ephem-tool -p asset-tool --all-targets --locked -- -D warnings
+      - name: Tests (sim, asset-tool)
+        run: cargo test -p sim -p asset-tool --locked
+
+  # The Bevy app. Slow when the cache is cold; runs in parallel with `sim`.
+  game:
+    name: game (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.98.1"
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: game
+      - name: Clippy (game)
+        run: cargo clippy -p game --all-targets --locked -- -D warnings
+      - name: Tests (game)
+        run: cargo test -p game --locked
       - name: Build game
         run: cargo build -p game --locked
