@@ -251,6 +251,11 @@ It lists tracked vessels (and later asteroids), lets you focus and switch to a v
 
 ---
 
+**D057: The flight view holds only flight controls; ship systems get their own view.** *Direction, 2026-09-26.*
+- The flight view shows vital flight information: time and warp, the navball, trajectory data, and the flight state.
+- Ship systems (power, propellant, thermal, crew and so on) go in a separate ship-management view: an abstracted schematic of the ship with no planets drawn. It will be built once ships have systems.
+- GUI style: clean sci-fi, function first; dense menus are fine.
+
 ## Open questions
 
 1. What kind of organization the player leads (D027).

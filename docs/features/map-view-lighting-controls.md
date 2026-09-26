@@ -21,6 +21,8 @@ In scope:
 8. Ground jitter while thrusting.
 9. Surface flicker and dark patches.
 10. Hover priority.
+11. A navball.
+12. A full-screen tracking station, and general GUI work.
 
 Out of scope: new content (craters, clouds), the burn planner.
 
@@ -72,11 +74,16 @@ A full-size body's disc blocks hovering on icons behind it.
 
 Moons are still reachable: zoom in until their icons separate. Icons whose screen distance to a heavier object's icon is under 6 px are hidden (the KSP convention), so hovering there shows the parent.
 
-### Tracking station (**Q3**)
+### Tracking station (decided: full screen, KSP-like)
 
-Proposed: the same rule, with the tracking station's own camera, plus two differences:
-- every *tracked* vessel's icon and line is shown even when its orbit is under 1 px, drawn at a minimum size, so nothing tracked is ever invisible;
-- the station has no flight HUD, and clicking an icon focuses it.
+The tracking station is its own full screen:
+- An object list on the left: bodies as a tree (star → planets → moons), vessels grouped by type/status, each with a track toggle.
+- Actions: focus, switch to, delete (with confirmation).
+- There is no flight HUD.
+
+The same per-object map-view rule applies, with the station's own camera, plus two differences:
+- every *tracked* object's icon and line is shown even when its orbit is under 1 px, drawn at a minimum icon size, so nothing tracked is ever invisible;
+- clicking an icon focuses it.
 
 ### Tests (pure functions, no Bevy)
 
@@ -176,7 +183,12 @@ F3/F5/F6/F7/F9 stay as shortcuts; F3 opens Settings → Graphics.
 
 ### General GUI
 
-These fix what is rough now; **Q6** adjusts the look.
+Decided look: **clean sci-fi, but function first.**
+- Vital information is always visible; density is fine in menus.
+- Time-warp arrows sit at the top of the screen.
+- The flight view contains only flight controls. Ship systems will get a separate ship-management view (a schematic, with no planets drawn) once ships exist (D057).
+
+The following fix what is rough now:
 - **One style.** A shared egui theme module holds colours, fonts, spacing and window frames. Panels are dark and slightly translucent, with an accent colour for the active vessel, and nothing is left at egui's default look.
 - **HUD layout, no overlaps.**
   - Top left: date, time and warp.
@@ -212,15 +224,42 @@ Likely causes, to be confirmed with repro captures before fixing:
 
 **Tests:** the water mask is independent of LOD level (sample the same point via different chunk levels); demo captures during a zoom sweep (new demo step) are checked by eye.
 
+## 10. Navball (attitude indicator)
+
+Decided: build it in this round, modelled on KSP's, with more information. It is flight-view only.
+- **The ball.** A textured sphere in the bottom centre showing the horizon and heading relative to the local frame of the reference body. It rotates with the ship's attitude. It is rendered as a small 3D view into the HUD, or as a shader quad.
+- **Markers:**
+  - prograde / retrograde;
+  - normal / antinormal;
+  - radial in / out;
+  - target and anti-target (when a target exists);
+  - the maneuver (later, with the burn planner).
+- **Modes:** surface / orbit / target (click to cycle), with the matching speed readout above the ball. The mode switches automatically as in KSP: surface below 36 km, orbit above; the owner can lock it.
+- **More than KSP:**
+  - heading, pitch and roll numbers;
+  - angle of attack and sideslip in the atmosphere;
+  - vertical speed;
+  - g-load;
+  - the SAS mode;
+  - the time to Ap/Pe beside the ball.
+- **Tests:** the marker directions are pure functions of state (prograde equals the normalised velocity in the chosen frame; radial is perpendicular to it). The ball's orientation is right for known attitudes (nose up on the pad means the horizon is centred at 90° pitch).
+- **Implementation:** a separate agent in its own module (`game::navball`), touching only its own files plus one registration line.
+
 ---
 
 ## Open questions
 
-- **Q3.** Tracking station differences (proposed above)?
-- **Q6.** GUI taste (colours, density, KSP-like or not): see the questions asked on 2026-09-26.
+None open.
+
 
 Resolved:
 - Q1: tidal dominance.
 - Q2: no hover outside map view.
 - Q4: eye adaptation.
 - Q5: the pad crash was steered (not a bug).
+- Q3: full-screen, KSP-like tracking station.
+- Q6: clean sci-fi, function first; warp arrows on top; navball in this round.
+
+## How it is built
+
+**Refactor as we touch:** each item first moves its rule into a pure, table-tested function (map view, camera limits, lighting, orbit length, formatting), then changes behaviour. There is no big-bang rewrite.
