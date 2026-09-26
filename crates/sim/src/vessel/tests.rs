@@ -66,3 +66,37 @@ fn a_segment_ended_at_its_horizon_is_continued() {
     let seg = ship.segment().unwrap();
     assert!(seg.t0.seconds_since(t0) >= 100.0 && seg.end.is_none(), "a new segment continues the coast");
 }
+
+/// Coasts one ship at 60 fps and another in one jump over 10 s; returns both.
+fn attitude_after_frames_and_jump(controls: Controls, omega0: DVec3) -> (Vessel, Vessel) {
+    let w = world();
+    let (earth, r, v) = leo(&w);
+    let t0 = sol::sol_epoch().add_seconds(86_400.0);
+    let mut frames = Vessel::coasting(&w, t0, earth, r, v, VesselParams::block());
+    frames.attitude.omega = omega0;
+    let mut jump = frames.clone();
+    for k in 1..=600 {
+        frames.advance(&w, t0.add_seconds(k as f64 / 60.0), &controls, usize::MAX);
+    }
+    jump.advance(&w, t0.add_seconds(10.0), &controls, usize::MAX);
+    assert_eq!(frames.time, jump.time);
+    (frames, jump)
+}
+
+#[test]
+fn coasting_rotation_input_is_independent_of_frame_rate() {
+    let controls = Controls { rotate: DVec3::new(0.3, -1.0, 0.5), ..Controls::default() };
+    let (frames, jump) = attitude_after_frames_and_jump(controls, DVec3::ZERO);
+    // 10 s of input at 0.5 rad/s² per axis (500 ticks, one partial tick left).
+    let spin = frames.attitude.omega.length();
+    assert!((spin - 0.5 * 10.0 * DVec3::new(0.3, -1.0, 0.5).length()).abs() < 0.02, "spin {spin} rad/s");
+    assert_eq!(frames.attitude, jump.attitude);
+}
+
+#[test]
+fn coasting_sas_is_independent_of_frame_rate() {
+    let controls = Controls { sas: true, ..Controls::default() };
+    let (frames, jump) = attitude_after_frames_and_jump(controls, DVec3::new(0.3, 0.1, -0.2));
+    assert_eq!(frames.attitude.omega, DVec3::ZERO, "SAS stopped the rotation");
+    assert_eq!(frames.attitude, jump.attitude);
+}

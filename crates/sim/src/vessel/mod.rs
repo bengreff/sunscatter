@@ -92,6 +92,13 @@ pub struct Vessel {
     /// own time to the clock with it). `None` outside powered flight.
     #[serde(default)]
     pub tick_accel: Option<DVec3>,
+    /// While coasting: the attitude at the last control tick and its epoch.
+    /// Ticks stay on that lattice (the remainder carries over to the next
+    /// frame) and `attitude` is this propagated torque-free to `time`, so
+    /// the result does not depend on frame rate or warp. `None`: `attitude`
+    /// is itself the tick state at `time`.
+    #[serde(default)]
+    attitude_tick: Option<(Epoch, Attitude)>,
 }
 
 /// Rotation matrix taking body-fixed axes of `body` to inertial axes at `t`.
@@ -116,6 +123,7 @@ impl Vessel {
             attitude: Attitude { q: DQuat::IDENTITY, omega: DVec3::ZERO },
             chute_deployed: false,
             tick_accel: None,
+            attitude_tick: None,
         };
         v.sync_landed_attitude(world);
         v
@@ -130,6 +138,7 @@ impl Vessel {
             attitude: Attitude { q: quat_z_to(r.normalize()), omega: DVec3::ZERO },
             chute_deployed: false,
             tick_accel: None,
+            attitude_tick: None,
         };
         vessel.start_coast(world);
         vessel
@@ -148,6 +157,7 @@ impl Vessel {
             Phase::Crashed { body, fixed, .. } => (*body, quat_z_to(fixed.raw().normalize())),
             _ => return,
         };
+        self.attitude_tick = None;
         let b2i = body_to_inertial(world, body, self.time);
         let rot = world.source(body).and_then(|s| s.physical.as_ref()).expect("physical").rotation;
         self.attitude = Attitude { q: (b2i * att_fixed).normalize(), omega: rot.omega(self.time).raw() };
@@ -226,6 +236,7 @@ impl Vessel {
             self.sync_landed_attitude(world);
             self.phase = Phase::Powered { anchor, r, v };
             self.tick_accel = None;
+            self.attitude_tick = None;
             return;
         }
         self.time = target;
@@ -348,6 +359,7 @@ impl Vessel {
             let (anchor, r, v) = self.state(world);
             self.phase = Phase::Powered { anchor, r, v };
             self.tick_accel = None;
+            self.attitude_tick = None;
             return;
         }
         if controls.chute && !self.chute_deployed {
@@ -389,15 +401,29 @@ impl Vessel {
         }
     }
 
-    /// Attitude over a coast: control ticks while input/SAS damping needs them,
-    /// then torque-free rotation for the rest.
+    /// Attitude over a coast: control ticks on the tick lattice while input or
+    /// SAS damping needs them, then torque-free rotation from the last tick.
+    /// The partial tick at the end of a frame is carried to the next one, so
+    /// 60 fps and one long jump give the same attitude bit for bit.
     fn advance_attitude(&mut self, until: Epoch, controls: &Controls) {
-        let mut t = self.time;
-        while self.attitude.needs_ticks(controls.rotate, controls.sas) && t.add_seconds(TICK) <= until {
-            self.attitude.control_tick(controls.rotate, controls.sas, self.params.max_ang_accel, TICK);
-            t = t.add_seconds(TICK);
+        let (input, sas) = (controls.rotate, controls.sas);
+        let (mut epoch, mut base) = self.attitude_tick.unwrap_or((self.time, self.attitude));
+        if base.needs_ticks(input, sas) {
+            // After free rotation, ticks resume at the last lattice point
+            // before the vessel's time (only when the input changes).
+            let behind = self.time.seconds_since(epoch);
+            if behind >= TICK {
+                let whole = libm::floor(behind / TICK) * TICK;
+                base = base.propagate_free(whole);
+                epoch = epoch.add_seconds(whole);
+            }
+            while base.needs_ticks(input, sas) && epoch.add_seconds(TICK) <= until {
+                base.control_tick(input, sas, self.params.max_ang_accel, TICK);
+                epoch = epoch.add_seconds(TICK);
+            }
         }
-        self.attitude = self.attitude.propagate_free(until.seconds_since(t));
+        self.attitude = base.propagate_free(until.seconds_since(epoch));
+        self.attitude_tick = Some((epoch, base));
     }
 
     /// Extends the current coast (if any) until `until`, with at most
