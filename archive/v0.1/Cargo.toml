@@ -1,3 +1,6 @@
+# Archived v0.1: its own workspace so it never joins a parent workspace.
+[workspace]
+
 [package]
 name = "sunscatter"
 version = "0.1.0"

@@ -55,3 +55,9 @@ The Sun doesn't exhibit this because it's a real body tracked via `tracked_body`
 **Mistake**: When implementing Layer 1, assumed all code needed to be written from scratch. Layer 0 had already implemented many stubs (establish_colony, update_colonies, simulation.rs, notification.rs, colony part, gas giant flag). This caused duplicate fields, methods, and imports.
 
 **Rule**: Before implementing any task from a plan, search for existing implementations first. Run `grep` for function names, field names, and file names. Layer 0 data model work often includes stubs for Layer 1 functionality.
+
+## Code Existing ≠ Feature Playable (2026-09-24)
+
+**Mistake**: While rewriting README.md, described interstellar travel ("travel to other stars"), the interstellar engines, and colony trade routes as working features. The evidence was that code, part definitions and commits existed for them. In fact you cannot reach another star in play, the interstellar engines are drafts, and trade routes are a skeleton.
+
+**Rule**: In any user-facing description (README, resume, pitch), describe what a player can actually do, not what the code contains. Before claiming a feature works, confirm it is usable end-to-end. If unsure, label it groundwork, draft or skeleton, or ask the owner. The existence of a module, enum variant, part file or "Add X" commit proves nothing about playability.

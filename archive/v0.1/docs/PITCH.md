@@ -1,0 +1,3 @@
+# Sunscatter
+
+**Sunscatter** is a 2D space game about building an interstellar civilization. Design rockets, fly them with real orbital mechanics, colonize worlds across the solar system, and eventually push toward other stars with fusion and antimatter drives at relativistic speeds — where your ship's clock drifts against Earth's and thrust fades as you approach the speed of light. The endgame is a supply chain spanning the galaxy: colonies extracting resources, refining fuel, and building the ships that carry civilization to the next star. Every orbit is 1:1 real scale, from Earth's 7.8 km/s LEO to a 4-component Milky Way gravity model centered on Sagittarius A*. Built from scratch in Rust with no game engine.

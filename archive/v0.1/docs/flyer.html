@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Sunscatter</title>
+<style>
+  @page { size: letter; margin: 0; }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html, body { width: 8.5in; height: 11in; }
+  body {
+    font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+    background: #0a0e17;
+    color: #e0e0e0;
+    display: flex;
+    flex-direction: column;
+    padding: 0.5in 0.55in 0.4in;
+  }
+
+  /* Header */
+  .header { text-align: center; margin-bottom: 0.25in; }
+  .header h1 {
+    font-size: 42pt;
+    font-weight: 700;
+    letter-spacing: 6px;
+    text-transform: uppercase;
+    color: #ffffff;
+    margin-bottom: 4px;
+  }
+  .header .tagline {
+    font-size: 12.5pt;
+    color: #8cb4d8;
+    font-weight: 300;
+    letter-spacing: 1px;
+  }
+
+  /* Screenshots row */
+  .screenshots {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 0.2in;
+  }
+  .screenshots .shot {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+  .screenshots img {
+    width: 100%;
+    border-radius: 4px;
+    border: 1px solid #1e2a3a;
+  }
+  .screenshots .caption {
+    font-size: 7.5pt;
+    color: #6a8caa;
+    margin-top: 4px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+  }
+
+  /* Description */
+  .description {
+    font-size: 11pt;
+    line-height: 1.55;
+    color: #c8d0d8;
+    margin-bottom: 0.22in;
+    text-align: left;
+  }
+
+  /* Features grid */
+  .features {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px 24px;
+    margin-bottom: 0.22in;
+  }
+  .feature {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+  }
+  .feature .icon {
+    flex-shrink: 0;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: #1a2a3e;
+    border: 1.5px solid #3a6a8e;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin-top: 1px;
+  }
+  .feature .icon::after {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #5a9abf;
+  }
+  .feature .text h3 {
+    font-size: 9.5pt;
+    font-weight: 600;
+    color: #ffffff;
+    margin-bottom: 1px;
+  }
+  .feature .text p {
+    font-size: 8pt;
+    color: #8a98a8;
+    line-height: 1.4;
+  }
+
+  /* Divider */
+  .divider {
+    height: 1px;
+    background: linear-gradient(to right, transparent, #2a4a6a, transparent);
+    margin-bottom: 0.15in;
+  }
+
+  /* Galaxy screenshot */
+  .galaxy {
+    flex: 1;
+    margin-bottom: 0.15in;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    overflow: hidden;
+    border-radius: 6px;
+    border: 1px solid #1e2a3a;
+  }
+  .galaxy img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: 6px;
+  }
+
+  /* Bottom section */
+  .bottom {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+  }
+  .tech {
+    font-size: 8pt;
+    color: #5a6a7a;
+    line-height: 1.6;
+  }
+  .tech span { color: #7a8a9a; }
+  .cta {
+    text-align: right;
+  }
+  .cta .status {
+    font-size: 8pt;
+    color: #5a8a5a;
+    text-transform: uppercase;
+    letter-spacing: 1.5px;
+    margin-bottom: 2px;
+  }
+  .cta .url {
+    font-size: 10pt;
+    color: #6aaa8a;
+    font-weight: 500;
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>Sunscatter</h1>
+  <div class="tagline">Build rockets. Fly real orbits. Colonize the galaxy.</div>
+</div>
+
+<div class="screenshots">
+  <div class="shot">
+    <img src="flyer_editor.png" alt="Vehicle Editor">
+    <div class="caption">Design</div>
+  </div>
+  <div class="shot">
+    <img src="flyer_launch.png" alt="Launch">
+    <div class="caption">Launch</div>
+  </div>
+  <div class="shot">
+    <img src="flyer_orbit.png" alt="Orbital Mechanics">
+    <div class="caption">Navigate</div>
+  </div>
+</div>
+
+<div class="description">
+  A 2D space game about building an interstellar civilization. Design rockets from 148 parts, fly them with real orbital mechanics, colonize worlds across the solar system, and push toward other stars with fusion and antimatter drives at relativistic speeds&mdash;where your ship's clock drifts against Earth's and thrust fades as you approach the speed of light. The endgame is a supply chain spanning the galaxy: colonies extracting resources, refining fuel, and building the ships that carry civilization to the next star.
+</div>
+
+<div class="features">
+  <div class="feature">
+    <div class="icon"></div>
+    <div class="text">
+      <h3>1:1 Real-Scale Physics</h3>
+      <p>Earth LEO at 7.8 km/s. Real planetary masses, real distances. No scaled-down shortcuts.</p>
+    </div>
+  </div>
+  <div class="feature">
+    <div class="icon"></div>
+    <div class="text">
+      <h3>Galactic Scope</h3>
+      <p>20 celestial bodies from Sagittarius A* to Martian moons, with a 4-component Milky Way gravity model.</p>
+    </div>
+  </div>
+  <div class="feature">
+    <div class="icon"></div>
+    <div class="text">
+      <h3>Deep Vehicle Editor</h3>
+      <p>148 parts across 6 propellant types. Mirror symmetry, staging, fairings, per-stage delta-v.</p>
+    </div>
+  </div>
+  <div class="feature">
+    <div class="icon"></div>
+    <div class="text">
+      <h3>Patched Conic Trajectories</h3>
+      <p>Maneuver nodes, transfer planner, SOI transitions, and closest approach prediction.</p>
+    </div>
+  </div>
+  <div class="feature">
+    <div class="icon"></div>
+    <div class="text">
+      <h3>Relativistic Flight</h3>
+      <p>Lorentz thrust limiting, gravitational time dilation, split ship/Earth clocks above 1% c.</p>
+    </div>
+  </div>
+  <div class="feature">
+    <div class="icon"></div>
+    <div class="text">
+      <h3>Interstellar Propulsion</h3>
+      <p>Fusion, antimatter, and nuclear pulse drives. Reactors from megawatts to terawatts.</p>
+    </div>
+  </div>
+  <div class="feature">
+    <div class="icon"></div>
+    <div class="text">
+      <h3>Colony Building</h3>
+      <p>Extract resources, refine fuel, manufacture parts. Build system-wide supply chains.</p>
+    </div>
+  </div>
+  <div class="feature">
+    <div class="icon"></div>
+    <div class="text">
+      <h3>Full Flight Systems</h3>
+      <p>Staging, fuel zones, RCS, autopilot, aerodynamic drag, heating, multi-vessel tracking.</p>
+    </div>
+  </div>
+</div>
+
+<div class="divider"></div>
+
+<div class="galaxy">
+  <img src="flyer_galaxy.png" alt="Milky Way Galaxy View">
+</div>
+
+<div class="bottom">
+  <div class="tech">
+    <span>Rust</span> &middot; wgpu &middot; egui &middot; No game engine<br>
+    Custom physics loop &middot; f64 precision &middot; 4x MSAA
+  </div>
+  <div class="cta">
+    <div class="status">In Development</div>
+    <div class="url">github.com/bengreff/space-game</div>
+    <div class="url">ben@thegreffs.com</div>
+  </div>
+</div>
+
+</body>
+</html>

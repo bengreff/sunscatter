@@ -1,0 +1,4 @@
+# Pin the toolchain v0.1 was last built with so the archive stays runnable.
+[toolchain]
+channel = "1.93.1"
+targets = ["wasm32-unknown-unknown"]

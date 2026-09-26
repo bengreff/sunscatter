@@ -1,36 +1,10 @@
 # Rust / Cargo
 /target/
 **/*.rs.bk
-Cargo.lock
 
-# IDE
+# OS / editors
+.DS_Store
+Thumbs.db
 .idea/
 .vscode/
 *.swp
-*.swo
-*~
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Game saves and user data — live in the platform user-data dir on desktop
-# (~/Library/Application Support/sunscatter/ on macOS) and IndexedDB on wasm.
-# Never tracked in the repo.
-/data/saves/
-/data/blueprints/
-
-# Test fixture output (e.g. tests/generate_mass_driver_save.rs).
-/target/test_artifacts/
-
-# Build artifacts
-*.log
-
-# Sprite atlas cache
-/data/cache/
-
-# Editor backups
-*.bak
-
-# Trunk wasm output
-/dist/
