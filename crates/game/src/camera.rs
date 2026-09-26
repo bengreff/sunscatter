@@ -5,6 +5,7 @@
 //! placed relative to it (our floating origin: the engine only ever sees small
 //! f32 camera-relative coordinates).
 
+use crate::relations;
 use crate::state::SimState;
 use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll, MouseScrollUnit};
 use bevy::prelude::*;
@@ -114,23 +115,15 @@ pub fn read_input(
     }
 }
 
-/// The surface body closest to the active ship (by altitude).
+/// The body nearest the active ship (see [`relations::nearest_body`]).
 pub fn nearest_body(sim: &SimState) -> Option<NodeId> {
     nearest_body_to(sim, sim.active)
 }
 
-/// The surface body closest to vessel `i` (by altitude).
+/// The body nearest vessel `i`.
 pub fn nearest_body_to(sim: &SimState, i: usize) -> Option<NodeId> {
     let (anchor, r, _) = sim.fleet[i].state(&sim.world);
-    let snap = sim.world.snapshot(sim.clock);
-    sim.world
-        .surfaces()
-        .map(|s| {
-            let radius = s.physical.as_ref().map_or(0.0, |p| p.radius_eq);
-            (s.node, (r - snap.relative(s.node, anchor).r).length() - radius)
-        })
-        .min_by(|a, b| a.1.total_cmp(&b.1))
-        .map(|(n, _)| n)
+    relations::nearest_body(&sim.world, sim.clock, anchor, r)
 }
 
 /// Focus a body with the camera placed just beyond the ship, looking at the

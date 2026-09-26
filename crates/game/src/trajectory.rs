@@ -75,19 +75,6 @@ pub fn active_segment<'a>(sim: &'a SimState, pred: &'a Prediction) -> Option<&'a
     sim.ship().segment().or(pred.segment.as_ref())
 }
 
-/// The osculating period about the nearest body, for bound orbits.
-pub fn one_period(sim: &SimState, vessel: &sim::vessel::Vessel) -> Option<f64> {
-    let (anchor, r, v) = vessel.state(&sim.world);
-    let snap = sim.world.snapshot(sim.clock);
-    let body = sim.world.surfaces().min_by(|a, b| {
-        let d = |s: &sim::world::Source| (r - snap.relative_r(s.node, anchor)).length();
-        d(a).total_cmp(&d(b))
-    })?;
-    let k = snap.relative(body.node, anchor);
-    let el = sim::kepler::Elements::from_state(r - k.r, v - k.v, body.gm);
-    (el.e < 1.0).then(|| el.period(body.gm))
-}
-
 /// An apsis on the displayed trajectory.
 #[derive(Clone, Copy, Debug)]
 pub struct Apsis {
@@ -152,7 +139,12 @@ pub fn draw(
         let Some(seg) = seg else { continue };
         let Some((t_start, t_end)) = future_span(seg, sim.clock) else { continue };
         // One revolution is enough: later passes nearly overlap it.
-        let t_end = t_end.min(t_start + one_period(&sim, vessel).unwrap_or(f64::INFINITY));
+        let t_end = t_end.min(
+            t_start
+                + crate::relations::vessel_orbit(&sim.world, sim.clock, vessel)
+                    .and_then(|o| o.period())
+                    .unwrap_or(f64::INFINITY),
+        );
         let points = if active { TRAJECTORY_POINTS } else { TRAJECTORY_POINTS / 3 };
         let resampled = (0..points).filter_map(|k| {
             let t = t_start + (t_end - t_start) * k as f64 / (points - 1) as f64;

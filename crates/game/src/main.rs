@@ -12,6 +12,7 @@ mod demo;
 mod hud;
 mod map;
 mod persist;
+mod relations;
 mod saves;
 mod scene;
 mod settings;

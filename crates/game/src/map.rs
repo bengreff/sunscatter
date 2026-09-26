@@ -12,7 +12,6 @@ use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use bevy_egui::{egui, EguiContexts};
 use glam::DVec3;
-use sim::ephem::{Ephemeris, NodeKind};
 use sim::frame::NodeId;
 use sim::kepler::Elements;
 
@@ -82,27 +81,6 @@ pub fn update_mode(
     map.active = map.forced || if map.active { px < EXIT_PX } else { px < ENTER_PX };
 }
 
-/// The body a node orbits for display: the dominant body of its parent
-/// barycenter, or (for that dominant body) the barycenter's own primary.
-pub fn primary(eph: &Ephemeris, node: NodeId) -> Option<NodeId> {
-    let parent = eph.node(node).parent?;
-    if eph.node(parent).kind == NodeKind::Body {
-        return Some(parent);
-    }
-    let dominant = eph
-        .nodes()
-        .iter()
-        .enumerate()
-        .filter(|(_, n)| n.parent == Some(parent) && n.kind == NodeKind::Body)
-        .max_by(|a, b| a.1.gm.total_cmp(&b.1.gm))
-        .map(|(i, _)| NodeId(i as u16))?;
-    if dominant != node {
-        Some(dominant)
-    } else {
-        primary(eph, parent)
-    }
-}
-
 /// The smallest anchor zone containing the camera (the body whose system
 /// the player is looking at), if any.
 fn context_body(sim: &SimState, rig: &CameraRig) -> Option<NodeId> {
@@ -133,7 +111,7 @@ pub fn draw_body_orbits(
     let snap = sim.world.snapshot(sim.clock);
     let context = context_body(&sim, &rig);
     for node in eph.bodies() {
-        let Some(p) = primary(eph, node) else { continue };
+        let Some(p) = crate::relations::primary(eph, node) else { continue };
         // Like KSP: inside a body's zone, show its moons' orbits (and, near
         // a moon, the moon's own orbit); outside all zones, the planets'.
         let has_zone = |n: NodeId| sim.world.source(n).is_some_and(|s| s.anchor_zone.is_some());

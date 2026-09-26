@@ -205,19 +205,17 @@ pub fn advance(time: Res<Time>, pause: Res<SimPause>, mut sim: ResMut<SimState>)
     sim.compute_limited = clock < target;
     sim.clock = clock;
     let ship = &mut sim.fleet[sim.active];
-    let lookahead = sim.clock.add_seconds(lookahead_span(ship, &sim.world));
+    let lookahead = sim.clock.add_seconds(lookahead_span(ship, &sim.world, sim.clock));
     ship.extend_coast(&sim.world, lookahead, LOOKAHEAD_STEPS_PER_FRAME);
 }
 
-/// How far ahead to draw: ~1.5 orbits (bounded to [2 h, 30 days]).
-fn lookahead_span(ship: &Vessel, world: &World) -> f64 {
-    let (anchor, r, v) = ship.state(world);
-    let mu = world.source(anchor).map_or(0.0, |s| s.gm);
-    if mu == 0.0 {
-        return 30.0 * 86_400.0;
+/// How far ahead to draw: ~1.5 orbits about the nearest body (bounded to
+/// [2 h, 30 days]; 30 days when unbound).
+fn lookahead_span(ship: &Vessel, world: &World, t: Epoch) -> f64 {
+    match crate::relations::vessel_orbit(world, t, ship).and_then(|o| o.period()) {
+        Some(p) => (1.5 * p).clamp(2.0 * 3600.0, 30.0 * 86_400.0),
+        None => 30.0 * 86_400.0,
     }
-    let el = Elements::from_state(r, v, mu);
-    (1.5 * el.period(mu)).clamp(2.0 * 3600.0, 30.0 * 86_400.0)
 }
 
 /// The predicted trajectory while powered (the stored segment is used
@@ -247,7 +245,7 @@ pub fn update_prediction(time: Res<Time>, sim: Res<SimState>, mut pred: ResMut<P
         pred.since_last = 0.0;
         let world = sim.world.clone();
         let mut seg = ship.coast_from_now(&world);
-        let span = lookahead_span(ship, &world);
+        let span = lookahead_span(ship, &world, sim.clock);
         pred.task = Some(AsyncComputeTaskPool::get().spawn(async move {
             let mut budget = 40_000usize;
             while seg.computed_until() < span && !seg.finished() && budget > 0 {

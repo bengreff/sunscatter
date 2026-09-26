@@ -17,7 +17,6 @@ use bevy::prelude::*;
 use bevy_egui::input::EguiWantsInput;
 use bevy_egui::{egui, EguiContexts};
 use sim::frame::NodeId;
-use sim::kepler::Elements;
 use sim::vessel::{Controls, Phase};
 use std::collections::HashSet;
 
@@ -203,11 +202,11 @@ pub fn vessel_info(sim: &SimState, i: usize) -> VesselInfo {
     let flying = matches!(vessel.phase, Phase::Powered { .. } | Phase::Coasting { .. });
     if let (true, Some(body)) = (flying, primary.and_then(|p| sim.world.source(p))) {
         let (anchor, r, v) = vessel.state(&sim.world);
-        let k = sim.world.snapshot(sim.clock).relative(body.node, anchor);
-        let el = Elements::from_state(r - k.r, v - k.v, body.gm);
-        let radius = body.physical.as_ref().map_or(0.0, |p| p.radius_eq);
-        info.apsides = Some((el.periapsis() - radius, el.apoapsis() - radius));
-        info.period = (el.e < 1.0).then(|| el.period(body.gm));
+        if let Some(o) = crate::relations::orbit_about(&sim.world, sim.clock, anchor, r, v, body.node) {
+            let radius = body.physical.as_ref().map_or(0.0, |p| p.radius_eq);
+            info.apsides = Some((o.elements.periapsis() - radius, o.elements.apoapsis() - radius));
+            info.period = o.period();
+        }
     }
     info
 }

@@ -8,7 +8,6 @@ use bevy::window::PrimaryWindow;
 use bevy_egui::input::EguiWantsInput;
 use bevy_egui::{egui, EguiContexts};
 use sim::frame::NodeId;
-use sim::kepler::Elements;
 use sim::vessel::Phase;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
@@ -128,7 +127,9 @@ pub fn draw(
             let above_ground = p.altitude_above_surface(fixed);
             let v_orb = v - k.v;
             let v_srf = v_orb - p.rotation.omega(sim.clock).raw().cross(rel);
-            let el = Elements::from_state(rel, v_orb, body.gm);
+            let el = crate::relations::orbit_about(&sim.world, sim.clock, anchor, r, v, body.node)
+                .expect("nearest body is a source")
+                .elements;
             ui_.monospace(format!("{:<6} alt {}  (terrain {})", body.name, fmt_dist(alt), fmt_dist(above_ground)));
             ui_.monospace(format!("surface speed {:.1} m/s", v_srf.length()));
             ui_.monospace(format!("orbital speed {:.1} m/s", v_orb.length()));
