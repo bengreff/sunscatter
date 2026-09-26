@@ -224,3 +224,24 @@ fn altitude_follows_the_speed_mode() {
         assert_eq!(mode_altitude(mode, 1200.0, 1500.0), expected, "{mode:?}");
     }
 }
+
+#[test]
+fn sky_is_blue_and_ground_is_brown() {
+    let [r, _, b] = ball_colour(0.5);
+    assert!(b > r, "sky");
+    let [r, _, b] = ball_colour(-0.5);
+    assert!(r > b, "ground");
+}
+
+/// Landed with the nose up, the rim is the horizon: noise in attitude must
+/// not flip its colour.
+#[test]
+fn ball_colour_is_continuous_across_the_horizon() {
+    let (a, b) = (ball_colour(1e-9), ball_colour(-1e-9));
+    for i in 0..3 {
+        assert!((a[i] - b[i]).abs() < 0.1, "channel {i}: {a:?} vs {b:?}");
+    }
+    // Still fully sky or ground outside the band.
+    assert!(ball_colour(2.0 * HORIZON_BLEND)[2] > 200.0);
+    assert!(ball_colour(-2.0 * HORIZON_BLEND)[0] > 150.0);
+}

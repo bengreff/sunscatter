@@ -188,6 +188,24 @@ pub fn ball_unproject(ship: &Ship, x: f64, y: f64) -> DVec3 {
     ship.right * x + ship.up * y + ship.forward * z
 }
 
+/// Half-width (in the sine of elevation) of the band where the ball blends
+/// sky into ground. A hard switch at 0 made the whole rim flip colour with
+/// attitude noise when the nose points at the zenith (landed: the rim is the
+/// horizon).
+pub const HORIZON_BLEND: f64 = 0.02;
+
+/// Ball colour (sRGB 0–255 floats) for a direction with elevation sine `el`:
+/// sky above the horizon, ground below, darkening towards zenith and nadir,
+/// continuous across the horizon.
+pub fn ball_colour(el: f64) -> [f32; 3] {
+    let lerp = |a: [f32; 3], b: [f32; 3], t: f32| [0, 1, 2].map(|i| a[i] + (b[i] - a[i]) * t);
+    let el = el.clamp(-1.0, 1.0) as f32;
+    let sky = lerp([74.0, 144.0, 214.0], [22.0, 58.0, 128.0], el.max(0.0));
+    let ground = lerp([156.0, 98.0, 52.0], [74.0, 42.0, 20.0], (-el).max(0.0));
+    let t = ((el as f64 / HORIZON_BLEND + 1.0) * 0.5).clamp(0.0, 1.0) as f32;
+    lerp(ground, sky, t)
+}
+
 /// Times (s) to the next apoapsis and periapsis of an osculating orbit;
 /// `None` when there is none ahead (no apoapsis when unbound, no periapsis
 /// after it on an escape).

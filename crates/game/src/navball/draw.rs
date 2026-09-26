@@ -4,7 +4,7 @@
 //! the readouts beside it, plus the Target panel. Hidden in the tracking
 //! station.
 
-use super::rules::{self, Local, Ship};
+use super::rules::{self, Ship};
 use super::{nav_state, NavState, NavTarget, Navball};
 use crate::format::{distance as fmt_dist, duration as fmt_duration, speed as fmt_speed};
 use crate::interface::layout::{InterfaceSettings, PanelId};
@@ -199,21 +199,10 @@ fn target_panel(
     }
 }
 
-/// Ball colour for a direction: sky above the horizon, ground below,
-/// darkening towards zenith and nadir.
-fn ball_colour(local: &Local, d: DVec3) -> [f32; 3] {
-    let el = d.dot(local.up) as f32;
-    let lerp = |a: [f32; 3], b: [f32; 3], t: f32| [0, 1, 2].map(|i| a[i] + (b[i] - a[i]) * t);
-    if el >= 0.0 {
-        lerp([74.0, 144.0, 214.0], [22.0, 58.0, 128.0], el)
-    } else {
-        lerp([156.0, 98.0, 52.0], [74.0, 42.0, 20.0], -el)
-    }
-}
-
 fn paint_ball(painter: &egui::Painter, rect: Rect, s: &NavState) {
-    let centre = rect.center();
-    let radius = rect.width() * 0.5 - 2.0;
+    // Whole pixels, so the rim stroke and the disc's edge cannot drift apart.
+    let centre = rect.center().round();
+    let radius = (rect.width() * 0.5 - 2.0).round();
     let at = |x: f64, y: f64| centre + vec2(x as f32, -y as f32) * radius;
     // Shaded disc: rings of vertices, colour and limb darkening per vertex.
     const RINGS: usize = 24;
@@ -223,7 +212,7 @@ fn paint_ball(painter: &egui::Painter, rect: Rect, s: &NavState) {
         let d = rules::ball_unproject(&s.ship, x, y);
         let z = (1.0 - x * x - y * y).max(0.0).sqrt() as f32;
         let shade = 0.5 + 0.5 * z;
-        let [r, g, b] = ball_colour(&s.local, d).map(|c| (c * shade) as u8);
+        let [r, g, b] = rules::ball_colour(d.dot(s.local.up)).map(|c| (c * shade) as u8);
         mesh.colored_vertex(at(x, y), Color32::from_rgb(r, g, b));
     };
     vertex(&mut mesh, 0.0, 0.0);
@@ -407,19 +396,5 @@ fn glyph_shapes(painter: &egui::Painter, p: Pos2, s: f32, glyph: Glyph, stroke: 
             seg((-0.7, -0.7), (0.7, 0.7));
             seg((-0.7, 0.7), (0.7, -0.7));
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn sky_is_blue_and_ground_is_brown() {
-        let local = rules::local_frame(DVec3::X, DVec3::Z);
-        let [r, _, b] = ball_colour(&local, DVec3::new(0.5, 0.0, 0.8).normalize());
-        assert!(b > r, "sky");
-        let [r, _, b] = ball_colour(&local, DVec3::new(-0.5, 0.0, 0.8).normalize());
-        assert!(r > b, "ground");
     }
 }
