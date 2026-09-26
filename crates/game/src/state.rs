@@ -1,6 +1,7 @@
 //! Simulation state owned by the app: the world, the fleet, the clock and
 //! time warp, the player's controls, and trajectory predictions.
 
+use crate::trajectory::{self, settings::OrbitSettings};
 use bevy::prelude::*;
 use bevy::tasks::{futures::check_ready, AsyncComputeTaskPool, ComputeTaskPool, Task};
 use glam::DVec3;
@@ -177,6 +178,7 @@ pub fn advance(
     time: Res<Time>,
     pause: Res<SimPause>,
     menu: Res<crate::interface::pause::PauseMenu>,
+    orbits: Res<OrbitSettings>,
     mut sim: ResMut<SimState>,
 ) {
     if pause.0 || menu.open {
@@ -212,17 +214,12 @@ pub fn advance(
     }
     sim.compute_limited = clock < target;
     sim.clock = clock;
+    // Look ahead as far as the drawn line needs (D056), a bounded number of
+    // steps per frame.
     let ship = &mut sim.fleet[sim.active];
-    let lookahead = sim.clock.add_seconds(lookahead_span(ship, &sim.world, sim.clock));
-    ship.extend_coast(&sim.world, lookahead, LOOKAHEAD_STEPS_PER_FRAME);
-}
-
-/// How far ahead to draw: ~1.5 orbits about the nearest body (bounded to
-/// [2 h, 30 days]; 30 days when unbound).
-fn lookahead_span(ship: &Vessel, world: &World, t: Epoch) -> f64 {
-    match crate::relations::vessel_orbit(world, t, ship).and_then(|o| o.period()) {
-        Some(p) => (1.5 * p).clamp(2.0 * 3600.0, 30.0 * 86_400.0),
-        None => 30.0 * 86_400.0,
+    if let Some(seg) = ship.segment() {
+        let until = trajectory::lookahead_until(&sim.world, seg, sim.clock, &orbits);
+        ship.extend_coast(&sim.world, until, LOOKAHEAD_STEPS_PER_FRAME);
     }
 }
 
@@ -236,7 +233,12 @@ pub struct Prediction {
     since_last: f64,
 }
 
-pub fn update_prediction(time: Res<Time>, sim: Res<SimState>, mut pred: ResMut<Prediction>) {
+pub fn update_prediction(
+    time: Res<Time>,
+    sim: Res<SimState>,
+    orbits: Res<OrbitSettings>,
+    mut pred: ResMut<Prediction>,
+) {
     if let Some(task) = pred.task.as_mut() {
         if let Some(seg) = check_ready(task) {
             pred.segment = Some(seg);
@@ -253,13 +255,9 @@ pub fn update_prediction(time: Res<Time>, sim: Res<SimState>, mut pred: ResMut<P
         pred.since_last = 0.0;
         let world = sim.world.clone();
         let mut seg = ship.coast_from_now(&world);
-        let span = lookahead_span(ship, &world, sim.clock);
+        let orbits = orbits.clone();
         pred.task = Some(AsyncComputeTaskPool::get().spawn(async move {
-            let mut budget = 40_000usize;
-            while seg.computed_until() < span && !seg.finished() && budget > 0 {
-                seg.extend(&world, 256);
-                budget = budget.saturating_sub(256);
-            }
+            trajectory::extend_to_line_end(&world, &mut seg, &orbits, 40_000);
             seg
         }));
     }

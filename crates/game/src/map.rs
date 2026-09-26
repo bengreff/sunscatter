@@ -5,15 +5,15 @@
 use crate::camera::{self, CameraRig, MainCamera};
 use crate::hud::{fmt_dist, PlotFrame, UiState};
 use crate::map_view::{self, Object, ObjectId, Visibility};
+use crate::relations::Dominance;
 use crate::scene::BodyDefs;
 use crate::state::{Prediction, SimState};
 use crate::tracking::{Tracked, TrackingStation};
-use crate::trajectory::{self, Plotter};
+use crate::trajectory::{self, settings::OrbitSettings, Plotter};
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use bevy_egui::{egui, EguiContexts};
 use glam::DVec3;
-use sim::kepler::Elements;
 
 /// A vessel's bounding radius for the map-view rule (m).
 pub const VESSEL_RADIUS: f64 = 10.0;
@@ -131,37 +131,36 @@ pub fn draw_body_orbits(
     ui: Res<UiState>,
     map: Res<MapView>,
     defs: Res<BodyDefs>,
+    orbits: Res<OrbitSettings>,
     mut gizmos: Gizmos,
 ) {
     let eph = &sim.world.eph;
+    let dom = Dominance::new(eph, sim.clock);
+    // One revolution about the dominant body (D056), or off.
+    let Some(limits) = orbits.body_limits(dom.region()) else { return };
+    let current = trajectory::vessel_dominant(&sim.world, &dom, sim.clock, sim.ship());
     let snap = sim.world.snapshot(sim.clock);
     for node in eph.bodies() {
         if !map.in_map(ObjectId::Body(node)) {
             continue;
         }
-        let Some((p, orbit)) = crate::relations::body_orbit(eph, sim.clock, node) else { continue };
+        let Some(p) = dom.of_body(eph, sim.clock, node) else { continue };
+        if !orbits.body_line_shown(&eph.node(node).name, p, Some(current)) {
+            continue;
+        }
         // The rotating frame is Earth–Moon: skip orbits about Earth there.
         if ui.plot_frame == PlotFrame::EarthMoonRotating && eph.node(p).name == "Earth" {
             continue;
         }
-        let Some(period) = orbit.period() else { continue };
-        let (el, mu) = (orbit.elements, orbit.mu);
-        let fade = (map.k * el.a - map_view::ORBIT_ENTER_PX) / (ORBIT_FADE_PX - map_view::ORBIT_ENTER_PX);
+        let Some((orbit, line)) = trajectory::body_line(eph, &dom, node, p, sim.clock, limits, ORBIT_POINTS) else {
+            continue;
+        };
+        let fade = (map.k * orbit.elements.a - map_view::ORBIT_ENTER_PX) / (ORBIT_FADE_PX - map_view::ORBIT_ENTER_PX);
         let alpha = fade.clamp(0.15, 1.0) as f32;
         let [r, g, b] = defs.get(node).map_or([0.7, 0.7, 0.7], |d| d.icon_color);
         let color = Color::srgba(r, g, b, 0.55 * alpha);
         let centre = snap.relative_r(p, rig.anchor) - rig.cam_pos;
-        let use_eph = sim.clock.add_seconds(period) < eph.end;
-        let points = (0..=ORBIT_POINTS).map(|i| {
-            let f = i as f64 / ORBIT_POINTS as f64;
-            let rel = if use_eph {
-                eph.relative(node, p, sim.clock.add_seconds(f * period)).r
-            } else {
-                Elements { mean_anomaly: el.mean_anomaly + f * std::f64::consts::TAU, ..el }.to_state(mu).0
-            };
-            (centre + rel).as_vec3()
-        });
-        gizmos.linestrip(points, color);
+        gizmos.linestrip(line.into_iter().map(|rel| (centre + rel).as_vec3()), color);
     }
 }
 

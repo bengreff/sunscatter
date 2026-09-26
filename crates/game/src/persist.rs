@@ -14,6 +14,7 @@
 use crate::bench::Bench;
 use crate::interface::layout::InterfaceSettings;
 use crate::settings::GraphicsSettings;
+use crate::trajectory::settings::OrbitSettings;
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -72,6 +73,7 @@ pub struct SettingsFile {
     pub graphics: GraphicsSettings,
     pub controls: ControlsSettings,
     pub interface: InterfaceSettings,
+    pub orbits: OrbitSettings,
 }
 
 impl SettingsFile {
@@ -128,6 +130,7 @@ impl Plugin for PersistPlugin {
         app.insert_resource(loaded.graphics)
             .insert_resource(loaded.controls)
             .insert_resource(loaded.interface.clone().sanitized())
+            .insert_resource(loaded.orbits.clone())
             .insert_resource(Persist { dirs, enabled, saved: loaded, last_write: f64::NEG_INFINITY })
             .add_systems(Last, save_settings);
     }
@@ -154,9 +157,11 @@ fn save_settings(
     graphics: Res<GraphicsSettings>,
     controls: Res<ControlsSettings>,
     interface: Res<InterfaceSettings>,
+    orbits: Res<OrbitSettings>,
     mut persist: ResMut<Persist>,
 ) {
-    let current = SettingsFile { graphics: *graphics, controls: *controls, interface: interface.clone() };
+    let current =
+        SettingsFile { graphics: *graphics, controls: *controls, interface: interface.clone(), orbits: orbits.clone() };
     let now = time.elapsed_secs_f64();
     if !persist.enabled || bench.running() || current == persist.saved || now - persist.last_write < WRITE_INTERVAL {
         return;
@@ -173,6 +178,7 @@ fn save_settings(
 mod tests {
     use super::*;
     use crate::settings::Tier;
+    use crate::trajectory::settings::VesselLine;
 
     fn scratch(name: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!("sunscatter-test-{}-{name}", std::process::id()));
@@ -204,6 +210,11 @@ mod tests {
                 invert_y: true,
             },
             interface: InterfaceSettings { ui_scale: 1.5, ..InterfaceSettings::default() },
+            orbits: OrbitSettings {
+                vessel_line: VesselLine::TwoRevolutions,
+                hidden_bodies: ["Pluto".to_string()].into(),
+                ..OrbitSettings::default()
+            },
         };
         s.write(&path).unwrap();
         assert_eq!(SettingsFile::read(&path), Ok(Some(s.clone())));
