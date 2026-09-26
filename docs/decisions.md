@@ -266,7 +266,7 @@ Deterministic fractal detail shaped by the local slope and roughness of the real
 
 **D060: The next theme is ultra realism, with ships as abstracted blobs.** *Decided, 2026-09-26.*
 - Every feature: the data model first, then the user interface.
-- No ship internals or part definitions yet (they will be very complex under the realism standard). A **test craft** stands in: one placeholder part for the whole ship with one temperature, one state, fuel, thrust and Isp; shaped like a ship (a 3D model), fixed landing gear allowed as geometry; crewed, minimal simple resources, no life support, no staging.
+- No ship internals or part definitions yet (they will be very complex under the realism standard). A **test craft** stands in: one placeholder part for the whole ship with one state, fuel, thrust and Isp (temperatures per cell, D065); shaped like a ship (a 3D model), fixed landing gear allowed as geometry; crewed, minimal simple resources, no life support, no staging (D064).
 - Order: visual fixes (D058), a foundation pass (the high-severity code-review items), the test craft's data model, relativity and light, aero/heating/hitbox (D061), then the UI (burn planner, powered Moon landing, rendezvous), then the MCP server (D063).
 
 **D061: Aerodynamics, heating and collision act on cells of the ship's 3D model.** *Direction, 2026-09-26.*
@@ -280,6 +280,31 @@ The altitude is data per body, chosen by rule: the top of the atmosphere, or on 
 - The MCP server (state, planning tools, commands) comes first, on a shared command API that WASM scripting (D043) later builds on.
 - In the first realism pass, light-time delay applies to telemetry and ground commands only; the crew flies without delay. Ships get proper time (D012).
 - Saves need not stay compatible across versions yet.
+
+**D064: The test craft is a debug craft with a realistic engine, and debug mode is one switch.** *Decided, 2026-09-26.*
+- The engine is realistic but abstracted: thrust, Isp (vacuum and sea level) and mass flow as numbers, no engine simulation and no elaborate plume graphics.
+- **Debug mode** turns on, together: infinite propellant, no overheating, infinite impact tolerance. Otherwise the craft is destroyed at its limits.
+- No heat shield.
+
+**D065: Heating is modeled per cell; a part has a maximum skin and a maximum internal temperature.** *Decided, 2026-09-26.*
+- Each surface cell has its own skin temperature, so localized heating is captured; the part has one internal temperature.
+- Cells are as small as they can be without significant performance drops, with adaptive resolution fitted to the geometry.
+- Exceeding either limit destroys the part cleanly. Ablation may come later.
+
+**D066: Ground contact is rigid-body contact.** *Decided, 2026-09-26.*
+Contact points on the gear and hull touch the physical terrain with spring-damper contact and friction; a craft can bounce or tip over, and impacts are judged per contact point.
+
+**D067: The player and their agent act from control locations.** *Decided, 2026-09-26.*
+- A control location is a crewed vessel or a mission control (on Earth now; later colonies with one, in any star system). Being at a location means being there: what you see arrives with light delay from everywhere else, and your commands to other places travel at light speed.
+- The tracking station is the view from mission control; flying a crewed vessel means being its crew.
+- Each location's technology is defined by a knowledge file for its computer. Switching between locations is allowed at will, but knowledge never moves with the player; each location is assumed to make its own decisions.
+
+**D068: Communication goes through a simulated relay network.** *Decided, 2026-09-26.*
+- Ground stations (the DSN complexes) are data; any colony or vessel with a sufficient antenna relays. Links need line of sight (occlusion by bodies) and have a data rate from a link budget.
+- Delay is the light time along the path.
+
+**D069: The MCP server uses local HTTP, and the agent is at a control location like the player.** *Decided, 2026-09-26.*
+Streamable HTTP on localhost, off by default. Agent commands have the origin of the agent's control location (D067), so light delay applies to them exactly as to the player's.
 
 ## Open questions
 

@@ -4,21 +4,9 @@ A SessionStart hook loads this file automatically after `/clear` or at startup. 
 
 *Updated 2026-09-26, after the fix round, the owner's second review, a full code review and the owner interview for the next chunk.*
 
-## Your first job: write the feature plan from the owner interview
+## Current job: build `docs/features/realism-1.md` in its build order
 
-The owner was interviewed at the end of the last session; do **not** re-run the interview. Everything is in `docs/plans/interview-2026-09-26.md` (bugs in the owner's words, theme, test craft, scope, order) and decisions **D058–D063**.
-
-1. **Read** the docs below, the interview record, D058–D063, and `docs/reviews/2026-09-26-code-review.md`.
-2. **Write the feature plan** `docs/features/realism-1.md` (or split into a few docs if it gets long), in the style of `map-view-lighting-controls.md`: scope, the owner's decisions folded in, per-item design with **the data model first, then the UI** (D060), pure functions and tests, performance budgets, build order, open questions marked **Q**. It covers, in this order (D060):
-   1. Visual fixes under D058 (simplify what does not work): haze tuning + setting, procedural sub-sample terrain in `sim` (D059), the flashing when zooming (whitish shapes), the dark horizon at certain angles, the navball rim and Time to Ap flicker when landed.
-   2. Foundation pass: the high-severity review items.
-   3. The test craft's data model (one part: one temperature, one state, fuel/thrust/Isp, gear geometry; crewed, minimal resources).
-   4. Relativity and light (proper time; light delay for telemetry and ground commands, D063).
-   5. Aero, heating and hitbox on cells of the ship's 3D model (D061), and rails warp disabled below a per-body altitude (D062).
-   6. UI: burn planner (maneuver nodes, burns under warp), powered Moon landing, rendezvous tools.
-   7. The MCP server on a shared command API (D063).
-   Research first where the problem is hard (process.md: KSP mods such as FAR and Deadly Reentry for aero/heating, Principia for flight plans, Persistent Thrust for burns under warp; papers for entry heating).
-3. **Ask the owner only what the interview left open** (use `AskUserQuestion`), fold the answers in, get the plan approved, commit it, then build it.
+The plan was written 2026-09-26 from the owner interview (`docs/plans/interview-2026-09-26.md`) and the owner's answers the same evening (D064–D069). The owner allowed building in plan order before reviewing it. Check items off in the plan's **Build order** as they land; open defaults are marked **Q**.
 
 ## Read, in this order
 
@@ -26,11 +14,12 @@ The owner was interviewed at the end of the last session; do **not** re-run the 
 2. `docs/vision.md`: pillars and non-goals.
 3. `docs/process.md`: how we work (docs, tests, agents, shared machine, context resets); `docs/windows.md` for the Windows runs.
 4. `docs/architecture.md`: who owns what. Check it before writing any new function.
-5. `docs/decisions.md`: skim all of it; read D045–D063 closely.
+5. `docs/decisions.md`: skim all of it; read D045–D069 closely.
 6. `docs/features/map-view-lighting-controls.md`: the round just finished; its **Review** section has the status per item.
 7. `docs/reviews/2026-09-26-code-review.md`: 30 verified findings (sim and game) with status.
-8. `docs/plans/interview-2026-09-26.md`: **the owner's answers for the next chunk.**
-9. Only when touching motion or physics: `docs/design/motion-model.md`.
+8. `docs/plans/interview-2026-09-26.md`: the owner's answers for this chunk.
+9. `docs/features/realism-1.md`: **the current plan.**
+10. Only when touching motion or physics: `docs/design/motion-model.md`.
 
 ## State
 
