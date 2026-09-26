@@ -24,6 +24,9 @@ pub struct BodyVisualDef {
     /// Self-luminous bodies (stars).
     #[serde(default)]
     pub emissive: Option<EmissiveDef>,
+    /// Bond albedo (for light reflected onto nearby objects).
+    #[serde(default = "default_albedo")]
+    pub albedo: f32,
     /// Icon colour in map mode.
     #[serde(default = "default_icon")]
     pub icon_color: [f32; 3],
@@ -31,6 +34,10 @@ pub struct BodyVisualDef {
 
 fn default_roughness() -> f32 {
     0.9
+}
+
+fn default_albedo() -> f32 {
+    0.3
 }
 
 fn default_icon() -> [f32; 3] {

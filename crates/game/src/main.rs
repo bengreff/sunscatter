@@ -14,6 +14,7 @@ mod map;
 mod scene;
 mod settings;
 mod settings_ui;
+mod sky;
 mod state;
 mod terrain;
 mod trajectory;
@@ -40,7 +41,7 @@ fn main() {
             ..default()
         }))
         .add_plugins(EguiPlugin::default())
-        .add_plugins(terrain::TerrainPlugin)
+        .add_plugins((terrain::TerrainPlugin, sky::SkyPlugin, atmosphere::AtmosphereFixPlugin))
         .insert_resource(state::SimState::new())
         .init_resource::<state::Prediction>()
         .init_resource::<camera::CameraRig>()
@@ -50,7 +51,10 @@ fn main() {
         .init_resource::<bench::Bench>()
         .init_resource::<map::MapMode>()
         .configure_sets(Update, (Stage::Input, Stage::Simulate, Stage::Camera, Stage::Scene).chain())
-        .add_systems(Startup, (scene::setup, terrain::setup, camera::setup).chain())
+        .add_systems(
+            Startup,
+            (scene::setup, terrain::setup, sky::setup_stars, sky::setup_earthshine, camera::setup).chain(),
+        )
         .add_systems(
             Update,
             (
@@ -76,11 +80,14 @@ fn main() {
                 scene::update_ships,
                 terrain::update,
                 terrain::update_textures,
+                sky::update_stars,
+                sky::update_earthshine,
+                sky::update_ambient,
                 trajectory::draw,
                 map::draw_body_orbits,
             )
                 .in_set(Stage::Scene),
         )
-        .add_systems(EguiPrimaryContextPass, (map::draw_overlay, hud::draw, settings_ui::draw).chain())
+        .add_systems(EguiPrimaryContextPass, (sky::draw_flare, map::draw_overlay, hud::draw, settings_ui::draw).chain())
         .run();
 }

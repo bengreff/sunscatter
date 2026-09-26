@@ -153,7 +153,7 @@ fn body_up(sim: &SimState, body: NodeId) -> DVec3 {
 }
 
 /// Two unit vectors perpendicular to `up` (and to each other).
-fn basis(up: DVec3) -> (DVec3, DVec3) {
+pub fn basis(up: DVec3) -> (DVec3, DVec3) {
     let seed = if up.cross(DVec3::Z).length() > 1e-6 { DVec3::Z } else { DVec3::X };
     let e1 = up.cross(seed).normalize();
     (e1, up.cross(e1))

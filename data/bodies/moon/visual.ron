@@ -2,6 +2,7 @@
 (
     base_color: (0.55, 0.55, 0.53),
     color_map: Some("color.jpg"),
+    albedo: 0.12,
     roughness: 0.95,
     icon_color: (0.8, 0.8, 0.78),
     detail: Some((
