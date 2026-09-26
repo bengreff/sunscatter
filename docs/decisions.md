@@ -1,8 +1,8 @@
 # Decision Log: Sunscatter v0.2
 
-This log records decisions that have been made. Each entry is numbered and dated. Entries are never deleted: if a decision changes, a new entry replaces it and the old one is marked *Superseded by Dnnn*. Proposals that have not been decided belong in design documents, not here.
+This log records decisions that have been made. Each entry is numbered and dated. When a decision is superseded or made redundant, the old entry is **deleted** and its number is not reused; git history keeps the record. If a major reversal needs its reasoning preserved, the new entry says why. Proposals that have not been decided belong in design documents, not here.
 
-Status values: **Decided** · **Direction** (settled in principle, details open) · **Superseded**
+Status values: **Decided** · **Direction** (settled in principle, details open)
 
 ---
 
@@ -25,10 +25,7 @@ The engine is designed around this number. More of the starfield may later be of
 **D005: The game covers about 1,000 years of time.** *Decided, 2026-09-25.*
 Ephemerides, the precision of the time type, and orbital drift models only need to be valid for this window, plus a margin.
 
-**D006: The highest time warp is 100,000x.** *Superseded by D022.*
-At that rate, 1,000 years takes about 87 hours of real time. See the open question about long interstellar cruises.
-
-**D007: Development starts with Earth only, but every architectural choice must allow interstellar play later.** *Decided, 2026-09-25.*
+**D007: Development starts with the Earth–Moon system, but every architectural choice must allow interstellar play later.** *Decided, 2026-09-25.*
 
 ## Physics and motion
 
@@ -97,15 +94,9 @@ The design is still to be decided, and it has little effect on the rest of the a
 - The game uses the resulting performance maps and never runs the solver in real time.
 - Part designs made procedurally in general follow the same pattern.
 
-## Milestone 1
+## More decisions
 
-**D021: The first milestone is Earth only, with near-final graphics and a launch-and-landing loop.** *Superseded by D040.*
-- Basic atmospheric scattering and lighting at close to final quality, heavily optimized.
-- A very solid foundation.
-
-## Decisions of 2026-09-25 (second round)
-
-**D022: The highest time warp is 1,000,000x.** *Decided, 2026-09-25. Supersedes D006.*
+**D022: The highest time warp is 1,000,000x.** *Decided, 2026-09-25.*
 The game is about realistic progression across many simultaneous missions, not one mission at a time. Continuous warp has to cover interstellar cruises: 43 years to Alpha Centauri at 0.1c takes about 23 minutes. Skipping ahead by jumping to events is not the main mechanism. A sandbox mode exists alongside the progression game.
 
 **D023: Spheres of influence are replaced by the motion model.** *Decided, 2026-09-25.*
@@ -185,7 +176,7 @@ Oceans get proper behavior when aerodynamics is implemented.
 **D039: The workflow uses design documents, feature documents and tests. OpenSpec is removed.** *Decided, 2026-09-25.*
 - Studying KSP mods and other prior work is a standard strategy for hard problems. See [process.md](process.md).
 
-**D040: v0.2 is milestone 1: one ship flying in the Earth–Moon system, plus the foundations.** *Decided, 2026-09-25. Supersedes D021.*
+**D040: v0.2 is milestone 1: one ship flying in the Earth–Moon system, plus the foundations.** *Decided, 2026-09-25.*
 - Graphics are close to final: atmospheric scattering and lighting, heavily optimized.
 - The loop is launch, fly and land.
 - How the game progresses beyond that will be defined over time.
@@ -202,15 +193,23 @@ Oceans get proper behavior when aerodynamics is implemented.
 - Earth and the Moon near the start date: 10 m.
 - These measure accuracy against our reference integration. Determinism (D026) is exact regardless.
 
+**D043: Ship scripts are WASM modules.** *Decided, 2026-09-25.*
+- Players can write scripts in any language that compiles to WASM.
+- Scripts run sandboxed and deterministically, with an execution budget per tick that models a ship computer's limited power.
+- Scripts are plain files on disk, driven by a command-line tool, so AI agents can work with them directly.
+
+**D044: The game runs an MCP server for AI agents.** *Decided, 2026-09-25.*
+- It exposes game state, planning tools and script deployment.
+- The player's own agent (Claude Code or another) connects through it, and acts as the tutorial and assistant (D041).
+
 ---
 
 ## Open questions
 
 1. What kind of organization the player leads (D027).
 2. The outcome of the Bevy prototype (D031).
-3. The scripting runtime and language. Candidates: WASM modules (any language, sandboxed, deterministic), Lua, or Rhai. It must work with AI tooling (D035).
-4. Details of the ship model: structural solver, aerodynamics model, cells for heat and radiation (D018, D032, D033).
-5. The crew model.
-6. The colony design (D019).
-7. How the player's AI agent connects to the game: API surface, which model it uses, and cost to the player (D041).
-8. Motion-model tunables: the cutoff threshold, opening angle, anchor hysteresis, and choice of coast integrator.
+3. Details of the ship model: structural solver, aerodynamics model, cells for heat and radiation (D018, D032, D033).
+4. The crew model.
+5. The colony design (D019).
+6. Which model the player's AI agent uses and what it costs the player (D044).
+7. Motion-model tunables: the cutoff threshold, opening angle, anchor hysteresis, and choice of coast integrator.

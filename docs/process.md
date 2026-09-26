@@ -4,13 +4,14 @@ How v0.2 is planned, built and verified. This document exists because of [lesson
 
 ## Documents
 
-| Kind | Where | Contents | Changes when |
+| Kind | Where | Contents | Written when |
 |---|---|---|---|
-| **Vision** | `docs/vision.md` | Identity, pillars, non-goals | Rarely, and only through a decision entry |
-| **Decision log** | `docs/decisions.md` | Numbered, dated decisions. Entries are superseded, never deleted | Whenever something is decided |
-| **Design docs** | `docs/design/*.md` | How an area works and why: models, trade-offs, rejected alternatives | During design; once implemented, they describe what was built |
-| **Feature docs** | `docs/features/*.md` | More specific: the plan, interfaces, data, budgets, acceptance criteria, a link to the design doc | Updated in the same commit as the code |
-| **Tests** | the crates | The executable specification. Anything that can be tested *is* tested, instead of being written as prose | With the code |
+| **Vision** | `docs/vision.md` | Identity, pillars, non-goals | Rarely changed, and only through a decision entry |
+| **Decision log** | `docs/decisions.md` | Numbered, dated decisions. Superseded or redundant entries are deleted | Whenever something is decided |
+| **Design docs** | `docs/design/*.md` | How a *general mechanic* works and why, for example the motion model, colonies or the star catalog | **Only as needed**, when a mechanic is big enough to need design before code |
+| **Plans** | `docs/plans/*.md` | A build plan for a milestone or draft: scope, architecture, ordered steps, acceptance criteria | Before a chunk of building starts. Items are checked off as work progresses |
+| **Feature docs** | `docs/features/*.md` | One thing to implement in code: a grounding plan for Claude, with interfaces, data, budgets and tests | **Later in the project**, once a single feature is big enough to need one |
+| **Tests** | the crates | The executable specification | With the code |
 
 There is no OpenSpec, and no prose specification for behavior that a test can express.
 
@@ -41,7 +42,7 @@ Before designing a solution to a hard problem, **look at how others solved it.**
 
 ## Engineering rules
 
-- **Every commit on `main` builds and passes CI.** Commits are small, have one purpose, and have descriptive messages.
+- **Work goes directly on `main`, committed and pushed regularly.** This changes to branches if the project is deployed or gains contributors. Every commit builds and passes the tests, and each has one purpose and a descriptive message.
 - **Tests start with the first code**, not months later:
   - **Property tests:** conservation laws, round trips (orbital elements ↔ state vectors, save ↔ load).
   - **Golden tests:** against DE440 and real mission profiles.
@@ -50,7 +51,7 @@ Before designing a solution to a hard problem, **look at how others solved it.**
   - **Executable scenarios**, such as a trans-lunar injection to the Moon.
 - **One owner for each piece of math**, enforced by module visibility.
 - **Frames and units are types.** Mixing frames is a compile error.
-- **Performance budgets** live in feature docs and are checked by benchmarks in CI, against the reference machine (D028).
+- **Performance budgets** live in plans and feature docs and are checked by benchmarks in CI, against the reference machine (D028).
 - **Limits on file and function length** are enforced in CI. The simulation crate has no engine dependencies.
 - **`Cargo.lock` is tracked.** Stale data is deleted, not labelled as stale.
 
@@ -58,7 +59,7 @@ Before designing a solution to a hard problem, **look at how others solved it.**
 
 - `CLAUDE.md` is short. It gives principles, entry points and commands, not a file-by-file tour that goes out of date.
 - Hooks run `cargo check`, clippy and the tests. A task is done when those pass, and for visual work, when there is a screenshot or recording.
-- Build any non-trivial feature in this order: design doc, then feature doc, then plan, then implementation with tests, then an independent review, and the review must reproduce what it reports.
+- Build any non-trivial chunk in this order: a plan (with a design doc first only if the mechanic needs one), then implementation with tests, then an independent review. The review must reproduce what it reports.
 - When something is corrected, turn the lesson into a type, test, lint or hook. Write it as prose only as a last resort.
 
 ## Versioning
