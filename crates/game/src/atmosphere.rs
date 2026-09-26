@@ -13,7 +13,7 @@ use crate::camera::{CameraRig, MainCamera};
 use crate::settings::{AtmosphereQuality, GraphicsSettings};
 use crate::state::SimState;
 use bevy::light::atmosphere::{Falloff, PhaseFunction, ScatteringMedium, ScatteringTerm};
-use bevy::light::{Atmosphere, AtmosphereEnvironmentMapLight};
+use bevy::light::{Atmosphere, AtmosphereEnvironmentMapLight, GeneratedEnvironmentMapLight};
 use bevy::pbr::resources::AtmosphereTransformsOffset;
 use bevy::pbr::{AtmosphereMode, AtmosphereSettings, ExtractedAtmosphere};
 use bevy::prelude::*;
@@ -158,7 +158,16 @@ pub fn apply_settings(
     }
 }
 
-type SkyLightCamera = (Entity, Has<AtmosphereEnvironmentMapLight>, Option<Mut<'static, AtmosphereSettings>>);
+/// Sky-light cubemap size (px per face): only diffuse and blurry reflections
+/// use it, and it is regenerated and filtered every frame.
+const SKY_LIGHT_SIZE: u32 = 64;
+
+type SkyLightCamera = (
+    Entity,
+    Has<AtmosphereEnvironmentMapLight>,
+    Option<&'static GeneratedEnvironmentMapLight>,
+    Option<Mut<'static, AtmosphereSettings>>,
+);
 
 /// Sky light (ambient and reflections from Bevy's atmosphere environment
 /// map) only inside an atmosphere: from above it, the map would still show
@@ -170,17 +179,31 @@ pub fn update_sky_light(
     mut commands: Commands,
     mut cams: Query<SkyLightCamera, With<MainCamera>>,
     atmos: Query<&BodyAtmosphere>,
+    mut stash: Local<Option<GeneratedEnvironmentMapLight>>,
 ) {
     let snap = sim.world.snapshot(sim.clock);
     let inside = settings.atmosphere != AtmosphereQuality::Off
         && atmos
             .iter()
             .any(|a| (rig.cam_pos - snap.relative_r(a.0, rig.anchor)).length() < f64::from(a.1.outer_radius));
-    for (cam, has, atmo) in &mut cams {
+    for (cam, has, generated, atmo) in &mut cams {
+        // Bevy adds a private cubemap component and a filtered
+        // `GeneratedEnvironmentMapLight` with the sky light, and removing the
+        // sky light leaves both, so the cubemap kept being filtered every
+        // frame (~3 ms). We take the generated light off with it and put it
+        // back later (Bevy won't recreate it while its private marker stays).
         if inside && !has {
-            commands.entity(cam).insert(AtmosphereEnvironmentMapLight::default());
+            commands
+                .entity(cam)
+                .insert(AtmosphereEnvironmentMapLight { size: UVec2::splat(SKY_LIGHT_SIZE), ..default() });
+            if let Some(g) = stash.take() {
+                commands.entity(cam).insert(g);
+            }
         } else if !inside && has {
-            commands.entity(cam).remove::<AtmosphereEnvironmentMapLight>();
+            commands.entity(cam).remove::<(AtmosphereEnvironmentMapLight, GeneratedEnvironmentMapLight)>();
+            if let Some(g) = generated {
+                *stash = Some(g.clone());
+            }
         }
         // "Raymarched" is adaptive: inside an atmosphere the lookup tables
         // are accurate and much cheaper; from outside, raymarching is needed.

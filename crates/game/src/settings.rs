@@ -175,7 +175,7 @@ pub fn apply(
             MsaaLevel::X4 => Msaa::Sample4,
         });
         if s.bloom {
-            e.insert(Bloom { intensity: 0.12, ..Bloom::NATURAL });
+            e.insert(Bloom { intensity: 0.12, max_mip_dimension: 256, ..Bloom::NATURAL });
         } else {
             e.remove::<Bloom>();
         }
