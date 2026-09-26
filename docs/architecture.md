@@ -27,7 +27,9 @@ A short map to search before building anything: who owns what, the frame order, 
 | Map view: what is visible/hoverable, per object | `game::map_view` (rule, D054); `game::map` gathers sizes and draws | pure functions + table tests |
 | Orbit-line length (dominance, revolutions) | `game::trajectory` (to be written, D056) | display only |
 | Lighting: flux per object, exposure | `game::sky`, `game::atmosphere` (to be reworked, D055) | |
-| Camera pose and limits, zoom | `game::camera` | |
+| Camera pose and limits, zoom, collision with surfaces and the ship | `game::camera` | terrain via `sim::forces::altitude_above` |
+| Navball: attitude, markers, mode, flight readouts | `game::navball` (rules in `navball::rules`) | |
+| A vessel's state at the clock (for drawing) | `sim::vessel::Vessel::state_at` | never integrates (rule 4) |
 | Fps readout (0.5 s windows) | `game::hud::FpsMeter` | |
 | Terrain meshes and LOD | `game::terrain` | heights via `sim` |
 | Graphics tiers and toggles | `game::settings`; UI in `game::settings_ui` | |
