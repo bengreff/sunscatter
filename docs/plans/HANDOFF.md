@@ -2,7 +2,7 @@
 
 A SessionStart hook loads this file automatically after `/clear` or at startup. It is kept current by `/handoff`.
 
-*Updated 2026-09-26, after steps 1–2 of the fix round, the navball and the water mask.*
+*Updated 2026-09-26, after the whole fix round (map view, lighting, orbit lines, GUI, tracking station, geomorphing).*
 
 ## Read, in this order
 
@@ -17,22 +17,16 @@ Read them before changing anything, by section where the doc is long.
 8. Only if needed: the Review of `docs/plans/v0.2-visual-pass-and-foundations.md` (measurements, known issues).
 
 ## State
-- Steps 1 and 2 of the feature doc are done and pushed, plus the navball and the water mask (built by agents). All verified by tests and a full hidden demo run (all demo assertions pass; 11 vessels ~300 fps at 1x, ~195 fps at 1,000,000x):
-  - `game::map_view`: the per-object map-view rule (D054), with occlusion by nearer discs; `game::map` draws from it. Planets and Pluto got `body.ron` (IAU radius and rotation, not solid, no J2) so the rule knows their size.
-  - Zoom at half speed (`ControlsSettings::wheel_zoom`, `trackpad_lines_per_px`); `hud::FpsMeter` (0.5 s windows).
-  - `Vessel::state_at(world, clock)`: vessels drawn at the clock (ground jitter while thrusting).
-  - Camera collision (`camera::accept`, `pull_in`, `clearance`, `min_distance`).
-  - `game::navball` (playable; seen in the demo screenshots).
-  - Water mask: `data/bodies/earth/water.png` from ETOPO flood-filled from the open sea, looked up per fragment. **Not yet seen on screen**: no demo view shows a coastline in daylight. Add a coast view (or the zoom-sweep step of §9) and check it.
-- Known leftovers: `terrain::material::load_color_map` passes a full mip chain to `Image::new`, which trips a debug assertion in debug builds (not hit yet). Lakes above sea level get no water shading. Navball target picker lives in the navball panel only.
+- **The fix round of `docs/features/map-view-lighting-controls.md` is built**; its Review section at the end has the status per item and the gaps. Everything is on `main`, CI green, verified by tests and hidden demo runs; the owner has not played it yet.
+- New modules this session: `game::map_view` (rule), `game::interface` (panels, pause menu, help, toasts, theme), `game::lighting` (D055), `game::format`, `game::trajectory::{line, settings}` and `relations::Dominance` (D056), `navball`. See `docs/architecture.md`.
+- Data: every planet and Pluto has `data/bodies/<body>/body.ron` (IAU size and rotation; physically point masses). The Sun's light is its luminosity. Earth has `water.png`.
 
-## Build order (from the feature doc)
-1. ~~Map-view rule, zoom, fps.~~ Done.
-2. ~~Vessels at the clock time; camera collision.~~ Done.
-3. Lighting (D055): per-body flux from star luminosity, planetshine, eclipses, eye adaptation. **Next.**
-4. Orbit-line length (D056), with settings.
-5. The Esc pause menu and settings screen, the GUI theme and HUD layout (warp arrows at the top), the full-screen tracking station (clicking an icon focuses it).
-6. Surface flicker: ~~water mask~~ (done, unverified on screen), geomorphing, sky/atmosphere cross-fade at the top, aerial perspective range.
+## Next
+1. **Ask the owner to play it** and report; in particular the dark ground patches (ask for a quicksave, F5, if they recur: it reproduces the exact view) and the surface flashing (geomorphing should have fixed LOD pops).
+2. **Eye adaptation calibration** (`lighting::DAYLIGHT_LOG_LUM`, currently -6.0 and off by default). The whole-Moon Low-tier view after the map view overexposes: check whether adaptation carries over between views or resets on tier changes.
+3. Aerial perspective: 400 km range and the strong haze at 10–20 km altitude (`atmosphere.rs`, Bevy's LUT settings).
+4. Windows: `backhouse` is reachable but has **no Rust toolchain or checkout**; installing Rust and the MSVC build tools needs the owner's go-ahead.
+5. Then the next milestone items (burn planner, ship systems) per `docs/vision.md` and the owner.
 
 ## How to work
 - Refactor as you touch: move each rule into a tested pure function first, then change the behaviour.

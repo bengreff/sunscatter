@@ -263,3 +263,24 @@ Resolved:
 ## How it is built
 
 **Refactor as we touch:** each item first moves its rule into a pure, table-tested function (map view, camera limits, lighting, orbit length, formatting), then changes behaviour. There is no big-bang rewrite.
+
+## Review (2026-09-26)
+
+Status per item, verified by tests and hidden offscreen demo runs (screenshots of every tier; the demo asserts the map-view rule at the pad, map and tracking-station views). Not yet played by the owner.
+
+| # | Item | Status | Notes |
+|---|---|---|---|
+| 1 | Zoom speed | playable | 1.072 per wheel line, 0.125 lines per trackpad px; settings. |
+| 2 | Per-object map view, hover priority | playable | `game::map_view`; occlusion by nearer discs; planets got `body.ron` sizes. |
+| 3 | Lighting | playable, partial | Per-body flux, eclipses (per fragment on terrain, per ship), planetshine, starlight ambient. **Eye adaptation is built but off by default**: its daylight calibration still overexposes the whole-Moon view after the dark map view. |
+| 4 | FPS readout | playable | 0.5 s windows. |
+| 5 | Orbit-line length | playable | D056 (dominance, revolutions, caps, settings). Not yet looked at closely in the demo. |
+| 6 | Pause menu, settings, GUI | playable | Esc menu, tabbed settings, movable saved panels, theme, help (H), toasts, one formatter, warp arrows. |
+| 7 | Camera collision | playable | Refuses moves into terrain; slides in when the ground rises; outside the ship. |
+| 8 | Ground jitter | playable | `Vessel::state_at` at the clock. |
+| 9 | Surface flicker, dark patches | partial | Water mask per fragment, geomorphing, sky light fades near the top. The owner's hard-edged dark patch was **not reproduced**; likely the old per-vertex water flag (coastline chunks). Aerial perspective still ends at 400 km. |
+| 10 | Hover priority | playable | Part of item 2. |
+| 11 | Navball | playable | Smaller, centred, altitude and speed above the ball, relative to the dominant body. |
+| 12 | Tracking station | playable | Full-height list, body tree, grouped vessels, click an icon to focus. |
+
+Known gaps: eye-adaptation calibration; aerial perspective range and overall haze strength at low altitude; the dark-patch repro; Ap/Pe markers still search the whole computed span (longer than the line in non-default modes); the orbit-line rescan per frame costs ~25 fps at 1,000,000x with 11 vessels (170 fps, fine against the 60 fps target).
