@@ -2,27 +2,23 @@
 
 A SessionStart hook loads this file automatically after `/clear` or at startup. It is kept current by `/handoff`.
 
-*Updated 2026-09-26, after the fix round, the owner's second review (night sides, terrain, navball, saves, station) and a full code review.*
+*Updated 2026-09-26, after the fix round, the owner's second review, a full code review and the owner interview for the next chunk.*
 
-## Your first job: interview the owner, then write a feature plan
+## Your first job: write the feature plan from the owner interview
 
-Do **not** start coding. The fix round is done; the next chunk of work is not chosen yet.
+The owner was interviewed at the end of the last session; do **not** re-run the interview. Everything is in `docs/plans/interview-2026-09-26.md` (bugs in the owner's words, theme, test craft, scope, order) and decisions **D058–D063**.
 
-1. **Read** the docs below (quickly: you need the vocabulary, not every detail), then `docs/reviews/2026-09-26-code-review.md`.
-2. **Interview the owner** with `AskUserQuestion` (a few questions per call, options with short descriptions, your recommendation first). Nail down, in this order:
-   1. **Feedback on the current build**: night sides, the new terrain textures, the launch site, the GUI, anything broken. Ask for a quicksave (F5) for anything visual that is wrong.
-   2. **Open decisions** that block features: the kind of organization the player leads (D027); whether saves must stay compatible from now on (review sim #7); whether a high-resolution launch-site data patch (imagery/heights around KSC) is wanted; the ship model for the next step (blocks vs predefined ships, D036/D040); anything in `docs/decisions.md` "Open questions".
-   3. **Which features to build now.** No full aerodynamics model yet (the owner: "that will be VERY complex"). Candidates to offer, with your recommendation:
-      - **Burn planner**: maneuver nodes on the N-body trajectory, burns executed under warp (D011, D029; study Principia's flight plans and Persistent Thrust).
-      - **Finite burns, propellant and mass**: trajectory as segments (coast / burn with a thrust law and mass flow), sim review #11. Probably a prerequisite for the planner.
-      - **Predefined ships / staging** (v0.2's "blocks with made-up thrust first, then predefined ships").
-      - **Rendezvous and targeting tools**: relative velocity, closest approach, target markers (the navball already has target mode).
-      - **Moon landing under power** (landing legs, suicide-burn readouts), since parachutes only work on Earth.
-      - **Launch-site patch**: high-resolution heights/imagery around the pad.
-      - **Ship systems view** skeleton (D057).
-      - **Scripting (WASM, D043) or the MCP server (D044)**: a first cut.
-      - **Foundation work from the review** (recommend bundling the high-severity items with whichever feature needs them): stable `VesselId` (saved), a `GameCommand` message applied in `Stage::Input`, one per-frame `ActiveFlight` / `VesselLines` resource, an `InputContext`, sim robustness (NaN hang, ephemeris-end guard, attitude on the tick lattice, gravity cutoff re-evaluation).
-3. **Write a feature plan** for what the owner picks: `docs/features/<name>.md` in the style of `map-view-lighting-controls.md` (scope, decisions with the owner's answers folded in, per-item design, pure functions and tests, performance budget, build order, open questions marked **Q**). Record decisions in `docs/decisions.md` (delete superseded ones, rule 9). Get the owner's approval of the plan, commit it, and only then build.
+1. **Read** the docs below, the interview record, D058–D063, and `docs/reviews/2026-09-26-code-review.md`.
+2. **Write the feature plan** `docs/features/realism-1.md` (or split into a few docs if it gets long), in the style of `map-view-lighting-controls.md`: scope, the owner's decisions folded in, per-item design with **the data model first, then the UI** (D060), pure functions and tests, performance budgets, build order, open questions marked **Q**. It covers, in this order (D060):
+   1. Visual fixes under D058 (simplify what does not work): haze tuning + setting, procedural sub-sample terrain in `sim` (D059), the flashing when zooming (whitish shapes), the dark horizon at certain angles, the navball rim and Time to Ap flicker when landed.
+   2. Foundation pass: the high-severity review items.
+   3. The test craft's data model (one part: one temperature, one state, fuel/thrust/Isp, gear geometry; crewed, minimal resources).
+   4. Relativity and light (proper time; light delay for telemetry and ground commands, D063).
+   5. Aero, heating and hitbox on cells of the ship's 3D model (D061), and rails warp disabled below a per-body altitude (D062).
+   6. UI: burn planner (maneuver nodes, burns under warp), powered Moon landing, rendezvous tools.
+   7. The MCP server on a shared command API (D063).
+   Research first where the problem is hard (process.md: KSP mods such as FAR and Deadly Reentry for aero/heating, Principia for flight plans, Persistent Thrust for burns under warp; papers for entry heating).
+3. **Ask the owner only what the interview left open** (use `AskUserQuestion`), fold the answers in, get the plan approved, commit it, then build it.
 
 ## Read, in this order
 
@@ -33,7 +29,8 @@ Do **not** start coding. The fix round is done; the next chunk of work is not ch
 5. `docs/decisions.md`: skim all of it; read D045–D057 closely.
 6. `docs/features/map-view-lighting-controls.md`: the round just finished; its **Review** section has the status per item.
 7. `docs/reviews/2026-09-26-code-review.md`: 30 verified findings (sim and game) with status.
-8. Only when touching motion or physics: `docs/design/motion-model.md`.
+8. `docs/plans/interview-2026-09-26.md`: **the owner's answers for the next chunk.**
+9. Only when touching motion or physics: `docs/design/motion-model.md`.
 
 ## State
 
@@ -55,5 +52,5 @@ Do **not** start coding. The fix round is done; the next chunk of work is not ch
 ## How to work
 
 - Refactor as you touch: move each rule into a tested pure function first, then change the behaviour.
-- Verify with the demo, offscreen (`SUNSCATTER_DEMO_OFFSCREEN=1` hides the window). One game window at a time; subagents never run the demo; `cargo -j 4` (process.md). Close agents and delete their worktrees as soon as their work is merged.
+- Verify with the demo, offscreen (`SUNSCATTER_DEMO_OFFSCREEN=1` hides the window). One game window at a time; subagents never run the demo; `cargo -j 4` (process.md). **No branches, no worktrees**: agents work on `main` in the main checkout on non-overlapping files.
 - At the end of a big session: fill in the plan or feature review, update this file, run the Windows check (`docs/windows.md`).

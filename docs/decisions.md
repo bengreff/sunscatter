@@ -256,10 +256,35 @@ It lists tracked vessels (and later asteroids), lets you focus and switch to a v
 - Ship systems (power, propellant, thermal, crew and so on) go in a separate ship-management view: an abstracted schematic of the ship with no planets drawn. It will be built once ships have systems.
 - GUI style: clean sci-fi, function first; dense menus are fine.
 
+**D058: Visuals are made minimal and stable before anything else; what does not work is simplified, not debugged.** *Decided, 2026-09-26.*
+- If a visual feature misbehaves, replace it with something simpler that works instead of spending sessions debugging it.
+- The next chunk starts by fixing the visual bugs the owner still sees (haze, blur, flashing, dark horizon, navball flicker), under this rule.
+- Haze gets physical tuning plus a player setting for its strength.
+
+**D059: Terrain detail below the heightmap's resolution is procedural and lives in `sim`.** *Decided, 2026-09-26.*
+Deterministic fractal detail shaped by the local slope and roughness of the real data, so physics, landing and rendering see the same surface (D047); matching detail in the colour.
+
+**D060: The next theme is ultra realism, with ships as abstracted blobs.** *Decided, 2026-09-26.*
+- Every feature: the data model first, then the user interface.
+- No ship internals or part definitions yet (they will be very complex under the realism standard). A **test craft** stands in: one placeholder part for the whole ship with one temperature, one state, fuel, thrust and Isp; shaped like a ship (a 3D model), fixed landing gear allowed as geometry; crewed, minimal simple resources, no life support, no staging.
+- Order: visual fixes (D058), a foundation pass (the high-severity code-review items), the test craft's data model, relativity and light, aero/heating/hitbox (D061), then the UI (burn planner, powered Moon landing, rendezvous), then the MCP server (D063).
+
+**D061: Aerodynamics, heating and collision act on cells of the ship's 3D model.** *Direction, 2026-09-26.*
+- Medium to high fidelity, still efficient, somewhat more complex than KSP. Nothing per part: in flight a ship is a 3D model, and aero forces, heating and the hitbox are computed on cells of that model.
+- Structure comes later and will split the model into parts; heating's effects on heat-dependent subsystems, and heat transfer between parts and along heat-transport systems, come with it.
+
+**D062: Rails warp is disabled below a per-body altitude.** *Decided, 2026-09-26.*
+The altitude is data per body, chosen by rule: the top of the atmosphere, or on airless bodies the highest terrain plus a margin.
+
+**D063: The MCP server comes before ship scripting; light delay starts with telemetry.** *Decided, 2026-09-26.*
+- The MCP server (state, planning tools, commands) comes first, on a shared command API that WASM scripting (D043) later builds on.
+- In the first realism pass, light-time delay applies to telemetry and ground commands only; the crew flies without delay. Ships get proper time (D012).
+- Saves need not stay compatible across versions yet.
+
 ## Open questions
 
 1. What kind of organization the player leads (D027).
-2. Details of the ship model: structural solver, aerodynamics model, cells for heat and radiation (D018, D032, D033).
+2. Details of the ship model: structural solver, the cell model for aero, heat and radiation (D018, D032, D033, D061).
 3. The crew model.
 4. The colony design (D019).
 5. Which model the player's AI agent uses and what it costs the player (D044).
