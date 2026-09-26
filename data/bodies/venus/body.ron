@@ -1,0 +1,26 @@
+// Venus: size and orientation only, for display (map view, D054). To the
+// simulation it is still a point mass: no surface, J2 or atmosphere yet.
+// Radii and rotation: IAU WGCCRE 2015 (constant and linear terms; the small
+// periodic terms are left out). Angles in degrees, rates in IAU units.
+(
+    physical: (
+        name: "Venus",
+        radius_eq: 6051800.0,
+        radius_polar: 6051800.0,
+        j2: 0.0,
+        rotation: (
+            ra_deg: 272.76,
+            dec_deg: 67.16,
+            ra_rate_deg_per_century: 0.0,
+            dec_rate_deg_per_century: 0.0,
+            w0_deg: 160.2,
+            w_rate_deg_per_day: -1.4813688,
+        ),
+        atmosphere: None,
+        anchor_zone: None,
+        relativistic: false,
+        solid: false,
+        heightmap: None,
+        sea_level: None,
+    ),
+)

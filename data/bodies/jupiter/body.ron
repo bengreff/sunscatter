@@ -1,0 +1,26 @@
+// Jupiter: size and orientation only, for display (map view, D054). To the
+// simulation it is still a point mass: no surface, J2 or atmosphere yet.
+// Radii and rotation: IAU WGCCRE 2015 (constant and linear terms; the small
+// periodic terms are left out). Angles in degrees, rates in IAU units.
+(
+    physical: (
+        name: "Jupiter",
+        radius_eq: 71492000.0,
+        radius_polar: 66854000.0,
+        j2: 0.0,
+        rotation: (
+            ra_deg: 268.056595,
+            dec_deg: 64.495303,
+            ra_rate_deg_per_century: -0.006499,
+            dec_rate_deg_per_century: 0.002413,
+            w0_deg: 284.95,
+            w_rate_deg_per_day: 870.536,
+        ),
+        atmosphere: None,
+        anchor_zone: None,
+        relativistic: false,
+        solid: false,
+        heightmap: None,
+        sea_level: None,
+    ),
+)

@@ -1,0 +1,26 @@
+// Mars: size and orientation only, for display (map view, D054). To the
+// simulation it is still a point mass: no surface, J2 or atmosphere yet.
+// Radii and rotation: IAU WGCCRE 2015 (constant and linear terms; the small
+// periodic terms are left out). Angles in degrees, rates in IAU units.
+(
+    physical: (
+        name: "Mars",
+        radius_eq: 3396190.0,
+        radius_polar: 3376200.0,
+        j2: 0.0,
+        rotation: (
+            ra_deg: 317.269202,
+            dec_deg: 54.432516,
+            ra_rate_deg_per_century: -0.10927547,
+            dec_rate_deg_per_century: -0.05827105,
+            w0_deg: 176.049863,
+            w_rate_deg_per_day: 350.891982443297,
+        ),
+        atmosphere: None,
+        anchor_zone: None,
+        relativistic: false,
+        solid: false,
+        heightmap: None,
+        sea_level: None,
+    ),
+)

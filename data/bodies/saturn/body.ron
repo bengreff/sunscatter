@@ -1,0 +1,26 @@
+// Saturn: size and orientation only, for display (map view, D054). To the
+// simulation it is still a point mass: no surface, J2 or atmosphere yet.
+// Radii and rotation: IAU WGCCRE 2015 (constant and linear terms; the small
+// periodic terms are left out). Angles in degrees, rates in IAU units.
+(
+    physical: (
+        name: "Saturn",
+        radius_eq: 60268000.0,
+        radius_polar: 54364000.0,
+        j2: 0.0,
+        rotation: (
+            ra_deg: 40.589,
+            dec_deg: 83.537,
+            ra_rate_deg_per_century: -0.036,
+            dec_rate_deg_per_century: -0.004,
+            w0_deg: 38.9,
+            w_rate_deg_per_day: 810.7939024,
+        ),
+        atmosphere: None,
+        anchor_zone: None,
+        relativistic: false,
+        solid: false,
+        heightmap: None,
+        sea_level: None,
+    ),
+)

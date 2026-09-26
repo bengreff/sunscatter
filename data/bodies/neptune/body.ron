@@ -1,0 +1,26 @@
+// Neptune: size and orientation only, for display (map view, D054). To the
+// simulation it is still a point mass: no surface, J2 or atmosphere yet.
+// Radii and rotation: IAU WGCCRE 2015 (constant and linear terms; the small
+// periodic terms are left out). Angles in degrees, rates in IAU units.
+(
+    physical: (
+        name: "Neptune",
+        radius_eq: 24764000.0,
+        radius_polar: 24341000.0,
+        j2: 0.0,
+        rotation: (
+            ra_deg: 299.36,
+            dec_deg: 43.46,
+            ra_rate_deg_per_century: 0.0,
+            dec_rate_deg_per_century: 0.0,
+            w0_deg: 249.978,
+            w_rate_deg_per_day: 541.1397757,
+        ),
+        atmosphere: None,
+        anchor_zone: None,
+        relativistic: false,
+        solid: false,
+        heightmap: None,
+        sea_level: None,
+    ),
+)
