@@ -3,6 +3,7 @@
 Real-scale 3D spaceflight, mission-design and logistics game in Rust. Being rebuilt from scratch; v0.1 (2D) is archived in `archive/v0.1/` — do not edit it.
 
 ## Read first
+- `docs/plans/HANDOFF.md` — **start here in a fresh session**: what to read, current state, next steps.
 - `docs/vision.md` — pillars and non-goals. `docs/decisions.md` — what is decided (check before proposing).
 - `docs/design/motion-model.md` — how bodies and ships move (no SOIs, frame tree, precision, determinism).
 - `docs/plans/` — the current build plan; check items off as you go.
