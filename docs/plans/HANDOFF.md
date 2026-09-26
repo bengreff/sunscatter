@@ -26,7 +26,7 @@ The owner was interviewed at the end of the last session; do **not** re-run the 
 2. `docs/vision.md`: pillars and non-goals.
 3. `docs/process.md`: how we work (docs, tests, agents, shared machine, context resets); `docs/windows.md` for the Windows runs.
 4. `docs/architecture.md`: who owns what. Check it before writing any new function.
-5. `docs/decisions.md`: skim all of it; read D045–D057 closely.
+5. `docs/decisions.md`: skim all of it; read D045–D063 closely.
 6. `docs/features/map-view-lighting-controls.md`: the round just finished; its **Review** section has the status per item.
 7. `docs/reviews/2026-09-26-code-review.md`: 30 verified findings (sim and game) with status.
 8. `docs/plans/interview-2026-09-26.md`: **the owner's answers for the next chunk.**
