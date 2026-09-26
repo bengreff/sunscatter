@@ -44,3 +44,7 @@ ssh backhouse "schtasks /delete /tn SunscatterDemo /f"
 - Minimal tier, 11 vessels, interactive session: 359 fps at 1x, 366 at 1000x, 236 at 1,000,000x (worst frame 15.5 ms vs 8 ms on the M2 Pro: the one gap to watch).
 
 The game finds `data/` through the compile-time `CARGO_MANIFEST_DIR`, so the exe runs only from the checkout that built it.
+
+## Results, 2026-09-26 (commit fa08a52)
+
+After the terrain overhaul and the night-side fix: `cargo test -p sim` passes (72 tests), the release build takes ~20 s incrementally, and the demo's pad, pad_top and earth_night views match macOS (textured ground, dark night side).
