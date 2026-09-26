@@ -3,6 +3,7 @@
 //! final conversion to f32 offsets from the chunk's own centre, so chunk
 //! meshes stay precise at any level (the floating-origin rule).
 
+use bevy::math::Vec3;
 use glam::DVec3;
 use std::sync::Arc;
 
@@ -111,6 +112,10 @@ pub struct ChunkData {
     pub detail: Vec<[f32; 2]>,
     /// g: height / 10 km (r, b unused).
     pub colors: Vec<[f32; 4]>,
+    /// Geomorphing: offset from each vertex to where the parent level's
+    /// surface is at that point (zero at the parent's own vertices). The
+    /// shader moves vertices by it × the chunk's morph factor.
+    pub morph: Vec<[f32; 3]>,
     pub indices: Vec<u32>,
 }
 
@@ -146,6 +151,7 @@ pub fn build(key: ChunkKey, shape: &Shape) -> ChunkData {
         normals: Vec::with_capacity(g * g + 4 * g),
         detail: Vec::with_capacity(g * g + 4 * g),
         colors: Vec::with_capacity(g * g + 4 * g),
+        morph: Vec::with_capacity(g * g + 4 * g),
         indices: Vec::with_capacity((g - 1) * (g - 1) * 6 + 4 * (g - 1) * 6),
     };
     for j in 1..=g {
@@ -162,6 +168,7 @@ pub fn build(key: ChunkKey, shape: &Shape) -> ChunkData {
             out.colors.push([0.0, (h / 10_000.0) as f32, 0.0, 1.0]);
         }
     }
+    out.morph = parent_offsets(&out.positions, g);
     for j in 0..g - 1 {
         for i in 0..g - 1 {
             let a = (j * g + i) as u32;
@@ -170,6 +177,28 @@ pub fn build(key: ChunkKey, shape: &Shape) -> ChunkData {
         }
     }
     add_skirt(&mut out, key, shape);
+    out
+}
+
+/// For a `g`×`g` grid (`g` odd), each vertex's offset to the parent level's
+/// surface: the parent has only the even-index vertices, and its quads are
+/// split along the (i, j)→(i+1, j+1) diagonal like ours, so an odd vertex
+/// lies on the midpoint of the two even neighbours along its row, column or
+/// that diagonal.
+pub fn parent_offsets(positions: &[[f32; 3]], g: usize) -> Vec<[f32; 3]> {
+    let p = |i: usize, j: usize| Vec3::from_array(positions[j * g + i]);
+    let mut out = Vec::with_capacity(g * g);
+    for j in 0..g {
+        for i in 0..g {
+            let coarse = match (i % 2, j % 2) {
+                (0, 0) => p(i, j),
+                (1, 0) => (p(i - 1, j) + p(i + 1, j)) * 0.5,
+                (0, 1) => (p(i, j - 1) + p(i, j + 1)) * 0.5,
+                _ => (p(i - 1, j - 1) + p(i + 1, j + 1)) * 0.5,
+            };
+            out.push((coarse - p(i, j)).to_array());
+        }
+    }
     out
 }
 
@@ -192,6 +221,7 @@ fn add_skirt(out: &mut ChunkData, key: ChunkKey, shape: &Shape) {
         out.normals.push(out.normals[v]);
         out.detail.push(out.detail[v]);
         out.colors.push(out.colors[v]);
+        out.morph.push(out.morph[v]);
     }
     let n = ring.len() as u32;
     for k in 0..n {
@@ -223,6 +253,36 @@ mod tests {
                 .any(|&(a, b)| (direction(f, a, b) - e).length() < 1e-12)
         });
         assert!(found);
+    }
+
+    #[test]
+    fn parent_offsets_move_odd_vertices_onto_the_parent_surface() {
+        // A 5x5 grid on a paraboloid: z = x² + 2y².
+        let g = 5;
+        let pos: Vec<[f32; 3]> = (0..g * g)
+            .map(|k| {
+                let (x, y) = ((k % g) as f32, (k / g) as f32);
+                [x, y, x * x + 2.0 * y * y]
+            })
+            .collect();
+        let off = parent_offsets(&pos, g);
+        let at = |i: usize, j: usize| Vec3::from_array(pos[j * g + i]) + Vec3::from_array(off[j * g + i]);
+        // (vertex, expected morphed position)
+        let cases = [
+            ((2, 2), Vec3::new(2.0, 2.0, 12.0)),
+            ((1, 0), Vec3::new(1.0, 0.0, 2.0)),
+            ((0, 1), Vec3::new(0.0, 1.0, 4.0)),
+            ((1, 1), Vec3::new(1.0, 1.0, 6.0)),
+            ((3, 3), Vec3::new(3.0, 3.0, 30.0)),
+        ];
+        for ((i, j), expected) in cases {
+            assert!((at(i, j) - expected).length() < 1e-5, "({i}, {j}): {:?}", at(i, j));
+        }
+        // A built chunk has one offset per vertex (skirt included), and the
+        // parent's own vertices (even i and j) do not move.
+        let c = build(ChunkKey { face: 1, level: 3, x: 2, y: 5 }, &sphere());
+        assert_eq!(c.morph.len(), c.positions.len());
+        assert!(c.morph.iter().take(GRID).step_by(2).all(|m| m[0].abs() + m[1].abs() + m[2].abs() < 1e-6));
     }
 
     #[test]

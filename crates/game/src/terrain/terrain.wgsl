@@ -19,6 +19,8 @@
     forward_io::{VertexOutput, FragmentOutput},
     pbr_functions::{apply_pbr_lighting, main_pass_post_lighting_processing},
     mesh_view_bindings::view,
+    mesh_functions,
+    view_transformations::position_world_to_clip,
 }
 #endif
 
@@ -129,6 +131,46 @@ fn fbm(p: vec2<f32>, octaves: i32) -> f32 {
 fn wrap_d(d: f32) -> f32 {
     return d - round(d);
 }
+
+#ifndef PREPASS_PIPELINE
+struct TerrainVertex {
+    @builtin(instance_index) instance_index: u32,
+    @location(0) position: vec3<f32>,
+    @location(1) normal: vec3<f32>,
+    @location(2) uv: vec2<f32>,
+    @location(5) color: vec4<f32>,
+    // Offset to the parent level's surface (geomorphing).
+    @location(8) morph: vec3<f32>,
+}
+
+// Bevy's mesh vertex shader plus geomorphing: each vertex moves towards
+// the parent level's surface by the chunk's morph factor (its MeshTag /
+// 1000), so a level change happens when the shapes already match.
+@vertex
+fn vertex(vertex: TerrainVertex) -> VertexOutput {
+    var out: VertexOutput;
+    let world_from_local = mesh_functions::get_world_from_local(vertex.instance_index);
+    let t = f32(mesh_functions::get_tag(vertex.instance_index)) / 1000.0;
+    let local = vertex.position + vertex.morph * t;
+    out.world_normal = mesh_functions::mesh_normal_local_to_world(vertex.normal, vertex.instance_index);
+    out.world_position = mesh_functions::mesh_position_local_to_world(world_from_local, vec4<f32>(local, 1.0));
+    out.position = position_world_to_clip(out.world_position.xyz);
+#ifdef VERTEX_UVS_A
+    out.uv = vertex.uv;
+#endif
+#ifdef VERTEX_COLORS
+    out.color = vertex.color;
+#endif
+#ifdef VERTEX_OUTPUT_INSTANCE_INDEX
+    out.instance_index = vertex.instance_index;
+#endif
+#ifdef VISIBILITY_RANGE_DITHER
+    out.visibility_range_dither = mesh_functions::get_visibility_range_dither_level(
+        vertex.instance_index, world_from_local[3]);
+#endif
+    return out;
+}
+#endif
 
 @fragment
 fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> FragmentOutput {

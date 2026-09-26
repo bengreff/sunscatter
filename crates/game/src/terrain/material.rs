@@ -4,15 +4,28 @@
 
 use bevy::asset::RenderAssetUsages;
 use bevy::image::{ImageAddressMode, ImageFilterMode, ImageSampler, ImageSamplerDescriptor};
-use bevy::pbr::{ExtendedMaterial, MaterialExtension};
+use bevy::mesh::{MeshVertexAttribute, MeshVertexBufferLayoutRef, VertexFormat};
+use bevy::pbr::{ExtendedMaterial, MaterialExtension, MaterialExtensionKey, MaterialExtensionPipeline};
 use bevy::prelude::*;
-use bevy::render::render_resource::{AsBindGroup, Extent3d, ShaderType, TextureDimension, TextureFormat};
+use bevy::render::render_resource::{
+    AsBindGroup, Extent3d, RenderPipelineDescriptor, ShaderType, SpecializedMeshPipelineError, TextureDimension,
+    TextureFormat,
+};
+use bevy::shader::ShaderDefVal;
 use bevy::shader::ShaderRef;
 use std::path::PathBuf;
 
 pub type TerrainMaterial = ExtendedMaterial<StandardMaterial, TerrainExt>;
 
 pub const SHADER: &str = "embedded://game/terrain/terrain.wgsl";
+
+/// Per-vertex offset to the parent level's surface (geomorphing, see
+/// `mesh::parent_offsets`); shader location 8.
+pub const ATTRIBUTE_MORPH: MeshVertexAttribute =
+    MeshVertexAttribute::new("TerrainMorph", 0x5375_6e73_6361_7401, VertexFormat::Float32x3);
+
+/// A chunk's morph factor travels in its `MeshTag` as factor × this.
+pub const MORPH_TAG_SCALE: f32 = 1000.0;
 
 #[derive(Clone, Copy, Debug, Default, ShaderType, Reflect)]
 pub struct TerrainParams {
@@ -53,8 +66,36 @@ pub struct TerrainExt {
 }
 
 impl MaterialExtension for TerrainExt {
+    fn vertex_shader() -> ShaderRef {
+        SHADER.into()
+    }
+
     fn fragment_shader() -> ShaderRef {
         SHADER.into()
+    }
+
+    /// The main pass uses our vertex shader, which reads the morph offset.
+    fn specialize(
+        _pipeline: &MaterialExtensionPipeline,
+        descriptor: &mut RenderPipelineDescriptor,
+        layout: &MeshVertexBufferLayoutRef,
+        _key: MaterialExtensionKey<Self>,
+    ) -> Result<(), SpecializedMeshPipelineError> {
+        let prepass = descriptor
+            .vertex
+            .shader_defs
+            .iter()
+            .any(|d| matches!(d, ShaderDefVal::Bool(n, true) if n == "PREPASS_PIPELINE"));
+        if !prepass {
+            descriptor.vertex.buffers = vec![layout.0.get_layout(&[
+                Mesh::ATTRIBUTE_POSITION.at_shader_location(0),
+                Mesh::ATTRIBUTE_NORMAL.at_shader_location(1),
+                Mesh::ATTRIBUTE_UV_0.at_shader_location(2),
+                Mesh::ATTRIBUTE_COLOR.at_shader_location(5),
+                ATTRIBUTE_MORPH.at_shader_location(8),
+            ])?];
+        }
+        Ok(())
     }
 
     fn deferred_fragment_shader() -> ShaderRef {

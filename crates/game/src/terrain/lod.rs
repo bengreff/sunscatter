@@ -1,5 +1,6 @@
 //! Quadtree LOD selection, chunk building and placement.
 
+use super::material::{ATTRIBUTE_MORPH, MORPH_TAG_SCALE};
 use super::mesh::{self, ChunkData, ChunkKey, GRID};
 use super::{body_matrix, Chunk, Terrain, TerrainBody, TerrainChunk, TerrainMaterial};
 use super::{EVICT_AFTER, MAX_IN_FLIGHT, MAX_LEVEL, SPAWNS_PER_FRAME};
@@ -9,7 +10,7 @@ use crate::settings::GraphicsSettings;
 use crate::state::SimState;
 use bevy::asset::RenderAssetUsages;
 use bevy::light::NotShadowCaster;
-use bevy::mesh::{Indices, PrimitiveTopology};
+use bevy::mesh::{Indices, MeshTag, PrimitiveTopology};
 use bevy::prelude::*;
 use bevy::tasks::{futures::check_ready, AsyncComputeTaskPool};
 use glam::{DMat3, DQuat, DVec3};
@@ -26,7 +27,28 @@ fn to_mesh(d: ChunkData) -> Mesh {
         .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, d.normals)
         .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, d.detail)
         .with_inserted_attribute(Mesh::ATTRIBUTE_COLOR, d.colors)
+        .with_inserted_attribute(ATTRIBUTE_MORPH, d.morph)
         .with_inserted_indices(Indices::U32(d.indices))
+}
+
+/// Geomorphing: a chunk that has just split in (split measure 1) is drawn
+/// at its parent's shape, and reaches its own at this measure (the last 20%
+/// of the distance range, as distance ∝ 1 / measure).
+const MORPH_FULL_AT: f64 = 1.25;
+
+/// A child's morph factor (1 = parent shape, 0 = own shape) from its
+/// parent's split measure; `None` (split for other reasons) never morphs.
+pub fn morph_factor(parent_measure: Option<f64>) -> f32 {
+    parent_measure.map_or(0.0, |m| ((MORPH_FULL_AT - m) / (MORPH_FULL_AT - 1.0)).clamp(0.0, 1.0) as f32)
+}
+
+/// Why a chunk splits: `No`, `Always` (tessellation sag, not the camera),
+/// or `Measure(m)` with m > 1 the screen error over the threshold.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Split {
+    No,
+    Always,
+    Measure(f64),
 }
 
 /// Vertex spacing (m) of a chunk at `level`.
@@ -34,7 +56,7 @@ fn spacing(body: &TerrainBody, level: u8) -> f64 {
     body.shape.radius_eq * std::f64::consts::FRAC_PI_2 / f64::from(1u32 << level) / (GRID - 1) as f64
 }
 
-type ChunkParts = (&'static mut Transform, &'static mut Visibility);
+type ChunkParts = (&'static mut Transform, &'static mut Visibility, &'static mut MeshTag);
 type ChunkFilter = (With<TerrainChunk>, Without<MainCamera>);
 
 struct Ctx {
@@ -58,45 +80,55 @@ impl TerrainBody {
         self.pending.insert(key, AsyncComputeTaskPool::get().spawn(async move { mesh::build(key, &shape) }));
     }
 
-    fn wants_split(&self, key: ChunkKey, c: &Chunk, ctx: &Ctx) -> bool {
+    fn wants_split(&self, key: ChunkKey, c: &Chunk, ctx: &Ctx) -> Split {
         if key.level >= MAX_LEVEL {
-            return false;
+            return Split::No;
         }
         let d = (ctx.cam_fixed - c.center).length();
         if d - c.radius > ctx.horizon {
-            return false;
+            return Split::No;
         }
         let s = spacing(self, key.level);
         // Flat triangles sag below the true surface; an atmosphere's
         // aerial perspective depends strongly on the depth it ends at, so
         // keep the sag small wherever the body is drawn.
         if s * s / (8.0 * self.shape.radius_eq) > self.max_sag {
-            return true;
+            return Split::Always;
         }
         let relief = if self.displaced && s > self.height_res { ERROR_RELIEF } else { 0.0 };
         let err = s * (ERROR_BASE + relief) + c.max_height.min(s) * relief;
-        err / (d - c.radius).max(1.0) * ctx.focal > ctx.threshold
+        let m = err / (d - c.radius).max(1.0) * ctx.focal / ctx.threshold;
+        if m > 1.0 {
+            Split::Measure(m)
+        } else {
+            Split::No
+        }
     }
 
-    /// Selects the chunks to draw this frame.
-    fn select(&mut self, ctx: &Ctx, budget: &mut usize) -> Vec<ChunkKey> {
+    /// Selects the chunks to draw this frame, each with its morph factor.
+    fn select(&mut self, ctx: &Ctx, budget: &mut usize) -> Vec<(ChunkKey, f32)> {
         let mut out = Vec::new();
-        let mut stack: Vec<ChunkKey> = ChunkKey::roots().to_vec();
-        while let Some(key) = stack.pop() {
+        let mut stack: Vec<(ChunkKey, f32)> = ChunkKey::roots().iter().map(|&k| (k, 0.0)).collect();
+        while let Some((key, morph)) = stack.pop() {
             let Some(c) = self.chunks.get_mut(&key) else { continue };
             c.last_used = ctx.frame;
             let c = &self.chunks[&key];
-            if self.wants_split(key, c, ctx) {
+            let split = self.wants_split(key, c, ctx);
+            if split != Split::No {
                 let children = key.children();
                 if children.iter().all(|k| self.chunks.contains_key(k)) {
-                    stack.extend(children);
+                    let m = morph_factor(match split {
+                        Split::Measure(m) => Some(m),
+                        _ => None,
+                    });
+                    stack.extend(children.iter().map(|&k| (k, m)));
                     continue;
                 }
                 for k in children {
                     self.request(k, budget);
                 }
             }
-            out.push(key);
+            out.push((key, morph));
         }
         out
     }
@@ -149,6 +181,7 @@ pub fn update(
                     MeshMaterial3d(body.material.clone()),
                     Transform::IDENTITY,
                     Visibility::Hidden,
+                    MeshTag(0),
                 ))
                 .id();
             body.chunks.insert(k, Chunk { entity, center, radius, max_height, last_used: frame });
@@ -167,13 +200,18 @@ pub fn update(
         drawn += selected.len();
 
         let rot = DQuat::from_mat3(&m).as_quat();
-        for key in &selected {
+        for (key, morph) in &selected {
             let c = &body.chunks[key];
-            if let Ok((mut t, mut vis)) = chunks_q.get_mut(c.entity) {
+            if let Ok((mut t, mut vis, mut tag)) = chunks_q.get_mut(c.entity) {
                 *t = Transform { translation: (m * c.center + centre).as_vec3(), rotation: rot, scale: Vec3::ONE };
                 *vis = Visibility::Visible;
+                let q = (morph * MORPH_TAG_SCALE) as u32;
+                if tag.0 != q {
+                    tag.0 = q;
+                }
             }
         }
+        let selected: Vec<ChunkKey> = selected.into_iter().map(|(k, _)| k).collect();
         let evict: Vec<ChunkKey> = body
             .chunks
             .iter()
@@ -182,7 +220,7 @@ pub fn update(
             .collect();
         for (k, c) in &body.chunks {
             if c.last_used != frame || !selected.contains(k) {
-                if let Ok((_, mut vis)) = chunks_q.get_mut(c.entity) {
+                if let Ok((_, mut vis, _)) = chunks_q.get_mut(c.entity) {
                     *vis = Visibility::Hidden;
                 }
             }
@@ -203,4 +241,18 @@ pub fn update(
         }
     }
     terrain.drawn = drawn;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn children_start_at_the_parent_shape_and_finish_morphing_at_80_percent_distance() {
+        // (parent split measure, expected morph factor)
+        let cases = [(Some(1.0), 1.0), (Some(1.125), 0.5), (Some(1.25), 0.0), (Some(3.0), 0.0), (None, 0.0)];
+        for (m, expected) in cases {
+            assert!((morph_factor(m) - expected).abs() < 1e-6, "{m:?}");
+        }
+    }
 }
