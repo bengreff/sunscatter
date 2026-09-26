@@ -129,6 +129,22 @@ impl Demo {
     }
 }
 
+/// Focuses `body` with the camera `distance` from its centre, in the
+/// direction `angle` (rad) away from the Sun (0 = over the subsolar point).
+fn view_sunlit(rig: &mut CameraRig, sim: &SimState, body: sim::frame::NodeId, angle: f64, distance: f64) {
+    let snap = sim.world.snapshot(sim.clock);
+    let Some(sun) = sim.world.find("Sun").map(|s| s.node) else { return };
+    let to_sun = snap.relative_r(sun, body).normalize();
+    camera::focus_body(rig, sim, body);
+    let up = sim.world.source(body).and_then(|s| s.physical.as_ref()).map_or(DVec3::Z, |p| p.rotation.pole(sim.clock));
+    let side = to_sun.cross(up).try_normalize().unwrap_or(DVec3::X);
+    let d = to_sun * angle.cos() + side * angle.sin();
+    let (e1, e2) = camera::basis(up);
+    rig.pitch = d.dot(up).clamp(-1.0, 1.0).asin();
+    rig.yaw = d.dot(e2).atan2(d.dot(e1));
+    rig.distance = distance;
+}
+
 fn horizontal(r: DVec3, v: DVec3) -> DVec3 {
     let up = r.normalize();
     let h = v - up * v.dot(up);
@@ -288,8 +304,7 @@ pub fn run(
                 demo.capture("map");
             } else {
                 if let Some(moon) = moon {
-                    camera::focus_body(&mut rig, &sim, moon);
-                    rig.distance = 3.0 * 1_737_400.0;
+                    view_sunlit(&mut rig, &sim, moon, 40f64.to_radians(), 3.0 * 1_737_400.0);
                 }
                 demo.next(Step::MoonFar);
             }
@@ -299,8 +314,10 @@ pub fn run(
                 demo.shot_taken = true;
                 demo.capture("moon_orbit");
             } else {
-                rig.distance = 1_737_400.0 + 12_000.0;
-                rig.pitch -= 0.3;
+                if let Some(moon) = moon {
+                    // A low Sun (about 12° up) brings out the relief.
+                    view_sunlit(&mut rig, &sim, moon, 78f64.to_radians(), 1_737_400.0 + 4_000.0);
+                }
                 demo.next(Step::MoonClose);
             }
         }

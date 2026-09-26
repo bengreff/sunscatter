@@ -94,6 +94,7 @@ pub fn update_ambient(
     settings: Res<GraphicsSettings>,
     mut ambient: ResMut<GlobalAmbientLight>,
 ) {
+    // With the atmosphere on, its environment map lights things inside it.
     let sky = if settings.atmosphere == crate::settings::AtmosphereQuality::Off {
         stars::daylight(&sim, &rig, &defs) * SKY_AMBIENT
     } else {

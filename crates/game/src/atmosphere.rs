@@ -135,7 +135,6 @@ pub fn apply_settings(
     for cam in &cams {
         match settings.atmosphere {
             AtmosphereQuality::Off => {
-                commands.entity(cam).remove::<AtmosphereEnvironmentMapLight>();
                 commands.entity(cam).insert(AtmosphereSettings::default());
                 continue;
             }
@@ -156,7 +155,30 @@ pub fn apply_settings(
                 });
             }
         }
-        // Sky light on everything (ambient and reflections from the sky).
-        commands.entity(cam).insert(AtmosphereEnvironmentMapLight::default());
+    }
+}
+
+/// Sky light (ambient and reflections from Bevy's atmosphere environment
+/// map) only inside an atmosphere: from above it, the map would still show
+/// a lit sky and tint everything blue.
+pub fn update_sky_light(
+    settings: Res<GraphicsSettings>,
+    sim: Res<SimState>,
+    rig: Res<CameraRig>,
+    mut commands: Commands,
+    cams: Query<(Entity, Has<AtmosphereEnvironmentMapLight>), With<MainCamera>>,
+    atmos: Query<&BodyAtmosphere>,
+) {
+    let snap = sim.world.snapshot(sim.clock);
+    let inside = settings.atmosphere != AtmosphereQuality::Off
+        && atmos
+            .iter()
+            .any(|a| (rig.cam_pos - snap.relative_r(a.0, rig.anchor)).length() < f64::from(a.1.outer_radius));
+    for (cam, has) in &cams {
+        if inside && !has {
+            commands.entity(cam).insert(AtmosphereEnvironmentMapLight::default());
+        } else if !inside && has {
+            commands.entity(cam).remove::<AtmosphereEnvironmentMapLight>();
+        }
     }
 }

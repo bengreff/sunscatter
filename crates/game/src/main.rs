@@ -78,6 +78,7 @@ fn main() {
             (
                 scene::update_bodies,
                 atmosphere::update,
+                atmosphere::update_sky_light,
                 scene::update_ships,
                 terrain::update,
                 terrain::update_textures,
