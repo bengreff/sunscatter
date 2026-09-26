@@ -21,9 +21,18 @@ use glam::DVec3;
 use sim::kepler::Elements;
 use sim::vessel::{quat_z_to, Phase};
 
+/// The zoom sweep's range (m from the ship) and frames each way.
+const ZOOM_NEAR: f64 = 50.0;
+const ZOOM_FAR: f64 = 2.0e7;
+const ZOOM_FRAMES: u32 = 40;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Step {
     Pad,
+    /// Opt-in (`SUNSCATTER_DEMO_ZOOM=1`): zoom out from 50 m to 20,000 km
+    /// over the pad and back, at High, a screenshot every frame (the owner's
+    /// "whitish shapes" when zooming).
+    ZoomSweep(u32),
     Ascent,
     Coast,
     Circularize,
@@ -101,6 +110,7 @@ pub struct Demo {
     menu_shot: bool,
     /// The top-down pad view was captured.
     pad_top_done: bool,
+    zoom_sweep: bool,
     perf: PerfSample,
     capture: Option<Capture>,
     /// A benchmark was started and its results are pending.
@@ -138,6 +148,7 @@ impl Demo {
             land_view: None,
             menu_shot: false,
             pad_top_done: false,
+            zoom_sweep: std::env::var_os("SUNSCATTER_DEMO_ZOOM").is_some(),
             perf: PerfSample::default(),
             capture: None,
             benching: false,
@@ -298,10 +309,32 @@ pub fn run(
                 bench.start("pad", *settings);
                 demo.benching = true;
             } else if demo.shot_taken && (!demo.bench || !bench.results.is_empty()) {
-                sim.controls.throttle = 1.0;
-                sim.warp = 3;
-                (rig.pitch, rig.distance) = (0.25, 40.0);
-                demo.next(Step::Ascent);
+                if demo.zoom_sweep {
+                    demo.zoom_sweep = false;
+                    *settings = settings.with_preset(Tier::High);
+                    (rig.pitch, rig.distance) = (0.35, ZOOM_NEAR);
+                    demo.next(Step::ZoomSweep(0));
+                } else {
+                    *settings = settings.with_preset(demo.flying_tier);
+                    sim.controls.throttle = 1.0;
+                    sim.warp = 3;
+                    (rig.pitch, rig.distance) = (0.25, 40.0);
+                    demo.next(Step::Ascent);
+                }
+            }
+        }
+        Step::ZoomSweep(frame) => {
+            // Out and back in ZOOM_FRAMES frames each way, logarithmically.
+            let k = (ZOOM_FAR / ZOOM_NEAR).powf(1.0 / f64::from(ZOOM_FRAMES));
+            let out = frame < ZOOM_FRAMES;
+            rig.distance *= if out { k } else { 1.0 / k };
+            demo.shot(&mut commands, &format!("zoom_{frame:03}"));
+            if frame + 1 < 2 * ZOOM_FRAMES {
+                demo.step = Step::ZoomSweep(frame + 1);
+            } else {
+                // Back to the pad step, which goes on to the ascent.
+                demo.step = Step::Pad;
+                demo.shot_taken = true;
             }
         }
         Step::Ascent => {

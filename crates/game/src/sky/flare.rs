@@ -1,7 +1,5 @@
-//! Sun glare and lens flare, painted additively over the 3D view (behind
-//! the UI): a soft glow, a horizontal streak and ghosts along the line
-//! through the screen centre. Fades with the fraction of the Sun's disc that
-//! bodies hide.
+//! Sun glare, painted additively over the 3D view (behind the UI): two soft
+//! glows. Fades with the fraction of the Sun's disc that bodies hide.
 
 use crate::camera::{CameraRig, MainCamera};
 use crate::map;
@@ -59,6 +57,9 @@ pub fn draw(
     }
     let screen = ctx.content_rect();
     let centre = screen.center();
+    // Only soft glows (D058): the streak and ghosts were large, hard-edged
+    // shapes that popped in and out as the Sun crossed a limb while zooming
+    // (the owner's "whitish shapes").
     let p = egui::pos2(s.x, s.y);
     // Fade out as the Sun leaves the screen.
     let off = ((p - centre).length() / screen.width().max(1.0)).min(2.0);
@@ -70,27 +71,5 @@ pub fn draw(
     let warm = [1.0, 0.92, 0.8];
     glow(&painter, p, 260.0, warm, 0.22 * k);
     glow(&painter, p, 70.0, [1.0, 0.97, 0.9], 0.55 * k);
-    // Horizontal streak.
-    let mut streak = egui::Mesh::default();
-    let (w, h) = (screen.width() * 0.45, 2.5);
-    for (dx, dy, a) in [(-w, 0.0, 0.0), (0.0, -h, 0.35), (w, 0.0, 0.0), (0.0, h, 0.35)] {
-        streak.colored_vertex(p + egui::vec2(dx, dy), add([0.8, 0.88, 1.0], a * k));
-    }
-    streak.colored_vertex(p, add([0.8, 0.88, 1.0], 0.35 * k));
-    for (a, b) in [(0, 1), (1, 2), (2, 3), (3, 0)] {
-        streak.add_triangle(4, a, b);
-    }
-    painter.add(egui::Shape::mesh(streak));
-    // Ghosts along the axis through the screen centre.
-    let axis = centre - p;
-    for (t, r, rgb, a) in [
-        (0.35, 18.0, [0.6, 0.8, 1.0], 0.10),
-        (0.7, 40.0, [0.5, 1.0, 0.6], 0.06),
-        (1.15, 26.0, [1.0, 0.6, 0.4], 0.08),
-        (1.5, 70.0, [0.6, 0.6, 1.0], 0.05),
-        (1.9, 12.0, [1.0, 0.9, 0.5], 0.12),
-    ] {
-        glow(&painter, p + axis * t, r, rgb, a * k);
-    }
     Ok(())
 }
