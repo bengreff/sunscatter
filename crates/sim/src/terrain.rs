@@ -10,8 +10,13 @@
 //! to the body's reference surface (sea level for Earth, including negative
 //! bathymetry).
 //!
+//! **Sampling** is Catmull-Rom bicubic between pixel centres, so heights and
+//! slopes are continuous (bilinear creases show as facets up close). Within
+//! half a row of a pole the value blends (smoothstep) to the mean of the polar
+//! row, so the surface is single-valued at the pole itself.
+//!
 //! Determinism: latitude/longitude come from [`crate::math`] (libm) trig; the
-//! lookup and bilinear blend are plain IEEE arithmetic on integer data.
+//! lookup and the blends are plain IEEE arithmetic on integer data.
 
 use crate::math;
 use glam::DVec3;
@@ -29,6 +34,8 @@ pub struct Heightmap {
     width: usize,
     height: usize,
     data: Vec<i16>,
+    /// Sums of the first (north) and last (south) rows, for the pole blend.
+    pole_sums: [i64; 2],
 }
 
 impl fmt::Debug for Heightmap {
@@ -43,7 +50,9 @@ impl Heightmap {
     pub fn from_vec(width: usize, height: usize, data: Vec<i16>) -> Self {
         assert!(width > 0 && height > 0, "empty heightmap");
         assert_eq!(data.len(), width * height, "heightmap size");
-        Heightmap { width, height, data }
+        let row_sum = |j: usize| data[j * width..(j + 1) * width].iter().map(|&h| i64::from(h)).sum();
+        let pole_sums = [row_sum(0), row_sum(height - 1)];
+        Heightmap { width, height, data, pole_sums }
     }
 
     pub fn width(&self) -> usize {
@@ -87,7 +96,10 @@ impl Heightmap {
             .iter()
             .map(|&b| (i32::from(u16::from_be_bytes(b)) - HEIGHT_OFFSET) as i16)
             .collect();
-        Ok(Heightmap { width, height, data })
+        if width == 0 || height == 0 {
+            return Err("empty image".into());
+        }
+        Ok(Heightmap::from_vec(width, height, data))
     }
 
     /// Encodes to the file contract (for tools and tests).
@@ -105,22 +117,35 @@ impl Heightmap {
         out
     }
 
-    /// Height (m) at latitude/longitude (rad), bilinear between pixel centres.
+    /// Height (m) at latitude/longitude (rad): Catmull-Rom bicubic between
+    /// pixel centres, blended to the polar-row mean at the poles.
     pub fn sample(&self, lat: f64, lon: f64) -> f64 {
         let (w, h) = (self.width as f64, self.height as f64);
         // Continuous pixel coordinates with pixel centres at integers.
         let u = (lon + math::PI) / math::TAU * w - 0.5;
         let v = (math::PI / 2.0 - lat) / math::PI * h - 0.5;
         let (u0, v0) = (u.floor(), v.floor());
-        let (fu, fv) = (u - u0, v - v0);
-        let wrap = |c: f64| (c as i64).rem_euclid(self.width as i64) as usize;
-        let clamp = |r: f64| (r as i64).clamp(0, self.height as i64 - 1) as usize;
-        let (c0, c1) = (wrap(u0), wrap(u0 + 1.0));
-        let (r0, r1) = (clamp(v0), clamp(v0 + 1.0));
-        let px = |c: usize, r: usize| f64::from(self.pixel(c, r));
-        let top = px(c0, r0) * (1.0 - fu) + px(c1, r0) * fu;
-        let bottom = px(c0, r1) * (1.0 - fu) + px(c1, r1) * fu;
-        top * (1.0 - fv) + bottom * fv
+        let (wu, wv) = (catmull_rom(u - u0), catmull_rom(v - v0));
+        let (u0, v0) = (u0 as i64, v0 as i64);
+        let (wi, hi) = (self.width as i64, self.height as i64);
+        let mut sum = 0.0;
+        for (dj, &wr) in wv.iter().enumerate() {
+            let r = (v0 - 1 + dj as i64).clamp(0, hi - 1) as usize;
+            let row = &self.data[r * self.width..(r + 1) * self.width];
+            let mut acc = 0.0;
+            for (di, &wc) in wu.iter().enumerate() {
+                let c = (u0 - 1 + di as i64).rem_euclid(wi) as usize;
+                acc += wc * f64::from(row[c]);
+            }
+            sum += wr * acc;
+        }
+        // Pole blend: v = −0.5 is the north pole, v = h − 0.5 the south pole.
+        let (pole, dist) = if v < 0.0 { (0, v + 0.5) } else { (1, h - 0.5 - v) };
+        if dist < 0.5 {
+            let mean = self.pole_sums[pole] as f64 / w;
+            return mean + (sum - mean) * smoothstep(dist / 0.5);
+        }
+        sum
     }
 
     /// Height (m) in the direction of a body-fixed vector (any length > 0).
@@ -128,6 +153,19 @@ impl Heightmap {
         let (lat, lon) = lat_lon(dir);
         self.sample(lat, lon)
     }
+}
+
+/// Catmull-Rom weights of the four samples around fraction `t` ∈ [0, 1).
+/// They sum to 1 and reproduce linear data exactly.
+fn catmull_rom(t: f64) -> [f64; 4] {
+    let (t2, t3) = (t * t, t * t * t);
+    [0.5 * (-t3 + 2.0 * t2 - t), 0.5 * (3.0 * t3 - 5.0 * t2 + 2.0), 0.5 * (-3.0 * t3 + 4.0 * t2 + t), 0.5 * (t3 - t2)]
+}
+
+/// `3x² − 2x³` on [0, 1], clamped outside.
+pub(crate) fn smoothstep(x: f64) -> f64 {
+    let x = x.clamp(0.0, 1.0);
+    x * x * (3.0 - 2.0 * x)
 }
 
 /// Geocentric latitude and longitude (rad) of a body-fixed direction.
@@ -182,25 +220,89 @@ mod tests {
     }
 
     #[test]
-    fn longitude_wraps_and_latitude_clamps() {
+    fn longitude_wraps_and_the_poles_are_single_valued() {
         let m = synthetic(64);
-        // Exactly on the antimeridian: halfway between the last and first columns.
-        let mid = 0.5 * (f64::from(m.pixel(63, 10)) + f64::from(m.pixel(0, 10)));
+        let p = |i: usize| f64::from(m.pixel(i, 10));
+        // Exactly on the antimeridian: Catmull-Rom halfway between the last and first columns.
+        let mid = (-p(62) + 9.0 * p(63) + 9.0 * p(0) - p(1)) / 16.0;
         let lat = math::PI / 2.0 - 10.5 * math::PI / 32.0;
-        assert!((m.sample(lat, math::PI) - mid).abs() < 1e-6);
-        assert!((m.sample(lat, -math::PI) - mid).abs() < 1e-6);
-        // North of the first row's centres: the first row.
-        let lon = -math::PI + 3.5 * math::TAU / 64.0;
-        assert!((m.sample(90.0 * DEG, lon) - f64::from(m.pixel(3, 0))).abs() < 1e-6);
-        assert!((m.sample(-90.0 * DEG, lon) - f64::from(m.pixel(3, 31))).abs() < 1e-6);
+        assert!((m.sample(lat, math::PI) - mid).abs() < 1e-9);
+        assert!((m.sample(lat, -math::PI) - mid).abs() < 1e-9);
+        // At the poles: the polar row's mean, whatever the longitude.
+        let mean = |j: usize| (0..64).map(|i| f64::from(m.pixel(i, j))).sum::<f64>() / 64.0;
+        for lon in [-3.0, -1.0, 0.0, 0.5, 2.9] {
+            assert!((m.sample(90.0 * DEG, lon) - mean(0)).abs() < 1e-9);
+            assert!((m.sample(-90.0 * DEG, lon) - mean(31)).abs() < 1e-9);
+        }
+    }
+
+    #[test]
+    fn bicubic_reproduces_a_linear_ramp() {
+        // h = 3·column − 5·row + 7 (away from the wrap seam, where a ramp cannot be periodic).
+        let (w, h) = (64usize, 32usize);
+        let data = (0..w * h).map(|k| (3 * (k % w) as i64 - 5 * (k / w) as i64 + 7) as i16).collect();
+        let m = Heightmap::from_vec(w, h, data);
+        for (u, v) in [(10.0, 5.0), (10.25, 5.5), (30.9, 20.1), (40.5, 12.75), (2.0, 2.0), (60.99, 28.9)] {
+            let lon = -math::PI + (u + 0.5) * math::TAU / w as f64;
+            let lat = math::PI / 2.0 - (v + 0.5) * math::PI / h as f64;
+            let expected = 3.0 * u - 5.0 * v + 7.0;
+            assert!((m.sample(lat, lon) - expected).abs() < 1e-9, "({u}, {v}): {} vs {expected}", m.sample(lat, lon));
+        }
+    }
+
+    #[test]
+    fn catmull_rom_weights_sum_to_one() {
+        for t in [0.0, 0.1, 0.5, 0.77, 0.999] {
+            let w = catmull_rom(t);
+            assert!((w.iter().sum::<f64>() - 1.0).abs() < 1e-15);
+            // Linear precision: Σ wᵢ·(i − 1) = t.
+            assert!((w[2] + 2.0 * w[3] - w[0] - t).abs() < 1e-15);
+        }
+        assert_eq!(catmull_rom(0.0), [0.0, 1.0, 0.0, 0.0]);
+    }
+
+    /// Heights of directions 1e-10 rad apart differ by < 1 mm: across the
+    /// antimeridian, at and around the poles, and at random places.
+    #[test]
+    fn heights_are_continuous_across_the_seam_and_the_poles() {
+        // Random ±500 m per pixel: rougher than any real map.
+        let m = synthetic(256);
+        let m = Heightmap::from_vec(256, 128, m.data.iter().map(|&h| h / 20).collect());
+        let eps = 1e-10;
+        let mut pairs = vec![
+            (DVec3::new(-1.0, eps, 0.3), DVec3::new(-1.0, -eps, 0.3)),
+            (DVec3::new(eps, 0.0, 1.0), DVec3::new(-eps, 0.0, 1.0)),
+            (DVec3::new(0.0, eps, 1.0), DVec3::new(0.0, -eps, 1.0)),
+            (DVec3::new(eps, eps, -1.0), DVec3::new(-eps, -eps, -1.0)),
+            (DVec3::new(1e-3, 0.0, 1.0), DVec3::new(1e-3, eps, 1.0)),
+        ];
+        let mut x: u64 = 0x9e37_79b9_7f4a_7c15;
+        for _ in 0..1000 {
+            x ^= x << 13;
+            x ^= x >> 7;
+            x ^= x << 17;
+            let a = DVec3::new(
+                (x % 1000) as f64 - 500.0,
+                ((x >> 20) % 1000) as f64 - 500.0,
+                ((x >> 40) % 1000) as f64 - 500.0,
+            )
+            .normalize();
+            let b = (a + a.any_orthonormal_vector() * eps).normalize();
+            pairs.push((a, b));
+        }
+        for (a, b) in pairs {
+            let d = (m.height_at(a) - m.height_at(b)).abs();
+            assert!(d < 1e-3, "{a} vs {b}: step {d} m");
+        }
     }
 
     #[test]
     fn png_round_trips_the_contract() {
-        let mut m = synthetic(32);
-        m.data[0] = i16::MIN;
-        m.data[1] = i16::MAX;
-        m.data[2] = 0;
+        let mut data = synthetic(32).data;
+        data[0] = i16::MIN;
+        data[1] = i16::MAX;
+        data[2] = 0;
+        let m = Heightmap::from_vec(32, 16, data);
         let png = m.to_png();
         assert_eq!(Heightmap::from_png(&png).unwrap(), m);
         // Stored value is height + 32768, big-endian.
@@ -240,5 +342,6 @@ mod tests {
         crate::ephem::fnv1a64(&bytes)
     }
 
-    const SYNTHETIC_GOLDEN: u64 = 0x5fa5b0a310b0b1d4;
+    // Bicubic sampling with pole blend (D059).
+    const SYNTHETIC_GOLDEN: u64 = 0x55cfb00e38564bef;
 }

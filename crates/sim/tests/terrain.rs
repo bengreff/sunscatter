@@ -168,4 +168,5 @@ fn shipped_heightmap_samples_match_golden_hash() {
     assert_eq!(hash, EARTH_GOLDEN, "terrain sampling or data changed (or differs on this platform)");
 }
 
-const EARTH_GOLDEN: u64 = 0xb395455c0fb288a8;
+// Catmull-Rom bicubic sampling with the pole blend (D059), was bilinear.
+const EARTH_GOLDEN: u64 = 0x581153ae2859922d;
