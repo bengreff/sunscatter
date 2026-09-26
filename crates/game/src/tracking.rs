@@ -12,8 +12,7 @@
 //! orbit lines (the active vessel always does).
 
 use crate::camera::{self, CameraRig, Focus};
-use crate::hud::fmt_dist;
-use crate::map::fmt_duration;
+use crate::format::{distance as fmt_dist, duration as fmt_duration};
 use crate::state::{Prediction, SimState, WARP_LEVELS};
 use bevy::prelude::*;
 use bevy_egui::input::EguiWantsInput;

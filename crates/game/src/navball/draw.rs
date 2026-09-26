@@ -6,8 +6,8 @@
 
 use super::rules::{self, Local, Ship};
 use super::{nav_state, NavState, NavTarget, Navball};
+use crate::format::{distance as fmt_dist, duration as fmt_duration, speed as fmt_speed};
 use crate::interface::layout::{InterfaceSettings, PanelId};
-use crate::map::fmt_duration;
 use crate::state::SimState;
 use crate::tracking::{Tracked, TrackingStation};
 use bevy::prelude::*;
@@ -114,18 +114,6 @@ pub fn draw(
         }
     }
     Ok(())
-}
-
-fn fmt_speed(v: f64) -> String {
-    if v >= 1.0e4 {
-        format!("{:.2} km/s", v / 1e3)
-    } else {
-        format!("{v:.1} m/s")
-    }
-}
-
-fn fmt_dist(m: f64) -> String {
-    crate::hud::fmt_dist(m)
 }
 
 /// Rows of right-aligned monospace values with dim labels.
@@ -433,12 +421,5 @@ mod tests {
         assert!(b > r, "sky");
         let [r, _, b] = ball_colour(&local, DVec3::new(-0.5, 0.0, 0.8).normalize());
         assert!(r > b, "ground");
-    }
-
-    #[test]
-    fn speeds_switch_to_km_per_second() {
-        assert_eq!(fmt_speed(123.45), "123.5 m/s");
-        assert_eq!(fmt_speed(7_784.0), "7784.0 m/s");
-        assert_eq!(fmt_speed(12_345.0), "12.35 km/s");
     }
 }

@@ -117,18 +117,6 @@ pub fn pick_bodies(
     }
 }
 
-pub fn fmt_dist(m: f64) -> String {
-    if !m.is_finite() {
-        "∞".into()
-    } else if m.abs() >= 1.0e6 {
-        format!("{:.0} km", m / 1e3)
-    } else if m.abs() >= 1.0e4 {
-        format!("{:.1} km", m / 1e3)
-    } else {
-        format!("{m:.0} m")
-    }
-}
-
 /// Why warp is lower than requested.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum WarpLimit {
@@ -243,7 +231,7 @@ pub fn draw(
         egui::Window::new(name).open(&mut open).fixed_pos([pos.x, pos.y]).resizable(false).collapsible(false).show(
             ctx,
             |ui_| {
-                ui_.monospace(format!("distance {}", fmt_dist(dist)));
+                ui_.monospace(format!("distance {}", crate::format::distance(dist)));
                 if ui_.button("Focus").clicked() {
                     camera::focus_body(&mut rig, sim, node);
                     ui.menu = None;
@@ -289,13 +277,13 @@ fn flight_panel(ui_: &mut egui::Ui, sim: &SimState, near: Option<sim::frame::Nod
                 ui_.end_row();
             };
             row("BODY", body.name.clone());
-            row("ALT (SEA)", fmt_dist(alt));
-            row("ALT (TERRAIN)", fmt_dist(above_ground));
+            row("ALT (SEA)", crate::format::distance(alt));
+            row("ALT (TERRAIN)", crate::format::distance(above_ground));
             row("SURFACE V", format!("{:.1} m/s", v_srf.length()));
             row("ORBIT V", format!("{:.1} m/s", v_orb.length()));
             row("V/S", format!("{:+.1} m/s", v_srf.dot(rel.normalize())));
-            row("Ap", fmt_dist(el.apoapsis() - p.radius_eq));
-            row("Pe", fmt_dist(el.periapsis() - p.radius_eq));
+            row("Ap", crate::format::distance(el.apoapsis() - p.radius_eq));
+            row("Pe", crate::format::distance(el.periapsis() - p.radius_eq));
         });
     }
     let c = sim.controls;

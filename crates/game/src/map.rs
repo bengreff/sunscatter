@@ -3,7 +3,8 @@
 //! (D054); this module gathers each object's sizes and draws the result.
 
 use crate::camera::{self, CameraRig, MainCamera};
-use crate::hud::{fmt_dist, PlotFrame, UiState};
+use crate::format;
+use crate::hud::{PlotFrame, UiState};
 use crate::map_view::{self, Object, ObjectId, Visibility};
 use crate::relations::Dominance;
 use crate::scene::BodyDefs;
@@ -275,8 +276,8 @@ fn draw_apsides(
         let label = format!(
             "{} {}\nin {}",
             if a.is_apo { "Ap" } else { "Pe" },
-            fmt_dist(a.distance - radius),
-            fmt_duration(a.t - now)
+            format::distance(a.distance - radius),
+            format::duration(a.t - now)
         );
         painter.text(
             egui::pos2(s.x + 8.0, s.y - 8.0),
@@ -285,16 +286,5 @@ fn draw_apsides(
             egui::FontId::monospace(12.0),
             color,
         );
-    }
-}
-
-pub fn fmt_duration(s: f64) -> String {
-    let s = s.max(0.0);
-    if s >= 86_400.0 {
-        format!("{:.0}d {:.0}h", (s / 86_400.0).floor(), (s % 86_400.0) / 3600.0)
-    } else if s >= 3600.0 {
-        format!("{:.0}h {:02.0}m", (s / 3600.0).floor(), ((s % 3600.0) / 60.0).floor())
-    } else {
-        format!("{:.0}m {:02.0}s", (s / 60.0).floor(), (s % 60.0).floor())
     }
 }

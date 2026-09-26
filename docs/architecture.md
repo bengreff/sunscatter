@@ -32,9 +32,10 @@ A short map to search before building anything: who owns what, the frame order, 
 | A vessel's state at the clock (for drawing) | `sim::vessel::Vessel::state_at` | never integrates (rule 4) |
 | Fps readout (0.5 s windows) | `game::hud::FpsMeter` | |
 | Terrain meshes and LOD | `game::terrain` | heights via `sim` |
-| Graphics tiers and toggles | `game::settings`; UI in `game::settings_ui` | |
+| Graphics tiers and toggles | `game::settings`; the settings screen in `game::settings_ui` | |
+| Panel layout, theme, pause menu, key help | `game::interface` (`layout` is pure data) | saved in `settings.ron` |
 | Where files live | `game::persist` | `SUNSCATTER_HOME` override |
-| Number/unit formatting | `game::hud::fmt_dist` (to become a `format` module) | |
+| Number/unit formatting (distance, speed, duration) | `game::format` | |
 
 ## Frame order (Update schedule, `main.rs`)
 

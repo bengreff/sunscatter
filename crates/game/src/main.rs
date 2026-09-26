@@ -9,6 +9,7 @@ mod bench;
 mod body_visual;
 mod camera;
 mod demo;
+mod format;
 mod hud;
 mod interface;
 mod lighting;
