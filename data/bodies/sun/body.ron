@@ -1,0 +1,28 @@
+// The Sun. The `physical` section is read by the simulation (`sim::body::data`);
+// other sections (e.g. `visual`) belong to the game and are ignored by sim.
+// Angles are in degrees and rates in IAU units; sim converts them on load.
+(
+    physical: (
+        name: "Sun",
+        radius_eq: 695700000.0,
+        radius_polar: 695700000.0,
+        j2: 0.0,
+        // IAU mean rotation.
+        rotation: (
+            ra_deg: 286.13,
+            dec_deg: 63.87,
+            ra_rate_deg_per_century: 0.0,
+            dec_rate_deg_per_century: 0.0,
+            w0_deg: 84.176,
+            w_rate_deg_per_day: 14.1844,
+        ),
+        atmosphere: None,
+        anchor_zone: None,
+        // Its 1PN (Schwarzschild) field acts on vessels.
+        relativistic: true,
+        // No landing or impact surface.
+        solid: false,
+        heightmap: None,
+        sea_level: None,
+    ),
+)

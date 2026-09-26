@@ -10,9 +10,7 @@ rust-version.workspace = true
 glam.workspace = true
 libm.workspace = true
 serde.workspace = true
+ron = "0.10"
 
 [lints]
 workspace = true
-
-[dev-dependencies]
-ron = "0.10"

@@ -1,5 +1,10 @@
 //! Physical properties of bodies (shape, gravity field, rotation, atmosphere).
-//! Motion lives in [`crate::ephem`]; this is everything else.
+//! Motion lives in [`crate::ephem`]; this is everything else. The values come
+//! from data files (`data/bodies/<body>/body.ron`, see [`data`]).
+
+pub mod data;
+
+pub use data::{default_bodies_dir, load_body, parse_body, BodyDef, DataError};
 
 use crate::frame::{BodyFixed, Inertial, Vec3};
 use crate::math;
@@ -67,7 +72,7 @@ impl Rotation {
 }
 
 /// Exponential atmosphere (prototype model).
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Atmosphere {
     /// Sea-level density (kg/m³).
     pub rho0: f64,
@@ -89,13 +94,18 @@ impl Atmosphere {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct BodyPhysical {
-    pub name: &'static str,
+    pub name: String,
     pub radius_eq: f64,
     pub radius_polar: f64,
     /// Zonal harmonic J2 (dimensionless), referenced to `radius_eq`.
     pub j2: f64,
     pub rotation: Rotation,
     pub atmosphere: Option<Atmosphere>,
+    /// Has a surface that vessels can land on or hit.
+    pub solid: bool,
+    /// Height of a solid ocean surface above the reference (m), if any
+    /// (D037: oceans are solid at sea level).
+    pub sea_level: Option<f64>,
 }
 
 impl BodyPhysical {
@@ -123,71 +133,26 @@ impl BodyPhysical {
     }
 }
 
-const DEG: f64 = math::PI / 180.0;
-/// Seconds per Julian century (IAU `T` unit).
-const CENTURY: f64 = 36_525.0 * 86_400.0;
-
-/// Earth: WGS84 shape, EGM J2, IAU 2015 rotation (no precession), exponential
-/// atmosphere up to 150 km.
+/// Earth from the default data directory (panics if the data is missing).
 pub fn earth() -> BodyPhysical {
-    BodyPhysical {
-        name: "Earth",
-        radius_eq: 6_378_137.0,
-        radius_polar: 6_356_752.314_245,
-        j2: 1.082_626_68e-3,
-        rotation: Rotation {
-            ra: 0.0,
-            dec: 90.0 * DEG,
-            ra_rate: -0.641 * DEG / CENTURY,
-            dec_rate: -0.557 * DEG / CENTURY,
-            w0: 190.147 * DEG,
-            w_rate: 360.985_623_5 * DEG / 86_400.0,
-        },
-        atmosphere: Some(Atmosphere { rho0: 1.225, scale_height: 7_200.0, top: 150_000.0 }),
-    }
+    data::load_default("earth").physical
 }
 
-/// Moon: sphere, J2 from GRAIL, IAU 2015 mean rotation (no librations).
+/// The Moon from the default data directory (panics if the data is missing).
 pub fn moon() -> BodyPhysical {
-    BodyPhysical {
-        name: "Moon",
-        radius_eq: 1_737_400.0,
-        radius_polar: 1_737_400.0,
-        j2: 2.033e-4,
-        rotation: Rotation {
-            ra: 269.9949 * DEG,
-            dec: 66.5392 * DEG,
-            ra_rate: 0.0031 * DEG / CENTURY,
-            dec_rate: 0.0130 * DEG / CENTURY,
-            w0: 38.3213 * DEG,
-            w_rate: 13.176_358_15 * DEG / 86_400.0,
-        },
-        atmosphere: None,
-    }
+    data::load_default("moon").physical
 }
 
-/// Sun (for rendering and gravity; no rotation modelled beyond IAU mean).
+/// The Sun from the default data directory (panics if the data is missing).
 pub fn sun() -> BodyPhysical {
-    BodyPhysical {
-        name: "Sun",
-        radius_eq: 695_700_000.0,
-        radius_polar: 695_700_000.0,
-        j2: 0.0,
-        rotation: Rotation {
-            ra: 286.13 * DEG,
-            dec: 63.87 * DEG,
-            ra_rate: 0.0,
-            dec_rate: 0.0,
-            w0: 84.176 * DEG,
-            w_rate: 14.1844 * DEG / 86_400.0,
-        },
-        atmosphere: None,
-    }
+    data::load_default("sun").physical
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const DEG: f64 = math::PI / 180.0;
 
     #[test]
     fn rotation_round_trips_and_spins_at_sidereal_rate() {

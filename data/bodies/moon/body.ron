@@ -1,0 +1,29 @@
+// The Moon. The `physical` section is read by the simulation (`sim::body::data`);
+// other sections (e.g. `visual`) belong to the game and are ignored by sim.
+// Angles are in degrees and rates in IAU units; sim converts them on load.
+(
+    physical: (
+        name: "Moon",
+        // Reference sphere (m).
+        radius_eq: 1737400.0,
+        radius_polar: 1737400.0,
+        // J2 from GRAIL.
+        j2: 2.033e-4,
+        // IAU 2015 mean rotation (no librations).
+        rotation: (
+            ra_deg: 269.9949,
+            dec_deg: 66.5392,
+            ra_rate_deg_per_century: 0.0031,
+            dec_rate_deg_per_century: 0.0130,
+            w0_deg: 38.3213,
+            w_rate_deg_per_day: 13.17635815,
+        ),
+        atmosphere: None,
+        anchor_zone: Some((enter: 6.0e7, exit: 7.0e7)),
+        relativistic: false,
+        solid: true,
+        // Terrain heights (m) relative to the reference sphere.
+        heightmap: Some("height.png"),
+        sea_level: None,
+    ),
+)

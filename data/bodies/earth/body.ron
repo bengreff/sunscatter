@@ -1,0 +1,32 @@
+// Earth. The `physical` section is read by the simulation (`sim::body::data`);
+// other sections (e.g. `visual`) belong to the game and are ignored by sim.
+// Angles are in degrees and rates in IAU units; sim converts them on load.
+(
+    physical: (
+        name: "Earth", // must match the ephemeris node name
+        // WGS84 ellipsoid (m).
+        radius_eq: 6378137.0,
+        radius_polar: 6356752.314245,
+        // EGM zonal harmonic J2, referenced to radius_eq.
+        j2: 1.08262668e-3,
+        // IAU 2015 rotation model (pole precession only; no nutation).
+        rotation: (
+            ra_deg: 0.0,
+            dec_deg: 90.0,
+            ra_rate_deg_per_century: -0.641,
+            dec_rate_deg_per_century: -0.557,
+            w0_deg: 190.147,
+            w_rate_deg_per_day: 360.9856235,
+        ),
+        // Exponential atmosphere (prototype model), heights above the ellipsoid.
+        atmosphere: Some((rho0: 1.225, scale_height: 7200.0, top: 150000.0)),
+        // Precision policy only: where Earth becomes / stops being the preferred anchor (m).
+        anchor_zone: Some((enter: 1.4e9, exit: 1.6e9)),
+        relativistic: false,
+        solid: true,
+        // Terrain heights (m) relative to sea level; see docs for the PNG contract.
+        heightmap: Some("height.png"),
+        // Oceans are solid at sea level (D037): surface = max(terrain, sea_level).
+        sea_level: Some(0.0),
+    ),
+)
