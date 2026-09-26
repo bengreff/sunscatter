@@ -184,6 +184,7 @@ pub fn draw_overlay(
     window: Query<&Window, With<PrimaryWindow>>,
     tracked: Res<Tracked>,
     mut station: ResMut<TrackingStation>,
+    orbits: Res<crate::trajectory::settings::OrbitSettings>,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
     let Some(v) = view(&cam) else { return Ok(()) };
@@ -206,7 +207,7 @@ pub fn draw_overlay(
         }
     }
     if map.in_map(ObjectId::Vessel(sim.active)) {
-        draw_apsides(&painter, &sim, &rig, &pred, &ui, &v, &map);
+        draw_apsides(&painter, &sim, &rig, &pred, &ui, &v, &map, &orbits);
     }
 
     let cursor = window.single().ok().and_then(Window::cursor_position);
@@ -245,6 +246,7 @@ pub fn draw_overlay(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn draw_apsides(
     painter: &egui::Painter,
     sim: &SimState,
@@ -253,9 +255,12 @@ fn draw_apsides(
     ui: &UiState,
     v: &View,
     map: &MapView,
+    orbits: &crate::trajectory::settings::OrbitSettings,
 ) {
     let Some(seg) = trajectory::active_segment(sim, pred) else { return };
     let Some((t0, t1)) = trajectory::future_span(seg, sim.clock) else { return };
+    // Only along the drawn line (D056), not the whole computed segment.
+    let t1 = t1.min(trajectory::vessel_line_end(&sim.world, seg, t0, orbits).0);
     let Some(primary) = camera::nearest_body(sim) else { return };
     let Some(plotter) = Plotter::new(sim, rig, ui.plot_frame) else { return };
     let radius = sim.world.source(primary).and_then(|s| s.physical.as_ref()).map_or(0.0, |p| p.radius_eq);
