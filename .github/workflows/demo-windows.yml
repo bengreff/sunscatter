@@ -2,7 +2,10 @@ name: Demo (Windows, software GPU)
 
 # Runs the scripted demo flight on a GPU-less Windows runner through WARP, the
 # D3D12 software rasterizer ("Microsoft Basic Render Driver"), and uploads the
-# screenshots and log. Manual and weekly only: it never blocks normal CI.
+# screenshots and log. Manual only: it never blocks normal CI.
+# Status (2026-09-26): WARP is selected and frames render, but screenshot
+# readbacks never complete and the device is lost after ~40 s, so this run fails.
+# Kept as a diagnostic; see the plan's B5 notes. Add a weekly schedule once green.
 # Bevy reads WGPU_BACKEND and WGPU_FORCE_FALLBACK_ADAPTER from the environment,
 # so no code change is needed to pick the software adapter.
 
@@ -13,8 +16,6 @@ on:
         description: "Enable the D3D12 debug layer (WGPU_VALIDATION) for diagnostics"
         type: boolean
         default: false
-  schedule:
-    - cron: "0 5 * * 1" # Mondays 05:00 UTC
 
 env:
   CARGO_TERM_COLOR: always

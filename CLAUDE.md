@@ -20,7 +20,7 @@ Real-scale 3D spaceflight, mission-design and logistics game in Rust. Being rebu
 - `cargo run -p sim --release --example bench_coast` — coast integration cost per step.
 - `cargo run -p ephem-tool --release -- sol` — regenerate the Solar System ephemeris (needs `data/external/de440s.bsp`; see the tool's docs). The golden tests fail if the shipped file and code disagree.
 - `cargo clippy -p sim -p ephem-tool -p asset-tool --all-targets -- -D warnings`, `cargo fmt --all`, `tools/check_file_sizes.sh`.
-- CI: a fast `sim` job (no Bevy) and a separate `game` job, on macOS and Windows. `Demo (Windows, software GPU)` runs the demo on WARP (manual/weekly; screenshots as an artifact).
+- CI: a fast `sim` job (no Bevy) and a separate `game` job, on macOS and Windows. `Demo (Windows, software GPU)` tries the demo on WARP (manual; not yet working, see plan B5).
 - Hooks (`.claude/settings.json`, scripts in `tools/hooks/`): `cargo check` of the owning crate after editing a `.rs` file, `cargo test -p sim` on stop. Failures are fed back (exit 2).
 
 ## Non-negotiable rules
