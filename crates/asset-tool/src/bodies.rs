@@ -1,4 +1,4 @@
-//! Earth and Moon: heightmaps, colour maps and (Earth) the water mask.
+//! Earth and Moon: heightmaps, colour maps, roughness and (Earth) the water mask.
 
 use std::path::{Path, PathBuf};
 
@@ -93,6 +93,8 @@ pub enum Map {
     Height,
     Color,
     Water,
+    /// Derived from the committed heightmap, after it is baked.
+    Roughness,
 }
 
 /// Command-line options for the body bakes.
@@ -123,6 +125,9 @@ pub fn earth(o: Opts) {
     if o.wants(Map::Color) {
         earth_color(o);
     }
+    if o.wants(Map::Roughness) {
+        crate::roughness::bake("earth");
+    }
 }
 
 pub fn moon(o: Opts) {
@@ -131,6 +136,9 @@ pub fn moon(o: Opts) {
     }
     if o.wants(Map::Color) {
         moon_color(o);
+    }
+    if o.wants(Map::Roughness) {
+        crate::roughness::bake("moon");
     }
 }
 
