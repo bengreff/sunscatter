@@ -441,7 +441,8 @@ pub fn run(
                 sim.warp = 0;
                 let (e1, e2) = camera::basis(up);
                 let away = -(to_sun - up * to_sun.dot(up));
-                rig.yaw = away.dot(e2).atan2(away.dot(e1));
+                // Turned ~20° so the Sun (and its flare) is beside the ship.
+                rig.yaw = away.dot(e2).atan2(away.dot(e1)) + 0.35;
                 rig.pitch = 0.05;
                 rig.distance = 40.0;
                 demo.shot_taken = true;
