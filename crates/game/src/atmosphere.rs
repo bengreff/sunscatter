@@ -223,7 +223,12 @@ pub fn update_sky_light(
                 commands.entity(cam).insert(g);
             }
         } else if !inside && has {
-            commands.entity(cam).remove::<(AtmosphereEnvironmentMapLight, GeneratedEnvironmentMapLight)>();
+            // Bevy also derives an `EnvironmentMapLight` (the filtered sky)
+            // and leaves it behind: it kept lighting everything, night sides
+            // included, after leaving the atmosphere.
+            commands
+                .entity(cam)
+                .remove::<(AtmosphereEnvironmentMapLight, GeneratedEnvironmentMapLight, EnvironmentMapLight)>();
             if let Some(g) = generated {
                 *stash = Some(g.clone());
             }

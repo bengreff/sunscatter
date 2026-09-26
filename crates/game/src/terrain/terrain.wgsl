@@ -246,7 +246,15 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     // Sunlight at this body's own distance, dimmed where another body
     // hides the star (D055: never the flux at the camera).
     let sun = terrain.light.w * eclipse(in.world_position.xyz);
-    var lit = out.color.rgb * sun;
+    // The sky light (Bevy's environment map) is the sky seen from the
+    // camera; a point where the Sun has set has no such sky. Fade all
+    // non-direct light out through twilight (Sun 6° below to 3° above the
+    // local horizon), so night sides stay dark (direct light is already
+    // zero there).
+    let up_here = normalize(in.world_position.xyz - terrain.center.xyz);
+    let sun_elev = dot(up_here, normalize(terrain.star.xyz - in.world_position.xyz));
+    let day = smoothstep(-0.105, 0.052, sun_elev);
+    var lit = out.color.rgb * sun * day;
     // Planetshine: a Lambert term from the reflecting body.
     if terrain.shine.w > 0.0 {
         let l = normalize(terrain.shine.xyz - in.world_position.xyz);

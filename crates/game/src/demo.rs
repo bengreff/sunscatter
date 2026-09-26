@@ -29,6 +29,8 @@ enum Step {
     Circularize,
     Orbit,
     Map,
+    /// Earth's night side and terminator from 20,000 km: must be dark.
+    EarthNight,
     MoonFar,
     MoonClose,
     /// The Moon's night side from Earth's direction, near new Moon on the
@@ -362,6 +364,15 @@ pub fn run(
             if !demo.shot_taken {
                 demo.shot_taken = true;
                 demo.capture("map");
+            } else {
+                view_sunlit(&mut rig, &sim, earth.node, 120f64.to_radians(), 2.6e7);
+                demo.next(Step::EarthNight);
+            }
+        }
+        Step::EarthNight => {
+            if !demo.shot_taken {
+                demo.shot_taken = true;
+                demo.capture("earth_night");
             } else {
                 if let Some(moon) = moon {
                     view_sunlit(&mut rig, &sim, moon, 40f64.to_radians(), 3.0 * 1_737_400.0);
