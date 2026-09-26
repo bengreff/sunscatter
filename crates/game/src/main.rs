@@ -11,6 +11,7 @@ mod camera;
 mod demo;
 mod hud;
 mod map;
+mod map_view;
 mod persist;
 mod relations;
 mod saves;
@@ -63,7 +64,7 @@ fn main() {
         .init_resource::<settings::GraphicsSettings>()
         .init_resource::<settings_ui::SettingsUi>()
         .init_resource::<bench::Bench>()
-        .init_resource::<map::MapMode>()
+        .init_resource::<map::MapView>()
         .init_resource::<saves::SaveUi>()
         .init_resource::<tracking::Tracked>()
         .init_resource::<tracking::TrackingStation>()
@@ -92,7 +93,7 @@ fn main() {
         )
         .add_systems(Update, (saves::keys, tracking::update).chain().after(state::read_controls).in_set(Stage::Input))
         .add_systems(Update, (state::advance, state::update_prediction).chain().in_set(Stage::Simulate))
-        .add_systems(Update, (camera::update, map::update_mode).chain().in_set(Stage::Camera))
+        .add_systems(Update, (camera::update, map::update, demo::check_map_view).chain().in_set(Stage::Camera))
         .add_systems(
             Update,
             (

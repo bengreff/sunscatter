@@ -1,8 +1,8 @@
 //! Vessel switching and the tracking station (D050).
 //!
-//! `[` / `]` cycle the active vessel. F7 opens the tracking station: a screen
-//! that is always in map mode (`MapMode::forced`), with the camera pulled out
-//! to show the Moon's orbit. It lists vessels (orbit about the nearest body,
+//! `[` / `]` cycle the active vessel. F7 opens the tracking station: the
+//! camera pulled out to show the Moon's orbit, where tracked vessels stay in
+//! map view whatever their size (`map_view::Object::pinned`). It lists vessels (orbit about the nearest body,
 //! phase) with Track, Focus, Switch to and Delete, and bodies with Focus.
 //!
 //! Vessels get stable ids here (a Vec parallel to `SimState::fleet`), so the
@@ -11,7 +11,7 @@
 
 use crate::camera::{self, CameraRig, Focus};
 use crate::hud::fmt_dist;
-use crate::map::{fmt_duration, MapMode};
+use crate::map::fmt_duration;
 use crate::state::{Prediction, SimState, WARP_LEVELS};
 use bevy::prelude::*;
 use bevy_egui::input::EguiWantsInput;
@@ -21,8 +21,9 @@ use sim::vessel::{Controls, Phase};
 use std::collections::HashSet;
 
 /// Camera distance when the tracking station opens (m): Earth with the
-/// whole of the Moon's orbit in view.
-const STATION_DISTANCE: f64 = 1.3e9;
+/// whole of the Moon's orbit in view, far enough out that the Moon is in map
+/// view (its sprite under 1 px, D054) so its orbit line shows.
+const STATION_DISTANCE: f64 = 2.5e9;
 
 /// Stable vessel ids (parallel to `SimState::fleet`) and the tracked set.
 #[derive(Resource)]
@@ -86,8 +87,8 @@ impl Tracked {
     }
 }
 
-/// The tracking station screen. Set `open`; the camera and map mode follow
-/// on the next input stage.
+/// The tracking station screen. Set `open`; the camera follows on the next
+/// input stage.
 #[derive(Resource, Default)]
 pub struct TrackingStation {
     pub open: bool,
@@ -139,7 +140,6 @@ pub fn update(
     mut pred: ResMut<Prediction>,
     mut tracked: ResMut<Tracked>,
     mut ts: ResMut<TrackingStation>,
-    mut map: ResMut<MapMode>,
 ) {
     tracked.sync(sim.fleet.len());
     if !egui.wants_any_keyboard_input() {
@@ -163,7 +163,6 @@ pub fn update(
     }
     if ts.open != ts.applied {
         ts.applied = ts.open;
-        map.forced = ts.open;
         if ts.open {
             ts.saved = Some((rig.focus, rig.yaw, rig.pitch, rig.distance));
             if let Some(earth) = sim.world.find("Earth").map(|s| s.node) {

@@ -33,6 +33,8 @@ pub struct Orbit {
     /// Gravitational parameter used (the body's; the object's mass is neglected).
     pub mu: f64,
     pub elements: Elements,
+    /// Current distance from the body's centre (m).
+    pub distance: f64,
 }
 
 impl Orbit {
@@ -40,13 +42,33 @@ impl Orbit {
     pub fn period(&self) -> Option<f64> {
         (self.elements.e < 1.0).then(|| self.elements.period(self.mu))
     }
+
+    /// Size of the orbit for display: the semi-major axis if bound, else
+    /// the current distance.
+    pub fn radius(&self) -> f64 {
+        if self.elements.e < 1.0 {
+            self.elements.a
+        } else {
+            self.distance
+        }
+    }
 }
 
 /// Osculating orbit of the state (`r`, `v` relative to `anchor`) about `body`.
 pub fn orbit_about(world: &World, t: Epoch, anchor: NodeId, r: DVec3, v: DVec3, body: NodeId) -> Option<Orbit> {
     let mu = world.source(body)?.gm;
     let k = world.snapshot(t).relative(body, anchor);
-    Some(Orbit { mu, elements: Elements::from_state(r - k.r, v - k.v, mu) })
+    let (r, v) = (r - k.r, v - k.v);
+    Some(Orbit { mu, elements: Elements::from_state(r, v, mu), distance: r.length() })
+}
+
+/// A body's osculating orbit about its display [`primary`] (two-body: the
+/// sum of both GMs), or `None` for a body with no primary.
+pub fn body_orbit(eph: &Ephemeris, t: Epoch, node: NodeId) -> Option<(NodeId, Orbit)> {
+    let p = primary(eph, node)?;
+    let k = eph.relative(node, p, t);
+    let mu = eph.node(node).gm + eph.node(p).gm;
+    Some((p, Orbit { mu, elements: Elements::from_state(k.r, k.v, mu), distance: k.r.length() }))
 }
 
 /// A vessel's osculating orbit about its nearest body.
@@ -98,6 +120,29 @@ mod tests {
         assert_eq!(primary(&w.eph, id("Earth")), Some(id("Sun")));
         assert_eq!(primary(&w.eph, id("Jupiter")), Some(id("Sun")));
         assert_eq!(primary(&w.eph, id("Sun")), None);
+    }
+
+    #[test]
+    fn body_orbits_about_their_primaries() {
+        let w = world();
+        let t = sim::sol::sol_epoch();
+        let id = |n: &str| w.eph.find(n).expect(n);
+        let (p, moon) = body_orbit(&w.eph, t, id("Moon")).expect("Moon orbit");
+        assert_eq!(p, id("Earth"));
+        assert!((moon.radius() - 3.844e8).abs() < 0.02 * 3.844e8, "{}", moon.radius());
+        let (p, earth) = body_orbit(&w.eph, t, id("Earth")).expect("Earth orbit");
+        assert_eq!(p, id("Sun"));
+        assert!((earth.radius() - 1.496e11).abs() < 0.02 * 1.496e11);
+        assert!(body_orbit(&w.eph, t, id("Sun")).is_none());
+    }
+
+    #[test]
+    fn orbit_radius_is_the_distance_when_unbound() {
+        let el = Elements { a: -1.0e7, e: 1.5, i: 0.0, raan: 0.0, argp: 0.0, mean_anomaly: 0.3 };
+        let o = Orbit { mu: 3.986e14, elements: el, distance: 2.0e7 };
+        assert_eq!(o.radius(), 2.0e7);
+        let bound = Orbit { elements: Elements { a: 7.0e6, e: 0.1, ..el }, ..o };
+        assert_eq!(bound.radius(), 7.0e6);
     }
 
     #[test]

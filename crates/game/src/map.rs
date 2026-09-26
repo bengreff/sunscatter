@@ -1,35 +1,43 @@
-//! Map mode: orbit lines, icons, Ap/Pe markers and hover. Currently one
-//! global switch (on when the active ship is under ~1 px); being replaced by
-//! the per-object rule of D054 (docs/features/map-view-lighting-controls.md).
+//! Map view, drawn: icons, body orbit lines, Ap/Pe markers and hover. Which
+//! objects get them is decided per object by the rule in [`map_view`]
+//! (D054); this module gathers each object's sizes and draws the result.
 
 use crate::camera::{self, CameraRig, MainCamera};
 use crate::hud::{fmt_dist, PlotFrame, UiState};
+use crate::map_view::{self, Object, ObjectId, Visibility};
 use crate::scene::BodyDefs;
 use crate::state::{Prediction, SimState};
+use crate::tracking::{Tracked, TrackingStation};
 use crate::trajectory::{self, Plotter};
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use bevy_egui::{egui, EguiContexts};
 use glam::DVec3;
-use sim::frame::NodeId;
 use sim::kepler::Elements;
 
-/// Nominal ship size for the pixel test (m).
-const SHIP_SIZE: f64 = 10.0;
-/// Enter map mode below this projected ship size (px); leave above `EXIT_PX`.
-const ENTER_PX: f64 = 1.0;
-const EXIT_PX: f64 = 2.0;
-/// Orbit lines smaller than this on screen (px) are not drawn; they fade in
-/// up to `ORBIT_FULL_PX`.
-const ORBIT_MIN_PX: f64 = 12.0;
-const ORBIT_FULL_PX: f64 = 60.0;
+/// A vessel's bounding radius for the map-view rule (m).
+pub const VESSEL_RADIUS: f64 = 10.0;
+/// Orbit lines fade in from the map-view threshold up to this size (px).
+const ORBIT_FADE_PX: f64 = 12.0;
 const ORBIT_POINTS: usize = 256;
 
+/// This frame's map-view classification of every body and vessel.
 #[derive(Resource, Default)]
-pub struct MapMode {
-    pub active: bool,
-    /// Forced on (the tracking station).
-    pub forced: bool,
+pub struct MapView {
+    objects: Vec<Object>,
+    vis: Vec<Visibility>,
+    /// Pixels per metre at the focus distance.
+    k: f64,
+}
+
+impl MapView {
+    pub fn get(&self, id: ObjectId) -> Visibility {
+        self.objects.iter().position(|o| o.id == id).map_or_else(Visibility::default, |i| self.vis[i])
+    }
+
+    pub fn in_map(&self, id: ObjectId) -> bool {
+        self.get(id).in_map
+    }
 }
 
 /// View parameters for projecting camera-relative points to the screen.
@@ -38,6 +46,9 @@ pub struct View {
     gt: GlobalTransform,
     /// Pixels per radian at the centre of the view.
     focal: f64,
+    /// Viewport height (logical px) and vertical field of view (rad).
+    height: f64,
+    fov: f64,
 }
 
 impl View {
@@ -64,82 +75,82 @@ pub fn view(cam: &Query<(&Camera, &Transform, &Projection), With<MainCamera>>) -
         Projection::Perspective(p) => f64::from(p.fov),
         _ => 0.8,
     };
-    Some(View { cam: c.clone(), gt: GlobalTransform::from(*t), focal: f64::from(size.y) * 0.5 / (fov * 0.5).tan() })
+    let height = f64::from(size.y);
+    Some(View { cam: c.clone(), gt: GlobalTransform::from(*t), focal: height * 0.5 / (fov * 0.5).tan(), height, fov })
 }
 
-pub fn update_mode(
+/// Gathers every object's sizes and classifies it (after the camera moves).
+pub fn update(
     sim: Res<SimState>,
     rig: Res<CameraRig>,
+    tracked: Res<Tracked>,
+    station: Res<TrackingStation>,
     cam: Query<(&Camera, &Transform, &Projection), With<MainCamera>>,
-    mut map: ResMut<MapMode>,
+    mut map: ResMut<MapView>,
 ) {
     let Some(v) = view(&cam) else { return };
-    let (anchor, r, _) = sim.ship().state(&sim.world);
-    let ship = sim.world.snapshot(sim.clock).relative_r(anchor, rig.anchor) + r - rig.cam_pos;
-    let px = v.radius_px(ship, SHIP_SIZE);
-    map.active = map.forced || if map.active { px < EXIT_PX } else { px < ENTER_PX };
+    let (world, eph) = (&sim.world, &sim.world.eph);
+    let snap = world.snapshot(sim.clock);
+    let object = |id, c: DVec3, radius: f64, orbit_radius, mass| Object {
+        id,
+        radius,
+        orbit_radius,
+        mass,
+        screen: v.project(c),
+        depth: c.length(),
+        disc_px: v.radius_px(c, radius),
+        pinned: false,
+    };
+    let mut objects = Vec::new();
+    for node in eph.bodies() {
+        let c = snap.relative_r(node, rig.anchor) - rig.cam_pos;
+        let radius = world.source(node).and_then(|s| s.physical.as_ref()).map_or(0.0, |p| p.radius_eq);
+        let orbit = crate::relations::body_orbit(eph, sim.clock, node).map(|(_, o)| o.radius());
+        objects.push(object(ObjectId::Body(node), c, radius, orbit, eph.node(node).gm));
+    }
+    for (i, vessel) in sim.fleet.iter().enumerate() {
+        let (anchor, r, _) = vessel.state(world);
+        let c = snap.relative_r(anchor, rig.anchor) + r - rig.cam_pos;
+        let orbit = crate::relations::vessel_orbit(world, sim.clock, vessel).map(|o| o.radius());
+        let mut o = object(ObjectId::Vessel(i), c, VESSEL_RADIUS, orbit, 0.0);
+        // The tracking station never hides a tracked vessel.
+        o.pinned = station.open && (i == sim.active || tracked.is_tracked(i));
+        objects.push(o);
+    }
+    let k = map_view::scale(v.height, v.fov, rig.distance);
+    let vis = map_view::classify(&objects, k, |id| map.in_map(id));
+    *map = MapView { objects, vis, k };
 }
 
-/// The smallest anchor zone containing the camera (the body whose system
-/// the player is looking at), if any.
-fn context_body(sim: &SimState, rig: &CameraRig) -> Option<NodeId> {
-    let snap = sim.world.snapshot(sim.clock);
-    sim.world.anchor_order.iter().map(|&i| &sim.world.sources[i]).find_map(|s| {
-        let zone = s.anchor_zone?;
-        let d = (rig.cam_pos - snap.relative_r(s.node, rig.anchor)).length();
-        (d < zone.enter).then_some(s.node)
-    })
-}
-
-/// Orbit lines of every body about its primary, over one period ahead
-/// (from the ephemeris where it covers the period, else the osculating conic).
+/// Orbit lines of the bodies in map view, about their primaries, over one
+/// period ahead (from the ephemeris where it covers the period, else the
+/// osculating conic).
 pub fn draw_body_orbits(
     sim: Res<SimState>,
     rig: Res<CameraRig>,
     ui: Res<UiState>,
-    map: Res<MapMode>,
+    map: Res<MapView>,
     defs: Res<BodyDefs>,
-    cam: Query<(&Camera, &Transform, &Projection), With<MainCamera>>,
     mut gizmos: Gizmos,
 ) {
-    let Some(v) = view(&cam) else { return };
-    if !map.active {
-        return;
-    }
     let eph = &sim.world.eph;
     let snap = sim.world.snapshot(sim.clock);
-    let context = context_body(&sim, &rig);
     for node in eph.bodies() {
-        let Some(p) = crate::relations::primary(eph, node) else { continue };
-        // Like KSP: inside a body's zone, show its moons' orbits (and, near
-        // a moon, the moon's own orbit); outside all zones, the planets'.
-        let has_zone = |n: NodeId| sim.world.source(n).is_some_and(|s| s.anchor_zone.is_some());
-        let relevant = match context {
-            Some(c) => p == c || (node == c && has_zone(p)),
-            None => !has_zone(p),
-        };
-        if !relevant {
+        if !map.in_map(ObjectId::Body(node)) {
             continue;
         }
+        let Some((p, orbit)) = crate::relations::body_orbit(eph, sim.clock, node) else { continue };
         // The rotating frame is Earth–Moon: skip orbits about Earth there.
         if ui.plot_frame == PlotFrame::EarthMoonRotating && eph.node(p).name == "Earth" {
             continue;
         }
-        let k = snap.relative(node, p);
-        let mu = eph.node(node).gm + eph.node(p).gm;
-        let el = Elements::from_state(k.r, k.v, mu);
-        if el.e >= 1.0 {
-            continue;
-        }
-        let centre = snap.relative_r(p, rig.anchor) - rig.cam_pos;
-        let size_px = v.radius_px(centre, el.a);
-        if size_px < ORBIT_MIN_PX {
-            continue;
-        }
-        let alpha = ((size_px - ORBIT_MIN_PX) / (ORBIT_FULL_PX - ORBIT_MIN_PX)).clamp(0.0, 1.0) as f32;
+        let Some(period) = orbit.period() else { continue };
+        let (el, mu) = (orbit.elements, orbit.mu);
+        let fade = (map.k * el.a - map_view::ORBIT_ENTER_PX) / (ORBIT_FADE_PX - map_view::ORBIT_ENTER_PX);
+        let alpha = fade.clamp(0.15, 1.0) as f32;
         let [r, g, b] = defs.get(node).map_or([0.7, 0.7, 0.7], |d| d.icon_color);
         let color = Color::srgba(r, g, b, 0.55 * alpha);
-        let period = el.period(mu);
+        let centre = snap.relative_r(p, rig.anchor) - rig.cam_pos;
         let use_eph = sim.clock.add_seconds(period) < eph.end;
         let points = (0..=ORBIT_POINTS).map(|i| {
             let f = i as f64 / ORBIT_POINTS as f64;
@@ -154,19 +165,12 @@ pub fn draw_body_orbits(
     }
 }
 
-/// Something that can be hovered: a name, a screen position and radius.
-struct Target {
-    name: String,
-    pos: Vec2,
-    radius: f32,
-}
-
 fn egui_color(c: [f32; 3], a: f32) -> egui::Color32 {
     let to = |x: f32| (x.clamp(0.0, 1.0) * 255.0) as u8;
     egui::Color32::from_rgba_unmultiplied(to(c[0]), to(c[1]), to(c[2]), to(a))
 }
 
-/// Icons, apsis markers and hover highlights, painted behind the windows.
+/// Icons, apsis markers and the hover ring, painted behind the windows.
 #[allow(clippy::too_many_arguments)]
 pub fn draw_overlay(
     mut contexts: EguiContexts,
@@ -174,72 +178,68 @@ pub fn draw_overlay(
     rig: Res<CameraRig>,
     pred: Res<Prediction>,
     ui: Res<UiState>,
-    map: Res<MapMode>,
+    map: Res<MapView>,
     defs: Res<BodyDefs>,
     cam: Query<(&Camera, &Transform, &Projection), With<MainCamera>>,
     window: Query<&Window, With<PrimaryWindow>>,
-    tracked: Res<crate::tracking::Tracked>,
+    tracked: Res<Tracked>,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
     let Some(v) = view(&cam) else { return Ok(()) };
     let painter = ctx.layer_painter(egui::LayerId::background());
-    let snap = sim.world.snapshot(sim.clock);
-    let mut targets = Vec::new();
     let pt = |p: Vec2| egui::pos2(p.x, p.y);
 
-    for node in sim.world.eph.bodies() {
-        let c = snap.relative_r(node, rig.anchor) - rig.cam_pos;
-        let Some(s) = v.project(c) else { continue };
-        let radius = sim.world.source(node).and_then(|s| s.physical.as_ref()).map_or(0.0, |p| p.radius_eq);
-        let rpx = v.radius_px(c, radius) as f32;
-        let color = defs.get(node).map_or([0.7, 0.7, 0.7], |d| d.icon_color);
-        if map.active && rpx < 1.0 {
-            painter.circle_filled(pt(s), 4.0, egui_color(color, 1.0));
+    for (o, vis) in map.objects.iter().zip(&map.vis) {
+        let Some(s) = o.screen.filter(|_| vis.icon) else { continue };
+        match o.id {
+            ObjectId::Body(node) => {
+                let color = defs.get(node).map_or([0.7, 0.7, 0.7], |d| d.icon_color);
+                painter.circle_filled(pt(s), 4.0, egui_color(color, 1.0));
+            }
+            ObjectId::Vessel(i) => {
+                let (size, color) = if i == sim.active { (6.0, [1.0, 0.85, 0.2]) } else { (4.0, [0.7, 0.75, 0.8]) };
+                let d = |x: f32, y: f32| egui::pos2(s.x + x * size, s.y + y * size);
+                let diamond = vec![d(0.0, -1.0), d(1.0, 0.0), d(0.0, 1.0), d(-1.0, 0.0)];
+                painter.add(egui::Shape::convex_polygon(diamond, egui_color(color, 1.0), egui::Stroke::NONE));
+            }
         }
-        targets.push(Target { name: sim.world.eph.node(node).name.clone(), pos: s, radius: rpx.max(6.0) });
     }
-    for (i, vessel) in sim.fleet.iter().enumerate() {
-        let (anchor, r, _) = vessel.state(&sim.world);
-        let c = snap.relative_r(anchor, rig.anchor) + r - rig.cam_pos;
-        let Some(s) = v.project(c) else { continue };
-        let active = i == sim.active;
-        if map.active {
-            let (size, color) = if active { (6.0, [1.0, 0.85, 0.2]) } else { (4.0, [0.7, 0.75, 0.8]) };
-            let d = |x: f32, y: f32| egui::pos2(s.x + x * size, s.y + y * size);
-            let diamond = vec![d(0.0, -1.0), d(1.0, 0.0), d(0.0, 1.0), d(-1.0, 0.0)];
-            painter.add(egui::Shape::convex_polygon(diamond, egui_color(color, 1.0), egui::Stroke::NONE));
-        }
-        let name = if active { format!("{} (active)", tracked.name(i)) } else { tracked.name(i) };
-        let rpx = v.radius_px(c, SHIP_SIZE) as f32;
-        targets.push(Target { name, pos: s, radius: rpx.max(6.0) });
-    }
-    if map.active {
-        draw_apsides(&painter, &sim, &rig, &pred, &ui, &v);
+    if map.in_map(ObjectId::Vessel(sim.active)) {
+        draw_apsides(&painter, &sim, &rig, &pred, &ui, &v, &map);
     }
 
-    // Hover: the nearest target under the cursor (smallest first on ties).
     let cursor = window.single().ok().and_then(Window::cursor_position);
-    if let Some(cursor) = cursor.filter(|_| !ctx.is_pointer_over_egui()) {
-        let hit = targets
-            .iter()
-            .filter(|t| t.pos.distance(cursor) <= t.radius + 6.0)
-            .min_by(|a, b| a.radius.total_cmp(&b.radius));
-        if let Some(t) = hit {
-            let ring = egui::Stroke::new(1.5, egui::Color32::from_rgb(120, 220, 255));
-            painter.circle_stroke(pt(t.pos), t.radius + 4.0, ring);
-            painter.text(
-                egui::pos2(t.pos.x + t.radius + 8.0, t.pos.y),
-                egui::Align2::LEFT_CENTER,
-                &t.name,
-                egui::FontId::proportional(14.0),
-                egui::Color32::WHITE,
-            );
-        }
+    let hovered =
+        cursor.filter(|_| !ctx.is_pointer_over_egui()).and_then(|c| map_view::hover(&map.objects, &map.vis, c));
+    if let Some(o) = hovered.map(|i| &map.objects[i]) {
+        let Some(s) = o.screen else { return Ok(()) };
+        let name = match o.id {
+            ObjectId::Body(node) => sim.world.eph.node(node).name.clone(),
+            ObjectId::Vessel(i) if i == sim.active => format!("{} (active)", tracked.name(i)),
+            ObjectId::Vessel(i) => tracked.name(i),
+        };
+        let ring = egui::Stroke::new(1.5, egui::Color32::from_rgb(120, 220, 255));
+        painter.circle_stroke(pt(s), 10.0, ring);
+        painter.text(
+            egui::pos2(s.x + 14.0, s.y),
+            egui::Align2::LEFT_CENTER,
+            name,
+            egui::FontId::proportional(14.0),
+            egui::Color32::WHITE,
+        );
     }
     Ok(())
 }
 
-fn draw_apsides(painter: &egui::Painter, sim: &SimState, rig: &CameraRig, pred: &Prediction, ui: &UiState, v: &View) {
+fn draw_apsides(
+    painter: &egui::Painter,
+    sim: &SimState,
+    rig: &CameraRig,
+    pred: &Prediction,
+    ui: &UiState,
+    v: &View,
+    map: &MapView,
+) {
     let Some(seg) = trajectory::active_segment(sim, pred) else { return };
     let Some((t0, t1)) = trajectory::future_span(seg, sim.clock) else { return };
     let Some(primary) = camera::nearest_body(sim) else { return };
@@ -254,7 +254,8 @@ fn draw_apsides(painter: &egui::Painter, sim: &SimState, rig: &CameraRig, pred: 
             continue;
         }
         let Some((anchor, r, _)) = seg.eval(a.t) else { continue };
-        let Some(s) = v.project(plotter.plot(anchor, r, seg.t0.add_seconds(a.t))) else { continue };
+        let c = plotter.plot(anchor, r, seg.t0.add_seconds(a.t));
+        let Some(s) = v.project(c).filter(|&s| !map_view::occluded(&map.objects, s, c.length())) else { continue };
         let color =
             if a.is_apo { egui::Color32::from_rgb(120, 200, 255) } else { egui::Color32::from_rgb(255, 170, 90) };
         painter.circle_filled(egui::pos2(s.x, s.y), 4.0, color);

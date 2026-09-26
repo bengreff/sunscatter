@@ -40,6 +40,32 @@ enum Step {
     Tracking,
 }
 
+/// Checks, in code, what the map-view rule (D054) must show at each view,
+/// and panics (failing the run) if it doesn't.
+pub fn check_map_view(
+    demo: Option<Res<Demo>>,
+    sim: Res<SimState>,
+    map: Res<crate::map::MapView>,
+    station: Res<crate::tracking::TrackingStation>,
+) {
+    use crate::map_view::ObjectId;
+    let Some(demo) = demo else { return };
+    let ship = map.in_map(ObjectId::Vessel(sim.active));
+    let body = |name: &str| sim.world.find(name).map(|s| map.in_map(ObjectId::Body(s.node)));
+    match demo.step {
+        Step::Pad => assert!(!ship, "demo Pad: the ship must not be in map view"),
+        Step::Map if demo.shot_taken => {
+            assert!(ship, "demo Map: the ship must be in map view");
+            assert_eq!(body("Earth"), Some(false), "demo Map: Earth is drawn at full size");
+        }
+        Step::Tracking if station.open && demo.timer > 1.0 => {
+            assert_eq!(body("Moon"), Some(true), "demo tracking station: the Moon's orbit must show");
+            assert!(ship, "demo tracking station: the active vessel is pinned");
+        }
+        _ => {}
+    }
+}
+
 /// Capturing one view in every tier.
 struct Capture {
     view: &'static str,

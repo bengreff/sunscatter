@@ -4,7 +4,8 @@
 
 use crate::camera::CameraRig;
 use crate::hud::{PlotFrame, UiState};
-use crate::map::MapMode;
+use crate::map::MapView;
+use crate::map_view::ObjectId;
 use crate::state::{Prediction, SimState};
 use crate::tracking::Tracked;
 use bevy::prelude::*;
@@ -114,7 +115,7 @@ pub fn apsides(world: &World, seg: &Segment, primary: NodeId, t0: f64, t1: f64, 
 }
 
 /// Draws the future trajectories of the active vessel and of tracked vessels
-/// (map mode only), resampled at
+/// that are in map view, resampled at
 /// uniform times with the segment's own interpolation, so the line starts
 /// exactly at the ship and stays smooth.
 pub fn draw(
@@ -122,17 +123,14 @@ pub fn draw(
     rig: Res<CameraRig>,
     pred: Res<Prediction>,
     ui: Res<UiState>,
-    map: Res<MapMode>,
+    map: Res<MapView>,
     tracked: Res<Tracked>,
     mut gizmos: Gizmos,
 ) {
-    if !map.active {
-        return;
-    }
     let Some(plotter) = Plotter::new(&sim, &rig, ui.plot_frame) else { return };
     for (i, vessel) in sim.fleet.iter().enumerate() {
         let active = i == sim.active;
-        if !active && !tracked.is_tracked(i) {
+        if (!active && !tracked.is_tracked(i)) || !map.in_map(ObjectId::Vessel(i)) {
             continue;
         }
         let seg = if active { active_segment(&sim, &pred) } else { vessel.segment() };

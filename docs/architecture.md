@@ -23,11 +23,12 @@ A short map to search before building anything: who owns what, the frame order, 
 | Heightmap sampling | `sim::terrain` | rendering samples through it too |
 | Vessel motion, phases, segments | `sim::vessel` | the stored segment is the truth (rule 4) |
 | Saves | `sim::save` (format), `game::saves` (UI, files) | |
-| Nearest body, display primary, osculating orbit | `game::relations` | display only, never physics |
-| Map view: what is visible/hoverable, per object | `game::map` (to become `game::map_view`, D054) | pure function + table tests |
+| Nearest body, display primary, osculating orbit (vessels and bodies), orbit size | `game::relations` | display only, never physics |
+| Map view: what is visible/hoverable, per object | `game::map_view` (rule, D054); `game::map` gathers sizes and draws | pure functions + table tests |
 | Orbit-line length (dominance, revolutions) | `game::trajectory` (to be written, D056) | display only |
 | Lighting: flux per object, exposure | `game::sky`, `game::atmosphere` (to be reworked, D055) | |
-| Camera pose and limits | `game::camera` | |
+| Camera pose and limits, zoom | `game::camera` | |
+| Fps readout (0.5 s windows) | `game::hud::FpsMeter` | |
 | Terrain meshes and LOD | `game::terrain` | heights via `sim` |
 | Graphics tiers and toggles | `game::settings`; UI in `game::settings_ui` | |
 | Where files live | `game::persist` | `SUNSCATTER_HOME` override |
@@ -37,7 +38,7 @@ A short map to search before building anything: who owns what, the frame order, 
 
 1. **Input:** controls, settings and benchmark, demo script, camera input, picking.
 2. **Simulate:** advance the clock and every vessel; background predictions.
-3. **Camera:** the camera pose from the current clock; map state.
+3. **Camera:** the camera pose from the current clock; the map-view classification of every object.
 4. **Scene:** bodies, atmosphere, terrain, stars, lights and trajectories, all placed camera-relative from f64 state at the **current clock**.
 5. **UI** (`EguiPrimaryContextPass`): flare, map overlay, HUD, windows.
 
@@ -52,7 +53,7 @@ Everything drawn is derived from the current clock, never from values cached in 
 | Accuracy vs DE440 | `sim` | Earth, Mars and Moon residuals |
 | Invariance | `sim` | anchor choice; chunked = single pass; save/load |
 | Scenarios | `crates/sim/tests/` | pad → orbit → parachute; landing on a mountain versus the sea |
-| Game rules | `game`, pure functions | `relations`, persistence, saves, tracking ids; map-view table (D054) |
+| Game rules | `game`, pure functions | `relations`, persistence, saves, tracking ids, map-view table (D054), zoom, fps |
 | End to end, visual | the demo (`SUNSCATTER_DEMO`) | every tier at seven views, benchmark tables |
 
 Game rules (visibility, hover, camera limits, lighting) are written as pure functions with table tests, and Bevy systems stay thin wrappers around them.
