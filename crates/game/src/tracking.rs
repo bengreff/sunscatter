@@ -50,6 +50,12 @@ impl Tracked {
         }
     }
 
+    /// Forgets every id (after loading a save); all vessels are tracked.
+    pub fn reset(&mut self, fleet_len: usize) {
+        *self = Tracked::default();
+        self.sync(fleet_len);
+    }
+
     pub fn id(&self, i: usize) -> Option<u64> {
         self.ids.get(i).copied()
     }
@@ -353,6 +359,9 @@ mod tests {
         assert!(t.is_tracked(0) && !t.is_tracked(1));
         t.sync(3);
         assert_eq!(t.id(2), Some(4), "new vessels never reuse an id");
+        t.reset(2);
+        assert_eq!((t.id(0), t.id(1)), (Some(1), Some(2)));
+        assert!(t.is_tracked(1));
     }
 
     #[test]

@@ -107,9 +107,19 @@ impl SimState {
 }
 
 /// Keyboard → controls, warp, and meta actions.
-pub fn read_controls(keys: Res<ButtonInput<KeyCode>>, time: Res<Time>, mut sim: ResMut<SimState>) {
+pub fn read_controls(
+    keys: Res<ButtonInput<KeyCode>>,
+    time: Res<Time>,
+    egui: Res<bevy_egui::input::EguiWantsInput>,
+    mut sim: ResMut<SimState>,
+) {
     let dt = time.delta_secs_f64();
     let c = &mut sim.controls;
+    // Typing in a text field (e.g. a save name) does not fly the ship.
+    if egui.wants_any_keyboard_input() {
+        c.rotate = DVec3::ZERO;
+        return;
+    }
     if keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight) {
         c.throttle = (c.throttle + 0.6 * dt).min(1.0);
     }

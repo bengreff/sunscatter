@@ -168,6 +168,7 @@ pub fn draw(
                 "F  focus nearest body   `  focus ship   double-click body  menu",
                 "Tab  plotting frame     F2  spawn 10 test ships",
                 "[ / ]  previous / next vessel   F7  tracking station",
+                "F5  quicksave   F9  quickload   F6  saves   F3  graphics",
             ] {
                 ui_.monospace(line);
             }
