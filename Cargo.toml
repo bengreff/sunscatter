@@ -21,6 +21,8 @@ unsafe_code = "forbid"
 # Deterministic simulation: never let a fused multiply-add sneak in via clippy suggestions.
 suboptimal_flops = "allow"
 too_many_lines = "warn"
+# Index loops are clearer in numeric kernels (tableaux, per-axis math).
+needless_range_loop = "allow"
 
 # Bevy is slow unoptimized; optimize dependencies even in dev builds.
 [profile.dev.package."*"]
