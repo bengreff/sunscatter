@@ -31,8 +31,8 @@ jobs:
         shell: bash
         run: tools/check_file_sizes.sh
       - name: Clippy (workspace)
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
       - name: Tests (sim)
-        run: cargo test -p sim
+        run: cargo test -p sim --locked
       - name: Build game
-        run: cargo build -p game
+        run: cargo build -p game --locked
