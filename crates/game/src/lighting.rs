@@ -159,6 +159,21 @@ pub fn body_light(i: usize, bodies: &[Sphere], star: DVec3, lm: f64) -> BodyLigh
     BodyLight { sun_scale, occluder, shine }
 }
 
+/// Light at a small object (a ship) at `at`: the fraction of the star's
+/// disc visible past the bodies, and the brightest planetshine (lux).
+pub fn object_light(at: DVec3, star: DVec3, star_r: f64, lm: f64, bodies: &[Sphere]) -> (f64, f64) {
+    let occluders: Vec<(DVec3, f64)> = bodies.iter().map(|b| (b.centre, b.radius)).collect();
+    let visible = eclipse_factor(at, star, star_r, &occluders);
+    let shine = bodies
+        .iter()
+        .map(|b| {
+            let e = flux(lm, (star - b.centre).length());
+            planetshine(at, b.centre, b.radius, b.albedo, e, (star - b.centre).normalize())
+        })
+        .fold(0.0, f64::max);
+    (visible, shine)
+}
+
 /// Fills each terrain body's lighting uniforms from [`body_light`].
 pub fn update_terrain(
     sim: Res<SimState>,
@@ -288,6 +303,22 @@ mod tests {
         // Earthshine on the Moon (7 lux vs ~128,000 lux sunlight) is within reach.
         let earthshine = (7.0f32 / 128_000.0).log2();
         assert!(earthshine > -MAX_BRIGHTEN_STOPS, "{earthshine}");
+    }
+
+    #[test]
+    fn a_ship_in_earths_shadow_is_dark_but_sees_moonlight() {
+        let sun = DVec3::new(-AU, 0.0, 0.0);
+        let lm = luminous_power(3.828e26, 93.0);
+        let earth = Sphere { centre: DVec3::ZERO, radius: EARTH_R, albedo: 0.3 };
+        let moon = Sphere { centre: DVec3::new(3.844e8, 0.0, 0.0), radius: 1.737e6, albedo: 0.12 };
+        let night = DVec3::new(6.778e6, 0.0, 0.0);
+        let (visible, shine) = object_light(night, sun, SUN_R, lm, &[earth, moon]);
+        assert_eq!(visible, 0.0);
+        assert!(shine > 0.05, "full-Moon light on the night side: {shine}");
+        let day = DVec3::new(-6.778e6, 0.0, 0.0);
+        let (visible, shine) = object_light(day, sun, SUN_R, lm, &[earth, moon]);
+        assert_eq!(visible, 1.0);
+        assert!(shine > 1000.0, "Earthshine from the lit Earth below: {shine}");
     }
 
     #[test]

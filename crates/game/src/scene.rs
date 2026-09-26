@@ -28,8 +28,6 @@ pub struct SunLight;
 #[derive(Resource)]
 pub struct Assets3d {
     ship_mesh: Handle<Mesh>,
-    ship_mat: Handle<StandardMaterial>,
-    active_mat: Handle<StandardMaterial>,
 }
 
 pub fn setup(
@@ -88,11 +86,7 @@ pub fn setup(
     commands.spawn((SunLight, DirectionalLight { illuminance: 128_000.0, ..default() }, cascades, Transform::IDENTITY));
     commands.insert_resource(GlobalAmbientLight { brightness: 0.0, ..default() });
     commands.insert_resource(defs);
-    commands.insert_resource(Assets3d {
-        ship_mesh: meshes.add(Cuboid::new(3.0, 3.0, 10.0)),
-        ship_mat: materials.add(StandardMaterial { base_color: Color::srgb(0.8, 0.8, 0.82), ..default() }),
-        active_mat: materials.add(StandardMaterial { base_color: Color::srgb(0.95, 0.85, 0.6), ..default() }),
-    });
+    commands.insert_resource(Assets3d { ship_mesh: meshes.add(Cuboid::new(3.0, 3.0, 10.0)) });
 }
 
 /// Visual definitions of the bodies that have one, and which body lights
@@ -149,16 +143,36 @@ pub fn update_bodies(
     }
 }
 
+/// Ship base colours (sRGB) for other vessels and the active one.
+const SHIP_COLOR: [f32; 3] = [0.8, 0.8, 0.82];
+const ACTIVE_COLOR: [f32; 3] = [0.95, 0.85, 0.6];
+
+#[allow(clippy::too_many_arguments)]
 pub fn update_ships(
     mut commands: Commands,
     sim: Res<SimState>,
     rig: Res<CameraRig>,
     assets: Res<Assets3d>,
-    mut ships: Query<(Entity, &ShipVisual, &mut Transform, &mut MeshMaterial3d<StandardMaterial>)>,
+    defs: Res<BodyDefs>,
+    settings: Res<crate::settings::GraphicsSettings>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut ships: Query<(Entity, &ShipVisual, &mut Transform, &MeshMaterial3d<StandardMaterial>)>,
 ) {
+    use crate::lighting::{object_light, Sphere};
     let snap = sim.world.snapshot(sim.clock);
+    let rel = |n: NodeId| snap.relative_r(n, rig.anchor) - rig.cam_pos;
+    let star = defs.light_source.map(|(n, lm)| (rel(n), physical(&sim.world, n).map_or(0.0, |p| p.radius_eq), lm));
+    let bodies: Vec<Sphere> = sim
+        .world
+        .surfaces()
+        .filter_map(|s| {
+            let p = s.physical.as_ref()?;
+            let albedo = defs.get(s.node).map_or(0.3, |d| f64::from(d.albedo));
+            Some(Sphere { centre: rel(s.node), radius: p.radius_eq, albedo })
+        })
+        .collect();
     let mut seen = vec![false; sim.fleet.len()];
-    for (entity, ship, mut t, mut mat) in &mut ships {
+    for (entity, ship, mut t, mat) in &mut ships {
         let Some(vessel) = sim.fleet.get(ship.0) else {
             commands.entity(entity).despawn();
             continue;
@@ -167,13 +181,38 @@ pub fn update_ships(
         let (anchor, r, _) = vessel.state_at(&sim.world, sim.clock);
         let pos = snap.relative(anchor, rig.anchor).r + r - rig.cam_pos;
         *t = Transform { translation: pos.as_vec3(), rotation: vessel.attitude.q.as_quat(), scale: Vec3::ONE };
-        mat.0 = if ship.0 == sim.active { assets.active_mat.clone() } else { assets.ship_mat.clone() };
+        // Per-ship light (D055): the shared sunlight dimmed where a body
+        // hides the Sun, plus planetshine as a diffuse glow where it does
+        // (in sunlight the sky light and sunlight already dominate, and a
+        // uniform glow would light every face).
+        let (visible, shine) = star.map_or((1.0, 0.0), |(c, radius, lm)| object_light(pos, c, radius, lm, &bodies));
+        let shine = if settings.earthshine { shine * (1.0 - visible) } else { 0.0 };
+        let [r0, g0, b0] = if ship.0 == sim.active { ACTIVE_COLOR } else { SHIP_COLOR };
+        let LinearRgba { red: r0, green: g0, blue: b0, .. } = Color::srgb(r0, g0, b0).to_linear();
+        let k = visible as f32;
+        let glow = (shine / std::f64::consts::PI) as f32;
+        if let Some(m) = materials.get(&mat.0) {
+            let want_base = LinearRgba::rgb(r0 * k, g0 * k, b0 * k);
+            let want_glow = LinearRgba::rgb(r0 * glow, g0 * glow, b0 * glow);
+            let base = m.base_color.to_linear();
+            let close =
+                |a: LinearRgba, b: LinearRgba| (a.red - b.red).abs() + (a.green - b.green).abs() < 1e-3 * (1.0 + b.red);
+            if !close(base, want_base) || !close(m.emissive, want_glow) {
+                if let Some(mut m) = materials.get_mut(&mat.0) {
+                    m.base_color = want_base.into();
+                    m.emissive = want_glow;
+                }
+            }
+        }
     }
     for (i, _) in seen.iter().enumerate().filter(|(_, s)| !**s) {
+        // Each ship gets its own material: its light depends on where it is.
+        let [r0, g0, b0] = SHIP_COLOR;
+        let material = materials.add(StandardMaterial { base_color: Color::srgb(r0, g0, b0), ..default() });
         commands.spawn((
             ShipVisual(i),
             Mesh3d(assets.ship_mesh.clone()),
-            MeshMaterial3d(assets.ship_mat.clone()),
+            MeshMaterial3d(material),
             Transform::IDENTITY,
         ));
     }
