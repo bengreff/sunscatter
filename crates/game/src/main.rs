@@ -12,6 +12,7 @@ mod demo;
 mod hud;
 mod map;
 mod map_view;
+mod navball;
 mod persist;
 mod relations;
 mod saves;
@@ -73,6 +74,7 @@ fn main() {
         .init_resource::<tracking::TrackingStation>()
         // After the settings defaults: replaces them with the saved settings.
         .add_plugins(persist::PersistPlugin)
+        .add_plugins(navball::NavballPlugin)
         .configure_sets(Update, (Stage::Input, Stage::Simulate, Stage::Camera, Stage::Scene).chain())
         .add_systems(
             Startup,
