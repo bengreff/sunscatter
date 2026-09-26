@@ -31,6 +31,12 @@ pub struct SaveUi {
 }
 
 impl SaveUi {
+    /// Opens the save list (re-read from disk).
+    pub fn show_list(&mut self) {
+        self.open = true;
+        self.stale = true;
+    }
+
     fn notify(&mut self, now: f64, text: String, error: bool) {
         if error {
             warn!("{text}");
@@ -92,17 +98,22 @@ pub fn load(sim: &mut SimState, path: &Path) -> Result<(), SaveError> {
     if save.vessels.is_empty() {
         return Err(SaveError::Format("the save has no vessels".into()));
     }
+    restore(sim, save);
+    Ok(())
+}
+
+/// Puts a (checked, non-empty) save into `sim`, warp back to 1x.
+pub fn restore(sim: &mut SimState, save: SaveGame) {
     sim.fleet = save.vessels;
     sim.active = save.active;
     sim.clock = save.clock;
     sim.controls = save.controls;
     sim.warp = 0;
     sim.compute_limited = false;
-    Ok(())
 }
 
 /// Game state that follows a load: prediction, ids and camera focus.
-fn after_load(sim: &SimState, pred: &mut Prediction, tracked: &mut Tracked, rig: &mut CameraRig) {
+pub fn after_load(sim: &SimState, pred: &mut Prediction, tracked: &mut Tracked, rig: &mut CameraRig) {
     *pred = Prediction::default();
     tracked.reset(sim.fleet.len());
     if matches!(rig.focus, Focus::Vessel(_)) {

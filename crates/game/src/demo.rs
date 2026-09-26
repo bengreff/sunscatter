@@ -38,6 +38,8 @@ enum Step {
     Sunset,
     Done,
     Tracking,
+    /// The pause menu, then the settings screen over it.
+    Menu,
 }
 
 /// Checks, in code, what the map-view rule (D054) must show at each view,
@@ -230,6 +232,8 @@ pub fn run(
     mut pause: ResMut<SimPause>,
     terrain: Res<Terrain>,
     mut station: ResMut<crate::tracking::TrackingStation>,
+    mut menu: ResMut<crate::interface::pause::PauseMenu>,
+    mut settings_ui: ResMut<crate::settings_ui::SettingsUi>,
     mut exit: MessageWriter<AppExit>,
 ) {
     let Some(mut demo) = demo else { return };
@@ -489,6 +493,21 @@ pub fn run(
             if !demo.shot_taken && demo.timer > 1.5 {
                 demo.shot(&mut commands, "tracking_station");
                 demo.shot_taken = true;
+                demo.next(Step::Menu);
+            }
+        }
+        Step::Menu => {
+            station.open = false;
+            menu.open = true;
+            if demo.timer > 1.0 && !demo.shot_taken {
+                demo.shot(&mut commands, "pause_menu");
+                demo.shot_taken = true;
+                settings_ui.open = true;
+                settings_ui.tab = crate::settings_ui::SettingsTab::Interface;
+            } else if demo.timer > 2.0 && demo.shot_taken {
+                demo.shot(&mut commands, "settings_interface");
+                settings_ui.open = false;
+                menu.open = false;
                 demo.next(Step::Done);
             }
         }

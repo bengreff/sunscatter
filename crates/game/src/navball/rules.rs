@@ -206,6 +206,15 @@ pub fn time_to_apsides(el: &Elements, mu: f64) -> (Option<f64>, Option<f64>) {
     }
 }
 
+/// The altitude shown above the ball, with its label: above the ground in
+/// surface mode, above sea level (the reference ellipsoid) otherwise.
+pub fn mode_altitude(mode: Mode, above_terrain: f64, above_sea_level: f64) -> (&'static str, f64) {
+    match mode {
+        Mode::Surface => ("ALT TERRAIN", above_terrain),
+        Mode::Orbit | Mode::Target => ("ALT SEA", above_sea_level),
+    }
+}
+
 #[cfg(test)]
 #[path = "rules_tests.rs"]
 mod tests;

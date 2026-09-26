@@ -94,8 +94,10 @@ pub fn read_input(
     if !egui.wants_any_pointer_input() {
         let old = (rig.yaw, rig.pitch, rig.distance);
         if buttons.pressed(MouseButton::Left) || buttons.pressed(MouseButton::Right) {
-            rig.yaw -= f64::from(motion.delta.x) * 0.005;
-            rig.pitch = (rig.pitch + f64::from(motion.delta.y) * 0.005).clamp(-1.55, 1.55);
+            let k = controls.mouse_sensitivity;
+            let dy = if controls.invert_y { -motion.delta.y } else { motion.delta.y };
+            rig.yaw -= f64::from(motion.delta.x) * k;
+            rig.pitch = (rig.pitch + f64::from(dy) * k).clamp(-1.55, 1.55);
         }
         if scroll.delta.y != 0.0 {
             // Trackpads report pixels, many per gesture: scale them to a

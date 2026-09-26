@@ -12,6 +12,7 @@
 //! saves settings.
 
 use crate::bench::Bench;
+use crate::interface::layout::InterfaceSettings;
 use crate::settings::GraphicsSettings;
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -42,8 +43,7 @@ impl Dirs {
     }
 }
 
-/// Camera and input preferences. There is no UI for these yet; they can be
-/// edited in `settings.ron`.
+/// Camera and input preferences (Settings → Controls).
 #[derive(Resource, Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ControlsSettings {
@@ -53,24 +53,29 @@ pub struct ControlsSettings {
     /// `trackpad_zoom_speed` when zoom was halved, so old files that saved
     /// the old default get the new one.)
     pub trackpad_lines_per_px: f64,
+    /// Camera rotation per pixel of mouse drag (rad).
+    pub mouse_sensitivity: f64,
+    /// Dragging up tilts the camera down instead of up.
+    pub invert_y: bool,
 }
 
 impl Default for ControlsSettings {
     fn default() -> Self {
-        ControlsSettings { wheel_zoom: 1.072, trackpad_lines_per_px: 0.125 }
+        ControlsSettings { wheel_zoom: 1.072, trackpad_lines_per_px: 0.125, mouse_sensitivity: 0.005, invert_y: false }
     }
 }
 
 /// The settings file.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SettingsFile {
     pub graphics: GraphicsSettings,
     pub controls: ControlsSettings,
+    pub interface: InterfaceSettings,
 }
 
 impl SettingsFile {
-    pub fn to_ron(self) -> String {
+    pub fn to_ron(&self) -> String {
         ron::ser::to_string_pretty(&self, ron::ser::PrettyConfig::new()).expect("settings serialise")
     }
 
@@ -122,6 +127,7 @@ impl Plugin for PersistPlugin {
         let loaded = if enabled { load(&dirs.settings_file) } else { SettingsFile::default() };
         app.insert_resource(loaded.graphics)
             .insert_resource(loaded.controls)
+            .insert_resource(loaded.interface.clone().sanitized())
             .insert_resource(Persist { dirs, enabled, saved: loaded, last_write: f64::NEG_INFINITY })
             .add_systems(Last, save_settings);
     }
@@ -147,15 +153,16 @@ fn save_settings(
     bench: Res<Bench>,
     graphics: Res<GraphicsSettings>,
     controls: Res<ControlsSettings>,
+    interface: Res<InterfaceSettings>,
     mut persist: ResMut<Persist>,
 ) {
-    let current = SettingsFile { graphics: *graphics, controls: *controls };
+    let current = SettingsFile { graphics: *graphics, controls: *controls, interface: interface.clone() };
     let now = time.elapsed_secs_f64();
     if !persist.enabled || bench.running() || current == persist.saved || now - persist.last_write < WRITE_INTERVAL {
         return;
     }
     persist.last_write = now;
-    persist.saved = current;
+    persist.saved = current.clone();
     match current.write(&persist.dirs.settings_file) {
         Ok(()) => info!("settings saved to {}", persist.dirs.settings_file.display()),
         Err(e) => warn!("cannot save settings to {}: {e}", persist.dirs.settings_file.display()),
@@ -190,10 +197,16 @@ mod tests {
         assert_eq!(SettingsFile::read(&path), Ok(None));
         let s = SettingsFile {
             graphics: GraphicsSettings { bloom: false, ..GraphicsSettings::preset(Tier::Ultra) },
-            controls: ControlsSettings { wheel_zoom: 1.2, trackpad_lines_per_px: 0.1 },
+            controls: ControlsSettings {
+                wheel_zoom: 1.2,
+                trackpad_lines_per_px: 0.1,
+                mouse_sensitivity: 0.01,
+                invert_y: true,
+            },
+            interface: InterfaceSettings { ui_scale: 1.5, ..InterfaceSettings::default() },
         };
         s.write(&path).unwrap();
-        assert_eq!(SettingsFile::read(&path), Ok(Some(s)));
+        assert_eq!(SettingsFile::read(&path), Ok(Some(s.clone())));
         assert_eq!(load(&path), s);
         let _ = std::fs::remove_dir_all(&dir);
     }

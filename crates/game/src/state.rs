@@ -111,12 +111,14 @@ pub fn read_controls(
     keys: Res<ButtonInput<KeyCode>>,
     time: Res<Time>,
     egui: Res<bevy_egui::input::EguiWantsInput>,
+    menu: Res<crate::interface::pause::PauseMenu>,
     mut sim: ResMut<SimState>,
 ) {
     let dt = time.delta_secs_f64();
     let c = &mut sim.controls;
-    // Typing in a text field (e.g. a save name) does not fly the ship.
-    if egui.wants_any_keyboard_input() {
+    // Typing in a text field (e.g. a save name) or the pause menu does not
+    // fly the ship.
+    if egui.wants_any_keyboard_input() || menu.open {
         c.rotate = DVec3::ZERO;
         return;
     }
@@ -164,14 +166,20 @@ pub fn read_controls(
     }
 }
 
-/// Freezes the clock (used by the demo while it captures every graphics tier).
+/// Freezes the clock (used by the demo while it captures every graphics
+/// tier; the pause menu freezes it too).
 #[derive(Resource, Default)]
 pub struct SimPause(pub bool);
 
 /// Advances every vessel to the new clock. Time warp only changes how far the
 /// clock moves per frame; each vessel's physics is independent of it.
-pub fn advance(time: Res<Time>, pause: Res<SimPause>, mut sim: ResMut<SimState>) {
-    if pause.0 {
+pub fn advance(
+    time: Res<Time>,
+    pause: Res<SimPause>,
+    menu: Res<crate::interface::pause::PauseMenu>,
+    mut sim: ResMut<SimState>,
+) {
+    if pause.0 || menu.open {
         return;
     }
     let level = sim.effective_warp();

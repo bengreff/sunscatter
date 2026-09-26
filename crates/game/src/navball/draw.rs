@@ -1,9 +1,12 @@
-//! Painting the navball with egui: a translucent panel at the bottom centre
-//! holding the ball (an egui mesh shaded per vertex from the pure projection
-//! in [`rules`]) and the readouts beside it. Hidden in the tracking station.
+//! Painting the navball with egui: a movable panel (bottom centre by
+//! default) holding the ball (an egui mesh shaded per vertex from the pure
+//! projection in [`rules`]) with the mode, altitude and speed above it and
+//! the readouts beside it, plus the Target panel. Hidden in the tracking
+//! station.
 
 use super::rules::{self, Local, Ship};
 use super::{nav_state, NavState, NavTarget, Navball};
+use crate::interface::layout::{InterfaceSettings, PanelId};
 use crate::map::fmt_duration;
 use crate::state::SimState;
 use crate::tracking::{Tracked, TrackingStation};
@@ -13,7 +16,6 @@ use egui::{vec2, Align2, Color32, FontId, Pos2, Rect, Shape, Stroke};
 use glam::DVec3;
 use std::f64::consts::{FRAC_PI_2, TAU};
 
-const BALL_PX: f32 = 176.0;
 const COLUMN_PX: f32 = 150.0;
 const DIM: Color32 = Color32::from_rgb(130, 150, 170);
 const BRIGHT: Color32 = Color32::from_rgb(225, 235, 245);
@@ -30,12 +32,14 @@ enum Action {
     SetTarget(Option<NavTarget>),
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn draw(
     mut contexts: EguiContexts,
     time: Res<Time>,
     sim: Res<SimState>,
     tracked: Res<Tracked>,
     station: Res<TrackingStation>,
+    mut iface: ResMut<InterfaceSettings>,
     mut nav: ResMut<Navball>,
 ) -> Result {
     if station.open {
@@ -45,43 +49,53 @@ pub fn draw(
     let Some(state) = nav_state(&sim, &tracked, &mut nav) else { return Ok(()) };
     let shown = nav.readouts(time.elapsed_secs_f64(), &state).clone();
     let (locked, current_target) = (nav.locked, nav.target);
+    let ball = iface.navball_size;
     let mut actions = Vec::new();
-    egui::Area::new("navball".into()).anchor(Align2::CENTER_BOTTOM, [0.0, -8.0]).show(ctx, |ui| {
-        egui::Frame::new()
-            .fill(Color32::from_rgba_unmultiplied(8, 12, 18, 205))
-            .stroke(Stroke::new(1.0, Color32::from_rgba_unmultiplied(120, 160, 200, 70)))
-            .corner_radius(10)
-            .inner_margin(egui::Margin::same(10))
-            .show(ui, |ui| {
-                ui.horizontal_top(|ui| {
-                    attitude_column(ui, &shown);
-                    ui.vertical_centered(|ui| {
-                        ui.set_width(BALL_PX + 8.0);
-                        ui.horizontal(|ui| {
-                            let mode = egui::RichText::new(shown.mode.label()).monospace().color(ACCENT);
-                            if ui.add(egui::Button::new(mode)).on_hover_text("Speed mode (click to cycle)").clicked() {
-                                actions.push(Action::CycleMode);
-                            }
-                            let lock = if locked { "LOCK" } else { "AUTO" };
-                            let hint = "AUTO: surface below 36 km, orbit above";
-                            if ui
-                                .add(egui::Button::new(egui::RichText::new(lock).monospace().small()))
-                                .on_hover_text(hint)
-                                .clicked()
-                            {
-                                actions.push(Action::ToggleLock);
-                            }
-                        });
-                        ui.label(egui::RichText::new(fmt_speed(shown.speed)).monospace().size(18.0).color(BRIGHT));
-                        let (rect, response) = ui.allocate_exact_size(vec2(BALL_PX, BALL_PX), egui::Sense::click());
-                        paint_ball(ui.painter(), rect, &state);
-                        if response.clicked() {
+    crate::interface::panel(ctx, &mut iface, PanelId::Navball, |ui| {
+        // Three fixed-width columns, so the ball sits in the panel's centre.
+        let height = ball + 70.0;
+        let column = |ui: &mut egui::Ui, width: f32, add: &mut dyn FnMut(&mut egui::Ui)| {
+            ui.allocate_ui_with_layout(vec2(width, height), egui::Layout::top_down(egui::Align::Min), |ui| {
+                ui.set_width(width);
+                add(ui);
+            });
+        };
+        ui.horizontal_top(|ui| {
+            column(ui, COLUMN_PX, &mut |ui| attitude_column(ui, &shown));
+            column(ui, ball + 8.0, &mut |ui| {
+                ui.vertical_centered(|ui| {
+                    ui.horizontal(|ui| {
+                        // Centre the two buttons over the ball.
+                        ui.add_space((ball - 110.0).max(0.0) * 0.5);
+                        let mode = egui::RichText::new(shown.mode.label()).monospace().color(ACCENT);
+                        if ui.add(egui::Button::new(mode)).on_hover_text("Speed mode (click to cycle)").clicked() {
                             actions.push(Action::CycleMode);
                         }
+                        let lock = if locked { "LOCK" } else { "AUTO" };
+                        let hint = "AUTO: surface below 36 km, orbit above";
+                        if ui
+                            .add(egui::Button::new(egui::RichText::new(lock).monospace().small()))
+                            .on_hover_text(hint)
+                            .clicked()
+                        {
+                            actions.push(Action::ToggleLock);
+                        }
                     });
-                    orbit_column(ui, &shown, &sim, &tracked, current_target, &mut actions);
+                    let (alt_label, alt) = shown.altitude;
+                    ui.label(egui::RichText::new(format!("{alt_label} {}", fmt_dist(alt))).monospace().color(BRIGHT));
+                    ui.label(egui::RichText::new(fmt_speed(shown.speed)).monospace().size(17.0).color(BRIGHT));
+                    let (rect, response) = ui.allocate_exact_size(vec2(ball, ball), egui::Sense::click());
+                    paint_ball(ui.painter(), rect, &state);
+                    if response.clicked() {
+                        actions.push(Action::CycleMode);
+                    }
                 });
             });
+            column(ui, COLUMN_PX, &mut |ui| orbit_column(ui, &shown, &sim));
+        });
+    });
+    crate::interface::panel(ctx, &mut iface, PanelId::Target, |ui| {
+        target_panel(ui, &shown, &sim, &tracked, current_target, &mut actions);
     });
     for action in actions {
         match action {
@@ -128,9 +142,8 @@ fn readout_grid(ui: &mut egui::Ui, id: &str, rows: &[(&str, String)]) {
 }
 
 fn attitude_column(ui: &mut egui::Ui, s: &NavState) {
-    ui.vertical(|ui| {
-        ui.set_width(COLUMN_PX);
-        ui.add_space(22.0);
+    ui.add_space(22.0);
+    {
         let (aoa, slip) = match s.aoa_sideslip {
             Some((a, b)) => (format!("{a:+.1}°"), format!("{b:+.1}°")),
             None => ("—".into(), "—".into()),
@@ -148,10 +161,25 @@ fn attitude_column(ui: &mut egui::Ui, s: &NavState) {
                 ("G", format!("{:.2} g", s.g_load)),
             ],
         );
-    });
+    }
 }
 
-fn orbit_column(
+fn orbit_column(ui: &mut egui::Ui, s: &NavState, sim: &SimState) {
+    ui.add_space(22.0);
+    let t = |x: Option<f64>| x.map_or_else(|| "—".to_string(), fmt_duration);
+    let c = sim.controls;
+    let rows = [
+        ("REF", s.body.clone()),
+        ("Ap in", t(s.time_to_ap)),
+        ("Pe in", t(s.time_to_pe)),
+        ("SAS", if c.sas { "HOLD".into() } else { "OFF".into() }),
+        ("THR", format!("{:.0}%", c.throttle * 100.0)),
+    ];
+    readout_grid(ui, "nav_orbit", &rows);
+}
+
+/// The Target panel: the target picker and, with a target, its distance.
+fn target_panel(
     ui: &mut egui::Ui,
     s: &NavState,
     sim: &SimState,
@@ -159,40 +187,28 @@ fn orbit_column(
     current: Option<NavTarget>,
     actions: &mut Vec<Action>,
 ) {
-    ui.vertical(|ui| {
-        ui.set_width(COLUMN_PX);
-        ui.add_space(22.0);
-        let t = |x: Option<f64>| x.map_or_else(|| "—".to_string(), fmt_duration);
-        let c = sim.controls;
-        let mut rows = vec![
-            ("REF", s.body.clone()),
-            ("Ap in", t(s.time_to_ap)),
-            ("Pe in", t(s.time_to_pe)),
-            ("SAS", if c.sas { "HOLD".into() } else { "OFF".into() }),
-            ("THR", format!("{:.0}%", c.throttle * 100.0)),
-        ];
-        if let Some((_, d)) = &s.target {
-            rows.push(("TGT", fmt_dist(*d)));
+    ui.set_width(COLUMN_PX + 30.0);
+    ui.label(egui::RichText::new("TARGET").monospace().small().color(DIM));
+    let name = s.target.as_ref().map_or("none", |(n, _)| n.as_str());
+    egui::ComboBox::from_id_salt("nav_target").selected_text(name).width(COLUMN_PX + 20.0).show_ui(ui, |ui| {
+        let mut pick = |ui: &mut egui::Ui, t: Option<NavTarget>, label: String| {
+            if ui.selectable_label(current == t, label).clicked() {
+                actions.push(Action::SetTarget(t));
+            }
+        };
+        pick(ui, None, "none".into());
+        for src in sim.world.surfaces() {
+            pick(ui, Some(NavTarget::Body(src.node)), src.name.clone());
         }
-        readout_grid(ui, "nav_orbit", &rows);
-        let name = s.target.as_ref().map_or("no target", |(n, _)| n.as_str());
-        egui::ComboBox::from_id_salt("nav_target").selected_text(name).width(COLUMN_PX - 8.0).show_ui(ui, |ui| {
-            let mut pick = |ui: &mut egui::Ui, t: Option<NavTarget>, label: String| {
-                if ui.selectable_label(current == t, label).clicked() {
-                    actions.push(Action::SetTarget(t));
-                }
-            };
-            pick(ui, None, "no target".into());
-            for src in sim.world.surfaces() {
-                pick(ui, Some(NavTarget::Body(src.node)), src.name.clone());
+        for i in (0..sim.fleet.len()).filter(|&i| i != sim.active) {
+            if let Some(id) = tracked.id(i) {
+                pick(ui, Some(NavTarget::Vessel(id)), tracked.name(i));
             }
-            for i in (0..sim.fleet.len()).filter(|&i| i != sim.active) {
-                if let Some(id) = tracked.id(i) {
-                    pick(ui, Some(NavTarget::Vessel(id)), tracked.name(i));
-                }
-            }
-        });
+        }
     });
+    if let Some((_, d)) = &s.target {
+        readout_grid(ui, "nav_target_rows", &[("DIST", fmt_dist(*d))]);
+    }
 }
 
 /// Ball colour for a direction: sky above the horizon, ground below,

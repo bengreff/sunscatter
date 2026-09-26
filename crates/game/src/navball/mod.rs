@@ -60,8 +60,11 @@ pub struct NavState {
     pub local: Local,
     pub markers: Markers,
     pub angles: Angles,
-    /// Speed in the current mode (m/s).
+    /// Speed in the current mode (m/s), relative to the reference body (its
+    /// surface or centre) or the target.
     pub speed: f64,
+    /// Altitude for the current mode, with its label.
+    pub altitude: (&'static str, f64),
     pub vertical_speed: f64,
     /// Angle of attack and sideslip (deg), in an atmosphere only.
     pub aoa_sideslip: Option<(f64, f64)>,
@@ -89,7 +92,7 @@ fn target_state(
         }
         NavTarget::Vessel(id) => {
             let i = (0..sim.fleet.len()).find(|&i| tracked.id(i) == Some(id)).filter(|&i| i != sim.active)?;
-            let (a, r, v) = sim.fleet[i].state(&sim.world);
+            let (a, r, v) = sim.fleet[i].state_at(&sim.world, t);
             let k = snap.relative(a, anchor);
             Some((tracked.name(i), k.r + r, k.v + v))
         }
@@ -100,7 +103,7 @@ fn target_state(
 /// (`anchor`, `r`, `v`) at `t`: thrust and drag, or the ground's push when
 /// landed. Its length over g0 is the g-load.
 pub fn proper_accel(world: &World, t: Epoch, vessel: &Vessel, throttle: f64) -> DVec3 {
-    let (anchor, r, v) = vessel.state(world);
+    let (anchor, r, v) = vessel.state_at(world, t);
     let snap = world.snapshot(t);
     let active = ActiveSources::select(world, &snap, anchor, r);
     let ctx = |drag, thrust| ForceContext { world, anchor, active: &active, drag, thrust };
@@ -126,8 +129,8 @@ pub fn proper_accel(world: &World, t: Epoch, vessel: &Vessel, throttle: f64) -> 
 /// Gathers the navball state for the active vessel, updating the mode.
 pub fn nav_state(sim: &SimState, tracked: &Tracked, nav: &mut Navball) -> Option<NavState> {
     let vessel = sim.ship();
-    let t = vessel.time;
-    let (anchor, r, v) = vessel.state(&sim.world);
+    let t = sim.clock;
+    let (anchor, r, v) = vessel.state_at(&sim.world, t);
     let body = relations::nearest_body(&sim.world, t, anchor, r)?;
     let src = sim.world.source(body)?;
     let p = src.physical.as_ref()?;
@@ -135,7 +138,9 @@ pub fn nav_state(sim: &SimState, tracked: &Tracked, nav: &mut Navball) -> Option
     let rel = r - k.r;
     let v_orb = v - k.v;
     let v_srf = v_orb - p.rotation.omega(t).raw().cross(rel);
-    let alt = p.altitude(p.rotation.to_fixed(sim::frame::Vec3::from_raw(rel), t));
+    let fixed = p.rotation.to_fixed(sim::frame::Vec3::from_raw(rel), t);
+    let alt = p.altitude(fixed);
+    let above_terrain = p.altitude_above_surface(fixed);
 
     let target = nav.target.and_then(|tg| target_state(sim, tracked, tg, anchor, t));
     if nav.target.is_some() && target.is_none() {
@@ -159,6 +164,7 @@ pub fn nav_state(sim: &SimState, tracked: &Tracked, nav: &mut Navball) -> Option
         markers: rules::markers(rel, v_mode, target.as_ref().map(|(_, tr, _)| *tr - r)),
         angles: rules::attitude_angles(&ship, &local),
         speed: v_mode.length(),
+        altitude: rules::mode_altitude(nav.mode, above_terrain, alt),
         vertical_speed: rules::vertical_speed(rel, v_srf),
         aoa_sideslip: if in_atmosphere { rules::aoa_sideslip(&ship, v_srf) } else { None },
         g_load: rules::g_load(proper_accel(&sim.world, t, vessel, sim.controls.throttle)),

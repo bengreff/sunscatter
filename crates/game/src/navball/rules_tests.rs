@@ -211,3 +211,16 @@ fn time_to_apsides_follows_the_mean_anomaly() {
     assert!(ap.is_none() && close(pe.unwrap(), 1.0 / hyp.mean_motion(mu), 1e-6));
     assert_eq!(time_to_apsides(&el(1.5, -2.0e7, 1.0), mu), (None, None));
 }
+
+#[test]
+fn altitude_follows_the_speed_mode() {
+    // (mode, expected label and value) for 1,200 m above the ground, 1,500 m above the sea.
+    let cases = [
+        (Mode::Surface, ("ALT TERRAIN", 1200.0)),
+        (Mode::Orbit, ("ALT SEA", 1500.0)),
+        (Mode::Target, ("ALT SEA", 1500.0)),
+    ];
+    for (mode, expected) in cases {
+        assert_eq!(mode_altitude(mode, 1200.0, 1500.0), expected, "{mode:?}");
+    }
+}

@@ -10,6 +10,7 @@ mod body_visual;
 mod camera;
 mod demo;
 mod hud;
+mod interface;
 mod map;
 mod map_view;
 mod navball;
@@ -65,6 +66,9 @@ fn main() {
         .init_resource::<camera::CameraRig>()
         .init_resource::<hud::UiState>()
         .init_resource::<hud::FpsMeter>()
+        .init_resource::<interface::pause::PauseMenu>()
+        .init_resource::<interface::pause::LaunchSnapshot>()
+        .init_resource::<interface::help::Help>()
         .init_resource::<settings::GraphicsSettings>()
         .init_resource::<settings_ui::SettingsUi>()
         .init_resource::<bench::Bench>()
@@ -83,7 +87,10 @@ fn main() {
         .add_systems(
             Update,
             (
+                interface::pause::keys,
+                interface::help::keys,
                 state::read_controls,
+                interface::pause::track_launch,
                 hud::measure_fps,
                 settings_ui::toggle,
                 demo::run,
@@ -116,7 +123,13 @@ fn main() {
             )
                 .in_set(Stage::Scene),
         )
-        .add_systems(EguiPrimaryContextPass, (sky::draw_flare, map::draw_overlay, hud::draw, settings_ui::draw).chain())
-        .add_systems(EguiPrimaryContextPass, (tracking::draw, saves::draw).chain().after(hud::draw))
+        .add_systems(
+            EguiPrimaryContextPass,
+            (interface::apply_style, sky::draw_flare, map::draw_overlay, hud::draw, settings_ui::draw).chain(),
+        )
+        .add_systems(
+            EguiPrimaryContextPass,
+            (tracking::draw, saves::draw, interface::pause::draw, interface::help::draw).chain().after(hud::draw),
+        )
         .run();
 }

@@ -1,7 +1,10 @@
-//! HUD (egui) and body picking: flight readouts, controls help, and the
-//! double-click body menu. Deliberately minimal; many GUIs come later.
+//! HUD panels (egui): Time (date, warp arrows), Flight (readouts), Debug,
+//! drawn as movable windows through [`crate::interface::panel`]; body
+//! picking and the double-click body menu.
 
 use crate::camera::{self, CameraRig, MainCamera};
+use crate::interface::layout::{InterfaceSettings, PanelId};
+use crate::interface::{panel, theme};
 use crate::state::{SimState, MAX_PHYSICS_WARP, WARP_LEVELS};
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
@@ -126,65 +129,103 @@ pub fn fmt_dist(m: f64) -> String {
     }
 }
 
+/// Why warp is lower than requested.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WarpLimit {
+    /// Rails warp needs the throttle closed and the ship not under thrust.
+    Throttle,
+    /// Coast integration can't keep up at this warp.
+    Compute,
+}
+
+/// What the warp indicator shows: the level in effect, whether it is rails
+/// or physics warp, and why it is below the requested level, if it is.
+pub fn warp_status(requested: usize, effective: usize, compute_limited: bool) -> (usize, bool, Option<WarpLimit>) {
+    let rails = effective > MAX_PHYSICS_WARP;
+    let limit = if effective < requested {
+        Some(WarpLimit::Throttle)
+    } else if compute_limited {
+        Some(WarpLimit::Compute)
+    } else {
+        None
+    };
+    (effective, rails, limit)
+}
+
+fn warp_label(x: f64) -> String {
+    if x >= 1e3 {
+        format!("{:.0}kx", x / 1e3)
+    } else {
+        format!("{x:.0}x")
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 pub fn draw(
     mut contexts: EguiContexts,
     fps: Res<FpsMeter>,
-    sim: Res<SimState>,
+    mut sim: ResMut<SimState>,
     mut rig: ResMut<CameraRig>,
     mut ui: ResMut<UiState>,
+    mut iface: ResMut<InterfaceSettings>,
+    station: Res<crate::tracking::TrackingStation>,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
-    let ship = sim.ship();
-    let (anchor, r, v) = ship.state_at(&sim.world, sim.clock);
-    let snap = sim.world.snapshot(sim.clock);
-    let near = camera::nearest_body(&sim);
     let (y, mo, d, h, mi, s) = sim.clock.to_calendar();
+    let dim = |t: &str| egui::RichText::new(t).monospace().small().color(theme::DIM);
 
-    egui::Window::new("Flight").anchor(egui::Align2::LEFT_TOP, [10.0, 10.0]).resizable(false).show(ctx, |ui_| {
-        ui_.monospace(format!("{y}-{mo:02}-{d:02} {h:02}:{mi:02}:{:04.1} TDB", s));
-        let level = sim.effective_warp();
-        let warp = WARP_LEVELS[level];
-        let kind = if level > MAX_PHYSICS_WARP { "rails" } else { "physics" };
-        let limited = if sim.compute_limited { "  (compute-limited)" } else { "" };
-        ui_.monospace(format!("warp {warp}x ({kind}){limited}"));
-        ui_.separator();
-        let phase = match &ship.phase {
-            Phase::Landed { .. } => "LANDED".to_string(),
-            Phase::Powered { .. } => "POWERED".to_string(),
-            Phase::Coasting { .. } => "COASTING".to_string(),
-            Phase::Crashed { speed, .. } => format!("CRASHED at {speed:.0} m/s (R to reset)"),
+    let show_fps = iface.show_fps;
+    let mut set_warp = None;
+    panel(ctx, &mut iface, PanelId::Time, |ui_| {
+        ui_.monospace(format!("{y}-{mo:02}-{d:02} {h:02}:{mi:02}:{s:04.1} TDB"));
+        let (level, rails, limit) = warp_status(sim.warp, sim.effective_warp(), sim.compute_limited);
+        ui_.horizontal(|ui_| {
+            ui_.spacing_mut().item_spacing.x = 1.0;
+            for (i, &w) in WARP_LEVELS.iter().enumerate() {
+                let (glyph, color) = if i <= level {
+                    ("▶", if i > MAX_PHYSICS_WARP { theme::ACCENT } else { theme::TEXT })
+                } else if i <= sim.warp {
+                    ("▶", theme::WARN)
+                } else {
+                    ("▷", theme::DIM)
+                };
+                let arrow =
+                    egui::Label::new(egui::RichText::new(glyph).monospace().color(color)).sense(egui::Sense::click());
+                if ui_.add(arrow).on_hover_text(warp_label(w)).clicked() {
+                    set_warp = Some(i);
+                }
+            }
+        });
+        let kind = if rails { "rails" } else { "physics" };
+        let why = match limit {
+            Some(WarpLimit::Throttle) => "  limited: throttle",
+            Some(WarpLimit::Compute) => "  limited: compute",
+            None => "",
         };
-        ui_.monospace(phase);
-        if let Some(body) = near.and_then(|b| sim.world.source(b)) {
-            let k = snap.relative(body.node, anchor);
-            let rel = r - k.r;
-            let p = body.physical.as_ref().expect("surface body");
-            let fixed = p.rotation.to_fixed(sim::frame::Vec3::from_raw(rel), sim.clock);
-            let alt = p.altitude(fixed);
-            let above_ground = p.altitude_above_surface(fixed);
-            let v_orb = v - k.v;
-            let v_srf = v_orb - p.rotation.omega(sim.clock).raw().cross(rel);
-            let el = crate::relations::orbit_about(&sim.world, sim.clock, anchor, r, v, body.node)
-                .expect("nearest body is a source")
-                .elements;
-            ui_.monospace(format!("{:<6} alt {}  (terrain {})", body.name, fmt_dist(alt), fmt_dist(above_ground)));
-            ui_.monospace(format!("surface speed {:.1} m/s", v_srf.length()));
-            ui_.monospace(format!("orbital speed {:.1} m/s", v_orb.length()));
-            ui_.monospace(format!(
-                "Pe {}  Ap {}",
-                fmt_dist(el.periapsis() - p.radius_eq),
-                fmt_dist(el.apoapsis() - p.radius_eq)
-            ));
-            ui_.monospace(format!("vertical speed {:.1} m/s", v_srf.dot(rel.normalize())));
-        }
-        ui_.separator();
-        let c = sim.controls;
-        ui_.add(egui::ProgressBar::new(c.throttle as f32).text(format!("throttle {:.0}%", c.throttle * 100.0)));
-        ui_.monospace(format!(
-            "SAS {}   chute {}",
-            if c.sas { "on" } else { "off" },
-            if ship.chute_deployed { "DEPLOYED" } else { "stowed" }
-        ));
+        ui_.horizontal(|ui_| {
+            ui_.monospace(format!("warp {} ({kind})", warp_label(WARP_LEVELS[level])));
+            if !why.is_empty() {
+                ui_.label(egui::RichText::new(why).monospace().small().color(theme::WARN));
+            }
+            if show_fps {
+                ui_.label(dim(&format!("  {} fps", fps.text())));
+            }
+        });
+    });
+    if let Some(i) = set_warp {
+        sim.warp = i;
+    }
+    if station.open {
+        return Ok(());
+    }
+    let sim = sim.into_inner();
+    let (anchor, r, _) = sim.ship().state_at(&sim.world, sim.clock);
+    let snap = sim.world.snapshot(sim.clock);
+    let near = camera::nearest_body(sim);
+
+    panel(ctx, &mut iface, PanelId::Flight, |ui_| flight_panel(ui_, sim, near));
+
+    panel(ctx, &mut iface, PanelId::Debug, |ui_| {
         let anchor_name = &sim.world.eph.node(anchor).name;
         let frame = match ui.plot_frame {
             PlotFrame::EarthInertial => "Earth inertial",
@@ -193,25 +234,6 @@ pub fn draw(
         ui_.monospace(format!("anchor {anchor_name}   plot {frame}"));
         ui_.monospace(format!("{} fps   {} vessel(s)", fps.text(), sim.fleet.len()));
     });
-
-    egui::Window::new("Controls").anchor(egui::Align2::LEFT_BOTTOM, [10.0, -10.0]).default_open(false).show(
-        ctx,
-        |ui_| {
-            for line in [
-                "Shift/Ctrl  throttle up/down     Z / X  full / cut",
-                "W/S pitch   A/D yaw   Q/E roll   T  SAS",
-                "P  deploy parachute              R  reset to pad",
-                ". / ,  warp up/down   /  warp 1x (rails warp needs throttle 0)",
-                "drag  orbit camera    scroll  zoom",
-                "F  focus nearest body   `  focus ship   double-click body  menu",
-                "Tab  plotting frame     F2  spawn 10 test ships",
-                "[ / ]  previous / next vessel   F7  tracking station",
-                "F5  quicksave   F9  quickload   F6  saves   F3  graphics",
-            ] {
-                ui_.monospace(line);
-            }
-        },
-    );
 
     if let Some((node, pos)) = ui.menu {
         let mut open = true;
@@ -222,7 +244,7 @@ pub fn draw(
             |ui_| {
                 ui_.monospace(format!("distance {}", fmt_dist(dist)));
                 if ui_.button("Focus").clicked() {
-                    camera::focus_body(&mut rig, &sim, node);
+                    camera::focus_body(&mut rig, sim, node);
                     ui.menu = None;
                 }
             },
@@ -234,9 +256,74 @@ pub fn draw(
     Ok(())
 }
 
+/// The Flight panel: phase, altitudes, speeds, apsides, throttle, SAS, chute.
+fn flight_panel(ui_: &mut egui::Ui, sim: &SimState, near: Option<sim::frame::NodeId>) {
+    let dim = |t: &str| egui::RichText::new(t).monospace().small().color(theme::DIM);
+    let ship = sim.ship();
+    let (anchor, r, v) = ship.state_at(&sim.world, sim.clock);
+    let snap = sim.world.snapshot(sim.clock);
+    let phase = match &ship.phase {
+        Phase::Landed { .. } => "LANDED".to_string(),
+        Phase::Powered { .. } => "POWERED".to_string(),
+        Phase::Coasting { .. } => "COASTING".to_string(),
+        Phase::Crashed { speed, .. } => format!("CRASHED at {speed:.0} m/s (R to reset)"),
+    };
+    ui_.label(egui::RichText::new(phase).monospace().color(theme::ACCENT));
+    if let Some(body) = near.and_then(|b| sim.world.source(b)) {
+        let k = snap.relative(body.node, anchor);
+        let rel = r - k.r;
+        let p = body.physical.as_ref().expect("surface body");
+        let fixed = p.rotation.to_fixed(sim::frame::Vec3::from_raw(rel), sim.clock);
+        let alt = p.altitude(fixed);
+        let above_ground = p.altitude_above_surface(fixed);
+        let v_orb = v - k.v;
+        let v_srf = v_orb - p.rotation.omega(sim.clock).raw().cross(rel);
+        let el = crate::relations::orbit_about(&sim.world, sim.clock, anchor, r, v, body.node)
+            .expect("nearest body is a source")
+            .elements;
+        egui::Grid::new("flight_grid").num_columns(2).spacing([10.0, 2.0]).show(ui_, |ui_| {
+            let mut row = |label: &str, value: String| {
+                ui_.label(dim(label));
+                ui_.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui_| ui_.monospace(value));
+                ui_.end_row();
+            };
+            row("BODY", body.name.clone());
+            row("ALT (SEA)", fmt_dist(alt));
+            row("ALT (TERRAIN)", fmt_dist(above_ground));
+            row("SURFACE V", format!("{:.1} m/s", v_srf.length()));
+            row("ORBIT V", format!("{:.1} m/s", v_orb.length()));
+            row("V/S", format!("{:+.1} m/s", v_srf.dot(rel.normalize())));
+            row("Ap", fmt_dist(el.apoapsis() - p.radius_eq));
+            row("Pe", fmt_dist(el.periapsis() - p.radius_eq));
+        });
+    }
+    let c = sim.controls;
+    ui_.add(egui::ProgressBar::new(c.throttle as f32).text(format!("throttle {:.0}%", c.throttle * 100.0)));
+    ui_.monospace(format!(
+        "SAS {}   chute {}",
+        if c.sas { "on" } else { "off" },
+        if ship.chute_deployed { "DEPLOYED" } else { "stowed" }
+    ));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn warp_indicator_shows_the_level_kind_and_limit() {
+        // (requested, effective, compute-limited, expected)
+        let cases = [
+            (0, 0, false, (0, false, None)),
+            (3, 3, false, (3, false, None)),
+            (6, 6, false, (6, true, None)),
+            (6, 3, false, (3, false, Some(WarpLimit::Throttle))),
+            (9, 9, true, (9, true, Some(WarpLimit::Compute))),
+        ];
+        for (req, eff, compute, expected) in cases {
+            assert_eq!(warp_status(req, eff, compute), expected, "{req} {eff} {compute}");
+        }
+    }
 
     #[test]
     fn fps_is_frames_over_at_least_half_a_second() {
