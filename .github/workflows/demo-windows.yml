@@ -1,0 +1,48 @@
+name: Demo (Windows, software GPU)
+
+# Runs the scripted demo flight on a GPU-less Windows runner through WARP, the
+# D3D12 software rasterizer ("Microsoft Basic Render Driver"), and uploads the
+# screenshots and log. Manual and weekly only: it never blocks normal CI.
+# Bevy reads WGPU_BACKEND and WGPU_FORCE_FALLBACK_ADAPTER from the environment,
+# so no code change is needed to pick the software adapter.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 5 * * 1" # Mondays 05:00 UTC
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  demo:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: "1.98.1"
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: demo-release
+      - name: Build (release)
+        run: cargo build -p game --release --locked
+      - name: Run demo on WARP
+        shell: bash
+        env:
+          SUNSCATTER_DEMO: demo-out
+          SUNSCATTER_DEMO_OFFSCREEN: "1"
+          WGPU_BACKEND: dx12
+          WGPU_FORCE_FALLBACK_ADAPTER: "1"
+        run: |
+          set -o pipefail
+          mkdir -p demo-out
+          timeout 75m target/release/game.exe 2>&1 | tee demo-out/demo.log
+      - name: Upload screenshots and log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: demo-windows-warp
+          path: demo-out/
+          if-no-files-found: warn
