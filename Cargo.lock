@@ -331,6 +331,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "asset-tool"
+version = "0.2.0"
+dependencies = [
+ "flate2",
+ "image",
+ "ron 0.10.1",
+ "serde",
+ "tiff",
+]
+
+[[package]]
 name = "async-broadcast"
 version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3732,6 +3743,8 @@ dependencies = [
  "num-traits",
  "png",
  "tiff",
+ "zune-core",
+ "zune-jpeg",
 ]
 
 [[package]]
