@@ -210,9 +210,11 @@ pub fn draw(
     let sim = sim.into_inner();
     let (anchor, r, _) = sim.ship().state_at(&sim.world, sim.clock);
     let snap = sim.world.snapshot(sim.clock);
-    let near = camera::nearest_body(sim);
+    // Readouts are relative to the dominant body, like the navball's.
+    let eph = &sim.world.eph;
+    let dominant = crate::relations::Dominance::new(eph, sim.clock).of(eph, sim.clock, anchor, r, None, None);
 
-    panel(ctx, &mut iface, PanelId::Flight, |ui_| flight_panel(ui_, sim, near));
+    panel(ctx, &mut iface, PanelId::Flight, |ui_| flight_panel(ui_, sim, Some(dominant)));
 
     panel(ctx, &mut iface, PanelId::Debug, |ui_| {
         let anchor_name = &sim.world.eph.node(anchor).name;
