@@ -108,7 +108,6 @@ impl OrbitSettings {
 
 /// The Orbits tab of the settings screen. `bodies` lists the bodies that
 /// can have lines (id, name).
-#[allow(dead_code)] // embedded by the settings screen (`settings_ui`)
 pub fn settings_ui(ui: &mut egui::Ui, s: &mut OrbitSettings, bodies: &[(NodeId, String)]) {
     ui.heading("Vessel lines");
     egui::ComboBox::from_label("Length").selected_text(s.vessel_line.name()).show_ui(ui, |ui| {

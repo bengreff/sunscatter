@@ -64,6 +64,8 @@ pub fn draw(
     mut settings: ResMut<GraphicsSettings>,
     mut controls: ResMut<ControlsSettings>,
     mut iface: ResMut<InterfaceSettings>,
+    mut orbits: ResMut<crate::trajectory::settings::OrbitSettings>,
+    sim: Res<crate::state::SimState>,
     mut bench: ResMut<Bench>,
     terrain: Res<crate::terrain::Terrain>,
     fps: Res<crate::hud::FpsMeter>,
@@ -102,7 +104,9 @@ pub fn draw(
         egui::ScrollArea::vertical().max_height(560.0).show(ui_, |ui_| match tab {
             SettingsTab::Graphics => graphics_tab(ui_, &mut ui, &mut settings, &mut bench),
             SettingsTab::Orbits => {
-                ui_.label("Orbit-line length and per-body lines (D056) arrive with the orbit-line rule.");
+                let eph = &sim.world.eph;
+                let bodies: Vec<_> = eph.bodies().map(|n| (n, eph.node(n).name.clone())).collect();
+                crate::trajectory::settings::settings_ui(ui_, &mut orbits, &bodies);
             }
             SettingsTab::Controls => controls_tab(ui_, &mut controls),
             SettingsTab::Interface => interface_tab(ui_, &mut iface),

@@ -25,7 +25,7 @@ A short map to search before building anything: who owns what, the frame order, 
 | Saves | `sim::save` (format), `game::saves` (UI, files) | |
 | Nearest body, display primary, osculating orbit (vessels and bodies), orbit size | `game::relations` | display only, never physics |
 | Map view: what is visible/hoverable, per object | `game::map_view` (rule, D054); `game::map` gathers sizes and draws | pure functions + table tests |
-| Orbit-line length (dominance, revolutions) | `game::trajectory` (to be written, D056) | display only |
+| Orbit-line length (revolutions, caps, settings) | `game::trajectory` (`line`, `settings`); dominance in `game::relations::Dominance` (D056) | display only |
 | Lighting: star flux per object, eclipses, planetshine (D055) | `game::lighting` (rules; fills the terrain uniforms; the shader mirrors `eclipse_factor`) | ambient/starlight in `game::sky`; exposure fixed (eye adaptation to come) |
 | Camera pose and limits, zoom, collision with surfaces and the ship | `game::camera` | terrain via `sim::forces::altitude_above` |
 | Navball: attitude, markers, mode, flight readouts | `game::navball` (rules in `navball::rules`) | |
