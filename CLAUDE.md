@@ -15,11 +15,13 @@ Real-scale 3D spaceflight, mission-design and logistics game in Rust. Being rebu
 
 ## Commands
 - `cargo test -p sim` — fast sim tests (run constantly).
-- `cargo run -p game --release` — the prototype.
+- `cargo run -p game --release` — the prototype. `--features dev` (Bevy dynamic linking) for faster incremental builds while iterating; never for releases.
 - `SUNSCATTER_DEMO=<dir> [SUNSCATTER_DEMO_OFFSCREEN=1] cargo run -p game --release` — scripted flight (pad → orbit → parachute), performance numbers with 11 vessels, screenshots. Offscreen works with the screen locked. Use it to verify visual changes.
 - `cargo run -p sim --release --example bench_coast` — coast integration cost per step.
 - `cargo run -p ephem-tool --release -- sol` — regenerate the Solar System ephemeris (needs `data/external/de440s.bsp`; see the tool's docs). The golden tests fail if the shipped file and code disagree.
-- `cargo clippy -p sim -p ephem-tool --all-targets -- -D warnings`, `cargo fmt --all`, `tools/check_file_sizes.sh`.
+- `cargo clippy -p sim -p ephem-tool -p asset-tool --all-targets -- -D warnings`, `cargo fmt --all`, `tools/check_file_sizes.sh`.
+- CI: a fast `sim` job (no Bevy) and a separate `game` job, on macOS and Windows. `Demo (Windows, software GPU)` runs the demo on WARP (manual/weekly; screenshots as an artifact).
+- Hooks (`.claude/settings.json`, scripts in `tools/hooks/`): `cargo check` of the owning crate after editing a `.rs` file, `cargo test -p sim` on stop. Failures are fed back (exit 2).
 
 ## Non-negotiable rules
 1. **Physics has no reference bodies.** Anchors/frames exist only for precision or display; changing them must not change trajectories (invariance tests enforce this). Never add SOI logic.
