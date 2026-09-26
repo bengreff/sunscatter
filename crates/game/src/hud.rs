@@ -174,6 +174,10 @@ pub fn draw(
     let (y, mo, d, h, mi, s) = sim.clock.to_calendar();
     let dim = |t: &str| egui::RichText::new(t).monospace().small().color(theme::DIM);
 
+    // The tracking station is its own screen: no flight HUD.
+    if station.open {
+        return Ok(());
+    }
     let show_fps = iface.show_fps;
     let mut set_warp = None;
     panel(ctx, &mut iface, PanelId::Time, |ui_| {
@@ -214,9 +218,6 @@ pub fn draw(
     });
     if let Some(i) = set_warp {
         sim.warp = i;
-    }
-    if station.open {
-        return Ok(());
     }
     let sim = sim.into_inner();
     let (anchor, r, _) = sim.ship().state_at(&sim.world, sim.clock);

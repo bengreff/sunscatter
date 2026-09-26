@@ -1,9 +1,11 @@
 //! Vessel switching and the tracking station (D050).
 //!
-//! `[` / `]` cycle the active vessel. F7 opens the tracking station: the
-//! camera pulled out to show the Moon's orbit, where tracked vessels stay in
-//! map view whatever their size (`map_view::Object::pinned`). It lists vessels (orbit about the nearest body,
-//! phase) with Track, Focus, Switch to and Delete, and bodies with Focus.
+//! `[` / `]` cycle the active vessel. F7 opens the tracking station, a full
+//! screen (KSP-like): the object list on the left (vessels grouped by status
+//! with track toggles, bodies as a star → planet → moon tree), details and
+//! actions (Focus, Switch to, Delete with confirmation) for the selection,
+//! and the map, where tracked vessels stay in map view whatever their size
+//! (`map_view::Object::pinned`) and clicking an icon selects and focuses it.
 //!
 //! Vessels get stable ids here (a Vec parallel to `SimState::fleet`), so the
 //! tracked set survives deleting other vessels. Only tracked vessels get map
@@ -95,6 +97,9 @@ pub struct TrackingStation {
     applied: bool,
     /// The flight camera to restore on leaving.
     saved: Option<(Focus, f64, f64, f64)>,
+    pub selected: Option<Selection>,
+    /// A vessel waiting for "delete for good?".
+    confirm_delete: Option<usize>,
 }
 
 /// Makes vessel `i` active. Its controls start from throttle 0 with SAS on;
@@ -212,14 +217,59 @@ pub fn vessel_info(sim: &SimState, i: usize) -> VesselInfo {
 
 enum Action {
     Close,
+    Select(Selection),
     FocusVessel(usize),
     Switch(usize),
+    AskDelete(usize),
     Delete(usize),
     Track(usize, bool),
     FocusBody(NodeId),
 }
 
-/// The tracking station window.
+/// What is selected in the station's list.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Selection {
+    Vessel(usize),
+    Body(NodeId),
+}
+
+/// The bodies as a tree for the station's list: each body after its display
+/// primary, children ordered by distance from it, with their depth (star 0,
+/// planets 1, moons 2).
+pub fn body_tree(world: &sim::world::World, t: sim::time::Epoch) -> Vec<(NodeId, usize)> {
+    let eph = &world.eph;
+    let bodies: Vec<NodeId> = eph.bodies().filter(|&n| world.source(n).is_some_and(|s| s.physical.is_some())).collect();
+    let snap = world.snapshot(t);
+    let children = |p: Option<NodeId>| {
+        let mut c: Vec<NodeId> = bodies.iter().copied().filter(|&n| crate::relations::primary(eph, n) == p).collect();
+        c.sort_by(|&a, &b| {
+            let d = |n: NodeId| p.map_or(0.0, |p| snap.relative_r(n, p).length());
+            d(a).total_cmp(&d(b))
+        });
+        c
+    };
+    let mut out = Vec::new();
+    let mut stack: Vec<(NodeId, usize)> = children(None).into_iter().rev().map(|n| (n, 0)).collect();
+    while let Some((n, depth)) = stack.pop() {
+        out.push((n, depth));
+        stack.extend(children(Some(n)).into_iter().rev().map(|c| (c, depth + 1)));
+    }
+    out
+}
+
+/// A vessel's group in the station's list.
+fn group(phase: &Phase) -> &'static str {
+    match phase {
+        Phase::Landed { .. } => "Landed",
+        Phase::Crashed { .. } => "Debris",
+        Phase::Powered { .. } | Phase::Coasting { .. } => "In flight",
+    }
+}
+
+/// The full-screen tracking station: the object list on the left (vessels
+/// grouped by status, bodies as a tree), the selection's details and
+/// actions, and the map. No flight HUD.
+#[allow(clippy::too_many_arguments)]
 pub fn draw(
     mut contexts: EguiContexts,
     mut sim: ResMut<SimState>,
@@ -233,55 +283,91 @@ pub fn draw(
     }
     let ctx = contexts.ctx_mut()?;
     let mut actions = Vec::new();
-    egui::Area::new("tracking_title".into()).anchor(egui::Align2::CENTER_TOP, [0.0, 10.0]).show(ctx, |ui| {
-        ui.label(egui::RichText::new("TRACKING STATION").size(18.0).color(egui::Color32::from_rgb(170, 200, 230)));
-    });
-    egui::Window::new("Tracking station (F7)")
-        .anchor(egui::Align2::RIGHT_TOP, [-10.0, 50.0])
-        .default_width(560.0)
+    let dim = crate::interface::theme::DIM;
+    let accent = crate::interface::theme::ACCENT;
+    let height = ctx.content_rect().height() - 16.0;
+    egui::Window::new("tracking_station")
+        .title_bar(false)
         .resizable(false)
+        .movable(false)
+        .anchor(egui::Align2::LEFT_TOP, [0.0, 0.0])
+        .fixed_size([330.0, height])
+        .frame(crate::interface::theme::panel_frame().corner_radius(0))
         .show(ctx, |ui| {
+            ui.label(egui::RichText::new("TRACKING STATION").size(18.0).color(accent));
             let (y, mo, d, h, mi, _) = sim.clock.to_calendar();
-            ui.horizontal(|ui| {
-                ui.monospace(format!("{y}-{mo:02}-{d:02} {h:02}:{mi:02} TDB   warp {}x", WARP_LEVELS[sim.warp]));
-                if ui.button("Back to flight").clicked() {
-                    actions.push(Action::Close);
+            ui.monospace(format!("{y}-{mo:02}-{d:02} {h:02}:{mi:02} TDB   warp {}x", WARP_LEVELS[sim.warp]));
+            if ui.button("Back to flight (F7)").clicked() {
+                actions.push(Action::Close);
+            }
+            ui.separator();
+            egui::ScrollArea::vertical().max_height(ui.available_height() * 0.62).show(ui, |ui| {
+                for g in ["In flight", "Landed", "Debris"] {
+                    let members: Vec<usize> =
+                        (0..sim.fleet.len()).filter(|&i| group(&sim.fleet[i].phase) == g).collect();
+                    if members.is_empty() {
+                        continue;
+                    }
+                    ui.label(egui::RichText::new(format!("{g} ({})", members.len())).small().color(dim));
+                    for i in members {
+                        ui.horizontal(|ui| {
+                            let mut on = tracked.is_tracked(i);
+                            if ui.checkbox(&mut on, "").on_hover_text("Track: orbit line and icon on the map").changed()
+                            {
+                                actions.push(Action::Track(i, on));
+                            }
+                            let name =
+                                if i == sim.active { format!("{} (active)", tracked.name(i)) } else { tracked.name(i) };
+                            if ui.selectable_label(ts.selected == Some(Selection::Vessel(i)), name).clicked() {
+                                actions.push(Action::Select(Selection::Vessel(i)));
+                            }
+                        });
+                    }
+                }
+                ui.add_space(6.0);
+                ui.label(egui::RichText::new("Bodies").small().color(dim));
+                for (node, depth) in body_tree(&sim.world, sim.clock) {
+                    ui.horizontal(|ui| {
+                        ui.add_space(14.0 * depth as f32);
+                        let name = &sim.world.eph.node(node).name;
+                        if ui.selectable_label(ts.selected == Some(Selection::Body(node)), name).clicked() {
+                            actions.push(Action::Select(Selection::Body(node)));
+                            actions.push(Action::FocusBody(node));
+                        }
+                    });
                 }
             });
             ui.separator();
-            ui.strong("Vessels");
-            egui::Grid::new("ts_vessels").striped(true).spacing([10.0, 4.0]).show(ui, |ui| {
-                for label in ["track", "vessel", "about", "Pe / Ap", "status", ""] {
-                    ui.label(egui::RichText::new(label).weak());
+            match ts.selected {
+                Some(Selection::Vessel(i)) if i < sim.fleet.len() => {
+                    vessel_details(ui, &sim, &tracked, &ts, i, &mut actions)
                 }
-                ui.end_row();
-                for i in 0..sim.fleet.len() {
-                    vessel_row(ui, &sim, &tracked, i, &mut actions);
-                }
-            });
-            ui.separator();
-            ui.strong("Bodies");
-            ui.horizontal_wrapped(|ui| {
-                for node in sim.world.eph.bodies() {
-                    if sim.world.source(node).and_then(|s| s.physical.as_ref()).is_some()
-                        && ui.button(&sim.world.eph.node(node).name).on_hover_text("Focus").clicked()
-                    {
+                Some(Selection::Body(node)) => {
+                    ui.strong(&sim.world.eph.node(node).name);
+                    if let Some((p, o)) = crate::relations::body_orbit(&sim.world.eph, sim.clock, node) {
+                        ui.monospace(format!("orbits {}", sim.world.eph.node(p).name));
+                        ui.monospace(format!("a {}", fmt_dist(o.elements.a)));
+                        if let Some(t) = o.period() {
+                            ui.monospace(format!("period {}", fmt_duration(t)));
+                        }
+                    }
+                    if ui.button("Focus").clicked() {
                         actions.push(Action::FocusBody(node));
                     }
                 }
-            });
+                _ => {
+                    ui.label(egui::RichText::new("Select a vessel or body, or click its icon on the map.").color(dim));
+                }
+            }
         });
     for a in actions {
         match a {
             Action::Close => ts.open = false,
-            Action::FocusVessel(i) => {
-                let primary = camera::nearest_body_to(&sim, i);
-                let (anchor, r, _) = sim.fleet[i].state_at(&sim.world, sim.clock);
-                let from =
-                    primary.map_or(1.0e7, |p| (r - sim.world.snapshot(sim.clock).relative(p, anchor).r).length());
-                rig.focus = Focus::Vessel(i);
-                rig.distance = 3.0 * from;
+            Action::Select(s) => {
+                ts.selected = Some(s);
+                ts.confirm_delete = None;
             }
+            Action::FocusVessel(i) => focus_vessel(&sim, &mut rig, i),
             Action::Switch(i) => {
                 switch_to(&mut sim, &mut rig, &mut pred, i);
                 ts.open = false;
@@ -290,8 +376,11 @@ pub fn draw(
                     saved.0 = Focus::Ship;
                 }
             }
+            Action::AskDelete(i) => ts.confirm_delete = Some(i),
             Action::Delete(i) => {
                 delete_vessel(&mut sim, &mut tracked, &mut rig, i);
+                ts.confirm_delete = None;
+                ts.selected = None;
             }
             Action::Track(i, on) => tracked.set_tracked(i, on),
             Action::FocusBody(node) => camera::focus_body(&mut rig, &sim, node),
@@ -300,46 +389,58 @@ pub fn draw(
     Ok(())
 }
 
-fn vessel_row(ui: &mut egui::Ui, sim: &SimState, tracked: &Tracked, i: usize, actions: &mut Vec<Action>) {
+/// Focus the station camera on vessel `i`, from a few times its distance
+/// to the body it orbits.
+pub fn focus_vessel(sim: &SimState, rig: &mut CameraRig, i: usize) {
+    let primary = camera::nearest_body_to(sim, i);
+    let (anchor, r, _) = sim.fleet[i].state_at(&sim.world, sim.clock);
+    let from = primary.map_or(1.0e7, |p| (r - sim.world.snapshot(sim.clock).relative(p, anchor).r).length());
+    rig.focus = Focus::Vessel(i);
+    rig.distance = 3.0 * from;
+}
+
+fn vessel_details(
+    ui: &mut egui::Ui,
+    sim: &SimState,
+    tracked: &Tracked,
+    ts: &TrackingStation,
+    i: usize,
+    actions: &mut Vec<Action>,
+) {
     let active = i == sim.active;
     let info = vessel_info(sim, i);
-    let mut on = tracked.is_tracked(i);
-    if ui.checkbox(&mut on, "").on_hover_text("Orbit line in map mode").changed() {
-        actions.push(Action::Track(i, on));
+    ui.strong(tracked.name(i));
+    ui.monospace(format!("status {}", info.status));
+    ui.monospace(format!("about  {}", info.primary.map_or_else(|| "-".into(), |p| sim.world.eph.node(p).name.clone())));
+    if let Some((pe, ap)) = info.apsides {
+        let ap = if ap.is_finite() { fmt_dist(ap) } else { "escape".into() };
+        ui.monospace(format!("Pe {}   Ap {}", fmt_dist(pe), ap));
     }
-    let name = tracked.name(i);
-    if active {
-        ui.label(egui::RichText::new(format!("{name} (active)")).color(egui::Color32::from_rgb(255, 215, 80)));
-    } else {
-        ui.label(name);
+    if let Some(p) = info.period {
+        ui.monospace(format!("period {}", fmt_duration(p)));
     }
-    ui.monospace(info.primary.map_or_else(|| "-".into(), |p| sim.world.eph.node(p).name.clone()));
-    match info.apsides {
-        Some((pe, ap)) => {
-            let ap = if ap.is_finite() { fmt_dist(ap) } else { "escape".into() };
-            let text = ui.monospace(format!("{} / {}", fmt_dist(pe), ap));
-            if let Some(p) = info.period {
-                text.on_hover_text(format!("period {}", fmt_duration(p)));
-            }
-        }
-        None => {
-            ui.monospace("-");
-        }
-    }
-    ui.monospace(info.status);
     ui.horizontal(|ui| {
-        if ui.small_button("Focus").clicked() {
+        if ui.button("Focus").clicked() {
             actions.push(Action::FocusVessel(i));
         }
-        if ui.add_enabled(!active, egui::Button::new("Switch to").small()).clicked() {
+        if ui.add_enabled(!active, egui::Button::new("Switch to")).clicked() {
             actions.push(Action::Switch(i));
         }
-        let delete = ui.add_enabled(!active, egui::Button::new("Delete").small());
-        if delete.on_hover_text("Delete this vessel (debris)").clicked() {
-            actions.push(Action::Delete(i));
+        if ui.add_enabled(!active, egui::Button::new("Delete")).on_hover_text("Delete this vessel").clicked() {
+            actions.push(Action::AskDelete(i));
         }
     });
-    ui.end_row();
+    if ts.confirm_delete == Some(i) {
+        ui.horizontal(|ui| {
+            ui.label(egui::RichText::new("Delete it for good?").color(crate::interface::theme::WARN));
+            if ui.button("Delete").clicked() {
+                actions.push(Action::Delete(i));
+            }
+            if ui.button("Cancel").clicked() {
+                actions.push(Action::Select(Selection::Vessel(i)));
+            }
+        });
+    }
 }
 
 #[cfg(test)]
@@ -360,6 +461,21 @@ mod tests {
         t.reset(2);
         assert_eq!((t.id(0), t.id(1)), (Some(1), Some(2)));
         assert!(t.is_tracked(1));
+    }
+
+    #[test]
+    fn bodies_form_a_star_planet_moon_tree() {
+        let sim = SimState::new();
+        let tree = body_tree(&sim.world, sim.clock);
+        let name = |k: usize| sim.world.eph.node(tree[k].0).name.as_str();
+        assert_eq!((name(0), tree[0].1), ("Sun", 0));
+        let earth = tree.iter().position(|(n, _)| sim.world.eph.node(*n).name == "Earth").expect("Earth");
+        assert_eq!(tree[earth].1, 1);
+        assert_eq!((name(earth + 1), tree[earth + 1].1), ("Moon", 2), "the Moon right under Earth");
+        // Planets in order of distance from the Sun.
+        let planets: Vec<&str> =
+            tree.iter().filter(|(_, d)| *d == 1).map(|(n, _)| sim.world.eph.node(*n).name.as_str()).collect();
+        assert_eq!(&planets[..4], &["Mercury", "Venus", "Earth", "Mars"]);
     }
 
     #[test]

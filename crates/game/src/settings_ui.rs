@@ -148,6 +148,7 @@ fn graphics_tab(ui_: &mut egui::Ui, ui: &mut SettingsUi, settings: &mut Graphics
     ui_.checkbox(&mut s.flare, "Sun flare");
     ui_.checkbox(&mut s.shadows, "Shadows");
     ui_.checkbox(&mut s.earthshine, "Planetshine (Earthshine, moonlight)");
+    ui_.checkbox(&mut s.eye_adaptation, "Eye adaptation (exposure follows the scene)");
     egui::ComboBox::from_label("MSAA").selected_text(format!("{:?}", s.msaa)).show_ui(ui_, |ui_| {
         for m in [MsaaLevel::Off, MsaaLevel::X2, MsaaLevel::X4] {
             ui_.selectable_value(&mut s.msaa, m, format!("{m:?}"));

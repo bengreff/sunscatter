@@ -174,7 +174,7 @@ fn egui_color(c: [f32; 3], a: f32) -> egui::Color32 {
 pub fn draw_overlay(
     mut contexts: EguiContexts,
     sim: Res<SimState>,
-    rig: Res<CameraRig>,
+    mut rig: ResMut<CameraRig>,
     pred: Res<Prediction>,
     ui: Res<UiState>,
     map: Res<MapView>,
@@ -182,6 +182,7 @@ pub fn draw_overlay(
     cam: Query<(&Camera, &Transform, &Projection), With<MainCamera>>,
     window: Query<&Window, With<PrimaryWindow>>,
     tracked: Res<Tracked>,
+    mut station: ResMut<TrackingStation>,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
     let Some(v) = view(&cam) else { return Ok(()) };
@@ -212,6 +213,19 @@ pub fn draw_overlay(
         cursor.filter(|_| !ctx.is_pointer_over_egui()).and_then(|c| map_view::hover(&map.objects, &map.vis, c));
     if let Some(o) = hovered.map(|i| &map.objects[i]) {
         let Some(s) = o.screen else { return Ok(()) };
+        // In the tracking station, clicking an icon selects and focuses it.
+        if station.open && ctx.input(|i| i.pointer.primary_clicked()) {
+            match o.id {
+                ObjectId::Body(node) => {
+                    station.selected = Some(crate::tracking::Selection::Body(node));
+                    camera::focus_body(&mut rig, &sim, node);
+                }
+                ObjectId::Vessel(i) => {
+                    station.selected = Some(crate::tracking::Selection::Vessel(i));
+                    crate::tracking::focus_vessel(&sim, &mut rig, i);
+                }
+            }
+        }
         let name = match o.id {
             ObjectId::Body(node) => sim.world.eph.node(node).name.clone(),
             ObjectId::Vessel(i) if i == sim.active => format!("{} (active)", tracked.name(i)),

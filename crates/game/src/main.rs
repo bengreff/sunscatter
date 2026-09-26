@@ -60,6 +60,7 @@ fn main() {
             ..default()
         }))
         .add_plugins(EguiPlugin::default())
+        .add_plugins(bevy::post_process::auto_exposure::AutoExposurePlugin)
         .add_plugins((terrain::TerrainPlugin, sky::SkyPlugin, atmosphere::AtmosphereFixPlugin))
         .insert_resource(state::SimState::new())
         .init_resource::<state::Prediction>()

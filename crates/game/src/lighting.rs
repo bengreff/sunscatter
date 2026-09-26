@@ -89,6 +89,23 @@ pub fn planetshine(at: DVec3, body: DVec3, r: f64, albedo: f64, e_star: f64, to_
     e_star * albedo * 2.0 / 3.0 * (r / d).powi(2) * lambert_phase(alpha)
 }
 
+/// Eye adaptation (D055). At the fixed exposure (EV100 14.5) a sunlit
+/// scene's mean exposed luminance is about 2^DAYLIGHT_LOG_LUM. Auto exposure
+/// keeps daylight scenes there (no change) and brightens darker ones by at
+/// most MAX_BRIGHTEN_STOPS, slowly: enough to show Earthshine on the Moon's
+/// night side (~7 lux, ~14 stops below sunlight) in a close-up, while a
+/// sunlit scene keeps night sides near-black.
+pub const DAYLIGHT_LOG_LUM: f32 = -2.2;
+pub const MAX_BRIGHTEN_STOPS: f32 = 15.0;
+/// Adaptation speeds (stops per second): slow to brighten, quicker back.
+pub const BRIGHTEN_SPEED: f32 = 1.0;
+pub const DARKEN_SPEED: f32 = 3.0;
+
+/// The metering range (log2 exposed luminance) given to auto exposure.
+pub fn metering_range() -> std::ops::RangeInclusive<f32> {
+    (DAYLIGHT_LOG_LUM - MAX_BRIGHTEN_STOPS)..=DAYLIGHT_LOG_LUM
+}
+
 /// What one body receives: its sunlight relative to the flux at `camera`,
 /// the body most likely to eclipse the star there, and the brightest
 /// planetshine (reflector index, lux at the body's centre).
@@ -247,6 +264,28 @@ mod tests {
         let moved: Vec<Sphere> = bodies.iter().map(|b| Sphere { centre: b.centre + shift, ..*b }).collect();
         let (_, moved_shine) = body_light(0, &moved, sun + shift, lm).shine.expect("moonshine");
         assert!((moved_shine - moonshine).abs() < 1e-9 * moonshine);
+    }
+
+    /// The correction (stops) auto exposure settles at for a scene whose mean
+    /// exposed log luminance is `mean` (Bevy's rule: compensation − clamped
+    /// mean, with our flat compensation at DAYLIGHT_LOG_LUM).
+    fn adapted_stops(mean: f32) -> f32 {
+        let r = metering_range();
+        DAYLIGHT_LOG_LUM - mean.clamp(*r.start(), *r.end())
+    }
+
+    #[test]
+    fn eye_adaptation_leaves_daylight_alone_and_brightens_dark_scenes_within_limits() {
+        // Mean exposed luminance of the scene, in stops relative to daylight.
+        let stops = |rel: f32| adapted_stops(DAYLIGHT_LOG_LUM + rel);
+        // (scene relative to daylight, expected correction)
+        let cases = [(0.0, 0.0), (3.0, 0.0), (-4.0, 4.0), (-14.0, 14.0), (-30.0, 15.0)];
+        for (rel, expected) in cases {
+            assert!((stops(rel) - expected).abs() < 1e-5, "{rel}: {}", stops(rel));
+        }
+        // Earthshine on the Moon (7 lux vs ~128,000 lux sunlight) is within reach.
+        let earthshine = (7.0f32 / 128_000.0).log2();
+        assert!(earthshine > -MAX_BRIGHTEN_STOPS, "{earthshine}");
     }
 
     #[test]

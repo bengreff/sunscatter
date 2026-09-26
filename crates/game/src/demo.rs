@@ -92,6 +92,8 @@ pub struct Demo {
     shot_taken: bool,
     /// The camera yaw before the low ascent view looked back over land.
     land_view: Option<f64>,
+    /// The settings screen's shot was taken (the Menu step).
+    menu_shot: bool,
     perf: PerfSample,
     capture: Option<Capture>,
     /// A benchmark was started and its results are pending.
@@ -127,6 +129,7 @@ impl Demo {
             shots: 0,
             shot_taken: false,
             land_view: None,
+            menu_shot: false,
             perf: PerfSample::default(),
             capture: None,
             benching: false,
@@ -523,8 +526,11 @@ pub fn run(
                 demo.shot_taken = true;
                 settings_ui.open = true;
                 settings_ui.tab = crate::settings_ui::SettingsTab::Interface;
-            } else if demo.timer > 2.0 && demo.shot_taken {
+            } else if demo.timer > 2.0 && demo.shot_taken && !demo.menu_shot {
                 demo.shot(&mut commands, "settings_interface");
+                // Closed a second later: the shot is of the frame being drawn.
+                demo.menu_shot = true;
+            } else if demo.timer > 3.0 && demo.menu_shot {
                 settings_ui.open = false;
                 menu.open = false;
                 demo.next(Step::Done);
