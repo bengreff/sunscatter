@@ -32,6 +32,9 @@ jobs:
       - name: File size limit
         shell: bash
         run: tools/check_file_sizes.sh
+      - name: Decision references
+        shell: bash
+        run: tools/check_decision_refs.sh
       - name: Clippy (sim, ephem-tool, asset-tool)
         run: cargo clippy -p sim -p ephem-tool -p asset-tool --all-targets --locked -- -D warnings
       - name: Tests (sim, asset-tool)
