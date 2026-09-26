@@ -202,14 +202,44 @@ Oceans get proper behavior when aerodynamics is implemented.
 - It exposes game state, planning tools and script deployment.
 - The player's own agent (Claude Code or another) connects through it, and acts as the tutorial and assistant (D041).
 
+**D045: The engine is Bevy, with the version pinned per milestone.** *Decided, 2026-09-26.*
+The prototype showed no blocking issues and plenty of performance headroom: 11 vessels at 1,000,000x warp ran at ~265 fps on the reference Mac. This resolves D031's engine question.
+
+**D046: Terrain and texture data are committed directly at reduced resolution.** *Decided, 2026-09-26.*
+- Earth and Moon heightmaps and colour maps come from public-domain sources: ETOPO 2022, LRO LOLA, NASA Blue Marble and LROC.
+- They are downsampled to sizes that can live in git: each file under ~50 MB, about 60 MB in total.
+- They should be close to final, not placeholders.
+
+**D047: Terrain is physical.** *Decided, 2026-09-26.*
+- Altitude, landing and collision use the same heightmap that is rendered.
+- The sim samples it deterministically.
+- Oceans are solid at sea level (D037).
+
+**D048: Graphics have five tiers: Minimal, Low, Medium, High, Ultra.** *Decided, 2026-09-26.*
+- Minimal has near-zero cost. Ultra looks like KSP1 with visual mods. Every tier is highly optimized.
+- Each feature can also be toggled on its own, and tiers are presets of those toggles.
+- All visuals are data-driven for any body.
+- Every feature's cost is measured.
+
+**D049: Map mode switches on automatically.** *Decided, 2026-09-26.*
+- It activates when the active ship covers less than about one pixel on screen, which is several km away.
+- Map mode shows the following, all with hover names and highlights:
+  - orbit lines for the ship, bodies and tracked objects
+  - Ap/Pe markers
+  - an icon for the ship
+  - icons for bodies smaller than a pixel
+- There is no separate map-view key.
+
+**D050: The tracking station is a separate screen that is always in map mode.** *Decided, 2026-09-26.*
+It lists tracked vessels (and later asteroids), lets you focus and switch to a vessel, and draws on ideas from KSP and v0.1's tracking station.
+
 ---
 
 ## Open questions
 
 1. What kind of organization the player leads (D027).
-2. The outcome of the Bevy prototype (D031).
-3. Details of the ship model: structural solver, aerodynamics model, cells for heat and radiation (D018, D032, D033).
-4. The crew model.
-5. The colony design (D019).
-6. Which model the player's AI agent uses and what it costs the player (D044).
-7. Motion-model tunables: the cutoff threshold, opening angle, anchor hysteresis, and choice of coast integrator.
+2. Details of the ship model: structural solver, aerodynamics model, cells for heat and radiation (D018, D032, D033).
+3. The crew model.
+4. The colony design (D019).
+5. Which model the player's AI agent uses and what it costs the player (D044).
+6. Motion-model tunables: the cutoff threshold, opening angle, anchor hysteresis, and choice of coast integrator.
