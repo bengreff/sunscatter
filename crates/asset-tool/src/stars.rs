@@ -107,19 +107,33 @@ mod tests {
         assert_eq!(parse_line(NOVA), None);
     }
 
+    #[derive(serde::Deserialize)]
+    struct S {
+        ra: f64,
+        dec: f64,
+        vmag: f32,
+        bv: f32,
+    }
+    #[derive(serde::Deserialize)]
+    struct Catalog {
+        stars: Vec<S>,
+    }
+
+    #[test]
+    fn committed_catalogue_parses() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../data/stars/bsc5.ron");
+        let cat: Catalog = ron::from_str(&std::fs::read_to_string(path).expect("read bsc5.ron")).expect("valid RON");
+        assert_eq!(cat.stars.len(), 9096);
+        assert!(cat
+            .stars
+            .iter()
+            .all(|s| (0.0..std::f64::consts::TAU).contains(&s.ra) && s.dec.abs() <= std::f64::consts::FRAC_PI_2));
+        let brightest = cat.stars.iter().min_by(|a, b| a.vmag.total_cmp(&b.vmag)).unwrap();
+        assert_eq!((brightest.vmag, brightest.bv), (-1.46, 0.0)); // Sirius
+    }
+
     #[test]
     fn ron_output_deserializes() {
-        #[derive(serde::Deserialize)]
-        struct S {
-            ra: f64,
-            dec: f64,
-            vmag: f32,
-            bv: f32,
-        }
-        #[derive(serde::Deserialize)]
-        struct Catalog {
-            stars: Vec<S>,
-        }
         let star = parse_line(SIRIUS).unwrap();
         let cat: Catalog = ron::from_str(&to_ron(&[star])).expect("valid RON");
         assert_eq!(cat.stars.len(), 1);
