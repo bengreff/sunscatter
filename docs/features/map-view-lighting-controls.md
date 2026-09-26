@@ -278,9 +278,9 @@ Status per item, verified by tests and hidden offscreen demo runs (screenshots o
 | 6 | Pause menu, settings, GUI | playable | Esc menu, tabbed settings, movable saved panels, theme, help (H), toasts, one formatter, warp arrows. |
 | 7 | Camera collision | playable | Refuses moves into terrain; slides in when the ground rises; outside the ship. |
 | 8 | Ground jitter | playable | `Vessel::state_at` at the clock. |
-| 9 | Surface flicker, dark patches | partial | Water mask per fragment, geomorphing, sky light fades near the top. The owner's hard-edged dark patch was **not reproduced**; likely the old per-vertex water flag (coastline chunks). Aerial perspective ends at 400 km; raising it to 1,000 km changed nothing visible in the demo's 10 km, 20 km and orbit views, so it was kept. |
+| 9 | Surface flicker, dark patches | playable | Water mask per fragment, geomorphing, sky light fades near the top. The owner's hard-edged dark patch was **not reproduced**; likely the old per-vertex water flag (coastline chunks). Aerial perspective ends at 400 km; raising it to 1,000 km changed nothing visible in the demo's 10 km, 20 km and orbit views, so it was kept. |
 | 10 | Hover priority | playable | Part of item 2. |
 | 11 | Navball | playable | Smaller, centred, altitude and speed above the ball, relative to the dominant body. |
 | 12 | Tracking station | playable | Full-height list, body tree, grouped vessels, click an icon to focus. |
 
-Known gaps: the overall haze strength at 10–20 km (the ground looks fully blue; not the 400 km range, see item 9); the dark-patch repro; Ap/Pe markers still search the whole computed span (longer than the line in non-default modes); the orbit-line rescan per frame costs ~25 fps at 1,000,000x with 11 vessels (170 fps, fine against the 60 fps target).
+After the owner's second review: night sides are dark (a leaked sky light was lighting them), CC0 ground textures and water waves replace the old detail layer, and the pad moved onto land. Known gaps: the overall haze strength at 10–20 km (the ground looks fully blue; not the 400 km range, see item 9); the dark-patch repro; Ap/Pe markers still search the whole computed span (longer than the line in non-default modes); the orbit-line rescan per frame costs ~25 fps at 1,000,000x with 11 vessels (170 fps, fine against the 60 fps target).

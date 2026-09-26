@@ -26,12 +26,13 @@ A short map to search before building anything: who owns what, the frame order, 
 | Nearest body, display primary, osculating orbit (vessels and bodies), orbit size | `game::relations` | display only, never physics |
 | Map view: what is visible/hoverable, per object | `game::map_view` (rule, D054); `game::map` gathers sizes and draws | pure functions + table tests |
 | Orbit-line length (revolutions, caps, settings) | `game::trajectory` (`line`, `settings`); dominance in `game::relations::Dominance` (D056) | display only |
-| Lighting: star flux per object, eclipses, planetshine (D055) | `game::lighting` (rules; fills the terrain uniforms; the shader mirrors `eclipse_factor`) | ambient/starlight in `game::sky`; exposure fixed (eye adaptation to come) |
+| Lighting: star flux per object, eclipses, planetshine (D055) | `game::lighting` (rules; fills the terrain uniforms; the shader mirrors `eclipse_factor` and fades sky light through twilight) | ambient/starlight in `game::sky`; exposure fixed (D055) |
 | Camera pose and limits, zoom, collision with surfaces and the ship | `game::camera` | terrain via `sim::forces::altitude_above` |
 | Navball: attitude, markers, mode, flight readouts | `game::navball` (rules in `navball::rules`) | |
 | A vessel's state at the clock (for drawing) | `sim::vessel::Vessel::state_at` | never integrates (rule 4) |
 | Fps readout (0.5 s windows) | `game::hud::FpsMeter` | |
-| Terrain meshes and LOD | `game::terrain` | heights via `sim` |
+| Terrain meshes and LOD, geomorphing | `game::terrain` (`lod`, `mesh`) | heights via `sim` |
+| Terrain look: colour map, water mask, ground textures, waves | `game::terrain` (`material`, `water`, `ground`, `terrain.wgsl`) | textures in `data/textures/terrain` (CC0) |
 | Graphics tiers and toggles | `game::settings`; the settings screen in `game::settings_ui` | |
 | Panel layout, theme, pause menu, key help | `game::interface` (`layout` is pure data) | saved in `settings.ron` |
 | Where files live | `game::persist` | `SUNSCATTER_HOME` override |
