@@ -55,6 +55,7 @@ fn config(years: f64) -> GenConfig {
         degree: 14,
         trial_steps: 24 * 200,
         rails_stride: 24,
+        extras: Default::default(),
     }
 }
 

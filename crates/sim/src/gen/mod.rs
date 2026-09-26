@@ -10,7 +10,7 @@ mod fit;
 mod nbody;
 
 pub use fit::{fit_rails, RailsFit};
-pub use nbody::NBody;
+pub use nbody::{j2_accel, schwarzschild_accel, Extras, NBody, Oblate};
 
 use crate::ephem::{ChebTable, Ephemeris, Motion, Node, NodeKind};
 use crate::frame::NodeId;
@@ -54,6 +54,8 @@ pub struct GenConfig {
     pub trial_steps: usize,
     /// Keep every `rails_stride`-th sample for the rails fit.
     pub rails_stride: usize,
+    /// Forces beyond point masses (part of the recorded assumption set).
+    pub extras: Extras,
 }
 
 /// What the generator decided for one node, and how well it fits.
@@ -137,7 +139,7 @@ fn run(
     steps: usize,
     seg_steps: Option<&[usize]>,
 ) -> RunOutput {
-    let mut sys = NBody::new(bodies);
+    let mut sys = NBody::new(cfg.start, bodies, cfg.extras.clone());
     let n_nodes = tree.len();
     let mut buffers: Vec<VecDeque<StepSample>> = vec![VecDeque::new(); n_nodes];
     let mut out = RunOutput {

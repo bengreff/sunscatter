@@ -10,10 +10,12 @@
 //!   through the lowest common ancestor in the frame tree, never by subtracting
 //!   two large absolute coordinates.
 
+pub mod body;
 pub mod ephem;
 pub mod frame;
 pub mod gen;
 pub mod integrate;
 pub mod kepler;
 pub mod math;
+pub mod sol;
 pub mod time;

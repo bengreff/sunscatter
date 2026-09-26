@@ -8,3 +8,6 @@ Thumbs.db
 .idea/
 .vscode/
 *.swp
+
+# Large third-party inputs (downloaded by tools, never committed)
+/data/external/
