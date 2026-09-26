@@ -293,6 +293,8 @@ pub fn draw(
         .fixed_size([330.0, height])
         .frame(crate::interface::theme::panel_frame().corner_radius(0))
         .show(ctx, |ui| {
+            // The list runs the full height of the screen.
+            ui.set_min_height(height - 16.0);
             ui.label(egui::RichText::new("TRACKING STATION").size(18.0).color(accent));
             let (y, mo, d, h, mi, _) = sim.clock.to_calendar();
             ui.monospace(format!("{y}-{mo:02}-{d:02} {h:02}:{mi:02} TDB   warp {}x", WARP_LEVELS[sim.warp]));
