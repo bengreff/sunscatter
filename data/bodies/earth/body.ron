@@ -26,6 +26,18 @@
         solid: true,
         // Terrain heights (m) relative to sea level; see docs for the PNG contract.
         heightmap: Some("height.png"),
+        // Procedural detail below the heightmap (D059): RMS residual map (8-bit,
+        // rms_m = value² / 64, baked by asset-tool) and the fractal's parameters.
+        // Octave 0 is the map's sample spacing; 12 octaves reach ~2.5 m.
+        roughness: Some("roughness.png"),
+        terrain_detail: Some((
+            octaves: 12,
+            wavelength: 4892.0,
+            lacunarity: 2.0,
+            gain: 0.5,
+            amplitude: 2.0,
+            ridge_threshold: 100.0,
+        )),
         // Oceans are solid at sea level (D037): surface = max(terrain, sea_level).
         sea_level: Some(0.0),
     ),

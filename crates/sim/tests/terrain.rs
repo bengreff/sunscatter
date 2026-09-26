@@ -29,8 +29,9 @@ fn plateau_world() -> World {
     let mut w = world();
     let (width, height) = (64, 32);
     let data = (0..width * height).map(|k| if k / width < height / 2 { 3_000 } else { -4_000 }).collect();
-    let earth = w.sources.iter_mut().find(|s| s.name == "Earth").unwrap();
-    earth.physical.as_mut().unwrap().terrain = Some(Arc::new(Heightmap::from_vec(width, height, data)));
+    let earth = w.sources.iter_mut().find(|s| s.name == "Earth").unwrap().physical.as_mut().unwrap();
+    earth.terrain = Some(Arc::new(Heightmap::from_vec(width, height, data)));
+    earth.detail = None;
     w
 }
 
@@ -136,7 +137,9 @@ fn shipped_heightmaps_have_the_expected_landmarks() {
         assert_eq!(e.surface_height_latlon(11.3733 * DEG, 142.5917 * DEG), 0.0, "sea is solid at 0");
         let ship = Vessel::landed_at(&w, VesselId(1), "Earth", 27.9881, 86.925, t0(), VesselParams::block());
         let Phase::Landed { fixed, .. } = ship.phase else { unreachable!() };
-        assert!((e.altitude(fixed) - everest - 5.0).abs() < 1.0);
+        let surface = e.surface_height_latlon(27.9881 * DEG, 86.925 * DEG);
+        assert!((e.altitude(fixed) - surface - 5.0).abs() < 1.0);
+        assert!((surface - everest).abs() < 500.0, "detail stays near the base: {surface} vs {everest}");
     }
     if let Some(m) = shipped(&w, "Moon") {
         let tycho = height(&m, -43.31, -11.36);
@@ -145,12 +148,8 @@ fn shipped_heightmaps_have_the_expected_landmarks() {
     }
 }
 
-/// Cross-platform determinism on the committed data (CI: macOS and Windows).
-#[test]
-fn shipped_heightmap_samples_match_golden_hash() {
-    let w = world();
-    let Some(e) = shipped(&w, "Earth") else { return };
-    let map = e.terrain.as_ref().unwrap();
+/// Pseudo-random directions (xorshift, fixed seed).
+fn directions(n: usize) -> Vec<DVec3> {
     let mut x: u64 = 0x2545_f491_4f6c_dd1d;
     let mut next = || {
         x ^= x << 13;
@@ -158,15 +157,71 @@ fn shipped_heightmap_samples_match_golden_hash() {
         x ^= x << 17;
         (x >> 11) as f64 / (1u64 << 53) as f64 * 2.0 - 1.0
     };
-    let mut bytes = Vec::new();
-    for _ in 0..100_000 {
-        let dir = DVec3::new(next(), next(), next());
-        bytes.extend_from_slice(&map.height_at(dir).to_bits().to_le_bytes());
-    }
-    let hash = sim::ephem::fnv1a64(&bytes);
-    println!("Earth terrain sample hash: {hash:#018x}");
-    assert_eq!(hash, EARTH_GOLDEN, "terrain sampling or data changed (or differs on this platform)");
+    (0..n).map(|_| DVec3::new(next(), next(), next())).collect()
 }
 
-// Catmull-Rom bicubic sampling with the pole blend (D059), was bilinear.
-const EARTH_GOLDEN: u64 = 0x581153ae2859922d;
+/// Cross-platform determinism on the committed data (CI: macOS and Windows):
+/// the whole surface, base (bicubic) + detail + solid sea.
+#[test]
+fn shipped_heightmap_samples_match_golden_hash() {
+    let w = world();
+    let Some(e) = shipped(&w, "Earth") else { return };
+    assert!(e.detail.is_some(), "Earth ships with terrain detail");
+    let mut bytes = Vec::new();
+    for dir in directions(100_000) {
+        bytes.extend_from_slice(&e.surface_height(Vec3::from_raw(dir)).to_bits().to_le_bytes());
+    }
+    let hash = sim::ephem::fnv1a64(&bytes);
+    println!("Earth surface sample hash: {hash:#018x}");
+    assert_eq!(hash, EARTH_GOLDEN, "terrain sampling, detail or data changed (or differs on this platform)");
+}
+
+// Base + procedural detail (D059); was the bicubic heightmap alone.
+const EARTH_GOLDEN: u64 = 0x3e55d4b2973ad95b;
+
+#[test]
+fn detail_is_zero_over_water_and_present_on_rough_land() {
+    let w = world();
+    let Some(e) = shipped(&w, "Earth") else { return };
+    let map = e.terrain.as_ref().unwrap();
+    let mut rough_land = 0;
+    for dir in directions(20_000) {
+        let (lat, lon) = sim::terrain::lat_lon(dir);
+        let base = map.sample(lat, lon);
+        let detail = e.terrain_height(dir) - base;
+        if base <= 0.0 {
+            assert_eq!(detail, 0.0, "detail over water at {dir}");
+            assert_eq!(e.surface_height(Vec3::from_raw(dir)), 0.0);
+        } else if base > 2_000.0 && detail.abs() > 1.0 {
+            rough_land += 1;
+        }
+    }
+    assert!(rough_land > 100, "{rough_land}");
+}
+
+/// No steps: heights of directions 1e-10 rad apart (0.6 mm on Earth) differ
+/// by < 1 mm, across the antimeridian, at the poles and at random places.
+/// (1e-9 rad is 6 mm, where real steep detail legitimately rises more.)
+#[test]
+fn shipped_surfaces_are_continuous() {
+    let w = world();
+    for body in ["Earth", "Moon"] {
+        let Some(p) = shipped(&w, body) else { continue };
+        let eps = 1e-10;
+        let mut pairs = vec![
+            (DVec3::new(-1.0, eps, 0.3), DVec3::new(-1.0, -eps, 0.3)),
+            (DVec3::new(-1.0, eps, -0.6), DVec3::new(-1.0, -eps, -0.6)),
+            (DVec3::new(eps, 0.0, 1.0), DVec3::new(-eps, 0.0, 1.0)),
+            (DVec3::new(0.0, eps, 1.0), DVec3::new(0.0, -eps, 1.0)),
+            (DVec3::new(eps, eps, -1.0), DVec3::new(-eps, -eps, -1.0)),
+        ];
+        for a in directions(5_000) {
+            let a = a.normalize();
+            pairs.push((a, (a + a.any_orthonormal_vector() * eps).normalize()));
+        }
+        for (a, b) in pairs {
+            let d = (p.terrain_height(a) - p.terrain_height(b)).abs();
+            assert!(d < 1e-3, "{body} {a} vs {b}: step {d} m");
+        }
+    }
+}

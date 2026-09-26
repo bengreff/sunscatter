@@ -9,6 +9,7 @@
 
 use super::{Atmosphere, BodyPhysical, Rotation};
 use crate::math;
+use crate::terrain::{Detail, DetailParams};
 use crate::world::AnchorZone;
 use serde::Deserialize;
 use std::fmt;
@@ -31,6 +32,10 @@ pub struct BodyDef {
     pub relativistic: bool,
     /// Resolved path of the heightmap (16-bit PNG), if the body has one.
     pub heightmap: Option<PathBuf>,
+    /// Resolved path of the roughness map (8-bit PNG, D059), if any.
+    pub roughness: Option<PathBuf>,
+    /// Procedural detail parameters (D059); detail needs the roughness map too.
+    pub terrain_detail: Option<DetailParams>,
 }
 
 /// An error reading body data.
@@ -74,6 +79,11 @@ struct PhysicalFile {
     heightmap: Option<String>,
     #[serde(default)]
     sea_level: Option<f64>,
+    /// Path relative to the body's directory.
+    #[serde(default)]
+    roughness: Option<String>,
+    #[serde(default)]
+    terrain_detail: Option<DetailParams>,
 }
 
 #[derive(Deserialize)]
@@ -120,26 +130,41 @@ pub fn parse_body(text: &str, dir: &Path) -> Result<BodyDef, DataError> {
             solid: p.solid,
             sea_level: p.sea_level,
             terrain: None,
+            detail: None,
         },
         anchor_zone: p.anchor_zone,
         relativistic: p.relativistic,
         heightmap: p.heightmap.map(|h| dir.join(h)),
+        roughness: p.roughness.map(|r| dir.join(r)),
+        terrain_detail: p.terrain_detail,
     })
 }
 
 impl BodyDef {
-    /// Loads the heightmap into `physical.terrain` (shared per process, see
-    /// [`crate::terrain::load_shared`]). A missing file is not an error: the
-    /// body keeps its smooth ellipsoid and a warning is printed. A file that
-    /// exists but cannot be decoded is an error.
+    /// Loads the heightmap into `physical.terrain` and, with detail
+    /// parameters, the roughness map into `physical.detail` (shared per
+    /// process, see [`crate::terrain::load_shared`]). A missing file is not
+    /// an error: the body keeps its smooth ellipsoid (or has no detail) and a
+    /// warning is printed. A file that exists but cannot be decoded is an error.
     pub fn load_terrain(&mut self) -> Result<(), DataError> {
-        let Some(path) = &self.heightmap else { return Ok(()) };
-        if !path.exists() {
-            eprintln!("warning: {} not found; {} uses its smooth ellipsoid", path.display(), self.physical.name);
-            return Ok(());
+        if let Some(path) = &self.heightmap {
+            if path.exists() {
+                let map =
+                    crate::terrain::load_shared(path).map_err(|message| DataError { path: path.clone(), message })?;
+                self.physical.terrain = Some(map);
+            } else {
+                eprintln!("warning: {} not found; {} uses its smooth ellipsoid", path.display(), self.physical.name);
+            }
         }
-        let map = crate::terrain::load_shared(path).map_err(|message| DataError { path: path.clone(), message })?;
-        self.physical.terrain = Some(map);
+        if let (Some(params), Some(path)) = (self.terrain_detail, &self.roughness) {
+            if path.exists() {
+                let roughness = crate::terrain::load_shared_roughness(path)
+                    .map_err(|message| DataError { path: path.clone(), message })?;
+                self.physical.detail = Some(Detail { params, roughness });
+            } else {
+                eprintln!("warning: {} not found; {} has no terrain detail", path.display(), self.physical.name);
+            }
+        }
         Ok(())
     }
 }
@@ -237,6 +262,7 @@ mod tests {
             solid,
             sea_level,
             terrain: None,
+            detail: None,
         }
     }
 
@@ -261,6 +287,9 @@ mod tests {
         assert_eq!(load_default("moon").anchor_zone, Some(AnchorZone { enter: 6.0e7, exit: 7.0e7 }));
         assert!(load_default("sun").relativistic && !earth.relativistic);
         assert!(earth.heightmap.unwrap().ends_with("earth/height.png"));
+        assert!(earth.roughness.unwrap().ends_with("earth/roughness.png"));
+        assert_eq!(earth.terrain_detail.map(|d| d.octaves), Some(12));
+        assert!(earth.physical.detail.is_none(), "loaded by load_terrain only");
     }
 
     #[test]
@@ -278,6 +307,7 @@ mod tests {
         assert_eq!(def.physical.name, "Rock");
         assert_eq!(def.physical.j2, 0.0);
         assert!(def.physical.atmosphere.is_none() && def.heightmap.is_none() && def.anchor_zone.is_none());
+        assert!(def.roughness.is_none() && def.terrain_detail.is_none());
         assert_eq!(def.physical.rotation.dec, 20.0 * DEG);
     }
 

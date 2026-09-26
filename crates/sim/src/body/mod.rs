@@ -8,7 +8,7 @@ pub use data::{default_bodies_dir, load_body, parse_body, BodyDef, DataError};
 
 use crate::frame::{BodyFixed, Inertial, Vec3};
 use crate::math;
-use crate::terrain::{self, Heightmap};
+use crate::terrain::{self, detail, Detail, Heightmap};
 use crate::time::Epoch;
 use glam::DVec3;
 use std::sync::Arc;
@@ -111,21 +111,47 @@ pub struct BodyPhysical {
     /// Terrain heights relative to the reference ellipsoid (D047), shared
     /// between clones of the world. `None`: the smooth ellipsoid.
     pub terrain: Option<Arc<Heightmap>>,
+    /// Procedural detail below the heightmap's resolution (D059). `None`: none.
+    pub detail: Option<Detail>,
 }
 
 impl BodyPhysical {
+    /// Terrain height (m) above the reference ellipsoid in a body-fixed
+    /// direction (any length > 0): the heightmap (bicubic) plus procedural
+    /// detail, **not** raised to sea level. This is the one surface (D047,
+    /// D059); renderers that draw the sea themselves use it, everything else
+    /// uses [`Self::surface_height`].
+    pub fn terrain_height(&self, dir: DVec3) -> f64 {
+        let (lat, lon) = terrain::lat_lon(dir);
+        self.terrain_at(dir.normalize(), lat, lon)
+    }
+
+    /// [`Self::terrain_height`] at unit direction `dir` whose latitude and longitude are `lat`, `lon`.
+    fn terrain_at(&self, dir: DVec3, lat: f64, lon: f64) -> f64 {
+        let base = self.terrain.as_ref().map_or(0.0, |t| t.sample(lat, lon));
+        match &self.detail {
+            Some(d) => base + d.height(dir, lat, lon, self.radius_eq, detail::coast_weight(base, self.sea_level)),
+            None => base,
+        }
+    }
+
     /// Height (m) of the solid surface above the reference ellipsoid at
     /// latitude/longitude (rad): the terrain, raised to sea level where the
     /// body has an ocean (oceans are solid, D037).
     pub fn surface_height_latlon(&self, lat: f64, lon: f64) -> f64 {
-        let h = self.terrain.as_ref().map_or(0.0, |t| t.sample(lat, lon));
+        let h = if self.detail.is_some() {
+            let dir = DVec3::new(math::cos(lat) * math::cos(lon), math::cos(lat) * math::sin(lon), math::sin(lat));
+            self.terrain_at(dir, lat, lon)
+        } else {
+            self.terrain.as_ref().map_or(0.0, |t| t.sample(lat, lon))
+        };
         self.sea_level.map_or(h, |sea| h.max(sea))
     }
 
     /// [`Self::surface_height_latlon`] in the direction of a body-fixed vector.
     pub fn surface_height(&self, dir: Vec3<BodyFixed>) -> f64 {
-        let (lat, lon) = terrain::lat_lon(dir.raw());
-        self.surface_height_latlon(lat, lon)
+        let h = self.terrain_height(dir.raw());
+        self.sea_level.map_or(h, |sea| h.max(sea))
     }
 
     /// Height of a body-fixed point above the solid surface (terrain or sea) (m).

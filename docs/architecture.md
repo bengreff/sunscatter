@@ -19,8 +19,8 @@ A short map to search before building anything: who owns what, the frame order, 
 | Frame-typed vectors | `sim::frame` | |
 | Where a body is at time t | `sim::ephem` (`relative`, `snapshot`) | never subtract absolute positions (rule 3) |
 | Kepler, orbital elements | `sim::kepler` | the one solver (rule 5) |
-| Body shape, rotation, atmosphere, surface height | `sim::body` | the physical surface is `surface_height` |
-| Heightmap sampling | `sim::terrain` | rendering samples through it too |
+| Body shape, rotation, atmosphere, surface height | `sim::body` | the physical surface is `surface_height` (base + detail, sea raised); `terrain_height` is the same without the sea (render meshes) |
+| Heightmap sampling (bicubic), sub-sample detail (roughness map, lattice noise, D059) | `sim::terrain` (`detail`, `noise`) | rendering samples through `sim::body` too; `roughness.png` baked by `asset-tool` |
 | Vessel motion, phases, segments | `sim::vessel` | the stored segment is the truth (rule 4) |
 | Saves | `sim::save` (format), `game::saves` (UI, files) | |
 | Nearest body, display primary, osculating orbit (vessels and bodies), orbit size | `game::relations` | display only, never physics |

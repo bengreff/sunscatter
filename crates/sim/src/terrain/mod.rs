@@ -1,5 +1,6 @@
 //! Terrain heights (D047): the committed int16 heightmap, sampled
-//! deterministically. The same sampling serves altitude, contact, landing and
+//! deterministically, plus procedural detail below its resolution ([`detail`],
+//! D059; combined with the base in `sim::body::BodyPhysical::surface_height`). The same sampling serves altitude, contact, landing and
 //! (in the game) rendering, so the drawn surface is the physical one.
 //!
 //! **File contract** (`data/bodies/<body>/height.png`): 16-bit grayscale PNG,
@@ -17,6 +18,11 @@
 //!
 //! Determinism: latitude/longitude come from [`crate::math`] (libm) trig; the
 //! lookup and the blends are plain IEEE arithmetic on integer data.
+
+pub mod detail;
+pub mod noise;
+
+pub use detail::{Detail, DetailParams, Roughness};
 
 use crate::math;
 use glam::DVec3;
@@ -177,16 +183,28 @@ pub fn lat_lon(dir: DVec3) -> (f64, f64) {
 /// Loads a heightmap file, once per path per process (the result is shared:
 /// Earth's grid is tens of MB and worlds are cloned for background work).
 pub fn load_shared(path: &Path) -> Result<Arc<Heightmap>, String> {
-    static CACHE: OnceLock<Mutex<HashMap<PathBuf, Arc<Heightmap>>>> = OnceLock::new();
+    static CACHE: Cache<Heightmap> = OnceLock::new();
+    load_cached(&CACHE, path, Heightmap::from_png)
+}
+
+/// Loads a roughness map file, once per path per process.
+pub fn load_shared_roughness(path: &Path) -> Result<Arc<Roughness>, String> {
+    static CACHE: Cache<Roughness> = OnceLock::new();
+    load_cached(&CACHE, path, Roughness::from_png)
+}
+
+type Cache<T> = OnceLock<Mutex<HashMap<PathBuf, Arc<T>>>>;
+
+fn load_cached<T>(cache: &Cache<T>, path: &Path, decode: fn(&[u8]) -> Result<T, String>) -> Result<Arc<T>, String> {
     let key = path.canonicalize().map_err(|e| format!("{}: {e}", path.display()))?;
-    let cache = CACHE.get_or_init(Default::default);
+    let cache = cache.get_or_init(Default::default);
     // Holding the lock while decoding makes concurrent loaders wait for one decode.
     let mut map = cache.lock().unwrap_or_else(|e| e.into_inner());
     if let Some(h) = map.get(&key) {
         return Ok(h.clone());
     }
     let bytes = std::fs::read(&key).map_err(|e| format!("{}: {e}", path.display()))?;
-    let h = Arc::new(Heightmap::from_png(&bytes).map_err(|e| format!("{}: {e}", path.display()))?);
+    let h = Arc::new(decode(&bytes).map_err(|e| format!("{}: {e}", path.display()))?);
     map.insert(key, h.clone());
     Ok(h)
 }

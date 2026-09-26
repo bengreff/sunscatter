@@ -24,6 +24,18 @@
         solid: true,
         // Terrain heights (m) relative to the reference sphere.
         heightmap: Some("height.png"),
+        // Procedural detail below the heightmap (D059): RMS residual map (8-bit,
+        // rms_m = value² / 64, baked by asset-tool) and the fractal's parameters.
+        // Octave 0 is the map's sample spacing; 11 octaves reach ~2.5 m.
+        roughness: Some("roughness.png"),
+        terrain_detail: Some((
+            octaves: 11,
+            wavelength: 2665.0,
+            lacunarity: 2.0,
+            gain: 0.5,
+            amplitude: 2.0,
+            ridge_threshold: 300.0,
+        )),
         sea_level: None,
     ),
 )
