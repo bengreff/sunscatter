@@ -33,10 +33,18 @@ impl ChebTable {
     }
 
     /// Segment index and `tau` for time `t` (clamped to the table: outside the
-    /// window the first/last segment is extrapolated).
+    /// window the first/last segment is extrapolated). Vessels never ask past
+    /// the end ([`crate::world::World::end`]); unit tests count such calls.
     fn locate(&self, t: Epoch) -> (usize, f64) {
         debug_assert_eq!(self.start.fractional_second(), 0.0);
         let offset = t.whole_seconds() - self.start.whole_seconds();
+        #[cfg(test)]
+        {
+            let len = self.n_segments() as i64 * self.seg_len;
+            if offset > len || (offset == len && t.fractional_second() > 0.0) {
+                PAST_END_CALLS.with(|c| c.set(c.get() + 1));
+            }
+        }
         let k = offset.div_euclid(self.seg_len).clamp(0, self.n_segments() as i64 - 1);
         let seg_start = self.start.whole_seconds() + k * self.seg_len;
         let local = (t.whole_seconds() - seg_start) as f64 + t.fractional_second();
@@ -88,6 +96,12 @@ impl ChebTable {
         }
         Kinematics { r: DVec3::from_array(out[0]), v: DVec3::from_array(out[1]), a: DVec3::from_array(out[2]) }
     }
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Evaluations past a table's end on this thread (test instrumentation).
+    pub(crate) static PAST_END_CALLS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
 }
 
 /// Highest supported polynomial degree (fixed-size, allocation-free evaluation).

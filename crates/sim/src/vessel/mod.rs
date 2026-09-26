@@ -190,10 +190,12 @@ impl Vessel {
         }
     }
 
-    /// Advances the vessel towards `target` (never past it). Returns the time
-    /// actually reached (coasts can be limited by `max_coast_steps` of new
-    /// integration work; the game then simply waits for the segment).
+    /// Advances the vessel towards `target` (never past it, nor past the
+    /// ephemeris end). Returns the time actually reached (coasts can be
+    /// limited by `max_coast_steps` of new integration work; the game then
+    /// simply waits for the segment).
     pub fn advance(&mut self, world: &World, target: Epoch, controls: &Controls, max_coast_steps: usize) -> Epoch {
+        let target = if target > world.end() { world.end() } else { target };
         loop {
             let before = (self.time, std::mem::discriminant(&self.phase));
             match &self.phase {
@@ -319,7 +321,12 @@ impl Vessel {
 
     /// Replaces the current phase with a coast starting now.
     fn start_coast(&mut self, world: &World) {
-        let (anchor, r, v) = self.state(world);
+        let state = self.state(world);
+        self.start_coast_from(world, state);
+    }
+
+    /// Replaces the current phase with a coast from `(anchor, r, v)` now.
+    fn start_coast_from(&mut self, world: &World, (anchor, r, v): (NodeId, DVec3, DVec3)) {
         let seg = Segment::new(
             world,
             self.time,
@@ -359,8 +366,16 @@ impl Vessel {
         segment.prune_before(reach);
         let end = segment.end;
         let new_time = segment.t0.add_seconds(reach);
+        let restart = match end {
+            Some(SegmentEnd { t, kind: EndKind::Horizon }) if reach >= t => segment.eval(reach),
+            _ => None,
+        };
         self.advance_attitude(new_time, controls);
         self.time = new_time;
+        if let Some(state) = restart {
+            // Keep going past the horizon, from the segment's last sample.
+            self.start_coast_from(world, state);
+        }
         if let Some(SegmentEnd { t, kind: EndKind::Surface { body } }) = end {
             if reach >= t {
                 let (anchor, r, v) = self.state(world);
@@ -427,3 +442,6 @@ impl Vessel {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

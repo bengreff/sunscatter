@@ -91,6 +91,12 @@ impl World {
         self.sources.iter().find(|s| s.name == name)
     }
 
+    /// The end of the ephemeris window: nothing is simulated past it (coasts
+    /// end with `EndKind::EphemerisEnd`, vessels stop, the game clock stops).
+    pub fn end(&self) -> Epoch {
+        self.eph.end
+    }
+
     pub fn snapshot(&self, t: Epoch) -> Snapshot<'_> {
         self.eph.snapshot(t)
     }

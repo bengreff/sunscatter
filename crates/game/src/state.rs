@@ -197,7 +197,10 @@ pub fn advance(
         active_controls.rotate = DVec3::ZERO;
     }
     let dt = time.delta_secs_f64().min(0.1);
+    // Nothing is simulated past the ephemeris window: the clock stops there.
+    let end = sim.world.end();
     let target = sim.clock.add_seconds(dt * warp);
+    let target = if target > end { end } else { target };
     let sim = &mut *sim;
     let passive = Controls { sas: true, ..Default::default() };
     // Vessels are independent, so advancing them in parallel is deterministic.

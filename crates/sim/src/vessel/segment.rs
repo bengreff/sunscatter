@@ -31,8 +31,10 @@ pub struct Sample {
 pub enum EndKind {
     /// Reached a body's surface (minus the vessel's contact height).
     Surface { body: NodeId },
-    /// Reached the maximum horizon.
+    /// Reached the maximum horizon (the vessel starts a new segment there).
     Horizon,
+    /// Reached the end of the ephemeris window: nothing is simulated past it.
+    EphemerisEnd,
     /// The integration could not continue (non-finite state or force). The
     /// segment ends at its last good sample; the vessel stays there.
     Failed,
@@ -56,7 +58,8 @@ pub struct Segment {
     drag: Option<DragModel>,
     /// Height above the surface at which contact happens (m).
     contact_height: f64,
-    /// Local time limit of the integration (fixed for the segment's life).
+    /// Local time limit of the integration (fixed for the segment's life):
+    /// the requested horizon, or the ephemeris end if that is sooner.
     horizon: f64,
     fixed_anchor: bool,
 }
@@ -70,7 +73,7 @@ pub struct CoastStart {
     pub drag: Option<DragModel>,
     /// Height above the surface at which contact happens (m).
     pub contact_height: f64,
-    /// Local time limit of the integration (s).
+    /// Local time limit of the integration (s). Capped at the ephemeris end.
     pub horizon: f64,
     /// Keep the starting anchor for the whole segment (tests of anchor
     /// invariance); normally the precision policy may re-anchor.
@@ -81,6 +84,7 @@ impl Segment {
     /// Starts a coast at `t0`.
     pub fn new(world: &World, t0: Epoch, start: CoastStart) -> Self {
         let CoastStart { anchor, r, v, drag, contact_height, horizon, fixed_anchor } = start;
+        let horizon = horizon.min(world.end().seconds_since(t0)).max(0.0);
         let snap = world.snapshot(t0);
         let active = ActiveSources::select(world, &snap, anchor, r);
         let mut seg = Segment {
@@ -122,6 +126,12 @@ impl Segment {
             if self.end.is_some() {
                 return;
             }
+            if self.state.t >= self.horizon {
+                // Only when started at the limit (otherwise the end is set
+                // after the step that reaches it).
+                self.end = Some(self.limit_end(world));
+                return;
+            }
             let prev = *self.samples.last().expect("segment has a first sample");
             let t0 = self.t0;
             let step = {
@@ -150,11 +160,17 @@ impl Segment {
             }
             self.samples.push(new);
             if self.state.t >= self.horizon {
-                self.end = Some(SegmentEnd { t: self.horizon, kind: EndKind::Horizon });
+                self.end = Some(self.limit_end(world));
                 return;
             }
             self.maybe_reanchor(world);
         }
+    }
+
+    /// The end at `horizon`: the ephemeris end if that is what limited it.
+    fn limit_end(&self, world: &World) -> SegmentEnd {
+        let at_ephemeris_end = world.end().seconds_since(self.t0) <= self.horizon;
+        SegmentEnd { t: self.horizon, kind: if at_ephemeris_end { EndKind::EphemerisEnd } else { EndKind::Horizon } }
     }
 
     /// Switches anchor at a step boundary if the policy prefers another one.

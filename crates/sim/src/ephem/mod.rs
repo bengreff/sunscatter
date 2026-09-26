@@ -13,6 +13,8 @@ mod chebyshev;
 mod io;
 mod rails;
 
+#[cfg(test)]
+pub(crate) use chebyshev::PAST_END_CALLS;
 pub use chebyshev::{cheb_basis, interpolate_lobatto, lobatto_nodes, ChebTable, MAX_DEGREE};
 pub use io::{fnv1a64, EphemerisFormatError};
 pub use rails::Rails;
