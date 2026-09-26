@@ -1,0 +1,29 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/tools/hooks/cargo_check.sh",
+            "timeout": 300,
+            "statusMessage": "cargo check"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/tools/hooks/sim_tests.sh",
+            "timeout": 600,
+            "statusMessage": "cargo test -p sim"
+          }
+        ]
+      }
+    ]
+  }
+}

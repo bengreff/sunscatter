@@ -11,3 +11,7 @@ Thumbs.db
 
 # Large third-party inputs (downloaded by tools, never committed)
 /data/external/
+
+# Claude Code: agent worktrees and personal settings (settings.json is tracked)
+/.claude/worktrees/
+/.claude/settings.local.json
