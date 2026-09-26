@@ -117,3 +117,50 @@ pub fn panel<R>(
     }
     shown.inner
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use egui::{pos2, vec2, Event, PointerButton, Pos2, RawInput, Rect};
+
+    /// Runs one egui frame drawing the Time panel, with `events`.
+    fn frame(ctx: &egui::Context, iface: &mut InterfaceSettings, events: Vec<Event>) {
+        let input = RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1000.0, 800.0))),
+            events,
+            ..Default::default()
+        };
+        ctx.begin_pass(input);
+        panel(ctx, iface, PanelId::Time, |ui| {
+            ui.set_min_size(vec2(120.0, 60.0));
+        });
+        ctx.end_pass().drop_without_applying_deltas();
+    }
+
+    fn button(pos: Pos2, pressed: bool) -> Event {
+        Event::PointerButton { pos, button: PointerButton::Primary, pressed, modifiers: Default::default() }
+    }
+
+    #[test]
+    fn dragging_a_panel_saves_its_place_and_reset_forgets_it() {
+        let ctx = egui::Context::default();
+        let mut iface = InterfaceSettings::default();
+        frame(&ctx, &mut iface, vec![]);
+        frame(&ctx, &mut iface, vec![]);
+        assert_eq!(iface.panel(PanelId::Time).pos, None, "not moved yet");
+        // Grab the panel's background at (40, 40) and drag it by (200, 100).
+        let start = pos2(40.0, 40.0);
+        frame(&ctx, &mut iface, vec![Event::PointerMoved(start), button(start, true)]);
+        for k in 1..=10 {
+            let p = start + vec2(20.0, 10.0) * k as f32;
+            frame(&ctx, &mut iface, vec![Event::PointerMoved(p)]);
+        }
+        let end = start + vec2(200.0, 100.0);
+        frame(&ctx, &mut iface, vec![button(end, false)]);
+        let [x, y] = iface.panel(PanelId::Time).pos.expect("the drag was saved");
+        // Default place is (10, 10) from the top-left corner.
+        assert!((x - 210.0).abs() <= 2.0 && (y - 110.0).abs() <= 2.0, "saved at ({x}, {y})");
+        iface.reset_layout();
+        assert_eq!(iface.panel(PanelId::Time).pos, None);
+    }
+}
