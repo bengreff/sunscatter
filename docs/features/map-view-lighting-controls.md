@@ -272,7 +272,7 @@ Status per item, verified by tests and hidden offscreen demo runs (screenshots o
 |---|---|---|---|
 | 1 | Zoom speed | playable | 1.072 per wheel line, 0.125 lines per trackpad px; settings. |
 | 2 | Per-object map view, hover priority | playable | `game::map_view`; occlusion by nearer discs; planets got `body.ron` sizes. |
-| 3 | Lighting | playable | Per-body flux, eclipses (per fragment on terrain, per ship), planetshine, starlight ambient, eye adaptation (Low up; calibrated so daylight views are unchanged, with a 3-stop dead zone; the dark-scene brightening is not yet seen in a demo view). |
+| 3 | Lighting | playable | Per-body flux, eclipses (per fragment on terrain, per ship), planetshine, starlight ambient, eye adaptation (Low up; daylight views unchanged via a 3-stop dead zone; the demo's `moon_night_adapted` view shows the Moon's night side under Earthshine after adapting). |
 | 4 | FPS readout | playable | 0.5 s windows. |
 | 5 | Orbit-line length | playable | D056 (dominance, revolutions, caps, settings). Not yet looked at closely in the demo. |
 | 6 | Pause menu, settings, GUI | playable | Esc menu, tabbed settings, movable saved panels, theme, help (H), toasts, one formatter, warp arrows. |
@@ -283,4 +283,4 @@ Status per item, verified by tests and hidden offscreen demo runs (screenshots o
 | 11 | Navball | playable | Smaller, centred, altitude and speed above the ball, relative to the dominant body. |
 | 12 | Tracking station | playable | Full-height list, body tree, grouped vessels, click an icon to focus. |
 
-Known gaps: a demo view of the Moon's night side (to see eye adaptation bring up Earthshine); aerial perspective range and overall haze strength at low altitude; the dark-patch repro; Ap/Pe markers still search the whole computed span (longer than the line in non-default modes); the orbit-line rescan per frame costs ~25 fps at 1,000,000x with 11 vessels (170 fps, fine against the 60 fps target).
+Known gaps: aerial perspective range and overall haze strength at low altitude; the dark-patch repro; Ap/Pe markers still search the whole computed span (longer than the line in non-default modes); the orbit-line rescan per frame costs ~25 fps at 1,000,000x with 11 vessels (170 fps, fine against the 60 fps target).

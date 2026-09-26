@@ -31,6 +31,9 @@ enum Step {
     Map,
     MoonFar,
     MoonClose,
+    /// The Moon's night side from Earth's direction (Earthshine, eye
+    /// adaptation): near new Moon on the demo date.
+    MoonNight,
     Perf(usize),
     Deorbit,
     Fall,
@@ -383,6 +386,29 @@ pub fn run(
                 demo.shot_taken = true;
                 demo.capture("moon_close");
             } else {
+                if let (Some(moon), Some(earth)) = (moon, sim.world.find("Earth").map(|s| s.node)) {
+                    let snap = sim.world.snapshot(sim.clock);
+                    let d = snap.relative_r(earth, moon).normalize();
+                    camera::focus_body(&mut rig, &sim, moon);
+                    let up = sim
+                        .world
+                        .source(moon)
+                        .and_then(|s| s.physical.as_ref())
+                        .map_or(DVec3::Z, |p| p.rotation.pole(sim.clock));
+                    let (e1, e2) = camera::basis(up);
+                    rig.pitch = d.dot(up).clamp(-1.0, 1.0).asin();
+                    rig.yaw = d.dot(e2).atan2(d.dot(e1));
+                    rig.distance = 3.0 * 1_737_400.0;
+                }
+                demo.next(Step::MoonNight);
+            }
+        }
+        Step::MoonNight => {
+            // Eye adaptation brightens at 1 stop/s: give it time.
+            if demo.timer > 14.0 && !demo.shot_taken {
+                demo.shot_taken = true;
+                demo.shot(&mut commands, "moon_night_adapted");
+            } else if demo.timer > 16.0 {
                 settings.set_if_neq(GraphicsSettings::preset(Tier::Minimal));
                 rig.focus = Focus::Ship;
                 rig.distance = 3.0e6;
