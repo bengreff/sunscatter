@@ -1,0 +1,216 @@
+# Decision Log: Sunscatter v0.2
+
+This log records decisions that have been made. Each entry is numbered and dated. Entries are never deleted: if a decision changes, a new entry replaces it and the old one is marked *Superseded by Dnnn*. Proposals that have not been decided belong in design documents, not here.
+
+Status values: **Decided** · **Direction** (settled in principle, details open) · **Superseded**
+
+---
+
+## Project
+
+**D001: v0.1 is archived and v0.2 is written from scratch.** *Decided, 2026-09-25.*
+v0.1 now lives in `archive/v0.1/` and still builds and runs there, with its toolchain and lockfile pinned. v0.2 may port v0.1's algorithms and data, but not its code structure, and anything ported is re-tested. The reasons are in [lessons-from-v0.1.md](lessons-from-v0.1.md).
+
+**D002: The game is about mission design, flight and logistics at real scale, and it is 3D.** *Decided, 2026-09-25.*
+It is not only a space game. Designing missions, flying them, and running many of them at once efficiently are the core.
+
+**D003: Performance is a central goal.** *Decided, 2026-09-25.*
+Performance is a design constraint from the first day, not a later polishing step. Every system has a budget.
+
+## Scope
+
+**D004: The simulated space is a sphere of radius 100 light-years, containing roughly 10,000–15,000 star systems.** *Decided, 2026-09-25.*
+The engine is designed around this number. More of the starfield may later be offered as a data download. Supporting the whole galaxy is not a goal.
+
+**D005: The game covers about 1,000 years of time.** *Decided, 2026-09-25.*
+Ephemerides, the precision of the time type, and orbital drift models only need to be valid for this window, plus a margin.
+
+**D006: The highest time warp is 100,000x.** *Superseded by D022.*
+At that rate, 1,000 years takes about 87 hours of real time. See the open question about long interstellar cruises.
+
+**D007: Development starts with Earth only, but every architectural choice must allow interstellar play later.** *Decided, 2026-09-25.*
+
+## Physics and motion
+
+**D008: Ship trajectories use N-body gravity. There are no sphere-of-influence (SOI) transitions.** *Decided, 2026-09-25.*
+Patched conics may appear only as tools for a first guess when planning; they never decide motion. Overlapping SOIs, barycenter special cases and "which body is this ship orbiting?" logic must not exist in the physics. The proposed model is in [design/motion-model.md](design/motion-model.md).
+
+**D009: Celestial bodies follow precomputed paths ("rails").** *Decided, 2026-09-25.*
+- Most bodies use orbital elements plus drift terms.
+- Systems with strong interactions store precomputed N-body results as lookup tables.
+- Every body's position is a *pure function of time*: it never depends on when a system was generated or what the player did before.
+
+**D010: Stars move in straight lines.** *Decided, 2026-09-25.*
+Over 1,000 years they barely leave the 100 light-year region, so galactic orbits are not modeled.
+
+**D011: Navigation is built on very advanced N-body trajectory-planning tools.** *Direction, 2026-09-25.*
+Because trajectories cannot be read as simple conic sections, planning tools are a core feature and not an extra.
+
+**D012: Relativity is part of the physics in 3D.** *Direction, 2026-09-25.*
+Special relativity governs ship motion, and ship proper time is tracked separately from the global coordinate time.
+
+## The universe's contents
+
+**D013: The population follows the "actually exists" rule.** *Direction, 2026-09-25.*
+- The model covers the bodies that statistically *should* exist, not just the ones we have detected.
+- Real catalogs are used where data exists.
+- The rest is filled with statistical models and AI-assisted filling from templates.
+- This can include black holes or a neutron star within 100 ly, if the statistics call for them.
+
+**D014: Bodies are split into full bodies and procedural bodies.** *Direction, 2026-09-25.*
+- **Full bodies** are named and simulated on orbits. The draft rule:
+  - planets with radius over 100 km
+  - moons with radius over 5 km
+  - anything notable for its system
+  - only objects bound to a star within a cutoff orbital distance
+- **Procedural bodies** are asteroids and rogue planets. They exist only as statistics until the player detects or tracks one, and then they are generated deterministically.
+- The size threshold is much larger for rogue planets.
+
+**D015: Every full body is defined in a minimal form.** *Direction, 2026-09-25.*
+Everything else about a body, including its deterministic position, is generated when needed.
+
+**D016: Planet surfaces start simple.** *Decided, 2026-09-25.*
+The first version uses textured ellipsoids. A later version adds a coarse heightmap with procedural detail. Surfaces are not central to the game.
+
+## Ships and gameplay
+
+**D017: Trade routes are tools for managing missions, not abstract cargo.** *Decided, 2026-09-25.*
+- Every ship is a full ship with its own N-body trajectory.
+- Trade routes are a system for creating missions efficiently, setting navigation and burn parameters, and managing many simultaneous missions.
+- AI agents might be integrated here.
+- There is no abstract "cargo capacity" layer.
+
+**D018: The ship model combines a part system with universal non-physical systems layered on top.** *Direction, 2026-09-25.*
+- In scope:
+  - basic structural mechanics
+  - simple aerodynamics, enough for spaceplanes
+  - a cell-based heating and radiation model
+  - more to come
+- Details have not been discussed yet.
+
+**D019: Colonies are abstracted but deeper than in v0.1.** *Direction, 2026-09-25.*
+The design is still to be decided, and it has little effect on the rest of the architecture.
+
+**D020: An engine and propulsion simulator is planned as a feature.** *Direction, 2026-09-25.*
+- It is a separate solver: a 2D axisymmetric cell-based flow model with combustion, fusion and antimatter, and no turbulence modeling.
+- Players can design an engine's shape and receive its performance.
+- The game uses the resulting performance maps and never runs the solver in real time.
+- Part designs made procedurally in general follow the same pattern.
+
+## Milestone 1
+
+**D021: The first milestone is Earth only, with near-final graphics and a launch-and-landing loop.** *Superseded by D040.*
+- Basic atmospheric scattering and lighting at close to final quality, heavily optimized.
+- A very solid foundation.
+
+## Decisions of 2026-09-25 (second round)
+
+**D022: The highest time warp is 1,000,000x.** *Decided, 2026-09-25. Supersedes D006.*
+The game is about realistic progression across many simultaneous missions, not one mission at a time. Continuous warp has to cover interstellar cruises: 43 years to Alpha Centauri at 0.1c takes about 23 minutes. Skipping ahead by jumping to events is not the main mechanism. A sandbox mode exists alongside the progression game.
+
+**D023: Spheres of influence are replaced by the motion model.** *Decided, 2026-09-25.*
+- The physics has no reference bodies. Anchors exist only for precision, and a CI test checks that trajectories are the same under different anchor choices.
+- The body tree clusters distant subtrees into point masses.
+- **Gravity sources below a threshold acceleration are not simulated at all.**
+- Rails-or-table is decided by measuring how well a fit matches.
+- See [design/motion-model.md](design/motion-model.md).
+
+**D024: A ship's precomputed trajectory is its actual path.** *Decided, 2026-09-25.*
+- Coast segments are computed once and stored.
+- Time warp only changes how fast the stored segment is played back, so a trajectory is bit-identical at every warp level.
+- Computing a segment in chunks must give exactly the same result as computing it in one go.
+- Rendering never integrates anything.
+- The planning horizon is bounded, but it effectively covers the 1,000-year window.
+- *Reason:* v0.1's worst bug class was behavior that changed with time warp: flashing trajectories, and sometimes different physics.
+
+**D025: Ships do not attract each other. The ship physics model is much richer than KSP's.** *Decided, 2026-09-25.*
+It includes radiation pressure, drag in very thin upper atmosphere, rotation that persists through coasts, and similar effects.
+
+**D026: Determinism means exact agreement, not accuracy to reality.** *Decided, 2026-09-25.*
+- Celestial body positions must agree to better than 1 m across machines, saves, generation order, visit history and warp settings.
+- They do not need to match real life that closely.
+- Simplified sets of perturbing bodies are allowed as long as the assumptions are applied consistently and recorded.
+
+**D027: The game starts in 2030, and the player leads an organization.** *Direction, 2026-09-25.*
+- Which kind of organization is still open: a NASA-like agency, a SpaceX-like company, or an international body.
+- Funding and science are both mechanics, in simplified form.
+
+**D028: Platforms and performance target.** *Decided, 2026-09-25.*
+- **macOS and Windows** are required. There is **no web build.**
+- **Performance target:** 60 fps on the reference Mac, an Apple M2 Pro MacBook Pro (Mac14,9) with 16 GB of memory, with **10 or more ships in flight**, at the lowest graphics settings.
+
+**D029: Warp while thrusting.** *Decided, 2026-09-25.*
+- **Physics warp** runs full rigid-body physics (structure, aerodynamics, thrust) at up to about 4x. The exact limit is whatever proves stable.
+- **Burns during on-rails warp** are allowed at any warp level if the burn meets certain criteria. The player sets them up in a dedicated burn interface, inspired by the KSP *Persistent Thrust* mod.
+
+**D030: Multiplayer is not planned before v1.** *Direction, 2026-09-25.*
+- The long-term idea is separate exploration timelines that don't affect each other's cause and effect, where space stations built by other players might be visitable somehow.
+- The architecture keeps this possible, mainly through determinism (D026).
+
+**D031: The language is Rust, the simulation crate does not depend on any engine, and a Bevy prototype comes before choosing the engine.** *Decided, 2026-09-25.*
+- The prototype tests whether Bevy can meet D028.
+- Godot is ruled out, because its double-precision builds are unofficial and have bugs.
+- A custom wgpu renderer is the fallback.
+
+**D032: Vessels are rigid bodies whose parts can break.** *Decided, 2026-09-25.*
+- Structural reinforcement can be added.
+- Materials are unlocked through tech.
+- No stacks of parts held together by struts.
+
+**D033: Ship systems are layered on the part model, with moderate realism.** *Decided, 2026-09-25.*
+- **Systems:** power, structure, consumables (including fuel), avionics, life support, comms and crew.
+- **The realism rule:** nothing contradicts reality, but complex engineering is abstracted generously.
+- **Power and fuel follow semi-physical paths through the ship.** How the ship is laid out has consequences.
+- **Radiation** is modeled from both outside sources and sources on the ship.
+
+**D034: Control depends on the speed of light.** *Decided, 2026-09-25.*
+- The player can control any actual crew member.
+- Uncrewed ships are commanded with the real light delay to the nearest human.
+- A later technology (AGI or full autonomy, possibly brain uploads) allows direct control of probes.
+
+**D035: Every ship has a simple operating system and supports scripting.** *Decided, 2026-09-25.*
+- Arbitrary scripting is required, because distant probes have to be controlled by scripts.
+- Scripts must integrate with a development environment that AI agents can use.
+
+**D036: Ships are built in a constrained, programmatic way.** *Decided, 2026-09-25.*
+- Specifying coordinates is a valid way to build a ship.
+- A free-form editor is in scope but comes later. v0.2 uses blocks with made-up thrust at first, then predefined ships.
+- Parts can be procedural or designed, and designing and sharing parts is a feature.
+
+**D037: Earth uses real elevation data at low resolution. Oceans are solid for now.** *Decided, 2026-09-25.*
+Oceans get proper behavior when aerodynamics is implemented.
+
+**D038: Landings in milestone 1 use parachutes.** *Decided, 2026-09-25.*
+
+**D039: The workflow uses design documents, feature documents and tests. OpenSpec is removed.** *Decided, 2026-09-25.*
+- Studying KSP mods and other prior work is a standard strategy for hard problems. See [process.md](process.md).
+
+**D040: v0.2 is milestone 1: one ship flying in the Earth–Moon system, plus the foundations.** *Decided, 2026-09-25. Supersedes D021.*
+- Graphics are close to final: atmospheric scattering and lighting, heavily optimized.
+- The loop is launch, fly and land.
+- How the game progresses beyond that will be defined over time.
+
+**D041: What kind of game this is.** *Decided, 2026-09-25.*
+- It is not a casual game: it is a challenging, vast environment for spaceflight and exploration.
+- Nothing in the game contradicts science.
+- The player's own AI agent, connected to the game, acts as the tutorial and assistant.
+- See [vision.md](vision.md).
+
+**D042: Accuracy tolerances for fits.** *Decided, 2026-09-25.*
+- Planets: 1 km over 1,000 years.
+- Moons: 100 m.
+- Earth and the Moon near the start date: 10 m.
+- These measure accuracy against our reference integration. Determinism (D026) is exact regardless.
+
+---
+
+## Open questions
+
+1. What kind of organization the player leads (D027).
+2. The outcome of the Bevy prototype (D031).
+3. The scripting runtime and language. Candidates: WASM modules (any language, sandboxed, deterministic), Lua, or Rhai. It must work with AI tooling (D035).
+4. Details of the ship model: structural solver, aerodynamics model, cells for heat and radiation (D018, D032, D033).
+5. The crew model.
+6. The colony design (D019).
+7. How the player's AI agent connects to the game: API surface, which model it uses, and cost to the player (D041).
+8. Motion-model tunables: the cutoff threshold, opening angle, anchor hysteresis, and choice of coast integrator.
