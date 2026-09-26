@@ -1,7 +1,6 @@
-//! Map mode (D049): switches on automatically when the active ship covers
-//! less than about a pixel. In map mode we draw orbit lines (ship, bodies,
-//! other vessels), Ap/Pe markers, the ship icon and icons for bodies smaller
-//! than a pixel. Hover names and highlight rings work in both modes.
+//! Map mode: orbit lines, icons, Ap/Pe markers and hover. Currently one
+//! global switch (on when the active ship is under ~1 px); being replaced by
+//! the per-object rule of D054 (docs/features/map-view-lighting-controls.md).
 
 use crate::camera::{self, CameraRig, MainCamera};
 use crate::hud::{fmt_dist, PlotFrame, UiState};

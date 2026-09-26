@@ -1,8 +1,6 @@
-//! Scene: bodies, ships, the near-ground patch and the trajectory line, all
-//! placed camera-relative from f64 simulation state every frame.
-//!
-//! Minimal graphics on purpose (shaded spheres, one sun light); the visual
-//! direction is still to be decided.
+//! Scene: self-luminous bodies (stars) as spheres, ships, the sun light and
+//! the per-body visual definitions, all placed camera-relative from f64
+//! simulation state every frame. Surfaces are drawn by `terrain`.
 
 use crate::atmosphere;
 use crate::body_visual::{self, BodyVisualDef};
