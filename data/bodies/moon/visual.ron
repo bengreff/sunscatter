@@ -6,7 +6,7 @@
     icon_color: (0.8, 0.8, 0.78),
     detail: Some((
         scale_m: 25.0,
-        strength: 0.45,
+        strength: 0.55,
         rock_color: (0.30, 0.30, 0.29),
     )),
 )

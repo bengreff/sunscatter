@@ -5,8 +5,6 @@
 use serde::Deserialize;
 use std::path::PathBuf;
 
-// Some fields are read only by the terrain renderer, added separately.
-#[allow(dead_code)]
 #[derive(Clone, Debug, Deserialize)]
 pub struct BodyVisualDef {
     /// Colour when no colour map is loaded (linear-ish sRGB triple).
@@ -40,8 +38,6 @@ fn default_icon() -> [f32; 3] {
 }
 
 /// Water at sea level (the physics treats it as solid ground, D037).
-// Some fields are read only by the terrain renderer, added separately.
-#[allow(dead_code)]
 #[derive(Clone, Debug, Deserialize)]
 pub struct OceanDef {
     pub roughness: f32,
@@ -50,8 +46,6 @@ pub struct OceanDef {
 }
 
 /// Close-range procedural detail layered over the colour map.
-// Some fields are read only by the terrain renderer, added separately.
-#[allow(dead_code)]
 #[derive(Clone, Debug, Deserialize)]
 pub struct DetailDef {
     /// Base feature size (m).

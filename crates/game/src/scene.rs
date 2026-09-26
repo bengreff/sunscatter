@@ -8,11 +8,9 @@ use crate::atmosphere;
 use crate::body_visual::{self, BodyVisualDef};
 use crate::camera::CameraRig;
 use crate::state::SimState;
-use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::NoFrustumCulling;
 use bevy::light::atmosphere::ScatteringMedium;
-use bevy::light::GlobalAmbientLight;
-use bevy::mesh::{Indices, PrimitiveTopology};
+use bevy::light::{CascadeShadowConfigBuilder, GlobalAmbientLight, NotShadowCaster};
 use bevy::prelude::*;
 use glam::{DMat3, DQuat, DVec3};
 use sim::body::BodyPhysical;
@@ -29,18 +27,12 @@ pub struct ShipVisual(pub usize);
 #[derive(Component)]
 pub struct SunLight;
 
-#[derive(Component)]
-pub struct GroundPatch;
-
 #[derive(Resource)]
 pub struct Assets3d {
     ship_mesh: Handle<Mesh>,
     ship_mat: Handle<StandardMaterial>,
     active_mat: Handle<StandardMaterial>,
 }
-
-/// Patch resolution (vertices per side).
-const PATCH_N: usize = 97;
 
 pub fn setup(
     mut commands: Commands,
@@ -71,8 +63,15 @@ pub fn setup(
         if let Some(e) = &def.emissive {
             defs.light_source = Some((src.node, e.illuminance_1au));
         }
+        // Bodies with a surface are drawn by the terrain system.
+        if def.emissive.is_none() {
+            defs.defs.push((src.node, def));
+            continue;
+        }
         commands.spawn((
             BodyVisual(src.node),
+            // A light source must not shadow what it lights.
+            NotShadowCaster,
             Mesh3d(sphere.clone()),
             MeshMaterial3d(mat),
             Transform::IDENTITY,
@@ -80,21 +79,15 @@ pub fn setup(
         ));
         defs.defs.push((src.node, def));
     }
-    let ground_mat = materials.add(StandardMaterial {
-        base_color: Color::srgb(0.18, 0.32, 0.55),
-        perceptual_roughness: 0.9,
+    // Shadows are for ships and nearby ground: cascades out to a few km.
+    let cascades = CascadeShadowConfigBuilder {
+        num_cascades: 3,
+        first_cascade_far_bound: 150.0,
+        maximum_distance: 4000.0,
         ..default()
-    });
-    let patch = meshes.add(Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::default()));
-    commands.spawn((
-        GroundPatch,
-        Mesh3d(patch),
-        MeshMaterial3d(ground_mat),
-        Transform::IDENTITY,
-        NoFrustumCulling,
-        Visibility::Hidden,
-    ));
-    commands.spawn((SunLight, DirectionalLight { illuminance: 128_000.0, ..default() }, Transform::IDENTITY));
+    }
+    .build();
+    commands.spawn((SunLight, DirectionalLight { illuminance: 128_000.0, ..default() }, cascades, Transform::IDENTITY));
     commands.insert_resource(GlobalAmbientLight { brightness: 30.0, ..default() });
     commands.insert_resource(defs);
     commands.insert_resource(Assets3d {
@@ -185,68 +178,5 @@ pub fn update_ships(
             MeshMaterial3d(assets.ship_mat.clone()),
             Transform::IDENTITY,
         ));
-    }
-}
-
-/// A high-resolution patch of the true ellipsoid under the camera, computed in
-/// f64. The sphere mesh is an inscribed polyhedron (hundreds of metres below
-/// the surface between vertices); the patch covers it where it matters.
-pub fn update_ground(
-    sim: Res<SimState>,
-    rig: Res<CameraRig>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut patch: Query<(&Mesh3d, &mut Visibility), With<GroundPatch>>,
-) {
-    let Ok((mesh3d, mut vis)) = patch.single_mut() else { return };
-    let snap = sim.world.snapshot(sim.clock);
-    let nearest = sim
-        .world
-        .surfaces()
-        .filter_map(|s| {
-            let p = s.physical.as_ref()?;
-            let center = snap.relative(s.node, rig.anchor).r;
-            Some((p, center, (rig.cam_pos - center).length() - p.radius_eq))
-        })
-        .min_by(|a, b| a.2.total_cmp(&b.2));
-    let Some((p, center, alt)) = nearest else { return };
-    if alt > 600_000.0 {
-        *vis = Visibility::Hidden;
-        return;
-    }
-    *vis = Visibility::Visible;
-    let m = body_matrix(p, sim.clock);
-    let sub = (m.transpose() * (rig.cam_pos - center)).normalize(); // body-fixed direction
-    let east = DVec3::Z.cross(sub).try_normalize().unwrap_or(DVec3::X);
-    let north = sub.cross(east);
-    let half = (alt.max(0.0) * 25.0).clamp(20_000.0, 2_000_000.0);
-    let mut positions = Vec::with_capacity(PATCH_N * PATCH_N);
-    let mut normals = Vec::with_capacity(PATCH_N * PATCH_N);
-    for j in 0..PATCH_N {
-        for i in 0..PATCH_N {
-            // Quadratic spacing: dense under the camera, sparse at the rim.
-            let s = |k: usize| {
-                let u = 2.0 * k as f64 / (PATCH_N - 1) as f64 - 1.0;
-                u * u.abs() * half
-            };
-            let dir = (sub + (east * s(i) + north * s(j)) / p.radius_eq).normalize();
-            let lat = dir.z.asin();
-            let lon = dir.y.atan2(dir.x);
-            let fixed = p.surface_point(lat, lon, 0.0).raw();
-            positions.push((m * fixed + center - rig.cam_pos).as_vec3().to_array());
-            normals.push((m * dir).as_vec3().to_array());
-        }
-    }
-    let mut indices = Vec::with_capacity((PATCH_N - 1) * (PATCH_N - 1) * 6);
-    for j in 0..PATCH_N - 1 {
-        for i in 0..PATCH_N - 1 {
-            let a = (j * PATCH_N + i) as u32;
-            let (b, c, d) = (a + 1, a + PATCH_N as u32, a + PATCH_N as u32 + 1);
-            indices.extend_from_slice(&[a, b, d, a, d, c]);
-        }
-    }
-    if let Some(mut mesh) = meshes.get_mut(&mesh3d.0) {
-        mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
-        mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
-        mesh.insert_indices(Indices::U32(indices));
     }
 }

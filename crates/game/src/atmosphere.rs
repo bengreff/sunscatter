@@ -10,7 +10,6 @@
 
 use crate::body_visual::AtmosphereDef;
 use crate::camera::{CameraRig, MainCamera};
-use crate::scene::BodyVisual;
 use crate::settings::{AtmosphereQuality, GraphicsSettings};
 use crate::state::SimState;
 use bevy::light::atmosphere::{Falloff, PhaseFunction, ScatteringMedium, ScatteringTerm};
@@ -79,17 +78,10 @@ pub fn spawn(
 }
 
 /// Keeps atmospheres at their bodies' camera-relative centres.
-pub fn update(
-    sim: Res<SimState>,
-    rig: Res<CameraRig>,
-    bodies: Query<&BodyVisual>,
-    mut atmos: Query<(&BodyAtmosphere, &mut Transform)>,
-) {
+pub fn update(sim: Res<SimState>, rig: Res<CameraRig>, mut atmos: Query<(&BodyAtmosphere, &mut Transform)>) {
     let snap = sim.world.snapshot(sim.clock);
     for (a, mut t) in &mut atmos {
-        if bodies.iter().any(|b| b.0 == a.0) {
-            t.translation = (snap.relative(a.0, rig.anchor).r - rig.cam_pos).as_vec3();
-        }
+        t.translation = (snap.relative_r(a.0, rig.anchor) - rig.cam_pos).as_vec3();
     }
 }
 

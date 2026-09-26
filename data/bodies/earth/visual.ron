@@ -7,7 +7,7 @@
     ocean: Some((roughness: 0.12, tint: (0.9, 0.95, 1.0))),
     detail: Some((
         scale_m: 40.0,
-        strength: 0.35,
+        strength: 0.5,
         rock_color: (0.32, 0.30, 0.27),
         snow_line_m: Some(4500.0),
     )),

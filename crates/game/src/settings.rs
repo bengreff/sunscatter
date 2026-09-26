@@ -154,7 +154,7 @@ pub fn apply(
     settings: Res<GraphicsSettings>,
     mut commands: Commands,
     cams: Query<Entity, With<crate::camera::MainCamera>>,
-    mut lights: Query<&mut DirectionalLight>,
+    mut lights: Query<&mut DirectionalLight, With<crate::scene::SunLight>>,
 ) {
     if !settings.is_changed() {
         return;

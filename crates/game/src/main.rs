@@ -15,6 +15,7 @@ mod scene;
 mod settings;
 mod settings_ui;
 mod state;
+mod terrain;
 mod trajectory;
 
 use bevy::prelude::*;
@@ -39,6 +40,7 @@ fn main() {
             ..default()
         }))
         .add_plugins(EguiPlugin::default())
+        .add_plugins(terrain::TerrainPlugin)
         .insert_resource(state::SimState::new())
         .init_resource::<state::Prediction>()
         .init_resource::<camera::CameraRig>()
@@ -48,7 +50,7 @@ fn main() {
         .init_resource::<bench::Bench>()
         .init_resource::<map::MapMode>()
         .configure_sets(Update, (Stage::Input, Stage::Simulate, Stage::Camera, Stage::Scene).chain())
-        .add_systems(Startup, (scene::setup, camera::setup))
+        .add_systems(Startup, (scene::setup, terrain::setup, camera::setup).chain())
         .add_systems(
             Update,
             (
@@ -72,7 +74,8 @@ fn main() {
                 scene::update_bodies,
                 atmosphere::update,
                 scene::update_ships,
-                scene::update_ground,
+                terrain::update,
+                terrain::update_textures,
                 trajectory::draw,
                 map::draw_body_orbits,
             )

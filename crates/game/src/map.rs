@@ -47,6 +47,10 @@ impl View {
         self.cam.world_to_viewport(&self.gt, p.as_vec3()).ok()
     }
 
+    pub fn focal(&self) -> f64 {
+        self.focal
+    }
+
     /// Projected radius (px) of a sphere of `radius` at camera-relative `p`.
     pub fn radius_px(&self, p: DVec3, radius: f64) -> f64 {
         radius / p.length().max(1e-3) * self.focal
