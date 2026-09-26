@@ -4,10 +4,13 @@
 //! input → simulation → camera → scene transforms → trajectory → UI.
 //! Everything drawn is derived from the simulation at the *current* clock.
 
+mod bench;
 mod camera;
 mod demo;
 mod hud;
 mod scene;
+mod settings;
+mod settings_ui;
 mod state;
 
 use bevy::prelude::*;
@@ -36,11 +39,24 @@ fn main() {
         .init_resource::<state::Prediction>()
         .init_resource::<camera::CameraRig>()
         .init_resource::<hud::UiState>()
+        .init_resource::<settings::GraphicsSettings>()
+        .init_resource::<settings_ui::SettingsUi>()
+        .init_resource::<bench::Bench>()
         .configure_sets(Update, (Stage::Input, Stage::Simulate, Stage::Camera, Stage::Scene).chain())
         .add_systems(Startup, (scene::setup, camera::setup))
         .add_systems(
             Update,
-            (state::read_controls, demo::run, camera::read_input, hud::pick_bodies).chain().in_set(Stage::Input),
+            (
+                state::read_controls,
+                settings_ui::toggle,
+                demo::run,
+                bench::run,
+                settings::apply,
+                camera::read_input,
+                hud::pick_bodies,
+            )
+                .chain()
+                .in_set(Stage::Input),
         )
         .add_systems(Update, (state::advance, state::update_prediction).chain().in_set(Stage::Simulate))
         .add_systems(Update, camera::update.in_set(Stage::Camera))
@@ -49,6 +65,6 @@ fn main() {
             (scene::update_bodies, scene::update_ships, scene::update_ground, scene::draw_trajectory)
                 .in_set(Stage::Scene),
         )
-        .add_systems(EguiPrimaryContextPass, hud::draw)
+        .add_systems(EguiPrimaryContextPass, (hud::draw, settings_ui::draw))
         .run();
 }

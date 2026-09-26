@@ -3127,6 +3127,7 @@ dependencies = [
  "bevy",
  "bevy_egui",
  "glam 0.32.1",
+ "serde",
  "sim",
 ]
 

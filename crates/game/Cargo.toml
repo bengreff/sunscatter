@@ -12,6 +12,7 @@ sim = { path = "../sim" }
 bevy = "0.19.1"
 bevy_egui = "0.42"
 glam.workspace = true
+serde.workspace = true
 
 [lints]
 workspace = true
