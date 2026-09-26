@@ -158,6 +158,14 @@ pub fn apply_settings(
     }
 }
 
+/// Sky-light strength at a height above the ground, as a fraction of the
+/// atmosphere's thickness: full in the lower 60%, fading smoothly to zero at
+/// the top so it does not switch off abruptly when leaving the atmosphere.
+pub fn sky_light_fade(height_fraction: f64) -> f32 {
+    let t = ((height_fraction - 0.6) / 0.4).clamp(0.0, 1.0);
+    (1.0 - t * t * (3.0 - 2.0 * t)) as f32
+}
+
 /// Sky-light cubemap size (px per face): only diffuse and blurry reflections
 /// use it, and it is regenerated and filtered every frame.
 const SKY_LIGHT_SIZE: u32 = 64;
@@ -182,20 +190,35 @@ pub fn update_sky_light(
     mut stash: Local<Option<GeneratedEnvironmentMapLight>>,
 ) {
     let snap = sim.world.snapshot(sim.clock);
-    let inside = settings.atmosphere != AtmosphereQuality::Off
-        && atmos
-            .iter()
-            .any(|a| (rig.cam_pos - snap.relative_r(a.0, rig.anchor)).length() < f64::from(a.1.outer_radius));
+    // How deep the camera is in the nearest atmosphere (fraction of its
+    // thickness above the ground; above 1: outside).
+    let depth = atmos
+        .iter()
+        .map(|a| {
+            let r = (rig.cam_pos - snap.relative_r(a.0, rig.anchor)).length();
+            let (lo, hi) = (f64::from(a.1.inner_radius), f64::from(a.1.outer_radius));
+            (r - lo) / (hi - lo)
+        })
+        .fold(f64::INFINITY, f64::min);
+    let inside = settings.atmosphere != AtmosphereQuality::Off && depth < 1.0;
+    let fade = sky_light_fade(depth);
     for (cam, has, generated, atmo) in &mut cams {
         // Bevy adds a private cubemap component and a filtered
         // `GeneratedEnvironmentMapLight` with the sky light, and removing the
         // sky light leaves both, so the cubemap kept being filtered every
         // frame (~3 ms). We take the generated light off with it and put it
         // back later (Bevy won't recreate it while its private marker stays).
+        if let Some(g) = generated.filter(|g| inside && (g.intensity - fade).abs() > 1e-3) {
+            let mut g = g.clone();
+            g.intensity = fade;
+            commands.entity(cam).insert(g);
+        }
         if inside && !has {
-            commands
-                .entity(cam)
-                .insert(AtmosphereEnvironmentMapLight { size: UVec2::splat(SKY_LIGHT_SIZE), ..default() });
+            commands.entity(cam).insert(AtmosphereEnvironmentMapLight {
+                size: UVec2::splat(SKY_LIGHT_SIZE),
+                intensity: fade,
+                ..default()
+            });
             if let Some(g) = stash.take() {
                 commands.entity(cam).insert(g);
             }
@@ -213,5 +236,20 @@ pub fn update_sky_light(
                 a.rendering_method = want;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sky_light_fades_out_towards_the_top() {
+        // (height as a fraction of the thickness, expected strength)
+        let cases = [(0.0, 1.0), (0.5, 1.0), (0.6, 1.0), (0.8, 0.5), (1.0, 0.0), (3.0, 0.0)];
+        for (h, expected) in cases {
+            assert!((sky_light_fade(h) - expected).abs() < 1e-6, "{h}");
+        }
+        assert!(sky_light_fade(0.7) > sky_light_fade(0.9));
     }
 }
