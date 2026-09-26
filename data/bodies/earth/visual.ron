@@ -1,0 +1,27 @@
+// Earth's visuals (read by crates/game; physical data is in body.ron).
+(
+    base_color: (0.18, 0.32, 0.55),
+    color_map: Some("color.jpg"),
+    roughness: 0.85,
+    icon_color: (0.45, 0.65, 1.0),
+    ocean: Some((roughness: 0.12, tint: (0.9, 0.95, 1.0))),
+    detail: Some((
+        scale_m: 40.0,
+        strength: 0.35,
+        rock_color: (0.32, 0.30, 0.27),
+        snow_line_m: Some(4500.0),
+    )),
+    // Hillaire 2020 / Bruneton Earth values; scale heights 8 km (Rayleigh)
+    // and 1.2 km (Mie), ozone layer centred at 25 km.
+    atmosphere: Some((
+        thickness_m: 100000.0,
+        rayleigh_scattering: (5.802e-6, 13.558e-6, 33.100e-6),
+        rayleigh_scale_height_m: 8000.0,
+        mie_scattering: (3.996e-6, 3.996e-6, 3.996e-6),
+        mie_absorption: (0.444e-6, 0.444e-6, 0.444e-6),
+        mie_scale_height_m: 1200.0,
+        mie_asymmetry: 0.8,
+        ozone: Some((absorption: (0.650e-6, 1.881e-6, 0.085e-6), center_m: 25000.0, width_m: 30000.0)),
+        ground_albedo: (0.3, 0.3, 0.3),
+    )),
+)

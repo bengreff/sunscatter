@@ -4,7 +4,9 @@
 //! input → simulation → camera → scene transforms → trajectory → UI.
 //! Everything drawn is derived from the simulation at the *current* clock.
 
+mod atmosphere;
 mod bench;
+mod body_visual;
 mod camera;
 mod demo;
 mod hud;
@@ -52,6 +54,7 @@ fn main() {
                 demo::run,
                 bench::run,
                 settings::apply,
+                atmosphere::apply_settings,
                 camera::read_input,
                 hud::pick_bodies,
             )
@@ -62,7 +65,13 @@ fn main() {
         .add_systems(Update, camera::update.in_set(Stage::Camera))
         .add_systems(
             Update,
-            (scene::update_bodies, scene::update_ships, scene::update_ground, scene::draw_trajectory)
+            (
+                scene::update_bodies,
+                atmosphere::update,
+                scene::update_ships,
+                scene::update_ground,
+                scene::draw_trajectory,
+            )
                 .in_set(Stage::Scene),
         )
         .add_systems(EguiPrimaryContextPass, (hud::draw, settings_ui::draw))

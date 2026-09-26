@@ -1,0 +1,11 @@
+// The Sun's visuals (read by crates/game; physical data is in body.ron).
+(
+    base_color: (1.0, 0.95, 0.8),
+    icon_color: (1.0, 0.85, 0.4),
+    emissive: Some((
+        color: (1.0, 0.96, 0.9),
+        luminance: 2.0e6,
+        // Solar constant 1361 W/m² ≈ 128,000 lux above the atmosphere.
+        illuminance_1au: 128000.0,
+    )),
+)

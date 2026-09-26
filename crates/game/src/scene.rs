@@ -4,11 +4,14 @@
 //! Minimal graphics on purpose (shaded spheres, one sun light); the visual
 //! direction is still to be decided.
 
+use crate::atmosphere;
+use crate::body_visual::{self, BodyVisualDef};
 use crate::camera::CameraRig;
 use crate::hud::{PlotFrame, UiState};
 use crate::state::{Prediction, SimState};
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::NoFrustumCulling;
+use bevy::light::atmosphere::ScatteringMedium;
 use bevy::light::GlobalAmbientLight;
 use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
@@ -46,17 +49,30 @@ pub fn setup(
     sim: Res<SimState>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    mut media: ResMut<Assets<ScatteringMedium>>,
 ) {
     let sphere = meshes.add(Sphere::new(1.0).mesh().uv(256, 128));
+    let mut defs = BodyDefs::default();
     for src in &sim.world.sources {
-        let (color, emissive) = match src.name.as_str() {
-            "Earth" => (Color::srgb(0.18, 0.32, 0.55), LinearRgba::BLACK),
-            "Moon" => (Color::srgb(0.55, 0.55, 0.53), LinearRgba::BLACK),
-            "Sun" => (Color::srgb(1.0, 0.95, 0.8), LinearRgba::rgb(40.0, 36.0, 28.0)),
-            _ => continue,
-        };
-        let mat =
-            materials.add(StandardMaterial { base_color: color, emissive, perceptual_roughness: 0.9, ..default() });
+        let (Some(def), Some(p)) = (body_visual::load(&src.name), src.physical.as_ref()) else { continue };
+        let [r, g, b] = def.base_color;
+        let emissive = def.emissive.as_ref().map_or(LinearRgba::BLACK, |e| {
+            let [r, g, b] = e.color;
+            LinearRgba::rgb(r, g, b) * e.luminance
+        });
+        let mat = materials.add(StandardMaterial {
+            base_color: Color::srgb(r, g, b),
+            emissive,
+            perceptual_roughness: def.roughness,
+            ..default()
+        });
+        if let Some(a) = &def.atmosphere {
+            let mean = (2.0 * p.radius_eq + p.radius_polar) / 3.0;
+            atmosphere::spawn(&mut commands, &mut media, src.node, mean, a);
+        }
+        if let Some(e) = &def.emissive {
+            defs.light_source = Some((src.node, e.illuminance_1au));
+        }
         commands.spawn((
             BodyVisual(src.node),
             Mesh3d(sphere.clone()),
@@ -64,6 +80,7 @@ pub fn setup(
             Transform::IDENTITY,
             NoFrustumCulling,
         ));
+        defs.defs.push((src.node, def));
     }
     let ground_mat = materials.add(StandardMaterial {
         base_color: Color::srgb(0.18, 0.32, 0.55),
@@ -79,14 +96,33 @@ pub fn setup(
         NoFrustumCulling,
         Visibility::Hidden,
     ));
-    commands.spawn((SunLight, DirectionalLight { illuminance: 12_000.0, ..default() }, Transform::IDENTITY));
+    commands.spawn((SunLight, DirectionalLight { illuminance: 128_000.0, ..default() }, Transform::IDENTITY));
     commands.insert_resource(GlobalAmbientLight { brightness: 30.0, ..default() });
+    commands.insert_resource(defs);
     commands.insert_resource(Assets3d {
         ship_mesh: meshes.add(Cuboid::new(3.0, 3.0, 10.0)),
         ship_mat: materials.add(StandardMaterial { base_color: Color::srgb(0.8, 0.8, 0.82), ..default() }),
         active_mat: materials.add(StandardMaterial { base_color: Color::srgb(0.95, 0.85, 0.6), ..default() }),
     });
 }
+
+/// Visual definitions of the bodies that have one, and which body lights
+/// the scene (with its illuminance at 1 AU).
+#[derive(Resource, Default)]
+pub struct BodyDefs {
+    pub defs: Vec<(NodeId, BodyVisualDef)>,
+    pub light_source: Option<(NodeId, f32)>,
+}
+
+impl BodyDefs {
+    #[allow(dead_code)] // used by map mode (next commit)
+    pub fn get(&self, node: NodeId) -> Option<&BodyVisualDef> {
+        self.defs.iter().find(|(n, _)| *n == node).map(|(_, d)| d)
+    }
+}
+
+/// One astronomical unit (m).
+const AU: f64 = 1.495_978_707e11;
 
 fn physical(world: &World, node: NodeId) -> Option<&BodyPhysical> {
     world.source(node).and_then(|s| s.physical.as_ref())
@@ -101,8 +137,9 @@ fn body_matrix(p: &BodyPhysical, t: Epoch) -> DMat3 {
 pub fn update_bodies(
     sim: Res<SimState>,
     rig: Res<CameraRig>,
+    defs: Res<BodyDefs>,
     mut bodies: Query<(&BodyVisual, &mut Transform), Without<SunLight>>,
-    mut light: Query<&mut Transform, With<SunLight>>,
+    mut light: Query<(&mut Transform, &mut DirectionalLight), With<SunLight>>,
 ) {
     let snap = sim.world.snapshot(sim.clock);
     for (body, mut t) in &mut bodies {
@@ -115,9 +152,10 @@ pub fn update_bodies(
             rotation: q.as_quat(),
             scale: Vec3::new(p.radius_eq as f32, p.radius_polar as f32, p.radius_eq as f32),
         };
-        if p.name == "Sun" {
-            if let Ok(mut lt) = light.single_mut() {
+        if let Some((_, lux)) = defs.light_source.filter(|(n, _)| *n == body.0) {
+            if let Ok((mut lt, mut l)) = light.single_mut() {
                 *lt = Transform::IDENTITY.looking_to(-pos.normalize().as_vec3(), Vec3::Z);
+                l.illuminance = lux * (AU / pos.length()).powi(2) as f32;
             }
         }
     }

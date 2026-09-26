@@ -48,11 +48,17 @@ impl Default for CameraRig {
 #[derive(Component)]
 pub struct MainCamera;
 
+/// Fixed exposure: sunlit surfaces read well; night sides are dark.
+pub const EV100: f32 = 14.5;
+
 pub fn setup(mut commands: Commands, demo: Option<ResMut<crate::demo::Demo>>, mut images: ResMut<Assets<Image>>) {
     let mut cam = commands.spawn((
         MainCamera,
         Camera3d::default(),
         Projection::Perspective(PerspectiveProjection { near: 0.1, far: 1.0e13, ..default() }),
+        // Physical light units: sunlight ~128,000 lux, sunny-16 exposure.
+        bevy::camera::Hdr,
+        bevy::camera::Exposure { ev100: EV100 },
         Transform::IDENTITY,
     ));
     if let Some(mut demo) = demo {
