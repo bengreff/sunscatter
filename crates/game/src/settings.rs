@@ -74,9 +74,8 @@ pub struct GraphicsSettings {
     pub msaa: MsaaLevel,
     /// Planetshine (Earthshine on the Moon, moonlight on Earth; D055).
     pub earthshine: bool,
-    /// Eye adaptation: exposure brightens slowly in dark scenes (D055).
-    /// Off in every tier until it is calibrated: some views (the whole
-    /// Moon after a dark map view) still come out overexposed.
+    /// Eye adaptation: exposure brightens slowly in dark scenes (D055); on
+    /// from Low up. Minimal keeps the fixed exposure.
     pub eye_adaptation: bool,
 }
 
@@ -106,6 +105,7 @@ impl GraphicsSettings {
                 atmosphere: AtmosphereQuality::Lut,
                 star_magnitude: 5.0,
                 msaa: MsaaLevel::X2,
+                eye_adaptation: true,
                 ..base
             },
             Tier::Medium => GraphicsSettings {
@@ -117,6 +117,7 @@ impl GraphicsSettings {
                 star_magnitude: 6.0,
                 bloom: true,
                 msaa: MsaaLevel::X4,
+                eye_adaptation: true,
                 ..base
             },
             Tier::High => GraphicsSettings {
@@ -132,6 +133,7 @@ impl GraphicsSettings {
                 shadows: true,
                 msaa: MsaaLevel::X4,
                 earthshine: true,
+                eye_adaptation: true,
                 ..base
             },
             Tier::Ultra => GraphicsSettings { terrain_error_px: 1.0, star_magnitude: 8.0, ..Self::preset(Tier::High) },
@@ -174,13 +176,12 @@ pub fn apply(
     if !settings.is_changed() {
         return;
     }
-    use crate::lighting::{metering_range, BRIGHTEN_SPEED, DARKEN_SPEED, DAYLIGHT_LOG_LUM};
+    use crate::lighting::{compensation_points, metering_range, BRIGHTEN_SPEED, DARKEN_SPEED, METERING_FILTER};
     use bevy::post_process::bloom::Bloom;
     let curve = curve
         .get_or_insert_with(|| {
-            let c = DAYLIGHT_LOG_LUM;
-            let flat = LinearSpline::new([Vec2::new(-32.0, c), Vec2::new(32.0, c)]);
-            curves.add(AutoExposureCompensationCurve::from_curve(flat).expect("a flat curve is valid"))
+            let points = compensation_points().map(|(x, y)| Vec2::new(x, y));
+            curves.add(AutoExposureCompensationCurve::from_curve(LinearSpline::new(points)).expect("a valid curve"))
         })
         .clone();
     let s = *settings;
@@ -199,6 +200,7 @@ pub fn apply(
         if s.eye_adaptation {
             e.insert(AutoExposure {
                 range: metering_range(),
+                filter: METERING_FILTER,
                 speed_brighten: BRIGHTEN_SPEED,
                 speed_darken: DARKEN_SPEED,
                 compensation_curve: curve.clone(),

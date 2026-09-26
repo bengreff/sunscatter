@@ -23,7 +23,7 @@ Read them before changing anything, by section where the doc is long.
 
 ## Next
 1. **Ask the owner to play it** and report; in particular the dark ground patches (ask for a quicksave, F5, if they recur: it reproduces the exact view) and the surface flashing (geomorphing should have fixed LOD pops).
-2. **Eye adaptation calibration** (`lighting::DAYLIGHT_LOG_LUM`, currently -6.0 and off by default). The whole-Moon Low-tier view after the map view overexposes: check whether adaptation carries over between views or resets on tier changes.
+2. **Eye adaptation**: on from Low up, calibrated so daylight views are unchanged (`lighting::DAYLIGHT_LOG_LUM` = -6.0, 3-stop dead zone, 0–98% metering). Add a demo view of the Moon's night side to see Earthshine come up.
 3. Aerial perspective: 400 km range and the strong haze at 10–20 km altitude (`atmosphere.rs`, Bevy's LUT settings).
 4. Windows: `backhouse` is reachable but has **no Rust toolchain or checkout**; installing Rust and the MSVC build tools needs the owner's go-ahead.
 5. Then the next milestone items (burn planner, ship systems) per `docs/vision.md` and the owner.
