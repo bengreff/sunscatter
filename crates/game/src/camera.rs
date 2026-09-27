@@ -21,7 +21,7 @@ pub enum Focus {
     /// The active vessel.
     Ship,
     /// Another vessel by fleet index (the tracking station).
-    Vessel(usize),
+    Vessel(sim::vessel::VesselId),
     Body(NodeId),
 }
 
@@ -265,7 +265,8 @@ fn focus_frame(sim: &SimState, rig: &CameraRig) -> (NodeId, DVec3, DVec3) {
             let near = nearest_body(sim).map_or(DVec3::ZERO, |b| snap.relative(b, anchor).r);
             (ship_r, (ship_r - near).normalize())
         }
-        Focus::Vessel(i) => {
+        Focus::Vessel(id) => {
+            let i = sim.index_of(id).unwrap_or(sim.active);
             let (va, vr, _) = sim.fleet[i].state_at(&sim.world, sim.clock);
             let r = snap.relative_r(va, anchor) + vr;
             let near = nearest_body_to(sim, i).map_or(DVec3::ZERO, |b| snap.relative(b, anchor).r);

@@ -109,13 +109,15 @@ pub fn update(
         let orbit = crate::relations::body_orbit(eph, sim.clock, node).map(|(_, o)| o.radius());
         objects.push(object(ObjectId::Body(node), c, radius, orbit, eph.node(node).gm));
     }
-    for (i, vessel) in sim.fleet.iter().enumerate() {
+    let active = sim.ship().id();
+    for vessel in &sim.fleet {
+        let id = vessel.id();
         let (anchor, r, _) = vessel.state_at(world, sim.clock);
         let c = snap.relative_r(anchor, rig.anchor) + r - rig.cam_pos;
         let orbit = crate::relations::vessel_orbit(world, sim.clock, vessel).map(|o| o.radius());
-        let mut o = object(ObjectId::Vessel(i), c, VESSEL_RADIUS, orbit, 0.0);
+        let mut o = object(ObjectId::Vessel(id), c, VESSEL_RADIUS, orbit, 0.0);
         // The tracking station never hides a tracked vessel.
-        o.pinned = station.open && (i == sim.active || tracked.is_tracked(i));
+        o.pinned = station.open && (id == active || tracked.is_tracked(id));
         objects.push(o);
     }
     let k = map_view::scale(v.height, v.fov, rig.distance);
@@ -205,14 +207,15 @@ pub fn draw_overlay(
                 painter.circle_filled(pt(s), 4.0, egui_color(color, 1.0));
             }
             ObjectId::Vessel(i) => {
-                let (size, color) = if i == sim.active { (6.0, [1.0, 0.85, 0.2]) } else { (4.0, [0.7, 0.75, 0.8]) };
+                let (size, color) =
+                    if i == sim.ship().id() { (6.0, [1.0, 0.85, 0.2]) } else { (4.0, [0.7, 0.75, 0.8]) };
                 let d = |x: f32, y: f32| egui::pos2(s.x + x * size, s.y + y * size);
                 let diamond = vec![d(0.0, -1.0), d(1.0, 0.0), d(0.0, 1.0), d(-1.0, 0.0)];
                 painter.add(egui::Shape::convex_polygon(diamond, egui_color(color, 1.0), egui::Stroke::NONE));
             }
         }
     }
-    if map.in_map(ObjectId::Vessel(sim.active)) {
+    if map.in_map(ObjectId::Vessel(sim.ship().id())) {
         draw_apsides(&painter, &sim, &rig, &pred, &ui, &v, &map, &orbits);
     }
 
@@ -236,7 +239,7 @@ pub fn draw_overlay(
         }
         let name = match o.id {
             ObjectId::Body(node) => sim.world.eph.node(node).name.clone(),
-            ObjectId::Vessel(i) if i == sim.active => format!("{} (active)", tracked.name(i)),
+            ObjectId::Vessel(i) if i == sim.ship().id() => format!("{} (active)", tracked.name(i)),
             ObjectId::Vessel(i) => tracked.name(i),
         };
         let ring = egui::Stroke::new(1.5, egui::Color32::from_rgb(120, 220, 255));

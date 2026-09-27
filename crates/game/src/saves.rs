@@ -130,9 +130,9 @@ pub fn restore(sim: &mut SimState, save: SaveGame) {
 }
 
 /// Game state that follows a load: prediction, ids and camera focus.
-pub fn after_load(sim: &SimState, pred: &mut Prediction, tracked: &mut Tracked, rig: &mut CameraRig) {
+pub fn after_load(pred: &mut Prediction, tracked: &mut Tracked, rig: &mut CameraRig) {
     *pred = Prediction::default();
-    tracked.reset(sim.fleet.len());
+    tracked.reset();
     if matches!(rig.focus, Focus::Vessel(_)) {
         rig.focus = Focus::Ship;
     }

@@ -66,7 +66,7 @@ pub fn check_map_view(
 ) {
     use crate::map_view::ObjectId;
     let Some(demo) = demo else { return };
-    let ship = map.in_map(ObjectId::Vessel(sim.active));
+    let ship = map.in_map(ObjectId::Vessel(sim.ship().id()));
     let body = |name: &str| sim.world.find(name).map(|s| map.in_map(ObjectId::Body(s.node)));
     match demo.step {
         Step::Pad => assert!(!ship, "demo Pad: the ship must not be in map view"),

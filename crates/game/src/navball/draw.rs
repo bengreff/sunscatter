@@ -188,10 +188,8 @@ fn target_panel(
         for src in sim.world.surfaces() {
             pick(ui, Some(NavTarget::Body(src.node)), src.name.clone());
         }
-        for i in (0..sim.fleet.len()).filter(|&i| i != sim.active) {
-            if let Some(id) = tracked.id(i) {
-                pick(ui, Some(NavTarget::Vessel(id)), tracked.name(i));
-            }
+        for id in sim.fleet.iter().map(|v| v.id()).filter(|&id| id != sim.ship().id()) {
+            pick(ui, Some(NavTarget::Vessel(id)), tracked.name(id));
         }
     });
     if let Some((_, d)) = &s.target {

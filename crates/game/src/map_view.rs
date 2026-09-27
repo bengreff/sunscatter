@@ -24,8 +24,7 @@ pub const ICON_HIT_PX: f32 = 8.0;
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ObjectId {
     Body(NodeId),
-    /// A vessel by fleet index.
-    Vessel(usize),
+    Vessel(sim::vessel::VesselId),
 }
 
 /// What the rule needs to know about one object this frame.
@@ -150,7 +149,12 @@ mod tests {
     }
 
     fn vessel(i: usize, orbit: f64) -> Object {
-        Object { id: ObjectId::Vessel(i), radius: 10.0, mass: 0.0, ..body(0, 0.0, Some(orbit), 0.0) }
+        Object {
+            id: ObjectId::Vessel(sim::vessel::VesselId(i as u64)),
+            radius: 10.0,
+            mass: 0.0,
+            ..body(0, 0.0, Some(orbit), 0.0)
+        }
     }
 
     fn at(mut o: Object, x: f32, y: f32) -> Object {

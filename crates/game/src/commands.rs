@@ -17,15 +17,16 @@ use crate::state::{Prediction, SimState, WARP_LEVELS};
 use crate::tracking::{self, Tracked, TrackingStation};
 use bevy::prelude::*;
 use sim::save::SaveGame;
+use sim::vessel::VesselId;
 
 #[derive(Message, Clone, Debug)]
 pub enum GameCommand {
     /// Requested warp level (index into `WARP_LEVELS`).
     SetWarp(usize),
-    /// Make fleet vessel `i` active.
-    Switch(usize),
-    /// Delete a non-active fleet vessel.
-    Delete(usize),
+    /// Make a vessel active.
+    Switch(VesselId),
+    /// Delete a non-active vessel.
+    Delete(VesselId),
     /// Replace the game with a (checked, non-empty) save: load or revert.
     Restore(Box<SaveGame>),
     /// Put the active vessel back on the pad.
@@ -58,7 +59,7 @@ pub fn apply(
             }
             GameCommand::Restore(save) => {
                 crate::saves::restore(&mut sim, (**save).clone());
-                crate::saves::after_load(&sim, &mut pred, &mut tracked, &mut rig);
+                crate::saves::after_load(&mut pred, &mut tracked, &mut rig);
                 // Indices in the station may now name other vessels.
                 ts.clear_selection();
             }

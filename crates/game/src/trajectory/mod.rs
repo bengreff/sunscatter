@@ -250,7 +250,7 @@ pub fn draw(
     let Some(plotter) = Plotter::new(&sim, &rig, ui.plot_frame) else { return };
     for (i, vessel) in sim.fleet.iter().enumerate() {
         let active = i == sim.active;
-        if (!active && !tracked.is_tracked(i)) || !map.in_map(ObjectId::Vessel(i)) {
+        if (!active && !tracked.is_tracked(vessel.id())) || !map.in_map(ObjectId::Vessel(vessel.id())) {
             continue;
         }
         let seg = if active { active_segment(&sim, &pred) } else { vessel.segment() };

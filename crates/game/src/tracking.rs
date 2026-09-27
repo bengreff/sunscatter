@@ -18,7 +18,7 @@ use crate::state::{Prediction, SimState, WARP_LEVELS};
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 use sim::frame::NodeId;
-use sim::vessel::{Controls, Phase};
+use sim::vessel::{Controls, Phase, VesselId};
 use std::collections::HashSet;
 
 /// Camera distance when the tracking station opens (m): Earth with the
@@ -26,64 +26,33 @@ use std::collections::HashSet;
 /// view (its sprite under 1 px, D054) so its orbit line shows.
 const STATION_DISTANCE: f64 = 2.5e9;
 
-/// Stable vessel ids (parallel to `SimState::fleet`) and the tracked set.
-#[derive(Resource)]
+/// Which vessels are tracked (orbit line and icon on the map; all are by
+/// default), by stable id.
+#[derive(Resource, Default)]
 pub struct Tracked {
-    ids: Vec<u64>,
-    next: u64,
-    hidden: HashSet<u64>,
-}
-
-impl Default for Tracked {
-    fn default() -> Self {
-        Tracked { ids: Vec::new(), next: 1, hidden: HashSet::new() }
-    }
+    hidden: HashSet<VesselId>,
 }
 
 impl Tracked {
-    /// Follows the fleet's length: vessels are appended at the end and
-    /// truncated from the end everywhere except [`delete_vessel`].
-    pub fn sync(&mut self, fleet_len: usize) {
-        self.ids.truncate(fleet_len);
-        while self.ids.len() < fleet_len {
-            self.ids.push(self.next);
-            self.next += 1;
-        }
+    /// Forgets everything (after loading a save): all vessels are tracked.
+    pub fn reset(&mut self) {
+        self.hidden.clear();
     }
 
-    /// Forgets every id (after loading a save); all vessels are tracked.
-    pub fn reset(&mut self, fleet_len: usize) {
-        *self = Tracked::default();
-        self.sync(fleet_len);
+    pub fn name(&self, id: VesselId) -> String {
+        format!("Vessel {}", id.0)
     }
 
-    pub fn id(&self, i: usize) -> Option<u64> {
-        self.ids.get(i).copied()
+    /// Whether vessel `id` gets a map orbit line.
+    pub fn is_tracked(&self, id: VesselId) -> bool {
+        !self.hidden.contains(&id)
     }
 
-    pub fn name(&self, i: usize) -> String {
-        self.id(i).map_or_else(|| format!("Vessel #{}", i + 1), |id| format!("Vessel {id}"))
-    }
-
-    /// Whether vessel `i` gets a map orbit line (vessels are tracked by default).
-    pub fn is_tracked(&self, i: usize) -> bool {
-        self.id(i).is_none_or(|id| !self.hidden.contains(&id))
-    }
-
-    pub fn set_tracked(&mut self, i: usize, tracked: bool) {
-        if let Some(id) = self.id(i) {
-            if tracked {
-                self.hidden.remove(&id);
-            } else {
-                self.hidden.insert(id);
-            }
-        }
-    }
-
-    fn remove(&mut self, i: usize) {
-        if i < self.ids.len() {
-            let id = self.ids.remove(i);
+    pub fn set_tracked(&mut self, id: VesselId, tracked: bool) {
+        if tracked {
             self.hidden.remove(&id);
+        } else {
+            self.hidden.insert(id);
         }
     }
 }
@@ -98,7 +67,7 @@ pub struct TrackingStation {
     saved: Option<(Focus, f64, f64, f64)>,
     pub selected: Option<Selection>,
     /// A vessel waiting for "delete for good?".
-    confirm_delete: Option<usize>,
+    confirm_delete: Option<VesselId>,
 }
 
 impl TrackingStation {
@@ -118,10 +87,11 @@ impl TrackingStation {
     }
 }
 
-/// Makes vessel `i` active. Its controls start from throttle 0 with SAS on;
-/// the camera follows it.
-pub fn switch_to(sim: &mut SimState, rig: &mut CameraRig, pred: &mut Prediction, i: usize) {
-    if i >= sim.fleet.len() || i == sim.active {
+/// Makes vessel `id` active. Its controls start from throttle 0 with SAS
+/// on; the camera follows it.
+pub fn switch_to(sim: &mut SimState, rig: &mut CameraRig, pred: &mut Prediction, id: VesselId) {
+    let Some(i) = sim.index_of(id) else { return };
+    if i == sim.active {
         return;
     }
     sim.active = i;
@@ -130,23 +100,19 @@ pub fn switch_to(sim: &mut SimState, rig: &mut CameraRig, pred: &mut Prediction,
     rig.focus = Focus::Ship;
 }
 
-/// Removes a non-active vessel ("delete debris"), keeping the active index,
-/// ids and camera focus pointing at the same vessels.
-pub fn delete_vessel(sim: &mut SimState, tracked: &mut Tracked, rig: &mut CameraRig, i: usize) -> bool {
-    if i >= sim.fleet.len() || i == sim.active {
+/// Removes a non-active vessel ("delete debris").
+pub fn delete_vessel(sim: &mut SimState, tracked: &mut Tracked, rig: &mut CameraRig, id: VesselId) -> bool {
+    let Some(i) = sim.index_of(id) else { return false };
+    if i == sim.active {
         return false;
     }
     sim.fleet.remove(i);
-    tracked.remove(i);
+    tracked.set_tracked(id, true);
     if sim.active > i {
         sim.active -= 1;
     }
-    if let Focus::Vessel(j) = rig.focus {
-        rig.focus = match j.cmp(&i) {
-            std::cmp::Ordering::Less => Focus::Vessel(j),
-            std::cmp::Ordering::Equal => Focus::Ship,
-            std::cmp::Ordering::Greater => Focus::Vessel(j - 1),
-        };
+    if rig.focus == Focus::Vessel(id) {
+        rig.focus = Focus::Ship;
     }
     true
 }
@@ -158,25 +124,24 @@ pub fn update(
     ctx: Res<InputContext>,
     sim: Res<SimState>,
     mut rig: ResMut<CameraRig>,
-    mut tracked: ResMut<Tracked>,
     mut ts: ResMut<TrackingStation>,
     mut commands: MessageWriter<GameCommand>,
 ) {
-    tracked.sync(sim.fleet.len());
     if ctx.allows(Keys::Menus) && keys.just_pressed(KeyCode::F7) {
         ts.open = !ts.open;
     }
     if ctx.allows(Keys::Flight) {
         let n = sim.fleet.len();
+        let id = |i: usize| sim.fleet[i % n].id();
         if keys.just_pressed(KeyCode::BracketRight) {
-            commands.write(GameCommand::Switch((sim.active + 1) % n));
+            commands.write(GameCommand::Switch(id(sim.active + 1)));
         }
         if keys.just_pressed(KeyCode::BracketLeft) {
-            commands.write(GameCommand::Switch((sim.active + n - 1) % n));
+            commands.write(GameCommand::Switch(id(sim.active + n - 1)));
         }
     }
-    if let Focus::Vessel(i) = rig.focus {
-        if i >= sim.fleet.len() {
+    if let Focus::Vessel(id) = rig.focus {
+        if sim.index_of(id).is_none() {
             rig.focus = Focus::Ship;
         }
     }
@@ -232,18 +197,18 @@ pub fn vessel_info(sim: &SimState, i: usize) -> VesselInfo {
 enum Action {
     Close,
     Select(Selection),
-    FocusVessel(usize),
-    Switch(usize),
-    AskDelete(usize),
-    Delete(usize),
-    Track(usize, bool),
+    FocusVessel(VesselId),
+    Switch(VesselId),
+    AskDelete(VesselId),
+    Delete(VesselId),
+    Track(VesselId, bool),
     FocusBody(NodeId),
 }
 
 /// What is selected in the station's list.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Selection {
-    Vessel(usize),
+    Vessel(VesselId),
     Body(NodeId),
 }
 
@@ -319,21 +284,21 @@ pub fn draw(
             ui.separator();
             egui::ScrollArea::vertical().max_height(ui.available_height() * 0.62).show(ui, |ui| {
                 for g in ["In flight", "Landed", "Debris"] {
-                    let members: Vec<usize> =
-                        (0..sim.fleet.len()).filter(|&i| group(&sim.fleet[i].phase) == g).collect();
+                    let members: Vec<VesselId> =
+                        sim.fleet.iter().filter(|v| group(&v.phase) == g).map(|v| v.id()).collect();
                     if members.is_empty() {
                         continue;
                     }
                     ui.label(egui::RichText::new(format!("{g} ({})", members.len())).small().color(dim));
                     for i in members {
+                        let active = sim.ship().id() == i;
                         ui.horizontal(|ui| {
                             let mut on = tracked.is_tracked(i);
                             if ui.checkbox(&mut on, "").on_hover_text("Track: orbit line and icon on the map").changed()
                             {
                                 actions.push(Action::Track(i, on));
                             }
-                            let name =
-                                if i == sim.active { format!("{} (active)", tracked.name(i)) } else { tracked.name(i) };
+                            let name = if active { format!("{} (active)", tracked.name(i)) } else { tracked.name(i) };
                             if ui.selectable_label(ts.selected == Some(Selection::Vessel(i)), name).clicked() {
                                 actions.push(Action::Select(Selection::Vessel(i)));
                             }
@@ -355,8 +320,8 @@ pub fn draw(
             });
             ui.separator();
             match ts.selected {
-                Some(Selection::Vessel(i)) if i < sim.fleet.len() => {
-                    vessel_details(ui, &sim, &tracked, &ts, i, &mut actions)
+                Some(Selection::Vessel(id)) if sim.index_of(id).is_some() => {
+                    vessel_details(ui, &sim, &tracked, &ts, id, &mut actions)
                 }
                 Some(Selection::Body(node)) => {
                     ui.strong(&sim.world.eph.node(node).name);
@@ -399,13 +364,14 @@ pub fn draw(
     Ok(())
 }
 
-/// Focus the station camera on vessel `i`, from a few times its distance
+/// Focus the station camera on vessel `id`, from a few times its distance
 /// to the body it orbits.
-pub fn focus_vessel(sim: &SimState, rig: &mut CameraRig, i: usize) {
+pub fn focus_vessel(sim: &SimState, rig: &mut CameraRig, id: VesselId) {
+    let Some(i) = sim.index_of(id) else { return };
     let primary = camera::nearest_body_to(sim, i);
     let (anchor, r, _) = sim.fleet[i].state_at(&sim.world, sim.clock);
     let from = primary.map_or(1.0e7, |p| (r - sim.world.snapshot(sim.clock).relative(p, anchor).r).length());
-    rig.focus = Focus::Vessel(i);
+    rig.focus = Focus::Vessel(id);
     rig.distance = 3.0 * from;
 }
 
@@ -414,12 +380,13 @@ fn vessel_details(
     sim: &SimState,
     tracked: &Tracked,
     ts: &TrackingStation,
-    i: usize,
+    id: VesselId,
     actions: &mut Vec<Action>,
 ) {
+    let Some(i) = sim.index_of(id) else { return };
     let active = i == sim.active;
     let info = vessel_info(sim, i);
-    ui.strong(tracked.name(i));
+    ui.strong(tracked.name(id));
     ui.monospace(format!("status {}", info.status));
     ui.monospace(format!("about  {}", info.primary.map_or_else(|| "-".into(), |p| sim.world.eph.node(p).name.clone())));
     if let Some((pe, ap)) = info.apsides {
@@ -431,23 +398,23 @@ fn vessel_details(
     }
     ui.horizontal(|ui| {
         if ui.button("Focus").clicked() {
-            actions.push(Action::FocusVessel(i));
+            actions.push(Action::FocusVessel(id));
         }
         if ui.add_enabled(!active, egui::Button::new("Switch to")).clicked() {
-            actions.push(Action::Switch(i));
+            actions.push(Action::Switch(id));
         }
         if ui.add_enabled(!active, egui::Button::new("Delete")).on_hover_text("Delete this vessel").clicked() {
-            actions.push(Action::AskDelete(i));
+            actions.push(Action::AskDelete(id));
         }
     });
-    if ts.confirm_delete == Some(i) {
+    if ts.confirm_delete == Some(id) {
         ui.horizontal(|ui| {
             ui.label(egui::RichText::new("Delete it for good?").color(crate::interface::theme::WARN));
             if ui.button("Delete").clicked() {
-                actions.push(Action::Delete(i));
+                actions.push(Action::Delete(id));
             }
             if ui.button("Cancel").clicked() {
-                actions.push(Action::Select(Selection::Vessel(i)));
+                actions.push(Action::Select(Selection::Vessel(id)));
             }
         });
     }
@@ -458,19 +425,13 @@ mod tests {
     use super::*;
 
     #[test]
-    fn ids_are_stable_across_deletion() {
+    fn tracking_is_by_id_and_reset_on_load() {
         let mut t = Tracked::default();
-        t.sync(3);
-        assert_eq!((t.id(0), t.id(1), t.id(2)), (Some(1), Some(2), Some(3)));
-        t.set_tracked(2, false);
-        t.remove(1);
-        assert_eq!((t.id(0), t.id(1)), (Some(1), Some(3)));
-        assert!(t.is_tracked(0) && !t.is_tracked(1));
-        t.sync(3);
-        assert_eq!(t.id(2), Some(4), "new vessels never reuse an id");
-        t.reset(2);
-        assert_eq!((t.id(0), t.id(1)), (Some(1), Some(2)));
-        assert!(t.is_tracked(1));
+        let (a, b) = (VesselId(1), VesselId(2));
+        t.set_tracked(b, false);
+        assert!(t.is_tracked(a) && !t.is_tracked(b));
+        t.reset();
+        assert!(t.is_tracked(b));
     }
 
     #[test]
@@ -489,23 +450,25 @@ mod tests {
     }
 
     #[test]
-    fn switching_and_deleting_keep_indices_consistent() {
+    fn switching_and_deleting_follow_ids() {
         let mut sim = SimState::new();
         sim.spawn_test_ships(3);
         let (mut rig, mut pred, mut tracked) = (CameraRig::default(), Prediction::default(), Tracked::default());
-        tracked.sync(sim.fleet.len());
+        let ids: Vec<VesselId> = sim.fleet.iter().map(|v| v.id()).collect();
         sim.controls.throttle = 0.7;
-        switch_to(&mut sim, &mut rig, &mut pred, 2);
+        switch_to(&mut sim, &mut rig, &mut pred, ids[2]);
         assert_eq!(sim.active, 2);
         assert_eq!(sim.controls.throttle, 0.0);
         assert!(sim.controls.sas);
-        rig.focus = Focus::Vessel(3);
-        assert!(!delete_vessel(&mut sim, &mut tracked, &mut rig, 2), "the active vessel cannot be deleted");
-        assert!(delete_vessel(&mut sim, &mut tracked, &mut rig, 0));
+        rig.focus = Focus::Vessel(ids[3]);
+        tracked.set_tracked(ids[0], false);
+        assert!(!delete_vessel(&mut sim, &mut tracked, &mut rig, ids[2]), "the active vessel cannot be deleted");
+        assert!(delete_vessel(&mut sim, &mut tracked, &mut rig, ids[0]));
         assert_eq!(sim.fleet.len(), 3);
-        assert_eq!(sim.active, 1);
-        assert_eq!(rig.focus, Focus::Vessel(2));
-        assert_eq!((tracked.id(0), tracked.id(1), tracked.id(2)), (Some(2), Some(3), Some(4)));
+        assert_eq!(sim.ship().id(), ids[2], "the same vessel stays active");
+        assert_eq!(rig.focus, Focus::Vessel(ids[3]), "the focus still names the same vessel");
+        assert!(tracked.is_tracked(ids[0]), "a deleted vessel leaves no tracking state");
+        assert!(!delete_vessel(&mut sim, &mut tracked, &mut rig, ids[0]), "deleting twice does nothing");
         let info = vessel_info(&sim, 1);
         let (pe, ap) = info.apsides.expect("coasting in orbit");
         assert!(info.status == "coasting" && pe > 300_000.0 && ap < 500_000.0, "{pe} {ap}");

@@ -37,8 +37,8 @@ impl Plugin for NavballPlugin {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NavTarget {
     Body(NodeId),
-    /// A vessel by its tracking id (stable across fleet changes).
-    Vessel(u64),
+    /// A vessel by its stable id.
+    Vessel(sim::vessel::VesselId),
 }
 
 /// Navball settings and the throttled readouts.
@@ -91,10 +91,10 @@ fn target_state(
             Some((sim.world.eph.node(node).name.clone(), k.r, k.v))
         }
         NavTarget::Vessel(id) => {
-            let i = (0..sim.fleet.len()).find(|&i| tracked.id(i) == Some(id)).filter(|&i| i != sim.active)?;
+            let i = sim.index_of(id).filter(|&i| i != sim.active)?;
             let (a, r, v) = sim.fleet[i].state_at(&sim.world, t);
             let k = snap.relative(a, anchor);
-            Some((tracked.name(i), k.r + r, k.v + v))
+            Some((tracked.name(id), k.r + r, k.v + v))
         }
     }
 }

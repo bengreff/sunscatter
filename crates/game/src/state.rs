@@ -10,7 +10,7 @@ use sim::ephem::Ephemeris;
 use sim::kepler::Elements;
 use sim::sol;
 use sim::time::Epoch;
-use sim::vessel::{Controls, Phase, Segment, Vessel, VesselIds, VesselParams, TICK};
+use sim::vessel::{Controls, Phase, Segment, Vessel, VesselId, VesselIds, VesselParams, TICK};
 use sim::world::World;
 use std::sync::Arc;
 
@@ -75,6 +75,11 @@ impl SimState {
 
     pub fn ship(&self) -> &Vessel {
         &self.fleet[self.active]
+    }
+
+    /// The fleet index of vessel `id`, if it exists.
+    pub fn index_of(&self, id: VesselId) -> Option<usize> {
+        self.fleet.iter().position(|v| v.id() == id)
     }
 
     /// The warp actually applied: rails warp only while coasting or landed
