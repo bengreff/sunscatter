@@ -22,6 +22,7 @@ A short map to search before building anything: who owns what, the frame order, 
 | Body shape, rotation, atmosphere, surface height | `sim::body` | the physical surface is `surface_height` (base + detail, sea raised); `terrain_height` is the same without the sea (render meshes) |
 | Heightmap sampling (bicubic), sub-sample detail (roughness map, lattice noise, D059) | `sim::terrain` (`detail`, `noise`) | rendering samples through `sim::body` too; `roughness.png` baked by `asset-tool` |
 | Vessel motion, phases, identity (`VesselId`), trajectories of coast and burn segments, flight plans, mass | `sim::vessel` (`trajectory`, `segment`, `burn`) | the stored trajectory is the truth (rule 4); planned burns are segments, so warp only samples them |
+| Craft files (`data/craft/<craft>/craft.ron`, `geometry.ron`), loading and validation | `sim::craft` (`file`) | one part per ship for now (D060); `test_craft()` is the shared instance |
 | Saves | `sim::save` (format), `game::saves` (UI, files) | |
 | Nearest body (camera clearance only), display primary, dominance ("which body is this about", one instance in `SimState`), osculating orbit (vessels and bodies), orbit size | `game::relations` | display only, never physics |
 | Map view: what is visible/hoverable, per object | `game::map_view` (rule, D054); `game::map` gathers sizes and draws | pure functions + table tests |

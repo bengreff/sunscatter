@@ -1,0 +1,21 @@
+// The test craft (realism-1 §3a, D060, D064): one part for the whole ship.
+// Numbers are placeholders for a small hypergolic craft (Δv ≈ 5.4 km/s full);
+// the owner tunes them. Vectors are in body axes (m), +Z = nose and thrust axis.
+(
+    name: "Test craft",
+    crew: 3,                         // crewed: flown without light delay (D063)
+    dry_mass: 4000.0,                // kg
+    propellant: (mass: 16000.0, capacity: 16000.0),   // one bipropellant, kg
+    engine: (
+        thrust_vac: 300.0e3,         // N
+        isp_vac: 320.0, isp_sl: 280.0,   // s; Isp and thrust fall with ambient pressure
+        min_throttle: 0.1,
+        gimbal_deg: 5.0,
+        mount: (pos: (0.0, 0.0, -3.2), dir: (0.0, 0.0, 1.0)),   // thrust along +Z
+    ),
+    attitude_control: (torque: (40.0e3, 40.0e3, 20.0e3)),  // N·m per body axis (abstract RCS/wheels)
+    chute: (cd_area: 600.0, deploy_max_q: 40.0e3, mount: (0.0, 0.0, 3.2)),
+    thermal: (skin_max_k: 1100.0, internal_max_k: 400.0),   // D065: clean destruction
+    impact: (max_speed: 8.0),        // m/s at any contact point, beyond the gear's stroke
+    antenna: (gain_dbi: 20.0, power_w: 20.0),                // D068
+)

@@ -1,0 +1,32 @@
+// The test craft's shape (realism-1 §3a): primitives in body axes (m),
+// +Z = nose and thrust axis. A lander capsule: an engine bell under a
+// cylindrical service body, a conical crew capsule with a rounded nose, and
+// four fixed legs with feet. Overlapping primitives are fine: surfaces inside
+// another primitive are removed when the craft is built.
+(
+    // Skin of every primitive unless it names its own (D065 thermal data):
+    // aluminium, 3 mm.
+    skin: (areal_mass: 8.1, specific_heat: 900.0, emissivity: 0.8, conductivity: 150.0, thickness: 0.003),
+    // Where the propellant sits (a solid cylinder filling from `base` along
+    // `axis`; mass properties, realism-1 §3a).
+    tank: (base: (0.0, 0.0, -3.0), axis: (0.0, 0.0, 2.8), radius: 1.8),
+    primitives: [
+        (
+            name: "engine bell",
+            shape: Frustum(base: (0.0, 0.0, -4.2), axis: (0.0, 0.0, 1.0), r_base: 0.8, r_top: 0.3),
+            // Niobium alloy, 1 mm, dark coating.
+            skin: Some((areal_mass: 8.6, specific_heat: 270.0, emissivity: 0.85, conductivity: 50.0, thickness: 0.001)),
+        ),
+        (name: "service body", shape: Cylinder(base: (0.0, 0.0, -3.2), axis: (0.0, 0.0, 3.2), radius: 2.0)),
+        (name: "capsule", shape: Frustum(base: (0.0, 0.0, 0.0), axis: (0.0, 0.0, 2.9), r_base: 2.0, r_top: 0.7)),
+        (name: "nose", shape: SphereCap(center: (0.0, 0.0, 2.375), axis: (0.0, 0.0, 1.0), radius: 0.875, height: 0.35)),
+        (name: "leg +X", shape: Strut(from: (1.9, 0.0, -2.2), to: (3.0, 0.0, -4.52), radius: 0.08)),
+        (name: "leg +Y", shape: Strut(from: (0.0, 1.9, -2.2), to: (0.0, 3.0, -4.52), radius: 0.08)),
+        (name: "leg -X", shape: Strut(from: (-1.9, 0.0, -2.2), to: (-3.0, 0.0, -4.52), radius: 0.08)),
+        (name: "leg -Y", shape: Strut(from: (0.0, -1.9, -2.2), to: (0.0, -3.0, -4.52), radius: 0.08)),
+        (name: "foot +X", shape: Cylinder(base: (3.0, 0.0, -4.6), axis: (0.0, 0.0, 0.12), radius: 0.3), foot: true),
+        (name: "foot +Y", shape: Cylinder(base: (0.0, 3.0, -4.6), axis: (0.0, 0.0, 0.12), radius: 0.3), foot: true),
+        (name: "foot -X", shape: Cylinder(base: (-3.0, 0.0, -4.6), axis: (0.0, 0.0, 0.12), radius: 0.3), foot: true),
+        (name: "foot -Y", shape: Cylinder(base: (0.0, -3.0, -4.6), axis: (0.0, 0.0, 0.12), radius: 0.3), foot: true),
+    ],
+)
