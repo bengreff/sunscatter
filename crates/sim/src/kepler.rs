@@ -9,6 +9,8 @@
 //! Degenerate cases use fixed conventions so that `from_state`/`to_state` round
 //! trip: equatorial orbits take `raan = 0`; circular orbits take `argp = 0`.
 
+pub mod lambert;
+
 use crate::math::{self, TAU};
 use glam::DVec3;
 use serde::{Deserialize, Serialize};
