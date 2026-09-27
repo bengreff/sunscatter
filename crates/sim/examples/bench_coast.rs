@@ -14,8 +14,16 @@ fn main() {
     let (r, v) =
         Elements { a: 6_778_137.0, e: 0.001, i: 0.9, raan: 0.0, argp: 0.0, mean_anomaly: 0.0 }.to_state(earth.gm);
     let t0 = sol::sol_epoch();
-    let start =
-        CoastStart { anchor: earth.node, r, v, drag: None, contact_height: 5.0, horizon: 1e9, fixed_anchor: false };
+    let start = CoastStart {
+        anchor: earth.node,
+        r,
+        v,
+        drag: None,
+        contact_height: 5.0,
+        horizon: 1e9,
+        fixed_anchor: false,
+        proper_time: 0.0,
+    };
     let mut seg = Segment::new(&w, t0, start);
     let n = 20_000;
     let clock = std::time::Instant::now();

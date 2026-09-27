@@ -83,7 +83,16 @@ fn coasting_vessel_continues_bit_identically_after_load() {
 fn chunked_extension_across_a_save_equals_single_pass() {
     let w = world();
     let (anchor, r, v) = leo(&w);
-    let start = CoastStart { anchor, r, v, drag: None, contact_height: 0.0, horizon: 1e9, fixed_anchor: false };
+    let start = CoastStart {
+        anchor,
+        r,
+        v,
+        drag: None,
+        contact_height: 0.0,
+        horizon: 1e9,
+        fixed_anchor: false,
+        proper_time: 0.0,
+    };
     let mut one = Segment::new(&w, t0(), start);
     one.extend(&w, 2000);
     let mut part = Segment::new(&w, t0(), start);

@@ -9,6 +9,10 @@
 //!
 //! Mass is part of the state: constant in a coast, `m0 − ṁ·t` in a burn
 //! (constant mass flow, so the exact expression replaces integration).
+//! Proper time (δ = τ − t, realism-1 §4a) is the integrator's extra scalar:
+//! integrated with the same stages, outside error control (so the steps are
+//! those of the translation alone), stored with each sample with its rate
+//! and evaluated between samples by cubic Hermite interpolation.
 //! Segments are chained into a [`super::Trajectory`].
 
 use super::anchor::preferred_anchor;
@@ -16,8 +20,8 @@ use super::burn::BurnLaw;
 use crate::ephem::Snapshot;
 use crate::forces::{altitude_above, ActiveSources, DragModel, ForceContext};
 use crate::frame::NodeId;
-use crate::integrate::{hermite5, Dopri5, StepSample, StepState, Tolerance};
-use crate::math::Compensated;
+use crate::integrate::{hermite5, Dopri5, Dynamics, StepSample, StepState, Tolerance};
+use crate::math::{Compensated, CompensatedScalar};
 use crate::time::Epoch;
 use crate::world::World;
 use glam::DVec3;
@@ -31,6 +35,11 @@ pub fn coast_tolerance() -> Tolerance {
 pub struct Sample {
     pub anchor: NodeId,
     pub s: StepSample,
+    /// Proper time offset δ = τ − t (s) and its rate at `s.t`.
+    #[serde(default)]
+    pub delta: f64,
+    #[serde(default)]
+    pub delta_rate: f64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -104,6 +113,9 @@ pub struct CoastStart {
     /// Keep the starting anchor for the whole segment (tests of anchor
     /// invariance); normally the precision policy may re-anchor.
     pub fixed_anchor: bool,
+    /// Proper time offset δ = τ − t at the start (s).
+    #[serde(default)]
+    pub proper_time: f64,
 }
 
 impl Segment {
@@ -125,7 +137,7 @@ impl Segment {
         horizon_end: EndKind,
         plan_index: usize,
     ) -> Self {
-        let CoastStart { anchor, r, v, drag, contact_height, horizon, fixed_anchor } = start;
+        let CoastStart { anchor, r, v, drag, contact_height, horizon, fixed_anchor, proper_time } = start;
         let valid = match kind {
             SegmentKind::Coast => true,
             SegmentKind::Burn(law) => {
@@ -140,7 +152,15 @@ impl Segment {
             kind,
             samples: Vec::new(),
             end: None,
-            state: StepState { t: 0.0, r: Compensated::new(r), v: Compensated::new(v), a: DVec3::ZERO, h: 1.0 },
+            state: StepState {
+                t: 0.0,
+                r: Compensated::new(r),
+                v: Compensated::new(v),
+                a: DVec3::ZERO,
+                h: 1.0,
+                x: CompensatedScalar::new(proper_time),
+                x_rate: 0.0,
+            },
             anchor,
             active,
             drag: drag.map(|d| DragModel { mass, ..d }),
@@ -154,8 +174,10 @@ impl Segment {
         };
         let integ = Dopri5::new(coast_tolerance());
         let f = seg.forces(world);
-        seg.state = integ.start(&|t: f64, r, v| f.accel(t, r, v), 0.0, r, v, 1.0);
-        seg.samples.push(Sample { anchor, s: StepSample { t: 0.0, r, v, a: seg.state.a } });
+        seg.state = integ.start(&f, 0.0, r, v, 1.0);
+        seg.state.x = CompensatedScalar::new(proper_time);
+        let s = StepSample { t: 0.0, r, v, a: seg.state.a };
+        seg.samples.push(Sample { anchor, s, delta: proper_time, delta_rate: seg.state.x_rate });
         if !valid {
             seg.end = Some(SegmentEnd { t: 0.0, kind: EndKind::Failed });
         }
@@ -241,17 +263,20 @@ impl Segment {
                     mass0: self.mass0,
                     kind: &self.kind,
                 };
-                integ.step(&|t: f64, r, v| f.accel(t, r, v), &mut self.state, self.horizon)
+                integ.step(&f, &mut self.state, self.horizon)
             };
             let Ok(sample) = step else {
                 self.end = Some(SegmentEnd { t: prev.s.t, kind: EndKind::Failed });
                 return taken + 1;
             };
-            let new = Sample { anchor: self.anchor, s: sample };
+            let new =
+                Sample { anchor: self.anchor, s: sample, delta: self.state.x.value(), delta_rate: self.state.x_rate };
             if let Some((t_hit, body)) = self.find_contact(world, &prev, &new) {
                 let (r, v) = hermite5(&prev.s, &new.s, t_hit);
-                let a = self.forces(world).accel(t_hit, r, v);
-                self.samples.push(Sample { anchor: self.anchor, s: StepSample { t: t_hit, r, v, a } });
+                let (a, delta_rate) = self.forces(world).accel_rate(t_hit, r, v);
+                let delta = hermite3(&prev, &new, t_hit);
+                let s = StepSample { t: t_hit, r, v, a };
+                self.samples.push(Sample { anchor: self.anchor, s, delta, delta_rate });
                 self.end = Some(SegmentEnd { t: t_hit, kind: EndKind::Surface { body } });
                 return taken + 1;
             }
@@ -283,11 +308,12 @@ impl Segment {
         let grew = self.active.add(&selected);
         if reanchored || grew {
             let (r, v) = (self.state.r.value(), self.state.v.value());
-            self.state.a = self.forces(world).accel_with(&snap, self.state.t, r, v);
+            (self.state.a, self.state.x_rate) = self.forces(world).accel_rate_with(&snap, self.state.t, r, v);
         }
         if reanchored {
             let s = StepSample { t: self.state.t, r: self.state.r.value(), v: self.state.v.value(), a: self.state.a };
-            self.samples.push(Sample { anchor: self.anchor, s });
+            let (delta, delta_rate) = (self.state.x.value(), self.state.x_rate);
+            self.samples.push(Sample { anchor: self.anchor, s, delta, delta_rate });
         }
     }
 
@@ -374,6 +400,36 @@ impl Segment {
         let (r, v) = hermite5(&a.s, &b.s, t);
         Some((b.anchor, r, v))
     }
+
+    /// Proper time offset δ = τ − t (s) at local time `t`. `None` if not
+    /// computed yet.
+    pub fn proper_time_at(&self, t: f64) -> Option<f64> {
+        let last = self.samples.last()?;
+        if t > last.s.t {
+            return None;
+        }
+        let i = self.samples.partition_point(|s| s.s.t < t);
+        if i == 0 {
+            return Some(self.samples[0].delta);
+        }
+        let (a, b) = (self.samples[i - 1], self.samples[i]);
+        if a.s.t == b.s.t {
+            return Some(b.delta);
+        }
+        Some(hermite3(&a, &b, t))
+    }
+}
+
+/// Cubic Hermite interpolation of δ between two samples (values and rates).
+fn hermite3(a: &Sample, b: &Sample, t: f64) -> f64 {
+    let h = b.s.t - a.s.t;
+    let s = (t - a.s.t) / h;
+    let (s2, s3) = (s * s, s * s * s);
+    let h00 = 2.0 * s3 - 3.0 * s2 + 1.0;
+    let h10 = s3 - 2.0 * s2 + s;
+    let h01 = -2.0 * s3 + 3.0 * s2;
+    let h11 = s3 - s2;
+    h00 * a.delta + h10 * h * a.delta_rate + h01 * b.delta + h11 * h * b.delta_rate
 }
 
 /// Mass at local time `t` of a segment of `kind` starting with `mass0`.
@@ -395,14 +451,27 @@ struct Forces<'a> {
     kind: &'a SegmentKind,
 }
 
-impl Forces<'_> {
+impl Dynamics for Forces<'_> {
     /// Acceleration at local time `t`.
     fn accel(&self, t: f64, r: DVec3, v: DVec3) -> DVec3 {
         let snap = self.world.snapshot(self.t0.add_seconds(t));
-        self.accel_with(&snap, t, r, v)
+        self.context(&snap, t, r, v).accel_with(&snap, r, v)
     }
 
-    fn accel_with(&self, snap: &Snapshot, t: f64, r: DVec3, v: DVec3) -> DVec3 {
+    /// Acceleration and proper-time rate at local time `t`.
+    fn accel_rate(&self, t: f64, r: DVec3, v: DVec3) -> (DVec3, f64) {
+        let snap = self.world.snapshot(self.t0.add_seconds(t));
+        self.accel_rate_with(&snap, t, r, v)
+    }
+}
+
+impl Forces<'_> {
+    fn accel_rate_with(&self, snap: &Snapshot, t: f64, r: DVec3, v: DVec3) -> (DVec3, f64) {
+        self.context(snap, t, r, v).accel_rate(snap, r, v)
+    }
+
+    /// The forces at local time `t` (thrust and drag mass of a burn).
+    fn context(&self, snap: &Snapshot, t: f64, r: DVec3, v: DVec3) -> ForceContext<'_> {
         let (drag, thrust) = match self.kind {
             SegmentKind::Coast => (self.drag, DVec3::ZERO),
             SegmentKind::Burn(law) => {
@@ -412,6 +481,5 @@ impl Forces<'_> {
             }
         };
         ForceContext { world: self.world, anchor: self.anchor, active: self.active, drag, thrust }
-            .accel_with(snap, r, v)
     }
 }

@@ -99,7 +99,7 @@ Extended precision *is* the right tool in three narrow places:
    - Without it, a long interstellar cruise with about 10⁵ steps accumulates random-walk error of about √N × ulp. In the bubble frame that is roughly 40 km.
    - Principia uses the same technique, in its `DoublePrecision` type.
    - It costs a few extra floating-point operations per step.
-3. **Proper time.** Store Δτ = t − τ directly, rather than τ.
+3. **Proper time.** Store δ = τ − t directly, rather than τ (`Vessel::proper_time_offset`, realism-1 §4a).
    - Time dilation in low Earth orbit is about 3×10⁻¹⁰, which is about 10 ms per year.
    - Tracking the difference keeps it precise; tracking τ as an absolute value would bury it in rounding.
 
@@ -173,7 +173,7 @@ The result is **roughly 10–30 force terms per step**, whatever the population 
 ## 6. Relativity
 
 - Motion is integrated in proper-velocity form, **u = γv**, in the current inertial frame. Thrust is a proper acceleration. Gravity is Newtonian (weak-field).
-- Each ship carries its own **proper time**, stored as Δτ = t − τ (§3). **Global coordinate time** is the bubble frame's time. Clocks in different system frames are treated as identical; the difference is about 10⁻⁸. This simplification is documented, not hidden.
+- Each ship carries its own **proper time**, stored as δ = τ − t (§3), integrated at `dδ/dt = −U/c² − v²/(2c²)` (U = Σ GM/r over every source, v barycentric) as an extra component of the vessel's state outside error control (`sim::relativity`, `sim::vessel::clock`). **Global coordinate time** is the bubble frame's time. Clocks in different system frames are treated as identical; the difference is about 10⁻⁸. This simplification is documented, not hidden.
 - Compact objects, if the population statistics place any within 100 ly, use a pseudo-Newtonian potential (Paczyński–Wiita) plus gravitational time dilation.
 - Communication delay (D034) uses light-travel time computed along the same frame tree.
 

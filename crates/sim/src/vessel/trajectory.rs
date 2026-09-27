@@ -75,6 +75,12 @@ impl Trajectory {
         seg.eval(t.seconds_since(seg.t0))
     }
 
+    /// Proper time offset δ = τ − t at `t` (s). `None` if not stored.
+    pub fn proper_time_at(&self, t: Epoch) -> Option<f64> {
+        let seg = self.segment_at(t)?;
+        seg.proper_time_at(t.seconds_since(seg.t0))
+    }
+
     /// Mass at `t` (kg); `None` before the first segment.
     pub fn mass_at(&self, t: Epoch) -> Option<f64> {
         let seg = self.segment_at(t)?;
@@ -115,7 +121,8 @@ impl Trajectory {
             EndKind::Surface { .. } | EndKind::EphemerisEnd | EndKind::Failed => return None,
         };
         let last = prev.samples.last().expect("segment has a sample");
-        let start = CoastStart { anchor: last.anchor, r: last.s.r, v: last.s.v, ..prev.initial() };
+        let start =
+            CoastStart { anchor: last.anchor, r: last.s.r, v: last.s.v, proper_time: last.delta, ..prev.initial() };
         Some(make_segment(world, plan, t, start, prev.mass_at(end.t), index, (self.coast_horizon, self.limits)))
     }
 

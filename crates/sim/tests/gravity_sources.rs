@@ -26,7 +26,8 @@ fn t0() -> Epoch {
 
 /// Integrates a whole segment of `span` seconds.
 fn coast(w: &World, anchor: NodeId, r: DVec3, v: DVec3, span: f64, fixed_anchor: bool) -> Segment {
-    let start = CoastStart { anchor, r, v, drag: None, contact_height: 0.0, horizon: span, fixed_anchor };
+    let start =
+        CoastStart { anchor, r, v, drag: None, contact_height: 0.0, horizon: span, fixed_anchor, proper_time: 0.0 };
     let mut seg = Segment::new(w, t0(), start);
     while !seg.finished() {
         seg.extend(w, 1000);
@@ -112,7 +113,16 @@ fn a_flyby_picks_up_a_source_cut_at_the_start() {
     assert!(!first.0.contains(&i), "Pluto is cut at the start");
     assert!(seg.active_sources().0.contains(&i), "the flyby picks Pluto up");
     // The source set is stored state: extending in small chunks is identical.
-    let start = CoastStart { anchor: root, r, v, drag: None, contact_height: 0.0, horizon: span, fixed_anchor: false };
+    let start = CoastStart {
+        anchor: root,
+        r,
+        v,
+        drag: None,
+        contact_height: 0.0,
+        horizon: span,
+        fixed_anchor: false,
+        proper_time: 0.0,
+    };
     let mut chunked = Segment::new(&w, t0(), start);
     while !chunked.finished() {
         chunked.extend(&w, 7);

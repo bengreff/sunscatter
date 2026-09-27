@@ -9,7 +9,7 @@
 //!   position, velocity and acceleration at both ends). Coast segments store only
 //!   step endpoints; this is the "dense output" the game evaluates.
 
-use crate::math::Compensated;
+use crate::math::{Compensated, CompensatedScalar};
 use glam::DVec3;
 use serde::{Deserialize, Serialize};
 
@@ -68,6 +68,14 @@ pub fn yoshida8_step<S: Separable>(s: &mut S, h: f64) {
 /// integration's reference epoch.
 pub trait Dynamics {
     fn accel(&self, t: f64, r: DVec3, v: DVec3) -> DVec3;
+
+    /// The acceleration and the rate `ẋ(t, r, v)` of an extra scalar carried
+    /// with the state ([`StepState::x`], proper time): integrated with the
+    /// same stages but outside error control, so it never changes the steps.
+    /// None by default.
+    fn accel_rate(&self, t: f64, r: DVec3, v: DVec3) -> (DVec3, f64) {
+        (self.accel(t, r, v), 0.0)
+    }
 }
 
 impl<F: Fn(f64, DVec3, DVec3) -> DVec3> Dynamics for F {
@@ -87,6 +95,11 @@ pub struct StepState {
     pub a: DVec3,
     /// Step size to attempt next.
     pub h: f64,
+    /// The extra scalar ([`Dynamics::accel_rate`]) and its rate at `t`.
+    #[serde(default)]
+    pub x: CompensatedScalar,
+    #[serde(default)]
+    pub x_rate: f64,
 }
 
 /// One accepted step: endpoints for Hermite interpolation.
@@ -146,13 +159,17 @@ impl Dopri5 {
     }
 
     /// Initial state at local time `t` with a first step guess `h`.
+    /// The extra scalar starts at zero.
     pub fn start<D: Dynamics>(&self, dyn_: &D, t: f64, r: DVec3, v: DVec3, h: f64) -> StepState {
+        let (a, x_rate) = dyn_.accel_rate(t, r, v);
         StepState {
             t,
             r: Compensated::new(r),
             v: Compensated::new(v),
-            a: dyn_.accel(t, r, v),
+            a,
             h: h.clamp(self.tol.h_min, self.tol.h_max),
+            x: CompensatedScalar::default(),
+            x_rate,
         }
     }
 
@@ -164,7 +181,7 @@ impl Dopri5 {
             let remaining = t_limit - st.t;
             let clamped = st.h >= remaining;
             let h = if clamped { remaining } else { st.h };
-            let (dr, dv, a1, err) = self.attempt(dyn_, st, h);
+            let (dr, dv, a1, err, (dx, x_rate)) = self.attempt(dyn_, st, h);
             // A NaN error compares false everywhere: without this the step
             // size grows and the step is retried forever.
             if !err.is_finite() || !(dr.is_finite() && dv.is_finite() && a1.is_finite()) {
@@ -174,6 +191,8 @@ impl Dopri5 {
             if err <= 1.0 || h <= self.tol.h_min {
                 st.r.add(dr);
                 st.v.add(dv);
+                st.x.add(dx);
+                st.x_rate = x_rate;
                 st.t = if clamped { t_limit } else { st.t + h };
                 st.a = a1;
                 // Keep the step size free of the artificial clamp so resuming
@@ -187,14 +206,17 @@ impl Dopri5 {
         }
     }
 
-    /// One trial step of size `h`. Returns (Δr, Δv, a at the end, scaled error).
-    fn attempt<D: Dynamics>(&self, dyn_: &D, st: &StepState, h: f64) -> (DVec3, DVec3, DVec3, f64) {
+    /// One trial step of size `h`. Returns (Δr, Δv, a at the end, scaled
+    /// error, (Δx, ẋ at the end)).
+    fn attempt<D: Dynamics>(&self, dyn_: &D, st: &StepState, h: f64) -> (DVec3, DVec3, DVec3, f64, (f64, f64)) {
         let r0 = st.r.value();
         let v0 = st.v.value();
         let mut kr = [DVec3::ZERO; 7];
         let mut kv = [DVec3::ZERO; 7];
+        let mut kx = [0.0; 7];
         kr[0] = v0;
         kv[0] = st.a;
+        kx[0] = st.x_rate;
         for s in 1..7 {
             let mut dr = DVec3::ZERO;
             let mut dv = DVec3::ZERO;
@@ -205,17 +227,19 @@ impl Dopri5 {
             let rs = r0 + dr * h;
             let vs = v0 + dv * h;
             kr[s] = vs;
-            kv[s] = dyn_.accel(st.t + C[s] * h, rs, vs);
+            (kv[s], kx[s]) = dyn_.accel_rate(st.t + C[s] * h, rs, vs);
         }
         // The 7th stage is evaluated at the 5th-order solution (FSAL).
         let mut dr = DVec3::ZERO;
         let mut dv = DVec3::ZERO;
         let mut er = DVec3::ZERO;
         let mut ev = DVec3::ZERO;
+        let mut dx = 0.0;
         for j in 0..7 {
             if j < 6 {
                 dr += kr[j] * A[6][j];
                 dv += kv[j] * A[6][j];
+                dx += kx[j] * A[6][j];
             }
             er += kr[j] * E[j];
             ev += kv[j] * E[j];
@@ -227,7 +251,7 @@ impl Dopri5 {
         let sv = self.tol.abs_v + self.tol.rel * v0.abs().max(v1.abs());
         let q = (er / sr).length_squared() + (ev / sv).length_squared();
         let err = (q / 6.0).sqrt();
-        (dr, dv, kv[6], err)
+        (dr, dv, kv[6], err, (dx * h, kx[6]))
     }
 }
 

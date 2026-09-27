@@ -102,8 +102,16 @@ fn chunked_chain_equals_single_pass() {
     let ship = leo_ship(&w);
     let p = plan(&[prograde(&w, 200.0, 80.0), prograde(&w, 400.0, 40.0)]);
     let (anchor, r, v) = ship.state(&w);
-    let start =
-        CoastStart { anchor, r, v, drag: Some(ship.drag()), contact_height: 5.0, horizon: 1e9, fixed_anchor: false };
+    let start = CoastStart {
+        anchor,
+        r,
+        v,
+        drag: Some(ship.drag()),
+        contact_height: 5.0,
+        horizon: 1e9,
+        fixed_anchor: false,
+        proper_time: 0.0,
+    };
     let until = t0().add_seconds(3_000.0);
     let mut one = Trajectory::new(&w, t0(), start, ship.mass(), &p, BurnLimits::default());
     one.extend(&w, &p, until, usize::MAX);
@@ -268,6 +276,7 @@ fn a_burn_does_not_depend_on_the_anchor() {
             contact_height: 0.0,
             horizon: 1e9,
             fixed_anchor: true,
+            proper_time: 0.0,
         };
         let mut traj = Trajectory::new(&w, t0(), start, ship.mass(), &p, BurnLimits::default());
         let t = t0().add_seconds(400.0);
@@ -289,7 +298,16 @@ fn a_burn_that_would_use_all_the_mass_fails_instead_of_dividing_by_zero() {
     let mut burn = prograde(&w, 100.0, 10.0);
     burn.end = BurnEnd::Duration(1e6);
     let (anchor, r, v) = ship.state(&w);
-    let start = CoastStart { anchor, r, v, drag: None, contact_height: 0.0, horizon: 1e9, fixed_anchor: false };
+    let start = CoastStart {
+        anchor,
+        r,
+        v,
+        drag: None,
+        contact_height: 0.0,
+        horizon: 1e9,
+        fixed_anchor: false,
+        proper_time: 0.0,
+    };
     let p = plan(&[burn]);
     let mut traj = Trajectory::new(&w, t0(), start, ship.mass(), &p, BurnLimits::default());
     traj.extend(&w, &p, t0().add_seconds(500.0), usize::MAX);

@@ -157,6 +157,31 @@ impl Compensated {
     }
 }
 
+/// Compensated (Neumaier) accumulator for a scalar (proper time, §4a).
+#[derive(Clone, Copy, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct CompensatedScalar {
+    pub sum: f64,
+    pub comp: f64,
+}
+
+impl CompensatedScalar {
+    pub fn new(value: f64) -> Self {
+        Self { sum: value, comp: 0.0 }
+    }
+
+    /// Adds `delta`, tracking the rounding error.
+    #[inline]
+    pub fn add(&mut self, delta: f64) {
+        self.sum = neumaier(self.sum, delta, &mut self.comp);
+    }
+
+    /// The best estimate of the accumulated value.
+    #[inline]
+    pub fn value(&self) -> f64 {
+        self.sum + self.comp
+    }
+}
+
 #[inline]
 fn neumaier(sum: f64, x: f64, comp: &mut f64) -> f64 {
     let t = sum + x;

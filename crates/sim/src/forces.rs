@@ -15,6 +15,7 @@
 use crate::ephem::Snapshot;
 use crate::frame::{BodyFixed, NodeId, Vec3};
 use crate::gen::{j2_accel, schwarzschild_accel};
+use crate::relativity::proper_time_rate;
 use crate::time::Epoch;
 use crate::world::World;
 use glam::DVec3;
@@ -92,9 +93,24 @@ impl ForceContext<'_> {
     }
 
     pub fn accel_with(&self, snap: &Snapshot, r: DVec3, v: DVec3) -> DVec3 {
+        self.eval(snap, r, v, false).0
+    }
+
+    /// The acceleration and the proper-time rate `dδ/dt`
+    /// ([`crate::relativity::proper_time_rate`]) of a vessel at `(r, v)`:
+    /// the potential of every source (cut or not) at the vessel, and its
+    /// velocity relative to the barycentre (the anchor's through the frame
+    /// tree, plus `v`). The acceleration is the same bits as
+    /// [`Self::accel_with`].
+    pub fn accel_rate(&self, snap: &Snapshot, r: DVec3, v: DVec3) -> (DVec3, f64) {
+        self.eval(snap, r, v, true)
+    }
+
+    fn eval(&self, snap: &Snapshot, r: DVec3, v: DVec3, rate: bool) -> (DVec3, f64) {
         let root = self.world.eph.root();
         let anchor_kin = snap.relative(self.anchor, root);
         let mut a = -anchor_kin.a + self.thrust;
+        let mut u = 0.0;
         let mut active = self.active.0.iter().peekable();
         for (i, s) in self.world.sources.iter().enumerate() {
             // Positions only, except where a velocity is needed (drag, 1PN).
@@ -105,11 +121,18 @@ impl ForceContext<'_> {
                 if s.node != self.anchor {
                     a += point_gravity(s.gm, -r_s);
                 }
+                if rate {
+                    u += s.gm / (r - r_s).length();
+                }
                 continue;
             }
             let d = r - r_s;
             let d2 = d.length_squared();
-            a -= d * (s.gm / (d2 * d2.sqrt()));
+            let dist = d2.sqrt();
+            a -= d * (s.gm / (d2 * dist));
+            if rate {
+                u += s.gm / dist;
+            }
             if let Some(p) = &s.physical {
                 if p.j2 != 0.0 {
                     a += j2_accel(d, s.gm, p.j2, p.radius_eq, p.rotation.pole(snap.t));
@@ -132,7 +155,8 @@ impl ForceContext<'_> {
                 a += schwarzschild_accel(d, v - snap.relative(s.node, self.anchor).v, s.gm);
             }
         }
-        a
+        let tau_rate = if rate { proper_time_rate(u, (anchor_kin.v + v).length_squared()) } else { 0.0 };
+        (a, tau_rate)
     }
 }
 

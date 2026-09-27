@@ -30,8 +30,9 @@ use glam::{DQuat, DVec3};
 
 /// How a contact tick ended early.
 enum Hit {
-    /// Destroyed at substep `k`: the state then and the impact.
-    Crash { k: usize, r: DVec3, att: super::Attitude, impact: contact::Impact },
+    /// Destroyed at substep `k`: the state then, the impact, and the
+    /// proper-time increment until then.
+    Crash { k: usize, r: DVec3, att: super::Attitude, impact: contact::Impact, delta: f64 },
     /// The state stopped being finite.
     Failed,
 }
@@ -42,6 +43,8 @@ struct ContactTick {
     v: DVec3,
     att: super::Attitude,
     touching: bool,
+    /// Proper-time increment over the tick.
+    delta: f64,
 }
 
 impl Vessel {
@@ -126,31 +129,32 @@ impl Vessel {
             let act = Actuators { torque: self.craft.torque, gimbal: Some(gimbal) };
             let before = (self.attitude, self.control);
             let cmd = attitude::command(&self.attitude, &props.inertia, &mut self.control, controls, &act, TICK);
-            let (r1, v1, touching) = match contact_body {
+            let (r1, v1, touching, delta) = match contact_body {
                 None => {
                     let next = rigid::tick(&self.attitude, &props.inertia, cmd.torque, TICK);
                     let att = attitude::finish(next, &mut self.control, &cmd, true);
                     let thrust = att.q * cmd.thrust_dir * (out.thrust / props.mass);
                     // A tick that cannot be integrated (non-finite state) leaves the
                     // vessel where it is, like a failed coast segment.
-                    let Some((r1, v1)) = self.integrate_tick(world, anchor, r, v, thrust) else {
+                    let Some((r1, v1, delta)) = self.integrate_tick(world, anchor, r, v, thrust) else {
                         (self.attitude, self.control) = before;
                         return;
                     };
                     self.attitude = att;
-                    (r1, v1, false)
+                    (r1, v1, false, delta)
                 }
                 Some(body) => match self.contact_tick(world, anchor, body, (r, v), &cmd, out.thrust, &props) {
                     Ok(t) => {
                         self.attitude = attitude::finish(t.att, &mut self.control, &cmd, false);
-                        (t.r, t.v, t.touching)
+                        (t.r, t.v, t.touching, t.delta)
                     }
                     Err(Hit::Failed) => {
                         (self.attitude, self.control) = before;
                         return;
                     }
-                    Err(Hit::Crash { k, r, att, impact }) => {
+                    Err(Hit::Crash { k, r, att, impact, delta }) => {
                         self.time = self.time.add_seconds(TICK / contact::SUBSTEPS as f64 * k as f64);
+                        self.clock.add(self.time, delta);
                         self.crash(world, anchor, body, r, att, impact);
                         return;
                     }
@@ -160,6 +164,7 @@ impl Vessel {
                 self.propellant = (self.propellant - out.mdot * TICK).max(0.0);
             }
             self.time = self.time.add_seconds(TICK);
+            self.clock.add(self.time, delta);
             self.phase = Phase::Powered { anchor, r: r1, v: v1 };
             self.tick_accel = Some((v1 - v) / TICK);
             if let Some(body) = contact_body {
@@ -189,6 +194,7 @@ impl Vessel {
         let drag = Some(self.drag());
         let mut att = self.attitude;
         let mut touching = false;
+        let mut delta = 0.0;
         for k in 0..contact::SUBSTEPS {
             let snap = world.snapshot(self.time.add_seconds(h * k as f64));
             let ground = Ground::new(world, &snap, anchor, body);
@@ -203,21 +209,23 @@ impl Vessel {
                 h,
             );
             if let Some(impact) = c.impact.filter(|_| !self.debug) {
-                return Err(Hit::Crash { k, r, att, impact });
+                return Err(Hit::Crash { k, r, att, impact, delta });
             }
             touching = c.touching;
             let thrust_accel = att.q * cmd.thrust_dir * (thrust / props.mass);
             let ctx = ForceContext { world, anchor, active: &active, drag, thrust: thrust_accel };
-            let a = ctx.accel_with(&snap, r, v) + c.force / props.mass;
+            let (a, rate) = ctx.accel_rate(&snap, r, v);
+            let a = a + c.force / props.mass;
             let torque = cmd.torque + att.q.inverse() * c.torque;
             if !(a.is_finite() && torque.is_finite()) {
                 return Err(Hit::Failed);
             }
+            delta += rate * h;
             v += a * h;
             r += v * h;
             att = rigid::tick(&att, &props.inertia, torque, h);
         }
-        Ok(ContactTick { r, v, att, touching })
+        Ok(ContactTick { r, v, att, touching, delta })
     }
 
     /// Destroyed by `impact` at `r` (anchor-relative) with attitude `att`.

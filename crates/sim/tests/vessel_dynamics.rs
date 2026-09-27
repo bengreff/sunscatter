@@ -32,7 +32,11 @@ fn leo(mu: f64) -> (DVec3, DVec3) {
 }
 
 fn coast(w: &World, anchor: NodeId, r: DVec3, v: DVec3, fixed_anchor: bool) -> Segment {
-    Segment::new(w, t0(), CoastStart { anchor, r, v, drag: None, contact_height: 0.0, horizon: 1e9, fixed_anchor })
+    Segment::new(
+        w,
+        t0(),
+        CoastStart { anchor, r, v, drag: None, contact_height: 0.0, horizon: 1e9, fixed_anchor, proper_time: 0.0 },
+    )
 }
 
 fn extend_to(w: &World, seg: &mut Segment, t: f64) {
@@ -261,7 +265,16 @@ fn coast_segment_matches_golden_hash() {
     let mut seg = Segment::new(
         &w,
         t0(),
-        CoastStart { anchor: earth, r, v, drag: None, contact_height: 0.0, horizon: 1e9, fixed_anchor: false },
+        CoastStart {
+            anchor: earth,
+            r,
+            v,
+            drag: None,
+            contact_height: 0.0,
+            horizon: 1e9,
+            fixed_anchor: false,
+            proper_time: 0.0,
+        },
     );
     seg.extend(&w, 2000);
     let mut bytes = Vec::new();

@@ -45,6 +45,7 @@ fn a_coast_started_near_the_ephemeris_end_stops_at_the_end() {
             contact_height: 0.0,
             horizon: COAST_HORIZON,
             fixed_anchor: false,
+            proper_time: 0.0,
         },
     );
     at_end.extend(&w, 10);
@@ -58,8 +59,16 @@ fn a_segment_ended_at_its_horizon_is_continued() {
     let (earth, r, v) = leo(&w);
     let t0 = sol::sol_epoch().add_seconds(86_400.0);
     let mut ship = Vessel::coasting(&w, VesselId(1), t0, earth, r, v, crate::craft::test_craft());
-    let start =
-        CoastStart { anchor: earth, r, v, drag: None, contact_height: 0.0, horizon: 100.0, fixed_anchor: false };
+    let start = CoastStart {
+        anchor: earth,
+        r,
+        v,
+        drag: None,
+        contact_height: 0.0,
+        horizon: 100.0,
+        fixed_anchor: false,
+        proper_time: 0.0,
+    };
     ship.phase = Phase::Coasting { trajectory: Box::new(Trajectory::from_segment(Segment::new(&w, t0, start))) };
     let target = t0.add_seconds(1_000.0);
     assert_eq!(ship.advance(&w, target, &Controls::default(), usize::MAX), target);

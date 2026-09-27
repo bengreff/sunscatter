@@ -25,6 +25,7 @@
 mod anchor;
 mod attitude;
 mod burn;
+mod clock;
 mod id;
 mod live;
 mod segment;
@@ -35,6 +36,7 @@ pub use attitude::{quat_from_rotvec, quat_z_to, rotvec_of, Attitude, AttitudeCon
 pub use burn::{
     prograde_normal_radial, BurnEnd, BurnLaw, BurnLimits, DirectionLaw, FlightPlan, PlanError, PlannedBurn, G0,
 };
+pub use clock::{landed_rate, ShipClock, LANDED_STEP};
 pub use id::{VesselId, VesselIds};
 pub use segment::{coast_tolerance, CoastStart, EndKind, Sample, Segment, SegmentEnd, SegmentKind};
 pub use trajectory::Trajectory;
@@ -42,7 +44,7 @@ pub use trajectory::Trajectory;
 use crate::craft::{Craft, CraftParams, MassProps};
 use crate::forces::{ambient_pressure, ActiveSources, DragModel, ForceContext};
 use crate::frame::{BodyFixed, NodeId, Vec3};
-use crate::integrate::{Dopri5, Tolerance};
+use crate::integrate::{Dopri5, Dynamics, Tolerance};
 use crate::math;
 use crate::time::Epoch;
 use crate::world::World;
@@ -122,6 +124,24 @@ pub struct Vessel {
     /// Live ticks in a row at rest on the ground ([`crate::contact::rest_ticks`]).
     #[serde(default)]
     rest_ticks: u32,
+    /// The ship clock: proper time minus coordinate time (D012).
+    clock: ShipClock,
+}
+
+/// The forces of a live tick from `t0`, with the proper-time rate.
+struct TickForces<'a> {
+    ctx: ForceContext<'a>,
+    t0: Epoch,
+}
+
+impl Dynamics for TickForces<'_> {
+    fn accel(&self, t: f64, r: DVec3, v: DVec3) -> DVec3 {
+        self.ctx.accel(self.t0.add_seconds(t), r, v)
+    }
+
+    fn accel_rate(&self, t: f64, r: DVec3, v: DVec3) -> (DVec3, f64) {
+        self.ctx.accel_rate(&self.ctx.world.snapshot(self.t0.add_seconds(t)), r, v)
+    }
 }
 
 /// Rotation matrix taking body-fixed axes of `body` to inertial axes at `t`.
@@ -161,6 +181,7 @@ impl Vessel {
             tick_accel: None,
             control: AttitudeControl::default(),
             rest_ticks: 0,
+            clock: ShipClock::at(t, 0.0),
         };
         v.sync_landed_attitude(world);
         if !v.holds_where_landed(world) {
@@ -185,6 +206,7 @@ impl Vessel {
             tick_accel: None,
             control: AttitudeControl::default(),
             rest_ticks: 0,
+            clock: ShipClock::at(t, 0.0),
         };
         vessel.start_coast(world);
         vessel
@@ -193,6 +215,12 @@ impl Vessel {
     /// The vessel's stable identity.
     pub fn id(&self) -> VesselId {
         self.id
+    }
+
+    /// Proper time minus coordinate time, δ = τ − t (s), at the vessel's
+    /// time: what the ship clock shows minus the game clock (D012).
+    pub fn proper_time_offset(&self) -> f64 {
+        self.clock.offset
     }
 
     /// The drag model in use (with the parachute's area once deployed).
@@ -381,10 +409,7 @@ impl Vessel {
             let before = (self.time, std::mem::discriminant(&self.phase));
             match &self.phase {
                 Phase::Landed { .. } => self.advance_landed(world, target, controls),
-                Phase::Crashed { .. } => {
-                    self.time = target;
-                    self.sync_landed_attitude(world);
-                }
+                Phase::Crashed { .. } => self.advance_grounded(world, target),
                 Phase::Powered { .. } => self.advance_powered(world, target, controls),
                 Phase::Coasting { .. } => self.advance_coasting(world, target, controls, max_coast_steps),
             }
@@ -401,6 +426,14 @@ impl Vessel {
             self.wake(world);
             return;
         }
+        self.advance_grounded(world, target);
+    }
+
+    /// Landed or crashed: fixed to the body until `target`.
+    fn advance_grounded(&mut self, world: &World, target: Epoch) {
+        if let Phase::Landed { body, fixed, .. } | Phase::Crashed { body, fixed, .. } = self.phase {
+            self.clock.advance_landed(world, body, fixed, target);
+        }
         self.time = target;
         self.sync_landed_attitude(world);
     }
@@ -413,10 +446,12 @@ impl Vessel {
         self.tick_accel = None;
         self.control = AttitudeControl::default();
         self.rest_ticks = 0;
+        self.clock.restart(self.time);
     }
 
-    /// Integrates one tick with constant thrust (adaptive substeps, exact end).
-    /// `None` if the integration fails (non-finite state or force).
+    /// Integrates one tick with constant thrust (adaptive substeps, exact
+    /// end). Returns the state and the tick's proper-time increment; `None`
+    /// if the integration fails (non-finite state or force).
     fn integrate_tick(
         &self,
         world: &World,
@@ -424,18 +459,19 @@ impl Vessel {
         r: DVec3,
         v: DVec3,
         thrust: DVec3,
-    ) -> Option<(DVec3, DVec3)> {
+    ) -> Option<(DVec3, DVec3, f64)> {
         let snap = world.snapshot(self.time);
         let active = ActiveSources::select(world, &snap, anchor, r);
-        let ctx = ForceContext { world, anchor, active: &active, drag: Some(self.drag()), thrust };
-        let t0 = self.time;
-        let f = |t: f64, r: DVec3, v: DVec3| ctx.accel(t0.add_seconds(t), r, v);
+        let f = TickForces {
+            ctx: ForceContext { world, anchor, active: &active, drag: Some(self.drag()), thrust },
+            t0: self.time,
+        };
         let integ = Dopri5::new(Tolerance { h_max: TICK, ..coast_tolerance() });
         let mut st = integ.start(&f, 0.0, r, v, TICK);
         while st.t < TICK {
             integ.step(&f, &mut st, TICK).ok()?;
         }
-        Some((st.r.value(), st.v.value()))
+        Some((st.r.value(), st.v.value(), st.x.value()))
     }
 
     /// Replaces the current phase with a coast starting now.
@@ -454,6 +490,7 @@ impl Vessel {
             contact_height: self.live_height(),
             horizon: COAST_HORIZON,
             fixed_anchor: false,
+            proper_time: self.clock.offset,
         };
         let trajectory = Trajectory::new(world, self.time, start, self.mass(), &self.plan, self.burn_limits());
         self.phase = Phase::Coasting { trajectory: Box::new(trajectory) };
@@ -487,6 +524,8 @@ impl Vessel {
         advance_coast(&mut self.attitude, &mut self.control, times, controls, torque, inertia_now, inertia_at);
         trajectory.prune_before(reach);
         self.propellant = (trajectory.mass_at(reach).expect("the vessel's time is in its trajectory") - dry).max(0.0);
+        let delta = trajectory.proper_time_at(reach).expect("the vessel's time is in its trajectory");
+        self.clock = ShipClock::at(reach, delta);
         let last = trajectory.last();
         let near_surface = matches!(last.end, Some(SegmentEnd { kind: EndKind::Surface { .. }, .. })) && at_end;
         self.time = reach;
@@ -521,6 +560,7 @@ impl Vessel {
                 contact_height: self.live_height(),
                 horizon: COAST_HORIZON,
                 fixed_anchor: false,
+                proper_time: self.clock.offset,
             },
         )
     }

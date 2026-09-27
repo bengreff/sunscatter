@@ -50,6 +50,7 @@ fn trans_lunar_coast_reaches_the_moon_and_reanchors() {
                 contact_height: 0.0,
                 horizon: 6.0 * 86_400.0,
                 fixed_anchor: false,
+                proper_time: 0.0,
             },
         );
         while !seg.finished() {
