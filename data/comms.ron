@@ -1,0 +1,30 @@
+// Communication network (D068): ground sites and the link model.
+// Positions are geodetic-ish latitude/longitude on the body's reference
+// ellipsoid (sim::body::BodyPhysical::surface_point) plus a height (m).
+(
+    link: (
+        // X band (deep-space telemetry).
+        frequency_hz: 8.4e9,
+        bandwidth_hz: 1.0e6,
+        // System noise temperature of the receiver (K).
+        noise_temperature_k: 50.0,
+        // Below this rate (bit/s) a link is unusable.
+        min_rate_bps: 10.0,
+        // Ground stations see vessels above this elevation (deg).
+        min_elevation_deg: 6.0,
+        // Ground network between sites on one body: signal speed / c.
+        ground_speed_factor: 0.7,
+    ),
+    sites: [
+        // Mission control (D067): the tracking station is "being here".
+        (name: "Houston", body: "Earth", lat_deg: 29.5593, lon_deg: -95.0900, height_m: 10.0,
+         kind: MissionControl, antenna: None),
+        // Deep Space Network complexes: 70 m dishes, ~74 dBi at X band, 20 kW.
+        (name: "Goldstone", body: "Earth", lat_deg: 35.4267, lon_deg: -116.8900, height_m: 1000.0,
+         kind: GroundStation, antenna: Some((gain_dbi: 74.0, power_w: 20000.0))),
+        (name: "Madrid", body: "Earth", lat_deg: 40.4314, lon_deg: -4.2481, height_m: 830.0,
+         kind: GroundStation, antenna: Some((gain_dbi: 74.0, power_w: 20000.0))),
+        (name: "Canberra", body: "Earth", lat_deg: -35.4014, lon_deg: 148.9817, height_m: 690.0,
+         kind: GroundStation, antenna: Some((gain_dbi: 74.0, power_w: 20000.0))),
+    ],
+)

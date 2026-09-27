@@ -11,6 +11,7 @@
 //!   two large absolute coordinates.
 
 pub mod body;
+pub mod comms;
 pub mod craft;
 pub mod ephem;
 pub mod forces;
