@@ -161,6 +161,7 @@ pub fn draw(
     fps: Res<FpsMeter>,
     sim: Res<SimState>,
     comms: Res<crate::comms::Comms>,
+    rv: Res<crate::rendezvous::Rendezvous>,
     mut commands: MessageWriter<crate::commands::GameCommand>,
     ui: Res<UiState>,
     mut iface: ResMut<InterfaceSettings>,
@@ -227,6 +228,9 @@ pub fn draw(
 
     panel(ctx, &mut iface, PanelId::Flight, |ui_| {
         flight_panel(ui_, sim, Some(dominant));
+        if let Some(line) = crate::rendezvous::summary(&rv, sim) {
+            ui_.label(egui::RichText::new(format!("target: {line}")).monospace().small().color(theme::TEXT));
+        }
         let home = &comms.data.sites[comms.mission_control].name;
         ui_.label(
             egui::RichText::new(format!("{home}: {}", crate::comms::describe(comms.home.as_ref())))

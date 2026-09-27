@@ -31,6 +31,12 @@ pub struct MapView {
 }
 
 impl MapView {
+    /// Whether a screen point at camera distance `depth` is hidden behind a
+    /// body's disc.
+    pub fn occluded(&self, s: Vec2, depth: f64) -> bool {
+        map_view::occluded(&self.objects, s, depth)
+    }
+
     pub fn get(&self, id: ObjectId) -> Visibility {
         self.objects.iter().position(|o| o.id == id).map_or_else(Visibility::default, |i| self.vis[i])
     }

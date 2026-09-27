@@ -22,6 +22,7 @@ mod navball;
 mod persist;
 mod planner;
 mod relations;
+mod rendezvous;
 mod saves;
 mod scene;
 mod settings;
@@ -88,6 +89,7 @@ fn main() {
         .add_message::<commands::GameCommand>()
         .init_resource::<commands::InFlight>()
         .init_resource::<planner::Planner>()
+        .init_resource::<rendezvous::Rendezvous>()
         // After the settings defaults: replaces them with the saved settings.
         .add_plugins(persist::PersistPlugin)
         .add_plugins(navball::NavballPlugin)
@@ -126,7 +128,9 @@ fn main() {
         )
         .add_systems(
             Update,
-            (camera::update, comms::update, map::update, demo::check_map_view).chain().in_set(Stage::Camera),
+            (camera::update, comms::update, rendezvous::update, map::update, demo::check_map_view)
+                .chain()
+                .in_set(Stage::Camera),
         )
         .add_systems(
             Update,
@@ -146,7 +150,15 @@ fn main() {
         )
         .add_systems(
             EguiPrimaryContextPass,
-            (interface::apply_style, sky::draw_flare, map::draw_overlay, hud::draw, settings_ui::draw).chain(),
+            (
+                interface::apply_style,
+                sky::draw_flare,
+                map::draw_overlay,
+                rendezvous::draw,
+                hud::draw,
+                settings_ui::draw,
+            )
+                .chain(),
         )
         .add_systems(
             EguiPrimaryContextPass,
