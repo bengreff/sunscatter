@@ -133,8 +133,7 @@ pub fn nav_state(sim: &SimState, tracked: &Tracked, nav: &mut Navball) -> Option
     let (anchor, r, v) = vessel.state_at(&sim.world, t);
     // The reference is the dominant body (D056's tidal rule): the altitude,
     // speed and markers are relative to it.
-    let eph = &sim.world.eph;
-    let body = relations::Dominance::new(eph, t).of(eph, t, anchor, r, None, None);
+    let body = sim.dominant_of(sim.active);
     let src = sim.world.source(body)?;
     let p = src.physical.as_ref()?;
     let k = sim.world.snapshot(t).relative(body, anchor);

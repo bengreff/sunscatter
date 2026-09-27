@@ -208,10 +208,9 @@ pub fn draw(
         commands.write(crate::commands::GameCommand::SetWarp(i));
     }
     let sim = &*sim;
-    let (anchor, r, _) = sim.ship().state_at(&sim.world, sim.clock);
+    let (anchor, _, _) = sim.ship().state_at(&sim.world, sim.clock);
     // Readouts are relative to the dominant body, like the navball's.
-    let eph = &sim.world.eph;
-    let dominant = crate::relations::Dominance::new(eph, sim.clock).of(eph, sim.clock, anchor, r, None, None);
+    let dominant = sim.dominant_of(sim.active);
 
     panel(ctx, &mut iface, PanelId::Flight, |ui_| flight_panel(ui_, sim, Some(dominant)));
 

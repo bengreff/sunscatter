@@ -6,7 +6,6 @@ use crate::camera::{self, CameraRig, MainCamera};
 use crate::format;
 use crate::hud::{PlotFrame, UiState};
 use crate::map_view::{self, Object, ObjectId, Visibility};
-use crate::relations::Dominance;
 use crate::scene::BodyDefs;
 use crate::state::{Prediction, SimState};
 use crate::tracking::{Tracked, TrackingStation};
@@ -114,7 +113,7 @@ pub fn update(
         let id = vessel.id();
         let (anchor, r, _) = vessel.state_at(world, sim.clock);
         let c = snap.relative_r(anchor, rig.anchor) + r - rig.cam_pos;
-        let orbit = crate::relations::vessel_orbit(world, sim.clock, vessel).map(|o| o.radius());
+        let orbit = crate::relations::vessel_orbit(world, &sim.dominance, sim.clock, vessel).map(|o| o.radius());
         let mut o = object(ObjectId::Vessel(id), c, VESSEL_RADIUS, orbit, 0.0);
         // The tracking station never hides a tracked vessel.
         o.pinned = station.open && (id == active || tracked.is_tracked(id));
@@ -142,10 +141,10 @@ pub fn draw_body_orbits(
     let Ok(cam) = cam.single() else { return };
     let forward = cam.forward().as_vec3();
     let eph = &sim.world.eph;
-    let dom = Dominance::new(eph, sim.clock);
+    let dom = &sim.dominance;
     // One revolution about the dominant body (D056), or off.
     let Some(limits) = orbits.body_limits(dom.region()) else { return };
-    let current = trajectory::vessel_dominant(&sim.world, &dom, sim.clock, sim.ship());
+    let current = trajectory::vessel_dominant(&sim.world, dom, sim.clock, sim.ship());
     let snap = sim.world.snapshot(sim.clock);
     for node in eph.bodies() {
         if !map.in_map(ObjectId::Body(node)) {
@@ -159,7 +158,7 @@ pub fn draw_body_orbits(
         if ui.plot_frame == PlotFrame::EarthMoonRotating && eph.node(p).name == "Earth" {
             continue;
         }
-        let Some((orbit, line)) = trajectory::body_line(eph, &dom, node, p, sim.clock, limits, ORBIT_POINTS) else {
+        let Some((orbit, line)) = trajectory::body_line(eph, dom, node, p, sim.clock, limits, ORBIT_POINTS) else {
             continue;
         };
         let fade = (map.k * orbit.elements.a - map_view::ORBIT_ENTER_PX) / (ORBIT_FADE_PX - map_view::ORBIT_ENTER_PX);
@@ -270,7 +269,7 @@ fn draw_apsides(
     let Some((t0, t1)) = trajectory::future_span(seg, sim.clock) else { return };
     // Only along the drawn line (D056), not the whole computed segment.
     let t1 = t1.min(trajectory::vessel_line_end(&sim.world, seg, t0, orbits).0);
-    let Some(primary) = camera::nearest_body(sim) else { return };
+    let primary = sim.dominant_of(sim.active);
     let Some(plotter) = Plotter::new(sim, rig, ui.plot_frame) else { return };
     let radius = sim.world.source(primary).and_then(|s| s.physical.as_ref()).map_or(0.0, |p| p.radius_eq);
     let now = sim.clock.seconds_since(seg.t0);

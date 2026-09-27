@@ -2,11 +2,13 @@
 //! time warp, the player's controls, and trajectory predictions.
 
 use crate::commands::{GameCommand, InputContext, Keys};
+use crate::relations::Dominance;
 use crate::trajectory::{self, settings::OrbitSettings};
 use bevy::prelude::*;
 use bevy::tasks::{futures::check_ready, AsyncComputeTaskPool, ComputeTaskPool, Task};
 use glam::DVec3;
 use sim::ephem::Ephemeris;
+use sim::frame::NodeId;
 use sim::kepler::Elements;
 use sim::sol;
 use sim::time::Epoch;
@@ -45,7 +47,15 @@ pub struct SimState {
     pub controls: Controls,
     /// Frames where the clock was held back by integration budget.
     pub compute_limited: bool,
+    /// The display rule for "which body is this about" (D056), rebuilt when
+    /// the clock has moved by more than `DOMINANCE_REFRESH` (its radii
+    /// change slowly). Display only (rule 1).
+    pub dominance: Dominance,
+    dominance_at: Epoch,
 }
+
+/// How far the clock moves before the dominance radii are rebuilt (s).
+const DOMINANCE_REFRESH: f64 = 86_400.0;
 
 fn load_world() -> World {
     let path = format!("{}/../../{}", env!("CARGO_MANIFEST_DIR"), sol::EPHEMERIS_PATH);
@@ -62,6 +72,8 @@ impl SimState {
         let ship =
             Vessel::landed_at(&world, vessel_ids.allocate(), "Earth", PAD_LAT, PAD_LON, clock, VesselParams::block());
         SimState {
+            dominance: Dominance::new(&world.eph, clock),
+            dominance_at: clock,
             world,
             fleet: vec![ship],
             vessel_ids,
@@ -71,6 +83,21 @@ impl SimState {
             controls: Controls { sas: true, ..Default::default() },
             compute_limited: false,
         }
+    }
+
+    /// Rebuilds the dominance radii if the clock moved far enough.
+    pub fn refresh_dominance(&mut self) {
+        if self.clock.seconds_since(self.dominance_at).abs() > DOMINANCE_REFRESH {
+            self.dominance = Dominance::new(&self.world.eph, self.clock);
+            self.dominance_at = self.clock;
+        }
+    }
+
+    /// The body fleet vessel `i` is about now, for display (its dominant
+    /// body, D056).
+    pub fn dominant_of(&self, i: usize) -> NodeId {
+        let (anchor, r, _) = self.fleet[i].state_at(&self.world, self.clock);
+        self.dominance.of(&self.world.eph, self.clock, anchor, r, None, None)
     }
 
     pub fn ship(&self) -> &Vessel {
@@ -237,6 +264,7 @@ pub fn advance(
     }
     sim.compute_limited = clock < target;
     sim.clock = clock;
+    sim.refresh_dominance();
     // Look ahead as far as the drawn line needs (D056), a bounded number of
     // steps per frame.
     let ship = &mut sim.fleet[sim.active];

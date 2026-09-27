@@ -76,10 +76,10 @@ pub fn body_orbit_about(eph: &Ephemeris, t: Epoch, node: NodeId, about: NodeId) 
     Orbit { mu, elements: Elements::from_state(k.r, k.v, mu), distance: k.r.length() }
 }
 
-/// A vessel's osculating orbit about its nearest body.
-pub fn vessel_orbit(world: &World, t: Epoch, vessel: &Vessel) -> Option<Orbit> {
+/// A vessel's osculating orbit about its dominant body (D056).
+pub fn vessel_orbit(world: &World, dom: &Dominance, t: Epoch, vessel: &Vessel) -> Option<Orbit> {
     let (anchor, r, v) = vessel.state_at(world, t);
-    let body = nearest_body(world, t, anchor, r)?;
+    let body = dom.of(&world.eph, t, anchor, r, None, None);
     orbit_about(world, t, anchor, r, v, body)
 }
 

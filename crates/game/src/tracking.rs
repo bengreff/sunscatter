@@ -173,7 +173,7 @@ pub struct VesselInfo {
 
 pub fn vessel_info(sim: &SimState, i: usize) -> VesselInfo {
     let vessel = &sim.fleet[i];
-    let primary = camera::nearest_body_to(sim, i);
+    let primary = Some(sim.dominant_of(i));
     let name = |n: NodeId| sim.world.eph.node(n).name.clone();
     let status = match &vessel.phase {
         Phase::Landed { body, .. } => format!("landed on {}", name(*body)),
@@ -368,7 +368,7 @@ pub fn draw(
 /// to the body it orbits.
 pub fn focus_vessel(sim: &SimState, rig: &mut CameraRig, id: VesselId) {
     let Some(i) = sim.index_of(id) else { return };
-    let primary = camera::nearest_body_to(sim, i);
+    let primary = Some(sim.dominant_of(i));
     let (anchor, r, _) = sim.fleet[i].state_at(&sim.world, sim.clock);
     let from = primary.map_or(1.0e7, |p| (r - sim.world.snapshot(sim.clock).relative(p, anchor).r).length());
     rig.focus = Focus::Vessel(id);

@@ -127,6 +127,7 @@ pub fn restore(sim: &mut SimState, save: SaveGame) {
     sim.controls = save.controls;
     sim.warp = 0;
     sim.compute_limited = false;
+    sim.refresh_dominance();
 }
 
 /// Game state that follows a load: prediction, ids and camera focus.

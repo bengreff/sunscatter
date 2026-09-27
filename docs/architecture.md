@@ -23,7 +23,7 @@ A short map to search before building anything: who owns what, the frame order, 
 | Heightmap sampling (bicubic), sub-sample detail (roughness map, lattice noise, D059) | `sim::terrain` (`detail`, `noise`) | rendering samples through `sim::body` too; `roughness.png` baked by `asset-tool` |
 | Vessel motion, phases, identity (`VesselId`), trajectories of coast and burn segments, flight plans, mass | `sim::vessel` (`trajectory`, `segment`, `burn`) | the stored trajectory is the truth (rule 4); planned burns are segments, so warp only samples them |
 | Saves | `sim::save` (format), `game::saves` (UI, files) | |
-| Nearest body, display primary, osculating orbit (vessels and bodies), orbit size | `game::relations` | display only, never physics |
+| Nearest body (camera clearance only), display primary, dominance ("which body is this about", one instance in `SimState`), osculating orbit (vessels and bodies), orbit size | `game::relations` | display only, never physics |
 | Map view: what is visible/hoverable, per object | `game::map_view` (rule, D054); `game::map` gathers sizes and draws | pure functions + table tests |
 | Orbit-line length (revolutions, caps, settings) | `game::trajectory` (`line`, `settings`); dominance in `game::relations::Dominance` (D056) | display only |
 | Lighting: star flux per object, eclipses, planetshine (D055) | `game::lighting` (rules; fills the terrain uniforms; the shader mirrors `eclipse_factor` and fades sky light through twilight) | ambient/starlight in `game::sky`; exposure fixed (D055) |
@@ -35,6 +35,8 @@ A short map to search before building anything: who owns what, the frame order, 
 | Terrain look: colour map, water mask, ground textures, waves | `game::terrain` (`material`, `water`, `ground`, `terrain.wgsl`) | textures in `data/textures/terrain` (CC0) |
 | Graphics tiers and toggles | `game::settings`; the settings screen in `game::settings_ui` | |
 | Panel layout, theme, pause menu, key help | `game::interface` (`layout` is pure data) | saved in `settings.ron` |
+| Discrete changes to the simulation (warp, switch, delete, load, revert, reset); which keys act | `game::commands` (`GameCommand`, `InputContext`) | the hook for MCP and scripting |
+| Haze strength, our sky compositing shader | `game::sky::haze` (`render_sky.wgsl`, copied from Bevy) | |
 | Where files live | `game::persist` | `SUNSCATTER_HOME` override |
 | Number/unit formatting (distance, speed, duration) | `game::format` | |
 
