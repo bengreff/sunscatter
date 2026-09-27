@@ -59,6 +59,30 @@ Cost target: ≤ 50 µs per vessel per tick with 512 cells (interpolation is O(1
 
 The contact points of §3e (gear feet and hull convex-hull cells) are the hitbox against terrain. Vessel–vessel contact waits for docking and parts.
 
+## Limitations, against the required reach (D070)
+
+The model computes surface pressure and friction per cell; it never solves the flow. What it does and does not capture, as built on 2026-09-26, and what closes each gap:
+
+| Regime / effect | As built | Gap to D070 | Closes it |
+|---|---|---|---|
+| Hypersonic (M ≥ 5) pressure | Modified Newtonian per cell, shadowing per direction, Cp,max from the Rayleigh pitot formula | Real-gas effects at entry speeds (Cp,max ≈ 1.9–2.0 as γ_eff falls) | Cp,max from an equilibrium γ_eff(V, ρ) table per atmosphere |
+| Lift, hypersonic | From the Newtonian normal force: capsule L/D and trim come out right | — | — |
+| Lift, subsonic/supersonic | Newtonian distribution scaled to Cd0·A: centre of pressure kept, lift magnitude only roughly right; no attached-flow lift | Semi-accurate lift of slender bodies and fins is missing | Slender-body normal force (C_N ≈ 2α per base area, Munk) plus crossflow drag (Allen–Perkins), per section along the body; flat-plate/thin-airfoil lift for wing-like cells (C_L ≈ 2πα subsonic, 4α/√(M²−1) supersonic) |
+| Transonic drag rise | A fixed 1.6× factor at M 1.2 | Depends on the shape (area rule) | Wave drag from the area distribution A(x) (von Kármán slender body, as FAR) |
+| Skin friction | None | Dominant drag of slender rockets at low altitude | Flat-plate friction (turbulent, compressible: Van Driest or reference-temperature) on the wetted cells |
+| Base drag | Implicit in Cd0 | Varies with Mach and plume | Base-pressure correlation vs Mach; plume-on reduction later |
+| Rarefied flow | Free-molecular (fully accommodating) bridged by Wilmoth's sin² in Kn | Wilmoth's form cited from memory: to verify | Check against the paper |
+| Atmosphere | Exponential density, one temperature from the scale height | Mach and Knudsen wrong away from the scale-height temperature | US Standard Atmosphere 1976 table (plus NRLMSISE-00 means above 86 km) |
+| Convective entry heating | Sutton–Graves at the stagnation point, spread by incidence | Fine for the correlations' accuracy | — |
+| Radiative (shock-layer) heating | None | Dominates above ~11 km/s: interplanetary entry | Tauber–Sutton (Earth, Mars) with its velocity table |
+| Shock–shock interactions, buffet, flow separation, plumes | None | Not required | — |
+
+**Build order to meet D070:** the atmosphere table; skin friction; slender-body and fin lift; wave drag from A(x); Tauber–Sutton; real-gas Cp,max. Each with a test against published data (Apollo command module L/D ≈ 0.3 at trim; a slender cone-cylinder's C_N slope; Stardust peak radiative/convective heating).
+
+## Thermal network (D065, revised)
+
+Skin cells over the surface, and interior volume nodes on a coarse grid (≈1 m for the test craft), each with the heat capacity of the mass inside it; conduction between neighbours and between nodes and the skin above them; heat sources (engine losses, reactor waste heat, equipment) into the nodes that contain them; coolant loops, radiators and heat pipes as explicit links. One implicit step for the whole network, stable at any time step.
+
 ## Tests (the specification)
 
 - Sphere: Cd ≈ 0.47 subsonic (Re ~1e5–1e6), ≈ 0.92 at M 10 (Newtonian with Cp,max 1.84: Cd = Cp,max/2), → 2.1 free-molecular (Kn ≫ 1).

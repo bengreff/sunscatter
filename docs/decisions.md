@@ -286,10 +286,13 @@ The altitude is data per body, chosen by rule: the top of the atmosphere, or on 
 - **Debug mode** turns on, together: infinite propellant, no overheating, infinite impact tolerance. Otherwise the craft is destroyed at its limits.
 - No heat shield.
 
-**D065: Heating is modeled per cell; a part has a maximum skin and a maximum internal temperature.** *Decided, 2026-09-26.*
-- Each surface cell has its own skin temperature, so localized heating is captured; the part has one internal temperature.
-- Cells are as small as they can be without significant performance drops, with adaptive resolution fitted to the geometry.
-- Exceeding either limit destroys the part cleanly. Ablation may come later.
+**D065: Heat is a network of surface cells and interior volume nodes, independent of parts.** *Decided, 2026-09-26; revised the same evening (owner).*
+- **Skin cells:** the surface split into cells as small as they can be without significant performance drops, adaptive to the geometry. They take heat from the flow and sunlight, radiate, and conduct to neighbours.
+- **Volume nodes:** a coarse 3D grid over the craft's interior (≈1 m for the test craft, adaptive for big craft), each with the heat capacity of the mass inside it, conducting to neighbours and to the skin cells above it. This replaces the single internal temperature.
+- **Heat sources go into the nodes that contain them:** engine losses into the chamber and mount nodes, reactor waste heat (thermal minus electrical) into the reactor's nodes, electronics and crew their power draw.
+- **Heat transport systems are explicit links:** coolant loops carry ṁ·c_p·ΔT between the nodes they pass (only while pumped, costing power); radiators are high-emissivity skin cells on a loop; heat pipes are high-conductance links within their working range.
+- **Parts, later, own the nodes and cells inside their shape** (a big part spans many nodes), with limits per node; joints are links with contact resistance; heat-dependent subsystems read their node's temperature.
+- Exceeding a skin or node limit destroys the part cleanly (no ablation yet); debug mode disables it (D064).
 
 **D066: Ground contact is rigid-body contact.** *Decided, 2026-09-26.*
 Contact points on the gear and hull touch the physical terrain with spring-damper contact and friction; a craft can bounce or tip over, and impacts are judged per contact point.
@@ -305,6 +308,9 @@ Contact points on the gear and hull touch the physical terrain with spring-dampe
 
 **D069: The MCP server uses local HTTP, and the agent is at a control location like the player.** *Decided, 2026-09-26.*
 Streamable HTTP on localhost, off by default. Agent commands have the origin of the agent's control location (D067), so light delay applies to them exactly as to the player's.
+
+**D070: The aerodynamics model's required reach.** *Decided, 2026-09-26 (owner).*
+Simplified is fine, as long as it models, semi-accurately: lift; rocket flight at low and high altitude at all speeds (subsonic, transonic, supersonic, hypersonic, rarefied); and entry from interplanetary velocities (to ~16 km/s). No flow-field solver. The model's limitations are recorded in [design/aero-thermal.md](design/aero-thermal.md).
 
 ## Open questions
 
