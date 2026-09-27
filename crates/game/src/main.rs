@@ -15,6 +15,7 @@ mod demo;
 mod format;
 mod hud;
 mod interface;
+mod landing;
 mod lighting;
 mod map;
 mod map_view;
@@ -67,29 +68,7 @@ fn main() {
         }))
         .add_plugins(EguiPlugin::default())
         .add_plugins((terrain::TerrainPlugin, sky::SkyPlugin, atmosphere::AtmosphereFixPlugin))
-        .insert_resource(state::SimState::new())
-        .init_resource::<state::Prediction>()
-        .init_resource::<state::SimPause>()
-        .init_resource::<camera::CameraRig>()
-        .init_resource::<hud::UiState>()
-        .init_resource::<hud::FpsMeter>()
-        .init_resource::<interface::pause::PauseMenu>()
-        .init_resource::<interface::pause::LaunchSnapshot>()
-        .init_resource::<interface::help::Help>()
-        .init_resource::<interface::toasts::Toasts>()
-        .init_resource::<settings::GraphicsSettings>()
-        .init_resource::<settings_ui::SettingsUi>()
-        .init_resource::<bench::Bench>()
-        .init_resource::<map::MapView>()
-        .init_resource::<saves::SaveUi>()
-        .init_resource::<tracking::Tracked>()
-        .init_resource::<tracking::TrackingStation>()
-        .init_resource::<commands::InputContext>()
-        .insert_resource(comms::Comms::load())
-        .add_message::<commands::GameCommand>()
-        .init_resource::<commands::InFlight>()
-        .init_resource::<planner::Planner>()
-        .init_resource::<rendezvous::Rendezvous>()
+        .add_plugins(GameState)
         // After the settings defaults: replaces them with the saved settings.
         .add_plugins(persist::PersistPlugin)
         .add_plugins(navball::NavballPlugin)
@@ -155,6 +134,7 @@ fn main() {
                 sky::draw_flare,
                 map::draw_overlay,
                 rendezvous::draw,
+                landing::draw,
                 hud::draw,
                 settings_ui::draw,
             )
@@ -175,4 +155,36 @@ fn main() {
                 .after(hud::draw),
         )
         .run();
+}
+
+/// The game's resources and messages (before the saved settings replace
+/// the settings defaults).
+struct GameState;
+
+impl Plugin for GameState {
+    fn build(&self, app: &mut App) {
+        app.insert_resource(state::SimState::new())
+            .init_resource::<state::Prediction>()
+            .init_resource::<state::SimPause>()
+            .init_resource::<camera::CameraRig>()
+            .init_resource::<hud::UiState>()
+            .init_resource::<hud::FpsMeter>()
+            .init_resource::<interface::pause::PauseMenu>()
+            .init_resource::<interface::pause::LaunchSnapshot>()
+            .init_resource::<interface::help::Help>()
+            .init_resource::<interface::toasts::Toasts>()
+            .init_resource::<settings::GraphicsSettings>()
+            .init_resource::<settings_ui::SettingsUi>()
+            .init_resource::<bench::Bench>()
+            .init_resource::<map::MapView>()
+            .init_resource::<saves::SaveUi>()
+            .init_resource::<tracking::Tracked>()
+            .init_resource::<tracking::TrackingStation>()
+            .init_resource::<commands::InputContext>()
+            .insert_resource(comms::Comms::load())
+            .add_message::<commands::GameCommand>()
+            .init_resource::<commands::InFlight>()
+            .init_resource::<planner::Planner>()
+            .init_resource::<rendezvous::Rendezvous>();
+    }
 }
