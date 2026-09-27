@@ -3172,8 +3172,10 @@ dependencies = [
  "directories",
  "glam 0.32.1",
  "image",
+ "mcp",
  "ron 0.12.2",
  "serde",
+ "serde_json",
  "sim",
 ]
 

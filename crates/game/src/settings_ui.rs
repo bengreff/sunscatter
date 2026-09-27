@@ -229,6 +229,21 @@ fn interface_tab(ui: &mut egui::Ui, s: &mut InterfaceSettings) {
             s.set_visible(id, visible);
         }
     }
+    ui.separator();
+    ui.checkbox(&mut s.agent.enabled, "AI agent server (MCP, local only)");
+    ui.horizontal(|ui| {
+        ui.label("port");
+        ui.add(egui::DragValue::new(&mut s.agent.port).range(1024..=65535));
+    });
+    if s.agent.enabled && !s.agent.token.is_empty() {
+        ui.label(egui::RichText::new("Connect Claude Code with:").small());
+        let mut cmd = crate::agent::connect_command(s.agent.port, &s.agent.token);
+        ui.add(egui::TextEdit::multiline(&mut cmd).font(egui::TextStyle::Monospace).desired_rows(2));
+        if ui.button("New token").clicked() {
+            s.agent.token = crate::agent::new_token();
+        }
+    }
+    ui.separator();
     ui.horizontal(|ui| {
         if ui.button("Reset layout").clicked() {
             s.reset_layout();

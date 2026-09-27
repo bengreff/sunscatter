@@ -19,7 +19,7 @@ use bevy::prelude::*;
 use sim::save::SaveGame;
 use sim::vessel::VesselId;
 
-#[derive(Message, Clone, Debug)]
+#[derive(Message, Clone, Debug, PartialEq)]
 pub enum GameCommand {
     /// Requested warp level (index into `WARP_LEVELS`).
     SetWarp(usize),

@@ -4,6 +4,7 @@
 //! input → simulation → camera → scene transforms → trajectory → UI.
 //! Everything drawn is derived from the simulation at the *current* clock.
 
+mod agent;
 mod atmosphere;
 mod bench;
 mod body_visual;
@@ -111,7 +112,10 @@ fn main() {
         )
         .add_systems(
             Update,
-            (saves::keys, tracking::update, commands::apply).chain().after(hud::pick_bodies).in_set(Stage::Input),
+            (saves::keys, tracking::update, agent::serve, commands::apply)
+                .chain()
+                .after(hud::pick_bodies)
+                .in_set(Stage::Input),
         )
         .add_systems(
             Update,

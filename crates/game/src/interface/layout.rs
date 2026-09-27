@@ -87,6 +87,24 @@ pub struct InterfaceSettings {
     /// Bumped by "Reset layout" so windows forget where egui put them.
     pub layout_generation: u32,
     pub panels: BTreeMap<PanelId, PanelLayout>,
+    /// The MCP server for the player's AI agent (D044, D069): off by default.
+    pub agent: AgentSettings,
+}
+
+/// Where the player's agent connects (local HTTP only).
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(default)]
+pub struct AgentSettings {
+    pub enabled: bool,
+    pub port: u16,
+    /// Bearer token the agent must send; empty until first enabled.
+    pub token: String,
+}
+
+impl Default for AgentSettings {
+    fn default() -> Self {
+        AgentSettings { enabled: false, port: 7878, token: String::new() }
+    }
 }
 
 pub const UI_SCALE_RANGE: std::ops::RangeInclusive<f32> = 0.6..=2.0;
@@ -100,6 +118,7 @@ impl Default for InterfaceSettings {
             show_fps: true,
             layout_generation: 0,
             panels: BTreeMap::new(),
+            agent: AgentSettings::default(),
         }
     }
 }

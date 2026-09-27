@@ -324,12 +324,12 @@ Scenario test: from a 15 km lunar orbit periapsis, a scripted descent lands upri
 ## Build order (check off as done)
 
 1. [x] 1d navball flicker (test first), 1c zoom sweep step and fix, 1a haze + setting + dark horizon, 1b terrain detail (sim first, then LOD). Still open: 1b's matching colour detail in the shader; the haze default awaits the owner's look.
-2. [ ] Foundation: sim 3, sim 2, sim 1, sim 4; `VesselId`; `GameCommand` + `InputContext`; `Dominance`/`ActiveFlight`/`VesselLines` resources; tracked vessels' lines; sim 11 (`Trajectory`, burn segments, mass in the state).
+2. [x] Foundation: sim 3, sim 2, sim 1, sim 4; `VesselId` (sim and game); `GameCommand` + `InputContext`; one `Dominance` in `SimState`; tracked vessels' lines (round robin); sim 11 (`Trajectory`, burn segments, mass in the state, planned burns under warp). Left: the `ActiveFlight`/`VesselLines` per-frame caches (the line rescans cost 1,000,000x with 11 vessels ~90 fps, still above target; redo with §6's lines).
 3. [ ] Test craft: files and loader, cells and mass properties, engine, rigid body, debug mode, contact, UI.
-4. [ ] Proper time; control locations; sites and comm network; delayed telemetry and commands; probes in F2.
-5. [ ] `aero-thermal.md` design doc; atmosphere table; aero bake and runtime; heating; rails floor.
+4. [ ] Proper time; [x] control locations (`game::comms`); [x] sites and comm network (`sim::comms`: link budget, occlusion, light time, relays); [x] delayed telemetry (station shows retarded positions, signal, last heard); delayed commands (with §6's plans); probes in F2 (needs crew in data).
+5. [ ] [x] `aero-thermal.md` design doc; atmosphere table; aero bake and runtime; heating; [x] rails floor (data + rule test; the warp indicator says why).
 6. [ ] Burn planner; landing prediction and panel; rendezvous tools.
-7. [ ] `crates/mcp`, tools, docs.
+7. [ ] [x] `crates/mcp` (transport); [x] `game::agent` tools (state, bodies, vessel, trajectory, warp, switch, location, controls); [x] `docs/mcp.md`; planning tools with §6.
 
 Each step ends with fmt, clippy, tests and, for visual steps, a demo run (offscreen). The architecture map gets a row for every new owner module (`sim::craft`, `sim::thermal`, `sim::aero`, `sim::contact`, `sim::comms`, `sim::plan`, `sim::approach`, `game::haze`, `crates/mcp`).
 
