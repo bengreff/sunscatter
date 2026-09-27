@@ -3,6 +3,7 @@
 //! along the N-body trajectory, not conic elements), and how long vessel and
 //! body lines are ([`line`], [`settings`]; D056).
 
+pub mod clip;
 pub mod line;
 pub mod settings;
 
@@ -241,8 +242,11 @@ pub fn draw(
     map: Res<MapView>,
     tracked: Res<Tracked>,
     orbits: Res<OrbitSettings>,
+    cam: Query<&Transform, With<crate::camera::MainCamera>>,
     mut gizmos: Gizmos,
 ) {
+    let Ok(cam) = cam.single() else { return };
+    let forward = cam.forward().as_vec3();
     let Some(plotter) = Plotter::new(&sim, &rig, ui.plot_frame) else { return };
     for (i, vessel) in sim.fleet.iter().enumerate() {
         let active = i == sim.active;
@@ -265,9 +269,13 @@ pub fn draw(
             // to the ship's current position so the line starts at the ship.
             let (ship_anchor, ship_r, _) = sim.ship().state_at(&sim.world, sim.clock);
             let ship_now = sim.world.snapshot(sim.clock).relative_r(ship_anchor, rig.anchor) + ship_r - rig.cam_pos;
-            gizmos.linestrip(std::iter::once(ship_now.as_vec3()).chain(resampled), Color::srgb(1.0, 0.85, 0.2));
+            for run in clip::front_runs(std::iter::once(ship_now.as_vec3()).chain(resampled), forward, 1.0) {
+                gizmos.linestrip(run, Color::srgb(1.0, 0.85, 0.2));
+            }
         } else {
-            gizmos.linestrip(resampled, Color::srgba(0.7, 0.75, 0.8, 0.6));
+            for run in clip::front_runs(resampled, forward, 1.0) {
+                gizmos.linestrip(run, Color::srgba(0.7, 0.75, 0.8, 0.6));
+            }
         }
     }
 }

@@ -29,7 +29,7 @@ const ZOOM_FRAMES: u32 = 40;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Step {
     Pad,
-    /// Opt-in (`SUNSCATTER_DEMO_ZOOM=1`): zoom out from 50 m to 20,000 km
+    /// Opt-in (`SUNSCATTER_DEMO_ZOOM=1`, or a tier name): zoom out from 50 m to 20,000 km
     /// over the pad and back, at High, a screenshot every frame (the owner's
     /// "whitish shapes" when zooming).
     ZoomSweep(u32),
@@ -311,7 +311,12 @@ pub fn run(
             } else if demo.shot_taken && (!demo.bench || !bench.results.is_empty()) {
                 if demo.zoom_sweep {
                     demo.zoom_sweep = false;
-                    *settings = settings.with_preset(Tier::High);
+                    // `SUNSCATTER_DEMO_ZOOM=<tier>` picks the tier (default High).
+                    let tier = std::env::var("SUNSCATTER_DEMO_ZOOM")
+                        .ok()
+                        .and_then(|n| Tier::ALL.into_iter().find(|t| t.name().eq_ignore_ascii_case(&n)))
+                        .unwrap_or(Tier::High);
+                    *settings = settings.with_preset(tier);
                     (rig.pitch, rig.distance) = (0.35, ZOOM_NEAR);
                     demo.next(Step::ZoomSweep(0));
                 } else {

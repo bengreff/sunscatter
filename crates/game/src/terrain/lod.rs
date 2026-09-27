@@ -42,6 +42,16 @@ pub fn morph_factor(parent_measure: Option<f64>) -> f32 {
     parent_measure.map_or(0.0, |m| ((MORPH_FULL_AT - m) / (MORPH_FULL_AT - 1.0)).clamp(0.0, 1.0) as f32)
 }
 
+/// Whether a chunk installed at frame `installed` can be drawn at `frame`.
+/// Its entity is spawned through `Commands` and only exists from the next
+/// frame: switching to children installed this frame hid the parent a frame
+/// before they could be shown, a one-frame hole through which the
+/// atmosphere drew its grey ground (the owner's "whitish shapes" when
+/// zooming).
+pub fn shown_by(installed: u32, frame: u32) -> bool {
+    installed < frame
+}
+
 /// Why a chunk splits: `No`, `Always` (tessellation sag, not the camera),
 /// or `Measure(m)` with m > 1 the screen error over the threshold.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -84,16 +94,18 @@ impl TerrainBody {
         if key.level >= MAX_LEVEL {
             return Split::No;
         }
-        let d = (ctx.cam_fixed - c.center).length();
-        if d - c.radius > ctx.horizon {
-            return Split::No;
-        }
         let s = spacing(self, key.level);
         // Flat triangles sag below the true surface; an atmosphere's
         // aerial perspective depends strongly on the depth it ends at, so
-        // keep the sag small wherever the body is drawn.
+        // keep the sag small wherever the body is drawn, including chunks
+        // judged past the horizon: a coarse chunk there sagged hundreds of km
+        // and its neighbours' skirts stood above it as walls near the limb.
         if s * s / (8.0 * self.shape.radius_eq) > self.max_sag {
             return Split::Always;
+        }
+        let d = (ctx.cam_fixed - c.center).length();
+        if d - c.radius > ctx.horizon {
+            return Split::No;
         }
         let relief = if self.displaced && s > self.height_res { ERROR_RELIEF } else { 0.0 };
         let err = s * (ERROR_BASE + relief) + c.max_height.min(s) * relief;
@@ -116,7 +128,7 @@ impl TerrainBody {
             let split = self.wants_split(key, c, ctx);
             if split != Split::No {
                 let children = key.children();
-                if children.iter().all(|k| self.chunks.contains_key(k)) {
+                if children.iter().all(|k| self.chunks.get(k).is_some_and(|c| shown_by(c.installed, ctx.frame))) {
                     let m = morph_factor(match split {
                         Split::Measure(m) => Some(m),
                         _ => None,
@@ -184,7 +196,7 @@ pub fn update(
                     MeshTag(0),
                 ))
                 .id();
-            body.chunks.insert(k, Chunk { entity, center, radius, max_height, last_used: frame });
+            body.chunks.insert(k, Chunk { entity, center, radius, max_height, last_used: frame, installed: frame });
         }
 
         let m: DMat3 = body_matrix(&sim, body.node);
@@ -246,6 +258,12 @@ pub fn update(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_chunk_is_drawn_from_the_frame_after_it_is_installed() {
+        assert!(!shown_by(10, 10));
+        assert!(shown_by(10, 11));
+    }
 
     #[test]
     fn children_start_at_the_parent_shape_and_finish_morphing_at_80_percent_distance() {

@@ -126,6 +126,7 @@ pub fn update(
 /// Orbit lines of the bodies in map view, about their primaries, over one
 /// period ahead (from the ephemeris where it covers the period, else the
 /// osculating conic).
+#[allow(clippy::too_many_arguments)]
 pub fn draw_body_orbits(
     sim: Res<SimState>,
     rig: Res<CameraRig>,
@@ -133,8 +134,11 @@ pub fn draw_body_orbits(
     map: Res<MapView>,
     defs: Res<BodyDefs>,
     orbits: Res<OrbitSettings>,
+    cam: Query<&Transform, With<MainCamera>>,
     mut gizmos: Gizmos,
 ) {
+    let Ok(cam) = cam.single() else { return };
+    let forward = cam.forward().as_vec3();
     let eph = &sim.world.eph;
     let dom = Dominance::new(eph, sim.clock);
     // One revolution about the dominant body (D056), or off.
@@ -161,7 +165,9 @@ pub fn draw_body_orbits(
         let [r, g, b] = defs.get(node).map_or([0.7, 0.7, 0.7], |d| d.icon_color);
         let color = Color::srgba(r, g, b, 0.55 * alpha);
         let centre = snap.relative_r(p, rig.anchor) - rig.cam_pos;
-        gizmos.linestrip(line.into_iter().map(|rel| (centre + rel).as_vec3()), color);
+        for run in trajectory::clip::front_runs(line.into_iter().map(|rel| (centre + rel).as_vec3()), forward, 1.0) {
+            gizmos.linestrip(run, color);
+        }
     }
 }
 

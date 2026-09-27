@@ -317,6 +317,15 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
             n_out = perturb(n_out, dp1, dp2, duv1, duv2, tn_n);
         }
     }
+    // Water lies at sea level: shade it with the sphere's normal at this
+    // fragment, not the mesh normal. On a coarse chunk the mesh normal is
+    // interpolated across triangles kilometres wide, and the sharp sun glint
+    // took their shape (grey and white triangles that jumped as the LOD
+    // changed while zooming).
+    if water > 0.0 {
+        let sphere_n = normalize(in.world_position.xyz - terrain.center.xyz);
+        n_out = normalize(mix(n_out, sphere_n, water));
+    }
     // Waves on water, near the camera.
     if water > 0.0 && fade > 0.0 {
         let g = wave_slope(in.uv, globals.time) * 3.0 * fade * water;

@@ -58,6 +58,9 @@ struct Chunk {
     radius: f64,
     max_height: f64,
     last_used: u32,
+    /// Frame the chunk was installed. Its entity is spawned through
+    /// `Commands`, so it can only be shown from the next frame.
+    installed: u32,
 }
 
 pub struct TerrainBody {
@@ -103,11 +106,19 @@ impl Terrain {
 
 /// Terrain heights for a body, from the simulation (one owner of the
 /// sampling math, so the rendered surface is the physical one).
+///
+/// Heights include the procedural sub-sample detail (D059), so relief is
+/// unresolved (and chunks keep splitting for it) down to the detail's
+/// shortest wavelength, not only the heightmap's spacing.
 fn height_fn(sim: &SimState, node: NodeId) -> Option<(HeightFn, f64)> {
-    let p = sim.world.source(node)?.physical.as_ref()?;
-    let map = p.terrain.clone()?;
-    let res = std::f64::consts::TAU * p.radius_eq / map.width() as f64;
-    Some((Arc::new(move |dir| map.height_at(dir)), res))
+    let p = sim.world.source(node)?.physical.clone()?;
+    let map = p.terrain.as_ref()?;
+    let map_res = std::f64::consts::TAU * p.radius_eq / map.width() as f64;
+    let res = p.detail.as_ref().map_or(map_res, |d| {
+        let k = d.params.lacunarity.powi(d.params.octaves.saturating_sub(1) as i32);
+        d.params.wavelength / k
+    });
+    Some((Arc::new(move |dir| p.terrain_height(dir)), res))
 }
 
 fn v4(a: [f32; 3], w: f32) -> Vec4 {
