@@ -282,8 +282,9 @@ pub fn advance(
     sim.refresh_dominance();
     // Look ahead as far as the drawn line needs (D056), a bounded number of
     // steps per frame.
+    // Through the planned burns: the line ends on the last segment.
     let ship = &mut sim.fleet[sim.active];
-    if let Some(seg) = ship.segment() {
+    if let Some(seg) = ship.trajectory().map(|t| t.last()) {
         let until = trajectory::lookahead_until(&sim.world, seg, sim.clock, &orbits);
         ship.extend_coast(&sim.world, until, LOOKAHEAD_STEPS_PER_FRAME);
     }
@@ -292,7 +293,7 @@ pub fn advance(
     if let Some(i) = lookahead_turn(*turn, sim.fleet.len(), sim.active) {
         *turn = i + 1;
         let vessel = &mut sim.fleet[i];
-        if let Some(seg) = vessel.segment() {
+        if let Some(seg) = vessel.trajectory().map(|t| t.last()) {
             let until = trajectory::lookahead_until(&sim.world, seg, sim.clock, &orbits);
             vessel.extend_coast(&sim.world, until, OTHER_LOOKAHEAD_STEPS_PER_FRAME);
         }

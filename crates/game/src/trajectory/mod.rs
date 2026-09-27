@@ -22,7 +22,7 @@ use sim::ephem::Ephemeris;
 use sim::frame::NodeId;
 use sim::kepler::Elements;
 use sim::time::Epoch;
-use sim::vessel::{Segment, Vessel};
+use sim::vessel::{Segment, SegmentKind, Vessel};
 use sim::world::World;
 
 /// Number of points used to draw a trajectory.
@@ -253,28 +253,48 @@ pub fn draw(
         if (!active && !tracked.is_tracked(vessel.id())) || !map.in_map(ObjectId::Vessel(vessel.id())) {
             continue;
         }
-        let seg = if active { active_segment(&sim, &pred) } else { vessel.segment() };
-        let Some(seg) = seg else { continue };
-        let Some((t_start, t_end)) = future_span(seg, sim.clock) else { continue };
-        // The line rule (D056): one revolution about the dominant body by default.
-        let t_end = t_end.min(vessel_line_end(&sim.world, seg, t_start, &orbits).0);
+        // The segments to draw: the powered prediction, or the stored
+        // trajectory from now through every planned burn.
+        let segs: Vec<&Segment> = match (active, vessel.trajectory()) {
+            (_, Some(tr)) => tr.segments.iter().filter(|s| s.t0.add_seconds(s.computed_until()) > sim.clock).collect(),
+            (true, None) => active_segment(&sim, &pred).into_iter().collect(),
+            (false, None) => Vec::new(),
+        };
+        let Some(&first) = segs.first() else { continue };
         let points = if active { TRAJECTORY_POINTS } else { TRAJECTORY_POINTS / 3 };
-        let resampled = (0..points).filter_map(|k| {
-            let t = t_start + (t_end - t_start) * k as f64 / (points - 1) as f64;
-            let (anchor, r, _) = seg.eval(t)?;
-            Some(plotter.plot(anchor, r, seg.t0.add_seconds(t)).as_vec3())
-        });
-        if active {
-            // While powered the prediction was computed a moment ago; join it
-            // to the ship's current position so the line starts at the ship.
-            let (ship_anchor, ship_r, _) = sim.ship().state_at(&sim.world, sim.clock);
-            let ship_now = sim.world.snapshot(sim.clock).relative_r(ship_anchor, rig.anchor) + ship_r - rig.cam_pos;
-            for run in clip::front_runs(std::iter::once(ship_now.as_vec3()).chain(resampled), forward, 1.0) {
-                gizmos.linestrip(run, Color::srgb(1.0, 0.85, 0.2));
-            }
-        } else {
-            for run in clip::front_runs(resampled, forward, 1.0) {
-                gizmos.linestrip(run, Color::srgba(0.7, 0.75, 0.8, 0.6));
+        let mut after_burn = false;
+        let mut first_run = true;
+        for (n, &seg) in segs.iter().enumerate() {
+            let Some((t_start, t_end)) = future_span(seg, sim.clock) else { continue };
+            // The line rule (D056) on the last segment: one revolution by default.
+            let t_end = if n + 1 == segs.len() {
+                t_end.min(vessel_line_end(&sim.world, seg, t_start, &orbits).0)
+            } else {
+                t_end
+            };
+            let burn = matches!(seg.kind, SegmentKind::Burn(_));
+            after_burn |= burn;
+            let colour = match (burn, after_burn, active) {
+                (true, _, _) => Color::srgb(1.0, 0.35, 0.2),
+                (false, true, _) => Color::srgb(0.3, 0.85, 1.0),
+                (false, false, true) => Color::srgb(1.0, 0.85, 0.2),
+                (false, false, false) => Color::srgba(0.7, 0.75, 0.8, 0.6),
+            };
+            let resampled: Vec<Vec3> = (0..points)
+                .filter_map(|k| {
+                    let t = t_start + (t_end - t_start) * k as f64 / (points - 1) as f64;
+                    let (anchor, r, _) = seg.eval(t)?;
+                    Some(plotter.plot(anchor, r, seg.t0.add_seconds(t)).as_vec3())
+                })
+                .collect();
+            // The first line starts at the ship (a powered prediction was
+            // computed a moment ago).
+            let start = (active && std::mem::take(&mut first_run) && std::ptr::eq(seg, first)).then(|| {
+                let (ship_anchor, ship_r, _) = sim.ship().state_at(&sim.world, sim.clock);
+                (sim.world.snapshot(sim.clock).relative_r(ship_anchor, rig.anchor) + ship_r - rig.cam_pos).as_vec3()
+            });
+            for run in clip::front_runs(start.into_iter().chain(resampled), forward, 1.0) {
+                gizmos.linestrip(run, colour);
             }
         }
     }

@@ -38,6 +38,8 @@ enum Step {
     Circularize,
     Orbit,
     Map,
+    /// A planned trans-lunar burn: the predicted line through it (map view).
+    Plan,
     /// Earth's night side and terminator from 20,000 km: must be dark.
     EarthNight,
     MoonFar,
@@ -419,6 +421,33 @@ pub fn run(
                 demo.shot_taken = true;
                 demo.capture("map");
             } else {
+                // A trans-lunar burn in 20 minutes, 3.15 km/s prograde.
+                let t = sim.clock.add_seconds(1200.0);
+                let sim_ = &mut *sim;
+                let v = &mut sim_.fleet[sim_.active];
+                let burn = sim::vessel::PlannedBurn::delta_v_with(
+                    t,
+                    DVec3::new(3150.0, 0.0, 0.0),
+                    &v.craft.engine,
+                    Some(earth.node),
+                );
+                let plan = sim::vessel::FlightPlan { burns: vec![burn] };
+                if let Err(e) = v.set_plan(&sim_.world, plan) {
+                    warn!("demo plan rejected: {e:?}");
+                }
+                rig.distance = 1.2e9;
+                demo.next(Step::Plan);
+            }
+        }
+        Step::Plan => {
+            // Let the look-ahead compute through the burn, then capture.
+            if demo.timer > 3.0 && !demo.shot_taken {
+                demo.shot_taken = true;
+                demo.shot(&mut commands, "plan_tli");
+            } else if demo.shot_taken && demo.timer > 3.5 {
+                let sim_ = &mut *sim;
+                let v = &mut sim_.fleet[sim_.active];
+                let _ = v.set_plan(&sim_.world, sim::vessel::FlightPlan::default());
                 view_sunlit(&mut rig, &sim, earth.node, 120f64.to_radians(), 2.6e7);
                 demo.next(Step::EarthNight);
             }

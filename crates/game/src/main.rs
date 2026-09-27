@@ -20,6 +20,7 @@ mod map;
 mod map_view;
 mod navball;
 mod persist;
+mod planner;
 mod relations;
 mod saves;
 mod scene;
@@ -85,6 +86,8 @@ fn main() {
         .init_resource::<commands::InputContext>()
         .insert_resource(comms::Comms::load())
         .add_message::<commands::GameCommand>()
+        .init_resource::<commands::InFlight>()
+        .init_resource::<planner::Planner>()
         // After the settings defaults: replaces them with the saved settings.
         .add_plugins(persist::PersistPlugin)
         .add_plugins(navball::NavballPlugin)
@@ -112,7 +115,7 @@ fn main() {
         )
         .add_systems(
             Update,
-            (saves::keys, tracking::update, agent::serve, commands::apply)
+            (saves::keys, tracking::update, planner::keys, agent::serve, commands::apply)
                 .chain()
                 .after(hud::pick_bodies)
                 .in_set(Stage::Input),
@@ -151,6 +154,7 @@ fn main() {
                 tracking::draw,
                 hud::draw_body_menu,
                 saves::draw,
+                planner::draw,
                 interface::pause::draw,
                 interface::help::draw,
                 interface::toasts::draw,
