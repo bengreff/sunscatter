@@ -135,8 +135,13 @@ impl SimState {
             return Some(RailsBlock::Thrust);
         }
         if matches!(ship.phase, Phase::Powered { .. }) {
-            // Flown live: thrusting or in contact with the ground.
+            // Flown live: thrusting, in the atmosphere or in contact.
             return Some(RailsBlock::Live);
+        }
+        // Every vessel moves at the same warp: one flying live (in an
+        // atmosphere, say) would need 20 ms ticks at rails speed.
+        if let Some(v) = self.fleet.iter().find(|v| matches!(v.phase, Phase::Powered { .. })) {
+            return Some(RailsBlock::OtherLive(v.id()));
         }
         if matches!(ship.phase, Phase::Landed { .. } | Phase::Crashed { .. }) {
             return None;
@@ -361,6 +366,8 @@ pub enum RailsBlock {
     Thrust,
     /// Flown in live ticks (near the ground, or thrust just ended).
     Live,
+    /// Another vessel is flying live (in an atmosphere, or landing).
+    OtherLive(VesselId),
     /// Below a body's rails floor (D062): (body, floor altitude in m).
     Floor { body: NodeId, floor: f64 },
 }

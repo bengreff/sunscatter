@@ -128,6 +128,8 @@ pub enum WarpLimit {
     Floor(f64),
     /// Flown live near the ground.
     Live,
+    /// Another vessel (id) is flying live.
+    OtherLive(u64),
 }
 
 /// What the warp indicator shows: the level in effect, whether it is rails
@@ -187,8 +189,12 @@ pub fn draw(
             _ => None,
         };
         let (level, rails, mut limit) = warp_status(sim.warp, sim.effective_warp(), sim.compute_limited, floor);
-        if block == Some(crate::state::RailsBlock::Live) && limit == Some(WarpLimit::Throttle) {
-            limit = Some(WarpLimit::Live);
+        match block {
+            Some(crate::state::RailsBlock::Live) if limit == Some(WarpLimit::Throttle) => limit = Some(WarpLimit::Live),
+            Some(crate::state::RailsBlock::OtherLive(id)) if limit == Some(WarpLimit::Throttle) => {
+                limit = Some(WarpLimit::OtherLive(id.0));
+            }
+            _ => {}
         }
         ui_.horizontal(|ui_| {
             ui_.spacing_mut().item_spacing.x = 1.0;
@@ -212,7 +218,8 @@ pub fn draw(
             Some(WarpLimit::Throttle) => "  limited: throttle".to_string(),
             Some(WarpLimit::Compute) => "  limited: compute".to_string(),
             Some(WarpLimit::Floor(f)) => format!("  limited: below {}", crate::format::distance(f)),
-            Some(WarpLimit::Live) => "  limited: near the ground".to_string(),
+            Some(WarpLimit::Live) => "  limited: flying live".to_string(),
+            Some(WarpLimit::OtherLive(id)) => format!("  limited: Vessel {id} is flying live"),
             None => String::new(),
         };
         ui_.horizontal(|ui_| {
@@ -269,6 +276,13 @@ pub fn draw(
 }
 
 /// The Flight panel: phase, altitudes, speeds, apsides, throttle, SAS, chute.
+/// A temperature with its limit: "812 K / 1100 K" (warning shown by the
+/// caller's colour; here the text).
+pub fn temperature(t: f64, limit: f64) -> String {
+    let mark = if t >= 0.9 * limit { " !" } else { "" };
+    format!("{t:.0} K / {limit:.0} K{mark}")
+}
+
 /// The ship clock's offset from the game clock (proper minus coordinate
 /// time, D012), in the unit that shows it.
 pub fn clock_offset(s: f64) -> String {
@@ -316,6 +330,11 @@ fn craft_rows(ui_: &mut egui::Ui, sim: &SimState, near: Option<sim::frame::NodeI
         row("ΔV (VAC)", format!("{:.0} m/s", delta_v(engine.isp_vac, props.mass, p)));
         row("TWR", twr(engine.thrust_vac, props.mass, g).map_or("—".into(), |t| format!("{t:.2}")));
         row("MASS", format!("{:.1} t", props.mass / 1e3));
+        let limits = &ship.craft.thermal;
+        let skin = ship.max_skin_temperature();
+        let (node, _) = ship.max_node_temperature();
+        row("SKIN MAX", temperature(skin, limits.skin_max_k));
+        row("INTERIOR MAX", temperature(node, limits.internal_max_k));
         row("SHIP CLOCK", clock_offset(ship.proper_time_offset()));
     });
     if ship.debug() {
@@ -406,6 +425,12 @@ pub fn draw_body_menu(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn temperatures_warn_near_the_limit() {
+        assert_eq!(temperature(812.4, 1100.0), "812 K / 1100 K");
+        assert_eq!(temperature(1000.0, 1100.0), "1000 K / 1100 K !");
+    }
 
     #[test]
     fn clock_offsets_read_in_their_unit() {

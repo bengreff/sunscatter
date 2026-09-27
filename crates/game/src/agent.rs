@@ -251,7 +251,7 @@ fn run(tool: &str, args: &Value, sim: &SimState, comms: &Comms) -> Result<(Value
         "go_to_mission_control" => (json!({"location": "mission control"}), vec![Effect::Station(true)]),
         "set_plan" => set_plan(args, sim, comms)?,
         "get_landing_prediction" => {
-            let hit = crate::landing::impact(sim, sim.active)
+            let hit = crate::landing::impact(sim, sim.active, None)
                 .map(|h| json!({"in_s": h.t.seconds_since(sim.clock), "speed_ms": h.speed, "body": name(h.body)}));
             (json!({"impact": hit}), Vec::new())
         }

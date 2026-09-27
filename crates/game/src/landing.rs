@@ -35,10 +35,14 @@ pub struct Impact {
     pub r: DVec3,
 }
 
-/// The impact of vessel `i`'s stored trajectory, if it ends on a surface.
-pub fn impact(sim: &SimState, i: usize) -> Option<Impact> {
-    let tr = sim.fleet[i].trajectory()?;
-    let last = tr.last();
+/// The impact of vessel `i`'s path, if it ends on a surface: its stored
+/// trajectory while coasting, else `prediction` (the background coast from
+/// now while it flies live, e.g. in the atmosphere).
+pub fn impact(sim: &SimState, i: usize, prediction: Option<&sim::vessel::Segment>) -> Option<Impact> {
+    let last = match sim.fleet[i].trajectory() {
+        Some(tr) => tr.last(),
+        None => prediction?,
+    };
     let end = last.end?;
     let EndKind::Surface { body } = end.kind else { return None };
     let t_end = last.t0.add_seconds(end.t);
@@ -82,6 +86,7 @@ pub fn draw(
     cam: Query<(&Camera, &Transform, &Projection), With<crate::camera::MainCamera>>,
     rig: Res<crate::camera::CameraRig>,
     station: Res<crate::tracking::TrackingStation>,
+    pred: Res<crate::state::Prediction>,
 ) -> Result {
     if station.open {
         return Ok(());
@@ -99,7 +104,8 @@ pub fn draw(
     let rel = r - k.r;
     let fixed = p.rotation.to_fixed(Vec3::from_raw(rel), sim.clock);
     let height = p.altitude_above_surface(fixed);
-    let hit = impact(&sim, i).filter(|h| h.t.seconds_since(sim.clock) < MARK_WITHIN);
+    let pred = (i == sim.active).then_some(pred.segment.as_ref()).flatten();
+    let hit = impact(&sim, i, pred).filter(|h| h.t.seconds_since(sim.clock) < MARK_WITHIN);
     let ctx = contexts.ctx_mut()?;
     // The impact point, in any view.
     if let (Some(hit), Some(view)) = (hit, map::view(&cam)) {
@@ -182,11 +188,12 @@ mod tests {
     #[test]
     fn a_falling_ship_predicts_its_impact() {
         let mut sim = SimState::new();
-        // A ship 50 km above Earth falling straight down.
+        // A ship 200 km above Earth (above the atmosphere: coasting)
+        // falling straight down.
         let earth = sim.world.find("Earth").unwrap().clone();
         let re = earth.physical.as_ref().unwrap().radius_eq;
         let id = sim.vessel_ids.allocate();
-        let r = DVec3::X * (re + 50_000.0);
+        let r = DVec3::X * (re + 200_000.0);
         let v = sim::vessel::Vessel::coasting(
             &sim.world,
             id,
@@ -201,11 +208,10 @@ mod tests {
         let world = sim.world.clone();
         let until = sim.clock.add_seconds(600.0);
         sim.fleet[i].extend_coast(&world, until, 100_000);
-        let hit = impact(&sim, i).expect("it hits the ground");
-        // Free fall from 50 km with drag lower down: between one and three
-        // minutes, fast.
+        let hit = impact(&sim, i, None).expect("it hits the ground");
+        // Free fall from 200 km with drag lower down: about four minutes.
         let dt = hit.t.seconds_since(sim.clock);
-        assert!(dt > 60.0 && dt < 200.0, "{dt}");
+        assert!(dt > 150.0 && dt < 400.0, "{dt}");
         assert!(hit.speed > 100.0, "{}", hit.speed);
     }
 }
