@@ -52,7 +52,8 @@ impl Rotation {
     /// Unit pole vector at `t` (inertial axes).
     pub fn pole(&self, t: Epoch) -> DVec3 {
         let (ra, dec) = self.pole_radec(t);
-        DVec3::new(math::cos(dec) * math::cos(ra), math::cos(dec) * math::sin(ra), math::sin(dec))
+        let cos_dec = math::cos(dec);
+        DVec3::new(cos_dec * math::cos(ra), cos_dec * math::sin(ra), math::sin(dec))
     }
 
     /// Angular velocity vector (inertial axes).

@@ -51,6 +51,22 @@ impl ActiveSources {
         ActiveSources(keep)
     }
 
+    /// Adds the sources [`Self::select`] would pick now (the same set as
+    /// `add(&select(..))`, without allocating; sources already in the set
+    /// are not re-tested). Returns whether the set grew.
+    pub fn grow(&mut self, world: &World, snap: &Snapshot, anchor: NodeId, r: DVec3) -> bool {
+        let mut grew = false;
+        for (i, s) in world.sources.iter().enumerate() {
+            if let Err(pos) = self.0.binary_search(&i) {
+                if s.node == anchor || tidal(s.gm, snap.relative_r(s.node, anchor), r) >= world.cutoff {
+                    self.0.insert(pos, i);
+                    grew = true;
+                }
+            }
+        }
+        grew
+    }
+
     /// Adds the sources of `other`. Returns whether the set grew.
     pub fn add(&mut self, other: &ActiveSources) -> bool {
         let before = self.0.len();

@@ -23,6 +23,7 @@ use crate::frame::NodeId;
 use crate::time::Epoch;
 use glam::DVec3;
 use serde::{Deserialize, Serialize};
+use std::cell::Cell;
 
 /// Position, velocity and acceleration of one node relative to another
 /// (inertial axes).
@@ -198,7 +199,7 @@ impl Ephemeris {
             eph: self,
             t,
             local_r: self.nodes.iter().map(|n| n.motion.eval_r(t)).collect(),
-            full: std::cell::RefCell::new(vec![None; self.nodes.len()]),
+            full: vec![Cell::new(None); self.nodes.len()],
         }
     }
 
@@ -211,20 +212,32 @@ impl Ephemeris {
 /// All nodes' positions relative to their parents at one instant, with full
 /// kinematics (velocity, acceleration) evaluated lazily for the nodes that
 /// need them. Positions from `relative_r` and `relative(..).r` are identical.
+/// (Evaluating every position up front is cheaper than a lazy check per
+/// query: a force evaluation touches every node.)
 pub struct Snapshot<'a> {
     eph: &'a Ephemeris,
     pub t: Epoch,
     local_r: Vec<DVec3>,
-    full: std::cell::RefCell<Vec<Option<Kinematics>>>,
+    full: Vec<Cell<Option<Kinematics>>>,
 }
 
 impl Snapshot<'_> {
+    /// Moves the snapshot to `t` in place (no allocation): the same values
+    /// as a new [`Ephemeris::snapshot`] at `t`.
+    pub fn set_time(&mut self, t: Epoch) {
+        self.t = t;
+        for (r, n) in self.local_r.iter_mut().zip(&self.eph.nodes) {
+            *r = n.motion.eval_r(t);
+        }
+        self.full.iter_mut().for_each(|c| *c.get_mut() = None);
+    }
+
     fn local_full(&self, i: usize) -> Kinematics {
-        if let Some(k) = self.full.borrow()[i] {
+        if let Some(k) = self.full[i].get() {
             return k;
         }
         let k = self.eph.nodes[i].motion.eval(self.t);
-        self.full.borrow_mut()[i] = Some(k);
+        self.full[i].set(Some(k));
         k
     }
 
@@ -258,6 +271,32 @@ impl Snapshot<'_> {
     /// Position of `of` relative to `about` (cheap: no derivatives).
     pub fn relative_r(&self, of: NodeId, about: NodeId) -> DVec3 {
         self.walk(of, about, DVec3::ZERO, |i| self.local_r[i])
+    }
+}
+
+/// One reusable [`Snapshot`] for a run of evaluations (an integration's
+/// stages and the checks after each step): re-evaluated in place only when
+/// the time changes, so repeated queries at one time (the step's last stage
+/// and the step-end checks) evaluate the ephemeris once, and none allocates.
+pub struct SnapshotCache<'a> {
+    eph: &'a Ephemeris,
+    snap: std::cell::RefCell<Option<Snapshot<'a>>>,
+}
+
+impl<'a> SnapshotCache<'a> {
+    pub fn new(eph: &'a Ephemeris) -> Self {
+        SnapshotCache { eph, snap: std::cell::RefCell::new(None) }
+    }
+
+    /// Calls `f` with the snapshot at `t` (`f` must not use this cache).
+    pub fn with<R>(&self, t: Epoch, f: impl FnOnce(&Snapshot<'a>) -> R) -> R {
+        let mut slot = self.snap.borrow_mut();
+        match slot.as_mut() {
+            Some(s) if s.t == t => {}
+            Some(s) => s.set_time(t),
+            None => *slot = Some(self.eph.snapshot(t)),
+        }
+        f(slot.as_ref().expect("just set"))
     }
 }
 
@@ -301,9 +340,14 @@ mod tests {
         assert_eq!(e.relative(NodeId(3), NodeId(2), t).r, -a1_about_b.r);
         assert_eq!(e.relative(NodeId(1), NodeId(1), t).r, DVec3::ZERO);
         let snap = e.snapshot(t);
+        // A snapshot moved to `t` from another time holds the same values.
+        let mut moved = e.snapshot(Epoch::J2000.add_seconds(-5.0));
+        moved.relative(NodeId(2), NodeId(3));
+        moved.set_time(t);
         for (x, y) in [(2, 1), (2, 3), (3, 2), (0, 2)] {
             assert_eq!(snap.relative(NodeId(x), NodeId(y)), e.relative(NodeId(x), NodeId(y), t));
             assert_eq!(snap.relative_r(NodeId(x), NodeId(y)), e.relative(NodeId(x), NodeId(y), t).r);
+            assert_eq!(moved.relative(NodeId(x), NodeId(y)), snap.relative(NodeId(x), NodeId(y)));
         }
     }
 }

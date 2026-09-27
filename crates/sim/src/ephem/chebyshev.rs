@@ -56,45 +56,65 @@ impl ChebTable {
     pub fn eval_r(&self, t: Epoch) -> DVec3 {
         let (k, tau) = self.locate(t);
         let n = self.degree + 1;
-        let mut tn = [0.0; MAX_DEGREE + 1];
-        tn[0] = 1.0;
+        let c = &self.coeffs[k * 3 * n..(k + 1) * 3 * n];
+        let (cx, rest) = c.split_at(n);
+        let (cy, cz) = rest.split_at(n);
+        // The three axes in one pass (each axis sums in the same order as
+        // `eval`, so the bits agree).
+        let (mut x, mut y, mut z) = (0.0 + cx[0] * 1.0, 0.0 + cy[0] * 1.0, 0.0 + cz[0] * 1.0);
         if n > 1 {
-            tn[1] = tau;
+            x += cx[1] * tau;
+            y += cy[1] * tau;
+            z += cz[1] * tau;
         }
+        let (mut t2, mut t1) = (1.0, tau);
         for j in 2..n {
-            tn[j] = 2.0 * tau * tn[j - 1] - tn[j - 2];
+            let tj = 2.0 * tau * t1 - t2;
+            x += cx[j] * tj;
+            y += cy[j] * tj;
+            z += cz[j] * tj;
+            (t2, t1) = (t1, tj);
         }
-        let mut out = [0.0f64; 3];
-        for axis in 0..3 {
-            let c = &self.coeffs[(k * 3 + axis) * n..(k * 3 + axis + 1) * n];
-            let mut p = 0.0;
-            for j in 0..n {
-                p += c[j] * tn[j];
-            }
-            out[axis] = p;
-        }
-        DVec3::from_array(out)
+        DVec3::new(x, y, z)
     }
 
     pub fn eval(&self, t: Epoch) -> Kinematics {
         let (k, tau) = self.locate(t);
         let n = self.degree + 1;
-        let (tn, dn, ddn) = cheb_basis(tau, self.degree);
+        assert!(self.degree <= MAX_DEGREE, "Chebyshev degree {} > {MAX_DEGREE}", self.degree);
         let scale = 2.0 / self.seg_len as f64;
-        let mut out = [[0.0f64; 3]; 3];
-        for axis in 0..3 {
-            let c = &self.coeffs[(k * 3 + axis) * n..(k * 3 + axis + 1) * n];
-            let (mut p, mut d, mut dd) = (0.0, 0.0, 0.0);
-            for j in 0..n {
-                p += c[j] * tn[j];
-                d += c[j] * dn[j];
-                dd += c[j] * ddn[j];
+        let c = &self.coeffs[k * 3 * n..(k + 1) * 3 * n];
+        let (cx, rest) = c.split_at(n);
+        let (cy, cz) = rest.split_at(n);
+        // The basis of [`cheb_basis`] generated on the fly, the three axes in
+        // one pass (the same operations in the same order: same bits).
+        let mut p = [0.0f64; 3];
+        let mut d = [0.0f64; 3];
+        let mut dd = [0.0f64; 3];
+        let mut add = |j: usize, (b, db, ddb): (f64, f64, f64)| {
+            for (axis, c) in [cx, cy, cz].into_iter().enumerate() {
+                p[axis] += c[j] * b;
+                d[axis] += c[j] * db;
+                dd[axis] += c[j] * ddb;
             }
-            out[0][axis] = p;
-            out[1][axis] = d * scale;
-            out[2][axis] = dd * scale * scale;
+        };
+        add(0, (1.0, 0.0, 0.0));
+        if n > 1 {
+            add(1, (tau, 1.0, 0.0));
         }
-        Kinematics { r: DVec3::from_array(out[0]), v: DVec3::from_array(out[1]), a: DVec3::from_array(out[2]) }
+        let (mut t2, mut t1) = (1.0, tau);
+        let (mut d2, mut d1) = (0.0, 1.0);
+        let (mut dd2, mut dd1) = (0.0, 0.0);
+        for j in 2..n {
+            let tj = 2.0 * tau * t1 - t2;
+            let dj = 2.0 * t1 + 2.0 * tau * d1 - d2;
+            let ddj = 4.0 * d1 + 2.0 * tau * dd1 - dd2;
+            add(j, (tj, dj, ddj));
+            (t2, t1, d2, d1, dd2, dd1) = (t1, tj, d1, dj, dd1, ddj);
+        }
+        let v = DVec3::new(d[0] * scale, d[1] * scale, d[2] * scale);
+        let a = DVec3::new(dd[0] * scale * scale, dd[1] * scale * scale, dd[2] * scale * scale);
+        Kinematics { r: DVec3::from_array(p), v, a }
     }
 }
 

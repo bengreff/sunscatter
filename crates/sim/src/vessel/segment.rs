@@ -17,7 +17,7 @@
 
 use super::anchor::preferred_anchor;
 use super::burn::BurnLaw;
-use crate::ephem::Snapshot;
+use crate::ephem::{Snapshot, SnapshotCache};
 use crate::forces::{altitude_above, ActiveSources, DragModel, ForceContext};
 use crate::frame::{NodeId, Vec3};
 use crate::integrate::{hermite5, Dopri5, Dynamics, StepSample, StepState, Tolerance};
@@ -151,8 +151,8 @@ impl Segment {
             }
         };
         let horizon = if valid { horizon.min(world.end().seconds_since(t0)).max(0.0) } else { 0.0 };
-        let snap = world.snapshot(t0);
-        let active = ActiveSources::select(world, &snap, anchor, r);
+        let snaps = SnapshotCache::new(&world.eph);
+        let active = snaps.with(t0, |snap| ActiveSources::select(world, snap, anchor, r));
         let mut seg = Segment {
             t0,
             kind,
@@ -180,7 +180,7 @@ impl Segment {
             entry: None,
         };
         let integ = Dopri5::new(coast_tolerance());
-        let f = seg.forces(world);
+        let f = seg.forces(world, &snaps);
         seg.state = integ.start(&f, 0.0, r, v, 1.0);
         seg.state.x = CompensatedScalar::new(proper_time);
         let s = StepSample { t: 0.0, r, v, a: seg.state.a };
@@ -191,9 +191,10 @@ impl Segment {
         seg
     }
 
-    fn forces<'a>(&'a self, world: &'a World) -> Forces<'a> {
+    fn forces<'a, 'w>(&'a self, world: &'a World, snaps: &'a SnapshotCache<'w>) -> Forces<'a, 'w> {
         Forces {
             world,
+            snaps,
             t0: self.t0,
             anchor: self.anchor,
             active: &self.active,
@@ -247,6 +248,7 @@ impl Segment {
     /// the number of steps taken. Where it stops never changes the steps.
     pub fn extend_until(&mut self, world: &World, until: f64, max_steps: usize) -> usize {
         let integ = Dopri5::new(coast_tolerance());
+        let snaps = SnapshotCache::new(&world.eph);
         for taken in 0..max_steps {
             if self.end.is_some() || self.computed_until() >= until {
                 return taken;
@@ -263,6 +265,7 @@ impl Segment {
                 // the integrator mutates `state`.
                 let f = Forces {
                     world,
+                    snaps: &snaps,
                     t0: self.t0,
                     anchor: self.anchor,
                     active: &self.active,
@@ -279,11 +282,11 @@ impl Segment {
             let new =
                 Sample { anchor: self.anchor, s: sample, delta: self.state.x.value(), delta_rate: self.state.x_rate };
             if self.entry.is_none() {
-                self.entry = self.find_entry(world, &prev, &new);
+                self.entry = self.find_entry(world, &snaps, &prev, &new);
             }
-            if let Some((t_hit, body)) = self.find_contact(world, &prev, &new) {
+            if let Some((t_hit, body)) = self.find_contact(world, &snaps, &prev, &new) {
                 let (r, v) = hermite5(&prev.s, &new.s, t_hit);
-                let (a, delta_rate) = self.forces(world).accel_rate(t_hit, r, v);
+                let (a, delta_rate) = self.forces(world, &snaps).accel_rate(t_hit, r, v);
                 let delta = hermite3(&prev, &new, t_hit);
                 let s = StepSample { t: t_hit, r, v, a };
                 self.samples.push(Sample { anchor: self.anchor, s, delta, delta_rate });
@@ -295,7 +298,7 @@ impl Segment {
                 self.end = Some(self.limit_end(world));
                 return taken + 1;
             }
-            self.after_step(world);
+            self.after_step(world, &snaps);
         }
         max_steps
     }
@@ -311,15 +314,26 @@ impl Segment {
     /// that now pass the cutoff (a flyby). Sources are never removed within
     /// a segment. Both are decided from the stored state only, so chunked
     /// integration still equals a single pass.
-    fn after_step(&mut self, world: &World) {
-        let snap = world.snapshot(self.t0.add_seconds(self.state.t));
-        let reanchored = self.maybe_reanchor(world, &snap);
-        let selected = ActiveSources::select(world, &snap, self.anchor, self.state.r.value());
-        let grew = self.active.add(&selected);
-        if reanchored || grew {
-            let (r, v) = (self.state.r.value(), self.state.v.value());
-            (self.state.a, self.state.x_rate) = self.forces(world).accel_rate_with(&snap, self.state.t, r, v);
-        }
+    fn after_step(&mut self, world: &World, snaps: &SnapshotCache) {
+        let reanchored = snaps.with(self.t0.add_seconds(self.state.t), |snap| {
+            let reanchored = self.maybe_reanchor(world, snap);
+            let grew = self.active.grow(world, snap, self.anchor, self.state.r.value());
+            if reanchored || grew {
+                let (r, v) = (self.state.r.value(), self.state.v.value());
+                let f = Forces {
+                    world,
+                    snaps,
+                    t0: self.t0,
+                    anchor: self.anchor,
+                    active: &self.active,
+                    drag: self.drag,
+                    mass0: self.mass0,
+                    kind: &self.kind,
+                };
+                (self.state.a, self.state.x_rate) = f.accel_rate_with(snap, self.state.t, r, v);
+            }
+            reanchored
+        });
         if reanchored {
             let s = StepSample { t: self.state.t, r: self.state.r.value(), v: self.state.v.value(), a: self.state.a };
             let (delta, delta_rate) = (self.state.x.value(), self.state.x_rate);
@@ -348,8 +362,11 @@ impl Segment {
 
     /// First contact with a surface between two samples, by bisection on the
     /// interpolated altitude.
-    fn find_contact(&self, world: &World, a: &Sample, b: &Sample) -> Option<(f64, NodeId)> {
-        let snap_b = world.snapshot(self.t0.add_seconds(b.s.t));
+    fn find_contact(&self, world: &World, snaps: &SnapshotCache, a: &Sample, b: &Sample) -> Option<(f64, NodeId)> {
+        let near = |src: &crate::world::Source, reach: f64| {
+            snaps.with(self.t0.add_seconds(b.s.t), |snap| (b.s.r - snap.relative_r(src.node, self.anchor)).length())
+                <= reach
+        };
         for src in world.surfaces() {
             let alt = |t: f64| {
                 let (r, _) = hermite5(&a.s, &b.s, t);
@@ -357,8 +374,7 @@ impl Segment {
                 altitude_above(world, &snap, self.anchor, src.node, r).0 - self.contact_height
             };
             let radius = src.physical.as_ref().map_or(0.0, |p| p.radius_eq);
-            let d = (b.s.r - snap_b.relative_r(src.node, self.anchor)).length();
-            if d > radius + 200_000.0 || alt(b.s.t) >= 0.0 {
+            if !near(src, radius + 200_000.0) || alt(b.s.t) >= 0.0 {
                 continue;
             }
             let (mut lo, mut hi) = (a.s.t, b.s.t);
@@ -378,12 +394,12 @@ impl Segment {
     /// First descent below an atmosphere's top between two samples (from
     /// at or above it at `a` to below at `b`), by bisection on the
     /// interpolated altitude above the ellipsoid.
-    fn find_entry(&self, world: &World, a: &Sample, b: &Sample) -> Option<(f64, NodeId)> {
-        let snap_b = world.snapshot(self.t0.add_seconds(b.s.t));
+    fn find_entry(&self, world: &World, snaps: &SnapshotCache, a: &Sample, b: &Sample) -> Option<(f64, NodeId)> {
         for src in &world.sources {
             let Some(p) = src.physical.as_ref() else { continue };
             let Some(atm) = &p.atmosphere else { continue };
-            let d = (b.s.r - snap_b.relative_r(src.node, self.anchor)).length();
+            let d = snaps
+                .with(self.t0.add_seconds(b.s.t), |snap| (b.s.r - snap.relative_r(src.node, self.anchor)).length());
             if d > p.radius_eq + atm.top + 200_000.0 {
                 continue;
             }
@@ -486,8 +502,10 @@ fn mass_at(kind: &SegmentKind, mass0: f64, t: f64) -> f64 {
 }
 
 /// The dynamics of a segment: gravity, drag and (in a burn) thrust.
-struct Forces<'a> {
+struct Forces<'a, 'w> {
     world: &'a World,
+    /// The snapshots of the ephemeris, reused across evaluations.
+    snaps: &'a SnapshotCache<'w>,
     t0: Epoch,
     anchor: NodeId,
     active: &'a ActiveSources,
@@ -496,21 +514,19 @@ struct Forces<'a> {
     kind: &'a SegmentKind,
 }
 
-impl Dynamics for Forces<'_> {
+impl Dynamics for Forces<'_, '_> {
     /// Acceleration at local time `t`.
     fn accel(&self, t: f64, r: DVec3, v: DVec3) -> DVec3 {
-        let snap = self.world.snapshot(self.t0.add_seconds(t));
-        self.context(&snap, t, r, v).accel_with(&snap, r, v)
+        self.snaps.with(self.t0.add_seconds(t), |snap| self.context(snap, t, r, v).accel_with(snap, r, v))
     }
 
     /// Acceleration and proper-time rate at local time `t`.
     fn accel_rate(&self, t: f64, r: DVec3, v: DVec3) -> (DVec3, f64) {
-        let snap = self.world.snapshot(self.t0.add_seconds(t));
-        self.accel_rate_with(&snap, t, r, v)
+        self.snaps.with(self.t0.add_seconds(t), |snap| self.accel_rate_with(snap, t, r, v))
     }
 }
 
-impl Forces<'_> {
+impl Forces<'_, '_> {
     fn accel_rate_with(&self, snap: &Snapshot, t: f64, r: DVec3, v: DVec3) -> (DVec3, f64) {
         self.context(snap, t, r, v).accel_rate(snap, r, v)
     }
