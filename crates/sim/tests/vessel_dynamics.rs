@@ -205,15 +205,30 @@ fn parachute_descent_reaches_terminal_speed_and_lands_in_debug_mode() {
     let r = e.rotation.to_inertial(fixed, t).raw();
     let v = e.rotation.omega(t).raw().cross(r);
     let controls = Controls { chute: true, sas: true, ..Default::default() };
-    // At its full mass the test craft touches down at its terminal speed
-    // under the parachute, √(2mg / ρ·CdA) ≈ 23 m/s: beyond its 8 m/s limit.
+    // At its full mass the test craft reaches the ground at its terminal
+    // speed under the parachute, √(2mg / ρ·CdA) ≈ 23 m/s: beyond its 8 m/s
+    // limit even after the gear's stroke.
     let mut vessel = Vessel::coasting(&w, VesselId(1), t, earth, r, v, sim::craft::test_craft());
     let terminal = (2.0 * vessel.mass() * 9.80 / (1.225 * (vessel.craft.cd_area + vessel.craft.chute_cd_area))).sqrt();
     let mut debug = vessel.clone();
-    vessel.advance(&w, t.add_seconds(3_600.0), &controls, usize::MAX);
+    // The coast ends just above the ground (contact is flown live).
+    vessel.advance(&w, t.add_seconds(1.0), &controls, usize::MAX);
+    vessel.extend_coast(&w, t.add_seconds(3_600.0), usize::MAX);
+    let last = vessel.trajectory().unwrap().last();
+    let mut clock = last.t0.add_seconds(last.end.unwrap().t);
+    vessel.advance(&w, clock, &controls, usize::MAX);
+    assert!(matches!(vessel.phase, Phase::Powered { .. }), "{:?}", vessel.phase);
+    let (_, r1, v1) = vessel.state(&w);
+    let ground_v = e.rotation.omega(clock).raw().cross(r1);
+    let touchdown = (v1 - ground_v).length();
+    assert!((touchdown / terminal - 1.0).abs() < 0.05, "{touchdown} vs {terminal} m/s");
+    for _ in 0..600 {
+        clock = clock.add_seconds(1.0 / 60.0);
+        vessel.advance(&w, clock, &controls, usize::MAX);
+    }
     match vessel.phase {
-        Phase::Crashed { speed, .. } => assert!((speed / terminal - 1.0).abs() < 0.05, "{speed} vs {terminal} m/s"),
-        other => panic!("expected a crash at terminal speed, got {other:?}"),
+        Phase::Crashed { speed, .. } => assert!(speed > 8.0 && speed < touchdown, "{speed} m/s"),
+        other => panic!("expected a crash, got {other:?}"),
     }
     // Debug mode: infinite impact tolerance.
     debug.set_debug(&w, true);

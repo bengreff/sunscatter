@@ -23,6 +23,7 @@ A short map to search before building anything: who owns what, the frame order, 
 | Heightmap sampling (bicubic), sub-sample detail (roughness map, lattice noise, D059) | `sim::terrain` (`detail`, `noise`) | rendering samples through `sim::body` too; `roughness.png` baked by `asset-tool` |
 | Vessel motion, phases, identity (`VesselId`), trajectories of coast and burn segments, flight plans, mass and propellant, debug mode (D064); attitude control (SAS rate damping and hold, gimbal, the coast's rotation lattice) | `sim::vessel` (`trajectory`, `segment`, `burn`, `attitude`) | the stored trajectory is the truth (rule 4); planned burns are segments, so warp only samples them; a vessel carries its `CraftParams` |
 | Craft files (`data/craft/<craft>/craft.ron`, `geometry.ron`), loading and validation; geometry → union surface and render mesh; surface cells (adaptive, thermal data, neighbours, contact points); mass properties (dry shell + propellant cylinder, CoM, inertia); engine output (thrust, mass flow, Isp with back pressure, burnout, planned-burn law) | `sim::craft` (`file`, `mesh`, `cells`, `mass`, `engine`) | one part per ship for now (D060); `test_craft()` is the shared instance; the game draws `Craft::mesh` |
+| Ground contact (D066): contact points against the physical surface (terrain normal by finite differences), gear and hull spring-dampers, regularised Coulomb friction, impact per point, the rest rule, whether a pose holds (tip and slide) | `sim::contact` (rules); the live contact tick and freezing into `Landed` in `sim::vessel` (`live`) | 2 ms substeps (10 per tick) within 10 m of a surface; parameters in `craft.ron` (`contact`) |
 | Rigid-body rotation: Euler's equations (RK4 control ticks), exact torque-free motion (constant spin, symmetric top, Jacobi elliptic for asymmetric bodies), principal axes | `sim::rigid` (`free`, `elliptic`) | the vessel's attitude goes through it (realism-1 §3d) |
 | Saves | `sim::save` (format), `game::saves` (UI, files) | |
 | Comm network: sites, link budget, line of sight, light time, relay paths (D068) | `sim::comms` | sites and link constants in `data/comms.ron` |
@@ -61,7 +62,7 @@ Everything drawn is derived from the current clock, never from values cached in 
 | Golden (bit-exact, both OSes) | `sim` | ephemeris generation, LEO coast hash, terrain sample hash |
 | Accuracy vs DE440 | `sim` | Earth, Mars and Moon residuals |
 | Invariance | `sim` | anchor choice; chunked = single pass; save/load |
-| Scenarios | `crates/sim/tests/` | pad → orbit → parachute; landing on a mountain versus the sea |
+| Scenarios | `crates/sim/tests/` | pad → orbit → parachute; landing on a mountain versus the sea; contact (slopes that hold or tip, touchdowns survived or not, rest across save/load, warp and frame rate) |
 | Game rules | `game`, pure functions | `relations`, persistence, saves, tracking ids, map-view table (D054), zoom, fps |
 | End to end, visual | the demo (`SUNSCATTER_DEMO`) | every tier at seven views, benchmark tables |
 

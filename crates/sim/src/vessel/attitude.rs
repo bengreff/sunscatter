@@ -156,17 +156,27 @@ pub fn needs_ticks(att: &Attitude, control: &AttitudeControl, controls: &Control
         || (controls.sas && (att.omega != DVec3::ZERO || control.hold.is_some_and(|h| h != att.q)))
 }
 
-/// One control tick of `dt`: the pilot's rotation input (a fraction of the
-/// authority per body axis) or SAS, then Euler's equations. Returns the new
-/// attitude and the thrust direction (body axes, after gimbal).
-pub fn control_tick(
+/// A control tick's command: what the pilot's input or SAS asks for.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Command {
+    /// Body-axes torque from attitude control and the gimbal (N·m).
+    pub torque: DVec3,
+    /// Thrust direction (body axes, after gimbal).
+    pub thrust_dir: DVec3,
+    sas: bool,
+    saturated: bool,
+}
+
+/// The command for a tick of `dt`: the pilot's rotation input (a fraction
+/// of the authority per body axis) or SAS.
+pub fn command(
     att: &Attitude,
     inertia: &DMat3,
     control: &mut AttitudeControl,
     controls: &Controls,
     act: &Actuators,
     dt: f64,
-) -> (Attitude, DVec3) {
+) -> Command {
     let w = att.body_rate();
     let gimbal_axes = act.gimbal.map_or(DVec3::ZERO, |g| g.authority().1);
     let auth = act.torque + gimbal_axes;
@@ -198,24 +208,49 @@ pub fn control_tick(
         Some(g) => g.deflect(u * gimbal_axes),
         None => (DVec3::Z, DVec3::ZERO),
     };
-    let torque = u * act.torque + thrust_torque;
-    let mut next = rigid::tick(att, inertia, torque, dt);
-    if sas {
+    Command { torque: u * act.torque + thrust_torque, thrust_dir, sas, saturated }
+}
+
+/// SAS bookkeeping after a tick flown with `cmd`. `alone`: the command was
+/// the only torque, so a damping command that did not saturate stopped the
+/// rotation exactly and the hold may snap to its target; with other torques
+/// (ground contact) SAS only starts holding where it is.
+pub fn finish(mut next: Attitude, control: &mut AttitudeControl, cmd: &Command, alone: bool) -> Attitude {
+    if cmd.sas {
         match control.hold {
-            None if !saturated => {
-                // The damping command was sized to stop the rotation this tick.
-                next.omega = DVec3::ZERO;
+            None if !cmd.saturated => {
+                if alone {
+                    // The damping command was sized to stop the rotation this tick.
+                    next.omega = DVec3::ZERO;
+                }
                 control.hold = Some(next.q);
             }
             Some(target)
-                if rotvec_of(next.q.inverse() * target).length() < HOLD_SNAP && next.omega.length() < HOLD_SNAP =>
+                if alone
+                    && rotvec_of(next.q.inverse() * target).length() < HOLD_SNAP
+                    && next.omega.length() < HOLD_SNAP =>
             {
                 next = Attitude { q: target, omega: DVec3::ZERO };
             }
             _ => {}
         }
     }
-    (next, thrust_dir)
+    next
+}
+
+/// One control tick of `dt`: the command, then Euler's equations. Returns
+/// the new attitude and the thrust direction (body axes, after gimbal).
+pub fn control_tick(
+    att: &Attitude,
+    inertia: &DMat3,
+    control: &mut AttitudeControl,
+    controls: &Controls,
+    act: &Actuators,
+    dt: f64,
+) -> (Attitude, DVec3) {
+    let cmd = command(att, inertia, control, controls, act, dt);
+    let next = rigid::tick(att, inertia, cmd.torque, dt);
+    (finish(next, control, &cmd, true), cmd.thrust_dir)
 }
 
 /// Attitude over a coast: control ticks on the tick lattice while input or

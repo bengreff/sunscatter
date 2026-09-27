@@ -1,12 +1,17 @@
 //! A vessel: a craft (realism-1 §3) moving through phases. Translation is
 //! that of its centre of mass; rotation is a rigid body ([`attitude`]).
 //!
-//! * `Landed`  — fixed in a body's rotating frame.
-//! * `Powered` — thrust on: fixed 20 ms ticks with controls latched per tick
-//!   (deterministic; limited to physics warp by the game).
+//! * `Landed`  — at rest, frozen in a body's rotating frame with its full
+//!   pose (position and tilt): costs nothing at any warp.
+//! * `Powered` — live: fixed 20 ms ticks with controls latched per tick
+//!   (deterministic; limited to physics warp by the game), while thrusting
+//!   or near a surface. Near a surface each tick runs ground-contact
+//!   substeps ([`crate::contact`], [`live`]); at rest it freezes into
+//!   `Landed`, and thrust or rotation input wakes a landed vessel.
 //! * `Coasting` — on rails: a stored [`Trajectory`] of coasts and planned
-//!   burns ([`FlightPlan`]) that is sampled at any warp.
-//! * `Crashed` — hit a surface too fast.
+//!   burns ([`FlightPlan`]) that is sampled at any warp. A coast ends
+//!   [`live_height`](Vessel::live_height) above a surface; contact is flown live.
+//! * `Crashed` — a contact point hit too fast (D066).
 //!
 //! Rotation input never breaks a coast: neither drag (isotropic until the
 //! cell aerodynamics of realism-1 §5) nor gravity depends on attitude, so
@@ -21,6 +26,7 @@ mod anchor;
 mod attitude;
 mod burn;
 mod id;
+mod live;
 mod segment;
 mod trajectory;
 
@@ -34,13 +40,13 @@ pub use segment::{coast_tolerance, CoastStart, EndKind, Sample, Segment, Segment
 pub use trajectory::Trajectory;
 
 use crate::craft::{Craft, CraftParams, MassProps};
-use crate::forces::{altitude_above, ambient_pressure, ActiveSources, DragModel, ForceContext};
+use crate::forces::{ambient_pressure, ActiveSources, DragModel, ForceContext};
 use crate::frame::{BodyFixed, NodeId, Vec3};
 use crate::integrate::{Dopri5, Tolerance};
 use crate::math;
 use crate::time::Epoch;
 use crate::world::World;
-use attitude::{advance_coast, control_tick, Actuators, Gimbal};
+use attitude::advance_coast;
 use glam::{DMat3, DQuat, DVec3};
 
 /// Physics tick for powered flight and attitude control (s).
@@ -61,10 +67,29 @@ pub struct Controls {
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum Phase {
-    Landed { body: NodeId, fixed: Vec3<BodyFixed>, att_fixed: DQuat },
-    Powered { anchor: NodeId, r: DVec3, v: DVec3 },
-    Coasting { trajectory: Box<Trajectory> },
-    Crashed { body: NodeId, fixed: Vec3<BodyFixed>, speed: f64 },
+    Landed {
+        body: NodeId,
+        fixed: Vec3<BodyFixed>,
+        att_fixed: DQuat,
+    },
+    Powered {
+        anchor: NodeId,
+        r: DVec3,
+        v: DVec3,
+    },
+    Coasting {
+        trajectory: Box<Trajectory>,
+    },
+    /// Destroyed on impact: contact point `point` (an index into
+    /// `CraftParams::contacts`) closed at `speed` (m/s) along the ground
+    /// normal. The wreck stays where it hit, in the pose it hit with.
+    Crashed {
+        body: NodeId,
+        fixed: Vec3<BodyFixed>,
+        speed: f64,
+        att_fixed: DQuat,
+        point: u32,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -94,6 +119,9 @@ pub struct Vessel {
     /// The coast's rotation lattice and the SAS hold ([`AttitudeControl`]).
     #[serde(default)]
     control: AttitudeControl,
+    /// Live ticks in a row at rest on the ground ([`crate::contact::rest_ticks`]).
+    #[serde(default)]
+    rest_ticks: u32,
 }
 
 /// Rotation matrix taking body-fixed axes of `body` to inertial axes at `t`.
@@ -132,8 +160,12 @@ impl Vessel {
             plan: FlightPlan::default(),
             tick_accel: None,
             control: AttitudeControl::default(),
+            rest_ticks: 0,
         };
         v.sync_landed_attitude(world);
+        if !v.holds_where_landed(world) {
+            v.wake(world);
+        }
         v
     }
 
@@ -152,6 +184,7 @@ impl Vessel {
             plan: FlightPlan::default(),
             tick_accel: None,
             control: AttitudeControl::default(),
+            rest_ticks: 0,
         };
         vessel.start_coast(world);
         vessel
@@ -295,8 +328,7 @@ impl Vessel {
     /// Landed and crashed vessels rotate rigidly with their body.
     fn sync_landed_attitude(&mut self, world: &World) {
         let (body, att_fixed) = match &self.phase {
-            Phase::Landed { body, att_fixed, .. } => (*body, *att_fixed),
-            Phase::Crashed { body, fixed, .. } => (*body, quat_z_to(fixed.raw().normalize())),
+            Phase::Landed { body, att_fixed, .. } | Phase::Crashed { body, att_fixed, .. } => (*body, *att_fixed),
             _ => return,
         };
         self.control.base = None;
@@ -365,62 +397,22 @@ impl Vessel {
     }
 
     fn advance_landed(&mut self, world: &World, target: Epoch, controls: &Controls) {
-        let Phase::Landed { body, fixed, .. } = self.phase else { unreachable!() };
-        let src = world.source(body).expect("body");
-        let r = fixed.length();
-        let g = src.gm / (r * r);
-        if self.engine_running(controls) && self.thrust_accel(world, controls.throttle).length() > g {
-            // Lift off: become a powered vessel anchored to the body.
-            let (anchor, r, v) = self.state(world);
-            self.sync_landed_attitude(world);
-            self.phase = Phase::Powered { anchor, r, v };
-            self.tick_accel = None;
-            self.control.base = None;
+        if self.engine_running(controls) || controls.rotate != DVec3::ZERO {
+            self.wake(world);
             return;
         }
         self.time = target;
         self.sync_landed_attitude(world);
     }
 
-    fn advance_powered(&mut self, world: &World, target: Epoch, controls: &Controls) {
-        while self.time.add_seconds(TICK) <= target {
-            if !self.engine_running(controls) {
-                self.start_coast(world);
-                return;
-            }
-            self.chute_deployed |= controls.chute;
-            let Phase::Powered { anchor, r, v } = self.phase else { unreachable!() };
-            let props = self.mass_props();
-            let engine = self.craft.engine;
-            let p = ambient_pressure(world, &world.snapshot(self.time), anchor, r);
-            let out = engine.tick_output(controls.throttle, p, self.propellant, TICK, self.debug);
-            let gimbal = Gimbal {
-                lever: engine.mount_pos - props.com,
-                dir: engine.mount_dir,
-                thrust: out.thrust,
-                max_angle: engine.gimbal,
-            };
-            let act = Actuators { torque: self.craft.torque, gimbal: Some(gimbal) };
-            let before = (self.attitude, self.control);
-            let (att, dir) = control_tick(&self.attitude, &props.inertia, &mut self.control, controls, &act, TICK);
-            self.attitude = att;
-            let thrust = att.q * dir * (out.thrust / props.mass);
-            // A tick that cannot be integrated (non-finite state) leaves the
-            // vessel where it is, like a failed coast segment.
-            let Some((r1, v1)) = self.integrate_tick(world, anchor, r, v, thrust) else {
-                (self.attitude, self.control) = before;
-                return;
-            };
-            if !self.debug {
-                self.propellant = (self.propellant - out.mdot * TICK).max(0.0);
-            }
-            self.time = self.time.add_seconds(TICK);
-            self.phase = Phase::Powered { anchor, r: r1, v: v1 };
-            self.tick_accel = Some((v1 - v) / TICK);
-            if self.check_contact(world) {
-                return;
-            }
-        }
+    /// Leaves `Landed` for live ticks from the landed state.
+    fn wake(&mut self, world: &World) {
+        let (anchor, r, v) = self.state(world);
+        self.sync_landed_attitude(world);
+        self.phase = Phase::Powered { anchor, r, v };
+        self.tick_accel = None;
+        self.control = AttitudeControl::default();
+        self.rest_ticks = 0;
     }
 
     /// Integrates one tick with constant thrust (adaptive substeps, exact end).
@@ -446,52 +438,6 @@ impl Vessel {
         Some((st.r.value(), st.v.value()))
     }
 
-    /// Checks ground contact in powered flight; lands or crashes if touching.
-    fn check_contact(&mut self, world: &World) -> bool {
-        let Phase::Powered { anchor, r, v } = self.phase else { return false };
-        let snap = world.snapshot(self.time);
-        for src in world.surfaces() {
-            let (alt, fixed) = altitude_above(world, &snap, anchor, src.node, r);
-            if alt - self.contact_height() < 0.0 {
-                let body_kin = snap.relative(src.node, anchor);
-                let p = src.physical.as_ref().expect("physical");
-                let d = r - body_kin.r;
-                let v_ground = body_kin.v + p.rotation.omega(self.time).raw().cross(d);
-                let rel_speed = (v - v_ground).length();
-                // Moving upward away from the surface (e.g. at liftoff) is not contact.
-                if (v - v_ground).dot(d) > 0.0 && rel_speed < self.safe_touchdown_speed() {
-                    continue;
-                }
-                self.touch_down(world, src.node, fixed, rel_speed);
-                return true;
-            }
-        }
-        false
-    }
-
-    fn touch_down(&mut self, world: &World, body: NodeId, fixed: Vec3<BodyFixed>, speed: f64) {
-        let p = world.source(body).and_then(|s| s.physical.as_ref()).expect("physical");
-        let dir = fixed.raw().normalize();
-        let (lat, lon) = crate::terrain::lat_lon(dir);
-        let on_ground = p.ground_point(lat, lon, self.contact_height());
-        self.phase = if speed <= self.safe_touchdown_speed() {
-            Phase::Landed { body, fixed: on_ground, att_fixed: quat_z_to(dir) }
-        } else {
-            Phase::Crashed { body, fixed: on_ground, speed }
-        };
-        self.chute_deployed = false;
-        self.sync_landed_attitude(world);
-    }
-
-    /// Highest touchdown speed that is a landing (infinite in debug mode).
-    fn safe_touchdown_speed(&self) -> f64 {
-        if self.debug {
-            f64::INFINITY
-        } else {
-            self.craft.impact_max_speed
-        }
-    }
-
     /// Replaces the current phase with a coast starting now.
     fn start_coast(&mut self, world: &World) {
         let state = self.state(world);
@@ -505,7 +451,7 @@ impl Vessel {
             r,
             v,
             drag: Some(self.drag()),
-            contact_height: self.contact_height(),
+            contact_height: self.live_height(),
             horizon: COAST_HORIZON,
             fixed_anchor: false,
         };
@@ -542,19 +488,12 @@ impl Vessel {
         trajectory.prune_before(reach);
         self.propellant = (trajectory.mass_at(reach).expect("the vessel's time is in its trajectory") - dry).max(0.0);
         let last = trajectory.last();
-        let contact = match last.end {
-            Some(SegmentEnd { kind: EndKind::Surface { body }, .. }) if at_end => Some(body),
-            _ => None,
-        };
+        let near_surface = matches!(last.end, Some(SegmentEnd { kind: EndKind::Surface { .. }, .. })) && at_end;
         self.time = reach;
-        if let Some(body) = contact {
-            let (anchor, r, v) = self.state(world);
-            let snap = world.snapshot(self.time);
-            let (_, fixed) = altitude_above(world, &snap, anchor, body, r);
-            let p = world.source(body).and_then(|s| s.physical.as_ref()).expect("physical");
-            let kin = snap.relative(body, anchor);
-            let v_ground = kin.v + p.rotation.omega(self.time).raw().cross(r - kin.r);
-            self.touch_down(world, body, fixed, (v - v_ground).length());
+        if near_surface {
+            // Close to a surface: contact is flown in live ticks.
+            let state = self.state(world);
+            self.go_live(state);
         }
     }
 
@@ -579,7 +518,7 @@ impl Vessel {
                 r,
                 v,
                 drag: Some(self.drag()),
-                contact_height: self.contact_height(),
+                contact_height: self.live_height(),
                 horizon: COAST_HORIZON,
                 fixed_anchor: false,
             },

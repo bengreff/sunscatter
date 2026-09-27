@@ -68,12 +68,14 @@ fn landed_height(w: &World, ship: &Vessel) -> f64 {
 fn landing_on_a_mountain_versus_the_sea() {
     let w = plateau_world();
     let contact = sim::craft::test_craft().params().contact_height(16_000.0);
+    // Resting on its gear: the feet sink m·g / 4k ≈ 12 cm on Earth.
+    let resting = |ground: f64, h: f64| h < ground + contact && h > ground + contact - 0.2;
     // Plateau: comes to rest on the terrain, 3 km above the ellipsoid.
     let ship = parachute_drop(&w, 20.0, 10.0, 4_000.0);
-    assert!((landed_height(&w, &ship) - (3_000.0 + contact)).abs() < 1e-6, "{}", landed_height(&w, &ship));
+    assert!(resting(3_000.0, landed_height(&w, &ship)), "{}", landed_height(&w, &ship));
     // Sea: the floor is at −4 km, but the ocean is solid at sea level (D037).
     let ship = parachute_drop(&w, -20.0, 10.0, 4_000.0);
-    assert!((landed_height(&w, &ship) - contact).abs() < 1e-6, "{}", landed_height(&w, &ship));
+    assert!(resting(0.0, landed_height(&w, &ship)), "{}", landed_height(&w, &ship));
 }
 
 #[test]
@@ -107,7 +109,12 @@ fn falling_onto_a_mountain_is_detected_at_its_height() {
     let mut ship = Vessel::coasting(&w, VesselId(1), t, w.find("Earth").unwrap().node, r, v, sim::craft::test_craft());
     ship.advance(&w, t.add_seconds(600.0), &Controls::default(), usize::MAX);
     match ship.phase {
-        Phase::Crashed { fixed, .. } => assert!((e.altitude(fixed) - 3_000.0 - ship.contact_height()).abs() < 1e-6),
+        // The feet bottomed out and the hull hit: the centre of mass is
+        // within the gear's travel of its standing height on the plateau.
+        Phase::Crashed { fixed, .. } => {
+            let h = e.altitude(fixed) - 3_000.0 - ship.contact_height();
+            assert!(h < 0.0 && h > -1.0, "{h} m");
+        }
         other => panic!("expected a crash, got {other:?}"),
     }
 }

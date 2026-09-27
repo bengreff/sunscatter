@@ -169,7 +169,8 @@ Replaces the kinematic `max_ang_accel` attitude: Euler's equations with the iner
 - **Substeps** of 2 ms inside a tick while any contact point is within 10 m of the surface (fixed count: deterministic).
 - **Impact:** a point's normal speed above `impact.max_speed` beyond the gear stroke destroys the craft (unless debug mode).
 - **Rest:** when every speed is below a threshold for 1 s, the vessel freezes into `Landed(pose)` (body-fixed position and full tilt): zero cost while landed; thrust, torque input or a slope it cannot hold wakes it.
-- Tests (scenarios): a 2° slope holds, a 30° slope tips the craft over; landing at 3 m/s on the gear survives, at 12 m/s on the hull is destroyed; the resting pose is identical after save/load; landed for a day at 1,000,000x never wakes.
+- Tests (scenarios): a 2° slope holds, a steep slope tips the craft over; landing at 3 m/s on the gear survives, at 12 m/s on the hull is destroyed; the resting pose is identical after save/load; landed for a day at 1,000,000x never wakes.
+- *Built (playable, 2026-09-26):* `sim::contact` and live ticks in `sim::vessel::live`. Coasts end 10 m (plus the craft's reach) above a surface and contact is flown live; `Powered` is the live phase (thrusting or near a surface). The test craft's feet are wide for its height: with an empty tank and two feet downhill it tips at 32° (it would slide at 39°), so the scenario checks that 30° holds and 35° tips. A scripted `landed_at` on ground too steep for friction starts live. Crashes keep the pose and name the contact point.
 
 ### 3f. UI (after the data model)
 
