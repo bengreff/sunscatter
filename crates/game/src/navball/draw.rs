@@ -24,6 +24,7 @@ const PROGRADE: Color32 = Color32::from_rgb(235, 220, 40);
 const NORMAL: Color32 = Color32::from_rgb(205, 90, 235);
 const RADIAL: Color32 = Color32::from_rgb(70, 205, 235);
 const TARGET: Color32 = Color32::from_rgb(245, 95, 165);
+const MANEUVER: Color32 = Color32::from_rgb(70, 140, 255);
 
 /// A user action from the panel, applied after drawing.
 enum Action {
@@ -160,6 +161,7 @@ fn orbit_column(ui: &mut egui::Ui, s: &NavState, sim: &SimState) {
         ("REF", s.body.clone()),
         ("Ap in", t(s.time_to_ap)),
         ("Pe in", t(s.time_to_pe)),
+        ("Burn in", t(s.maneuver.map(|m| m.1))),
         ("SAS", if c.sas { "HOLD".into() } else { "OFF".into() }),
         ("THR", format!("{:.0}%", c.throttle * 100.0)),
     ];
@@ -321,6 +323,8 @@ enum Glyph {
     RadialIn,
     Target,
     AntiTarget,
+    /// The next planned burn's direction.
+    Maneuver,
 }
 
 fn paint_markers(painter: &egui::Painter, at: &impl Fn(f64, f64) -> Pos2, radius: f32, s: &NavState) {
@@ -332,6 +336,13 @@ fn paint_markers(painter: &egui::Painter, at: &impl Fn(f64, f64) -> Pos2, radius
         (m.target, Glyph::Target, Glyph::AntiTarget),
     ];
     let size = radius * 0.085;
+    if let Some((d, _)) = s.maneuver {
+        let (x, y, z) = rules::ball_project(&s.ship, d);
+        if rules::faces_viewer(z) {
+            glyph_shapes(painter, at(x, y), size, Glyph::Maneuver, Stroke::new(4.0, Color32::from_black_alpha(150)));
+            glyph_shapes(painter, at(x, y), size, Glyph::Maneuver, Stroke::new(1.8, MANEUVER));
+        }
+    }
     for (dir, pos_glyph, neg_glyph) in list {
         let Some(d) = dir else { continue };
         for (d, glyph) in [(d, pos_glyph), (-d, neg_glyph)] {
@@ -344,6 +355,7 @@ fn paint_markers(painter: &egui::Painter, at: &impl Fn(f64, f64) -> Pos2, radius
                     Glyph::Normal | Glyph::Antinormal => NORMAL,
                     Glyph::RadialOut | Glyph::RadialIn => RADIAL,
                     Glyph::Target | Glyph::AntiTarget => TARGET,
+                    Glyph::Maneuver => MANEUVER,
                 };
                 glyph_shapes(painter, at(x, y), size, glyph, Stroke::new(1.8, colour));
             }
@@ -393,6 +405,13 @@ fn glyph_shapes(painter: &egui::Painter, p: Pos2, s: f32, glyph: Glyph, stroke: 
         Glyph::AntiTarget => {
             seg((-0.7, -0.7), (0.7, 0.7));
             seg((-0.7, 0.7), (0.7, -0.7));
+        }
+        Glyph::Maneuver => {
+            // A ring with three ticks pointing in.
+            ring(1.0);
+            seg((0.0, -1.0), (0.0, -0.5));
+            seg((-0.87, 0.5), (-0.43, 0.25));
+            seg((0.87, 0.5), (0.43, 0.25));
         }
     }
 }

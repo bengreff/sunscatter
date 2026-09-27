@@ -74,6 +74,9 @@ pub struct NavState {
     pub body: String,
     /// Target name and distance (m).
     pub target: Option<(String, f64)>,
+    /// The next planned burn: its direction now (inertial) and seconds to
+    /// ignition.
+    pub maneuver: Option<(DVec3, f64)>,
 }
 
 /// A target's name, position and velocity relative to `anchor` at `t`.
@@ -183,6 +186,10 @@ pub fn nav_state(sim: &SimState, tracked: &Tracked, nav: &mut Navball) -> Option
         time_to_pe,
         body: src.name.clone(),
         target: target.map(|(name, tr, _)| (name, (tr - r).length())),
+        maneuver: vessel.plan().burns.iter().find(|b| b.t_start.seconds_since(t) > 0.0).map(|b| {
+            let snap = sim.world.snapshot(t);
+            (b.law.direction.direction(&snap, anchor, r, v), b.t_start.seconds_since(t))
+        }),
     })
 }
 
