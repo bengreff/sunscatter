@@ -238,6 +238,7 @@ fn run(tool: &str, args: &Value, sim: &SimState, comms: &Comms) -> Result<(Value
 pub struct AgentServer {
     server: Option<(Server, u16, String)>,
     error: Option<String>,
+    env: Option<Option<(u16, String)>>,
 }
 
 /// A token for the agent to present (local use; not cryptographic).
@@ -258,6 +259,16 @@ pub fn serve(
     mut station: ResMut<TrackingStation>,
     mut commands: MessageWriter<GameCommand>,
 ) {
+    // `SUNSCATTER_AGENT=<port>:<token>` turns the server on (demos, tests).
+    if state.server.is_none() && state.env.is_none() {
+        state.env = Some(std::env::var("SUNSCATTER_AGENT").ok().and_then(|v| {
+            let (port, token) = v.split_once(':')?;
+            Some((port.parse().ok()?, token.to_string()))
+        }));
+        if let Some(Some((port, token))) = &state.env {
+            iface.agent = crate::interface::layout::AgentSettings { enabled: true, port: *port, token: token.clone() };
+        }
+    }
     let want = iface.agent.enabled.then(|| iface.agent.port);
     if want.is_some() && iface.agent.token.is_empty() {
         iface.agent.token = new_token();

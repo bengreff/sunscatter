@@ -34,6 +34,7 @@ Planning tools (burns, landing prediction, closest approaches) come with the bur
 
 - `crates/mcp`: the transport (JSON-RPC 2.0 over HTTP POST, plain JSON responses; `initialize`, `ping`, `tools/list`, `tools/call`). It knows nothing about the game.
 - `game::agent`: the tools, answered once per frame in the input stage; actions become `GameCommand`s (`game::commands`), exactly as the keyboard's.
+- `SUNSCATTER_AGENT=<port>:<token>` turns the server on at start (the demo ignores saved settings); checked by hand on 2026-09-26 against a running demo (get_state, get_vessel, set_warp).
 - Test a running game by hand:
 
   ```sh
