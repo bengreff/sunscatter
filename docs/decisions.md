@@ -312,6 +312,12 @@ Streamable HTTP on localhost, off by default. Agent commands have the origin of 
 **D070: The aerodynamics model's required reach.** *Decided, 2026-09-26 (owner).*
 Simplified is fine, as long as it models, semi-accurately: lift; rocket flight at low and high altitude at all speeds (subsonic, transonic, supersonic, hypersonic, rarefied); and entry from interplanetary velocities (to ~16 km/s). No flow-field solver. The model's limitations are recorded in [design/aero-thermal.md](design/aero-thermal.md).
 
+**D071: Medium must run full screen at full frame rate on the reference Mac.** *Decided, 2026-09-27 (owner).*
+A new performance benchmark alongside D028: the Medium tier, full screen on the reference Mac (M2 Pro, Retina), holds the display's frame rate (120 fps). Measured by the owner on 2026-09-27: Low reaches 120 fps, Medium drops to 40 fps in the lower atmosphere (GPU-bound; terrain/texture shading suspected).
+
+**D072: The 3D view renders at a scale of the window's resolution, 1× logical pixels by default.** *Decided, 2026-09-27 (owner).*
+A render-scale setting: by default the 3D scene renders at logical resolution (on Retina, a quarter of the physical pixels) and is scaled up; the UI stays at native resolution. "Native" is selectable.
+
 ## Open questions
 
 1. What kind of organization the player leads (D027).

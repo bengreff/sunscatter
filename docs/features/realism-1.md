@@ -1,6 +1,6 @@
 # Feature plan: realism 1 (visual fixes, foundations, test craft, relativity and light, aero and heat, flight UI, MCP)
 
-**Status:** plan, written 2026-09-26 from the owner interview ([record](../plans/interview-2026-09-26.md)) and the owner's answers the same evening. The owner allowed building in plan order before reviewing it; anything marked **Q** is a default the owner can override.
+**Status:** built 2026-09-27 (not yet played by the owner; open items in `docs/plans/open-issues.md`). Plan written 2026-09-26 from the owner interview ([record](../plans/interview-2026-09-26.md)) and the owner's answers the same evening. The owner allowed building in plan order before reviewing it; anything marked **Q** is a default the owner can override.
 
 **Decisions:** D058–D063 (interview), D060 revised and D064–D069 (answers of the same evening: test craft and debug mode, cell thermal model, rigid-body contact, control locations, comm network, MCP transport).
 
