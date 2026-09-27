@@ -60,7 +60,7 @@ fn a_segment_ended_at_its_horizon_is_continued() {
     let mut ship = Vessel::coasting(&w, VesselId(1), t0, earth, r, v, VesselParams::block());
     let start =
         CoastStart { anchor: earth, r, v, drag: None, contact_height: 0.0, horizon: 100.0, fixed_anchor: false };
-    ship.phase = Phase::Coasting { segment: Box::new(Segment::new(&w, t0, start)) };
+    ship.phase = Phase::Coasting { trajectory: Box::new(Trajectory::from_segment(Segment::new(&w, t0, start))) };
     let target = t0.add_seconds(1_000.0);
     assert_eq!(ship.advance(&w, target, &Controls::default(), usize::MAX), target);
     let seg = ship.segment().unwrap();

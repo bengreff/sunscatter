@@ -3,22 +3,29 @@
 //! * `Landed`  — fixed in a body's rotating frame.
 //! * `Powered` — thrust on: fixed 20 ms ticks with controls latched per tick
 //!   (deterministic; limited to physics warp by the game).
-//! * `Coasting` — no thrust: a stored [`Segment`] that is sampled at any warp.
+//! * `Coasting` — on rails: a stored [`Trajectory`] of coasts and planned
+//!   burns ([`FlightPlan`]) that is sampled at any warp.
 //! * `Crashed` — hit a surface too fast.
 //!
 //! Rotation input never breaks a coast: in the prototype neither drag
 //! (isotropic) nor gravity depends on attitude, so translation and attitude are
-//! independent while unpowered.
+//! independent while unpowered. A planned burn's thrust follows its direction
+//! law, not the vessel's attitude (the rigid body of realism-1 §3d will join
+//! them).
 
 mod anchor;
 mod attitude;
+mod burn;
 mod id;
 mod segment;
+mod trajectory;
 
 pub use anchor::preferred_anchor;
 pub use attitude::{quat_from_rotvec, quat_z_to, Attitude};
+pub use burn::{prograde_normal_radial, BurnEnd, BurnLaw, DirectionLaw, FlightPlan, PlanError, PlannedBurn, G0};
 pub use id::{VesselId, VesselIds};
-pub use segment::{coast_tolerance, CoastStart, EndKind, Sample, Segment, SegmentEnd};
+pub use segment::{coast_tolerance, CoastStart, EndKind, Sample, Segment, SegmentEnd, SegmentKind};
+pub use trajectory::Trajectory;
 
 use crate::forces::{altitude_above, ActiveSources, DragModel, ForceContext};
 use crate::frame::{BodyFixed, NodeId, Vec3};
@@ -77,7 +84,7 @@ pub struct Controls {
 pub enum Phase {
     Landed { body: NodeId, fixed: Vec3<BodyFixed>, att_fixed: DQuat },
     Powered { anchor: NodeId, r: DVec3, v: DVec3 },
-    Coasting { segment: Box<Segment> },
+    Coasting { trajectory: Box<Trajectory> },
     Crashed { body: NodeId, fixed: Vec3<BodyFixed>, speed: f64 },
 }
 
@@ -91,6 +98,10 @@ pub struct Vessel {
     pub time: Epoch,
     pub attitude: Attitude,
     pub chute_deployed: bool,
+    /// Mass at `time` (kg): changes only in planned burns.
+    mass: f64,
+    /// Planned burns, flown when coasting (at any warp).
+    plan: FlightPlan,
     /// Mean acceleration over the last powered tick, relative to the anchor
     /// (display only: [`Vessel::state_at`] carries a powered vessel from its
     /// own time to the clock with it). `None` outside powered flight.
@@ -135,6 +146,8 @@ impl Vessel {
             time: t,
             attitude: Attitude { q: DQuat::IDENTITY, omega: DVec3::ZERO },
             chute_deployed: false,
+            mass: params.mass,
+            plan: FlightPlan::default(),
             tick_accel: None,
             attitude_tick: None,
         };
@@ -159,6 +172,8 @@ impl Vessel {
             time: t,
             attitude: Attitude { q: quat_z_to(r.normalize()), omega: DVec3::ZERO },
             chute_deployed: false,
+            mass: params.mass,
+            plan: FlightPlan::default(),
             tick_accel: None,
             attitude_tick: None,
         };
@@ -174,7 +189,57 @@ impl Vessel {
     /// The drag model in use (with the parachute's area once deployed).
     pub fn drag(&self) -> DragModel {
         let extra = if self.chute_deployed { self.params.chute_cd_area } else { 0.0 };
-        DragModel { cd_area: self.params.cd_area + extra, mass: self.params.mass }
+        DragModel { cd_area: self.params.cd_area + extra, mass: self.mass }
+    }
+
+    /// Mass at the vessel's time (kg).
+    pub fn mass(&self) -> f64 {
+        self.mass
+    }
+
+    /// The flight plan.
+    pub fn plan(&self) -> &FlightPlan {
+        &self.plan
+    }
+
+    /// Replaces the flight plan. Burns that have started (or been skipped)
+    /// cannot change, nor can a changed burn ignite before the vessel's
+    /// time. Trajectory segments before the first changed burn are kept bit
+    /// for bit; the rest is rebuilt.
+    pub fn set_plan(&mut self, world: &World, plan: FlightPlan) -> Result<(), PlanError> {
+        if !plan.is_sorted() {
+            return Err(PlanError::NotSorted);
+        }
+        let changed = self.plan.first_difference(&plan);
+        if changed == usize::MAX {
+            return Ok(());
+        }
+        let started = match &self.phase {
+            Phase::Coasting { trajectory } => trajectory.burns_started(),
+            _ => 0,
+        };
+        if changed < started {
+            return Err(PlanError::Started);
+        }
+        if plan.burns[changed.min(plan.burns.len())..].iter().any(|b| b.t_start.seconds_since(self.time) < 0.0) {
+            return Err(PlanError::InThePast);
+        }
+        if let Phase::Coasting { trajectory } = &mut self.phase {
+            trajectory.replan(world, &plan, changed, self.time);
+        }
+        self.plan = plan;
+        Ok(())
+    }
+
+    /// The burn being flown, if the vessel is in a planned burn.
+    pub fn burn(&self) -> Option<&BurnLaw> {
+        match &self.phase {
+            Phase::Coasting { trajectory } => match &trajectory.current().kind {
+                SegmentKind::Burn(law) => Some(law),
+                SegmentKind::Coast => None,
+            },
+            _ => None,
+        }
     }
 
     /// Landed and crashed vessels rotate rigidly with their body.
@@ -218,11 +283,8 @@ impl Vessel {
                     _ => (*anchor, *r, *v),
                 }
             }
-            Phase::Coasting { segment } => {
-                let local = t.seconds_since(segment.t0);
-                let own = self.time.seconds_since(segment.t0);
-                let covered = local >= 0.0 && local <= segment.computed_until();
-                segment.eval(if covered { local } else { own }).expect("vessel time is inside its segment")
+            Phase::Coasting { trajectory } => {
+                trajectory.eval(t).or_else(|| trajectory.eval(self.time)).expect("vessel time is inside its trajectory")
             }
         }
     }
@@ -365,20 +427,17 @@ impl Vessel {
 
     /// Replaces the current phase with a coast from `(anchor, r, v)` now.
     fn start_coast_from(&mut self, world: &World, (anchor, r, v): (NodeId, DVec3, DVec3)) {
-        let seg = Segment::new(
-            world,
-            self.time,
-            CoastStart {
-                anchor,
-                r,
-                v,
-                drag: Some(self.drag()),
-                contact_height: self.params.contact_height,
-                horizon: COAST_HORIZON,
-                fixed_anchor: false,
-            },
-        );
-        self.phase = Phase::Coasting { segment: Box::new(seg) };
+        let start = CoastStart {
+            anchor,
+            r,
+            v,
+            drag: Some(self.drag()),
+            contact_height: self.params.contact_height,
+            horizon: COAST_HORIZON,
+            fixed_anchor: false,
+        };
+        let trajectory = Trajectory::new(world, self.time, start, self.mass, &self.plan);
+        self.phase = Phase::Coasting { trajectory: Box::new(trajectory) };
     }
 
     fn advance_coasting(&mut self, world: &World, target: Epoch, controls: &Controls, max_steps: usize) {
@@ -393,38 +452,28 @@ impl Vessel {
             self.chute_deployed = true;
             self.start_coast(world); // drag changed: a new segment from now
         }
-        let Phase::Coasting { segment } = &mut self.phase else { unreachable!() };
-        let want = target.seconds_since(segment.t0);
-        let mut budget = max_steps;
-        while segment.computed_until() < want && !segment.finished() && budget > 0 {
-            let chunk = budget.min(256);
-            segment.extend(world, chunk);
-            budget -= chunk;
-        }
-        let reach = want.min(segment.computed_until());
-        segment.prune_before(reach);
-        let end = segment.end;
-        let new_time = segment.t0.add_seconds(reach);
-        let restart = match end {
-            Some(SegmentEnd { t, kind: EndKind::Horizon }) if reach >= t => segment.eval(reach),
+        let Phase::Coasting { trajectory } = &mut self.phase else { unreachable!() };
+        trajectory.extend(world, &self.plan, target, max_steps);
+        let computed = trajectory.computed_until();
+        let at_end = target.seconds_since(computed) >= 0.0;
+        let reach = if at_end { computed } else { target };
+        trajectory.prune_before(reach);
+        self.mass = trajectory.mass_at(reach).expect("the vessel's time is in its trajectory");
+        let last = trajectory.last();
+        let contact = match last.end {
+            Some(SegmentEnd { kind: EndKind::Surface { body }, .. }) if at_end => Some(body),
             _ => None,
         };
-        self.advance_attitude(new_time, controls);
-        self.time = new_time;
-        if let Some(state) = restart {
-            // Keep going past the horizon, from the segment's last sample.
-            self.start_coast_from(world, state);
-        }
-        if let Some(SegmentEnd { t, kind: EndKind::Surface { body } }) = end {
-            if reach >= t {
-                let (anchor, r, v) = self.state(world);
-                let snap = world.snapshot(self.time);
-                let (_, fixed) = altitude_above(world, &snap, anchor, body, r);
-                let p = world.source(body).and_then(|s| s.physical.as_ref()).expect("physical");
-                let kin = snap.relative(body, anchor);
-                let v_ground = kin.v + p.rotation.omega(self.time).raw().cross(r - kin.r);
-                self.touch_down(world, body, fixed, (v - v_ground).length());
-            }
+        self.advance_attitude(reach, controls);
+        self.time = reach;
+        if let Some(body) = contact {
+            let (anchor, r, v) = self.state(world);
+            let snap = world.snapshot(self.time);
+            let (_, fixed) = altitude_above(world, &snap, anchor, body, r);
+            let p = world.source(body).and_then(|s| s.physical.as_ref()).expect("physical");
+            let kin = snap.relative(body, anchor);
+            let v_ground = kin.v + p.rotation.omega(self.time).raw().cross(r - kin.r);
+            self.touch_down(world, body, fixed, (v - v_ground).length());
         }
     }
 
@@ -457,14 +506,8 @@ impl Vessel {
     /// `max_steps` new integration steps. The drawn trajectory *is* this
     /// segment, so looking ahead never changes where the vessel will go.
     pub fn extend_coast(&mut self, world: &World, until: Epoch, max_steps: usize) {
-        if let Phase::Coasting { segment } = &mut self.phase {
-            let want = until.seconds_since(segment.t0);
-            let mut budget = max_steps;
-            while segment.computed_until() < want && !segment.finished() && budget > 0 {
-                let chunk = budget.min(256);
-                segment.extend(world, chunk);
-                budget -= chunk;
-            }
+        if let Phase::Coasting { trajectory } = &mut self.phase {
+            trajectory.extend(world, &self.plan, until, max_steps);
         }
     }
 
@@ -487,10 +530,15 @@ impl Vessel {
         )
     }
 
-    /// The current coast segment, if coasting (for drawing the trajectory).
+    /// The current segment (coast or planned burn), if on rails.
     pub fn segment(&self) -> Option<&Segment> {
+        self.trajectory().map(Trajectory::current)
+    }
+
+    /// The stored trajectory (current and future segments), if on rails.
+    pub fn trajectory(&self) -> Option<&Trajectory> {
         match &self.phase {
-            Phase::Coasting { segment } => Some(segment),
+            Phase::Coasting { trajectory } => Some(trajectory),
             _ => None,
         }
     }

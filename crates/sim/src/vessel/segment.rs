@@ -1,13 +1,18 @@
-//! Coast segments: "the prediction is the truth" (D024).
+//! Trajectory segments: "the prediction is the truth" (D024).
 //!
-//! A segment is integrated once, in chunks of accepted steps, and stores the
-//! step endpoints. The vessel's state at any time inside it is a quintic
+//! A segment is a coast or a burn ([`SegmentKind`]). It is integrated once,
+//! in chunks of accepted steps, and stores the step endpoints. The vessel's state at any time inside it is a quintic
 //! Hermite evaluation of those samples, so time warp only changes how fast the
 //! segment is sampled. Extending in chunks is bit-identical to one long run
 //! because the integrator state (including compensation terms and the next
 //! step size) is stored and the step limit (`horizon`) never changes.
+//!
+//! Mass is part of the state: constant in a coast, `m0 − ṁ·t` in a burn
+//! (constant mass flow, so the exact expression replaces integration).
+//! Segments are chained into a [`super::Trajectory`].
 
 use super::anchor::preferred_anchor;
+use super::burn::BurnLaw;
 use crate::ephem::Snapshot;
 use crate::forces::{altitude_above, ActiveSources, DragModel, ForceContext};
 use crate::frame::NodeId;
@@ -34,6 +39,10 @@ pub enum EndKind {
     Surface { body: NodeId },
     /// Reached the maximum horizon (the vessel starts a new segment there).
     Horizon,
+    /// A coast reached the ignition of the next planned burn.
+    BurnStart,
+    /// A burn completed.
+    BurnEnd,
     /// Reached the end of the ephemeris window: nothing is simulated past it.
     EphemerisEnd,
     /// The integration could not continue (non-finite state or force). The
@@ -47,10 +56,18 @@ pub struct SegmentEnd {
     pub kind: EndKind,
 }
 
+/// What moves the vessel during a segment (besides gravity and drag).
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum SegmentKind {
+    Coast,
+    Burn(BurnLaw),
+}
+
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Segment {
     /// Epoch of local time 0.
     pub t0: Epoch,
+    pub kind: SegmentKind,
     pub samples: Vec<Sample>,
     pub end: Option<SegmentEnd>,
     state: StepState,
@@ -63,6 +80,14 @@ pub struct Segment {
     /// the requested horizon, or the ephemeris end if that is sooner.
     horizon: f64,
     fixed_anchor: bool,
+    /// Mass at local time 0 (kg).
+    mass0: f64,
+    /// How the segment ends when it reaches `horizon` before the ephemeris end.
+    horizon_end: EndKind,
+    /// The initial conditions (to rebuild the segment when a plan changes).
+    start: CoastStart,
+    /// Planned burns started before this segment (its own index if a burn).
+    pub(super) plan_index: usize,
 }
 
 /// Initial conditions and settings of a coast.
@@ -82,33 +107,91 @@ pub struct CoastStart {
 }
 
 impl Segment {
-    /// Starts a coast at `t0`.
+    /// Starts a coast at `t0` (mass from the drag model, if any).
     pub fn new(world: &World, t0: Epoch, start: CoastStart) -> Self {
+        let mass = start.drag.map_or(0.0, |d| d.mass);
+        Self::start(world, t0, start, mass, SegmentKind::Coast, EndKind::Horizon, 0)
+    }
+
+    /// Starts a segment of `kind` at `t0` with mass `mass`; reaching
+    /// `start.horizon` ends it with `horizon_end`. A burn whose law or
+    /// duration cannot be flown ends at once as [`EndKind::Failed`].
+    pub(super) fn start(
+        world: &World,
+        t0: Epoch,
+        start: CoastStart,
+        mass: f64,
+        kind: SegmentKind,
+        horizon_end: EndKind,
+        plan_index: usize,
+    ) -> Self {
         let CoastStart { anchor, r, v, drag, contact_height, horizon, fixed_anchor } = start;
-        let horizon = horizon.min(world.end().seconds_since(t0)).max(0.0);
+        let valid = match kind {
+            SegmentKind::Coast => true,
+            SegmentKind::Burn(law) => {
+                law.is_valid() && horizon.is_finite() && horizon >= 0.0 && mass - law.mass_flow * horizon > 0.0
+            }
+        };
+        let horizon = if valid { horizon.min(world.end().seconds_since(t0)).max(0.0) } else { 0.0 };
         let snap = world.snapshot(t0);
         let active = ActiveSources::select(world, &snap, anchor, r);
         let mut seg = Segment {
             t0,
+            kind,
             samples: Vec::new(),
             end: None,
             state: StepState { t: 0.0, r: Compensated::new(r), v: Compensated::new(v), a: DVec3::ZERO, h: 1.0 },
             anchor,
             active,
-            drag,
+            drag: drag.map(|d| DragModel { mass, ..d }),
             contact_height,
             horizon,
             fixed_anchor,
+            mass0: mass,
+            horizon_end,
+            start,
+            plan_index,
         };
         let integ = Dopri5::new(coast_tolerance());
-        let ctx = seg.context(world);
-        seg.state = integ.start(&|t: f64, r, v| ctx.accel(t0.add_seconds(t), r, v), 0.0, r, v, 1.0);
+        let f = seg.forces(world);
+        seg.state = integ.start(&|t: f64, r, v| f.accel(t, r, v), 0.0, r, v, 1.0);
         seg.samples.push(Sample { anchor, s: StepSample { t: 0.0, r, v, a: seg.state.a } });
+        if !valid {
+            seg.end = Some(SegmentEnd { t: 0.0, kind: EndKind::Failed });
+        }
         seg
     }
 
-    fn context<'a>(&'a self, world: &'a World) -> ForceContext<'a> {
-        ForceContext { world, anchor: self.anchor, active: &self.active, drag: self.drag, thrust: DVec3::ZERO }
+    fn forces<'a>(&'a self, world: &'a World) -> Forces<'a> {
+        Forces {
+            world,
+            t0: self.t0,
+            anchor: self.anchor,
+            active: &self.active,
+            drag: self.drag,
+            mass0: self.mass0,
+            kind: &self.kind,
+        }
+    }
+
+    /// Mass at local time `t` (kg).
+    pub fn mass_at(&self, t: f64) -> f64 {
+        mass_at(&self.kind, self.mass0, t)
+    }
+
+    /// The initial conditions this segment was started from.
+    pub fn initial(&self) -> CoastStart {
+        self.start
+    }
+
+    /// Mass at local time 0 (kg).
+    pub fn initial_mass(&self) -> f64 {
+        self.mass0
+    }
+
+    /// Local time at which the segment ends if nothing happens first.
+    pub fn horizon(&self) -> f64 {
+        self.horizon
     }
 
     /// Local time of the last computed sample.
@@ -127,56 +210,65 @@ impl Segment {
 
     /// Integrates up to `max_steps` more accepted steps (stops at the end).
     pub fn extend(&mut self, world: &World, max_steps: usize) {
+        self.extend_until(world, f64::INFINITY, max_steps);
+    }
+
+    /// Integrates until local time `until` is computed (the first step at or
+    /// past it), the segment ends, or `max_steps` steps were taken. Returns
+    /// the number of steps taken. Where it stops never changes the steps.
+    pub fn extend_until(&mut self, world: &World, until: f64, max_steps: usize) -> usize {
         let integ = Dopri5::new(coast_tolerance());
-        for _ in 0..max_steps {
-            if self.end.is_some() {
-                return;
+        for taken in 0..max_steps {
+            if self.end.is_some() || self.computed_until() >= until {
+                return taken;
             }
             if self.state.t >= self.horizon {
                 // Only when started at the limit (otherwise the end is set
                 // after the step that reaches it).
                 self.end = Some(self.limit_end(world));
-                return;
+                return taken;
             }
             let prev = *self.samples.last().expect("segment has a first sample");
-            let t0 = self.t0;
             let step = {
-                // Field-level borrows: the context reads `active`/`drag` while
+                // Field-level borrows: the forces read `active`/`drag` while
                 // the integrator mutates `state`.
-                let ctx = ForceContext {
+                let f = Forces {
                     world,
+                    t0: self.t0,
                     anchor: self.anchor,
                     active: &self.active,
                     drag: self.drag,
-                    thrust: DVec3::ZERO,
+                    mass0: self.mass0,
+                    kind: &self.kind,
                 };
-                integ.step(&|t: f64, r, v| ctx.accel(t0.add_seconds(t), r, v), &mut self.state, self.horizon)
+                integ.step(&|t: f64, r, v| f.accel(t, r, v), &mut self.state, self.horizon)
             };
             let Ok(sample) = step else {
                 self.end = Some(SegmentEnd { t: prev.s.t, kind: EndKind::Failed });
-                return;
+                return taken + 1;
             };
             let new = Sample { anchor: self.anchor, s: sample };
             if let Some((t_hit, body)) = self.find_contact(world, &prev, &new) {
                 let (r, v) = hermite5(&prev.s, &new.s, t_hit);
-                let a = self.context(world).accel(t0.add_seconds(t_hit), r, v);
+                let a = self.forces(world).accel(t_hit, r, v);
                 self.samples.push(Sample { anchor: self.anchor, s: StepSample { t: t_hit, r, v, a } });
                 self.end = Some(SegmentEnd { t: t_hit, kind: EndKind::Surface { body } });
-                return;
+                return taken + 1;
             }
             self.samples.push(new);
             if self.state.t >= self.horizon {
                 self.end = Some(self.limit_end(world));
-                return;
+                return taken + 1;
             }
             self.after_step(world);
         }
+        max_steps
     }
 
     /// The end at `horizon`: the ephemeris end if that is what limited it.
     fn limit_end(&self, world: &World) -> SegmentEnd {
         let at_ephemeris_end = world.end().seconds_since(self.t0) <= self.horizon;
-        SegmentEnd { t: self.horizon, kind: if at_ephemeris_end { EndKind::EphemerisEnd } else { EndKind::Horizon } }
+        SegmentEnd { t: self.horizon, kind: if at_ephemeris_end { EndKind::EphemerisEnd } else { self.horizon_end } }
     }
 
     /// At a step boundary: re-anchors if the precision policy prefers another
@@ -191,7 +283,7 @@ impl Segment {
         let grew = self.active.add(&selected);
         if reanchored || grew {
             let (r, v) = (self.state.r.value(), self.state.v.value());
-            self.state.a = self.context(world).accel_with(&snap, r, v);
+            self.state.a = self.forces(world).accel_with(&snap, self.state.t, r, v);
         }
         if reanchored {
             let s = StepSample { t: self.state.t, r: self.state.r.value(), v: self.state.v.value(), a: self.state.a };
@@ -281,5 +373,45 @@ impl Segment {
         }
         let (r, v) = hermite5(&a.s, &b.s, t);
         Some((b.anchor, r, v))
+    }
+}
+
+/// Mass at local time `t` of a segment of `kind` starting with `mass0`.
+fn mass_at(kind: &SegmentKind, mass0: f64, t: f64) -> f64 {
+    match kind {
+        SegmentKind::Coast => mass0,
+        SegmentKind::Burn(law) => mass0 - law.mass_flow * t,
+    }
+}
+
+/// The dynamics of a segment: gravity, drag and (in a burn) thrust.
+struct Forces<'a> {
+    world: &'a World,
+    t0: Epoch,
+    anchor: NodeId,
+    active: &'a ActiveSources,
+    drag: Option<DragModel>,
+    mass0: f64,
+    kind: &'a SegmentKind,
+}
+
+impl Forces<'_> {
+    /// Acceleration at local time `t`.
+    fn accel(&self, t: f64, r: DVec3, v: DVec3) -> DVec3 {
+        let snap = self.world.snapshot(self.t0.add_seconds(t));
+        self.accel_with(&snap, t, r, v)
+    }
+
+    fn accel_with(&self, snap: &Snapshot, t: f64, r: DVec3, v: DVec3) -> DVec3 {
+        let (drag, thrust) = match self.kind {
+            SegmentKind::Coast => (self.drag, DVec3::ZERO),
+            SegmentKind::Burn(law) => {
+                let m = mass_at(self.kind, self.mass0, t);
+                let dir = law.direction.direction(snap, self.anchor, r, v);
+                (self.drag.map(|d| DragModel { mass: m, ..d }), dir * (law.thrust / m))
+            }
+        };
+        ForceContext { world: self.world, anchor: self.anchor, active: self.active, drag, thrust }
+            .accel_with(snap, r, v)
     }
 }

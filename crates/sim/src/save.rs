@@ -5,9 +5,10 @@
 //! comes back with the same bits (tested over random bit patterns, signed
 //! zeros, subnormals and infinities). Text keeps saves readable and diffable.
 //!
-//! Coasting vessels store their segment: the samples from the vessel's current
-//! time onward *and* the integrator state (including the compensated-sum
-//! terms and the next step size). Continuing a loaded segment is therefore
+//! Coasting vessels store their trajectory (coast and burn segments, and the
+//! flight plan): the samples from the vessel's current time onward *and* the
+//! integrator state (including the compensated-sum terms and the next step
+//! size). Continuing a loaded trajectory is therefore
 //! the same computation as never having saved (chunked == single-pass).
 //! Re-deriving it from the segment's start instead would mean re-integrating
 //! a coast that can be years long.
@@ -24,7 +25,7 @@ use std::fmt;
 use std::path::Path;
 
 /// Version of the save format. Loading any other version is an error.
-pub const SAVE_VERSION: u32 = 2;
+pub const SAVE_VERSION: u32 = 3;
 
 /// Which ephemeris a save was made against. Vessel states are only
 /// meaningful (and only reproducible) with the same body motions.
