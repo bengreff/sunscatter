@@ -215,17 +215,18 @@ pub fn advance(
     // Vessels are independent, so advancing them in parallel is deterministic.
     let world = &sim.world;
     let active = sim.active;
-    let reached: Vec<Epoch> = ComputeTaskPool::get().scope(|scope| {
+    let reached: Vec<(Epoch, bool)> = ComputeTaskPool::get().scope(|scope| {
         for (i, vessel) in sim.fleet.iter_mut().enumerate() {
             let controls = if i == active { active_controls } else { passive };
-            scope.spawn(async move { vessel.advance(world, target, &controls, COAST_STEPS_PER_FRAME) });
+            scope.spawn(async move {
+                let r = vessel.advance(world, target, &controls, COAST_STEPS_PER_FRAME);
+                (r, stopped(vessel))
+            });
         }
     });
-    // Powered vessels trail by less than a tick; a coast that could not be
-    // integrated far enough holds the clock back.
     let mut clock = target;
-    for r in reached {
-        if r.seconds_since(target) < -TICK && r < clock {
+    for (r, stopped) in reached {
+        if holds_clock(r, target, stopped) && r < clock {
             clock = r;
         }
     }
@@ -238,6 +239,20 @@ pub fn advance(
         let until = trajectory::lookahead_until(&sim.world, seg, sim.clock, &orbits);
         ship.extend_coast(&sim.world, until, LOOKAHEAD_STEPS_PER_FRAME);
     }
+}
+
+/// Whether a vessel's motion has ended for good at a time before the clock
+/// (its trajectory failed or reached the ephemeris end): it stays there and
+/// must not hold the clock.
+fn stopped(vessel: &Vessel) -> bool {
+    matches!(&vessel.phase, Phase::Coasting { trajectory } if trajectory.finished())
+}
+
+/// Whether a vessel that reached `reached` holds the clock back from
+/// `target`: powered vessels trail by less than a tick; a coast that could
+/// not be integrated far enough holds it; a stopped vessel never does.
+pub fn holds_clock(reached: Epoch, target: Epoch, stopped: bool) -> bool {
+    !stopped && reached.seconds_since(target) < -TICK
 }
 
 /// The predicted trajectory while powered (the stored segment is used
@@ -277,5 +292,20 @@ pub fn update_prediction(
             trajectory::extend_to_line_end(&world, &mut seg, &orbits, 40_000);
             seg
         }));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_a_lagging_live_vessel_holds_the_clock() {
+        let t = sol::sol_epoch();
+        // (seconds behind the target, stopped, holds)
+        let cases = [(0.0, false, false), (0.5 * TICK, false, false), (10.0, false, true), (10.0, true, false)];
+        for (behind, stopped, holds) in cases {
+            assert_eq!(holds_clock(t.add_seconds(-behind), t, stopped), holds, "{behind} {stopped}");
+        }
     }
 }
