@@ -117,7 +117,7 @@ fn physical(world: &World, node: NodeId) -> Option<&BodyPhysical> {
 }
 
 /// Body-fixed → inertial rotation as a matrix (sim trig, evaluated once).
-fn body_matrix(p: &BodyPhysical, t: Epoch) -> DMat3 {
+pub fn body_matrix(p: &BodyPhysical, t: Epoch) -> DMat3 {
     let col = |v: DVec3| p.rotation.to_inertial(FVec3::from_raw(v), t).raw();
     DMat3::from_cols(col(DVec3::X), col(DVec3::Y), col(DVec3::Z))
 }

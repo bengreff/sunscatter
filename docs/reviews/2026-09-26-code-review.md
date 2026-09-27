@@ -39,5 +39,5 @@ Two read-only reviews (sim and game crates) after the fix round. Each finding wa
 | 13 | Low | HUD `expect("surface body")` on the dominant body panics for bodies without physical data. | `?` like the navball. | fixed |
 | 14 | Low | Change detection defeated elsewhere (read_controls, hud `into_inner`, panel `&mut iface`); persist clones and compares every frame. | Deref mutably only when writing; gate persist on is_changed. | open |
 | 15 | Low | One star and an Earth-centred system assumed (light_source Option; Plotter Earth-only; skip by name "Earth"; station focuses Earth). | Generalise when a second system arrives. | open |
-| 16 | Low | `scene::body_matrix` and `terrain::body_matrix` duplicate. | Keep one. | open |
+| 16 | Low | `scene::body_matrix` and `terrain::body_matrix` duplicate. | Keep one. | fixed |
 | 17 | Low | Modules to split: tracking.rs (identity, commands, body tree, station UI), map.rs (gather vs draw). | `vessels`, `station`, map gather/draw. | open |

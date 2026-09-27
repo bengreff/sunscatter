@@ -25,7 +25,7 @@ pub use material::TerrainMaterial;
 use material::{TerrainExt, TerrainParams};
 use mesh::{ChunkData, ChunkKey, HeightFn, Shape};
 
-use sim::frame::{NodeId, Vec3 as FVec3};
+use sim::frame::NodeId;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -198,8 +198,7 @@ pub fn setup(
 
 fn body_matrix(sim: &SimState, node: NodeId) -> DMat3 {
     let p = sim.world.source(node).and_then(|s| s.physical.as_ref()).expect("terrain body is physical");
-    let col = |v: DVec3| p.rotation.to_inertial(FVec3::from_raw(v), sim.clock).raw();
-    DMat3::from_cols(col(DVec3::X), col(DVec3::Y), col(DVec3::Z))
+    crate::scene::body_matrix(p, sim.clock)
 }
 
 /// A body's surface maps, loaded together at the texture size setting.
