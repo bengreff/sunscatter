@@ -30,7 +30,7 @@ pub fn site_nodes(world: &World, data: &CommsData, t: Epoch, bodies: &[(NodeId, 
             let p = src.physical.as_ref()?;
             let k = bodies.iter().position(|(n, _)| *n == src.node)?;
             let (rel, up) = site.inertial(p, t);
-            Some(Node { pos: bodies[k].1.centre + rel, antenna: site.antenna, ground: Some((k, up)) })
+            Some(Node { pos: bodies[k].1.centre + rel, antenna: site.antenna, ground: Some((k, up)), wired: true })
         })
         .collect()
 }
@@ -63,6 +63,7 @@ mod tests {
             pos: ship,
             antenna: Some(crate::comms::Antenna { gain_dbi: 20.0, power_w: 20.0 }),
             ground: None,
+            wired: false,
         });
         let g = Graph::new(&nodes, &bodies.iter().map(|b| b.1).collect::<Vec<_>>(), &data.link);
         let hq = data.site("Houston").unwrap();

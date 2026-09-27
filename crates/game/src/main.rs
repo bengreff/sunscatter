@@ -9,6 +9,7 @@ mod bench;
 mod body_visual;
 mod camera;
 mod commands;
+mod comms;
 mod demo;
 mod format;
 mod hud;
@@ -81,6 +82,7 @@ fn main() {
         .init_resource::<tracking::Tracked>()
         .init_resource::<tracking::TrackingStation>()
         .init_resource::<commands::InputContext>()
+        .insert_resource(comms::Comms::load())
         .add_message::<commands::GameCommand>()
         // After the settings defaults: replaces them with the saved settings.
         .add_plugins(persist::PersistPlugin)
@@ -115,7 +117,10 @@ fn main() {
             Update,
             (interface::pause::track_launch, state::advance, state::update_prediction).chain().in_set(Stage::Simulate),
         )
-        .add_systems(Update, (camera::update, map::update, demo::check_map_view).chain().in_set(Stage::Camera))
+        .add_systems(
+            Update,
+            (camera::update, comms::update, map::update, demo::check_map_view).chain().in_set(Stage::Camera),
+        )
         .add_systems(
             Update,
             (

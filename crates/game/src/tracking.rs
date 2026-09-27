@@ -255,6 +255,7 @@ pub fn draw(
     mut rig: ResMut<CameraRig>,
     mut tracked: ResMut<Tracked>,
     mut ts: ResMut<TrackingStation>,
+    comms: Res<crate::comms::Comms>,
     mut commands: MessageWriter<GameCommand>,
 ) -> Result {
     if !ts.open {
@@ -276,6 +277,7 @@ pub fn draw(
             // The list runs the full height of the screen.
             ui.set_min_height(height - 16.0);
             ui.label(egui::RichText::new("TRACKING STATION").size(18.0).color(accent));
+            ui.label(egui::RichText::new(format!("at {} (mission control)", comms.location_name())).small().color(dim));
             let (y, mo, d, h, mi, _) = sim.clock.to_calendar();
             ui.monospace(format!("{y}-{mo:02}-{d:02} {h:02}:{mi:02} TDB   warp {}x", WARP_LEVELS[sim.warp]));
             if ui.button("Back to flight (F7)").clicked() {
@@ -321,7 +323,7 @@ pub fn draw(
             ui.separator();
             match ts.selected {
                 Some(Selection::Vessel(id)) if sim.index_of(id).is_some() => {
-                    vessel_details(ui, &sim, &tracked, &ts, id, &mut actions)
+                    vessel_details(ui, &sim, &tracked, &ts, &comms, id, &mut actions)
                 }
                 Some(Selection::Body(node)) => {
                     ui.strong(&sim.world.eph.node(node).name);
@@ -380,6 +382,7 @@ fn vessel_details(
     sim: &SimState,
     tracked: &Tracked,
     ts: &TrackingStation,
+    comms: &crate::comms::Comms,
     id: VesselId,
     actions: &mut Vec<Action>,
 ) {
@@ -388,6 +391,12 @@ fn vessel_details(
     let info = vessel_info(sim, i);
     ui.strong(tracked.name(id));
     ui.monospace(format!("status {}", info.status));
+    ui.monospace(format!("signal {}", crate::comms::describe(comms.signal(id))));
+    if comms.signal(id).is_none() {
+        if let Some(t) = comms.last_contact.get(&id) {
+            ui.monospace(format!("heard  {} ago", fmt_duration(sim.clock.seconds_since(*t))));
+        }
+    }
     ui.monospace(format!("about  {}", info.primary.map_or_else(|| "-".into(), |p| sim.world.eph.node(p).name.clone())));
     if let Some((pe, ap)) = info.apsides {
         let ap = if ap.is_finite() { fmt_dist(ap) } else { "escape".into() };

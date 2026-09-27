@@ -85,6 +85,7 @@ pub fn update(
     rig: Res<CameraRig>,
     tracked: Res<Tracked>,
     station: Res<TrackingStation>,
+    comms: Res<crate::comms::Comms>,
     cam: Query<(&Camera, &Transform, &Projection), With<MainCamera>>,
     mut map: ResMut<MapView>,
 ) {
@@ -111,7 +112,9 @@ pub fn update(
     let active = sim.ship().id();
     for vessel in &sim.fleet {
         let id = vessel.id();
-        let (anchor, r, _) = vessel.state_at(world, sim.clock);
+        let (anchor, r, vel) = vessel.state_at(world, sim.clock);
+        // As seen from the location: where its light left it (D067).
+        let r = crate::comms::retarded(r, vel, crate::comms::seen_delay(&comms, id));
         let c = snap.relative_r(anchor, rig.anchor) + r - rig.cam_pos;
         let orbit = crate::relations::vessel_orbit(world, &sim.dominance, sim.clock, vessel).map(|o| o.radius());
         let mut o = object(ObjectId::Vessel(id), c, VESSEL_RADIUS, orbit, 0.0);

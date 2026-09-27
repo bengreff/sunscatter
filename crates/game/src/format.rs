@@ -1,5 +1,6 @@
 //! The one formatter for numbers shown to the player: distance (m, km, Mm,
-//! AU), speed (m/s, km/s) and durations (s, min, h, d, y). Fixed decimals
+//! AU), speed (m/s, km/s), durations (s, min, h, d, y), signal delays and
+//! data rates. Fixed decimals
 //! so right-aligned monospace readouts do not jiggle.
 
 /// One astronomical unit (m).
@@ -45,9 +46,45 @@ pub fn duration(s: f64) -> String {
     }
 }
 
+/// A signal delay: milliseconds below one second, then seconds, then the
+/// duration format.
+pub fn delay(s: f64) -> String {
+    if s < 1.0 {
+        format!("{:.0} ms", s * 1e3)
+    } else if s < 60.0 {
+        format!("{s:.2} s")
+    } else {
+        duration(s)
+    }
+}
+
+/// A data rate (bit/s).
+pub fn rate(bps: f64) -> String {
+    if !bps.is_finite() {
+        "∞".into()
+    } else if bps >= 1e6 {
+        format!("{:.1} Mbit/s", bps / 1e6)
+    } else if bps >= 1e3 {
+        format!("{:.1} kbit/s", bps / 1e3)
+    } else {
+        format!("{bps:.0} bit/s")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn delays_and_rates() {
+        assert_eq!(delay(0.0213), "21 ms");
+        assert_eq!(delay(1.2831), "1.28 s");
+        assert_eq!(delay(750.0), "12m 30s");
+        assert_eq!(rate(4.26e6), "4.3 Mbit/s");
+        assert_eq!(rate(1500.0), "1.5 kbit/s");
+        assert_eq!(rate(12.0), "12 bit/s");
+        assert_eq!(rate(f64::INFINITY), "∞");
+    }
 
     #[test]
     fn distances() {

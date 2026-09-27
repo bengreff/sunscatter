@@ -153,6 +153,7 @@ pub fn draw(
     mut contexts: EguiContexts,
     fps: Res<FpsMeter>,
     sim: Res<SimState>,
+    comms: Res<crate::comms::Comms>,
     mut commands: MessageWriter<crate::commands::GameCommand>,
     ui: Res<UiState>,
     mut iface: ResMut<InterfaceSettings>,
@@ -212,7 +213,16 @@ pub fn draw(
     // Readouts are relative to the dominant body, like the navball's.
     let dominant = sim.dominant_of(sim.active);
 
-    panel(ctx, &mut iface, PanelId::Flight, |ui_| flight_panel(ui_, sim, Some(dominant)));
+    panel(ctx, &mut iface, PanelId::Flight, |ui_| {
+        flight_panel(ui_, sim, Some(dominant));
+        let home = &comms.data.sites[comms.mission_control].name;
+        ui_.label(
+            egui::RichText::new(format!("{home}: {}", crate::comms::describe(comms.home.as_ref())))
+                .monospace()
+                .small()
+                .color(if comms.home.is_some() { theme::DIM } else { theme::WARN }),
+        );
+    });
 
     panel(ctx, &mut iface, PanelId::Debug, |ui_| {
         let anchor_name = &sim.world.eph.node(anchor).name;

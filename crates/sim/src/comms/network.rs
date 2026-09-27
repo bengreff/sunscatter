@@ -12,8 +12,10 @@ pub struct Node {
     pub pos: DVec3,
     /// Without an antenna a node only uses the ground network.
     pub antenna: Option<Antenna>,
-    /// For a ground site: the occluder (index) it stands on, and local up.
+    /// On the ground: the occluder (index) it stands on, and local up.
     pub ground: Option<(usize, DVec3)>,
+    /// On the ground network (sites; not a landed vessel).
+    pub wired: bool,
 }
 
 /// A usable link.
@@ -62,7 +64,7 @@ impl Graph {
 /// The link between two nodes, if usable: (delay, rate).
 fn link(a: &Node, b: &Node, occluders: &[Occluder], p: &LinkParams) -> Option<(f64, f64)> {
     // Two sites on one body: the ground network, along the great circle.
-    if let (Some((ba, ua)), Some((bb, ub))) = (a.ground, b.ground) {
+    if let (Some((ba, ua)), Some((bb, ub)), true) = (a.ground, b.ground, a.wired && b.wired) {
         if ba == bb {
             let o = occluders[ba];
             let angle = crate::math::acos(ua.dot(ub).clamp(-1.0, 1.0));
@@ -147,11 +149,12 @@ mod tests {
             pos: up * R,
             antenna: antenna.then_some(Antenna { gain_dbi: 74.0, power_w: 2e4 }),
             ground: Some((0, up)),
+            wired: true,
         }
     }
 
     fn craft(pos: DVec3) -> Node {
-        Node { pos, antenna: Some(Antenna { gain_dbi: 20.0, power_w: 20.0 }), ground: None }
+        Node { pos, antenna: Some(Antenna { gain_dbi: 20.0, power_w: 20.0 }), ground: None, wired: false }
     }
 
     #[test]
@@ -191,8 +194,8 @@ mod tests {
         // A lander on the far side (ground on body 0) and a relay above it
         // that also sees a distant station (a ship far away on the other side).
         let up = DVec3::X;
-        let lander =
-            Node { pos: up * 1.737e6, antenna: Some(Antenna { gain_dbi: 20.0, power_w: 20.0 }), ground: Some((0, up)) };
+        let antenna = Some(Antenna { gain_dbi: 20.0, power_w: 20.0 });
+        let lander = Node { pos: up * 1.737e6, antenna, ground: Some((0, up)), wired: false };
         let relay = craft(DVec3::new(1.737e6 + 5e6, 0.0, 1e7));
         let far = craft(DVec3::new(-3e8, 0.0, 1e8));
         let g = Graph::new(&[lander, relay, far], &[moon], &params());
