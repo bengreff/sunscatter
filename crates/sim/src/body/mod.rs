@@ -126,6 +126,19 @@ pub struct BodyPhysical {
     pub terrain: Option<Arc<Heightmap>>,
     /// Procedural detail below the heightmap's resolution (D059). `None`: none.
     pub detail: Option<Detail>,
+    /// Rails warp is not allowed below this altitude above the reference
+    /// (m; D062), chosen by [`rails_floor_rule`]. 0 for bodies without one.
+    pub rails_floor: f64,
+}
+
+/// Margin above the highest terrain for the rails floor of an airless body (m).
+pub const RAILS_FLOOR_MARGIN: f64 = 2_000.0;
+
+/// The rails-warp floor rule (D062): the top of the atmosphere, or on an
+/// airless body the highest terrain plus a margin, rounded up to a whole km.
+pub fn rails_floor_rule(atmosphere_top: Option<f64>, max_terrain: f64) -> f64 {
+    let floor = atmosphere_top.unwrap_or(max_terrain.max(0.0) + RAILS_FLOOR_MARGIN);
+    (floor / 1000.0).ceil() * 1000.0
 }
 
 impl BodyPhysical {

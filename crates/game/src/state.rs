@@ -122,7 +122,20 @@ impl SimState {
 
     /// Whether rails warp (beyond 4x) is allowed right now.
     pub fn rails_allowed(&self) -> bool {
-        self.controls.throttle == 0.0 && !matches!(self.ship().phase, Phase::Powered { .. })
+        self.rails_block().is_none()
+    }
+
+    /// Why rails warp is not allowed right now, if it is not.
+    pub fn rails_block(&self) -> Option<RailsBlock> {
+        let ship = self.ship();
+        if self.controls.throttle != 0.0 || matches!(ship.phase, Phase::Powered { .. }) {
+            return Some(RailsBlock::Thrust);
+        }
+        if matches!(ship.phase, Phase::Landed { .. } | Phase::Crashed { .. }) {
+            return None;
+        }
+        let (anchor, r, _) = ship.state_at(&self.world, self.clock);
+        below_rails_floor(&self.world, self.clock, anchor, r).map(|(body, floor)| RailsBlock::Floor { body, floor })
     }
 
     pub fn reset(&mut self) {
@@ -292,6 +305,28 @@ pub fn lookahead_turn(turn: usize, fleet: usize, active: usize) -> Option<usize>
     (0..fleet).map(|k| (turn + k) % fleet).find(|&i| i != active)
 }
 
+/// Why rails warp is not allowed.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum RailsBlock {
+    /// The throttle is open or the ship is under thrust.
+    Thrust,
+    /// Below a body's rails floor (D062): (body, floor altitude in m).
+    Floor { body: NodeId, floor: f64 },
+}
+
+/// The first body whose rails floor (D062) a flying object at (`anchor`,
+/// `r`) is below, with that floor. Physics, not display: every body counts,
+/// not just a dominant one (rule 1).
+pub fn below_rails_floor(world: &World, t: Epoch, anchor: NodeId, r: DVec3) -> Option<(NodeId, f64)> {
+    let snap = world.snapshot(t);
+    world.surfaces().find_map(|s| {
+        let p = s.physical.as_ref().filter(|p| p.rails_floor > 0.0)?;
+        let rel = r - snap.relative_r(s.node, anchor);
+        let alt = p.altitude(p.rotation.to_fixed(sim::frame::Vec3::from_raw(rel), t));
+        (alt < p.rails_floor).then_some((s.node, p.rails_floor))
+    })
+}
+
 /// Whether a vessel's motion has ended for good at a time before the clock
 /// (its trajectory failed or reached the ephemeris end): it stays there and
 /// must not hold the clock.
@@ -349,6 +384,28 @@ pub fn update_prediction(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rails_floor_blocks_low_orbits_on_earth_and_low_passes_over_the_moon() {
+        let sim = SimState::new();
+        let w = &sim.world;
+        let t = sim.clock;
+        let earth = w.find("Earth").unwrap().node;
+        let moon = w.find("Moon").unwrap().node;
+        let re = w.find("Earth").unwrap().physical.as_ref().unwrap().radius_eq;
+        let rm = w.find("Moon").unwrap().physical.as_ref().unwrap().radius_eq;
+        // (anchor, distance from its centre along x, blocked by)
+        let cases = [
+            (earth, re + 120_000.0, Some(earth)),
+            (earth, re + 200_000.0, None),
+            (moon, rm + 10_000.0, Some(moon)),
+            (moon, rm + 15_000.0, None),
+        ];
+        for (anchor, d, expected) in cases {
+            let got = below_rails_floor(w, t, anchor, DVec3::X * d).map(|b| b.0);
+            assert_eq!(got, expected, "{d}");
+        }
+    }
 
     #[test]
     fn lookahead_takes_turns_and_skips_the_active_vessel() {

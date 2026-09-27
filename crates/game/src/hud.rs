@@ -118,20 +118,27 @@ pub fn pick_bodies(
 }
 
 /// Why warp is lower than requested.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum WarpLimit {
     /// Rails warp needs the throttle closed and the ship not under thrust.
     Throttle,
     /// Coast integration can't keep up at this warp.
     Compute,
+    /// Below a body's rails floor (D062): the floor altitude (m).
+    Floor(f64),
 }
 
 /// What the warp indicator shows: the level in effect, whether it is rails
 /// or physics warp, and why it is below the requested level, if it is.
-pub fn warp_status(requested: usize, effective: usize, compute_limited: bool) -> (usize, bool, Option<WarpLimit>) {
+pub fn warp_status(
+    requested: usize,
+    effective: usize,
+    compute_limited: bool,
+    floor: Option<f64>,
+) -> (usize, bool, Option<WarpLimit>) {
     let rails = effective > MAX_PHYSICS_WARP;
     let limit = if effective < requested {
-        Some(WarpLimit::Throttle)
+        Some(floor.map_or(WarpLimit::Throttle, WarpLimit::Floor))
     } else if compute_limited {
         Some(WarpLimit::Compute)
     } else {
@@ -171,7 +178,11 @@ pub fn draw(
     let mut set_warp = None;
     panel(ctx, &mut iface, PanelId::Time, |ui_| {
         ui_.monospace(format!("{y}-{mo:02}-{d:02} {h:02}:{mi:02}:{s:04.1} TDB"));
-        let (level, rails, limit) = warp_status(sim.warp, sim.effective_warp(), sim.compute_limited);
+        let floor = match sim.rails_block() {
+            Some(crate::state::RailsBlock::Floor { floor, .. }) => Some(floor),
+            _ => None,
+        };
+        let (level, rails, limit) = warp_status(sim.warp, sim.effective_warp(), sim.compute_limited, floor);
         ui_.horizontal(|ui_| {
             ui_.spacing_mut().item_spacing.x = 1.0;
             for (i, &w) in WARP_LEVELS.iter().enumerate() {
@@ -191,9 +202,10 @@ pub fn draw(
         });
         let kind = if rails { "rails" } else { "physics" };
         let why = match limit {
-            Some(WarpLimit::Throttle) => "  limited: throttle",
-            Some(WarpLimit::Compute) => "  limited: compute",
-            None => "",
+            Some(WarpLimit::Throttle) => "  limited: throttle".to_string(),
+            Some(WarpLimit::Compute) => "  limited: compute".to_string(),
+            Some(WarpLimit::Floor(f)) => format!("  limited: below {}", crate::format::distance(f)),
+            None => String::new(),
         };
         ui_.horizontal(|ui_| {
             ui_.monospace(format!("warp {} ({kind})", warp_label(WARP_LEVELS[level])));
@@ -332,8 +344,9 @@ mod tests {
             (9, 9, true, (9, true, Some(WarpLimit::Compute))),
         ];
         for (req, eff, compute, expected) in cases {
-            assert_eq!(warp_status(req, eff, compute), expected, "{req} {eff} {compute}");
+            assert_eq!(warp_status(req, eff, compute, None), expected, "{req} {eff} {compute}");
         }
+        assert_eq!(warp_status(6, 3, false, Some(150e3)), (3, false, Some(WarpLimit::Floor(150e3))));
     }
 
     #[test]

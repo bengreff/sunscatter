@@ -36,6 +36,8 @@
             amplitude: 0.5,
             ridge_threshold: 300.0,
         )),
+        // Rails warp is disabled below this altitude (m, D062): the highest terrain (10,654 m) plus 2 km, rounded up.
+        rails_floor: 13000.0,
         sea_level: None,
     ),
 )

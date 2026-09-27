@@ -39,6 +39,8 @@
             ridge_threshold: 100.0,
         )),
         // Oceans are solid at sea level (D037): surface = max(terrain, sea_level).
+        // Rails warp is disabled below this altitude (m, D062): the top of the atmosphere.
+        rails_floor: 150000.0,
         sea_level: Some(0.0),
     ),
 )

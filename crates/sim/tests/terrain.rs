@@ -228,3 +228,17 @@ fn shipped_surfaces_are_continuous() {
         }
     }
 }
+
+/// D062: every shipped body's rails floor follows the rule (the data cannot
+/// drift from it when the maps or the atmosphere change).
+#[test]
+fn rails_floors_follow_the_rule() {
+    let w = world();
+    for name in ["Earth", "Moon"] {
+        let Some(p) = shipped(&w, name) else { return };
+        let max_terrain = p.terrain.as_ref().map_or(0.0, |t| f64::from(*t.data().iter().max().unwrap()));
+        let rule = sim::body::rails_floor_rule(p.atmosphere.map(|a| a.top), max_terrain);
+        assert_eq!(p.rails_floor, rule, "{name}");
+        assert!(p.rails_floor > 0.0);
+    }
+}

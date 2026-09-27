@@ -84,6 +84,9 @@ struct PhysicalFile {
     roughness: Option<String>,
     #[serde(default)]
     terrain_detail: Option<DetailParams>,
+    /// Rails warp is disabled below this altitude (m, D062).
+    #[serde(default)]
+    rails_floor: f64,
 }
 
 #[derive(Deserialize)]
@@ -131,6 +134,7 @@ pub fn parse_body(text: &str, dir: &Path) -> Result<BodyDef, DataError> {
             sea_level: p.sea_level,
             terrain: None,
             detail: None,
+            rails_floor: p.rails_floor,
         },
         anchor_zone: p.anchor_zone,
         relativistic: p.relativistic,
@@ -263,6 +267,7 @@ mod tests {
             sea_level,
             terrain: None,
             detail: None,
+            rails_floor: 0.0,
         }
     }
 
@@ -280,7 +285,8 @@ mod tests {
         for name in ["earth", "moon", "sun"] {
             let def = load_default(name);
             assert_eq!(bits(&def.physical), bits(&legacy(name)), "{name}");
-            assert_eq!(def.physical, legacy(name), "{name}");
+            let floor = def.physical.rails_floor;
+            assert_eq!(def.physical, BodyPhysical { rails_floor: floor, ..legacy(name) }, "{name}");
         }
         let earth = load_default("earth");
         assert_eq!(earth.anchor_zone, Some(AnchorZone { enter: 1.4e9, exit: 1.6e9 }));
