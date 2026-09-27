@@ -18,6 +18,9 @@ use sim::vessel::{EndKind, Phase};
 
 /// Below this height above the terrain the landing panel shows (m).
 pub const PANEL_BELOW: f64 = 20_000.0;
+/// Impacts further ahead than this are not marked (s): a year-long transfer
+/// that ends on a body is not a landing.
+pub const MARK_WITHIN: f64 = 86_400.0;
 
 /// Where the stored trajectory meets a surface.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -96,7 +99,7 @@ pub fn draw(
     let rel = r - k.r;
     let fixed = p.rotation.to_fixed(Vec3::from_raw(rel), sim.clock);
     let height = p.altitude_above_surface(fixed);
-    let hit = impact(&sim, i);
+    let hit = impact(&sim, i).filter(|h| h.t.seconds_since(sim.clock) < MARK_WITHIN);
     let ctx = contexts.ctx_mut()?;
     // The impact point, in any view.
     if let (Some(hit), Some(view)) = (hit, map::view(&cam)) {
