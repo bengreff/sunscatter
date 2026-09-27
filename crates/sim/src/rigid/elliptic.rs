@@ -156,7 +156,7 @@ mod tests {
 
     #[test]
     fn quadrature_is_exact_for_smooth_functions() {
-        let i = gauss_legendre(|x| math::cos(x), 0.0, 2.0, 2);
+        let i = gauss_legendre(math::cos, 0.0, 2.0, 2);
         assert!((i - math::sin(2.0)).abs() < 1e-15);
         let p = gauss_legendre(|x| math::powi(x, 15), -1.0, 2.0, 1);
         assert!((p - (math::powi(2.0, 16) - 1.0) / 16.0).abs() < 1e-9);
