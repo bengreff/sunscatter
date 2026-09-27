@@ -7,7 +7,7 @@ use sim::frame::NodeId;
 use sim::kepler::Elements;
 use sim::sol;
 use sim::time::Epoch;
-use sim::vessel::{CoastStart, Controls, EndKind, Phase, Segment, SegmentEnd, Vessel, VesselId, VesselParams};
+use sim::vessel::{CoastStart, Controls, EndKind, Phase, Segment, SegmentEnd, Vessel, VesselId};
 use sim::world::World;
 use std::sync::Arc;
 
@@ -150,7 +150,7 @@ fn time_warp_does_not_change_the_state() {
     let w = world();
     let (earth, mu) = earth(&w);
     let (r, v) = leo(mu);
-    let params = VesselParams::block();
+    let params = sim::craft::test_craft();
     let mut slow = Vessel::coasting(&w, VesselId(1), t0(), earth, r, v, params);
     let mut fast = Vessel::coasting(&w, VesselId(1), t0(), earth, r, v, params);
     let controls = Controls::default();
@@ -176,7 +176,7 @@ fn nan_initial_state_ends_the_segment_instead_of_hanging() {
     assert_eq!(seg.end, Some(SegmentEnd { t: 0.0, kind: EndKind::Failed }));
     // A vessel in that state stops at its time; advancing returns.
     let mut vessel =
-        Vessel::coasting(&w, VesselId(1), t0(), earth, DVec3::new(f64::NAN, r.y, r.z), v, VesselParams::block());
+        Vessel::coasting(&w, VesselId(1), t0(), earth, DVec3::new(f64::NAN, r.y, r.z), v, sim::craft::test_craft());
     assert_eq!(vessel.advance(&w, t0().add_seconds(60.0), &Controls::default(), usize::MAX), t0());
 }
 
@@ -194,7 +194,7 @@ impl MinEpoch for Epoch {
 }
 
 #[test]
-fn parachute_descent_lands_safely() {
+fn parachute_descent_reaches_terminal_speed_and_lands_in_debug_mode() {
     let w = world();
     let (earth, _) = earth(&w);
     let e = sim::body::earth();
@@ -204,13 +204,21 @@ fn parachute_descent_lands_safely() {
     let fixed = e.surface_point(28.6 * deg, -80.6 * deg, 8_000.0);
     let r = e.rotation.to_inertial(fixed, t).raw();
     let v = e.rotation.omega(t).raw().cross(r);
-    let mut vessel = Vessel::coasting(&w, VesselId(1), t, earth, r, v, VesselParams::block());
     let controls = Controls { chute: true, sas: true, ..Default::default() };
+    // At its full mass the test craft touches down at its terminal speed
+    // under the parachute, √(2mg / ρ·CdA) ≈ 23 m/s: beyond its 8 m/s limit.
+    let mut vessel = Vessel::coasting(&w, VesselId(1), t, earth, r, v, sim::craft::test_craft());
+    let terminal = (2.0 * vessel.mass() * 9.80 / (1.225 * (vessel.craft.cd_area + vessel.craft.chute_cd_area))).sqrt();
+    let mut debug = vessel.clone();
     vessel.advance(&w, t.add_seconds(3_600.0), &controls, usize::MAX);
     match vessel.phase {
-        Phase::Landed { .. } => {}
-        other => panic!("expected a safe landing, got {other:?}"),
+        Phase::Crashed { speed, .. } => assert!((speed / terminal - 1.0).abs() < 0.05, "{speed} vs {terminal} m/s"),
+        other => panic!("expected a crash at terminal speed, got {other:?}"),
     }
+    // Debug mode: infinite impact tolerance.
+    debug.set_debug(&w, true);
+    debug.advance(&w, t.add_seconds(3_600.0), &controls, usize::MAX);
+    assert!(matches!(debug.phase, Phase::Landed { .. }), "{:?}", debug.phase);
 }
 
 #[test]
@@ -223,7 +231,7 @@ fn falling_without_parachute_crashes() {
     let fixed = e.surface_point(0.0, 10.0 * deg, 3_000.0);
     let r = e.rotation.to_inertial(fixed, t).raw();
     let v = e.rotation.omega(t).raw().cross(r);
-    let mut vessel = Vessel::coasting(&w, VesselId(1), t, earth, r, v, VesselParams::block());
+    let mut vessel = Vessel::coasting(&w, VesselId(1), t, earth, r, v, sim::craft::test_craft());
     vessel.advance(&w, t.add_seconds(600.0), &Controls::default(), usize::MAX);
     assert!(matches!(vessel.phase, Phase::Crashed { .. }), "{:?}", vessel.phase);
 }
@@ -261,7 +269,7 @@ const COAST_GOLDEN: u64 = 0x0d0bdc25e979d651;
 #[test]
 fn powered_vessel_shown_at_the_clock_is_continuous() {
     let w = world();
-    let mut ship = Vessel::landed_at(&w, VesselId(1), "Earth", 28.5, -80.6, t0(), VesselParams::block());
+    let mut ship = Vessel::landed_at(&w, VesselId(1), "Earth", 28.5, -80.6, t0(), sim::craft::test_craft());
     let full = Controls { throttle: 1.0, sas: true, ..Controls::default() };
     let mut clock = t0();
     // 20 s of climb, advanced by uneven frames as the game does.
@@ -291,7 +299,7 @@ fn powered_vessel_shown_at_the_clock_is_continuous() {
 #[test]
 fn landed_vessel_state_at_follows_the_rotation() {
     let w = world();
-    let ship = Vessel::landed_at(&w, VesselId(1), "Earth", 0.0, 0.0, t0(), VesselParams::block());
+    let ship = Vessel::landed_at(&w, VesselId(1), "Earth", 0.0, 0.0, t0(), sim::craft::test_craft());
     let (_, r0, v0) = ship.state(&w);
     let (_, r1, _) = ship.state_at(&w, t0().add_seconds(0.01));
     assert!(((r1 - r0) - v0 * 0.01).length() < 1e-4);

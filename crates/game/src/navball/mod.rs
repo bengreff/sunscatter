@@ -118,8 +118,7 @@ pub fn proper_accel(world: &World, t: Epoch, vessel: &Vessel, throttle: f64) -> 
             omega.cross(omega.cross(r)) - gravity
         }
         Phase::Powered { .. } => {
-            let p = &vessel.params;
-            let thrust = vessel.attitude.nose() * (throttle.clamp(0.0, 1.0) * p.max_thrust / p.mass);
+            let thrust = vessel.thrust_accel(world, throttle);
             ctx(Some(vessel.drag()), thrust).accel_with(&snap, r, v) - gravity
         }
         Phase::Coasting { .. } => ctx(Some(vessel.drag()), DVec3::ZERO).accel_with(&snap, r, v) - gravity,
@@ -201,8 +200,9 @@ impl Navball {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sim::craft::test_craft;
     use sim::kepler::Elements;
-    use sim::vessel::{VesselId, VesselParams};
+    use sim::vessel::VesselId;
     use std::sync::Arc;
 
     fn world() -> World {
@@ -215,20 +215,20 @@ mod tests {
     fn g_load_is_one_on_the_pad_zero_in_orbit_and_thrust_when_powered() {
         let w = world();
         let t = sim::sol::sol_epoch();
-        let pad = Vessel::landed_at(&w, VesselId(1), "Earth", 28.6, -80.6, t, VesselParams::block());
+        let pad = Vessel::landed_at(&w, VesselId(1), "Earth", 28.6, -80.6, t, test_craft());
         let g = rules::g_load(proper_accel(&w, t, &pad, 0.0));
         assert!((g - 1.0).abs() < 0.01, "pad {g}");
 
         let earth = w.find("Earth").expect("Earth").clone();
         let el = Elements { a: 6_778_137.0, e: 0.001, i: 0.9, raan: 0.3, argp: 0.0, mean_anomaly: 1.0 };
         let (r, v) = el.to_state(earth.gm);
-        let leo = Vessel::coasting(&w, VesselId(1), t, earth.node, r, v, VesselParams::block());
+        let leo = Vessel::coasting(&w, VesselId(1), t, earth.node, r, v, test_craft());
         let g = rules::g_load(proper_accel(&w, t, &leo, 0.0));
         assert!(g < 1e-6, "coasting in vacuum {g}");
 
         let mut burn = leo.clone();
         burn.phase = Phase::Powered { anchor: earth.node, r, v };
-        let expected = VesselParams::block().max_thrust / VesselParams::block().mass / rules::G0;
+        let expected = burn.craft.engine.thrust_vac / burn.mass() / rules::G0;
         let g = rules::g_load(proper_accel(&w, t, &burn, 1.0));
         assert!((g - expected).abs() < 1e-6, "full thrust {g} vs {expected}");
     }

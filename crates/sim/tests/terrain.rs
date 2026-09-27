@@ -8,7 +8,7 @@ use sim::frame::{BodyFixed, Vec3};
 use sim::sol;
 use sim::terrain::Heightmap;
 use sim::time::Epoch;
-use sim::vessel::{Controls, Phase, Vessel, VesselId, VesselParams};
+use sim::vessel::{Controls, Phase, Vessel, VesselId};
 use sim::world::World;
 use std::sync::Arc;
 
@@ -39,7 +39,7 @@ fn earth(w: &World) -> &BodyPhysical {
     w.find("Earth").unwrap().physical.as_ref().unwrap()
 }
 
-/// Drops the block under parachute from `above_ground` metres over the
+/// Drops the test craft under parachute from `above_ground` metres over the
 /// surface at (lat, lon) and returns where it came to rest.
 fn parachute_drop(w: &World, lat: f64, lon: f64, above_ground: f64) -> Vessel {
     let e = earth(w);
@@ -48,7 +48,10 @@ fn parachute_drop(w: &World, lat: f64, lon: f64, above_ground: f64) -> Vessel {
     let r = e.rotation.to_inertial(fixed, t).raw();
     let v = e.rotation.omega(t).raw().cross(r);
     let node = w.find("Earth").unwrap().node;
-    let mut ship = Vessel::coasting(w, VesselId(1), t, node, r, v, VesselParams::block());
+    let mut ship = Vessel::coasting(w, VesselId(1), t, node, r, v, sim::craft::test_craft());
+    // Debug mode: at its full mass the test craft's parachute lands it
+    // faster than its impact limit (this test is about where it lands).
+    ship.set_debug(w, true);
     let controls = Controls { chute: true, sas: true, ..Default::default() };
     ship.advance(w, t.add_seconds(3_600.0), &controls, usize::MAX);
     ship
@@ -64,7 +67,7 @@ fn landed_height(w: &World, ship: &Vessel) -> f64 {
 #[test]
 fn landing_on_a_mountain_versus_the_sea() {
     let w = plateau_world();
-    let contact = VesselParams::block().contact_height;
+    let contact = sim::craft::test_craft().params().contact_height(16_000.0);
     // Plateau: comes to rest on the terrain, 3 km above the ellipsoid.
     let ship = parachute_drop(&w, 20.0, 10.0, 4_000.0);
     assert!((landed_height(&w, &ship) - (3_000.0 + contact)).abs() < 1e-6, "{}", landed_height(&w, &ship));
@@ -76,10 +79,10 @@ fn landing_on_a_mountain_versus_the_sea() {
 #[test]
 fn vessels_start_on_the_terrain() {
     let w = plateau_world();
-    let contact = VesselParams::block().contact_height;
-    let high = Vessel::landed_at(&w, VesselId(1), "Earth", 30.0, 0.0, t0(), VesselParams::block());
+    let contact = sim::craft::test_craft().params().contact_height(16_000.0);
+    let high = Vessel::landed_at(&w, VesselId(1), "Earth", 30.0, 0.0, t0(), sim::craft::test_craft());
     assert!((landed_height(&w, &high) - (3_000.0 + contact)).abs() < 1e-6);
-    let sea = Vessel::landed_at(&w, VesselId(1), "Earth", -30.0, 0.0, t0(), VesselParams::block());
+    let sea = Vessel::landed_at(&w, VesselId(1), "Earth", -30.0, 0.0, t0(), sim::craft::test_craft());
     assert!((landed_height(&w, &sea) - contact).abs() < 1e-6);
     // Standing still is not contact: the vessel stays landed.
     let mut v = high.clone();
@@ -101,10 +104,10 @@ fn falling_onto_a_mountain_is_detected_at_its_height() {
     let fixed = e.ground_point(25.0 * DEG, 40.0 * DEG, 2_000.0);
     let r = e.rotation.to_inertial(fixed, t).raw();
     let v = e.rotation.omega(t).raw().cross(r);
-    let mut ship = Vessel::coasting(&w, VesselId(1), t, w.find("Earth").unwrap().node, r, v, VesselParams::block());
+    let mut ship = Vessel::coasting(&w, VesselId(1), t, w.find("Earth").unwrap().node, r, v, sim::craft::test_craft());
     ship.advance(&w, t.add_seconds(600.0), &Controls::default(), usize::MAX);
     match ship.phase {
-        Phase::Crashed { fixed, .. } => assert!((e.altitude(fixed) - 3_005.0).abs() < 1e-6),
+        Phase::Crashed { fixed, .. } => assert!((e.altitude(fixed) - 3_000.0 - ship.contact_height()).abs() < 1e-6),
         other => panic!("expected a crash, got {other:?}"),
     }
 }
@@ -135,10 +138,10 @@ fn shipped_heightmaps_have_the_expected_landmarks() {
         assert!(deep < -9_000.0, "{deep}");
         assert!(pad.abs() < 20.0, "{pad}");
         assert_eq!(e.surface_height_latlon(11.3733 * DEG, 142.5917 * DEG), 0.0, "sea is solid at 0");
-        let ship = Vessel::landed_at(&w, VesselId(1), "Earth", 27.9881, 86.925, t0(), VesselParams::block());
+        let ship = Vessel::landed_at(&w, VesselId(1), "Earth", 27.9881, 86.925, t0(), sim::craft::test_craft());
         let Phase::Landed { fixed, .. } = ship.phase else { unreachable!() };
         let surface = e.surface_height_latlon(27.9881 * DEG, 86.925 * DEG);
-        assert!((e.altitude(fixed) - surface - 5.0).abs() < 1.0);
+        assert!((e.altitude(fixed) - surface - ship.contact_height()).abs() < 1.0);
         assert!((surface - everest).abs() < 500.0, "detail stays near the base: {surface} vs {everest}");
     }
     if let Some(m) = shipped(&w, "Moon") {

@@ -7,7 +7,7 @@ use sim::kepler::Elements;
 use sim::save::{SaveError, SaveGame};
 use sim::sol;
 use sim::time::Epoch;
-use sim::vessel::{CoastStart, Controls, Phase, Segment, Vessel, VesselId, VesselIds, VesselParams};
+use sim::vessel::{CoastStart, Controls, Phase, Segment, Vessel, VesselId, VesselIds};
 use sim::world::World;
 use std::sync::Arc;
 
@@ -65,7 +65,7 @@ fn fly(w: &World, v: &mut Vessel, from: Epoch, end: Epoch, dt: f64, controls: &C
 fn coasting_vessel_continues_bit_identically_after_load() {
     let w = world();
     let (earth, r, v) = leo(&w);
-    let mut ship = Vessel::coasting(&w, VesselId(1), t0(), earth, r, v, VesselParams::block());
+    let mut ship = Vessel::coasting(&w, VesselId(1), t0(), earth, r, v, sim::craft::test_craft());
     let controls = Controls { sas: true, ..Default::default() };
     let mid = t0().add_seconds(1_234.567);
     fly(&w, &mut ship, t0(), mid, 0.25, &controls);
@@ -96,7 +96,7 @@ fn chunked_extension_across_a_save_equals_single_pass() {
 #[test]
 fn landed_vessel_lifts_off_identically_after_load() {
     let w = world();
-    let pad = Vessel::landed_at(&w, VesselId(1), "Earth", 28.6082, -80.6041, t0(), VesselParams::block());
+    let pad = Vessel::landed_at(&w, VesselId(1), "Earth", 28.6082, -80.6041, t0(), sim::craft::test_craft());
     let idle = Controls { sas: true, ..Default::default() };
     let mut a = pad.clone();
     let wait = t0().add_seconds(100.0);
@@ -113,8 +113,9 @@ fn landed_vessel_lifts_off_identically_after_load() {
 #[test]
 fn powered_flight_continues_identically_after_load() {
     let w = world();
-    let mut a = Vessel::landed_at(&w, VesselId(1), "Earth", 28.6082, -80.6041, t0(), VesselParams::block());
-    let burn = Controls { throttle: 1.0, sas: true, rotate: DVec3::new(0.3, 0.0, 0.0), ..Default::default() };
+    let mut a = Vessel::landed_at(&w, VesselId(1), "Earth", 28.6082, -80.6041, t0(), sim::craft::test_craft());
+    // Roll input (about the thrust axis: the craft does not tip over).
+    let burn = Controls { throttle: 1.0, sas: true, rotate: DVec3::new(0.0, 0.0, 0.3), ..Default::default() };
     // A clock that is not a whole number of ticks: the vessel trails it.
     let mid = t0().add_seconds(12.345);
     fly(&w, &mut a, t0(), mid, 1.0 / 60.0, &burn);
@@ -138,8 +139,8 @@ fn save_files_round_trip_and_check_the_ephemeris() {
     let w = world();
     let (earth, r, v) = leo(&w);
     let mut ids = VesselIds::default();
-    let ship = Vessel::coasting(&w, ids.allocate(), t0(), earth, r, v, VesselParams::block());
-    let pad = Vessel::landed_at(&w, ids.allocate(), "Moon", 0.67, 23.47, t0(), VesselParams::block());
+    let ship = Vessel::coasting(&w, ids.allocate(), t0(), earth, r, v, sim::craft::test_craft());
+    let pad = Vessel::landed_at(&w, ids.allocate(), "Moon", 0.67, 23.47, t0(), sim::craft::test_craft());
     let fleet = [ship, pad];
     let save = SaveGame::capture(&w, t0(), &fleet, ids, 1, Controls::default());
     let dir = std::env::temp_dir().join(format!("sunscatter-save-{}", std::process::id()));
@@ -162,7 +163,7 @@ fn save_files_round_trip_and_check_the_ephemeris() {
 #[test]
 fn saves_with_duplicate_or_unissued_vessel_ids_are_rejected() {
     let w = world();
-    let pad = |id| Vessel::landed_at(&w, id, "Moon", 0.67, 23.47, t0(), VesselParams::block());
+    let pad = |id| Vessel::landed_at(&w, id, "Moon", 0.67, 23.47, t0(), sim::craft::test_craft());
     let load = |fleet: &[Vessel], ids| {
         SaveGame::from_ron(&SaveGame::capture(&w, t0(), fleet, ids, 0, Controls::default()).to_ron())
     };

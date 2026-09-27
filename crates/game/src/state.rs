@@ -7,12 +7,13 @@ use crate::trajectory::{self, settings::OrbitSettings};
 use bevy::prelude::*;
 use bevy::tasks::{futures::check_ready, AsyncComputeTaskPool, ComputeTaskPool, Task};
 use glam::DVec3;
+use sim::craft::test_craft;
 use sim::ephem::Ephemeris;
 use sim::frame::NodeId;
 use sim::kepler::Elements;
 use sim::sol;
 use sim::time::Epoch;
-use sim::vessel::{Controls, Phase, Segment, Vessel, VesselId, VesselIds, VesselParams, TICK};
+use sim::vessel::{Controls, Phase, Segment, Vessel, VesselId, VesselIds, TICK};
 use sim::world::World;
 use std::sync::Arc;
 
@@ -70,8 +71,7 @@ impl SimState {
         // Start in daylight over Florida: 2030-01-01 17:00 TDB.
         let clock = sol::sol_epoch().add_seconds(17.0 * 3600.0);
         let mut vessel_ids = VesselIds::default();
-        let ship =
-            Vessel::landed_at(&world, vessel_ids.allocate(), "Earth", PAD_LAT, PAD_LON, clock, VesselParams::block());
+        let ship = Vessel::landed_at(&world, vessel_ids.allocate(), "Earth", PAD_LAT, PAD_LON, clock, test_craft());
         SimState {
             dominance: Dominance::new(&world.eph, clock),
             dominance_at: clock,
@@ -127,7 +127,7 @@ impl SimState {
 
     pub fn reset(&mut self) {
         let id = self.vessel_ids.allocate();
-        let ship = Vessel::landed_at(&self.world, id, "Earth", PAD_LAT, PAD_LON, self.clock, VesselParams::block());
+        let ship = Vessel::landed_at(&self.world, id, "Earth", PAD_LAT, PAD_LON, self.clock, test_craft());
         self.fleet[self.active] = ship;
         self.controls = Controls { sas: true, ..Default::default() };
         self.warp = 0;
@@ -147,7 +147,7 @@ impl SimState {
             };
             let (r, v) = el.to_state(earth.gm);
             let id = self.vessel_ids.allocate();
-            self.fleet.push(Vessel::coasting(&self.world, id, self.clock, earth.node, r, v, VesselParams::block()));
+            self.fleet.push(Vessel::coasting(&self.world, id, self.clock, earth.node, r, v, test_craft()));
         }
     }
 }

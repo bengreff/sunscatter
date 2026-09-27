@@ -26,7 +26,7 @@ fn a_coast_started_near_the_ephemeris_end_stops_at_the_end() {
     let (earth, r, v) = leo(&w);
     let t0 = w.end().add_seconds(-6.0 * 3600.0);
     PAST_END_CALLS.with(|c| c.set(0));
-    let mut ship = Vessel::coasting(&w, VesselId(1), t0, earth, r, v, VesselParams::block());
+    let mut ship = Vessel::coasting(&w, VesselId(1), t0, earth, r, v, crate::craft::test_craft());
     let reached = ship.advance(&w, w.end().add_seconds(86_400.0), &Controls::default(), usize::MAX);
     assert!(reached.seconds_since(w.end()).abs() < 1e-6, "stopped {} s from the end", reached.seconds_since(w.end()));
     assert!(reached <= w.end());
@@ -57,7 +57,7 @@ fn a_segment_ended_at_its_horizon_is_continued() {
     let w = world();
     let (earth, r, v) = leo(&w);
     let t0 = sol::sol_epoch().add_seconds(86_400.0);
-    let mut ship = Vessel::coasting(&w, VesselId(1), t0, earth, r, v, VesselParams::block());
+    let mut ship = Vessel::coasting(&w, VesselId(1), t0, earth, r, v, crate::craft::test_craft());
     let start =
         CoastStart { anchor: earth, r, v, drag: None, contact_height: 0.0, horizon: 100.0, fixed_anchor: false };
     ship.phase = Phase::Coasting { trajectory: Box::new(Trajectory::from_segment(Segment::new(&w, t0, start))) };
@@ -72,7 +72,7 @@ fn attitude_after_frames_and_jump(controls: Controls, omega0: DVec3) -> (Vessel,
     let w = world();
     let (earth, r, v) = leo(&w);
     let t0 = sol::sol_epoch().add_seconds(86_400.0);
-    let mut frames = Vessel::coasting(&w, VesselId(1), t0, earth, r, v, VesselParams::block());
+    let mut frames = Vessel::coasting(&w, VesselId(1), t0, earth, r, v, crate::craft::test_craft());
     frames.attitude.omega = omega0;
     let mut jump = frames.clone();
     for k in 1..=600 {
@@ -85,12 +85,32 @@ fn attitude_after_frames_and_jump(controls: Controls, omega0: DVec3) -> (Vessel,
 
 #[test]
 fn coasting_rotation_input_is_independent_of_frame_rate() {
-    let controls = Controls { rotate: DVec3::new(0.3, -1.0, 0.5), ..Controls::default() };
+    // Roll input: about the symmetry axis, so no gyroscopic coupling.
+    let controls = Controls { rotate: DVec3::Z, ..Controls::default() };
     let (frames, jump) = attitude_after_frames_and_jump(controls, DVec3::ZERO);
-    // 10 s of input at 0.5 rad/s² per axis (500 ticks, one partial tick left).
-    let spin = frames.attitude.omega.length();
-    assert!((spin - 0.5 * 10.0 * DVec3::new(0.3, -1.0, 0.5).length()).abs() < 0.02, "spin {spin} rad/s");
+    // 10 s of input at authority / inertia (500 ticks, give or take the
+    // partial tick left at the end).
+    let props = frames.mass_props();
+    let rate = frames.craft.torque.z / props.inertia.z_axis.z;
+    let spin = frames.attitude.body_rate();
+    assert!((spin.z - rate * 10.0).abs() <= rate * TICK * 1.01, "spin {spin} rad/s, {rate} rad/s²");
+    assert!(spin.truncate().length() < 1e-9 * spin.z);
     assert_eq!(frames.attitude, jump.attitude);
+    // Any input: the same bits at 60 fps and in one jump.
+    let mixed = Controls { rotate: DVec3::new(0.3, -1.0, 0.5), ..Controls::default() };
+    let (frames, jump) = attitude_after_frames_and_jump(mixed, DVec3::new(0.01, 0.0, -0.02));
+    assert_eq!(frames.attitude, jump.attitude);
+}
+
+#[test]
+fn coasting_tumble_is_independent_of_frame_rate_and_conserves_momentum() {
+    let (frames, jump) = attitude_after_frames_and_jump(Controls::default(), DVec3::new(0.1, 0.05, 0.3));
+    assert_eq!(frames.attitude, jump.attitude);
+    let inertia = frames.mass_props().inertia;
+    let l = crate::rigid::angular_momentum(&frames.attitude, &inertia);
+    let q0 = quat_z_to(leo(&world()).1.normalize());
+    let l0 = crate::rigid::angular_momentum(&Attitude { q: q0, omega: DVec3::new(0.1, 0.05, 0.3) }, &inertia);
+    assert!((l - l0).length() < 1e-9 * l0.length(), "{l} vs {l0}");
 }
 
 #[test]

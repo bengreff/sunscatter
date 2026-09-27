@@ -1,6 +1,6 @@
 use super::*;
 use sim::kepler::Elements;
-use sim::vessel::{Vessel, VesselId, VesselParams};
+use sim::vessel::{Vessel, VesselId};
 use sim::world::World;
 use std::sync::Arc;
 
@@ -83,7 +83,7 @@ fn caps_end_the_line() {
 
 /// A vessel coasting from (`r`, `v`) about `anchor`, integrated `span` s ahead.
 fn coast(w: &World, t: Epoch, anchor: NodeId, r: DVec3, v: DVec3, span: f64) -> Vessel {
-    let mut ship = Vessel::coasting(w, VesselId(1), t, anchor, r, v, VesselParams::block());
+    let mut ship = Vessel::coasting(w, VesselId(1), t, anchor, r, v, sim::craft::test_craft());
     ship.extend_coast(w, t.add_seconds(span), 2_000_000);
     ship
 }
@@ -187,7 +187,7 @@ fn prediction_and_body_lines_follow_the_rule() {
     let el = Elements { a: 7.0e6, e: 0.05, i: 0.4, raan: 0.0, argp: 0.0, mean_anomaly: 0.0 };
     let (r, v) = el.to_state(earth.gm);
     let period = el.period(earth.gm);
-    let ship = Vessel::coasting(&w, VesselId(1), t, earth.node, r, v, VesselParams::block());
+    let ship = Vessel::coasting(&w, VesselId(1), t, earth.node, r, v, sim::craft::test_craft());
     let mut seg = ship.coast_from_now(&w);
     let settings = OrbitSettings::default();
     extend_to_line_end(&w, &mut seg, &settings, 40_000);

@@ -55,6 +55,60 @@ impl Craft {
         let mass = MassModel::new(&surface, &g.primitives, &g.skin, spec.dry_mass, &g.tank, spec.propellant.capacity);
         Craft { id, spec, mesh: surface.render_mesh(), surface, cells, geometry, mass }
     }
+
+    /// The parameters a vessel of this craft carries.
+    pub fn params(&self) -> CraftParams {
+        let s = &self.surface;
+        // Area facing along Z of a closed surface: ½ Σ |n_z| a.
+        let projected: f64 = (0..s.triangles.len())
+            .map(|t| {
+                let (_, n, a) = s.triangle(t);
+                0.5 * n.z.abs() * a
+            })
+            .sum();
+        CraftParams {
+            id: self.id.clone(),
+            engine: Engine::from_file(&self.spec.engine),
+            mass: self.mass,
+            torque: self.spec.attitude_control.torque,
+            cd_area: projected,
+            chute_cd_area: self.spec.chute.cd_area,
+            impact_max_speed: self.spec.impact.max_speed,
+            bottom_z: s.positions.iter().map(|p| p.z).fold(f64::MAX, f64::min),
+            initial_propellant: self.spec.propellant.mass,
+        }
+    }
+}
+
+/// What a vessel keeps from its craft (saved with it, so a vessel is
+/// self-contained and deterministic).
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct CraftParams {
+    pub id: CraftId,
+    pub engine: Engine,
+    pub mass: MassModel,
+    /// Attitude-control torque authority per body axis (N·m).
+    pub torque: glam::DVec3,
+    /// Hull drag area Cd·A (m²): the area facing along the body axis, ½ Σ |n_z| a
+    /// (the silhouette for a convex hull, a little more for this one) with
+    /// Cd = 1. A placeholder until the cell aerodynamics of realism-1 §5.
+    pub cd_area: f64,
+    /// Parachute Cd·A when deployed (m²).
+    pub chute_cd_area: f64,
+    /// Highest touchdown speed that is not a crash (m/s; D066 refines it
+    /// per contact point).
+    pub impact_max_speed: f64,
+    /// Lowest point of the craft along body Z (m): the bottom of the feet.
+    pub bottom_z: f64,
+    /// Propellant loaded at the start (kg).
+    pub initial_propellant: f64,
+}
+
+impl CraftParams {
+    /// Height of the centre of mass above the ground when standing (m).
+    pub fn contact_height(&self, propellant: f64) -> f64 {
+        self.mass.at(propellant).com.z - self.bottom_z
+    }
 }
 
 /// Parses and validates a craft from the two files' text. `dir` labels errors.
@@ -117,6 +171,13 @@ mod tests {
         assert_eq!((s.chute.cd_area, s.thermal.skin_max_k, s.thermal.internal_max_k), (600.0, 1100.0, 400.0));
         assert_eq!((s.impact.max_speed, s.antenna.gain_dbi, s.antenna.power_w), (8.0, 20.0, 20.0));
         assert_eq!(c.geometry.primitives.iter().filter(|p| p.foot).count(), 4);
+        let p = c.params();
+        assert_eq!(p.bottom_z, -4.6);
+        // At least the silhouette seen end on: the body's disc (π·2²) and the
+        // feet (4 × π·0.3²); the bell and legs overlap it.
+        let silhouette = std::f64::consts::PI * (4.0 + 4.0 * 0.09);
+        assert!(p.cd_area > silhouette && p.cd_area < 1.25 * silhouette, "{} vs {silhouette}", p.cd_area);
+        assert!(p.contact_height(16000.0) > 2.0 && p.contact_height(16000.0) < p.contact_height(0.0));
     }
 
     #[test]

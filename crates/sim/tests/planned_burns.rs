@@ -2,6 +2,7 @@
 //! burn segments with mass in the state, flown identically at every warp.
 
 use glam::DVec3;
+use sim::craft::test_craft;
 use sim::ephem::Ephemeris;
 use sim::frame::NodeId;
 use sim::kepler::Elements;
@@ -9,8 +10,8 @@ use sim::save::SaveGame;
 use sim::sol;
 use sim::time::Epoch;
 use sim::vessel::{
-    BurnEnd, CoastStart, Controls, EndKind, FlightPlan, PlanError, PlannedBurn, SegmentKind, Trajectory, Vessel,
-    VesselId, VesselIds, VesselParams,
+    BurnEnd, BurnLimits, CoastStart, Controls, EndKind, FlightPlan, PlanError, PlannedBurn, SegmentKind, Trajectory,
+    Vessel, VesselId, VesselIds,
 };
 use sim::world::World;
 use std::sync::Arc;
@@ -33,15 +34,14 @@ fn earth(w: &World) -> (NodeId, f64) {
 fn leo_ship(w: &World) -> Vessel {
     let (earth, mu) = earth(w);
     let (r, v) = Elements { a: 6_778_137.0, e: 0.0005, i: 0.9, raan: 1.0, argp: 0.5, mean_anomaly: 0.0 }.to_state(mu);
-    Vessel::coasting(w, VesselId(1), t0(), earth, r, v, VesselParams::block())
+    Vessel::coasting(w, VesselId(1), t0(), earth, r, v, sim::craft::test_craft())
 }
 
-const THRUST: f64 = 600_000.0;
-const ISP: f64 = 350.0;
-
 /// A prograde burn (relative to Earth) of `dv` m/s at `t0 + at` seconds.
+/// A prograde burn by the test craft's engine.
 fn prograde(w: &World, at: f64, dv: f64) -> PlannedBurn {
-    PlannedBurn::delta_v(t0().add_seconds(at), DVec3::new(dv, 0.0, 0.0), THRUST, ISP, Some(earth(w).0))
+    let engine = test_craft().params().engine;
+    PlannedBurn::delta_v_with(t0().add_seconds(at), DVec3::new(dv, 0.0, 0.0), &engine, Some(earth(w).0))
 }
 
 fn plan(burns: &[PlannedBurn]) -> FlightPlan {
@@ -80,7 +80,7 @@ fn a_burn_flown_in_frames_equals_one_jump_bit_for_bit() {
     // The look-ahead ran further; compare the stored part both have.
     jump.extend_coast(&w, frames.trajectory().unwrap().computed_until(), usize::MAX);
     assert_eq!(frames.trajectory(), jump.trajectory());
-    assert!(frames.mass() < VesselParams::block().mass, "the burns used propellant");
+    assert!(frames.mass() < 20_000.0, "the burns used propellant");
 }
 
 trait MinEpoch {
@@ -105,9 +105,9 @@ fn chunked_chain_equals_single_pass() {
     let start =
         CoastStart { anchor, r, v, drag: Some(ship.drag()), contact_height: 5.0, horizon: 1e9, fixed_anchor: false };
     let until = t0().add_seconds(3_000.0);
-    let mut one = Trajectory::new(&w, t0(), start, ship.mass(), &p);
+    let mut one = Trajectory::new(&w, t0(), start, ship.mass(), &p, BurnLimits::default());
     one.extend(&w, &p, until, usize::MAX);
-    let mut chunked = Trajectory::new(&w, t0(), start, ship.mass(), &p);
+    let mut chunked = Trajectory::new(&w, t0(), start, ship.mass(), &p, BurnLimits::default());
     for (i, n) in [1usize, 7, 3, 50, 1, 2, 11].iter().cycle().enumerate() {
         if chunked.computed_until().seconds_since(until) >= 0.0 {
             break;
@@ -159,7 +159,7 @@ fn a_prograde_burn_raises_apoapsis_as_the_rocket_equation_predicts() {
     ship.advance(&w, t_end.add_seconds(5.0), &Controls::default(), usize::MAX);
     assert_eq!(ship.mass(), m0 - burn.law.mass_flow * duration);
     let m1 = ship.mass();
-    let delivered = THRUST / burn.law.mass_flow * sim::math::ln(m0 / m1);
+    let delivered = burn.law.thrust / burn.law.mass_flow * sim::math::ln(m0 / m1);
     assert!((delivered - dv).abs() < 1e-9, "rocket equation Δv {delivered}");
 }
 
@@ -168,8 +168,12 @@ fn editing_the_second_burn_keeps_the_first_burns_samples() {
     let w = world();
     let b1 = prograde(&w, 300.0, 60.0);
     let b2 = prograde(&w, 2_000.0, 30.0);
-    let b2_new =
-        PlannedBurn::delta_v(t0().add_seconds(2_500.0), DVec3::new(0.0, 20.0, -5.0), THRUST, ISP, Some(earth(&w).0));
+    let b2_new = PlannedBurn::delta_v_with(
+        t0().add_seconds(2_500.0),
+        DVec3::new(0.0, 20.0, -5.0),
+        &test_craft().params().engine,
+        Some(earth(&w).0),
+    );
 
     let mut ship = leo_ship(&w);
     ship.set_plan(&w, plan(&[b1, b2])).unwrap();
@@ -265,7 +269,7 @@ fn a_burn_does_not_depend_on_the_anchor() {
             horizon: 1e9,
             fixed_anchor: true,
         };
-        let mut traj = Trajectory::new(&w, t0(), start, ship.mass(), &p);
+        let mut traj = Trajectory::new(&w, t0(), start, ship.mass(), &p, BurnLimits::default());
         let t = t0().add_seconds(400.0);
         traj.extend(&w, &p, t, usize::MAX);
         earth_state(&w, &traj, t)
@@ -278,14 +282,54 @@ fn a_burn_does_not_depend_on_the_anchor() {
 
 #[test]
 fn a_burn_that_would_use_all_the_mass_fails_instead_of_dividing_by_zero() {
+    // Without a dry mass (a bare trajectory), a burn longer than the mass
+    // lasts cannot be flown.
+    let w = world();
+    let ship = leo_ship(&w);
+    let mut burn = prograde(&w, 100.0, 10.0);
+    burn.end = BurnEnd::Duration(1e6);
+    let (anchor, r, v) = ship.state(&w);
+    let start = CoastStart { anchor, r, v, drag: None, contact_height: 0.0, horizon: 1e9, fixed_anchor: false };
+    let p = plan(&[burn]);
+    let mut traj = Trajectory::new(&w, t0(), start, ship.mass(), &p, BurnLimits::default());
+    traj.extend(&w, &p, t0().add_seconds(500.0), usize::MAX);
+    assert!(traj.finished());
+    assert_eq!(traj.last().end.map(|e| e.kind), Some(EndKind::Failed));
+    assert_eq!(traj.computed_until(), burn.t_start, "the trajectory stops at the failed ignition");
+}
+
+#[test]
+fn a_vessel_burn_stops_at_burnout() {
     let w = world();
     let mut ship = leo_ship(&w);
     let mut burn = prograde(&w, 100.0, 10.0);
     burn.end = BurnEnd::Duration(1e6);
     ship.set_plan(&w, plan(&[burn])).unwrap();
-    let reached = ship.advance(&w, t0().add_seconds(500.0), &Controls::default(), usize::MAX);
+    let burnout = 16_000.0 / burn.law.mass_flow;
+    let after = t0().add_seconds(100.0 + burnout + 60.0);
+    assert_eq!(ship.advance(&w, after, &Controls::default(), usize::MAX), after);
+    assert_eq!(ship.propellant(), 0.0);
+    assert_eq!(ship.mass(), 4_000.0);
     let traj = ship.trajectory().unwrap();
-    assert!(traj.finished());
-    assert_eq!(traj.last().end.map(|e| e.kind), Some(EndKind::Failed));
-    assert_eq!(reached, burn.t_start, "the vessel stops at the failed ignition");
+    assert!(matches!(traj.current().kind, SegmentKind::Coast), "coasting after burnout");
+}
+
+#[test]
+fn debug_mode_burns_take_no_propellant() {
+    let w = world();
+    let mut ship = leo_ship(&w);
+    ship.set_debug(&w, true);
+    let burn = prograde(&w, 100.0, 200.0);
+    ship.set_plan(&w, plan(&[burn])).unwrap();
+    // 200 m/s at constant mass: t = Δv·m / F.
+    let duration = 200.0 * 20_000.0 / burn.law.thrust;
+    ship.extend_coast(&w, t0().add_seconds(100.0 + duration + 10.0), usize::MAX);
+    let seg = ship.trajectory().unwrap().segments.iter().find(|s| matches!(s.kind, SegmentKind::Burn(_))).unwrap();
+    assert!((seg.horizon() - duration).abs() < 1e-9, "{} vs {duration}", seg.horizon());
+    assert_eq!(seg.mass_at(seg.horizon()), 20_000.0);
+    ship.advance(&w, t0().add_seconds(100.0 + duration + 10.0), &Controls::default(), usize::MAX);
+    assert_eq!(ship.propellant(), 16_000.0);
+    // Turning debug mode off keeps the propellant and restarts the coast.
+    ship.set_debug(&w, false);
+    assert!(!ship.debug() && ship.propellant() == 16_000.0);
 }

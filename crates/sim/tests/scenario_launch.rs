@@ -1,13 +1,18 @@
-//! Executable scenario: launch the prototype block from Cape Canaveral into a
+//! Executable scenario: launch the test craft from Cape Canaveral into a
 //! low Earth orbit with a scripted gravity turn, coast a full orbit, then
 //! de-orbit and land under parachute.
+//!
+//! Flown in **debug mode** (D064): the test craft is a lander (Δv ≈ 5 km/s,
+//! liftoff thrust-to-weight 1.3) and cannot reach orbit on its own
+//! propellant, and at its full mass the parachute lands it faster than its
+//! impact limit. Debug mode gives infinite propellant and impact tolerance.
 
 use glam::DVec3;
 use sim::ephem::Ephemeris;
 use sim::kepler::Elements;
 use sim::sol;
 use sim::time::Epoch;
-use sim::vessel::{quat_z_to, Controls, Phase, Vessel, VesselId, VesselParams};
+use sim::vessel::{quat_z_to, Attitude, Controls, Phase, Vessel, VesselId};
 use sim::world::World;
 use std::sync::Arc;
 
@@ -36,10 +41,10 @@ impl Flight<'_> {
         assert!(!matches!(self.ship.phase, Phase::Crashed { .. }), "crashed at {:?}", self.orbit().2);
     }
 
-    /// Points the nose along `dir` (magic attitude hold for the script).
+    /// Points the nose along `dir` (magic attitude hold for the script; SAS
+    /// holds it too).
     fn point(&mut self, dir: DVec3) {
-        self.ship.attitude.q = quat_z_to(dir.normalize());
-        self.ship.attitude.omega = DVec3::ZERO;
+        self.ship.set_attitude(Attitude { q: quat_z_to(dir.normalize()), omega: DVec3::ZERO });
     }
 }
 
@@ -59,7 +64,8 @@ fn pad_to_orbit_then_parachute_landing() {
     let w = world();
     let earth = w.find("Earth").unwrap();
     let start = sol::sol_epoch().add_seconds(86_400.0);
-    let ship = Vessel::landed_at(&w, VesselId(1), "Earth", 28.6082, -80.6041, start, VesselParams::block());
+    let mut ship = Vessel::landed_at(&w, VesselId(1), "Earth", 28.6082, -80.6041, start, sim::craft::test_craft());
+    ship.set_debug(&w, true);
     let mut f = Flight { w: &w, ship, t: start, mu: earth.gm, re: sim::body::earth().radius_eq };
     let mut controls = Controls { throttle: 1.0, sas: true, ..Default::default() };
 
@@ -71,7 +77,8 @@ fn pad_to_orbit_then_parachute_landing() {
             break;
         }
         let up = r.normalize();
-        let pitch = (1.4 * ((r.length() - f.re) / 50_000.0).clamp(0.0, 1.0).sqrt()).min(1.35);
+        // A slow turn: liftoff thrust-to-weight is only 1.3.
+        let pitch = (1.4 * ((r.length() - f.re) / 200_000.0).clamp(0.0, 1.0).sqrt()).min(1.35);
         f.point(up * pitch.cos() + horizontal(r, v) * pitch.sin());
         f.step(0.1, &controls);
     }

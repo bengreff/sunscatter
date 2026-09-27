@@ -7,7 +7,7 @@
 //! the flight plan. Segments are only created from stored state, so extending
 //! in chunks gives the same chain, bit for bit, as one long run (rule 4).
 
-use super::burn::FlightPlan;
+use super::burn::{BurnLimits, FlightPlan};
 use super::segment::{CoastStart, EndKind, Segment, SegmentKind};
 use crate::frame::NodeId;
 use crate::time::Epoch;
@@ -21,22 +21,25 @@ pub struct Trajectory {
     pub segments: Vec<Segment>,
     /// Horizon of a coast with no burn ahead (s).
     coast_horizon: f64,
+    /// Propellant limits of the burns.
+    #[serde(default)]
+    limits: BurnLimits,
 }
 
 impl Trajectory {
     /// A trajectory from `start` at `t` with mass `mass`, following `plan`
-    /// (burns igniting before `t` are skipped). `start.horizon` is the horizon
-    /// of coasts with no burn ahead.
-    pub fn new(world: &World, t: Epoch, start: CoastStart, mass: f64, plan: &FlightPlan) -> Self {
-        let first = make_segment(world, plan, t, start, mass, 0, start.horizon);
-        Trajectory { segments: vec![first], coast_horizon: start.horizon }
+    /// (burns igniting before `t` are skipped) within `limits`.
+    /// `start.horizon` is the horizon of coasts with no burn ahead.
+    pub fn new(world: &World, t: Epoch, start: CoastStart, mass: f64, plan: &FlightPlan, limits: BurnLimits) -> Self {
+        let first = make_segment(world, plan, t, start, mass, 0, (start.horizon, limits));
+        Trajectory { segments: vec![first], coast_horizon: start.horizon, limits }
     }
 
     /// A trajectory made of one given segment (tests, and callers that build
     /// a segment themselves). Burns of a plan are followed after it ends.
     pub fn from_segment(segment: Segment) -> Self {
         let coast_horizon = segment.initial().horizon;
-        Trajectory { segments: vec![segment], coast_horizon }
+        Trajectory { segments: vec![segment], coast_horizon, limits: BurnLimits::default() }
     }
 
     /// The segment containing the earliest stored time.
@@ -113,7 +116,7 @@ impl Trajectory {
         };
         let last = prev.samples.last().expect("segment has a sample");
         let start = CoastStart { anchor: last.anchor, r: last.s.r, v: last.s.v, ..prev.initial() };
-        Some(make_segment(world, plan, t, start, prev.mass_at(end.t), index, self.coast_horizon))
+        Some(make_segment(world, plan, t, start, prev.mass_at(end.t), index, (self.coast_horizon, self.limits)))
     }
 
     /// Drops what the vessel has passed: whole segments before the one
@@ -139,8 +142,8 @@ impl Trajectory {
             return;
         }
         let cur = &self.segments[0];
-        let rebuilt =
-            make_segment(world, plan, cur.t0, cur.initial(), cur.initial_mass(), cur.plan_index, self.coast_horizon);
+        let settings = (self.coast_horizon, self.limits);
+        let rebuilt = make_segment(world, plan, cur.t0, cur.initial(), cur.initial_mass(), cur.plan_index, settings);
         self.segments = vec![rebuilt];
         self.extend(world, plan, now, usize::MAX);
         self.prune_before(now);
@@ -160,7 +163,8 @@ fn continues(seg: &Segment) -> bool {
 
 /// The segment starting at `t`: the burn `plan.burns[i]` if it ignites at `t`
 /// (with `i` the first burn from `index` not missed), else a coast up to
-/// that burn's ignition (or `coast_horizon`).
+/// that burn's ignition (or `coast_horizon`). Burns are flown within
+/// `limits` (burnout, or no mass flow with infinite propellant).
 fn make_segment(
     world: &World,
     plan: &FlightPlan,
@@ -168,14 +172,15 @@ fn make_segment(
     start: CoastStart,
     mass: f64,
     index: usize,
-    coast_horizon: f64,
+    (coast_horizon, limits): (f64, BurnLimits),
 ) -> Segment {
     let i = plan.next_from(index, t);
     match plan.burns.get(i) {
         Some(b) if b.t_start == t => {
-            let horizon = b.end.duration(&b.law, mass).unwrap_or(f64::NAN);
+            let law = limits.effective(b.law);
+            let horizon = b.end.duration_limited(&law, mass, limits.dry_mass).unwrap_or(f64::NAN);
             let start = CoastStart { horizon, ..start };
-            Segment::start(world, t, start, mass, SegmentKind::Burn(b.law), EndKind::BurnEnd, i)
+            Segment::start(world, t, start, mass, SegmentKind::Burn(law), EndKind::BurnEnd, i)
         }
         Some(b) if b.t_start.seconds_since(t) <= coast_horizon => {
             let start = CoastStart { horizon: b.t_start.seconds_since(t), ..start };

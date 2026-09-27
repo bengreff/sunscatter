@@ -1,4 +1,5 @@
-//! A vessel: point-mass translation plus attitude, moving through phases
+//! A vessel: a craft (realism-1 §3) moving through phases. Translation is
+//! that of its centre of mass; rotation is a rigid body ([`attitude`]).
 //!
 //! * `Landed`  — fixed in a body's rotating frame.
 //! * `Powered` — thrust on: fixed 20 ms ticks with controls latched per tick
@@ -7,11 +8,14 @@
 //!   burns ([`FlightPlan`]) that is sampled at any warp.
 //! * `Crashed` — hit a surface too fast.
 //!
-//! Rotation input never breaks a coast: in the prototype neither drag
-//! (isotropic) nor gravity depends on attitude, so translation and attitude are
-//! independent while unpowered. A planned burn's thrust follows its direction
-//! law, not the vessel's attitude (the rigid body of realism-1 §3d will join
-//! them).
+//! Rotation input never breaks a coast: neither drag (isotropic until the
+//! cell aerodynamics of realism-1 §5) nor gravity depends on attitude, so
+//! translation and attitude are independent while unpowered. A planned
+//! burn's thrust follows its direction law, not the vessel's attitude.
+//!
+//! The vessel carries its propellant (burned by the engine in powered ticks
+//! and in planned burns) and the **debug mode** flag (D064): infinite
+//! propellant, no overheating, infinite impact tolerance, all together.
 
 mod anchor;
 mod attitude;
@@ -21,18 +25,22 @@ mod segment;
 mod trajectory;
 
 pub use anchor::preferred_anchor;
-pub use attitude::{quat_from_rotvec, quat_z_to, Attitude};
-pub use burn::{prograde_normal_radial, BurnEnd, BurnLaw, DirectionLaw, FlightPlan, PlanError, PlannedBurn, G0};
+pub use attitude::{quat_from_rotvec, quat_z_to, rotvec_of, Attitude, AttitudeControl, RotationBase};
+pub use burn::{
+    prograde_normal_radial, BurnEnd, BurnLaw, BurnLimits, DirectionLaw, FlightPlan, PlanError, PlannedBurn, G0,
+};
 pub use id::{VesselId, VesselIds};
 pub use segment::{coast_tolerance, CoastStart, EndKind, Sample, Segment, SegmentEnd, SegmentKind};
 pub use trajectory::Trajectory;
 
-use crate::forces::{altitude_above, ActiveSources, DragModel, ForceContext};
+use crate::craft::{Craft, CraftParams, MassProps};
+use crate::forces::{altitude_above, ambient_pressure, ActiveSources, DragModel, ForceContext};
 use crate::frame::{BodyFixed, NodeId, Vec3};
 use crate::integrate::{Dopri5, Tolerance};
 use crate::math;
 use crate::time::Epoch;
 use crate::world::World;
+use attitude::{advance_coast, control_tick, Actuators, Gimbal};
 use glam::{DMat3, DQuat, DVec3};
 
 /// Physics tick for powered flight and attitude control (s).
@@ -40,41 +48,12 @@ pub const TICK: f64 = 0.02;
 /// Coast integration horizon (s): effectively unbounded within the game window.
 pub const COAST_HORIZON: f64 = 60.0 * 365.25 * 86_400.0;
 
-#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct VesselParams {
-    pub mass: f64,
-    pub cd_area: f64,
-    pub chute_cd_area: f64,
-    pub max_thrust: f64,
-    /// Maximum angular acceleration from reaction control (rad/s²).
-    pub max_ang_accel: f64,
-    /// Distance from the centre of mass to the bottom (contact) point (m).
-    pub contact_height: f64,
-    /// Highest touchdown speed relative to the ground that counts as landed.
-    pub safe_touchdown_speed: f64,
-}
-
-impl VesselParams {
-    /// The prototype block: 3 × 3 × 10 m, 20 t, magic 600 kN thrust.
-    pub fn block() -> Self {
-        VesselParams {
-            mass: 20_000.0,
-            cd_area: 7.0,
-            // ~4× Apollo's three mains, for 20 t: ~7 m/s at sea level.
-            chute_cd_area: 6_000.0,
-            max_thrust: 600_000.0,
-            max_ang_accel: 0.5,
-            contact_height: 5.0,
-            safe_touchdown_speed: 10.0,
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Controls {
     /// Throttle in [0, 1].
     pub throttle: f64,
-    /// Rotation command in body axes (pitch = x, yaw = y, roll = z), each in [-1, 1].
+    /// Rotation command in body axes (pitch = x, yaw = y, roll = z), each in
+    /// [-1, 1]: a fraction of the torque authority.
     pub rotate: DVec3,
     pub sas: bool,
     pub chute: bool,
@@ -92,14 +71,19 @@ pub enum Phase {
 pub struct Vessel {
     /// Stable identity (never reused; see [`VesselIds`]).
     id: VesselId,
-    pub params: VesselParams,
+    /// What the vessel is made of (copied from its craft files).
+    pub craft: CraftParams,
     pub phase: Phase,
     /// The vessel's current time (it may trail the game clock by < one tick).
     pub time: Epoch,
     pub attitude: Attitude,
     pub chute_deployed: bool,
-    /// Mass at `time` (kg): changes only in planned burns.
-    mass: f64,
+    /// Propellant at `time` (kg).
+    propellant: f64,
+    /// Debug mode (D064): infinite propellant, no overheating, infinite
+    /// impact tolerance.
+    #[serde(default)]
+    debug: bool,
     /// Planned burns, flown when coasting (at any warp).
     plan: FlightPlan,
     /// Mean acceleration over the last powered tick, relative to the anchor
@@ -107,13 +91,9 @@ pub struct Vessel {
     /// own time to the clock with it). `None` outside powered flight.
     #[serde(default)]
     pub tick_accel: Option<DVec3>,
-    /// While coasting: the attitude at the last control tick and its epoch.
-    /// Ticks stay on that lattice (the remainder carries over to the next
-    /// frame) and `attitude` is this propagated torque-free to `time`, so
-    /// the result does not depend on frame rate or warp. `None`: `attitude`
-    /// is itself the tick state at `time`.
+    /// The coast's rotation lattice and the SAS hold ([`AttitudeControl`]).
     #[serde(default)]
-    attitude_tick: Option<(Epoch, Attitude)>,
+    control: AttitudeControl,
 }
 
 /// Rotation matrix taking body-fixed axes of `body` to inertial axes at `t`.
@@ -132,50 +112,46 @@ impl Vessel {
         lat_deg: f64,
         lon_deg: f64,
         t: Epoch,
-        params: VesselParams,
+        craft: &Craft,
     ) -> Self {
         let src = world.find(body).expect("known body");
         let p = src.physical.as_ref().expect("physical body");
         let deg = math::PI / 180.0;
-        let fixed = p.ground_point(lat_deg * deg, lon_deg * deg, params.contact_height);
+        let craft = craft.params();
+        let fixed = p.ground_point(lat_deg * deg, lon_deg * deg, craft.contact_height(craft.initial_propellant));
         let att_fixed = quat_z_to(fixed.raw().normalize());
         let mut v = Vessel {
             id,
-            params,
+            propellant: craft.initial_propellant,
+            craft,
             phase: Phase::Landed { body: src.node, fixed, att_fixed },
             time: t,
             attitude: Attitude { q: DQuat::IDENTITY, omega: DVec3::ZERO },
             chute_deployed: false,
-            mass: params.mass,
+            debug: false,
             plan: FlightPlan::default(),
             tick_accel: None,
-            attitude_tick: None,
+            control: AttitudeControl::default(),
         };
         v.sync_landed_attitude(world);
         v
     }
 
     /// A vessel coasting from `(r, v)` relative to `anchor` at `t`.
-    pub fn coasting(
-        world: &World,
-        id: VesselId,
-        t: Epoch,
-        anchor: NodeId,
-        r: DVec3,
-        v: DVec3,
-        params: VesselParams,
-    ) -> Self {
+    pub fn coasting(world: &World, id: VesselId, t: Epoch, anchor: NodeId, r: DVec3, v: DVec3, craft: &Craft) -> Self {
+        let craft = craft.params();
         let mut vessel = Vessel {
             id,
-            params,
+            propellant: craft.initial_propellant,
+            craft,
             phase: Phase::Powered { anchor, r, v },
             time: t,
             attitude: Attitude { q: quat_z_to(r.normalize()), omega: DVec3::ZERO },
             chute_deployed: false,
-            mass: params.mass,
+            debug: false,
             plan: FlightPlan::default(),
             tick_accel: None,
-            attitude_tick: None,
+            control: AttitudeControl::default(),
         };
         vessel.start_coast(world);
         vessel
@@ -188,13 +164,87 @@ impl Vessel {
 
     /// The drag model in use (with the parachute's area once deployed).
     pub fn drag(&self) -> DragModel {
-        let extra = if self.chute_deployed { self.params.chute_cd_area } else { 0.0 };
-        DragModel { cd_area: self.params.cd_area + extra, mass: self.mass }
+        let extra = if self.chute_deployed { self.craft.chute_cd_area } else { 0.0 };
+        DragModel { cd_area: self.craft.cd_area + extra, mass: self.mass() }
     }
 
-    /// Mass at the vessel's time (kg).
+    /// Mass at the vessel's time (kg): dry plus propellant.
     pub fn mass(&self) -> f64 {
-        self.mass
+        self.craft.mass.dry_mass + self.propellant
+    }
+
+    /// Propellant at the vessel's time (kg).
+    pub fn propellant(&self) -> f64 {
+        self.propellant
+    }
+
+    /// Mass, centre of mass (body axes) and inertia at the vessel's time.
+    pub fn mass_props(&self) -> MassProps {
+        self.craft.mass.at(self.propellant)
+    }
+
+    /// Height of the centre of mass above the ground when standing (m).
+    pub fn contact_height(&self) -> f64 {
+        self.craft.contact_height(self.propellant)
+    }
+
+    /// Debug mode (D064): infinite propellant, no overheating, infinite
+    /// impact tolerance.
+    pub fn debug(&self) -> bool {
+        self.debug
+    }
+
+    /// Turns debug mode on or off. A coast is restarted from now (its burns
+    /// depend on it; a planned burn in progress is dropped).
+    pub fn set_debug(&mut self, world: &World, on: bool) {
+        if self.debug == on {
+            return;
+        }
+        self.debug = on;
+        if matches!(self.phase, Phase::Coasting { .. }) {
+            self.start_coast(world);
+        }
+    }
+
+    /// Sets the attitude from outside the dynamics (scripts, tests): the
+    /// coast's rotation restarts from it, and SAS holds it if it is not
+    /// rotating. Landed vessels keep standing on the ground.
+    pub fn set_attitude(&mut self, att: Attitude) {
+        if matches!(self.phase, Phase::Landed { .. } | Phase::Crashed { .. }) {
+            return;
+        }
+        self.attitude = att;
+        self.control.base = None;
+        self.control.hold = (att.omega == DVec3::ZERO).then_some(att.q);
+    }
+
+    /// Sets the propellant (clamped to [0, capacity]). A coast is restarted
+    /// from now with the new mass.
+    pub fn set_propellant(&mut self, world: &World, kg: f64) {
+        self.propellant = kg.clamp(0.0, self.craft.mass.capacity);
+        if matches!(self.phase, Phase::Coasting { .. }) {
+            self.start_coast(world);
+        }
+    }
+
+    /// Whether the engine runs with these controls (a throttle, and
+    /// propellant or debug mode).
+    fn engine_running(&self, controls: &Controls) -> bool {
+        self.craft.engine.setting(controls.throttle) > 0.0 && (self.debug || self.propellant > 0.0)
+    }
+
+    /// Thrust acceleration (inertial axes, m/s²) the engine would give at
+    /// `throttle` now, along the nose (display: the navball).
+    pub fn thrust_accel(&self, world: &World, throttle: f64) -> DVec3 {
+        let (anchor, r, _) = self.state(world);
+        let p = ambient_pressure(world, &world.snapshot(self.time), anchor, r);
+        let out = self.craft.engine.tick_output(throttle, p, self.propellant, TICK, self.debug);
+        self.attitude.q * self.craft.engine.mount_dir * (out.thrust / self.mass())
+    }
+
+    /// Limits of planned burns: the propellant, unless debug mode.
+    fn burn_limits(&self) -> BurnLimits {
+        BurnLimits { dry_mass: self.craft.mass.dry_mass, infinite: self.debug }
     }
 
     /// The flight plan.
@@ -249,7 +299,7 @@ impl Vessel {
             Phase::Crashed { body, fixed, .. } => (*body, quat_z_to(fixed.raw().normalize())),
             _ => return,
         };
-        self.attitude_tick = None;
+        self.control.base = None;
         let b2i = body_to_inertial(world, body, self.time);
         let rot = world.source(body).and_then(|s| s.physical.as_ref()).expect("physical").rotation;
         self.attitude = Attitude { q: (b2i * att_fixed).normalize(), omega: rot.omega(self.time).raw() };
@@ -319,13 +369,13 @@ impl Vessel {
         let src = world.source(body).expect("body");
         let r = fixed.length();
         let g = src.gm / (r * r);
-        if controls.throttle * self.params.max_thrust / self.params.mass > g {
+        if self.engine_running(controls) && self.thrust_accel(world, controls.throttle).length() > g {
             // Lift off: become a powered vessel anchored to the body.
             let (anchor, r, v) = self.state(world);
             self.sync_landed_attitude(world);
             self.phase = Phase::Powered { anchor, r, v };
             self.tick_accel = None;
-            self.attitude_tick = None;
+            self.control.base = None;
             return;
         }
         self.time = target;
@@ -333,23 +383,37 @@ impl Vessel {
     }
 
     fn advance_powered(&mut self, world: &World, target: Epoch, controls: &Controls) {
-        if controls.throttle <= 0.0 {
-            self.start_coast(world);
-            return;
-        }
         while self.time.add_seconds(TICK) <= target {
+            if !self.engine_running(controls) {
+                self.start_coast(world);
+                return;
+            }
             self.chute_deployed |= controls.chute;
-            let attitude_before = self.attitude;
-            self.attitude.control_tick(controls.rotate, controls.sas, self.params.max_ang_accel, TICK);
-            let thrust =
-                self.attitude.nose() * (controls.throttle.clamp(0.0, 1.0) * self.params.max_thrust / self.params.mass);
             let Phase::Powered { anchor, r, v } = self.phase else { unreachable!() };
+            let props = self.mass_props();
+            let engine = self.craft.engine;
+            let p = ambient_pressure(world, &world.snapshot(self.time), anchor, r);
+            let out = engine.tick_output(controls.throttle, p, self.propellant, TICK, self.debug);
+            let gimbal = Gimbal {
+                lever: engine.mount_pos - props.com,
+                dir: engine.mount_dir,
+                thrust: out.thrust,
+                max_angle: engine.gimbal,
+            };
+            let act = Actuators { torque: self.craft.torque, gimbal: Some(gimbal) };
+            let before = (self.attitude, self.control);
+            let (att, dir) = control_tick(&self.attitude, &props.inertia, &mut self.control, controls, &act, TICK);
+            self.attitude = att;
+            let thrust = att.q * dir * (out.thrust / props.mass);
             // A tick that cannot be integrated (non-finite state) leaves the
             // vessel where it is, like a failed coast segment.
             let Some((r1, v1)) = self.integrate_tick(world, anchor, r, v, thrust) else {
-                self.attitude = attitude_before;
+                (self.attitude, self.control) = before;
                 return;
             };
+            if !self.debug {
+                self.propellant = (self.propellant - out.mdot * TICK).max(0.0);
+            }
             self.time = self.time.add_seconds(TICK);
             self.phase = Phase::Powered { anchor, r: r1, v: v1 };
             self.tick_accel = Some((v1 - v) / TICK);
@@ -388,14 +452,14 @@ impl Vessel {
         let snap = world.snapshot(self.time);
         for src in world.surfaces() {
             let (alt, fixed) = altitude_above(world, &snap, anchor, src.node, r);
-            if alt - self.params.contact_height < 0.0 {
+            if alt - self.contact_height() < 0.0 {
                 let body_kin = snap.relative(src.node, anchor);
                 let p = src.physical.as_ref().expect("physical");
                 let d = r - body_kin.r;
                 let v_ground = body_kin.v + p.rotation.omega(self.time).raw().cross(d);
                 let rel_speed = (v - v_ground).length();
                 // Moving upward away from the surface (e.g. at liftoff) is not contact.
-                if (v - v_ground).dot(d) > 0.0 && rel_speed < self.params.safe_touchdown_speed {
+                if (v - v_ground).dot(d) > 0.0 && rel_speed < self.safe_touchdown_speed() {
                     continue;
                 }
                 self.touch_down(world, src.node, fixed, rel_speed);
@@ -409,14 +473,23 @@ impl Vessel {
         let p = world.source(body).and_then(|s| s.physical.as_ref()).expect("physical");
         let dir = fixed.raw().normalize();
         let (lat, lon) = crate::terrain::lat_lon(dir);
-        let on_ground = p.ground_point(lat, lon, self.params.contact_height);
-        self.phase = if speed <= self.params.safe_touchdown_speed {
+        let on_ground = p.ground_point(lat, lon, self.contact_height());
+        self.phase = if speed <= self.safe_touchdown_speed() {
             Phase::Landed { body, fixed: on_ground, att_fixed: quat_z_to(dir) }
         } else {
             Phase::Crashed { body, fixed: on_ground, speed }
         };
         self.chute_deployed = false;
         self.sync_landed_attitude(world);
+    }
+
+    /// Highest touchdown speed that is a landing (infinite in debug mode).
+    fn safe_touchdown_speed(&self) -> f64 {
+        if self.debug {
+            f64::INFINITY
+        } else {
+            self.craft.impact_max_speed
+        }
     }
 
     /// Replaces the current phase with a coast starting now.
@@ -432,20 +505,20 @@ impl Vessel {
             r,
             v,
             drag: Some(self.drag()),
-            contact_height: self.params.contact_height,
+            contact_height: self.contact_height(),
             horizon: COAST_HORIZON,
             fixed_anchor: false,
         };
-        let trajectory = Trajectory::new(world, self.time, start, self.mass, &self.plan);
+        let trajectory = Trajectory::new(world, self.time, start, self.mass(), &self.plan, self.burn_limits());
         self.phase = Phase::Coasting { trajectory: Box::new(trajectory) };
     }
 
     fn advance_coasting(&mut self, world: &World, target: Epoch, controls: &Controls, max_steps: usize) {
-        if controls.throttle > 0.0 {
+        if self.engine_running(controls) {
             let (anchor, r, v) = self.state(world);
             self.phase = Phase::Powered { anchor, r, v };
             self.tick_accel = None;
-            self.attitude_tick = None;
+            self.control.base = None;
             return;
         }
         if controls.chute && !self.chute_deployed {
@@ -457,14 +530,22 @@ impl Vessel {
         let computed = trajectory.computed_until();
         let at_end = target.seconds_since(computed) >= 0.0;
         let reach = if at_end { computed } else { target };
+        // Attitude before pruning: control ticks read the inertia at epochs
+        // after the vessel's time, which the trajectory still holds.
+        let (model, dry) = (self.craft.mass, self.craft.mass.dry_mass);
+        let mass_now = dry + self.propellant;
+        let inertia_at = |e: Epoch| model.at(trajectory.mass_at(e).unwrap_or(mass_now) - dry).inertia;
+        let times = (self.time, reach);
+        let inertia_now = model.at(self.propellant).inertia;
+        let torque = self.craft.torque;
+        advance_coast(&mut self.attitude, &mut self.control, times, controls, torque, inertia_now, inertia_at);
         trajectory.prune_before(reach);
-        self.mass = trajectory.mass_at(reach).expect("the vessel's time is in its trajectory");
+        self.propellant = (trajectory.mass_at(reach).expect("the vessel's time is in its trajectory") - dry).max(0.0);
         let last = trajectory.last();
         let contact = match last.end {
             Some(SegmentEnd { kind: EndKind::Surface { body }, .. }) if at_end => Some(body),
             _ => None,
         };
-        self.advance_attitude(reach, controls);
         self.time = reach;
         if let Some(body) = contact {
             let (anchor, r, v) = self.state(world);
@@ -475,31 +556,6 @@ impl Vessel {
             let v_ground = kin.v + p.rotation.omega(self.time).raw().cross(r - kin.r);
             self.touch_down(world, body, fixed, (v - v_ground).length());
         }
-    }
-
-    /// Attitude over a coast: control ticks on the tick lattice while input or
-    /// SAS damping needs them, then torque-free rotation from the last tick.
-    /// The partial tick at the end of a frame is carried to the next one, so
-    /// 60 fps and one long jump give the same attitude bit for bit.
-    fn advance_attitude(&mut self, until: Epoch, controls: &Controls) {
-        let (input, sas) = (controls.rotate, controls.sas);
-        let (mut epoch, mut base) = self.attitude_tick.unwrap_or((self.time, self.attitude));
-        if base.needs_ticks(input, sas) {
-            // After free rotation, ticks resume at the last lattice point
-            // before the vessel's time (only when the input changes).
-            let behind = self.time.seconds_since(epoch);
-            if behind >= TICK {
-                let whole = libm::floor(behind / TICK) * TICK;
-                base = base.propagate_free(whole);
-                epoch = epoch.add_seconds(whole);
-            }
-            while base.needs_ticks(input, sas) && epoch.add_seconds(TICK) <= until {
-                base.control_tick(input, sas, self.params.max_ang_accel, TICK);
-                epoch = epoch.add_seconds(TICK);
-            }
-        }
-        self.attitude = base.propagate_free(until.seconds_since(epoch));
-        self.attitude_tick = Some((epoch, base));
     }
 
     /// Extends the current coast (if any) until `until`, with at most
@@ -523,7 +579,7 @@ impl Vessel {
                 r,
                 v,
                 drag: Some(self.drag()),
-                contact_height: self.params.contact_height,
+                contact_height: self.contact_height(),
                 horizon: COAST_HORIZON,
                 fixed_anchor: false,
             },

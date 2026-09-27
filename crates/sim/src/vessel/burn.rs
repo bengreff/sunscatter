@@ -90,10 +90,37 @@ pub enum BurnEnd {
     DeltaV(f64),
 }
 
+/// What limits planned burns: the propellant (the mass cannot drop below
+/// `dry_mass`; a burn stops at burnout), or none in debug mode (`infinite`:
+/// burns take no mass, D064). The default (no dry mass) only requires the
+/// mass to stay positive.
+#[derive(Clone, Copy, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct BurnLimits {
+    pub dry_mass: f64,
+    pub infinite: bool,
+}
+
+impl BurnLimits {
+    /// The law actually flown: no mass flow with infinite propellant.
+    pub fn effective(&self, law: BurnLaw) -> BurnLaw {
+        if self.infinite {
+            BurnLaw { mass_flow: 0.0, ..law }
+        } else {
+            law
+        }
+    }
+}
+
 impl BurnEnd {
     /// The burn's duration (s) for a vessel of mass `m0` at ignition. `None`
     /// if it cannot be flown (invalid law, or the mass would reach zero).
     pub fn duration(&self, law: &BurnLaw, m0: f64) -> Option<f64> {
+        self.duration_limited(law, m0, 0.0)
+    }
+
+    /// As [`BurnEnd::duration`], but stopping at burnout when the mass
+    /// reaches `dry_mass` (if positive).
+    pub fn duration_limited(&self, law: &BurnLaw, m0: f64, dry_mass: f64) -> Option<f64> {
         if !law.is_valid() || !(m0.is_finite() && m0 > 0.0) {
             return None;
         }
@@ -105,6 +132,7 @@ impl BurnEnd {
             }
             BurnEnd::DeltaV(dv) => dv * m0 / law.thrust,
         };
+        let d = if dry_mass > 0.0 && law.mass_flow > 0.0 { d.min((m0 - dry_mass).max(0.0) / law.mass_flow) } else { d };
         (d.is_finite() && d >= 0.0 && m0 - law.mass_flow * d > 0.0).then_some(d)
     }
 }
@@ -127,6 +155,11 @@ impl PlannedBurn {
             None => DirectionLaw::Inertial(dv),
         };
         PlannedBurn { t_start, law: BurnLaw::from_isp(thrust, isp, direction), end: BurnEnd::DeltaV(dv.length()) }
+    }
+
+    /// A burn of `dv` flown by a craft's engine (full throttle, vacuum).
+    pub fn delta_v_with(t_start: Epoch, dv: DVec3, engine: &crate::craft::Engine, tracking: Option<NodeId>) -> Self {
+        PlannedBurn::delta_v(t_start, dv, engine.thrust_vac, engine.isp_vac, tracking)
     }
 }
 
@@ -195,6 +228,26 @@ mod tests {
         }
         // No mass flow: constant acceleration.
         assert_eq!(BurnEnd::DeltaV(30.0).duration(&law(0.0), 20_000.0), Some(1.0));
+    }
+
+    #[test]
+    fn burns_stop_at_burnout() {
+        // (end, m0, dry) → duration: 100 kg/s, 5 t of propellant = 50 s.
+        let l = law(100.0);
+        let cases = [
+            (BurnEnd::Duration(20.0), 9_000.0, 4_000.0, Some(20.0)),
+            (BurnEnd::Duration(80.0), 9_000.0, 4_000.0, Some(50.0)),
+            (BurnEnd::Duration(200.0), 9_000.0, 4_000.0, Some(50.0)),
+            (BurnEnd::Duration(10.0), 4_000.0, 4_000.0, Some(0.0)),
+            (BurnEnd::DeltaV(1e6), 9_000.0, 4_000.0, Some(50.0)),
+        ];
+        for (end, m0, dry, expected) in cases {
+            assert_eq!(end.duration_limited(&l, m0, dry), expected, "{end:?}");
+        }
+        // Infinite propellant: no mass flow, the rocket equation degenerates.
+        let inf = BurnLimits { dry_mass: 4_000.0, infinite: true }.effective(l);
+        assert_eq!(inf.mass_flow, 0.0);
+        assert_eq!(BurnEnd::DeltaV(30.0).duration_limited(&inf, 20_000.0, 4_000.0), Some(1.0));
     }
 
     #[test]

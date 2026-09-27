@@ -19,7 +19,7 @@ use bevy::prelude::*;
 use bevy::render::view::screenshot::{save_to_disk, Screenshot};
 use glam::DVec3;
 use sim::kepler::Elements;
-use sim::vessel::{quat_z_to, Phase};
+use sim::vessel::{quat_z_to, Attitude, Phase};
 
 /// The zoom sweep's range (m from the ship) and frames each way.
 const ZOOM_NEAR: f64 = 50.0;
@@ -287,8 +287,7 @@ pub fn run(
     let alt = r.length() - re;
     let point = |sim: &mut SimState, dir: DVec3| {
         let a = sim.active;
-        sim.fleet[a].attitude.q = quat_z_to(dir.normalize());
-        sim.fleet[a].attitude.omega = DVec3::ZERO;
+        sim.fleet[a].set_attitude(Attitude { q: quat_z_to(dir.normalize()), omega: DVec3::ZERO });
     };
     let moon = sim.world.find("Moon").map(|s| s.node);
     match demo.step {
@@ -321,6 +320,10 @@ pub fn run(
                     demo.next(Step::ZoomSweep(0));
                 } else {
                     *settings = settings.with_preset(demo.flying_tier);
+                    // Debug mode (D064): the test craft cannot reach orbit on
+                    // its own propellant.
+                    let s = &mut *sim;
+                    s.fleet[s.active].set_debug(&s.world, true);
                     sim.controls.throttle = 1.0;
                     sim.warp = 3;
                     (rig.pitch, rig.distance) = (0.25, 40.0);
@@ -344,7 +347,8 @@ pub fn run(
         }
         Step::Ascent => {
             let up = r.normalize();
-            let pitch = (1.4 * (alt / 50_000.0).clamp(0.0, 1.0).sqrt()).min(1.35);
+            // A slow turn: the test craft lifts off at a thrust-to-weight of 1.3.
+            let pitch = (1.4 * (alt / 200_000.0).clamp(0.0, 1.0).sqrt()).min(1.35);
             point(&mut sim, up * pitch.cos() + horizontal(r, v) * pitch.sin());
             // At 10 km, look north along the Florida coast from above and
             // behind the ship: the view where the ground showed hard-edged
