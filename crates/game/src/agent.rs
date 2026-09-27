@@ -148,14 +148,27 @@ fn vessel_id(args: &Value) -> Result<VesselId, String> {
 }
 
 /// Answers one call: the result, and what the game must do.
-pub fn answer(tool: &str, args: &Value, sim: &SimState, comms: &Comms) -> (ToolResult, Vec<Effect>) {
-    match run(tool, args, sim, comms) {
+/// `prediction`: the active vessel's background coast while it flies live.
+pub fn answer(
+    tool: &str,
+    args: &Value,
+    sim: &SimState,
+    comms: &Comms,
+    prediction: Option<&sim::vessel::Segment>,
+) -> (ToolResult, Vec<Effect>) {
+    match run(tool, args, sim, comms, prediction) {
         Ok((v, effects)) => (ToolResult::Ok(v), effects),
         Err(e) => (ToolResult::Err(e), Vec::new()),
     }
 }
 
-fn run(tool: &str, args: &Value, sim: &SimState, comms: &Comms) -> Result<(Value, Vec<Effect>), String> {
+fn run(
+    tool: &str,
+    args: &Value,
+    sim: &SimState,
+    comms: &Comms,
+    prediction: Option<&sim::vessel::Segment>,
+) -> Result<(Value, Vec<Effect>), String> {
     let eph = &sim.world.eph;
     let name = |n: sim::frame::NodeId| eph.node(n).name.clone();
     Ok(match tool {
@@ -251,7 +264,7 @@ fn run(tool: &str, args: &Value, sim: &SimState, comms: &Comms) -> Result<(Value
         "go_to_mission_control" => (json!({"location": "mission control"}), vec![Effect::Station(true)]),
         "set_plan" => set_plan(args, sim, comms)?,
         "get_landing_prediction" => {
-            let hit = crate::landing::impact(sim, sim.active, None)
+            let hit = crate::landing::impact(sim, sim.active, prediction)
                 .map(|h| json!({"in_s": h.t.seconds_since(sim.clock), "speed_ms": h.speed, "body": name(h.body)}));
             (json!({"impact": hit}), Vec::new())
         }
@@ -342,6 +355,7 @@ pub fn serve(
     mut state: Local<AgentServer>,
     mut sim: ResMut<SimState>,
     comms: Res<Comms>,
+    pred: Res<crate::state::Prediction>,
     mut station: ResMut<TrackingStation>,
     mut in_flight: ResMut<crate::commands::InFlight>,
     mut commands: MessageWriter<GameCommand>,
@@ -376,7 +390,7 @@ pub fn serve(
     }
     let Some((server, _, _)) = &state.server else { return };
     for call in server.poll() {
-        let (result, effects) = answer(&call.tool, &call.arguments, &sim, &comms);
+        let (result, effects) = answer(&call.tool, &call.arguments, &sim, &comms, pred.segment.as_ref());
         for e in effects {
             match e {
                 Effect::Command(c) => {
@@ -421,14 +435,14 @@ mod tests {
         for t in tools() {
             assert_eq!(t.input_schema["type"], "object", "{}", t.name);
             // Every tool answers something (an error for missing arguments).
-            let _ = answer(&t.name, &json!({}), &sim, &comms);
+            let _ = answer(&t.name, &json!({}), &sim, &comms, None);
         }
     }
 
     #[test]
     fn state_lists_every_vessel() {
         let (sim, comms) = setup();
-        let (ToolResult::Ok(v), effects) = answer("get_state", &json!({}), &sim, &comms) else { panic!() };
+        let (ToolResult::Ok(v), effects) = answer("get_state", &json!({}), &sim, &comms, None) else { panic!() };
         assert!(effects.is_empty());
         assert_eq!(v["vessels"].as_array().unwrap().len(), sim.fleet.len());
         assert_eq!(v["active_vessel"], sim.ship().id().0);
@@ -439,10 +453,10 @@ mod tests {
         let (sim, mut comms) = setup();
         let id = sim.fleet[1].id();
         comms.signals.insert(id, None);
-        let (r, _) = answer("get_vessel", &json!({"id": id.0}), &sim, &comms);
+        let (r, _) = answer("get_vessel", &json!({"id": id.0}), &sim, &comms, None);
         assert!(matches!(r, ToolResult::Err(e) if e.contains("no signal")));
         comms.signals.insert(id, Some(comms::Signal { delay: 0.01, rate: 1e6, via: vec![] }));
-        let (r, _) = answer("get_vessel", &json!({"id": id.0}), &sim, &comms);
+        let (r, _) = answer("get_vessel", &json!({"id": id.0}), &sim, &comms, None);
         let ToolResult::Ok(v) = r else { panic!("{r:?}") };
         assert_eq!(v["about"], "Earth");
         assert!(v["altitude_m"].as_f64().unwrap() > 300_000.0);
@@ -455,26 +469,26 @@ mod tests {
         comms.location = Location::Site(0);
         comms.signals.insert(id, Some(comms::Signal { delay: 0.02, rate: 1e6, via: vec![] }));
         let args = json!({"id": id.0, "burns": [{"in_s": 600.0, "prograde": 100.0}]});
-        let (r, e) = answer("set_plan", &args, &sim, &comms);
+        let (r, e) = answer("set_plan", &args, &sim, &comms, None);
         assert!(matches!(r, ToolResult::Ok(_)), "{r:?}");
         assert!(matches!(&e[..], [Effect::Send { delay, command: GameCommand::SetPlan { .. } }] if *delay == 0.02));
         comms.signals.insert(id, None);
-        let (r, _) = answer("set_plan", &args, &sim, &comms);
+        let (r, _) = answer("set_plan", &args, &sim, &comms, None);
         assert!(matches!(r, ToolResult::Err(e) if e.contains("no signal")));
     }
 
     #[test]
     fn actions_become_commands_and_controls_need_the_crew() {
         let (sim, mut comms) = setup();
-        let (_, e) = answer("set_warp", &json!({"level": 5}), &sim, &comms);
+        let (_, e) = answer("set_warp", &json!({"level": 5}), &sim, &comms, None);
         assert_eq!(e, vec![Effect::Command(GameCommand::SetWarp(5))]);
-        let (r, _) = answer("set_warp", &json!({"level": 99}), &sim, &comms);
+        let (r, _) = answer("set_warp", &json!({"level": 99}), &sim, &comms, None);
         assert!(matches!(r, ToolResult::Err(_)));
         comms.location = Location::Site(0);
-        let (r, _) = answer("set_controls", &json!({"throttle": 1.0}), &sim, &comms);
+        let (r, _) = answer("set_controls", &json!({"throttle": 1.0}), &sim, &comms, None);
         assert!(matches!(r, ToolResult::Err(e) if e.contains("not aboard")));
         comms.location = Location::Vessel(sim.ship().id());
-        let (_, e) = answer("set_controls", &json!({"throttle": 0.5, "sas": false}), &sim, &comms);
+        let (_, e) = answer("set_controls", &json!({"throttle": 0.5, "sas": false}), &sim, &comms, None);
         assert_eq!(e, vec![Effect::Controls { throttle: Some(0.5), sas: Some(false) }]);
     }
 }
