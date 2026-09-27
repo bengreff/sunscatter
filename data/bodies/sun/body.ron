@@ -17,6 +17,8 @@
             w_rate_deg_per_day: 14.1844,
         ),
         atmosphere: None,
+        // IAU 2015 nominal solar luminosity (W): sunlight on vessels.
+        luminosity: 3.828e26,
         anchor_zone: None,
         // Its 1PN (Schwarzschild) field acts on vessels.
         relativistic: true,

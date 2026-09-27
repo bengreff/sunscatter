@@ -19,7 +19,12 @@
             w_rate_deg_per_day: 360.9856235,
         ),
         // Exponential atmosphere (prototype model), heights above the ellipsoid.
-        atmosphere: Some((rho0: 1.225, scale_height: 7200.0, top: 150000.0, p0: 101325.0)),
+        // Air: γ, mean molar mass (kg/mol), mean free path at rho0 (m, US 1976:
+        // 6.63e-8), Sutton–Graves stagnation heating constant (NASA TR R-376).
+        atmosphere: Some((
+            rho0: 1.225, scale_height: 7200.0, top: 150000.0, p0: 101325.0,
+            gamma: 1.4, molar_mass: 0.029, mean_free_path: 6.6e-8, sutton_graves_k: 1.7415e-4,
+        )),
         // Precision policy only: where Earth becomes / stops being the preferred anchor (m).
         anchor_zone: Some((enter: 1.4e9, exit: 1.6e9)),
         relativistic: false,

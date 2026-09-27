@@ -27,46 +27,9 @@ pub fn flux(lm: f64, d: f64) -> f64 {
     lm / (4.0 * PI * d * d)
 }
 
-/// Area of overlap of two discs of radii `r1`, `r2` whose centres are `d`
-/// apart (any consistent unit, here angles in radians).
-fn disc_overlap(r1: f64, r2: f64, d: f64) -> f64 {
-    if d >= r1 + r2 {
-        return 0.0;
-    }
-    if d <= (r1 - r2).abs() {
-        let r = r1.min(r2);
-        return PI * r * r;
-    }
-    let a1 = ((d * d + r1 * r1 - r2 * r2) / (2.0 * d * r1)).clamp(-1.0, 1.0).acos();
-    let a2 = ((d * d + r2 * r2 - r1 * r1) / (2.0 * d * r2)).clamp(-1.0, 1.0).acos();
-    r1 * r1 * (a1 - a1.sin() * a1.cos()) + r2 * r2 * (a2 - a2.sin() * a2.cos())
-}
-
-/// Fraction (0..1) of a star's disc visible from `at`, with the star at
-/// `star` (radius `star_r`) and sphere occluders `(centre, radius)`. Discs
-/// are compared as angles on the sky; overlapping occluders are not
-/// double-counted beyond hiding the whole disc.
-pub fn eclipse_factor(at: DVec3, star: DVec3, star_r: f64, occluders: &[(DVec3, f64)]) -> f64 {
-    let to_star = star - at;
-    let ds = to_star.length();
-    let s_ang = (star_r / ds).clamp(0.0, 1.0).asin();
-    let s_area = PI * s_ang * s_ang;
-    let mut hidden = 0.0;
-    for &(c, r) in occluders {
-        let to_c = c - at;
-        let dc = to_c.length();
-        // Behind us, farther than the star, or containing the point: skip
-        // (a point inside a body is its surface; the body itself is lit by
-        // the shader's Lambert term, not eclipsed).
-        if dc <= r || dc >= ds || to_c.dot(to_star) <= 0.0 {
-            continue;
-        }
-        let o_ang = (r / dc).clamp(0.0, 1.0).asin();
-        let sep = to_c.normalize().dot(to_star / ds).clamp(-1.0, 1.0).acos();
-        hidden += disc_overlap(s_ang, o_ang, sep);
-    }
-    (1.0 - hidden / s_area).clamp(0.0, 1.0)
-}
+/// Fraction (0..1) of a star's disc visible from a point: the one eclipse
+/// rule, owned by `sim::light` (vessel heating uses it too).
+pub use sim::light::eclipse_factor;
 
 /// Lambert-sphere phase function: reflected light at phase angle `alpha`
 /// relative to full phase (1 at alpha = 0, 0 at alpha = π).

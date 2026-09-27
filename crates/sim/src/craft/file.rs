@@ -17,6 +17,7 @@ pub struct CraftFile {
     pub engine: EngineFile,
     pub attitude_control: AttitudeControlFile,
     pub chute: ChuteFile,
+    pub aero: AeroFile,
     pub thermal: ThermalLimits,
     pub impact: ImpactLimits,
     pub contact: ContactFile,
@@ -74,12 +75,26 @@ pub struct ChuteFile {
     pub mount: DVec3,
 }
 
-/// Temperature limits (D065): exceeding either destroys the craft.
+/// Aerodynamic data the cells cannot give (D061, `sim::aero`).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AeroFile {
+    /// Subsonic drag coefficient on the projected area (blunt bodies ≈ 0.8).
+    pub cd0: f64,
+}
+
+/// Temperature limits (D065): exceeding either destroys the craft; and the
+/// internal node of the thermal network (`sim::thermal`).
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ThermalLimits {
     pub skin_max_k: f64,
     pub internal_max_k: f64,
+    /// Heat capacity of the interior (J/K).
+    pub internal_capacity: f64,
+    /// Conductance from each skin cell to the interior per unit of the
+    /// cell's area (W/(m²·K)).
+    pub internal_coupling: f64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -270,6 +285,11 @@ pub fn validate_craft(c: &CraftFile) -> Result<(), String> {
     finite_vec("chute.mount", c.chute.mount)?;
     positive("thermal.skin_max_k", c.thermal.skin_max_k)?;
     positive("thermal.internal_max_k", c.thermal.internal_max_k)?;
+    positive("thermal.internal_capacity", c.thermal.internal_capacity)?;
+    if !(c.thermal.internal_coupling.is_finite() && c.thermal.internal_coupling >= 0.0) {
+        return Err(format!("thermal.internal_coupling must be non-negative, got {}", c.thermal.internal_coupling));
+    }
+    positive("aero.cd0", c.aero.cd0)?;
     positive("impact.max_speed", c.impact.max_speed)?;
     for (what, sp) in [("contact.foot", &c.contact.foot), ("contact.hull", &c.contact.hull)] {
         positive(&format!("{what}.stiffness"), sp.stiffness)?;

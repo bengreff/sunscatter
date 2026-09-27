@@ -87,6 +87,9 @@ struct PhysicalFile {
     /// Rails warp is disabled below this altitude (m, D062).
     #[serde(default)]
     rails_floor: f64,
+    /// Radiated power of a star (W).
+    #[serde(default)]
+    luminosity: f64,
 }
 
 #[derive(Deserialize)]
@@ -135,6 +138,7 @@ pub fn parse_body(text: &str, dir: &Path) -> Result<BodyDef, DataError> {
             terrain: None,
             detail: None,
             rails_floor: p.rails_floor,
+            luminosity: p.luminosity,
         },
         anchor_zone: p.anchor_zone,
         relativistic: p.relativistic,
@@ -214,7 +218,16 @@ mod tests {
                     w0: 190.147 * DEG,
                     w_rate: 360.985_623_5 * DEG / 86_400.0,
                 },
-                Some(Atmosphere { rho0: 1.225, scale_height: 7_200.0, top: 150_000.0, p0: 101_325.0 }),
+                Some(Atmosphere {
+                    rho0: 1.225,
+                    scale_height: 7_200.0,
+                    top: 150_000.0,
+                    p0: 101_325.0,
+                    gamma: 1.4,
+                    molar_mass: 0.029,
+                    mean_free_path: 6.6e-8,
+                    sutton_graves_k: 1.7415e-4,
+                }),
                 true,
                 Some(0.0),
             ),
@@ -268,6 +281,7 @@ mod tests {
             terrain: None,
             detail: None,
             rails_floor: 0.0,
+            luminosity: if name == "Sun" { 3.828e26 } else { 0.0 },
         }
     }
 

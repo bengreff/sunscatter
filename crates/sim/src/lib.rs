@@ -22,6 +22,7 @@ pub mod frame;
 pub mod gen;
 pub mod integrate;
 pub mod kepler;
+pub mod light;
 pub mod math;
 pub mod relativity;
 pub mod rigid;

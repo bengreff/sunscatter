@@ -70,7 +70,7 @@ struct TerrainParams {
 const PI: f32 = 3.14159265;
 
 // Area of overlap of two discs (radii r1, r2, centres d apart); mirrors
-// `lighting::disc_overlap` (tested there).
+// `sim::light::disc_overlap` (tested there).
 fn disc_overlap(r1: f32, r2: f32, d: f32) -> f32 {
     if d >= r1 + r2 {
         return 0.0;
@@ -85,7 +85,7 @@ fn disc_overlap(r1: f32, r2: f32, d: f32) -> f32 {
 }
 
 // Fraction of the star's disc visible from `p` past the occluder; mirrors
-// `lighting::eclipse_factor`.
+// `sim::light::eclipse_factor`.
 fn eclipse(p: vec3<f32>) -> f32 {
     let r = terrain.occluder.w;
     if r <= 0.0 {

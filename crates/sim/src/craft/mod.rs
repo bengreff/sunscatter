@@ -5,14 +5,16 @@
 //! module owns everything derived from those files at load.
 
 pub mod cells;
+pub mod design;
 pub mod engine;
 pub mod file;
 pub mod mass;
 pub mod mesh;
 
 pub use cells::{Cell, CellOptions, Cells, ContactKind, ContactPoint, Neighbour};
+pub use design::{design_of, CraftDesign, DesignSlot};
 pub use engine::{Engine, EngineOutput};
-pub use file::{ContactFile, CraftFile, GeometryFile, Primitive, Shape, Skin, Spring, Tank};
+pub use file::{AeroFile, ContactFile, CraftFile, GeometryFile, Primitive, Shape, Skin, Spring, Tank, ThermalLimits};
 pub use mass::{MassModel, MassProps};
 pub use mesh::{RenderMesh, Resolution, Surface};
 
@@ -44,6 +46,8 @@ pub struct Craft {
     pub cells: Cells,
     /// Dry shell and tank, for mass properties at any fill.
     pub mass: MassModel,
+    /// The aerodynamic bake and thermal network, built on first use.
+    design: DesignSlot,
 }
 
 impl Craft {
@@ -53,31 +57,33 @@ impl Craft {
         let cells = cells::build_cells(&surface, &geometry.primitives, &geometry.skin, opts);
         let g = &geometry;
         let mass = MassModel::new(&surface, &g.primitives, &g.skin, spec.dry_mass, &g.tank, spec.propellant.capacity);
-        Craft { id, spec, mesh: surface.render_mesh(), surface, cells, geometry, mass }
+        Craft { id, spec, mesh: surface.render_mesh(), surface, cells, geometry, mass, design: DesignSlot::default() }
+    }
+
+    /// The design's aerodynamic bake and thermal network (built once).
+    pub fn design(&self) -> &std::sync::Arc<CraftDesign> {
+        self.design.get_or_init(|| std::sync::Arc::new(CraftDesign::new(self)))
     }
 
     /// The parameters a vessel of this craft carries.
     pub fn params(&self) -> CraftParams {
         let s = &self.surface;
-        // Area facing along Z of a closed surface: ½ Σ |n_z| a.
-        let projected: f64 = (0..s.triangles.len())
-            .map(|t| {
-                let (_, n, a) = s.triangle(t);
-                0.5 * n.z.abs() * a
-            })
-            .sum();
+        let design = self.design().clone();
         CraftParams {
             id: self.id.clone(),
             engine: Engine::from_file(&self.spec.engine),
             mass: self.mass,
             torque: self.spec.attitude_control.torque,
-            cd_area: projected,
+            cd_area: design.mean_drag_area,
             chute_cd_area: self.spec.chute.cd_area,
+            chute_mount: self.spec.chute.mount,
+            thermal: self.spec.thermal,
             impact_max_speed: self.spec.impact.max_speed,
             contact: self.spec.contact,
             contacts: self.cells.contacts.clone(),
             bottom_z: s.positions.iter().map(|p| p.z).fold(f64::MAX, f64::min),
             initial_propellant: self.spec.propellant.mass,
+            design: DesignSlot::filled(design),
         }
     }
 }
@@ -91,12 +97,16 @@ pub struct CraftParams {
     pub mass: MassModel,
     /// Attitude-control torque authority per body axis (N·m).
     pub torque: glam::DVec3,
-    /// Hull drag area Cd·A (m²): the area facing along the body axis, ½ Σ |n_z| a
-    /// (the silhouette for a convex hull, a little more for this one) with
-    /// Cd = 1. A placeholder until the cell aerodynamics of realism-1 §5.
+    /// Attitude-independent hull drag area Cd·A (m²) of coasts and
+    /// predictions: [`CraftDesign::mean_drag_area`]. Live ticks use the
+    /// full aerodynamics of the design.
     pub cd_area: f64,
     /// Parachute Cd·A when deployed (m²).
     pub chute_cd_area: f64,
+    /// Where the parachute pulls (body axes, m).
+    pub chute_mount: glam::DVec3,
+    /// Temperature limits and the interior's heat capacity and coupling.
+    pub thermal: ThermalLimits,
     /// Highest touchdown speed that is not a crash (m/s; D066 refines it
     /// per contact point).
     pub impact_max_speed: f64,
@@ -108,9 +118,18 @@ pub struct CraftParams {
     pub bottom_z: f64,
     /// Propellant loaded at the start (kg).
     pub initial_propellant: f64,
+    /// The design's bake and thermal network: never saved, rebuilt from
+    /// the craft's files after a load.
+    #[serde(skip)]
+    pub design: DesignSlot,
 }
 
 impl CraftParams {
+    /// The design's aerodynamic bake and thermal network.
+    pub fn design(&self) -> &std::sync::Arc<CraftDesign> {
+        self.design.get(&self.id)
+    }
+
     /// Height of the centre of mass above the ground when standing (m).
     pub fn contact_height(&self, propellant: f64) -> f64 {
         self.mass.at(propellant).com.z - self.bottom_z
@@ -183,14 +202,16 @@ mod tests {
         assert_eq!((s.engine.min_throttle, s.engine.gimbal_deg), (0.1, 5.0));
         assert_eq!(s.attitude_control.torque, glam::DVec3::new(40e3, 40e3, 20e3));
         assert_eq!((s.chute.cd_area, s.thermal.skin_max_k, s.thermal.internal_max_k), (600.0, 1100.0, 400.0));
+        assert_eq!((s.aero.cd0, s.thermal.internal_capacity, s.thermal.internal_coupling), (0.8, 4.0e6, 2.0));
         assert_eq!((s.impact.max_speed, s.antenna.gain_dbi, s.antenna.power_w), (8.0, 20.0, 20.0));
         assert_eq!(c.geometry.primitives.iter().filter(|p| p.foot).count(), 4);
         let p = c.params();
         assert_eq!(p.bottom_z, -4.6);
-        // At least the silhouette seen end on: the body's disc (π·2²) and the
-        // feet (4 × π·0.3²); the bell and legs overlap it.
+        // The mean hypersonic drag area: Cp,max/2 ≈ 0.92 on the mean
+        // projected area, which lies between the end-on silhouette (the
+        // body's disc π·2² and the feet) and the side view (~4 m × 8 m).
         let silhouette = std::f64::consts::PI * (4.0 + 4.0 * 0.09);
-        assert!(p.cd_area > silhouette && p.cd_area < 1.25 * silhouette, "{} vs {silhouette}", p.cd_area);
+        assert!(p.cd_area > 0.92 * silhouette && p.cd_area < 0.92 * 40.0, "{} vs {silhouette}", p.cd_area);
         assert!(p.contact_height(16000.0) > 2.0 && p.contact_height(16000.0) < p.contact_height(0.0));
     }
 
@@ -205,6 +226,8 @@ mod tests {
             (("min_throttle: 0.1", "min_throttle: 0.0"), ("", ""), CRAFT_FILE, "min_throttle"),
             (("dir: (0.0, 0.0, 1.0)", "dir: (0.0, 0.0, 0.0)"), ("", ""), CRAFT_FILE, "mount.dir"),
             (("crew: 3,", "crew: 3, wings: 2,"), ("", ""), CRAFT_FILE, "wings"),
+            (("cd0: 0.8", "cd0: 0.0"), ("", ""), CRAFT_FILE, "aero.cd0"),
+            (("internal_capacity: 4.0e6", "internal_capacity: -1.0"), ("", ""), CRAFT_FILE, "internal_capacity"),
             (("", ""), ("radius: 1.8", "radius: 0.0"), GEOMETRY_FILE, "tank.radius"),
             (("", ""), ("emissivity: 0.8", "emissivity: 1.5"), GEOMETRY_FILE, "emissivity"),
             (("", ""), ("height: 0.35", "height: 2.0"), GEOMETRY_FILE, "height"),

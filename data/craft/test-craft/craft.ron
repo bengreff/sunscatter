@@ -15,7 +15,14 @@
     ),
     attitude_control: (torque: (40.0e3, 40.0e3, 20.0e3)),  // N·m per body axis (abstract RCS/wheels)
     chute: (cd_area: 600.0, deploy_max_q: 40.0e3, mount: (0.0, 0.0, 3.2)),
-    thermal: (skin_max_k: 1100.0, internal_max_k: 400.0),   // D065: clean destruction
+    aero: (cd0: 0.8),                // subsonic Cd on the projected area (blunt body)
+    // D065: clean destruction above either limit. The interior: 4 t of dry
+    // structure and equipment at ~1 kJ/(kg·K) (the propellant is not
+    // counted: insulated tanks). Skin to interior through insulation and
+    // structure at 2 W/(m²·K): with ~150 m² of skin a time constant of
+    // ~4 h, so an entry (minutes) barely warms it and a day in the sun
+    // settles it.
+    thermal: (skin_max_k: 1100.0, internal_max_k: 400.0, internal_capacity: 4.0e6, internal_coupling: 2.0),
     impact: (max_speed: 8.0),        // m/s at any contact point, beyond the gear's stroke
     // Ground contact (D066). Feet: 20 t on four feet sink ~12 cm on Earth
     // (~2 cm on the Moon), damped at ζ ≈ 0.7 per foot; the stroke stops 5 cm

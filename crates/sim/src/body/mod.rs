@@ -73,7 +73,9 @@ impl Rotation {
     }
 }
 
-/// Exponential atmosphere (prototype model).
+/// Exponential atmosphere (prototype model), and the air's properties the
+/// aerodynamics and heating need (`sim::aero::air`, `sim::thermal`). The
+/// air fields default to Earth air.
 #[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Atmosphere {
     /// Sea-level density (kg/m³).
@@ -86,6 +88,34 @@ pub struct Atmosphere {
     /// back pressure). Zero if not given.
     #[serde(default)]
     pub p0: f64,
+    /// Ratio of specific heats.
+    #[serde(default = "air_defaults::gamma")]
+    pub gamma: f64,
+    /// Mean molar mass (kg/mol).
+    #[serde(default = "air_defaults::molar_mass")]
+    pub molar_mass: f64,
+    /// Mean free path at `rho0` (m); λ ∝ 1/ρ.
+    #[serde(default = "air_defaults::mean_free_path")]
+    pub mean_free_path: f64,
+    /// Sutton–Graves stagnation heating constant (SI, `thermal::sutton_graves`).
+    #[serde(default = "air_defaults::sutton_graves_k")]
+    pub sutton_graves_k: f64,
+}
+
+/// Earth air: the defaults of [`Atmosphere`]'s air fields.
+mod air_defaults {
+    pub fn gamma() -> f64 {
+        crate::aero::air::EARTH_AIR_GAMMA
+    }
+    pub fn molar_mass() -> f64 {
+        crate::aero::air::EARTH_AIR_MOLAR_MASS
+    }
+    pub fn mean_free_path() -> f64 {
+        crate::aero::air::EARTH_MEAN_FREE_PATH_SL
+    }
+    pub fn sutton_graves_k() -> f64 {
+        crate::thermal::heating::SUTTON_GRAVES_EARTH
+    }
 }
 
 impl Atmosphere {
@@ -104,6 +134,17 @@ impl Atmosphere {
         } else {
             self.rho0 * math::exp(-altitude.max(0.0) / self.scale_height)
         }
+    }
+
+    /// Temperature (K) of the isothermal atmosphere this scale height
+    /// implies, for surface gravity `g0` (m/s²).
+    pub fn temperature(&self, g0: f64) -> f64 {
+        crate::aero::air::isothermal_temperature(self.scale_height, g0, self.molar_mass)
+    }
+
+    /// Mean free path (m) at density `rho` (infinite in vacuum).
+    pub fn mean_free_path_at(&self, rho: f64) -> f64 {
+        crate::aero::air::mean_free_path(self.mean_free_path, self.rho0, rho)
     }
 }
 
@@ -129,6 +170,8 @@ pub struct BodyPhysical {
     /// Rails warp is not allowed below this altitude above the reference
     /// (m; D062), chosen by [`rails_floor_rule`]. 0 for bodies without one.
     pub rails_floor: f64,
+    /// Radiated power (W): non-zero for stars (sunlight on vessels).
+    pub luminosity: f64,
 }
 
 /// Margin above the highest terrain for the rails floor of an airless body (m).
