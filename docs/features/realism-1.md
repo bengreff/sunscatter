@@ -66,6 +66,7 @@ The heightmaps are 4.9 km per sample on Earth and 2.7 km on the Moon; the render
 - Add a demo step **ZoomSweep**: from 50 m to 20,000 km over the pad, in 40 frames, a screenshot every frame, at the High tier. The lead looks at the frames (or a subagent reviews them and reports).
 - Suspects, in order: specular highlights on the new water waves and bloom (whitish, bright); chunk swaps before geomorphing completes; the atmosphere's mode switch near its top; depth precision.
 - Rule (D058): whichever feature causes it is simplified (e.g. clamp wave specular, or drop bloom below High) rather than tuned at length.
+- **Found (2026-09-26):** holes in the terrain, through which Bevy's atmosphere draws its grey ground: chunks were switched to children the frame they were installed (their entities only exist a frame later), and chunks past the horizon skipped the sag rule (their neighbours' skirts stood as walls). Also: the Sun flare's streak and ghosts (removed), the sun glint taking the shape of coarse triangles (water now uses the sphere normal), and orbit lines through the camera plane (clipped). The sweep (`SUNSCATTER_DEMO_ZOOM=<tier>`) is clean at Medium and High, zooming out and in.
 
 ### 1d. Navball rim and Time to Ap flicker when landed
 
@@ -322,7 +323,7 @@ Scenario test: from a 15 km lunar orbit periapsis, a scripted descent lands upri
 
 ## Build order (check off as done)
 
-1. [ ] 1d navball flicker (test first), 1c zoom sweep step and fix, 1a haze + setting + dark horizon, 1b terrain detail (sim first, then LOD and colour).
+1. [x] 1d navball flicker (test first), 1c zoom sweep step and fix, 1a haze + setting + dark horizon, 1b terrain detail (sim first, then LOD). Still open: 1b's matching colour detail in the shader; the haze default awaits the owner's look.
 2. [ ] Foundation: sim 3, sim 2, sim 1, sim 4; `VesselId`; `GameCommand` + `InputContext`; `Dominance`/`ActiveFlight`/`VesselLines` resources; tracked vessels' lines; sim 11 (`Trajectory`, burn segments, mass in the state).
 3. [ ] Test craft: files and loader, cells and mass properties, engine, rigid body, debug mode, contact, UI.
 4. [ ] Proper time; control locations; sites and comm network; delayed telemetry and commands; probes in F2.
