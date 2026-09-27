@@ -20,7 +20,7 @@ pub(super) fn shape(shapes: &[Shape]) -> (Surface, Cells) {
 }
 
 /// A unit sphere at the origin (two hemispheres).
-fn sphere() -> &'static AeroBake {
+pub(super) fn sphere() -> &'static AeroBake {
     static B: OnceLock<AeroBake> = OnceLock::new();
     B.get_or_init(|| {
         let cap = |axis: DVec3| Shape::SphereCap { center: DVec3::ZERO, axis, radius: 1.0, height: 1.0 };

@@ -39,8 +39,16 @@ fn main() {
     for i in 0..n {
         let a = i as f64 * 1e-3;
         let dir = DVec3::new(sim::math::sin(a) * 0.2, 0.1, -1.0).normalize();
-        let flow =
-            Flow { dir, q: 20e3, mach: 12.0, knudsen: 1e-4, gamma: 1.4, reynolds_per_m: 1e6, temperature: 230.0 };
+        let flow = Flow {
+            dir,
+            q: 20e3,
+            mach: 12.0,
+            knudsen: 1e-4,
+            gamma: 1.4,
+            reynolds_per_m: 1e6,
+            temperature: 230.0,
+            speed: 3600.0,
+        };
         let (f, m) = aero_forces(&b, &flow, 0.8);
         sink += f + m;
         let input = HeatInput { flow_dir: dir, q_stag: 1e6, sun: DVec3::new(1361.0, 0.0, 0.0) };
@@ -58,8 +66,16 @@ fn main() {
         println!("  {what}: {:.1} µs", clock.elapsed().as_secs_f64() * 1e6 / n as f64);
     };
     time("aero_forces", &mut || {
-        let flow =
-            Flow { dir, q: 20e3, mach: 12.0, knudsen: 1e-4, gamma: 1.4, reynolds_per_m: 1e6, temperature: 230.0 };
+        let flow = Flow {
+            dir,
+            q: 20e3,
+            mach: 12.0,
+            knudsen: 1e-4,
+            gamma: 1.4,
+            reynolds_per_m: 1e6,
+            temperature: 230.0,
+            speed: 3600.0,
+        };
         sink += aero_forces(&b, &flow, 0.8).0;
     });
     let input = HeatInput { flow_dir: dir, q_stag: 1e6, sun: DVec3::new(1361.0, 0.0, 0.0) };

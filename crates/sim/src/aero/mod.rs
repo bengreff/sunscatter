@@ -5,7 +5,10 @@
 //! are pure. The runtime blends three regimes:
 //!
 //! * **Hypersonic continuum (M ≥ 5):** modified Newtonian, Cp = Cp,max·sin²θ
-//!   on exposed cells, Cp,max from the Rayleigh pitot formula ([`air::cp_max`]).
+//!   on exposed cells, Cp,max from the Rayleigh pitot formula ([`air::cp_max`])
+//!   with the effective γ of equilibrium air behind the shock at the
+//!   flight speed ([`air::real_gas_gamma`]: Cp,max 1.84 → ≈ 1.93 at
+//!   11 km/s).
 //! * **Subsonic (M < 0.8):** pressure drag q·Cd₀·A along the flow (A the
 //!   projected area, Cd₀ a craft property; blunt bodies ≈ 0.8): the Newtonian pressure
 //!   distribution scaled to that drag, so the centre of pressure is the
@@ -66,6 +69,9 @@ pub struct Flow {
     pub reynolds_per_m: f64,
     /// Free-stream static temperature (K).
     pub temperature: f64,
+    /// Airspeed (m/s), for the real-gas stagnation pressure; zero: a
+    /// perfect gas.
+    pub speed: f64,
 }
 
 /// Wilmoth's rarefied bridging weight: C = C_cont + (C_fm − C_cont)·b with
@@ -91,10 +97,13 @@ fn lift_weight(mach: f64) -> f64 {
 }
 
 /// Continuum pressure force and moment per unit q (friction apart).
-fn continuum(bake: &AeroBake, s: &DirSums, d: DVec3, mach: f64, gamma: f64, cd0: f64) -> (DVec3, DVec3) {
+fn continuum(bake: &AeroBake, s: &DirSums, d: DVec3, flow: &Flow, cd0: f64) -> (DVec3, DVec3) {
+    let (mach, gamma) = (flow.mach, flow.gamma);
     let newtonian = |cp: f64| (s.newton * cp, s.newton_moment * cp);
+    // Newtonian with the equilibrium-air stagnation pressure at entry speeds.
+    let g_eff = air::real_gas_gamma(gamma, flow.speed);
     if mach >= HYPERSONIC_MACH {
-        return newtonian(air::cp_max(gamma, mach));
+        return newtonian(air::cp_max(g_eff, mach));
     }
     // Subsonic: the Newtonian distribution scaled so its drag is Cd₀·A
     // (the centre of pressure stays the shape's); where that scale exceeds
@@ -111,7 +120,7 @@ fn continuum(bake: &AeroBake, s: &DirSums, d: DVec3, mach: f64, gamma: f64, cd0:
     let (mut f, mut m) = if mach < 1.2 {
         sub
     } else {
-        let hyper = newtonian(air::cp_max(gamma, HYPERSONIC_MACH));
+        let hyper = newtonian(air::cp_max(g_eff, HYPERSONIC_MACH));
         let w = (mach - 1.2) / (HYPERSONIC_MACH - 1.2);
         (sub.0 + (hyper.0 - sub.0) * w, sub.1 + (hyper.1 - sub.1) * w)
     };
@@ -149,7 +158,7 @@ pub fn aero_forces(bake: &AeroBake, flow: &Flow, cd0: f64) -> (DVec3, DVec3) {
     }
     let d = flow.dir.normalize();
     let s = bake.sums_at(d);
-    let (f_cont, m_cont) = continuum(bake, &s, d, flow.mach, flow.gamma, cd0);
+    let (f_cont, m_cont) = continuum(bake, &s, d, flow, cd0);
     let plate = friction::Plate::new(flow.reynolds_per_m, flow.mach, flow.gamma, flow.temperature);
     let (f_fr, m_fr) = friction::friction(&bake.geometry, d, &plate);
     let (f_cont, m_cont) = (f_cont + f_fr, m_cont + m_fr);

@@ -160,3 +160,33 @@ fn a_blunt_body_keeps_a_large_drag_rise_and_a_slender_one_a_small() {
     println!("Sears–Haack: C_D {sub:.3} → {sup:.3}");
     assert!((sup - sub - 0.111).abs() < 0.02, "{sub} {sup}");
 }
+
+#[test]
+fn a_sphere_at_lunar_return_speed_has_the_real_gas_newtonian_drag() {
+    // Cd = Cp,max/2: 0.92 for a perfect gas, ≈ 0.96 in equilibrium air at
+    // 11 km/s (Cp,max ≈ 2 − 1/14.2).
+    let b = super::tests::sphere();
+    let mut f = flow(DVec3::Z, 36.0, 1e-5);
+    f.speed = 11_000.0;
+    let cd = aero_forces(b, &f, 0.8).0.z / (f.q * math::PI);
+    let want = air::cp_max(air::real_gas_gamma(1.4, 11_000.0), 36.0) / 2.0;
+    assert!(want > 0.95 && (cd / want - 1.0).abs() < 0.03, "{cd} vs {want}");
+}
+
+#[test]
+fn an_apollo_like_capsule_at_its_trim_incidence_has_apollo_lift_to_drag() {
+    // Apollo command module: L/D ≈ 0.3 at its hypersonic trim, α ≈ 20°
+    // (flight: Hillje, "Entry Aerodynamics at Lunar Return Conditions
+    // Obtained from the Flight of Apollo 4", NASA TN D-5399, 1969).
+    let b = super::tests::capsule();
+    for mach in [10.0, 30.0] {
+        let a = 20f64.to_radians();
+        let mut f = flow(DVec3::new(math::sin(a), 0.0, math::cos(a)), mach, 1e-5);
+        f.speed = mach * 300.0;
+        let force = aero_forces(b, &f, 0.8).0;
+        let drag = force.dot(f.dir);
+        let lift = (force - f.dir * drag).length();
+        println!("capsule α 20°, M {mach}: L/D {:.3}", lift / drag);
+        assert!((lift / drag - 0.3).abs() < 0.05, "{}", lift / drag);
+    }
+}

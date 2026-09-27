@@ -50,6 +50,53 @@ pub fn knudsen(mean_free_path: f64, length: f64) -> f64 {
     mean_free_path / length
 }
 
+/// Density ratio ρ₂/ρ₁ across a strong normal shock in equilibrium air
+/// against the flight speed (m/s): dissociation and ionisation soak up
+/// the energy, and the gas behind the shock is far denser than a γ = 1.4
+/// gas's 6. Approximate readings of the equilibrium normal-shock curves
+/// for altitudes of 50–60 km (Anderson, *Hypersonic and High-Temperature
+/// Gas Dynamics*, ch. 14, after Hansen's equilibrium-air properties; ±10 %,
+/// the ratio grows a little with altitude, which is left out: Cp,max ≈
+/// 2 − ρ₁/ρ₂ moves by under 1 % over an entry's altitudes).
+const SHOCK_DENSITY_RATIO: [(f64, f64); 12] = [
+    (2_000.0, 6.0),
+    (3_000.0, 6.8),
+    (4_000.0, 8.0),
+    (5_000.0, 9.3),
+    (6_000.0, 10.3),
+    (7_000.0, 11.2),
+    (8_000.0, 11.8),
+    (9_000.0, 12.4),
+    (10_000.0, 13.2),
+    (11_000.0, 14.2),
+    (12_000.0, 15.0),
+    (16_000.0, 16.5),
+];
+
+/// Equilibrium-air normal-shock density ratio at `speed` (m/s): the
+/// table, linear between entries, 6 below 2 km/s, the last value above.
+pub fn shock_density_ratio(speed: f64) -> f64 {
+    let t = &SHOCK_DENSITY_RATIO;
+    if speed <= t[0].0 {
+        return t[0].1;
+    }
+    let k = t.partition_point(|e| e.0 <= speed);
+    if k >= t.len() {
+        return t[t.len() - 1].1;
+    }
+    let (a, b) = (t[k - 1], t[k]);
+    a.1 + (b.1 - a.1) * (speed - a.0) / (b.0 - a.0)
+}
+
+/// The effective ratio of specific heats for the stagnation pressure at
+/// entry speeds: the γ whose strong-shock density ratio (γ+1)/(γ−1) is
+/// equilibrium air's at `speed`, ε = ρ₁/ρ₂, γ_eff = (1+ε)/(1−ε), never
+/// above the gas's own `gamma` (a perfect gas below ~2 km/s).
+pub fn real_gas_gamma(gamma: f64, speed: f64) -> f64 {
+    let eps = 1.0 / shock_density_ratio(speed);
+    ((1.0 + eps) / (1.0 - eps)).min(gamma)
+}
+
 /// Stagnation pressure coefficient behind a normal shock (Rayleigh pitot
 /// formula), Cp,max = (p₀₂/p₁ − 1) / (½γM²), for M ≥ 1 (clamped):
 /// p₀₂/p₁ = [(γ+1)²M² / (4γM² − 2(γ−1))]^(γ/(γ−1)) · (1 − γ + 2γM²)/(γ+1).
@@ -101,6 +148,28 @@ mod tests {
         // US 1976 Table I: 1.7894e-5 at sea level, 1.4216e-5 at 216.65 K.
         assert!((sutherland_viscosity(288.15) / 1.7894e-5 - 1.0).abs() < 1e-4);
         assert!((sutherland_viscosity(216.65) / 1.4216e-5 - 1.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn real_gas_stagnation_pressure_at_entry_speeds() {
+        // At lunar-return speed Cp,max ≈ 1.9–2.0 (≈ 2 − ρ₁/ρ₂ for a strong
+        // shock; Anderson, Hypersonic and High-Temperature Gas Dynamics,
+        // §3.2 and ch. 14), against 1.84 for a perfect gas.
+        let cp = |v: f64, m: f64| cp_max(real_gas_gamma(EARTH_AIR_GAMMA, v), m);
+        let lunar = cp(11_000.0, 36.0);
+        assert!(lunar > 1.9 && lunar < 2.0, "{lunar}");
+        assert!((lunar - (2.0 - 1.0 / 14.2)).abs() < 0.01, "{lunar}");
+        // Low speed: the perfect gas.
+        assert_eq!(real_gas_gamma(1.4, 1_000.0), 1.4);
+        assert!((cp(1_500.0, 5.0) - cp_max(1.4, 5.0)).abs() < 1e-15);
+        // Rising with speed, continuous.
+        let mut last = 0.0;
+        for k in 0..200 {
+            let v = 1_000.0 + 100.0 * k as f64;
+            let c = cp(v, v / 300.0);
+            assert!(c >= last - 1e-12, "{v}");
+            last = c;
+        }
     }
 
     #[test]

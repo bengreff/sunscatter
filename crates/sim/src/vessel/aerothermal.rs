@@ -247,6 +247,7 @@ pub struct AeroTick<'a> {
     gamma: f64,
     reynolds_per_m: f64,
     temperature: f64,
+    speed: f64,
     /// Centre of mass (body axes).
     com: DVec3,
     /// Parachute: Cd·A (m²) and mount (body axes), if deployed.
@@ -269,6 +270,7 @@ impl<'a> AeroTick<'a> {
             gamma: air.gamma,
             reynolds_per_m: air.rho * speed / aero::air::sutherland_viscosity(air.temperature),
             temperature: air.temperature,
+            speed,
             com,
             chute,
         })
@@ -277,8 +279,17 @@ impl<'a> AeroTick<'a> {
     /// The flow in body axes for attitude `q` (body → inertial).
     pub fn flow(&self, q: DQuat) -> Flow {
         let dir = (q.inverse() * self.wind_dir).normalize();
-        let (reynolds_per_m, temperature) = (self.reynolds_per_m, self.temperature);
-        Flow { dir, q: self.q, mach: self.mach, knudsen: self.knudsen, gamma: self.gamma, reynolds_per_m, temperature }
+        let (reynolds_per_m, temperature, speed) = (self.reynolds_per_m, self.temperature, self.speed);
+        Flow {
+            dir,
+            q: self.q,
+            mach: self.mach,
+            knudsen: self.knudsen,
+            gamma: self.gamma,
+            reynolds_per_m,
+            temperature,
+            speed,
+        }
     }
 
     /// Hull force (body axes, N) and total torque about the centre of mass
