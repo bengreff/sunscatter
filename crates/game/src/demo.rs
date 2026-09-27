@@ -663,3 +663,29 @@ pub fn run(
         }
     }
 }
+
+/// In the demo, a shader that fails to compile fails the run (they were only
+/// logged: a reserved word once silently removed all terrain).
+pub struct PipelineGuardPlugin;
+
+impl Plugin for PipelineGuardPlugin {
+    fn build(&self, app: &mut App) {
+        if let Some(render_app) = app.get_sub_app_mut(bevy::render::RenderApp) {
+            render_app.add_systems(bevy::render::Render, fail_on_shader_errors);
+        }
+    }
+}
+
+fn fail_on_shader_errors(cache: Res<bevy::render::render_resource::PipelineCache>) {
+    use bevy::render::render_resource::CachedPipelineState;
+    use bevy::shader::ShaderCacheError;
+    for p in cache.pipelines() {
+        if let CachedPipelineState::Err(
+            e @ (ShaderCacheError::ProcessShaderError(_) | ShaderCacheError::CreateShaderModule(_)),
+        ) = &p.state
+        {
+            error!("demo: a shader failed to compile: {e}");
+            std::process::exit(3);
+        }
+    }
+}

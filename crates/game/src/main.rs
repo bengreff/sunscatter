@@ -154,8 +154,11 @@ fn main() {
             )
                 .chain()
                 .after(hud::draw),
-        )
-        .run();
+        );
+    if demo_mode {
+        app.add_plugins(demo::PipelineGuardPlugin);
+    }
+    app.run();
 }
 
 /// The game's resources and messages (before the saved settings replace
