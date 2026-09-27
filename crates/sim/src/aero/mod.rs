@@ -17,6 +17,12 @@
 //!   ≈ 0.8 subsonic to ≈ 1.3 at M 1.2); **1.2–5:** linear in M to the
 //!   hypersonic force and moment. FAR-style area-distribution drag rise
 //!   is later.
+//! * **Slender bodies and fins** ([`slender`]), full to M 4 and faded out
+//!   by M 5 (where Newtonian takes over): where the craft is slender along
+//!   the flow, the slender-body normal force (Munk's potential term and
+//!   Allen–Perkins crossflow, per section along the long axis) with the
+//!   drag as an axial force replaces the distribution's force; fins add
+//!   finite-wing lift.
 //! * **Skin friction** ([`friction`]) on the wetted cells, in every
 //!   continuum regime: a compressible flat plate per cell.
 //! * **Rarefied:** free molecular (fully accommodating, cold wall: the
@@ -30,6 +36,7 @@ pub mod air;
 pub mod bake;
 pub mod friction;
 pub mod geodesic;
+pub mod slender;
 
 pub use bake::{bake, AeroBake, BakeOptions, CellGeometry, DirSums};
 
@@ -40,6 +47,9 @@ use glam::DVec3;
 pub const TRANSONIC_PEAK: f64 = 1.6;
 /// Hypersonic from this Mach number.
 pub const HYPERSONIC_MACH: f64 = 5.0;
+/// Slender-body and fin lift at full strength up to this Mach number,
+/// fading to none at [`HYPERSONIC_MACH`].
+pub const LIFT_FULL_MACH: f64 = 4.0;
 
 /// The free stream seen by the craft.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -86,8 +96,14 @@ fn transonic_factor(mach: f64) -> f64 {
     }
 }
 
-/// Continuum force and moment per unit q.
-fn continuum(s: &DirSums, d: DVec3, mach: f64, gamma: f64, cd0: f64) -> (DVec3, DVec3) {
+/// Weight of the attached-flow lift models (slender body, fins): 1 to
+/// [`LIFT_FULL_MACH`], 0 from [`HYPERSONIC_MACH`], linear between.
+fn lift_weight(mach: f64) -> f64 {
+    ((HYPERSONIC_MACH - mach) / (HYPERSONIC_MACH - LIFT_FULL_MACH)).clamp(0.0, 1.0)
+}
+
+/// Continuum pressure force and moment per unit q (friction apart).
+fn continuum(bake: &AeroBake, s: &DirSums, d: DVec3, mach: f64, gamma: f64, cd0: f64) -> (DVec3, DVec3) {
     let newtonian = |cp: f64| (s.newton * cp, s.newton_moment * cp);
     if mach >= HYPERSONIC_MACH {
         return newtonian(air::cp_max(gamma, mach));
@@ -101,12 +117,36 @@ fn continuum(s: &DirSums, d: DVec3, mach: f64, gamma: f64, cd0: f64) -> (DVec3, 
     let k_lift = kappa.min(air::cp_max_limit(gamma));
     let extra = kappa - k_lift;
     let sub = (s.newton * k_lift + d * (drag_n * extra), s.newton_moment * k_lift + s.drag_lever.cross(d) * extra);
-    if mach < 1.2 {
-        return sub;
+    let (mut f, mut m) = if mach < 1.2 {
+        sub
+    } else {
+        let hyper = newtonian(air::cp_max(gamma, HYPERSONIC_MACH));
+        let w = (mach - 1.2) / (HYPERSONIC_MACH - 1.2);
+        (sub.0 + (hyper.0 - sub.0) * w, sub.1 + (hyper.1 - sub.1) * w)
+    };
+    let lift = lift_weight(mach);
+    if lift == 0.0 {
+        return (f, m);
     }
-    let hyper = newtonian(air::cp_max(gamma, HYPERSONIC_MACH));
-    let w = (mach - 1.2) / (HYPERSONIC_MACH - 1.2);
-    (sub.0 + (hyper.0 - sub.0) * w, sub.1 + (hyper.1 - sub.1) * w)
+    // Slender along the flow: the slender-body normal force, and the drag
+    // as an axial force at the drag's centre, replace the distribution.
+    let fineness = bake.extent_at(d) / (2.0 * (s.area / math::PI).sqrt()).max(1e-9);
+    let sw = slender::slenderness(fineness) * lift;
+    if sw > 0.0 && drag_n > 1e-12 {
+        let drag = f.dot(d);
+        let aft = if d.dot(bake.sections.axis) >= 0.0 { bake.sections.axis } else { -bake.sections.axis };
+        let axial = aft * drag;
+        let (bf, bm) = slender::body_normal(&bake.sections, d);
+        let at = s.drag_lever / drag_n;
+        f += (bf + axial - f) * sw;
+        m += (bm + at.cross(axial) - m) * sw;
+    }
+    for fin in &bake.fins {
+        let (ff, fm) = slender::fin_normal(fin, &bake.geometry, d, mach);
+        f += ff * lift;
+        m += fm * lift;
+    }
+    (f, m)
 }
 
 /// Aerodynamic force and moment (about the craft origin), body axes, at
@@ -118,7 +158,7 @@ pub fn aero_forces(bake: &AeroBake, flow: &Flow, cd0: f64) -> (DVec3, DVec3) {
     }
     let d = flow.dir.normalize();
     let s = bake.sums_at(d);
-    let (f_cont, m_cont) = continuum(&s, d, flow.mach, flow.gamma, cd0);
+    let (f_cont, m_cont) = continuum(bake, &s, d, flow.mach, flow.gamma, cd0);
     let plate = friction::Plate::new(flow.reynolds_per_m, flow.mach, flow.gamma, flow.temperature);
     let (f_fr, m_fr) = friction::friction(&bake.geometry, d, &plate);
     let (f_cont, m_cont) = (f_cont + f_fr, m_cont + m_fr);
@@ -130,5 +170,7 @@ pub fn aero_forces(bake: &AeroBake, flow: &Flow, cd0: f64) -> (DVec3, DVec3) {
     (f * flow.q, m * flow.q)
 }
 
+#[cfg(test)]
+mod lift_tests;
 #[cfg(test)]
 mod tests;

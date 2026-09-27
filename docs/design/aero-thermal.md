@@ -15,6 +15,8 @@ A ship in flight is one 3D model (the test craft's `geometry.ron` for now). Its 
 | Tauber–Sutton (1991) | Radiative q̇ = C·Rn^a·ρ^b·f(V), Earth 9–16 km/s | Radiative heating at lunar-return speeds | — |
 | KSP 1.0.3+ / Deadly Reentry | Skin and internal temperature per part; conduction graph | Two temperature levels (skin per cell, one internal) | Per-part graphs (stiff at physics warp; opaque to players) |
 | Lees | Heating falls off from the stagnation point with local incidence | g(θ) per cell | — |
+| Munk; Allen & Perkins (NACA TR 1048); Jorgensen (NASA TR R-474) | Slender-body potential normal force from dA/dx, viscous crossflow | Normal force per section along the long axis | Vortex asymmetry at high α |
+| Helmbold / DATCOM; Ackeret | Finite-wing lift slope subsonic; supersonic linear theory | Fin lift per thin part | Sweep, interference |
 | Flat-plate friction (Blasius; White's turbulent law; Eckert reference temperature; Van Driest II) | Local c_f(Re_x), compressibility transforms | Friction per wetted cell, run length along the flow | Boundary-layer solution, roughness, wall-temperature effects (adiabatic wall) |
 
 ## Data
@@ -33,6 +35,9 @@ Per body (`body.ron`, `sim::body::atmosphere`): the atmosphere as a **table** of
 `sim::craft::design::CraftDesign` holds the bake and the thermal network, built on first use and shared by every vessel of the design (`Arc`); vessels hold it in a `DesignSlot` that is never saved and is rebuilt from the craft's files after a load (the bake is deterministic: same bits). For the 642 directions **d** of a level-3 geodesic grid in body axes (105 ms for the test craft in release; level 4, 2,562 directions, 408 ms):
 1. **Exposure:** the surface triangles facing **d** are rasterised onto a 64×64 z-buffer orthogonal to it; a cell's exposure is the fraction of its covered pixels it wins (u8). Cells smaller than a pixel are judged by the pixel under their centroid.
 2. **Nose radius** for **d**: a regression of the lateral offsets on the lateral normal components over the stagnation region (exact for a sphere), capped by the projected disc.
+3. **Extent** of the craft along **d** (vertex projections), for the fineness along the flow.
+
+Once per design, not per direction: each cell's second moment of area (its extent along any direction, for friction run lengths); the **body sections** (`aero::slender::BodySections`): the long axis (principal axis of largest spread of the surface area, by power iteration) and the cross-section area at 65 stations along it from the triangles by the divergence theorem, A(x) = −Σ A_t·(n_t·â) upstream of x; the **fins**: cells whose anti-parallel opposite face is within 3 % of the craft's size (a ray through the part), grouped by primitive, kept when each side is a plane (normals within 8°) and the part is thin for its size (thickness < 0.1·√planform). The test craft has none (legs are round, feet are stubby discs); +30 ms of bake (the ray casts).
 
 Memory: 642 × 512 cells ≈ 321 KB per design. The force sums are **not** baked: they are formed per evaluation over the cells, with the exposure interpolated barycentrically between the three grid directions around the flow and the incidence from the actual flow (~3 µs for 512 cells). Baking the sums was measured 2 % off on a cone at 5° (they are quadratic in the direction). No area distribution A(x) yet (wave drag is on the D070 build order).
 
@@ -79,7 +84,7 @@ The model computes surface pressure and friction per cell; it never solves the f
 |---|---|---|---|
 | Hypersonic (M ≥ 5) pressure | Modified Newtonian per cell, shadowing per direction, Cp,max from the Rayleigh pitot formula | Real-gas effects at entry speeds (Cp,max ≈ 1.9–2.0 as γ_eff falls) | Cp,max from an equilibrium γ_eff(V, ρ) table per atmosphere |
 | Lift, hypersonic | From the Newtonian normal force: capsule L/D and trim come out right | — | — |
-| Lift, subsonic/supersonic | Newtonian distribution scaled to Cd0·A: centre of pressure kept, lift magnitude only roughly right; no attached-flow lift | Semi-accurate lift of slender bodies and fins is missing | Slender-body normal force (C_N ≈ 2α per base area, Munk) plus crossflow drag (Allen–Perkins), per section along the body; flat-plate/thin-airfoil lift for wing-like cells (C_L ≈ 2πα subsonic, 4α/√(M²−1) supersonic) |
+| Lift, subsonic/supersonic | **Done:** where the craft is slender along the flow (fineness f = L/D of its extent over its projected diameter; weight 0 at f ≤ 2, 1 at f ≥ 4), the slender-body normal force per section along the long axis (Munk: q·sin 2α·cos(α/2)·dA/dx where the area grows; Allen–Perkins crossflow q·η·C_dc·sin²α·2r, η from their fineness table, C_dc 1.2) and the drag as an axial force replace the Newtonian distribution; fins get finite-wing lift (Helmbold's 2π·AR/(2 + √(4 + AR²β²)) subsonic with Prandtl–Glauert, the rectangular wing's (4/β)(1 − 1/(2β·AR)) supersonic, linear M 0.8–1.2; stall 15–30°; quarter/half chord); full to M 4, faded out by M 5. Blunt shapes keep the scaled Newtonian distribution. Tests: a 15° cone-cylinder of fineness 10: C_Nα 2.15 /rad at M 0.5 and 2 (slender-body theory 2.0, the rest the crossflow term at 1°), C_N at 10° 0.619 (Allen–Perkins by hand 0.623); a flat plate of AR 4: C_Nα 3.91 /rad at M 0.3 (Helmbold 4.00), 2.18 at M 2 (linear theory 2.14) | No body–fin interference, no downwash between fins, no sweep, no vortex lift; bodies bent or with several long axes use one axis; crossflow C_dc does not vary with crossflow Mach or Reynolds number | Body–fin interference factors (Pitts–Nielsen–Kaattari); C_dc(M_c) (Jorgensen) |
 | Transonic drag rise | A fixed 1.6× factor at M 1.2 | Depends on the shape (area rule) | Wave drag from the area distribution A(x) (von Kármán slender body, as FAR) |
 | Skin friction | **Done:** flat-plate friction per wetted cell (Blasius / White's turbulent law, transition at Re_x 5·10⁵; Eckert laminar, Van Driest II turbulent, adiabatic wall). Tests: a plate within 8 % of Blasius (laminar; leading-edge cells) and 2 % of the integrated laws, 3–4 % of Prandtl's and White's closed forms (Re 3·10⁶–10⁸); C_f/C_f,inc 0.78 at M 2 | No roughness, no wall-temperature effect (hot skins), run length along straight lines (no streamline tracing), transition fixed at Re_x 5·10⁵ | Wall temperature from the skin cells; roughness per craft |
 | Base drag | Implicit in Cd0 | Varies with Mach and plume | Base-pressure correlation vs Mach; plume-on reduction later |
@@ -89,7 +94,7 @@ The model computes surface pressure and friction per cell; it never solves the f
 | Radiative (shock-layer) heating | None | Dominates above ~11 km/s: interplanetary entry | Tauber–Sutton (Earth, Mars) with its velocity table |
 | Shock–shock interactions, buffet, flow separation, plumes | None | Not required | — |
 
-**Build order to meet D070:** the atmosphere table (done); skin friction (done); slender-body and fin lift; wave drag from A(x); Tauber–Sutton; real-gas Cp,max. Each with a test against published data (Apollo command module L/D ≈ 0.3 at trim; a slender cone-cylinder's C_N slope; Stardust peak radiative/convective heating).
+**Build order to meet D070:** the atmosphere table (done); skin friction (done); slender-body and fin lift (done); wave drag from A(x); Tauber–Sutton; real-gas Cp,max. Each with a test against published data (Apollo command module L/D ≈ 0.3 at trim; a slender cone-cylinder's C_N slope; Stardust peak radiative/convective heating).
 
 ## Thermal network (D065, revised)
 
@@ -101,6 +106,7 @@ Skin cells over the surface, and interior volume nodes on a coarse grid (≈1 m 
 
 - Sphere: Cd ≈ 0.47 subsonic (Re ~1e5–1e6), ≈ 0.92 at M 10 (Newtonian with Cp,max 1.84: Cd = Cp,max/2), → 2.1 free-molecular (Kn ≫ 1).
 - Cone: Newtonian normal force against the analytic sin²θ integral.
+- Lift: a slender cone-cylinder's normal-force slope against slender-body theory and Allen–Perkins at 10°; a flat-plate wing's lift slope against Helmbold and supersonic linear theory, antisymmetric in α, lower along its span, stalled beyond 30°; the test craft has no fins.
 - Skin friction: a thin flat plate against Blasius (laminar), the integrated local laws and Prandtl's and White's closed forms (turbulent); Van Driest II's ratio at M 2 and 5; a cylinder along the flow has friction on its side only.
 - Atmosphere: Earth's table against the US Standard Atmosphere 1976 at 0–1,000 km (temperature, pressure, density, speed of sound, mean free path, molar mass).
 - Stability: a blunt capsule with its CoM forward trims heat-shield first; moved aft, it tumbles to the other trim.

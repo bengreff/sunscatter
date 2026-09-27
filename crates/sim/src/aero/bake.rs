@@ -18,6 +18,7 @@
 //! cover a pixel centre are judged by the pixel under their centroid.
 
 use super::geodesic::Geodesic;
+use super::slender::{BodySections, Fin, WING_RATIO};
 use crate::craft::mesh::basis;
 use crate::craft::{Cell, Cells, Surface};
 use glam::DVec3;
@@ -121,6 +122,12 @@ pub struct AeroBake {
     pub cells: usize,
     /// Reference length for the Knudsen number: the bounding-sphere diameter (m).
     pub length: f64,
+    /// The craft's extent along each grid direction (m).
+    pub extent: Vec<f64>,
+    /// Cross-section areas along the long axis (slender-body lift).
+    pub sections: BodySections,
+    /// Thin parts (fin lift).
+    pub fins: Vec<Fin>,
 }
 
 /// Per-direction working buffers.
@@ -157,6 +164,10 @@ pub fn bake(surface: &Surface, cells: &Cells, opts: &BakeOptions) -> AeroBake {
         Raster { n, depth: vec![0.0; n * n], owner: vec![NONE; n * n], stamp: vec![NONE; n * n], covered: vec![0; nc] };
     let mut geometry: Vec<CellGeometry> = cells.cells.iter().map(CellGeometry::of).collect();
     spreads(surface, cells, &mut geometry);
+    let tris: Vec<(DVec3, DVec3, f64)> = (0..surface.triangles.len()).map(|t| surface.triangle(t)).collect();
+    let sections = BodySections::new(&tris, &surface.positions);
+    let fins = find_fins(surface, cells, &geometry, WING_RATIO * 2.0 * radius);
+    let mut extent = Vec::with_capacity(grid.dirs.len());
     let mut nose_radius = Vec::with_capacity(grid.dirs.len());
     let mut exposure = Vec::with_capacity(grid.dirs.len() * nc);
     let mut proj = vec![DVec3::ZERO; surface.positions.len()];
@@ -169,6 +180,8 @@ pub fn bake(surface: &Surface, cells: &Cells, opts: &BakeOptions) -> AeroBake {
             let x = *p - centre;
             *q = DVec3::new((x.dot(u) + radius) * scale, (x.dot(v) + radius) * scale, x.dot(d));
         }
+        let (lo, hi) = proj.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), q| (a.min(q.z), b.max(q.z)));
+        extent.push(hi - lo);
         r.depth.fill(f64::INFINITY);
         r.owner.fill(NONE);
         r.stamp.fill(NONE);
@@ -210,7 +223,96 @@ pub fn bake(surface: &Surface, cells: &Cells, opts: &BakeOptions) -> AeroBake {
         let area = direction_sums(&geometry, d, fq).area;
         nose_radius.push(nose(&geometry, d, fq, area));
     }
-    AeroBake { grid, geometry, exposure, nose_radius, cells: nc, length: 2.0 * radius }
+    AeroBake { grid, geometry, exposure, nose_radius, cells: nc, length: 2.0 * radius, extent, sections, fins }
+}
+
+/// The fins: cells whose opposite face (anti-parallel, straight through
+/// the part along −n) is closer than `thin`, grouped by primitive; a group
+/// is a fin when its cells lie in two parallel planes (each side's normals
+/// within 8° of their mean) and it is thin for its size (thickness under
+/// [`FIN_THICKNESS`] × √planform).
+fn find_fins(surface: &Surface, cells: &Cells, geometry: &[CellGeometry], thin: f64) -> Vec<Fin> {
+    let mut by_primitive: Vec<(u32, Vec<u32>, f64)> = Vec::new();
+    for (i, g) in geometry.iter().enumerate() {
+        let n = g.normal;
+        let mut nearest = f64::INFINITY;
+        for tri in &surface.triangles {
+            let [a, b, c] = tri.map(|k| surface.positions[k as usize]);
+            let tn = (b - a).cross(c - a);
+            if tn.dot(n) >= -0.9 * tn.length() {
+                continue;
+            }
+            if let Some(t) = ray_triangle(g.centroid, -n, a, b, c) {
+                if t > 1e-6 {
+                    nearest = nearest.min(t);
+                }
+            }
+        }
+        if nearest < thin {
+            let p = cells.cells[i].primitive;
+            match by_primitive.iter_mut().find(|e| e.0 == p) {
+                Some(e) => {
+                    e.1.push(i as u32);
+                    e.2 = e.2.max(nearest);
+                }
+                None => by_primitive.push((p, vec![i as u32], nearest)),
+            }
+        }
+    }
+    by_primitive
+        .into_iter()
+        .filter_map(|(_, list, thickness)| {
+            let n0 = geometry[list[0] as usize].normal;
+            let (mut normal, mut area, mut centroid, mut total) = (DVec3::ZERO, 0.0, DVec3::ZERO, 0.0);
+            for &i in &list {
+                let g = &geometry[i as usize];
+                if g.normal.dot(n0) > 0.0 {
+                    normal += g.normal * g.area;
+                    area += g.area;
+                }
+                centroid += g.centroid * g.area;
+                total += g.area;
+            }
+            if area <= 0.0 || normal.length_squared() == 0.0 {
+                return None;
+            }
+            let normal = normal.normalize();
+            let flat = list.iter().all(|&i| geometry[i as usize].normal.dot(normal).abs() > FIN_FLAT);
+            (flat && thickness < FIN_THICKNESS * area.sqrt()).then(|| Fin {
+                cells: list,
+                normal,
+                area,
+                centroid: centroid / total,
+            })
+        })
+        .collect()
+}
+
+/// A fin's two sides are planes: normals within this cosine (8°) of the mean.
+const FIN_FLAT: f64 = 0.99;
+/// A fin is thinner than this × the square root of its planform area.
+const FIN_THICKNESS: f64 = 0.1;
+
+/// Distance along the unit ray `dir` from `o` to triangle abc (Möller–Trumbore).
+fn ray_triangle(o: DVec3, dir: DVec3, a: DVec3, b: DVec3, c: DVec3) -> Option<f64> {
+    let (e1, e2) = (b - a, c - a);
+    let p = dir.cross(e2);
+    let det = e1.dot(p);
+    if det.abs() < 1e-15 {
+        return None;
+    }
+    let inv = 1.0 / det;
+    let s = o - a;
+    let u = s.dot(p) * inv;
+    if !(0.0..=1.0).contains(&u) {
+        return None;
+    }
+    let q = s.cross(e1);
+    let v = dir.dot(q) * inv;
+    if v < 0.0 || u + v > 1.0 {
+        return None;
+    }
+    Some(e2.dot(q) * inv)
 }
 
 /// The sums for direction `d` given each cell's exposure (no nose radius).
@@ -335,6 +437,19 @@ impl AeroBake {
         }
         self.nose_radius.iter().for_each(|&r| put(r));
         put(self.length);
+        self.extent.iter().for_each(|&x| put(x));
+        let b = &self.sections;
+        b.axis
+            .to_array()
+            .into_iter()
+            .chain(b.point.to_array())
+            .chain([b.x0, b.dx])
+            .chain(b.area.iter().copied())
+            .for_each(&mut put);
+        for f in &self.fins {
+            f.normal.to_array().into_iter().chain(f.centroid.to_array()).chain([f.area]).for_each(&mut put);
+            f.cells.iter().for_each(|&c| put(f64::from(c)));
+        }
         bytes.extend_from_slice(&self.exposure);
         crate::ephem::fnv1a64(&bytes)
     }
@@ -351,6 +466,13 @@ impl AeroBake {
         let mut s = direction_sums(&self.geometry, d, f);
         s.nose_radius = self.nose_radius_at(d);
         s
+    }
+
+    /// The craft's extent along `d` (unit, body axes), interpolated like
+    /// [`Self::sums_at`].
+    pub fn extent_at(&self, d: DVec3) -> f64 {
+        let w = self.grid.locate(d);
+        (0..3).map(|k| w.w[k] * self.extent[w.dirs[k] as usize]).sum()
     }
 
     /// The effective nose radius at flow direction `d` (unit, body axes),

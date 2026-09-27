@@ -8,7 +8,7 @@ use std::sync::OnceLock;
 const SKIN: Skin =
     Skin { areal_mass: 8.1, specific_heat: 900.0, emissivity: 0.8, conductivity: 150.0, thickness: 0.003 };
 
-fn shape(shapes: &[Shape]) -> (Surface, Cells) {
+pub(super) fn shape(shapes: &[Shape]) -> (Surface, Cells) {
     let prims: Vec<Primitive> = shapes
         .iter()
         .enumerate()
@@ -42,12 +42,12 @@ fn cone() -> &'static AeroBake {
     })
 }
 
-fn craft_bake() -> &'static AeroBake {
+pub(super) fn craft_bake() -> &'static AeroBake {
     static B: OnceLock<AeroBake> = OnceLock::new();
     B.get_or_init(|| bake(&test_craft().surface, &test_craft().cells, &BakeOptions::default()))
 }
 
-fn flow(dir: DVec3, mach: f64, knudsen: f64) -> Flow {
+pub(super) fn flow(dir: DVec3, mach: f64, knudsen: f64) -> Flow {
     Flow { dir: dir.normalize(), q: 1000.0, mach, knudsen, gamma: EARTH_AIR_GAMMA, ..Flow::default() }
 }
 
@@ -275,7 +275,7 @@ fn the_bake_is_deterministic() {
 }
 
 /// Golden hash of the unit-sphere bake (identical on every platform).
-const SPHERE_BAKE_HASH: u64 = 0x2ee8_960b_0b14_a000;
+const SPHERE_BAKE_HASH: u64 = 0x492a_3d63_e600_c37d;
 
 /// A thin flat plate, `l` long along X, 2 m wide, 4 mm thick.
 fn plate(l: f64) -> AeroBake {
