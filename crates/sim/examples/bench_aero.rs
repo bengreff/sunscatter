@@ -39,7 +39,8 @@ fn main() {
     for i in 0..n {
         let a = i as f64 * 1e-3;
         let dir = DVec3::new(sim::math::sin(a) * 0.2, 0.1, -1.0).normalize();
-        let flow = Flow { dir, q: 20e3, mach: 12.0, knudsen: 1e-4, gamma: 1.4 };
+        let flow =
+            Flow { dir, q: 20e3, mach: 12.0, knudsen: 1e-4, gamma: 1.4, reynolds_per_m: 1e6, temperature: 230.0 };
         let (f, m) = aero_forces(&b, &flow, 0.8);
         sink += f + m;
         let input = HeatInput { flow_dir: dir, q_stag: 1e6, sun: DVec3::new(1361.0, 0.0, 0.0) };
@@ -57,7 +58,8 @@ fn main() {
         println!("  {what}: {:.1} µs", clock.elapsed().as_secs_f64() * 1e6 / n as f64);
     };
     time("aero_forces", &mut || {
-        let flow = Flow { dir, q: 20e3, mach: 12.0, knudsen: 1e-4, gamma: 1.4 };
+        let flow =
+            Flow { dir, q: 20e3, mach: 12.0, knudsen: 1e-4, gamma: 1.4, reynolds_per_m: 1e6, temperature: 230.0 };
         sink += aero_forces(&b, &flow, 0.8).0;
     });
     let input = HeatInput { flow_dir: dir, q_stag: 1e6, sun: DVec3::new(1361.0, 0.0, 0.0) };
@@ -105,5 +107,5 @@ fn vessel_ticks() {
     let clock = Instant::now();
     ship.advance(&w, t0.add_seconds(secs), &Controls::default(), usize::MAX);
     let us = clock.elapsed().as_secs_f64() * 1e6 / (secs / sim::vessel::LATTICE);
-    println!("coast in LEO, per 60 s lattice point (integration, attitude, sunlight, thermal): {us:.1} µs");
+    println!("coast in LEO, tumbling, per lattice point (integration, attitude, sunlight, thermal): {us:.1} µs");
 }

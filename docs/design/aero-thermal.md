@@ -15,12 +15,13 @@ A ship in flight is one 3D model (the test craft's `geometry.ron` for now). Its 
 | Tauber–Sutton (1991) | Radiative q̇ = C·Rn^a·ρ^b·f(V), Earth 9–16 km/s | Radiative heating at lunar-return speeds | — |
 | KSP 1.0.3+ / Deadly Reentry | Skin and internal temperature per part; conduction graph | Two temperature levels (skin per cell, one internal) | Per-part graphs (stiff at physics warp; opaque to players) |
 | Lees | Heating falls off from the stagnation point with local incidence | g(θ) per cell | — |
+| Flat-plate friction (Blasius; White's turbulent law; Eckert reference temperature; Van Driest II) | Local c_f(Re_x), compressibility transforms | Friction per wetted cell, run length along the flow | Boundary-layer solution, roughness, wall-temperature effects (adiabatic wall) |
 
 ## Data
 
 Per craft (`craft.ron`, the test craft for now):
 - per cell (built at load): centroid, outward normal, area, skin areal mass, specific heat, emissivity, neighbours with conductance, contact flag;
-- `aero: (cd0)`: the subsonic drag coefficient on the projected area (0.8, a blunt body);
+- `aero: (cd0)`: the subsonic pressure (form and base) drag coefficient on the projected area (0.8, a blunt body); skin friction is added from the geometry;
 - `thermal: (skin_max_k, internal_max_k, node_size, interior_specific_heat, propellant_specific_heat, interior_conductivity, internal_coupling)`: the skin limit and the limit of every interior node; the interior grid's cube edge (1 m); the specific heats of the dry interior (the dry mass less the skin, spread by volume: 900 J/(kg·K)) and of the propellant (2,000); the interior's effective conductivity between nodes (5 W/(m·K)); the conductance from each cell to the node beneath it per unit of the cell's area (2 W/(m²·K));
 - `engine.heat_fraction`: the share of the jet power ½·F·vₑ that soaks into the structure at the mount while the engine runs (2e-4, ~94 kW at full thrust: of the 1–2 % reaching the chamber wall, regenerative cooling returns nearly all to the flow);
 - the effective nose radius per flow direction is derived from the cells (the bake).
@@ -44,14 +45,15 @@ Inside an atmosphere a vessel is always live (`sim::vessel::aerothermal`):
 2. Force and moment from `aero::aero_forces` at the flow direction in body axes, by regime:
    - hypersonic (M ≥ 5): modified Newtonian, Cp,max from the Rayleigh pitot formula for the air's γ;
    - subsonic (M < 0.8): drag q·Cd₀·A_proj along the flow, the Newtonian pressure distribution scaled to it (the centre of pressure is the shape's); transonic: the factor rises linearly to 1.6 at M 1.2; M 1.2–5: linear in M to the hypersonic values;
-   - rarefied: free molecular (fully accommodating, cold wall: 2·q·A along the flow), bridged in Kn by Wilmoth's sin² formula.
+   - skin friction in every continuum regime (`aero::friction`): each cell not facing downstream more steeply than 45° takes the shear q·c̄_f·A along the flow's tangential direction (magnitude |t|, t = d − n(n·d)); run length x from the most upstream point of the cells along the flow, each cell averaging c_f over its extent x ± h along the flow (h from the cell's second moment of area, baked); laminar Blasius c_f = 0.664/√Re_x below Re_x 5·10⁵ (averaged exactly over the cell), turbulent White's c_f = 0.455/ln²(0.06·Re_x) above; compressibility, adiabatic wall: Eckert's reference temperature (laminar), Van Driest II (turbulent); Re from ρV/μ, Sutherland viscosity;
+   - rarefied: free molecular (fully accommodating, cold wall: 2·q·A along the flow, which includes the tangential momentum), bridged in Kn by Wilmoth's sin² formula.
 3. **Rotation:** the moment about the centre of mass (τ − r_cm × F), plus the parachute's (its drag along the flow at its mount), is evaluated at each RK4 stage of the rotation (`rigid::tick_with`: it depends on the attitude). The craft trims itself: the test craft falls base first.
 4. **Translation:** the force's component along the flow becomes a drag area (plus the parachute's), so the drag stays velocity- and density-dependent inside the tick's adaptive integration; the rest (lift) is a constant acceleration over the tick.
 5. **Heating:** q̇_stag by Sutton–Graves with the direction's nose radius; each cell gets q̇_stag·max(f·sin^1.5θ, 3 %)·A (f its exposure); plus sunlight: the stars' flux at the vessel, dimmed by eclipses of body spheres (`sim::light`, the rule the game's lighting uses too), absorbed ε·S·cosθ·f per cell (self-shadowing through the same bake).
 6. **Thermal step:** backward Euler for the network (cells, neighbours, the interior volume nodes; see "Thermal network"), with the engine's heat (its share of ½·F·vₑ this tick) into its node and the nodes' capacities for the propellant aboard; solved per cell exactly (Newton on the quartic) and per node linearly, in Gauss–Seidel sweeps (cells in order, then nodes) until no temperature changes by more than 1e-13 relative (at most 128; 3 per live tick). Radiation to 2.725 K (planet IR, albedo and convective cooling later). Stable at any step.
 7. **Limits:** after each tick, the hottest cell above `skin_max_k`, else the hottest node above `internal_max_k`, destroys the vessel: `Phase::Crashed { cause: Destruction::Overheat { at: Cell(i) | Node(j), temperature } }`, the wreck fixed to the body whose air it was in; not in debug mode (D064).
 
-Measured (release, 512 cells, 110 nodes): a whole live tick in the atmosphere (aero, heating, integration) 59 µs; of which aero forces 3 µs per evaluation (5 per tick), cell heating 4 µs, thermal step 24 µs.
+Measured (release, 512 cells, 110 nodes): a whole live tick in the atmosphere (aero, heating, integration) 74 µs; of which aero forces 10 µs per evaluation (5 per tick; skin friction 6.5 µs of it), cell heating 4 µs, thermal step 24 µs.
 
 ## Coasts and rails warp
 
@@ -79,7 +81,7 @@ The model computes surface pressure and friction per cell; it never solves the f
 | Lift, hypersonic | From the Newtonian normal force: capsule L/D and trim come out right | — | — |
 | Lift, subsonic/supersonic | Newtonian distribution scaled to Cd0·A: centre of pressure kept, lift magnitude only roughly right; no attached-flow lift | Semi-accurate lift of slender bodies and fins is missing | Slender-body normal force (C_N ≈ 2α per base area, Munk) plus crossflow drag (Allen–Perkins), per section along the body; flat-plate/thin-airfoil lift for wing-like cells (C_L ≈ 2πα subsonic, 4α/√(M²−1) supersonic) |
 | Transonic drag rise | A fixed 1.6× factor at M 1.2 | Depends on the shape (area rule) | Wave drag from the area distribution A(x) (von Kármán slender body, as FAR) |
-| Skin friction | None | Dominant drag of slender rockets at low altitude | Flat-plate friction (turbulent, compressible: Van Driest or reference-temperature) on the wetted cells |
+| Skin friction | **Done:** flat-plate friction per wetted cell (Blasius / White's turbulent law, transition at Re_x 5·10⁵; Eckert laminar, Van Driest II turbulent, adiabatic wall). Tests: a plate within 8 % of Blasius (laminar; leading-edge cells) and 2 % of the integrated laws, 3–4 % of Prandtl's and White's closed forms (Re 3·10⁶–10⁸); C_f/C_f,inc 0.78 at M 2 | No roughness, no wall-temperature effect (hot skins), run length along straight lines (no streamline tracing), transition fixed at Re_x 5·10⁵ | Wall temperature from the skin cells; roughness per craft |
 | Base drag | Implicit in Cd0 | Varies with Mach and plume | Base-pressure correlation vs Mach; plume-on reduction later |
 | Rarefied flow | Free-molecular (fully accommodating) bridged by Wilmoth's sin² in Kn | Wilmoth's form cited from memory: to verify | Check against the paper |
 | Atmosphere | **Done:** US Standard Atmosphere 1976 table to 1,000 km (within 0.1 % of the standard at the tested heights); temperature, molar mass, speed of sound and mean free path from it; exponential model for bodies without a table | No solar-cycle or diurnal variation; no air above `top` (150 km) in flight | NRLMSISE-00 with solar activity (later) |
@@ -87,7 +89,7 @@ The model computes surface pressure and friction per cell; it never solves the f
 | Radiative (shock-layer) heating | None | Dominates above ~11 km/s: interplanetary entry | Tauber–Sutton (Earth, Mars) with its velocity table |
 | Shock–shock interactions, buffet, flow separation, plumes | None | Not required | — |
 
-**Build order to meet D070:** the atmosphere table (done); skin friction; slender-body and fin lift; wave drag from A(x); Tauber–Sutton; real-gas Cp,max. Each with a test against published data (Apollo command module L/D ≈ 0.3 at trim; a slender cone-cylinder's C_N slope; Stardust peak radiative/convective heating).
+**Build order to meet D070:** the atmosphere table (done); skin friction (done); slender-body and fin lift; wave drag from A(x); Tauber–Sutton; real-gas Cp,max. Each with a test against published data (Apollo command module L/D ≈ 0.3 at trim; a slender cone-cylinder's C_N slope; Stardust peak radiative/convective heating).
 
 ## Thermal network (D065, revised)
 
@@ -99,6 +101,8 @@ Skin cells over the surface, and interior volume nodes on a coarse grid (≈1 m 
 
 - Sphere: Cd ≈ 0.47 subsonic (Re ~1e5–1e6), ≈ 0.92 at M 10 (Newtonian with Cp,max 1.84: Cd = Cp,max/2), → 2.1 free-molecular (Kn ≫ 1).
 - Cone: Newtonian normal force against the analytic sin²θ integral.
+- Skin friction: a thin flat plate against Blasius (laminar), the integrated local laws and Prandtl's and White's closed forms (turbulent); Van Driest II's ratio at M 2 and 5; a cylinder along the flow has friction on its side only.
+- Atmosphere: Earth's table against the US Standard Atmosphere 1976 at 0–1,000 km (temperature, pressure, density, speed of sound, mean free path, molar mass).
 - Stability: a blunt capsule with its CoM forward trims heat-shield first; moved aft, it tumbles to the other trim.
 - Heating: stagnation flux within the correlations' stated accuracy at Apollo 4 and Stardust peak-heating points; a single isolated cell relaxes to (q̇/εσ)^¼; conduction conserves energy.
 - Determinism: bake hash stable; chunked = single pass for a live descent; save/load mid-descent continues bit for bit; the coast thermal lattice at 60 fps equals one jump.

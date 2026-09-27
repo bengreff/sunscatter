@@ -101,7 +101,8 @@ impl CraftDesign {
 pub fn mean_drag_area(bake: &AeroBake, cd0: f64) -> f64 {
     let sum: f64 = (bake.grid.dirs.iter())
         .map(|&d| {
-            let flow = Flow { dir: d, q: 1.0, mach: MEAN_DRAG_MACH, knudsen: 0.0, gamma: aero::air::EARTH_AIR_GAMMA };
+            let flow =
+                Flow { dir: d, q: 1.0, mach: MEAN_DRAG_MACH, gamma: aero::air::EARTH_AIR_GAMMA, ..Flow::default() };
             aero::aero_forces(bake, &flow, cd0).0.dot(d)
         })
         .sum();

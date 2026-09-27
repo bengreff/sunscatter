@@ -6,8 +6,8 @@
 //!
 //! * **Hypersonic continuum (M ≥ 5):** modified Newtonian, Cp = Cp,max·sin²θ
 //!   on exposed cells, Cp,max from the Rayleigh pitot formula ([`air::cp_max`]).
-//! * **Subsonic (M < 0.8):** drag q·Cd₀·A along the flow (A the projected
-//!   area, Cd₀ a craft property; blunt bodies ≈ 0.8): the Newtonian pressure
+//! * **Subsonic (M < 0.8):** pressure drag q·Cd₀·A along the flow (A the
+//!   projected area, Cd₀ a craft property; blunt bodies ≈ 0.8): the Newtonian pressure
 //!   distribution scaled to that drag, so the centre of pressure is the
 //!   shape's. Where the scale would exceed Cp,max (slender shapes), the
 //!   normal force stays Newtonian and the extra drag acts at the Newtonian
@@ -16,7 +16,9 @@
 //!   [`TRANSONIC_PEAK`]·Cd₀ at M 1.2 (blunt capsules: Apollo's Cd goes from
 //!   ≈ 0.8 subsonic to ≈ 1.3 at M 1.2); **1.2–5:** linear in M to the
 //!   hypersonic force and moment. FAR-style area-distribution drag rise
-//!   and skin friction are later.
+//!   is later.
+//! * **Skin friction** ([`friction`]) on the wetted cells, in every
+//!   continuum regime: a compressible flat plate per cell.
 //! * **Rarefied:** free molecular (fully accommodating, cold wall: the
 //!   incoming momentum is absorbed, force 2·q·A along the flow), bridged in
 //!   the Knudsen number by Wilmoth's formula ([`bridge`]).
@@ -26,6 +28,7 @@
 
 pub mod air;
 pub mod bake;
+pub mod friction;
 pub mod geodesic;
 
 pub use bake::{bake, AeroBake, BakeOptions, CellGeometry, DirSums};
@@ -39,7 +42,7 @@ pub const TRANSONIC_PEAK: f64 = 1.6;
 pub const HYPERSONIC_MACH: f64 = 5.0;
 
 /// The free stream seen by the craft.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Flow {
     /// Direction the air moves relative to the craft, body axes (unit; the
     /// opposite of the craft's airspeed direction).
@@ -51,6 +54,10 @@ pub struct Flow {
     pub knudsen: f64,
     /// Ratio of specific heats of the air.
     pub gamma: f64,
+    /// Reynolds number per metre ρV/μ (1/m); zero: no skin friction.
+    pub reynolds_per_m: f64,
+    /// Free-stream static temperature (K).
+    pub temperature: f64,
 }
 
 /// Wilmoth's rarefied bridging weight: C = C_cont + (C_fm − C_cont)·b with
@@ -112,6 +119,9 @@ pub fn aero_forces(bake: &AeroBake, flow: &Flow, cd0: f64) -> (DVec3, DVec3) {
     let d = flow.dir.normalize();
     let s = bake.sums_at(d);
     let (f_cont, m_cont) = continuum(&s, d, flow.mach, flow.gamma, cd0);
+    let plate = friction::Plate::new(flow.reynolds_per_m, flow.mach, flow.gamma, flow.temperature);
+    let (f_fr, m_fr) = friction::friction(&bake.geometry, d, &plate);
+    let (f_cont, m_cont) = (f_cont + f_fr, m_cont + m_fr);
     let f_fm = d * (2.0 * s.area);
     let m_fm = s.area_moment.cross(d) * 2.0;
     let b = bridge(flow.knudsen);

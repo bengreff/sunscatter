@@ -22,6 +22,14 @@ pub fn isothermal_temperature(h: f64, g0: f64, molar_mass: f64) -> f64 {
     h * g0 * molar_mass / GAS_CONSTANT
 }
 
+/// Dynamic viscosity of air (Pa·s) at `temperature` (K), Sutherland's law
+/// with the US 1976 constants: μ = β·T^1.5 / (T + S), β = 1.458e-6,
+/// S = 110.4 K (1.789e-5 at 288.15 K).
+pub fn sutherland_viscosity(temperature: f64) -> f64 {
+    let t = temperature.max(1.0);
+    1.458e-6 * t * t.sqrt() / (t + 110.4)
+}
+
 /// Speed of sound (m/s): √(γ·R·T / M).
 pub fn speed_of_sound(gamma: f64, temperature: f64, molar_mass: f64) -> f64 {
     (gamma * GAS_CONSTANT * temperature / molar_mass).max(0.0).sqrt()
@@ -86,6 +94,13 @@ mod tests {
         }
         assert_eq!(mean_free_path(6.6e-8, 1.225, 0.0), f64::INFINITY);
         assert!((knudsen(0.5, 5.0) - 0.1).abs() < 1e-15);
+    }
+
+    #[test]
+    fn sutherland_matches_us_1976() {
+        // US 1976 Table I: 1.7894e-5 at sea level, 1.4216e-5 at 216.65 K.
+        assert!((sutherland_viscosity(288.15) / 1.7894e-5 - 1.0).abs() < 1e-4);
+        assert!((sutherland_viscosity(216.65) / 1.4216e-5 - 1.0).abs() < 1e-4);
     }
 
     #[test]

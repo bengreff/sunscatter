@@ -63,11 +63,49 @@ pub struct CellGeometry {
     pub centroid: DVec3,
     pub normal: DVec3,
     pub area: f64,
+    /// Second moment of the cell's area about its centroid (m⁴): xx, yy,
+    /// zz, xy, xz, yz (from its triangles; zero from [`Self::of`]).
+    pub spread: [f64; 6],
 }
 
 impl CellGeometry {
     pub fn of(c: &Cell) -> Self {
-        CellGeometry { centroid: c.centroid, normal: c.normal, area: c.area }
+        CellGeometry { centroid: c.centroid, normal: c.normal, area: c.area, spread: [0.0; 6] }
+    }
+
+    /// Half the cell's extent along the unit direction `d`: √(3·σ²) with σ²
+    /// the area's variance along `d` (exact for a rectangle).
+    pub fn half_extent(&self, d: DVec3) -> f64 {
+        let [xx, yy, zz, xy, xz, yz] = self.spread;
+        let m =
+            xx * d.x * d.x + yy * d.y * d.y + zz * d.z * d.z + 2.0 * (xy * d.x * d.y + xz * d.x * d.z + yz * d.y * d.z);
+        if self.area > 0.0 {
+            (3.0 * m.max(0.0) / self.area).sqrt()
+        } else {
+            0.0
+        }
+    }
+}
+
+/// Each cell's second moment of area about its centroid, from the surface
+/// triangles (a triangle's own: A/12·Σ dᵢdᵢᵀ over its vertices' offsets
+/// from its centroid, plus A·ccᵀ for its offset c from the cell's).
+fn spreads(surface: &Surface, cells: &Cells, geometry: &mut [CellGeometry]) {
+    let add = |m: &mut [f64; 6], v: DVec3, w: f64| {
+        m[0] += w * v.x * v.x;
+        m[1] += w * v.y * v.y;
+        m[2] += w * v.z * v.z;
+        m[3] += w * v.x * v.y;
+        m[4] += w * v.x * v.z;
+        m[5] += w * v.y * v.z;
+    };
+    for (t, tri) in surface.triangles.iter().enumerate() {
+        let (c, _, a) = surface.triangle(t);
+        let g = &mut geometry[cells.tri_cell[t] as usize];
+        for &i in tri {
+            add(&mut g.spread, surface.positions[i as usize] - c, a / 12.0);
+        }
+        add(&mut g.spread, c - g.centroid, a);
     }
 }
 
@@ -117,7 +155,8 @@ pub fn bake(surface: &Surface, cells: &Cells, opts: &BakeOptions) -> AeroBake {
     let n = opts.raster;
     let mut r =
         Raster { n, depth: vec![0.0; n * n], owner: vec![NONE; n * n], stamp: vec![NONE; n * n], covered: vec![0; nc] };
-    let geometry: Vec<CellGeometry> = cells.cells.iter().map(CellGeometry::of).collect();
+    let mut geometry: Vec<CellGeometry> = cells.cells.iter().map(CellGeometry::of).collect();
+    spreads(surface, cells, &mut geometry);
     let mut nose_radius = Vec::with_capacity(grid.dirs.len());
     let mut exposure = Vec::with_capacity(grid.dirs.len() * nc);
     let mut proj = vec![DVec3::ZERO; surface.positions.len()];
@@ -292,6 +331,7 @@ impl AeroBake {
                 v.to_array().into_iter().for_each(&mut put);
             }
             put(g.area);
+            g.spread.into_iter().for_each(&mut put);
         }
         self.nose_radius.iter().for_each(|&r| put(r));
         put(self.length);

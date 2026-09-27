@@ -181,6 +181,8 @@ pub struct Air {
     pub wind: DVec3,
     pub speed_of_sound: f64,
     pub mean_free_path: f64,
+    /// Static temperature (K).
+    pub temperature: f64,
     pub gamma: f64,
     pub sutton_graves_k: f64,
 }
@@ -212,6 +214,7 @@ pub fn air_at(world: &World, snap: &Snapshot, anchor: NodeId, r: DVec3, v: DVec3
             wind: v_air - v,
             speed_of_sound: state.speed_of_sound(atm.gamma),
             mean_free_path: state.mean_free_path,
+            temperature: state.temperature,
             gamma: atm.gamma,
             sutton_graves_k: atm.sutton_graves_k,
         });
@@ -240,6 +243,8 @@ pub struct AeroTick<'a> {
     mach: f64,
     knudsen: f64,
     gamma: f64,
+    reynolds_per_m: f64,
+    temperature: f64,
     /// Centre of mass (body axes).
     com: DVec3,
     /// Parachute: Cd·A (m²) and mount (body axes), if deployed.
@@ -260,6 +265,8 @@ impl<'a> AeroTick<'a> {
             mach: speed / air.speed_of_sound,
             knudsen: aero::air::knudsen(air.mean_free_path, design.bake.length),
             gamma: air.gamma,
+            reynolds_per_m: air.rho * speed / aero::air::sutherland_viscosity(air.temperature),
+            temperature: air.temperature,
             com,
             chute,
         })
@@ -268,7 +275,8 @@ impl<'a> AeroTick<'a> {
     /// The flow in body axes for attitude `q` (body → inertial).
     pub fn flow(&self, q: DQuat) -> Flow {
         let dir = (q.inverse() * self.wind_dir).normalize();
-        Flow { dir, q: self.q, mach: self.mach, knudsen: self.knudsen, gamma: self.gamma }
+        let (reynolds_per_m, temperature) = (self.reynolds_per_m, self.temperature);
+        Flow { dir, q: self.q, mach: self.mach, knudsen: self.knudsen, gamma: self.gamma, reynolds_per_m, temperature }
     }
 
     /// Hull force (body axes, N) and total torque about the centre of mass

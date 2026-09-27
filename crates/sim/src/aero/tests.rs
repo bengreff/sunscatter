@@ -48,7 +48,7 @@ fn craft_bake() -> &'static AeroBake {
 }
 
 fn flow(dir: DVec3, mach: f64, knudsen: f64) -> Flow {
-    Flow { dir: dir.normalize(), q: 1000.0, mach, knudsen, gamma: EARTH_AIR_GAMMA }
+    Flow { dir: dir.normalize(), q: 1000.0, mach, knudsen, gamma: EARTH_AIR_GAMMA, ..Flow::default() }
 }
 
 /// Drag and side coefficients on area `a`.
@@ -275,4 +275,99 @@ fn the_bake_is_deterministic() {
 }
 
 /// Golden hash of the unit-sphere bake (identical on every platform).
-const SPHERE_BAKE_HASH: u64 = 0x5c3a_200c_8133_9b91;
+const SPHERE_BAKE_HASH: u64 = 0x2ee8_960b_0b14_a000;
+
+/// A thin flat plate, `l` long along X, 2 m wide, 4 mm thick.
+fn plate(l: f64) -> AeroBake {
+    let (s, c) = shape(&[Shape::Box { center: DVec3::ZERO, half: DVec3::new(0.5 * l, 1.0, 0.002) }]);
+    bake(&s, &c, &BakeOptions { level: 1, raster: 32 })
+}
+
+/// Mean friction coefficient of the plate (both faces) at `re_l` along X.
+fn plate_cf(b: &AeroBake, l: f64, re_l: f64, mach: f64) -> f64 {
+    let f = friction::friction(&b.geometry, DVec3::X, &friction::Plate::new(re_l / l, mach, 1.4, 216.65));
+    f.0.x / (2.0 * l * 2.0)
+}
+
+#[test]
+fn flat_plate_friction_matches_blasius_and_the_turbulent_plate() {
+    let l = 4.0;
+    let b = plate(l);
+    // Laminar (Blasius): C_f = 1.328/√Re_L; within 8 % (the cells near
+    // the leading edge, where c_f ∝ x^−½, are not rectangles).
+    for re in [1e4, 1e5, 4e5] {
+        let (got, want) = (plate_cf(&b, l, re, 0.0), 1.328 / re.sqrt());
+        println!("Re {re:e}: C_f {got:.5} (Blasius {want:.5})");
+        assert!((got / want - 1.0).abs() < 0.08, "Re {re}: {got} vs {want}");
+    }
+    // Laminar to 5·10⁵, turbulent after: against the plate's mean from
+    // the local laws (Blasius, then White's c_f = 0.455/ln²(0.06·Re_x),
+    // Viscous Fluid Flow, 3rd ed., eq. 6-78), integrated here; and against
+    // the published closed forms: Prandtl's mixed plate 0.074·Re^−⅕ −
+    // 1742/Re (Schlichting, Boundary-Layer Theory, ch. 21; its ⅕-power law
+    // holds to ~10⁷) and White's fully turbulent 0.523/ln²(0.06·Re) (eq.
+    // 6-79), where the laminar start is small.
+    let mean_of_laws = |re: f64| {
+        let tr = friction::TRANSITION_RE;
+        let n = 20_000;
+        let h = (math::ln(re) - math::ln(tr)) / n as f64;
+        // ∫ c_f dRe over [tr, re] in ln Re (midpoint rule).
+        let turb: f64 = (0..n)
+            .map(|k| {
+                let r = math::exp(math::ln(tr) + (k as f64 + 0.5) * h);
+                friction::cf_incompressible(r) * r * h
+            })
+            .sum();
+        (1.328 * tr.sqrt() + turb) / re
+    };
+    for re in [3e6, 1e7, 3e7, 1e8] {
+        let got = plate_cf(&b, l, re, 0.0);
+        let laws = mean_of_laws(re);
+        let prandtl = 0.074 / math::exp(0.2 * math::ln(re)) - 1742.0 / re;
+        let white = 0.523 / (math::ln(0.06 * re) * math::ln(0.06 * re));
+        println!("Re {re:e}: C_f {got:.5} (laws {laws:.5}, Prandtl {prandtl:.5}, White {white:.5})");
+        assert!((got / laws - 1.0).abs() < 0.02, "Re {re}: {got} vs {laws}");
+        if re <= 1e7 {
+            assert!((got / prandtl - 1.0).abs() < 0.04, "Re {re}: {got} vs {prandtl}");
+        }
+        if re >= 3e7 {
+            assert!((got / white - 1.0).abs() < 0.03, "Re {re}: {got} vs {white}");
+        }
+    }
+}
+
+#[test]
+fn compressible_turbulent_friction_falls_like_van_driest() {
+    // Adiabatic wall, Re 10⁷, T 216.65 K: Van Driest II by hand (F =
+    // 1 + 0.89·0.2·M²; A = √((F−1)/F); F_c = (F−1)/asin²A; F_Rx =
+    // (μ/μ_w)/F_c): M 2: F_c 1.451, F_Rx 0.453, C_f/C_f,inc 0.779; M 5:
+    // F_c 3.49, F_Rx 0.089, 0.428. Hopkins & Inouye (AIAA J. 9(6), 1971)
+    // found Van Driest II within about ±10 % of flat-plate and cone data
+    // to M 7.4.
+    let p = |m: f64| friction::Plate::new(1e7, m, 1.4, 216.65).local(1.0);
+    for (m, want) in [(2.0, 0.779), (5.0, 0.427)] {
+        let ratio = p(m) / p(0.0);
+        println!("M {m}: C_f/C_f,inc {ratio:.3}");
+        assert!((ratio / want - 1.0).abs() < 0.01, "M {m}: {ratio}");
+    }
+    assert!(p(5.0) < p(3.0) && p(3.0) < p(2.0));
+    // The incompressible local law.
+    assert!((p(0.0) - friction::cf_incompressible(1e7)).abs() < 1e-15);
+}
+
+#[test]
+fn friction_acts_along_the_flow_and_not_on_the_base() {
+    // A cylinder along the flow: friction on its side only (its upstream
+    // face has no flow along it, the downstream face is separated).
+    let (s, c) =
+        shape(&[Shape::Cylinder { base: DVec3::new(0.0, 0.0, -3.0), axis: DVec3::new(0.0, 0.0, 6.0), radius: 0.5 }]);
+    let b = bake(&s, &c, &BakeOptions { level: 1, raster: 32 });
+    let p = friction::Plate::new(2e6, 0.5, 1.4, 288.15);
+    let (f, m) = friction::friction(&b.geometry, DVec3::Z, &p);
+    assert!(f.z > 0.0 && f.truncate().length() < 1e-3 * f.z, "{f}");
+    assert!(m.length() < 1e-3 * f.z * 6.0, "{m}");
+    // About the flat plate's mean over the side (6 m run, πD·L wetted).
+    let side = math::PI * 1.0 * 6.0;
+    let flat = plate_cf(&plate(6.0), 6.0, 2e6 * 6.0, 0.5);
+    assert!((f.z / (side * flat) - 1.0).abs() < 0.05, "{} vs {flat}", f.z / side);
+}
