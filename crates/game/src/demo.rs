@@ -689,3 +689,32 @@ fn fail_on_shader_errors(cache: Res<bevy::render::render_resource::PipelineCache
         }
     }
 }
+
+/// Logs frame rate, the active vessel's altitude and the terrain chunks
+/// drawn every two seconds of the demo (to find where frame time goes).
+pub fn log_fps(
+    demo: Option<Res<Demo>>,
+    time: Res<Time>,
+    fps: Res<crate::hud::FpsMeter>,
+    sim: Res<SimState>,
+    terrain: Res<Terrain>,
+    mut last: Local<f64>,
+) {
+    let Some(demo) = demo else { return };
+    let now = time.elapsed_secs_f64();
+    if now - *last < 2.0 {
+        return;
+    }
+    *last = now;
+    let body = sim.dominant_of(sim.active);
+    let (anchor, r, _) = sim.ship().state_at(&sim.world, sim.clock);
+    let rel = r - sim.world.snapshot(sim.clock).relative_r(body, anchor);
+    let alt = sim.world.source(body).and_then(|s| s.physical.as_ref()).map_or(0.0, |p| rel.length() - p.radius_eq);
+    info!(
+        "demo fps {:.0} step {:?} alt {:.1} km chunks {}",
+        fps.fps().unwrap_or(0.0),
+        demo.step,
+        alt / 1e3,
+        terrain.drawn
+    );
+}

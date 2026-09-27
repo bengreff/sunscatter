@@ -107,7 +107,7 @@ fn main() {
         )
         .add_systems(
             Update,
-            (camera::update, comms::update, rendezvous::update, map::update, demo::check_map_view)
+            (camera::update, comms::update, rendezvous::update, map::update, demo::check_map_view, demo::log_fps)
                 .chain()
                 .in_set(Stage::Camera),
         )

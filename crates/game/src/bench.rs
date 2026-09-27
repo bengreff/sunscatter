@@ -51,6 +51,21 @@ pub fn configurations() -> Vec<(String, GraphicsSettings)> {
     ];
     v.extend(features.into_iter().map(|(n, s)| (format!("+{n}"), s)));
     v.push(("+earthshine".into(), GraphicsSettings { earthshine: true, ..min }));
+    v.push(("+sky light".into(), GraphicsSettings { atmosphere: AtmosphereQuality::Lut, sky_light: true, ..min }));
+    // Each feature taken out of High, where they interact (terrain shading
+    // at full resolution, MSAA, atmosphere): what it costs in a real tier.
+    let high = GraphicsSettings { tier: None, ..GraphicsSettings::preset(Tier::High) };
+    let without: [(&str, GraphicsSettings); 8] = [
+        ("terrain", GraphicsSettings { terrain: false, ..high }),
+        ("detail layer", GraphicsSettings { detail: false, ..high }),
+        ("atmosphere", GraphicsSettings { atmosphere: AtmosphereQuality::Off, ..high }),
+        ("MSAA", GraphicsSettings { msaa: MsaaLevel::Off, ..high }),
+        ("shadows", GraphicsSettings { shadows: false, ..high }),
+        ("bloom", GraphicsSettings { bloom: false, ..high }),
+        ("textures 8k", GraphicsSettings { texture_size: 2048, ..high }),
+        ("terrain error 2px", GraphicsSettings { terrain_error_px: 8.0, ..high }),
+    ];
+    v.extend(without.into_iter().map(|(n, s)| (format!("High −{n}"), s)));
     v
 }
 

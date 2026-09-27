@@ -221,7 +221,7 @@ pub fn update_sky_light(
             (r - lo) / (hi - lo)
         })
         .fold(f64::INFINITY, f64::min);
-    let inside = settings.atmosphere != AtmosphereQuality::Off && depth < 1.0;
+    let inside = settings.atmosphere != AtmosphereQuality::Off && settings.sky_light && depth < 1.0;
     let fade = sky_light_fade(depth);
     for (cam, has, generated, atmo) in &mut cams {
         // Bevy adds a private cubemap component and a filtered

@@ -72,6 +72,10 @@ pub struct GraphicsSettings {
     pub msaa: MsaaLevel,
     /// Planetshine (Earthshine on the Moon, moonlight on Earth; D055).
     pub earthshine: bool,
+    /// Sky light from the atmosphere's environment map (ambient and
+    /// reflections). Regenerated and filtered every frame: ~3 ms at 1600×900,
+    /// ~12 ms on a Retina window. Off: a daylight ambient stand-in.
+    pub sky_light: bool,
     /// Haze strength: the aerial perspective on the ground and ships, as a
     /// multiple of the physical air density along the view ray (1 =
     /// physical). Not part of the tiers.
@@ -94,6 +98,7 @@ impl GraphicsSettings {
             shadows: false,
             msaa: MsaaLevel::Off,
             earthshine: false,
+            sky_light: false,
             haze: 1.0,
         };
         match tier {
@@ -132,7 +137,12 @@ impl GraphicsSettings {
                 earthshine: true,
                 ..base
             },
-            Tier::Ultra => GraphicsSettings { terrain_error_px: 1.0, star_magnitude: 8.0, ..Self::preset(Tier::High) },
+            Tier::Ultra => GraphicsSettings {
+                terrain_error_px: 1.0,
+                star_magnitude: 8.0,
+                sky_light: true,
+                ..Self::preset(Tier::High)
+            },
         }
         .with_tier(tier)
     }
