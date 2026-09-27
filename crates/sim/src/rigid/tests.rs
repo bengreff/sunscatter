@@ -154,7 +154,7 @@ fn a_constant_torque_spins_up_at_torque_over_inertia() {
 #[ignore = "timing; run with --ignored --nocapture"]
 fn timing() {
     let q0 = quat_from_rotvec(DVec3::new(0.4, 0.1, -0.2));
-    for (name, inertia, w) in [cases()[0].clone(), cases()[2].clone()] {
+    for (name, inertia, w) in [cases()[0], cases()[2]] {
         let att = Attitude { q: q0, omega: q0 * w };
         let n = 2000;
         let t0 = std::time::Instant::now();
