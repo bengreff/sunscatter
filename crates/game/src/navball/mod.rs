@@ -158,7 +158,7 @@ pub fn nav_state(sim: &SimState, tracked: &Tracked, nav: &mut Navball) -> Option
     };
     let local = rules::local_frame(rel, p.rotation.pole(t));
     let ship = rules::ship_axes(vessel.attitude.q);
-    let in_atmosphere = p.atmosphere.is_some_and(|a| alt < a.top);
+    let in_atmosphere = p.atmosphere.as_ref().is_some_and(|a| alt < a.top);
     let orbit = relations::orbit_about(&sim.world, t, anchor, r, v, body);
     // On the ground the "orbit" is the surface's rotation, with the ship at
     // its apoapsis: noise flipped the time to Ap between 0 and a period.

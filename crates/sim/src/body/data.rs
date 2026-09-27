@@ -125,6 +125,11 @@ pub fn parse_body(text: &str, dir: &Path) -> Result<BodyDef, DataError> {
     if !(p.radius_eq > 0.0 && p.radius_polar > 0.0) {
         return Err(err("radii must be positive".into()));
     }
+    if let Some(a) = p.atmosphere.as_ref().filter(|a| a.table.is_none()) {
+        if !(a.rho0 > 0.0 && a.scale_height > 0.0) {
+            return Err(err("an atmosphere without a table needs rho0 and scale_height".into()));
+        }
+    }
     Ok(BodyDef {
         physical: BodyPhysical {
             name: p.name,
@@ -218,16 +223,7 @@ mod tests {
                     w0: 190.147 * DEG,
                     w_rate: 360.985_623_5 * DEG / 86_400.0,
                 },
-                Some(Atmosphere {
-                    rho0: 1.225,
-                    scale_height: 7_200.0,
-                    top: 150_000.0,
-                    p0: 101_325.0,
-                    gamma: 1.4,
-                    molar_mass: 0.029,
-                    mean_free_path: 6.6e-8,
-                    sutton_graves_k: 1.7415e-4,
-                }),
+                None, // replaced by the US 1976 table (tested in `body::atmosphere`)
                 true,
                 Some(0.0),
             ),
@@ -287,10 +283,7 @@ mod tests {
 
     fn bits(p: &BodyPhysical) -> Vec<u64> {
         let r = &p.rotation;
-        let mut v = vec![p.radius_eq, p.radius_polar, p.j2, r.ra, r.dec, r.ra_rate, r.dec_rate, r.w0, r.w_rate];
-        if let Some(a) = p.atmosphere {
-            v.extend([a.rho0, a.scale_height, a.top]);
-        }
+        let v = vec![p.radius_eq, p.radius_polar, p.j2, r.ra, r.dec, r.ra_rate, r.dec_rate, r.w0, r.w_rate];
         v.into_iter().map(f64::to_bits).collect()
     }
 
@@ -300,7 +293,8 @@ mod tests {
             let def = load_default(name);
             assert_eq!(bits(&def.physical), bits(&legacy(name)), "{name}");
             let floor = def.physical.rails_floor;
-            assert_eq!(def.physical, BodyPhysical { rails_floor: floor, ..legacy(name) }, "{name}");
+            let atmosphere = def.physical.atmosphere.clone();
+            assert_eq!(def.physical, BodyPhysical { rails_floor: floor, atmosphere, ..legacy(name) }, "{name}");
         }
         let earth = load_default("earth");
         assert_eq!(earth.anchor_zone, Some(AnchorZone { enter: 1.4e9, exit: 1.6e9 }));

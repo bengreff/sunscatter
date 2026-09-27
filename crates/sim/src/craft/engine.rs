@@ -204,11 +204,10 @@ mod tests {
 
     #[test]
     fn earth_back_pressure_table() {
+        // US 1976: 54,048 Pa at 5 km; zero from the atmosphere's top.
         let atm = crate::body::earth().atmosphere.unwrap();
-        for (h, p) in
-            [(0.0, P_SEA_LEVEL), (7200.0, P_SEA_LEVEL / std::f64::consts::E), (-50.0, P_SEA_LEVEL), (150e3, 0.0)]
-        {
-            assert!((atm.pressure(h) - p).abs() < 1e-9, "{h} m: {}", atm.pressure(h));
+        for (h, p) in [(0.0, P_SEA_LEVEL), (5000.0, 54_048.0), (-50.0, P_SEA_LEVEL), (150e3, 0.0)] {
+            assert!((atm.pressure(h) - p).abs() < 1e-3 * p.max(1.0), "{h} m: {}", atm.pressure(h));
         }
     }
 }

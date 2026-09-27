@@ -250,7 +250,7 @@ fn drag_in_the_upper_atmosphere_decays_an_orbit() {
     let lost = energy(r, v) - energy(r1, v1);
     // Specific power ½ρv³·CdA/m, with the density at 130 km and the drag
     // area between the end-on and the mean areas.
-    let rho = earth.physical.as_ref().unwrap().atmosphere.unwrap().density(130_000.0);
+    let rho = earth.physical.as_ref().unwrap().atmosphere.as_ref().unwrap().density(130_000.0);
     let v_air = v.length() - 465.0 * 0.0; // equatorial plane: roughly prograde with the rotation
     let per_area = 0.5 * rho * v_air.powi(3) / ship.mass() * dt;
     println!("live: lost {lost:.1} J/kg in {dt} s ({:.1} m² effective Cd·A)", lost / per_area);

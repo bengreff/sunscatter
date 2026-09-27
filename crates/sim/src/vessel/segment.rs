@@ -382,7 +382,7 @@ impl Segment {
         let snap_b = world.snapshot(self.t0.add_seconds(b.s.t));
         for src in &world.sources {
             let Some(p) = src.physical.as_ref() else { continue };
-            let Some(atm) = p.atmosphere else { continue };
+            let Some(atm) = &p.atmosphere else { continue };
             let d = (b.s.r - snap_b.relative_r(src.node, self.anchor)).length();
             if d > p.radius_eq + atm.top + 200_000.0 {
                 continue;

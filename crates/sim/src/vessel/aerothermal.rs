@@ -158,25 +158,21 @@ impl Air {
 pub fn air_at(world: &World, snap: &Snapshot, anchor: NodeId, r: DVec3, v: DVec3) -> Option<Air> {
     for s in &world.sources {
         let Some(p) = s.physical.as_ref() else { continue };
-        let Some(atm) = p.atmosphere else { continue };
+        let Some(atm) = &p.atmosphere else { continue };
         let k = snap.relative(s.node, anchor);
         let d = r - k.r;
         if d.length() - p.radius_eq >= atm.top {
             continue;
         }
-        let rho = atm.density(p.altitude(p.rotation.to_fixed(Vec3::from_raw(d), snap.t)));
-        if rho <= 0.0 {
-            continue;
-        }
-        let v_air = k.v + p.rotation.omega(snap.t).raw().cross(d);
         let g0 = s.gm / (p.radius_eq * p.radius_eq);
-        let temperature = atm.temperature(g0);
+        let Some(state) = atm.air(p.altitude(p.rotation.to_fixed(Vec3::from_raw(d), snap.t)), g0) else { continue };
+        let v_air = k.v + p.rotation.omega(snap.t).raw().cross(d);
         return Some(Air {
             body: s.node,
-            rho,
+            rho: state.rho,
             wind: v_air - v,
-            speed_of_sound: aero::air::speed_of_sound(atm.gamma, temperature, atm.molar_mass),
-            mean_free_path: atm.mean_free_path_at(rho),
+            speed_of_sound: state.speed_of_sound(atm.gamma),
+            mean_free_path: state.mean_free_path,
             gamma: atm.gamma,
             sutton_graves_k: atm.sutton_graves_k,
         });
@@ -189,7 +185,7 @@ pub fn air_at(world: &World, snap: &Snapshot, anchor: NodeId, r: DVec3, v: DVec3
 pub fn in_atmosphere(world: &World, snap: &Snapshot, anchor: NodeId, r: DVec3, margin: f64) -> bool {
     world.sources.iter().any(|s| {
         let Some(p) = s.physical.as_ref() else { return false };
-        let Some(atm) = p.atmosphere else { return false };
+        let Some(atm) = &p.atmosphere else { return false };
         let d = r - snap.relative_r(s.node, anchor);
         d.length() - p.radius_eq < atm.top + margin + 1e5
             && p.altitude(p.rotation.to_fixed(Vec3::from_raw(d), snap.t)) < atm.top + margin

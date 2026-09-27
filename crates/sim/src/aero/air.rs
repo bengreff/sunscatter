@@ -1,11 +1,7 @@
-//! Air properties the aerodynamics needs, from the exponential
-//! [`crate::body::Atmosphere`] (realism-1 §5a).
-//!
-//! The exponential model is isothermal: a scale height H means
-//! T = H·g₀·M / R. Speed of sound and mean free path follow from it. This is
-//! a stand-in: the planned per-body table (US Standard Atmosphere 1976 for
-//! Earth, NRLMSISE-00 exosphere averages) replaces these functions' inputs,
-//! not their callers.
+//! Air properties the aerodynamics needs (realism-1 §5a): speed of sound,
+//! mean free path, Knudsen number, the stagnation pressure coefficient.
+//! Their inputs come from [`crate::body::Atmosphere`] (a table, or the
+//! isothermal exponential model: a scale height H means T = H·g₀·M / R).
 
 use crate::math;
 

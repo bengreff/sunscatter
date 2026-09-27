@@ -137,7 +137,7 @@ impl ForceContext<'_> {
                 if p.j2 != 0.0 {
                     a += j2_accel(d, s.gm, p.j2, p.radius_eq, p.rotation.pole(snap.t));
                 }
-                if let (Some(atm), Some(drag)) = (p.atmosphere, self.drag) {
+                if let (Some(atm), Some(drag)) = (&p.atmosphere, self.drag) {
                     // Cheap spherical bound before the exact ellipsoid altitude.
                     if d2.sqrt() - p.radius_eq < atm.top {
                         let fixed = p.rotation.to_fixed(Vec3::from_raw(d), snap.t);
@@ -184,7 +184,7 @@ pub fn ambient_pressure(world: &World, snap: &Snapshot, anchor: NodeId, r: DVec3
     let mut p_total = 0.0;
     for src in &world.sources {
         let Some(p) = src.physical.as_ref() else { continue };
-        let Some(atm) = p.atmosphere else { continue };
+        let Some(atm) = &p.atmosphere else { continue };
         let d = r - snap.relative_r(src.node, anchor);
         if d.length() - p.radius_eq >= atm.top {
             continue;

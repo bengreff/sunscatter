@@ -2,8 +2,10 @@
 //! Motion lives in [`crate::ephem`]; this is everything else. The values come
 //! from data files (`data/bodies/<body>/body.ron`, see [`data`]).
 
+pub mod atmosphere;
 pub mod data;
 
+pub use atmosphere::{AirState, Atmosphere, AtmosphereTable};
 pub use data::{default_bodies_dir, load_body, parse_body, BodyDef, DataError};
 
 use crate::frame::{BodyFixed, Inertial, Vec3};
@@ -70,81 +72,6 @@ impl Rotation {
         let x = math::rotate_z(v.raw(), -(ra + math::PI / 2.0));
         let x = math::rotate_x(x, -(math::PI / 2.0 - dec));
         Vec3::from_raw(math::rotate_z(x, -self.angle(t)))
-    }
-}
-
-/// Exponential atmosphere (prototype model), and the air's properties the
-/// aerodynamics and heating need (`sim::aero::air`, `sim::thermal`). The
-/// air fields default to Earth air.
-#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct Atmosphere {
-    /// Sea-level density (kg/m³).
-    pub rho0: f64,
-    /// Scale height (m).
-    pub scale_height: f64,
-    /// Altitude above which density is zero (m).
-    pub top: f64,
-    /// Sea-level pressure (Pa); falls with the same scale height (engines'
-    /// back pressure). Zero if not given.
-    #[serde(default)]
-    pub p0: f64,
-    /// Ratio of specific heats.
-    #[serde(default = "air_defaults::gamma")]
-    pub gamma: f64,
-    /// Mean molar mass (kg/mol).
-    #[serde(default = "air_defaults::molar_mass")]
-    pub molar_mass: f64,
-    /// Mean free path at `rho0` (m); λ ∝ 1/ρ.
-    #[serde(default = "air_defaults::mean_free_path")]
-    pub mean_free_path: f64,
-    /// Sutton–Graves stagnation heating constant (SI, `thermal::sutton_graves`).
-    #[serde(default = "air_defaults::sutton_graves_k")]
-    pub sutton_graves_k: f64,
-}
-
-/// Earth air: the defaults of [`Atmosphere`]'s air fields.
-mod air_defaults {
-    pub fn gamma() -> f64 {
-        crate::aero::air::EARTH_AIR_GAMMA
-    }
-    pub fn molar_mass() -> f64 {
-        crate::aero::air::EARTH_AIR_MOLAR_MASS
-    }
-    pub fn mean_free_path() -> f64 {
-        crate::aero::air::EARTH_MEAN_FREE_PATH_SL
-    }
-    pub fn sutton_graves_k() -> f64 {
-        crate::thermal::heating::SUTTON_GRAVES_EARTH
-    }
-}
-
-impl Atmosphere {
-    /// Ambient pressure (Pa) at `altitude`.
-    pub fn pressure(&self, altitude: f64) -> f64 {
-        if altitude >= self.top {
-            0.0
-        } else {
-            self.p0 * math::exp(-altitude.max(0.0) / self.scale_height)
-        }
-    }
-
-    pub fn density(&self, altitude: f64) -> f64 {
-        if altitude >= self.top {
-            0.0
-        } else {
-            self.rho0 * math::exp(-altitude.max(0.0) / self.scale_height)
-        }
-    }
-
-    /// Temperature (K) of the isothermal atmosphere this scale height
-    /// implies, for surface gravity `g0` (m/s²).
-    pub fn temperature(&self, g0: f64) -> f64 {
-        crate::aero::air::isothermal_temperature(self.scale_height, g0, self.molar_mass)
-    }
-
-    /// Mean free path (m) at density `rho` (infinite in vacuum).
-    pub fn mean_free_path_at(&self, rho: f64) -> f64 {
-        crate::aero::air::mean_free_path(self.mean_free_path, self.rho0, rho)
     }
 }
 
