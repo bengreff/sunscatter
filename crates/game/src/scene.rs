@@ -86,7 +86,15 @@ pub fn setup(
     commands.spawn((SunLight, DirectionalLight { illuminance: 128_000.0, ..default() }, cascades, Transform::IDENTITY));
     commands.insert_resource(GlobalAmbientLight { brightness: 0.0, ..default() });
     commands.insert_resource(defs);
-    commands.insert_resource(Assets3d { ship_mesh: meshes.add(Cuboid::new(3.0, 3.0, 10.0)) });
+    commands.insert_resource(Assets3d { ship_mesh: meshes.add(craft_mesh(&sim::craft::test_craft().mesh)) });
+}
+
+/// A Bevy mesh from a craft's render mesh (body axes, +Z the nose).
+fn craft_mesh(m: &sim::craft::RenderMesh) -> Mesh {
+    Mesh::new(bevy::mesh::PrimitiveTopology::TriangleList, bevy::asset::RenderAssetUsages::RENDER_WORLD)
+        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, m.positions.clone())
+        .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, m.normals.clone())
+        .with_inserted_indices(bevy::mesh::Indices::U32(m.indices.clone()))
 }
 
 /// Visual definitions of the bodies that have one, and which body lights
@@ -180,7 +188,11 @@ pub fn update_ships(
         seen[ship.0] = true;
         let (anchor, r, _) = vessel.state_at(&sim.world, sim.clock);
         let pos = snap.relative(anchor, rig.anchor).r + r - rig.cam_pos;
-        *t = Transform { translation: pos.as_vec3(), rotation: vessel.attitude.q.as_quat(), scale: Vec3::ONE };
+        // The vessel's position is its centre of mass; the mesh is in the
+        // craft's body axes.
+        let q = vessel.attitude.q;
+        let origin = pos - q * vessel.mass_props().com;
+        *t = Transform { translation: origin.as_vec3(), rotation: q.as_quat(), scale: Vec3::ONE };
         // Per-ship light (D055): the shared sunlight dimmed where a body
         // hides the Sun, plus planetshine as a diffuse glow where it does
         // (in sunlight the sky light and sunlight already dominate, and a

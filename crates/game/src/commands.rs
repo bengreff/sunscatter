@@ -33,6 +33,9 @@ pub enum GameCommand {
     Reset,
     /// Debug: spawn test ships in low Earth orbit.
     SpawnTestShips(usize),
+    /// Debug mode (D064) on every vessel: infinite propellant, no
+    /// overheating, infinite impact tolerance.
+    SetDebug(bool),
 }
 
 /// Applies the frame's commands, in the order they were written.
@@ -68,6 +71,12 @@ pub fn apply(
                 rig.focus = Focus::Ship;
             }
             GameCommand::SpawnTestShips(n) => sim.spawn_test_ships(*n),
+            GameCommand::SetDebug(on) => {
+                let sim = &mut *sim;
+                for v in &mut sim.fleet {
+                    v.set_debug(&sim.world, *on);
+                }
+            }
         }
     }
 }

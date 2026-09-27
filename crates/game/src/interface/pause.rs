@@ -104,6 +104,7 @@ pub fn draw(
     mut saves: ResMut<SaveUi>,
     mut station: ResMut<TrackingStation>,
     snapshot: Res<LaunchSnapshot>,
+    sim: Res<SimState>,
     mut commands: MessageWriter<GameCommand>,
     mut exit: MessageWriter<AppExit>,
 ) -> Result {
@@ -140,6 +141,10 @@ pub fn draw(
                     let revert = ui.add_enabled_ui(snapshot.0.is_some(), |ui| button(ui, "Revert flight to launch"));
                     if revert.inner {
                         menu.page = Page::ConfirmRevert;
+                    }
+                    let debug = sim.ship().debug();
+                    if button(ui, if debug { "Debug mode: ON" } else { "Debug mode: off" }) {
+                        commands.write(GameCommand::SetDebug(!debug));
                     }
                     if button(ui, "Tracking station") {
                         station.open = true;

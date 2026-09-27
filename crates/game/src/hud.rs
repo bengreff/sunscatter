@@ -250,6 +250,46 @@ pub fn draw(
 }
 
 /// The Flight panel: phase, altitudes, speeds, apsides, throttle, SAS, chute.
+/// Rocket-equation Δv (m/s) of `propellant` (kg) burnt from mass `mass`.
+pub fn delta_v(isp: f64, mass: f64, propellant: f64) -> f64 {
+    let dry = (mass - propellant).max(1e-9);
+    isp * sim::vessel::G0 * (mass / dry).ln()
+}
+
+/// Thrust-to-weight ratio in local gravity `g` (m/s²); `None` in free space.
+pub fn twr(thrust: f64, mass: f64, g: f64) -> Option<f64> {
+    (g > 1e-6).then(|| thrust / (mass * g))
+}
+
+/// Propellant, Δv, TWR and mass of the active vessel, and the debug badge.
+fn craft_rows(ui_: &mut egui::Ui, sim: &SimState, near: Option<sim::frame::NodeId>) {
+    let dim = |t: &str| egui::RichText::new(t).monospace().small().color(theme::DIM);
+    let ship = sim.ship();
+    let props = ship.mass_props();
+    let engine = &ship.craft.engine;
+    let full = ship.craft.initial_propellant.max(1.0);
+    let (anchor, r, _) = ship.state_at(&sim.world, sim.clock);
+    let g = near.and_then(|b| sim.world.source(b)).map_or(0.0, |b| {
+        let d = (r - sim.world.snapshot(sim.clock).relative_r(b.node, anchor)).length();
+        b.gm / (d * d)
+    });
+    egui::Grid::new("craft_grid").num_columns(2).spacing([10.0, 2.0]).show(ui_, |ui_| {
+        let mut row = |label: &str, value: String| {
+            ui_.label(dim(label));
+            ui_.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui_| ui_.monospace(value));
+            ui_.end_row();
+        };
+        let p = ship.propellant();
+        row("PROPELLANT", format!("{:.0} kg {:3.0}%", p, 100.0 * p / full));
+        row("ΔV (VAC)", format!("{:.0} m/s", delta_v(engine.isp_vac, props.mass, p)));
+        row("TWR", twr(engine.thrust_vac, props.mass, g).map_or("—".into(), |t| format!("{t:.2}")));
+        row("MASS", format!("{:.1} t", props.mass / 1e3));
+    });
+    if ship.debug() {
+        ui_.label(egui::RichText::new("DEBUG MODE").monospace().color(theme::WARN));
+    }
+}
+
 fn flight_panel(ui_: &mut egui::Ui, sim: &SimState, near: Option<sim::frame::NodeId>) {
     let dim = |t: &str| egui::RichText::new(t).monospace().small().color(theme::DIM);
     let ship = sim.ship();
@@ -290,6 +330,7 @@ fn flight_panel(ui_: &mut egui::Ui, sim: &SimState, near: Option<sim::frame::Nod
             row("Pe", crate::format::distance(el.periapsis() - p.radius_eq));
         });
     }
+    craft_rows(ui_, sim, near);
     let c = sim.controls;
     ui_.add(egui::ProgressBar::new(c.throttle as f32).text(format!("throttle {:.0}%", c.throttle * 100.0)));
     ui_.monospace(format!(
@@ -332,6 +373,18 @@ pub fn draw_body_menu(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn delta_v_and_twr_follow_the_rocket_equation() {
+        // 20 t with 16 t of propellant at Isp 320 s: 320·g0·ln 5.
+        let dv = delta_v(320.0, 20_000.0, 16_000.0);
+        assert!((dv - 320.0 * sim::vessel::G0 * 5f64.ln()).abs() < 1e-9);
+        assert!((dv - 5051.0).abs() < 1.0, "{dv}");
+        assert_eq!(delta_v(320.0, 4_000.0, 0.0), 0.0);
+        let t = twr(300e3, 20_000.0, 9.81).unwrap();
+        assert!((t - 1.529).abs() < 1e-3);
+        assert_eq!(twr(300e3, 20_000.0, 0.0), None);
+    }
 
     #[test]
     fn warp_indicator_shows_the_level_kind_and_limit() {
