@@ -82,9 +82,22 @@ pub struct Atmosphere {
     pub scale_height: f64,
     /// Altitude above which density is zero (m).
     pub top: f64,
+    /// Sea-level pressure (Pa); falls with the same scale height (engines'
+    /// back pressure). Zero if not given.
+    #[serde(default)]
+    pub p0: f64,
 }
 
 impl Atmosphere {
+    /// Ambient pressure (Pa) at `altitude`.
+    pub fn pressure(&self, altitude: f64) -> f64 {
+        if altitude >= self.top {
+            0.0
+        } else {
+            self.p0 * math::exp(-altitude.max(0.0) / self.scale_height)
+        }
+    }
+
     pub fn density(&self, altitude: f64) -> f64 {
         if altitude >= self.top {
             0.0

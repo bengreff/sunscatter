@@ -5,11 +5,13 @@
 //! module owns everything derived from those files at load.
 
 pub mod cells;
+pub mod engine;
 pub mod file;
 pub mod mass;
 pub mod mesh;
 
 pub use cells::{Cell, CellOptions, Cells, ContactKind, ContactPoint, Neighbour};
+pub use engine::{Engine, EngineOutput};
 pub use file::{CraftFile, GeometryFile, Primitive, Shape, Skin, Tank};
 pub use mass::{MassModel, MassProps};
 pub use mesh::{RenderMesh, Resolution, Surface};

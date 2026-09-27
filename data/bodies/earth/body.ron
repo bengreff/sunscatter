@@ -19,7 +19,7 @@
             w_rate_deg_per_day: 360.9856235,
         ),
         // Exponential atmosphere (prototype model), heights above the ellipsoid.
-        atmosphere: Some((rho0: 1.225, scale_height: 7200.0, top: 150000.0)),
+        atmosphere: Some((rho0: 1.225, scale_height: 7200.0, top: 150000.0, p0: 101325.0)),
         // Precision policy only: where Earth becomes / stops being the preferred anchor (m).
         anchor_zone: Some((enter: 1.4e9, exit: 1.6e9)),
         relativistic: false,

@@ -152,3 +152,21 @@ pub fn altitude_above(
     let fixed = p.rotation.to_fixed(Vec3::from_raw(d), snap.t);
     (p.altitude_above_surface(fixed), fixed)
 }
+
+/// Ambient pressure (Pa) at an anchor-relative position: the atmosphere of
+/// whichever body the vessel is in (zero in vacuum). Uses the same altitude
+/// above the ellipsoid as drag.
+pub fn ambient_pressure(world: &World, snap: &Snapshot, anchor: NodeId, r: DVec3) -> f64 {
+    let mut p_total = 0.0;
+    for src in &world.sources {
+        let Some(p) = src.physical.as_ref() else { continue };
+        let Some(atm) = p.atmosphere else { continue };
+        let d = r - snap.relative_r(src.node, anchor);
+        if d.length() - p.radius_eq >= atm.top {
+            continue;
+        }
+        let fixed = p.rotation.to_fixed(Vec3::from_raw(d), snap.t);
+        p_total += atm.pressure(p.altitude(fixed));
+    }
+    p_total
+}

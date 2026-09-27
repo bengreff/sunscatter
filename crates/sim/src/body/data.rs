@@ -210,7 +210,7 @@ mod tests {
                     w0: 190.147 * DEG,
                     w_rate: 360.985_623_5 * DEG / 86_400.0,
                 },
-                Some(Atmosphere { rho0: 1.225, scale_height: 7_200.0, top: 150_000.0 }),
+                Some(Atmosphere { rho0: 1.225, scale_height: 7_200.0, top: 150_000.0, p0: 101_325.0 }),
                 true,
                 Some(0.0),
             ),
