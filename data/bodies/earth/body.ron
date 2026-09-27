@@ -35,7 +35,7 @@
             wavelength: 4892.0,
             lacunarity: 2.0,
             gain: 0.5,
-            amplitude: 2.0,
+            amplitude: 0.5,
             ridge_threshold: 100.0,
         )),
         // Oceans are solid at sea level (D037): surface = max(terrain, sea_level).

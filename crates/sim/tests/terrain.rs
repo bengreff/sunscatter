@@ -177,7 +177,7 @@ fn shipped_heightmap_samples_match_golden_hash() {
 }
 
 // Base + procedural detail (D059); was the bicubic heightmap alone.
-const EARTH_GOLDEN: u64 = 0x3e55d4b2973ad95b;
+const EARTH_GOLDEN: u64 = 0xe9f34b76e0848548;
 
 #[test]
 fn detail_is_zero_over_water_and_present_on_rough_land() {

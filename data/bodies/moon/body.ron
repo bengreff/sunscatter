@@ -33,7 +33,7 @@
             wavelength: 2665.0,
             lacunarity: 2.0,
             gain: 0.5,
-            amplitude: 2.0,
+            amplitude: 0.5,
             ridge_threshold: 300.0,
         )),
         sea_level: None,
