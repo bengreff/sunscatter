@@ -147,6 +147,7 @@ fn main() {
                 hud::draw_body_menu,
                 saves::draw,
                 planner::draw,
+                planner::pick_on_line,
                 interface::pause::draw,
                 interface::help::draw,
                 interface::toasts::draw,

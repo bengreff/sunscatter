@@ -123,6 +123,57 @@ pub fn intercept(sim: &SimState, i: usize, j: usize) -> Option<DraftBurn> {
     Some(DraftBurn { t_start, dv: DVec3::new(dv.dot(p), dv.dot(n), dv.dot(rad)), reference: body })
 }
 
+/// The time of the line sample nearest to `cursor` on screen, if within
+/// `max_px`: (time, screen point) samples in order along the line.
+pub fn nearest_on_screen(samples: &[(Epoch, Vec2)], cursor: Vec2, max_px: f32) -> Option<Epoch> {
+    samples
+        .iter()
+        .map(|(t, p)| (*t, p.distance(cursor)))
+        .filter(|(_, d)| *d <= max_px)
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .map(|(t, _)| t)
+}
+
+/// With the planner open, a click on the active vessel's line adds a burn
+/// there (edit its Δv in the window).
+#[allow(clippy::too_many_arguments)]
+pub fn pick_on_line(
+    mut contexts: EguiContexts,
+    mouse: Res<ButtonInput<MouseButton>>,
+    sim: Res<SimState>,
+    rig: Res<crate::camera::CameraRig>,
+    ui: Res<crate::hud::UiState>,
+    cam: Query<(&Camera, &Transform, &Projection), With<crate::camera::MainCamera>>,
+    window: Query<&Window>,
+    mut planner: ResMut<Planner>,
+) -> Result {
+    if !planner.open || !mouse.just_pressed(MouseButton::Left) || planner.vessel != Some(sim.ship().id()) {
+        return Ok(());
+    }
+    let ctx = contexts.ctx_mut()?;
+    if ctx.is_pointer_over_egui() {
+        return Ok(());
+    }
+    let Some(cursor) = window.single().ok().and_then(Window::cursor_position) else { return Ok(()) };
+    let (Some(view), Some(tr)) = (crate::map::view(&cam), sim.ship().trajectory()) else { return Ok(()) };
+    let Some(plotter) = crate::trajectory::Plotter::new(&sim, &rig, ui.plot_frame) else { return Ok(()) };
+    let end = tr.computed_until();
+    let span = end.seconds_since(sim.clock).min(86_400.0);
+    let samples: Vec<(Epoch, Vec2)> = (1..=600)
+        .filter_map(|k| {
+            let t = sim.clock.add_seconds(span * f64::from(k) / 600.0);
+            let (anchor, r, _) = tr.eval(t)?;
+            Some((t, view.project(plotter.plot(anchor, r, t))?))
+        })
+        .collect();
+    if let Some(t) = nearest_on_screen(&samples, cursor, 8.0) {
+        let reference = sim.dominant_of(sim.active);
+        planner.draft.push(DraftBurn { t_start: t, dv: DVec3::ZERO, reference });
+        planner.draft.sort_by(|a, b| a.t_start.seconds_since(b.t_start).total_cmp(&0.0));
+    }
+    Ok(())
+}
+
 /// Toggles the planner (N) for the active vessel.
 pub fn keys(
     keys: Res<ButtonInput<KeyCode>>,
@@ -289,6 +340,15 @@ mod tests {
         assert!(b.t_start.seconds_since(sim.clock) >= 60.0);
         let dv = b.dv.length();
         assert!(dv > 1.0 && dv < 3000.0, "{dv}");
+    }
+
+    #[test]
+    fn a_click_picks_the_nearest_sample_within_reach() {
+        let t0 = sim::sol::sol_epoch();
+        let samples: Vec<(Epoch, Vec2)> =
+            (0..10).map(|k| (t0.add_seconds(f64::from(k)), Vec2::new(10.0 * k as f32, 0.0))).collect();
+        assert_eq!(nearest_on_screen(&samples, Vec2::new(41.0, 3.0), 8.0), Some(t0.add_seconds(4.0)));
+        assert_eq!(nearest_on_screen(&samples, Vec2::new(41.0, 30.0), 8.0), None);
     }
 
     #[test]
