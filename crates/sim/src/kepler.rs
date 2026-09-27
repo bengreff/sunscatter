@@ -108,6 +108,58 @@ impl Elements {
     }
 }
 
+/// A bound orbit's shape in space, for sampling it by eccentric anomaly E
+/// (no Kepler solve: time follows as M = E − e·sin E).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Ellipse {
+    pub a: f64,
+    pub e: f64,
+    /// Unit vector to periapsis (to the position for a circular orbit).
+    pub p: DVec3,
+    /// Unit vector 90° ahead of `p` in the direction of motion.
+    pub q: DVec3,
+}
+
+impl Ellipse {
+    /// The osculating ellipse of `(r, v)` about a body of parameter `mu`;
+    /// `None` for unbound or degenerate orbits.
+    pub fn from_state(r: DVec3, v: DVec3, mu: f64) -> Option<Self> {
+        let rm = r.length();
+        let h = r.cross(v);
+        let energy = 0.5 * v.length_squared() - mu / rm;
+        if energy.is_nan() || energy >= 0.0 || h.length_squared() == 0.0 {
+            return None;
+        }
+        let e_vec = (r * (v.length_squared() - mu / rm) - v * r.dot(v)) / mu;
+        let e = e_vec.length();
+        if e >= 1.0 {
+            return None;
+        }
+        let p = if e > DEGENERATE_E { e_vec / e } else { r / rm };
+        Some(Ellipse { a: -mu / (2.0 * energy), e, p, q: h.normalize().cross(p) })
+    }
+
+    /// Position at eccentric anomaly `big_e` (relative to the central body).
+    pub fn position(&self, big_e: f64) -> DVec3 {
+        let b = self.a * (1.0 - self.e * self.e).sqrt();
+        self.p * (self.a * (math::cos(big_e) - self.e)) + self.q * (b * math::sin(big_e))
+    }
+
+    /// Mean anomaly at eccentric anomaly `big_e` (Kepler's equation).
+    pub fn mean_anomaly(&self, big_e: f64) -> f64 {
+        big_e - self.e * math::sin(big_e)
+    }
+
+    /// Orbital period (s).
+    pub fn period(&self, mu: f64) -> f64 {
+        TAU * math::sqrt_pos(self.a * self.a * self.a / mu)
+    }
+
+    pub fn periapsis(&self) -> f64 {
+        self.a * (1.0 - self.e)
+    }
+}
+
 /// Mean anomaly from true anomaly.
 pub fn mean_from_true(nu: f64, e: f64) -> f64 {
     if e < 1.0 {

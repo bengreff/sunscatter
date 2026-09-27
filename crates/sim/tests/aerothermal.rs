@@ -389,3 +389,68 @@ fn a_planned_burn_on_rails_heats_the_engine_node_at_any_frame_rate() {
     println!("planned 95 s burn: engine node +{:.2} K after 10 min", rise[aft]);
     assert!(rise[aft] > 5.0, "{}", rise[aft]);
 }
+
+#[test]
+fn coast_sunlight_is_the_orbit_average_in_low_orbit() {
+    let w = world();
+    let t = t0();
+    let snap = w.snapshot(t);
+    let (earth, r, v) = orbit(&w, 400_000.0, 400_000.0);
+    let avg = sim::vessel::coast_sunlight(&w, t, earth, r, v);
+    let full = sim::light::star_flux(3.828e26, snap.relative_r(w.find("Sun").unwrap().node, earth).length());
+    // Sunlit 61–100 % of a 400 km orbit, depending on its beta angle.
+    let lit = avg.length() / full;
+    assert!(lit > 0.6 && lit <= 1.0, "{lit}");
+    // Far out (a period of days) it is the sunlight at the point.
+    let (earth, r, v) = sunlit(&w, t);
+    assert_eq!(sim::vessel::coast_sunlight(&w, t, earth, r, v), sim::light::sunlight(&w, &snap, earth, r));
+}
+
+#[test]
+fn a_budgeted_coast_equals_an_unbudgeted_one() {
+    // Holding its attitude in low orbit for two days: advanced in calls of
+    // a small work budget (the game holds its clock back) against one call.
+    let w = world();
+    let (earth, r, v) = orbit(&w, 420_000.0, 400_000.0);
+    let mut a = Vessel::coasting(&w, VesselId(1), t0(), earth, r, v, sim::craft::test_craft());
+    let mut b = a.clone();
+    let controls = Controls { sas: true, ..Default::default() };
+    let end = t0().add_seconds(2.0 * 86_400.0);
+    let mut calls = 0;
+    while a.time < end {
+        a.advance(&w, end, &controls, 60);
+        calls += 1;
+        assert!(calls < 100_000);
+    }
+    b.advance(&w, end, &controls, usize::MAX);
+    println!("{calls} budgeted calls");
+    assert!(calls > 10, "{calls}");
+    assert_eq!(a, b);
+}
+
+#[test]
+fn holding_attitude_in_low_orbit_frames_equal_one_jump() {
+    // 60 fps at 1,000x for a day (lattice points passed without evaluation
+    // while the attitude holds) against one jump.
+    let w = world();
+    let (earth, r, v) = orbit(&w, 420_000.0, 400_000.0);
+    let mut a = Vessel::coasting(&w, VesselId(1), t0(), earth, r, v, sim::craft::test_craft());
+    let mut b = a.clone();
+    let controls = Controls { sas: true, ..Default::default() };
+    let end = t0().add_seconds(86_400.0);
+    let mut t = t0();
+    while t < end {
+        t = t.add_seconds(1000.0 / 60.0);
+        a.advance(&w, if t > end { end } else { t }, &controls, usize::MAX);
+    }
+    b.advance(&w, end, &controls, usize::MAX);
+    assert_eq!(a.thermal(), b.thermal());
+    assert_eq!(a.attitude, b.attitude);
+    let skin = a.thermal().state.skin.iter().fold((f64::MAX, 0.0f64), |(lo, hi), &x| (lo.min(x), hi.max(x)));
+    println!(
+        "a day in LEO holding attitude: skin {:.1}–{:.1} K, interior {:.1} K",
+        skin.0,
+        skin.1,
+        a.max_node_temperature().0
+    );
+}

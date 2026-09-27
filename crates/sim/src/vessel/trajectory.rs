@@ -96,7 +96,8 @@ impl Trajectory {
 
     /// Integrates until `until` is covered (or the chain ends), with at most
     /// `max_steps` new steps, starting the next segments from `plan`.
-    pub fn extend(&mut self, world: &World, plan: &FlightPlan, until: Epoch, max_steps: usize) {
+    /// Returns the steps taken.
+    pub fn extend(&mut self, world: &World, plan: &FlightPlan, until: Epoch, max_steps: usize) -> usize {
         let mut budget = max_steps;
         loop {
             let last = self.segments.last_mut().expect("a trajectory has a segment");
@@ -106,12 +107,12 @@ impl Trajectory {
                         self.segments.push(next);
                         continue;
                     }
-                    None => return,
+                    None => return max_steps - budget,
                 }
             }
             let want = until.seconds_since(last.t0);
             if last.computed_until() >= want || budget == 0 {
-                return;
+                return max_steps - budget;
             }
             budget -= last.extend_until(world, want, budget);
         }

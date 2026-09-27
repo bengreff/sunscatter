@@ -17,11 +17,14 @@
 //! **Coasts** (above every atmosphere): the temperatures step on a fixed
 //! [`LATTICE`] from the vessel's thermal epoch (sunlight and radiation
 //! only), with the attitude and position at each lattice epoch, so 60 fps
-//! and one long jump give the same bits. While the network has settled and
-//! the sunlight in body axes has not changed, lattice points are skipped
-//! for up to [`MAX_SKIP`] and the next solve spans them (backward Euler is
-//! stable at any step; [`coast_step`]): a vessel in steady sunlight solves
-//! once an hour.
+//! and one long jump give the same bits. The sunlight of a coast step is
+//! averaged over the vessel's osculating orbit ([`coast_sunlight`]: the
+//! orbit's sunlit fraction, for bound orbits of at most
+//! [`ORBIT_AVERAGE_PERIOD`]), so the input changes only slowly. While the
+//! sunlight in body axes has not changed, lattice points are skipped as
+//! long as the temperatures, at the last solve's rate, move by less than
+//! [`STEP_CHANGE_K`] (up to [`MAX_SKIP`]), and the next solve spans them
+//! (backward Euler is stable at any step; [`coast_step`]).
 //! Landed and crashed vessels keep their temperatures (ground heat
 //! exchange comes later).
 //!
@@ -34,25 +37,33 @@ use crate::aero::{self, Flow};
 use crate::craft::CraftDesign;
 use crate::ephem::Snapshot;
 use crate::frame::{NodeId, Vec3};
-use crate::thermal::{self, HeatInput, ThermalState, DEFAULT_SWEEPS};
+use crate::thermal::{self, HeatInput, ThermalState, COAST_CONVERGED, DEFAULT_SWEEPS};
 use crate::time::Epoch;
 use crate::world::World;
 use glam::{DQuat, DVec3};
 
-/// The coast thermal lattice (s).
-pub const LATTICE: f64 = 60.0;
+/// The coast thermal lattice (s): a third of the test craft's skin time
+/// constant (C/(4εσT³) ≈ 1,600 s at 290 K).
+pub const LATTICE: f64 = 600.0;
 /// Radiative sink temperature (K): the cosmic background.
 pub const SINK_K: f64 = 2.725;
 /// Temperature of a new vessel (K).
 pub const INITIAL_K: f64 = 290.0;
-/// A solve that changed no temperature by more than this per lattice step
-/// (K) has settled.
-const SETTLED_K: f64 = 1e-2;
+/// Coast solves are spaced so that each moves no temperature by more
+/// than about this (K), at the rate of the last solve.
+const STEP_CHANGE_K: f64 = 0.5;
+/// While the attitude does not change, the sunlight is compared only every
+/// this many lattice points (1 h; the Sun moves 0.04° against a fixed
+/// attitude, an orbit's eclipse fraction little more).
+pub const SUN_CHECK_POINTS: u64 = 6;
 /// Longest run of skipped lattice points (s).
-pub const MAX_SKIP: f64 = 3_600.0;
-/// A settled network is not stepped while the sunlight in body axes stays
-/// within this fraction of what it was solved with (or of 1 W/m²).
-const SUN_SAME: f64 = 1e-3;
+pub const MAX_SKIP: f64 = 86_400.0;
+/// Lattice points are skipped only while the sunlight in body axes stays
+/// within this fraction of what the last solve had (or of 1 W/m²): about
+/// 0.7 K on a sunlit cell.
+const SUN_SAME: f64 = 1e-2;
+/// Coasts average the sunlight over bound orbits of at most this period (s).
+pub const ORBIT_AVERAGE_PERIOD: f64 = 86_400.0;
 /// A vessel in an atmosphere starts coasting only this far above its top (m).
 pub const LEAVE_ATMOSPHERE: f64 = 1_000.0;
 
@@ -64,9 +75,9 @@ pub struct VesselThermal {
     pub epoch: Epoch,
     /// Coasts: the last lattice point passed (solved or skipped).
     lattice: Epoch,
-    /// Coasts: the sunlight (body axes, W/m²) of the last solved lattice
-    /// step, if that step settled.
-    settled: Option<DVec3>,
+    /// Coasts: the sunlight (body axes, W/m²) of the last solve and how
+    /// long after it (s) the next solve is due while that sunlight holds.
+    hold: Option<(DVec3, f64)>,
     /// Coasts: planned burns not yet stepped past: start, end (once known)
     /// and the engine's heat (W), in start order.
     burns: Vec<(Epoch, Option<Epoch>, f64)>,
@@ -75,7 +86,7 @@ pub struct VesselThermal {
 impl VesselThermal {
     pub fn uniform(cells: usize, nodes: usize, t: f64, epoch: Epoch) -> Self {
         let state = ThermalState::uniform(cells, nodes, t);
-        VesselThermal { state, epoch, lattice: epoch, settled: None, burns: Vec::new() }
+        VesselThermal { state, epoch, lattice: epoch, hold: None, burns: Vec::new() }
     }
 
     /// Hottest skin cell (K).
@@ -117,11 +128,28 @@ impl VesselThermal {
             .sum()
     }
 
+    /// Whether the coast lattice point `e` can be passed without even
+    /// evaluating the sunlight, for a vessel whose attitude does not change
+    /// (the caller's judgement): the last solve's hold still runs, no
+    /// planned burn heats the span, and `e` is not one of the points every
+    /// [`SUN_CHECK`] after the last solve where the sunlight is compared.
+    pub fn passes(&self, e: Epoch) -> bool {
+        let Some((_, span)) = self.hold else { return false };
+        let dt = e.seconds_since(self.epoch);
+        let k = libm::round(dt / LATTICE) as u64;
+        dt < span && !k.is_multiple_of(SUN_CHECK_POINTS) && self.burn_energy(self.epoch, e) == 0.0
+    }
+
+    /// Passes lattice point `e` (see [`Self::passes`]).
+    pub fn pass(&mut self, e: Epoch) {
+        self.lattice = e;
+    }
+
     /// Restarts the clock at `epoch` without stepping (landed vessels).
     pub fn restart(&mut self, epoch: Epoch) {
         self.epoch = epoch;
         self.lattice = epoch;
-        self.settled = None;
+        self.hold = None;
         self.burns.clear();
     }
 
@@ -129,6 +157,17 @@ impl VesselThermal {
     pub fn next_lattice(&self) -> Epoch {
         self.lattice.add_seconds(LATTICE)
     }
+}
+
+/// The sunlight of a coast step at `t` for a vessel at `(r, v)` relative to
+/// `anchor` (inertial, W/m²): averaged over its osculating orbit when that
+/// is bound, clear of the body and at most [`ORBIT_AVERAGE_PERIOD`] long
+/// ([`crate::light::orbit_average_sunlight`]); otherwise the sunlight at
+/// the point, eclipses included ([`crate::light::sunlight`]).
+pub fn coast_sunlight(world: &World, t: Epoch, anchor: NodeId, r: DVec3, v: DVec3) -> DVec3 {
+    let snap = world.snapshot(t);
+    crate::light::orbit_average_sunlight(world, &snap, anchor, r, v, ORBIT_AVERAGE_PERIOD)
+        .unwrap_or_else(|| crate::light::sunlight(world, &snap, anchor, r))
 }
 
 /// The air around a vessel at one instant.
@@ -319,9 +358,12 @@ pub fn live_step(
 /// the coast) with the sunlight `sun_body` (W/m², body axes) and
 /// `propellant` kg aboard: solves from the state's epoch (spanning skipped
 /// lattice points; the planned burns' engine heat over that span goes into
-/// the engine's node), or skips while settled under the same sunlight, with
-/// no burn, for less than [`MAX_SKIP`]. Returns whether the network was
-/// solved.
+/// the engine's node), or skips the point. A point is skipped while the
+/// sunlight is the same as at the last solve (within [`SUN_SAME`]), no
+/// burn heats the span and the last solve's rate of change says the
+/// temperatures have moved less than [`STEP_CHANGE_K`] since (at most
+/// [`MAX_SKIP`]): error control on a deterministic lattice. Returns
+/// whether the network was solved.
 pub fn coast_step(
     design: &CraftDesign,
     th: &mut VesselThermal,
@@ -336,8 +378,8 @@ pub fn coast_step(
         return false;
     }
     let burn = th.burn_energy(th.epoch, epoch);
-    if let Some(s) = th.settled.filter(|_| !last && dt < MAX_SKIP && burn == 0.0) {
-        if (sun_body - s).length() <= SUN_SAME * s.length().max(1.0) {
+    if let Some((s, span)) = th.hold.filter(|_| !last && burn == 0.0) {
+        if dt < span && (sun_body - s).length() <= SUN_SAME * s.length().max(1.0) {
             return false;
         }
     }
@@ -346,10 +388,14 @@ pub fn coast_step(
     thermal::cell_heat(&design.bake, &design.cells, &input, &mut b.scratch, &mut b.heat);
     node_inputs(design, burn / dt, propellant, &mut b);
     let before = th.state.clone();
-    design.network.step(&mut th.state, &b.heat, &b.node_heat, &b.node_capacity, SINK_K, dt, DEFAULT_SWEEPS);
+    let (heat, node_heat, capacity) = (&b.heat, &b.node_heat, &b.node_capacity);
+    design.network.step_to(&mut th.state, heat, node_heat, capacity, SINK_K, dt, DEFAULT_SWEEPS, COAST_CONVERGED);
     let change = |now: &[f64], was: &[f64]| now.iter().zip(was).map(|(a, b)| (a - b).abs()).fold(0.0, f64::max);
     let change = change(&th.state.skin, &before.skin).max(change(&th.state.nodes, &before.nodes));
-    th.settled = (!last && burn == 0.0 && change <= SETTLED_K * (dt / LATTICE)).then_some(sun_body);
+    // The next solve is due when the temperatures, at this solve's rate,
+    // will have moved by STEP_CHANGE_K.
+    let span = if change > 0.0 { (STEP_CHANGE_K * dt / change).min(MAX_SKIP) } else { MAX_SKIP };
+    th.hold = (!last && burn == 0.0).then_some((sun_body, span));
     th.epoch = epoch;
     th.burns.retain(|b| b.1.is_none_or(|end| end.seconds_since(epoch) > 0.0));
     true

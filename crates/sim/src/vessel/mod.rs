@@ -33,12 +33,15 @@ mod anchor;
 mod attitude;
 mod burn;
 mod clock;
+mod coast;
 mod id;
 mod live;
 mod segment;
 mod trajectory;
 
-pub use aerothermal::{air_at, in_atmosphere, Air, VesselThermal, LATTICE, MAX_SKIP};
+pub use aerothermal::{air_at, coast_sunlight, in_atmosphere, Air, VesselThermal, LATTICE, MAX_SKIP};
+pub use coast::THERMAL_SOLVE_UNITS;
+
 pub use anchor::preferred_anchor;
 pub use attitude::{quat_from_rotvec, quat_z_to, rotvec_of, Attitude, AttitudeControl, RotationBase};
 pub use burn::{
@@ -56,7 +59,7 @@ use crate::integrate::{Dopri5, Dynamics, Tolerance};
 use crate::math;
 use crate::time::Epoch;
 use crate::world::World;
-use attitude::advance_coast;
+use coast::Budget;
 use glam::{DMat3, DQuat, DVec3};
 
 /// Physics tick for powered flight and attitude control (s).
@@ -476,22 +479,29 @@ impl Vessel {
     }
 
     /// Advances the vessel towards `target` (never past it, nor past the
-    /// ephemeris end). Returns the time actually reached (coasts can be
-    /// limited by `max_coast_steps` of new integration work; the game then
-    /// simply waits for the segment).
-    pub fn advance(&mut self, world: &World, target: Epoch, controls: &Controls, max_coast_steps: usize) -> Epoch {
+    /// ephemeris end). Returns the time actually reached: coasts stop when
+    /// `budget` work units are spent (the game then holds its clock back
+    /// and continues next frame; the result is the same as without a
+    /// budget). A unit is about one coast integration step (~7 µs): the
+    /// integration may spend `budget` steps and the coast thermal lattice
+    /// `budget` units (a lattice point one, a thermal solve
+    /// [`THERMAL_SOLVE_UNITS`]). Live ticks are not budgeted.
+    pub fn advance(&mut self, world: &World, target: Epoch, controls: &Controls, budget: usize) -> Epoch {
         let target = if target > world.end() { world.end() } else { target };
+        let mut budget = Budget { steps: budget, thermal: budget };
         loop {
             let before = (self.time, std::mem::discriminant(&self.phase));
             match &self.phase {
                 Phase::Landed { .. } => self.advance_landed(world, target, controls),
                 Phase::Crashed { .. } => self.advance_grounded(world, target),
                 Phase::Powered { .. } => self.advance_powered(world, target, controls),
-                Phase::Coasting { .. } => self.advance_coasting(world, target, controls, max_coast_steps),
+                Phase::Coasting { .. } => self.advance_coasting(world, target, controls, &mut budget),
             }
-            // Stop at the target, or when neither time nor phase moved (waiting
-            // for a segment, or less than one tick left).
-            if self.time >= target || (self.time, std::mem::discriminant(&self.phase)) == before {
+            // Stop at the target, when neither time nor phase moved (waiting
+            // for a segment, or less than one tick left), or out of budget
+            // while coasting.
+            let spent = budget.thermal == 0 && matches!(self.phase, Phase::Coasting { .. });
+            if self.time >= target || (self.time, std::mem::discriminant(&self.phase)) == before || spent {
                 return self.time;
             }
         }
@@ -571,84 +581,6 @@ impl Vessel {
         };
         let trajectory = Trajectory::new(world, self.time, start, self.mass(), &self.plan, self.burn_limits());
         self.phase = Phase::Coasting { trajectory: Box::new(trajectory) };
-    }
-
-    fn advance_coasting(&mut self, world: &World, target: Epoch, controls: &Controls, max_steps: usize) {
-        if self.engine_running(controls) {
-            self.thermal_to_now(world);
-            let (anchor, r, v) = self.state(world);
-            self.phase = Phase::Powered { anchor, r, v };
-            self.tick_accel = None;
-            self.control.base = None;
-            return;
-        }
-        if controls.chute && !self.chute_deployed {
-            self.chute_deployed = true;
-            self.start_coast(world); // drag changed: a new segment from now
-        }
-        let Phase::Coasting { trajectory } = &mut self.phase else { unreachable!() };
-        trajectory.extend(world, &self.plan, target, max_steps);
-        let computed = trajectory.computed_until();
-        let at_end = target.seconds_since(computed) >= 0.0;
-        let mut reach = if at_end { computed } else { target };
-        // Into an atmosphere: flown live from the entry.
-        let entry = trajectory.entry_from(self.time).filter(|(e, _)| e.seconds_since(reach) <= 0.0);
-        if let Some((e, _)) = entry {
-            reach = e;
-        }
-        // Attitude and temperatures before pruning: control ticks read the
-        // inertia, and the thermal lattice the position, at epochs after the
-        // vessel's time, which the trajectory still holds.
-        let (model, dry) = (self.craft.mass, self.craft.mass.dry_mass);
-        let mass_now = dry + self.propellant;
-        let inertia_at = |e: Epoch| model.at(trajectory.mass_at(e).unwrap_or(mass_now) - dry).inertia;
-        let inertia_now = model.at(self.propellant).inertia;
-        let torque = self.craft.torque;
-        let design = self.craft.design().clone();
-        let engine = self.craft.engine;
-        let heat = |law: &BurnLaw| engine.heat(law.thrust, engine.mdot_max() * law.thrust / engine.thrust_vac);
-        self.thermal.record_burns(&trajectory.segments, reach, heat);
-        let propellant_at = |e: Epoch| (trajectory.mass_at(e).unwrap_or(mass_now) - dry).max(0.0);
-        let mut t = self.time;
-        loop {
-            let e = self.thermal.next_lattice();
-            if e.seconds_since(reach) > 0.0 {
-                break;
-            }
-            advance_coast(&mut self.attitude, &mut self.control, (t, e), controls, torque, inertia_now, inertia_at);
-            t = e;
-            let (anchor, r, _) = trajectory.eval(e).expect("the lattice epoch is in the trajectory");
-            let sun = crate::light::sunlight(world, &world.snapshot(e), anchor, r);
-            let sun = self.attitude.q.inverse() * sun;
-            aerothermal::coast_step(&design, &mut self.thermal, sun, propellant_at(e), e, false);
-        }
-        advance_coast(&mut self.attitude, &mut self.control, (t, reach), controls, torque, inertia_now, inertia_at);
-        trajectory.prune_before(reach);
-        self.propellant = (trajectory.mass_at(reach).expect("the vessel's time is in its trajectory") - dry).max(0.0);
-        let delta = trajectory.proper_time_at(reach).expect("the vessel's time is in its trajectory");
-        self.clock = ShipClock::at(reach, delta);
-        let last = trajectory.last();
-        let near_surface = matches!(last.end, Some(SegmentEnd { kind: EndKind::Surface { .. }, .. })) && at_end;
-        self.time = reach;
-        if entry.is_some() || near_surface {
-            // In an atmosphere or close to a surface: flown in live ticks.
-            self.thermal_to_now(world);
-            let state = self.state(world);
-            self.go_live(state);
-        }
-    }
-
-    /// Steps the temperatures from their lattice epoch to the vessel's time
-    /// (a coast ends between lattice points).
-    fn thermal_to_now(&mut self, world: &World) {
-        if self.thermal.epoch.seconds_since(self.time) >= 0.0 {
-            return;
-        }
-        let (anchor, r, _) = self.state(world);
-        let sun = crate::light::sunlight(world, &world.snapshot(self.time), anchor, r);
-        let design = self.craft.design().clone();
-        let sun = self.attitude.q.inverse() * sun;
-        aerothermal::coast_step(&design, &mut self.thermal, sun, self.propellant, self.time, true);
     }
 
     /// Extends the current coast (if any) until `until`, with at most

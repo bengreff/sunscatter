@@ -50,6 +50,9 @@ pub fn relaxation(dt: f64) -> f64 {
 }
 /// Sweeps stop when the largest change is below this × the hottest temperature.
 pub const CONVERGED: f64 = 1e-13;
+/// The same for coast steps (minutes to a day long): ~0.03 mK. Their
+/// inputs are orbit averages, far coarser.
+pub const COAST_CONVERGED: f64 = 1e-5;
 /// Most Newton iterations per cell update.
 const NEWTON: usize = 8;
 
@@ -266,6 +269,23 @@ impl ThermalNetwork {
         dt: f64,
         max_sweeps: usize,
     ) -> usize {
+        self.step_to(state, heat, node_heat, node_capacity, t_env, dt, max_sweeps, CONVERGED)
+    }
+
+    /// [`Self::step`] converged to `tolerance` (relative) instead of
+    /// [`CONVERGED`] (coast steps: [`COAST_CONVERGED`]).
+    #[allow(clippy::too_many_arguments)]
+    pub fn step_to(
+        &self,
+        state: &mut ThermalState,
+        heat: &[f64],
+        node_heat: &[f64],
+        node_capacity: &[f64],
+        t_env: f64,
+        dt: f64,
+        max_sweeps: usize,
+        tolerance: f64,
+    ) -> usize {
         let (n, m) = (self.cells(), self.nodes());
         assert!(heat.len() == n && state.skin.len() == n, "thermal step: {} cells, {} inputs", n, heat.len());
         assert!(node_heat.len() == m && node_capacity.len() == m && state.nodes.len() == m, "thermal step: nodes");
@@ -311,7 +331,7 @@ impl ThermalNetwork {
                 hottest = hottest.max(t);
                 state.nodes[j] = t;
             }
-            if change <= CONVERGED * hottest {
+            if change <= tolerance * hottest {
                 break;
             }
         }
