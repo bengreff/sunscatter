@@ -34,6 +34,7 @@ pub const PAD_LON: f64 = -80.66;
 /// then limited by compute, never the physics.
 const COAST_STEPS_PER_FRAME: usize = 1_200;
 const LOOKAHEAD_STEPS_PER_FRAME: usize = 1_500;
+const OTHER_LOOKAHEAD_STEPS_PER_FRAME: usize = 300;
 
 #[derive(Resource)]
 pub struct SimState {
@@ -226,6 +227,7 @@ pub fn advance(
     menu: Res<crate::interface::pause::PauseMenu>,
     orbits: Res<OrbitSettings>,
     mut sim: ResMut<SimState>,
+    mut turn: Local<usize>,
 ) {
     if pause.0 || menu.open {
         return;
@@ -272,6 +274,22 @@ pub fn advance(
         let until = trajectory::lookahead_until(&sim.world, seg, sim.clock, &orbits);
         ship.extend_coast(&sim.world, until, LOOKAHEAD_STEPS_PER_FRAME);
     }
+    // The other vessels' lines (review game 1): one vessel per frame, in
+    // turn, from a smaller shared budget.
+    if let Some(i) = lookahead_turn(*turn, sim.fleet.len(), sim.active) {
+        *turn = i + 1;
+        let vessel = &mut sim.fleet[i];
+        if let Some(seg) = vessel.segment() {
+            let until = trajectory::lookahead_until(&sim.world, seg, sim.clock, &orbits);
+            vessel.extend_coast(&sim.world, until, OTHER_LOOKAHEAD_STEPS_PER_FRAME);
+        }
+    }
+}
+
+/// Which non-active vessel gets this frame's look-ahead, starting the scan
+/// at `turn` (wrapping); `None` if the active vessel is alone.
+pub fn lookahead_turn(turn: usize, fleet: usize, active: usize) -> Option<usize> {
+    (0..fleet).map(|k| (turn + k) % fleet).find(|&i| i != active)
 }
 
 /// Whether a vessel's motion has ended for good at a time before the clock
@@ -331,6 +349,15 @@ pub fn update_prediction(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lookahead_takes_turns_and_skips_the_active_vessel() {
+        assert_eq!(lookahead_turn(0, 1, 0), None);
+        assert_eq!(lookahead_turn(0, 3, 0), Some(1));
+        assert_eq!(lookahead_turn(2, 3, 0), Some(2));
+        assert_eq!(lookahead_turn(3, 3, 0), Some(1), "wraps past the active vessel");
+        assert_eq!(lookahead_turn(5, 3, 2), Some(0));
+    }
 
     #[test]
     fn only_a_lagging_live_vessel_holds_the_clock() {
