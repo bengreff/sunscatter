@@ -237,31 +237,7 @@ fn run(tool: &str, args: &Value, sim: &SimState, comms: &Comms) -> Result<(Value
             (json!({"aboard": id.0}), vec![Effect::Command(GameCommand::Switch(id)), Effect::Station(false)])
         }
         "go_to_mission_control" => (json!({"location": "mission control"}), vec![Effect::Station(true)]),
-        "set_plan" => {
-            let id = vessel_id(args)?;
-            let i = sim.index_of(id).ok_or("no such vessel")?;
-            let delay = if comms.location == Location::Vessel(id) {
-                0.0
-            } else {
-                comms.signal(id).map(|s| s.delay).ok_or_else(|| format!("no signal to vessel {}", id.0))?
-            };
-            let burns = args.get("burns").and_then(Value::as_array).ok_or("missing array `burns`")?;
-            let body = sim.dominant_of(i);
-            let mut draft = Vec::new();
-            for b in burns {
-                let get = |k: &str| b.get(k).and_then(Value::as_f64).unwrap_or(0.0);
-                let in_s = b.get("in_s").and_then(Value::as_f64).ok_or("each burn needs `in_s`")?;
-                if in_s <= delay {
-                    return Err(format!("a burn in {in_s} s ignites before the plan arrives ({delay:.3} s)"));
-                }
-                let dv = glam::DVec3::new(get("prograde"), get("normal"), get("radial"));
-                draft.push(crate::planner::DraftBurn { t_start: sim.clock.add_seconds(in_s), dv, reference: body });
-            }
-            let plan = crate::planner::plan_from(&sim.fleet[i], &draft, sim.clock.add_seconds(delay));
-            let command = GameCommand::SetPlan { vessel: id, plan };
-            let effect = if delay > 0.0 { Effect::Send { delay, command } } else { Effect::Command(command) };
-            (json!({"sent": draft.len(), "arrives_in_s": delay, "about": name(body)}), vec![effect])
-        }
+        "set_plan" => set_plan(args, sim, comms)?,
         "set_controls" => {
             if comms.location != Location::Vessel(sim.ship().id()) {
                 return Err("you are not aboard the active vessel (use switch_vessel)".into());
@@ -275,6 +251,34 @@ fn run(tool: &str, args: &Value, sim: &SimState, comms: &Comms) -> Result<(Value
         }
         _ => return Err(format!("unknown tool {tool}")),
     })
+}
+
+/// The `set_plan` tool.
+fn set_plan(args: &Value, sim: &SimState, comms: &Comms) -> Result<(Value, Vec<Effect>), String> {
+    let name = |n: sim::frame::NodeId| sim.world.eph.node(n).name.clone();
+    let id = vessel_id(args)?;
+    let i = sim.index_of(id).ok_or("no such vessel")?;
+    let delay = if comms.location == Location::Vessel(id) {
+        0.0
+    } else {
+        comms.signal(id).map(|s| s.delay).ok_or_else(|| format!("no signal to vessel {}", id.0))?
+    };
+    let burns = args.get("burns").and_then(Value::as_array).ok_or("missing array `burns`")?;
+    let body = sim.dominant_of(i);
+    let mut draft = Vec::new();
+    for b in burns {
+        let get = |k: &str| b.get(k).and_then(Value::as_f64).unwrap_or(0.0);
+        let in_s = b.get("in_s").and_then(Value::as_f64).ok_or("each burn needs `in_s`")?;
+        if in_s <= delay {
+            return Err(format!("a burn in {in_s} s ignites before the plan arrives ({delay:.3} s)"));
+        }
+        let dv = glam::DVec3::new(get("prograde"), get("normal"), get("radial"));
+        draft.push(crate::planner::DraftBurn { t_start: sim.clock.add_seconds(in_s), dv, reference: body });
+    }
+    let plan = crate::planner::plan_from(&sim.fleet[i], &draft, sim.clock.add_seconds(delay));
+    let command = GameCommand::SetPlan { vessel: id, plan };
+    let effect = if delay > 0.0 { Effect::Send { delay, command } } else { Effect::Command(command) };
+    Ok((json!({"sent": draft.len(), "arrives_in_s": delay, "about": name(body)}), vec![effect]))
 }
 
 /// The running server, if the setting is on.
