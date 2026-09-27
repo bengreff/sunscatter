@@ -14,11 +14,21 @@
         min_elevation_deg: 6.0,
         // Ground network between sites on one body: signal speed / c.
         ground_speed_factor: 0.7,
+        // A vessel landed this close to a launch site is on its umbilical
+        // (the ground network) (m).
+        umbilical_range_m: 2000.0,
     ),
     sites: [
         // Mission control (D067): the tracking station is "being here".
         (name: "Houston", body: "Earth", lat_deg: 29.5593, lon_deg: -95.0900, height_m: 10.0,
          kind: MissionControl, antenna: None),
+        // The launch pad (sim's pad, Kennedy Space Center): no antenna, wired.
+        (name: "Kennedy pad", body: "Earth", lat_deg: 28.6082, lon_deg: -80.66, height_m: 0.0,
+         kind: LaunchSite, antenna: None),
+        // Merritt Island (MILA), the launch site's tracking station: 9 m dish,
+        // ~55 dBi at X band, 2 kW.
+        (name: "Merritt Island", body: "Earth", lat_deg: 28.5086, lon_deg: -80.6931, height_m: 5.0,
+         kind: GroundStation, antenna: Some((gain_dbi: 55.0, power_w: 2000.0))),
         // Deep Space Network complexes: 70 m dishes, ~74 dBi at X band, 20 kW.
         (name: "Goldstone", body: "Earth", lat_deg: 35.4267, lon_deg: -116.8900, height_m: 1000.0,
          kind: GroundStation, antenna: Some((gain_dbi: 74.0, power_w: 20000.0))),

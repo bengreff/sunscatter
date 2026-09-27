@@ -47,7 +47,7 @@ mod tests {
     }
 
     #[test]
-    fn houston_reaches_a_geostationary_ship_over_the_americas_through_goldstone() {
+    fn houston_reaches_a_geostationary_ship_over_the_americas_through_a_station_there() {
         let w = world();
         let data = CommsData::load(&CommsData::default_path()).unwrap();
         let earth = w.find("Earth").unwrap();
@@ -68,7 +68,8 @@ mod tests {
         let g = Graph::new(&nodes, &bodies.iter().map(|b| b.1).collect::<Vec<_>>(), &data.link);
         let hq = data.site("Houston").unwrap();
         let path = best_path(&g, hq, nodes.len() - 1).expect("a path");
-        assert_eq!(data.sites[path.nodes[1]].name, "Goldstone");
+        let relay = &data.sites[path.nodes[1]].name;
+        assert!(relay == "Goldstone" || relay == "Merritt Island", "{relay}");
         assert!(path.delay > 0.12 && path.delay < 0.14, "{}", path.delay);
         // Canberra is on the other side of the planet.
         assert!(!g.linked(data.site("Canberra").unwrap(), nodes.len() - 1));

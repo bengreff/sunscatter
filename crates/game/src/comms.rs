@@ -147,7 +147,14 @@ pub fn update(sim: Res<SimState>, station: Res<TrackingStation>, mut comms: ResM
             }
             _ => None,
         };
-        nodes.push(Node { pos: snap.relative_r(a, anchor) + r, antenna: Some(VESSEL_ANTENNA), ground, wired: false });
+        let pos = snap.relative_r(a, anchor) + r;
+        // On a launch pad: wired through its umbilical.
+        let wired = ground.is_some()
+            && comms.data.sites.iter().zip(&sites).any(|(site, node)| {
+                site.kind == comms::SiteKind::LaunchSite
+                    && node.is_some_and(|n| (n.pos - pos).length() < comms.data.link.umbilical_range_m)
+            });
+        nodes.push(Node { pos, antenna: Some(VESSEL_ANTENNA), ground, wired });
         names.push(format!("Vessel {}", v.id().0));
     }
     let occluders: Vec<_> = bodies.iter().map(|b| b.1).collect();
@@ -215,6 +222,20 @@ mod tests {
     }
 
     #[test]
+    fn the_ship_on_the_pad_is_heard_through_its_umbilical() {
+        let mut app = App::new();
+        app.insert_resource(SimState::new());
+        app.insert_resource(TrackingStation::default());
+        app.insert_resource(Comms::load());
+        app.add_systems(Update, update);
+        app.update();
+        let comms = app.world().resource::<Comms>();
+        let home = comms.home.as_ref().expect("the pad is wired to Houston");
+        assert_eq!(home.rate, f64::INFINITY);
+        assert!(home.delay > 0.0 && home.delay < 0.02, "{}", home.delay);
+    }
+
+    #[test]
     fn mission_control_hears_ships_in_orbit_through_the_dsn() {
         let mut sim = SimState::new();
         sim.spawn_test_ships(4);
@@ -231,7 +252,7 @@ mod tests {
         assert_eq!(comms.location, Location::Site(comms.mission_control));
         let heard = sim.fleet.iter().filter(|v| comms.signal(v.id()).is_some()).count();
         assert!(heard >= 1, "some LEO ship is above a DSN horizon");
-        for v in &sim.fleet {
+        for v in sim.fleet.iter().filter(|v| !matches!(v.phase, Phase::Landed { .. })) {
             if let Some(s) = comms.signal(v.id()) {
                 assert!(s.delay > 0.0 && s.delay < 0.1, "{}", s.delay);
                 assert!(!s.via.is_empty(), "through a ground station");

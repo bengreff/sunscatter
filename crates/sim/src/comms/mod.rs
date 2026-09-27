@@ -54,6 +54,9 @@ pub struct LinkParams {
     pub min_rate_bps: f64,
     pub min_elevation_deg: f64,
     pub ground_speed_factor: f64,
+    /// A vessel landed within this distance of a launch site is on the
+    /// ground network through the pad's umbilical (m).
+    pub umbilical_range_m: f64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
@@ -62,6 +65,9 @@ pub enum SiteKind {
     MissionControl,
     /// A relay on the ground.
     GroundStation,
+    /// A launch pad: wired to the ground network, with an umbilical to a
+    /// vessel standing on it.
+    LaunchSite,
 }
 
 /// A site on a body's surface.

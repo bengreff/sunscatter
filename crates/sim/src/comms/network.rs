@@ -139,6 +139,7 @@ mod tests {
             min_rate_bps: 10.0,
             min_elevation_deg: 6.0,
             ground_speed_factor: 0.7,
+            umbilical_range_m: 2000.0,
         }
     }
 
