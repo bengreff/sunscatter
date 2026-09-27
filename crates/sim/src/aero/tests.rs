@@ -184,7 +184,7 @@ fn restoring(b: &AeroBake, com: DVec3, trim_flow: DVec3, mach: f64, knudsen: f64
 
 /// A blunt capsule: a spherical heat shield (radius 4.7 m, centre at
 /// z = 4) facing −Z, and a conical afterbody to z = 2.8.
-fn capsule() -> &'static AeroBake {
+pub(super) fn capsule() -> &'static AeroBake {
     static B: OnceLock<AeroBake> = OnceLock::new();
     B.get_or_init(|| {
         let shield = Shape::SphereCap { center: DVec3::Z * 4.0, axis: -DVec3::Z, radius: 4.7, height: 0.5 };
@@ -275,7 +275,7 @@ fn the_bake_is_deterministic() {
 }
 
 /// Golden hash of the unit-sphere bake (identical on every platform).
-const SPHERE_BAKE_HASH: u64 = 0x492a_3d63_e600_c37d;
+const SPHERE_BAKE_HASH: u64 = 0xde29_bb9d_88a7_bf34;
 
 /// A thin flat plate, `l` long along X, 2 m wide, 4 mm thick.
 fn plate(l: f64) -> AeroBake {

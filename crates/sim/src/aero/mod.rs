@@ -12,11 +12,10 @@
 //!   shape's. Where the scale would exceed Cp,max (slender shapes), the
 //!   normal force stays Newtonian and the extra drag acts at the Newtonian
 //!   drag lever.
-//! * **Transonic (0.8–1.2):** the drag factor rises linearly to
-//!   [`TRANSONIC_PEAK`]·Cd₀ at M 1.2 (blunt capsules: Apollo's Cd goes from
-//!   ≈ 0.8 subsonic to ≈ 1.3 at M 1.2); **1.2–5:** linear in M to the
-//!   hypersonic force and moment. FAR-style area-distribution drag rise
-//!   is later.
+//! * **Transonic and supersonic:** the wave drag of the area distribution
+//!   along the flow ([`wave`], von Kármán's slender-body integral, capped
+//!   for blunt shapes) joins the Cd₀ drag from M 0.8, fully from M 1;
+//!   **1.2–5:** linear in M to the hypersonic force and moment.
 //! * **Slender bodies and fins** ([`slender`]), full to M 4 and faded out
 //!   by M 5 (where Newtonian takes over): where the craft is slender along
 //!   the flow, the slender-body normal force (Munk's potential term and
@@ -37,14 +36,13 @@ pub mod bake;
 pub mod friction;
 pub mod geodesic;
 pub mod slender;
+pub mod wave;
 
 pub use bake::{bake, AeroBake, BakeOptions, CellGeometry, DirSums};
 
 use crate::math;
 use glam::DVec3;
 
-/// Drag factor at M 1.2 relative to the subsonic Cd₀.
-pub const TRANSONIC_PEAK: f64 = 1.6;
 /// Hypersonic from this Mach number.
 pub const HYPERSONIC_MACH: f64 = 5.0;
 /// Slender-body and fin lift at full strength up to this Mach number,
@@ -86,16 +84,6 @@ pub fn bridge(knudsen: f64) -> f64 {
     }
 }
 
-/// Subsonic drag factor on Cd₀: 1 below M 0.8, rising linearly to
-/// [`TRANSONIC_PEAK`] at M 1.2.
-fn transonic_factor(mach: f64) -> f64 {
-    if mach < 0.8 {
-        1.0
-    } else {
-        1.0 + (TRANSONIC_PEAK - 1.0) * ((mach - 0.8) / 0.4).min(1.0)
-    }
-}
-
 /// Weight of the attached-flow lift models (slender body, fins): 1 to
 /// [`LIFT_FULL_MACH`], 0 from [`HYPERSONIC_MACH`], linear between.
 fn lift_weight(mach: f64) -> f64 {
@@ -112,8 +100,11 @@ fn continuum(bake: &AeroBake, s: &DirSums, d: DVec3, mach: f64, gamma: f64, cd0:
     // (the centre of pressure stays the shape's); where that scale exceeds
     // Cp,max (slender shapes), lift stays Newtonian and the extra drag acts
     // at the Newtonian drag lever.
+    // Transonic and supersonic: the wave drag of the area distribution
+    // along the flow joins the drag, at the same lever.
     let drag_n = s.newton.dot(d);
-    let kappa = if drag_n > 1e-12 { transonic_factor(mach) * cd0 * s.area / drag_n } else { 0.0 };
+    let wave = wave::mach_factor(mach) * bake.wave_at(d).min(wave::WAVE_CAP * s.area);
+    let kappa = if drag_n > 1e-12 { (cd0 * s.area + wave) / drag_n } else { 0.0 };
     let k_lift = kappa.min(air::cp_max_limit(gamma));
     let extra = kappa - k_lift;
     let sub = (s.newton * k_lift + d * (drag_n * extra), s.newton_moment * k_lift + s.drag_lever.cross(d) * extra);

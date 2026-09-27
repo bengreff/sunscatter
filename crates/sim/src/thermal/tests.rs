@@ -145,7 +145,8 @@ fn stagnation_cells_get_the_full_flux_and_leeward_cells_a_little() {
     cell_heat(b, cells, &HeatInput { flow_dir: -DVec3::Z, q_stag: q, sun: DVec3::ZERO }, &mut scratch, &mut heat);
     let flux: Vec<f64> = heat.iter().zip(cells).map(|(h, c)| h / c.area).collect();
     let max = flux.iter().fold(0.0f64, |m, &f| m.max(f));
-    assert!(max > 0.97 * q && max <= q * (1.0 + 1e-12), "{max}");
+    // The nose's four cells around the tip tilt 15° (sin^1.5 θ = 0.949).
+    assert!(max > 0.94 * q && max <= q * (1.0 + 1e-12), "{max}");
     for (i, c) in cells.iter().enumerate() {
         // The whole back half (normals facing aft) gets the leeward fraction.
         if c.normal.z < -0.1 {

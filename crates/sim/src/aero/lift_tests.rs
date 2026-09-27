@@ -92,3 +92,71 @@ fn round_and_stubby_parts_are_not_fins() {
     // 0.12 m thick) are not wings.
     assert!(craft_bake().fins.is_empty(), "{:?}", craft_bake().fins.len());
 }
+
+/// A Sears–Haack body along Z, `l` long, radius `r` at the middle, as 32
+/// frustums: r(ξ) = r·(4ξ(1−ξ))^¾.
+fn sears_haack(l: f64, r: f64) -> AeroBake {
+    let n = 32;
+    let radius = |k: usize| {
+        let xi = k as f64 / n as f64;
+        (r * math::exp(0.75 * math::ln((4.0 * xi * (1.0 - xi)).max(1e-12)))).max(0.002)
+    };
+    let shapes: Vec<Shape> = (0..n)
+        .map(|k| Shape::Frustum {
+            base: DVec3::Z * (l * k as f64 / n as f64 - 0.5 * l),
+            axis: DVec3::Z * (l / n as f64),
+            r_base: radius(k),
+            r_top: radius(k + 1),
+        })
+        .collect();
+    let (s, c) = shape(&shapes);
+    bake(&s, &c, &BakeOptions::default())
+}
+
+#[test]
+fn a_sears_haack_body_has_its_analytic_wave_drag() {
+    // D/q = 9π·A_max²/(2L²) (Sears 1947, Haack 1941): L 10 m, r 0.5 m:
+    // 0.0872 m², C_D 0.111 on A_max.
+    let (l, r) = (10.0, 0.5);
+    let a_max = math::PI * r * r;
+    let want = 9.0 * math::PI * a_max * a_max / (2.0 * l * l);
+    // The integral alone, on the exact area distribution.
+    let exact: Vec<f64> = (0..=wave::STATIONS)
+        .map(|k| {
+            let xi = k as f64 / wave::STATIONS as f64;
+            a_max * math::exp(1.5 * math::ln((4.0 * xi * (1.0 - xi)).max(1e-300)))
+        })
+        .collect();
+    let direct = wave::wave_drag_area(&exact, l / wave::STATIONS as f64);
+    println!("Sears–Haack: integral {direct:.5} m², analytic {want:.5}");
+    assert!((direct / want - 1.0).abs() < 0.03, "{direct}");
+    // The baked body (frustums, triangles), nose first and tail first.
+    let b = sears_haack(l, r);
+    for d in [DVec3::Z, -DVec3::Z] {
+        let got = b.wave_at(d);
+        println!("baked, along {d}: {got:.5} m²");
+        assert!((got / want - 1.0).abs() < 0.1, "{d}: {got}");
+    }
+}
+
+#[test]
+fn a_blunt_body_keeps_a_large_drag_rise_and_a_slender_one_a_small() {
+    // Drag coefficient on the projected area, M 0.5 → M 1.2 (Cd₀ 0.8 for
+    // the capsule, Apollo-like; 0.1 for the Sears–Haack body).
+    let rise = |b: &AeroBake, d: DVec3, cd0: f64| {
+        let cd = |m: f64| {
+            let f = flow(d, m, 1e-5);
+            aero_forces(b, &f, cd0).0.dot(d) / (f.q * b.sums_at(d).area)
+        };
+        (cd(0.5), cd(1.2))
+    };
+    let capsule = super::tests::capsule();
+    let (sub, sup) = rise(capsule, DVec3::Z, 0.8);
+    println!("capsule: C_D {sub:.3} → {sup:.3}");
+    // Apollo: ≈ 0.8 → ≈ 1.3 (heat shield first).
+    assert!(sup - sub > 0.4 && sup < 1.4, "{sub} {sup}");
+    let sh = sears_haack(10.0, 0.5);
+    let (sub, sup) = rise(&sh, -DVec3::Z, 0.1);
+    println!("Sears–Haack: C_D {sub:.3} → {sup:.3}");
+    assert!((sup - sub - 0.111).abs() < 0.02, "{sub} {sup}");
+}

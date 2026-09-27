@@ -10,7 +10,8 @@
 //! exposure interpolation the only interpolated quantity is the shadowing.
 //!
 //! Exposure is found with a small z-buffer: the surface triangles facing the
-//! flow are rasterised onto a square grid orthogonal to it (pixel centres
+//! flow are rasterised onto a square grid orthogonal to it, spanning the
+//! craft's projection (pixel centres
 //! sampled, depth interpolated), each pixel keeping the nearest cell. A
 //! cell's exposure is the fraction of the pixels its own triangles cover
 //! that it wins; both counts come from the same raster, so on a convex
@@ -124,6 +125,9 @@ pub struct AeroBake {
     pub length: f64,
     /// The craft's extent along each grid direction (m).
     pub extent: Vec<f64>,
+    /// Wave drag per unit q (m², uncapped) along each grid direction, from
+    /// the area distribution along it ([`super::wave`]).
+    pub wave: Vec<f64>,
     /// Cross-section areas along the long axis (slender-body lift).
     pub sections: BodySections,
     /// Thin parts (fin lift).
@@ -168,6 +172,9 @@ pub fn bake(surface: &Surface, cells: &Cells, opts: &BakeOptions) -> AeroBake {
     let sections = BodySections::new(&tris, &surface.positions);
     let fins = find_fins(surface, cells, &geometry, WING_RATIO * 2.0 * radius);
     let mut extent = Vec::with_capacity(grid.dirs.len());
+    let mut wave = Vec::with_capacity(grid.dirs.len());
+    // Triangles relative to the centre (as the projections below).
+    let rel: Vec<(DVec3, DVec3, f64)> = tris.iter().map(|&(c, n, a)| (c - centre, n, a)).collect();
     let mut nose_radius = Vec::with_capacity(grid.dirs.len());
     let mut exposure = Vec::with_capacity(grid.dirs.len() * nc);
     let mut proj = vec![DVec3::ZERO; surface.positions.len()];
@@ -175,13 +182,25 @@ pub fn bake(surface: &Surface, cells: &Cells, opts: &BakeOptions) -> AeroBake {
     let mut f = vec![0.0; nc];
     for &d in &grid.dirs {
         let (u, v, _) = basis(d);
-        let scale = n as f64 / (2.0 * radius);
+        // The raster spans the craft's projection (square pixels), so a
+        // slender body seen end-on is as well resolved as seen broadside.
+        let (mut u0, mut u1, mut v0, mut v1) = (f64::INFINITY, f64::NEG_INFINITY, f64::INFINITY, f64::NEG_INFINITY);
+        for p in &surface.positions {
+            let x = *p - centre;
+            (u0, u1) = (u0.min(x.dot(u)), u1.max(x.dot(u)));
+            (v0, v1) = (v0.min(x.dot(v)), v1.max(x.dot(v)));
+        }
+        let span = (u1 - u0).max(v1 - v0).max(1e-9) * (1.0 + 1e-9);
+        let scale = n as f64 / span;
         for (p, q) in surface.positions.iter().zip(proj.iter_mut()) {
             let x = *p - centre;
-            *q = DVec3::new((x.dot(u) + radius) * scale, (x.dot(v) + radius) * scale, x.dot(d));
+            *q = DVec3::new((x.dot(u) - u0) * scale, (x.dot(v) - v0) * scale, x.dot(d));
         }
         let (lo, hi) = proj.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), q| (a.min(q.z), b.max(q.z)));
         extent.push(hi - lo);
+        // The area distribution along d.
+        let areas = super::wave::area_along(&rel, d, lo, hi);
+        wave.push(super::wave::wave_drag_area(&areas, (hi - lo) / super::wave::STATIONS as f64));
         r.depth.fill(f64::INFINITY);
         r.owner.fill(NONE);
         r.stamp.fill(NONE);
@@ -199,7 +218,7 @@ pub fn bake(surface: &Surface, cells: &Cells, opts: &BakeOptions) -> AeroBake {
                 won[o as usize] += 1;
             }
         }
-        let pixel = 2.0 * radius / n as f64;
+        let pixel = span / n as f64;
         for (i, c) in cells.cells.iter().enumerate() {
             f[i] = if c.normal.dot(d) >= 0.0 {
                 0.0
@@ -207,8 +226,8 @@ pub fn bake(surface: &Surface, cells: &Cells, opts: &BakeOptions) -> AeroBake {
                 (f64::from(won[i]) / f64::from(r.covered[i])).min(1.0)
             } else {
                 let x = c.centroid - centre;
-                let px = ((x.dot(u) + radius) * scale).floor().clamp(0.0, (n - 1) as f64) as usize;
-                let py = ((x.dot(v) + radius) * scale).floor().clamp(0.0, (n - 1) as f64) as usize;
+                let px = ((x.dot(u) - u0) * scale).floor().clamp(0.0, (n - 1) as f64) as usize;
+                let py = ((x.dot(v) - v0) * scale).floor().clamp(0.0, (n - 1) as f64) as usize;
                 let front = r.depth[py * n + px];
                 if front < x.dot(d) - 2.0 * pixel {
                     0.0
@@ -223,7 +242,7 @@ pub fn bake(surface: &Surface, cells: &Cells, opts: &BakeOptions) -> AeroBake {
         let area = direction_sums(&geometry, d, fq).area;
         nose_radius.push(nose(&geometry, d, fq, area));
     }
-    AeroBake { grid, geometry, exposure, nose_radius, cells: nc, length: 2.0 * radius, extent, sections, fins }
+    AeroBake { grid, geometry, exposure, nose_radius, cells: nc, length: 2.0 * radius, extent, wave, sections, fins }
 }
 
 /// The fins: cells whose opposite face (anti-parallel, straight through
@@ -437,7 +456,7 @@ impl AeroBake {
         }
         self.nose_radius.iter().for_each(|&r| put(r));
         put(self.length);
-        self.extent.iter().for_each(|&x| put(x));
+        self.extent.iter().chain(&self.wave).for_each(|&x| put(x));
         let b = &self.sections;
         b.axis
             .to_array()
@@ -473,6 +492,13 @@ impl AeroBake {
     pub fn extent_at(&self, d: DVec3) -> f64 {
         let w = self.grid.locate(d);
         (0..3).map(|k| w.w[k] * self.extent[w.dirs[k] as usize]).sum()
+    }
+
+    /// Wave drag per unit q (m², uncapped) along `d`, interpolated like
+    /// [`Self::sums_at`].
+    pub fn wave_at(&self, d: DVec3) -> f64 {
+        let w = self.grid.locate(d);
+        (0..3).map(|k| w.w[k] * self.wave[w.dirs[k] as usize]).sum()
     }
 
     /// The effective nose radius at flow direction `d` (unit, body axes),
