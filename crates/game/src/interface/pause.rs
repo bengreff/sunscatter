@@ -37,12 +37,25 @@ pub struct PauseMenu {
 #[derive(Resource, Default)]
 pub struct LaunchSnapshot(pub Option<SaveGame>);
 
+/// Windows Esc can close, besides the pause menu.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct OpenWindows {
+    pub help: bool,
+    pub settings: bool,
+    pub saves: bool,
+    pub planner: bool,
+}
+
 /// What Esc does, given what is open: the innermost thing closes first.
-pub fn on_escape(help_open: bool, settings_open: bool, menu: &PauseMenu) -> EscAction {
-    if help_open {
+pub fn on_escape(open: OpenWindows, menu: &PauseMenu) -> EscAction {
+    if open.help {
         EscAction::CloseHelp
-    } else if settings_open {
+    } else if open.settings {
         EscAction::CloseSettings
+    } else if open.saves {
+        EscAction::CloseSaves
+    } else if open.planner && !menu.open {
+        EscAction::ClosePlanner
     } else if !menu.open {
         EscAction::Pause
     } else if menu.page != Page::Main {
@@ -56,6 +69,8 @@ pub fn on_escape(help_open: bool, settings_open: bool, menu: &PauseMenu) -> EscA
 pub enum EscAction {
     CloseHelp,
     CloseSettings,
+    CloseSaves,
+    ClosePlanner,
     Pause,
     BackToMenu,
     Resume,
@@ -66,13 +81,18 @@ pub fn keys(
     mut menu: ResMut<PauseMenu>,
     mut help: ResMut<super::help::Help>,
     mut settings: ResMut<SettingsUi>,
+    mut saves: ResMut<SaveUi>,
+    mut planner: ResMut<crate::planner::Planner>,
 ) {
     if !keys.just_pressed(KeyCode::Escape) {
         return;
     }
-    match on_escape(help.open, settings.open, &menu) {
+    let open = OpenWindows { help: help.open, settings: settings.open, saves: saves.open, planner: planner.open };
+    match on_escape(open, &menu) {
         EscAction::CloseHelp => help.open = false,
         EscAction::CloseSettings => settings.open = false,
+        EscAction::CloseSaves => saves.open = false,
+        EscAction::ClosePlanner => planner.open = false,
         EscAction::Pause => *menu = PauseMenu { open: true, page: Page::Main },
         EscAction::BackToMenu => menu.page = Page::Main,
         EscAction::Resume => menu.open = false,
@@ -191,17 +211,21 @@ mod tests {
         let closed = PauseMenu::default();
         let main = PauseMenu { open: true, page: Page::Main };
         let confirm = PauseMenu { open: true, page: Page::ConfirmQuit };
-        // (help open, settings open, menu, expected)
+        let w = |help, settings, saves, planner| OpenWindows { help, settings, saves, planner };
+        // (open windows, menu, expected)
         let cases = [
-            (true, true, &main, EscAction::CloseHelp),
-            (false, true, &main, EscAction::CloseSettings),
-            (false, true, &closed, EscAction::CloseSettings),
-            (false, false, &closed, EscAction::Pause),
-            (false, false, &confirm, EscAction::BackToMenu),
-            (false, false, &main, EscAction::Resume),
+            (w(true, true, true, true), &main, EscAction::CloseHelp),
+            (w(false, true, true, false), &main, EscAction::CloseSettings),
+            (w(false, true, false, false), &closed, EscAction::CloseSettings),
+            (w(false, false, true, true), &closed, EscAction::CloseSaves),
+            (w(false, false, false, true), &closed, EscAction::ClosePlanner),
+            (w(false, false, false, true), &main, EscAction::Resume),
+            (w(false, false, false, false), &closed, EscAction::Pause),
+            (w(false, false, false, false), &confirm, EscAction::BackToMenu),
+            (w(false, false, false, false), &main, EscAction::Resume),
         ];
-        for (help, settings, menu, expected) in cases {
-            assert_eq!(on_escape(help, settings, menu), expected, "help {help}, settings {settings}, {:?}", menu.page);
+        for (open, menu, expected) in cases {
+            assert_eq!(on_escape(open, menu), expected, "{open:?}, {:?}", menu.page);
         }
     }
 }
