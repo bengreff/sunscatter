@@ -19,6 +19,7 @@ pub struct CraftFile {
     pub chute: ChuteFile,
     pub thermal: ThermalLimits,
     pub impact: ImpactLimits,
+    pub contact: ContactFile,
     pub antenna: AntennaFile,
 }
 
@@ -86,6 +87,36 @@ pub struct ThermalLimits {
 pub struct ImpactLimits {
     /// Highest normal speed at a contact point beyond the gear's stroke (m/s).
     pub max_speed: f64,
+}
+
+/// Ground contact (D066, realism-1 §3e): a spring-damper along the terrain
+/// normal and Coulomb friction at each contact point.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ContactFile {
+    /// Landing-gear feet: soft, with a stroke.
+    pub foot: Spring,
+    /// Hull points (and a foot beyond its stroke): stiff, no stroke.
+    pub hull: Spring,
+    /// Sliding speed below which friction is viscous rather than Coulomb
+    /// (regularised friction, m/s): a craft on a slope it holds creeps at
+    /// about `stick_speed · tan(slope) / friction`.
+    pub stick_speed: f64,
+}
+
+/// One kind of contact point.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Spring {
+    /// N/m.
+    pub stiffness: f64,
+    /// N·s/m.
+    pub damping: f64,
+    /// Travel before the point bottoms out (m); zero for hull points.
+    #[serde(default)]
+    pub stroke: f64,
+    /// Coulomb friction coefficient.
+    pub friction: f64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -240,6 +271,20 @@ pub fn validate_craft(c: &CraftFile) -> Result<(), String> {
     positive("thermal.skin_max_k", c.thermal.skin_max_k)?;
     positive("thermal.internal_max_k", c.thermal.internal_max_k)?;
     positive("impact.max_speed", c.impact.max_speed)?;
+    for (what, sp) in [("contact.foot", &c.contact.foot), ("contact.hull", &c.contact.hull)] {
+        positive(&format!("{what}.stiffness"), sp.stiffness)?;
+        if !(sp.damping.is_finite() && sp.damping >= 0.0) {
+            return Err(format!("{what}.damping must be non-negative, got {}", sp.damping));
+        }
+        if !(sp.friction.is_finite() && sp.friction >= 0.0) {
+            return Err(format!("{what}.friction must be non-negative, got {}", sp.friction));
+        }
+    }
+    positive("contact.foot.stroke", c.contact.foot.stroke)?;
+    if c.contact.hull.stroke != 0.0 {
+        return Err(format!("contact.hull.stroke must be zero, got {}", c.contact.hull.stroke));
+    }
+    positive("contact.stick_speed", c.contact.stick_speed)?;
     if !c.antenna.gain_dbi.is_finite() {
         return Err("antenna.gain_dbi must be finite".into());
     }

@@ -74,7 +74,7 @@ impl Cell {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum ContactKind {
     /// A landing-gear foot (soft, with a stroke; §3e).
     Foot,
@@ -83,7 +83,7 @@ pub enum ContactKind {
 }
 
 /// A point that can touch the ground (the hitbox, §5c).
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ContactPoint {
     pub pos: DVec3,
     pub kind: ContactKind,

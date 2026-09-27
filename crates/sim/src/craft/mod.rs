@@ -12,7 +12,7 @@ pub mod mesh;
 
 pub use cells::{Cell, CellOptions, Cells, ContactKind, ContactPoint, Neighbour};
 pub use engine::{Engine, EngineOutput};
-pub use file::{CraftFile, GeometryFile, Primitive, Shape, Skin, Tank};
+pub use file::{ContactFile, CraftFile, GeometryFile, Primitive, Shape, Skin, Spring, Tank};
 pub use mass::{MassModel, MassProps};
 pub use mesh::{RenderMesh, Resolution, Surface};
 
@@ -74,6 +74,8 @@ impl Craft {
             cd_area: projected,
             chute_cd_area: self.spec.chute.cd_area,
             impact_max_speed: self.spec.impact.max_speed,
+            contact: self.spec.contact,
+            contacts: self.cells.contacts.clone(),
             bottom_z: s.positions.iter().map(|p| p.z).fold(f64::MAX, f64::min),
             initial_propellant: self.spec.propellant.mass,
         }
@@ -98,6 +100,10 @@ pub struct CraftParams {
     /// Highest touchdown speed that is not a crash (m/s; D066 refines it
     /// per contact point).
     pub impact_max_speed: f64,
+    /// Ground-contact springs and friction (D066).
+    pub contact: ContactFile,
+    /// The points that touch the ground (body axes): feet, then hull points.
+    pub contacts: Vec<ContactPoint>,
     /// Lowest point of the craft along body Z (m): the bottom of the feet.
     pub bottom_z: f64,
     /// Propellant loaded at the start (kg).
@@ -108,6 +114,14 @@ impl CraftParams {
     /// Height of the centre of mass above the ground when standing (m).
     pub fn contact_height(&self, propellant: f64) -> f64 {
         self.mass.at(propellant).com.z - self.bottom_z
+    }
+
+    /// Farthest contact point from the centre of mass (m): below this
+    /// height plus [`crate::contact::NEAR`] the vessel flies live ticks
+    /// with contact substeps.
+    pub fn contact_reach(&self, propellant: f64) -> f64 {
+        let com = self.mass.at(propellant).com;
+        self.contacts.iter().map(|c| (c.pos - com).length()).fold(0.0, f64::max)
     }
 }
 

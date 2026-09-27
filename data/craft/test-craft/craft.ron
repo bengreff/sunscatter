@@ -17,5 +17,13 @@
     chute: (cd_area: 600.0, deploy_max_q: 40.0e3, mount: (0.0, 0.0, 3.2)),
     thermal: (skin_max_k: 1100.0, internal_max_k: 400.0),   // D065: clean destruction
     impact: (max_speed: 8.0),        // m/s at any contact point, beyond the gear's stroke
+    // Ground contact (D066). Feet: 20 t on four feet sink ~12 cm on Earth
+    // (~2 cm on the Moon), damped at ζ ≈ 0.7 per foot; the stroke stops 5 cm
+    // above the engine bell. Hull: stiff; a foot past its stroke uses it too.
+    contact: (
+        foot: (stiffness: 4.0e5, damping: 6.0e4, stroke: 0.35, friction: 0.8),   // N/m, N·s/m, m
+        hull: (stiffness: 2.0e6, damping: 1.0e5, friction: 0.5),
+        stick_speed: 0.05,           // m/s: friction is viscous below this sliding speed
+    ),
     antenna: (gain_dbi: 20.0, power_w: 20.0),                // D068
 )
