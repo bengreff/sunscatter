@@ -39,7 +39,6 @@ The plan was written 2026-09-26 from the owner interview (`docs/plans/interview-
 - Haze: physical by measurement (see realism-1 §1a); the owner decides the default of the new setting.
 - The Moon's sub-sample detail is noise-like (no craters yet; data-only later).
 - Terrain close up is still limited by the ~5 km colour map; a launch-site patch is the real fix.
-- Shader compile errors are only logged: the demo should fail on pipeline errors.
 - The test craft's chute (600 m²) lands at 23 m/s full / 10 m/s empty, above its 8 m/s impact limit: without debug mode a parachute landing is fatal (plan Q2 numbers).
 - Aero is still an isotropic drag area until `sim::aero` is integrated; no heating yet.
 
