@@ -4,9 +4,13 @@
 //! `data/craft/<craft>/craft.ron` (numbers) and `geometry.ron` (shape). This
 //! module owns everything derived from those files at load.
 
+pub mod cells;
 pub mod file;
+pub mod mesh;
 
+pub use cells::{Cell, CellOptions, Cells, ContactKind, ContactPoint, Neighbour};
 pub use file::{CraftFile, GeometryFile, Primitive, Shape, Skin, Tank};
+pub use mesh::{RenderMesh, Resolution, Surface};
 
 use crate::body::DataError;
 use std::path::{Path, PathBuf};
@@ -22,12 +26,27 @@ pub const TEST_CRAFT: &str = "test-craft";
 #[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub struct CraftId(pub String);
 
-/// A loaded craft.
+/// A loaded craft: its files and everything derived from them at load.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Craft {
     pub id: CraftId,
     pub spec: CraftFile,
     pub geometry: GeometryFile,
+    /// The outer surface (body axes, f64).
+    pub surface: Surface,
+    /// What the game draws (the same surface in f32).
+    pub mesh: RenderMesh,
+    /// Surface cells and contact points (D065).
+    pub cells: Cells,
+}
+
+impl Craft {
+    /// Derives the surface, render mesh and cells from the files.
+    pub fn build(id: CraftId, spec: CraftFile, geometry: GeometryFile, res: &Resolution, opts: &CellOptions) -> Self {
+        let surface = mesh::union_surface(&geometry.primitives, res);
+        let cells = cells::build_cells(&surface, &geometry.primitives, &geometry.skin, opts);
+        Craft { id, spec, mesh: surface.render_mesh(), surface, cells, geometry }
+    }
 }
 
 /// Parses and validates a craft from the two files' text. `dir` labels errors.
@@ -37,7 +56,7 @@ pub fn parse_craft(id: CraftId, craft_text: &str, geometry_text: &str, dir: &Pat
     file::validate_craft(&spec).map_err(|m| err(CRAFT_FILE, m))?;
     let geometry: GeometryFile = ron::from_str(geometry_text).map_err(|e| err(GEOMETRY_FILE, e.to_string()))?;
     file::validate_geometry(&geometry).map_err(|m| err(GEOMETRY_FILE, m))?;
-    Ok(Craft { id, spec, geometry })
+    Ok(Craft::build(id, spec, geometry, &Resolution::default(), &CellOptions::default()))
 }
 
 /// Loads `<dir>/craft.ron` and `<dir>/geometry.ron`; the id is the directory name.
