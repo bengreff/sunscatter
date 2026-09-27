@@ -2,7 +2,7 @@
 
 A SessionStart hook loads this file automatically after `/clear` or at startup. It is kept current by `/handoff`.
 
-*Updated 2026-09-26, after the fix round, the owner's second review, a full code review and the owner interview for the next chunk.*
+*Updated 2026-09-26 evening, during the realism-1 build (autonomous, with the owner checking in).*
 
 ## Current job: build `docs/features/realism-1.md` in its build order
 
@@ -23,20 +23,25 @@ The plan was written 2026-09-26 from the owner interview (`docs/plans/interview-
 
 ## State
 
-- `main` is green in CI (macOS and Windows). The game also builds, passes the sim tests (bit-exact goldens) and runs the full demo on the owner's Windows PC (`docs/windows.md`).
-- Built in the fix round: per-object map view (D054), physical lighting per body with eclipses and planetshine (D055, **fixed exposure**: eye adaptation was built and removed on review), orbit lines of one revolution about the dominant body (D056), the Esc pause menu and tabbed settings, movable saved panels, navball, full-screen tracking station, camera collision, vessels drawn at the clock, geomorphing, water mask.
-- After the owner's second review (this session's end):
-  - Night sides are dark: Bevy's derived sky light leaked after leaving the atmosphere, and the terrain now fades sky light through twilight.
-  - Terrain overhaul: CC0 ground textures (grass, soil, sand, rock, snow) chosen per fragment, patchy cover, beach band, animated water waves. The pad moved ~6 km west onto land (LC-39A's barrier island is below the maps' resolution).
-  - Navball: no apsis times or velocity markers while landed (the flicker). Saves get a default name. The double-click body menu works in the station. Flight keys are off in the station; F/`/Tab off while typing. Settings tabs no longer mark settings changed every frame.
-- Demo views added: `pad_top` (straight down from 300 m), `earth_night`, `moon_night`, the 10 km coast view.
+- `main` is green in CI. realism-1 progress (details and checkboxes in `docs/features/realism-1.md`, **Build order**):
+  1. **Visual fixes: done.** Navball rim/horizon flicker; dark horizon (Bevy's aerial LUT clamp: we install our own `render_sky.wgsl`, `game::sky::haze`); haze setting (1 = physical; measured roughly physical, owner to judge the default); physical ocean albedo; atmosphere radius follows the ellipsoid; zoom "whitish shapes" = one-frame terrain holes on LOD splits + sag rule skipped past the horizon + flare streak + glint on coarse triangles + orbit lines through the camera plane (all fixed; `SUNSCATTER_DEMO_ZOOM=<tier>` sweep); sub-sample terrain detail in `sim` (D059), rendered.
+  2. **Foundation: done** (review sim 1–4, 11; game 1, 2, 5 partly, 7, 8). `GameCommand`/`InputContext` (`game::commands`), `VesselId` everywhere, one `Dominance` in `SimState`, trajectories of coast/burn segments with planned burns under warp.
+  3. **Test craft: done in sim and game** (`sim::craft`, `sim::rigid`, `sim::contact`): files, adaptive cells, mass properties, engine with propellant, rigid body, debug mode (pause menu), rigid-body ground contact (tips at ~32–35°, impact per contact point, rests tilted), 3D model, propellant/Δv/TWR/mass readouts.
+  4. **Relativity and light: done** except uncrewed probes. Proper time per vessel (GPS check +38.54 µs/day; ship clock in the flight panel). `sim::comms` (sites: Houston, DSN, Merritt Island, the pad's umbilical; link budget; occlusion; light time; relays) and `game::comms` (control locations: station = mission control; signals, retarded positions, last heard; commands in flight with light delay, `commands::InFlight`).
+  5. **Aero/heating: design doc done** (`docs/design/aero-thermal.md`); rails floor done (D062). `sim::aero` and `sim::thermal` are being written by an agent as pure modules; integration into the vessel is next.
+  6. **Flight UI: first versions done.** Burn planner (N): burns at Ap/Pe/+10 min, prograde/normal/radial Δv, sent with light delay; the line is drawn through every burn. Landing panel below 20 km and impact marker. Rendezvous: closest approach to the navball target (map marker, HUD line). Not done: node handles on the line, navball maneuver marker, intercept helper (Lambert + correction).
+  7. **MCP: done for current tools.** `crates/mcp` (local HTTP JSON-RPC) + `game::agent` (get_state, list_bodies, get_vessel, get_trajectory, set_warp, switch_vessel, go_to_mission_control, set_controls, set_plan); `docs/mcp.md`; `SUNSCATTER_AGENT=<port>:<token>`.
+- Perf (demo, 11 vessels): 333 fps at 1x, 131 fps at 1,000,000x.
 
 ## Known issues
 
-- All open review findings: `docs/reviews/2026-09-26-code-review.md` (notably: tracked vessels' orbit lines are stubs; `nearest_body` vs `Dominance`; per-frame recomputation of line ends and Dominance; UI mutating the sim after the scene is placed; fleet-index vessel identity; sim NaN hang and no ephemeris-end guard; attitude control ignored while coasting at 60 fps).
-- Haze at 10–20 km looks strong (the ground fully blue). Not the aerial-perspective range; atmosphere data matches Hillaire. Suspect the colour map's darkness as albedo.
+- Open review findings: `docs/reviews/2026-09-26-code-review.md` (remaining: the per-frame line-end rescans, review game 4/6; saves format and validation, sim 7/8; Kepler edge cases, sim 9; small ones).
+- Haze: physical by measurement (see realism-1 §1a); the owner decides the default of the new setting.
+- The Moon's sub-sample detail is noise-like (no craters yet; data-only later).
 - Terrain close up is still limited by the ~5 km colour map; a launch-site patch is the real fix.
-- Shader compile errors are only logged (a reserved word silently removed all terrain once): the demo should fail on pipeline errors.
+- Shader compile errors are only logged: the demo should fail on pipeline errors.
+- The test craft's chute (600 m²) lands at 23 m/s full / 10 m/s empty, above its 8 m/s impact limit: without debug mode a parachute landing is fatal (plan Q2 numbers).
+- Aero is still an isotropic drag area until `sim::aero` is integrated; no heating yet.
 
 ## How to work
 
