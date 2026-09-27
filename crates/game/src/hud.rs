@@ -126,6 +126,8 @@ pub enum WarpLimit {
     Compute,
     /// Below a body's rails floor (D062): the floor altitude (m).
     Floor(f64),
+    /// Flown live near the ground.
+    Live,
 }
 
 /// What the warp indicator shows: the level in effect, whether it is rails
@@ -179,11 +181,15 @@ pub fn draw(
     let mut set_warp = None;
     panel(ctx, &mut iface, PanelId::Time, |ui_| {
         ui_.monospace(format!("{y}-{mo:02}-{d:02} {h:02}:{mi:02}:{s:04.1} TDB"));
-        let floor = match sim.rails_block() {
+        let block = sim.rails_block();
+        let floor = match block {
             Some(crate::state::RailsBlock::Floor { floor, .. }) => Some(floor),
             _ => None,
         };
-        let (level, rails, limit) = warp_status(sim.warp, sim.effective_warp(), sim.compute_limited, floor);
+        let (level, rails, mut limit) = warp_status(sim.warp, sim.effective_warp(), sim.compute_limited, floor);
+        if block == Some(crate::state::RailsBlock::Live) && limit == Some(WarpLimit::Throttle) {
+            limit = Some(WarpLimit::Live);
+        }
         ui_.horizontal(|ui_| {
             ui_.spacing_mut().item_spacing.x = 1.0;
             for (i, &w) in WARP_LEVELS.iter().enumerate() {
@@ -206,6 +212,7 @@ pub fn draw(
             Some(WarpLimit::Throttle) => "  limited: throttle".to_string(),
             Some(WarpLimit::Compute) => "  limited: compute".to_string(),
             Some(WarpLimit::Floor(f)) => format!("  limited: below {}", crate::format::distance(f)),
+            Some(WarpLimit::Live) => "  limited: near the ground".to_string(),
             None => String::new(),
         };
         ui_.horizontal(|ui_| {
@@ -254,6 +261,19 @@ pub fn draw(
 }
 
 /// The Flight panel: phase, altitudes, speeds, apsides, throttle, SAS, chute.
+/// The ship clock's offset from the game clock (proper minus coordinate
+/// time, D012), in the unit that shows it.
+pub fn clock_offset(s: f64) -> String {
+    let a = s.abs();
+    if a < 1e-3 {
+        format!("{:+.2} µs", s * 1e6)
+    } else if a < 1.0 {
+        format!("{:+.3} ms", s * 1e3)
+    } else {
+        format!("{s:+.3} s")
+    }
+}
+
 /// Rocket-equation Δv (m/s) of `propellant` (kg) burnt from mass `mass`.
 pub fn delta_v(isp: f64, mass: f64, propellant: f64) -> f64 {
     let dry = (mass - propellant).max(1e-9);
@@ -288,6 +308,7 @@ fn craft_rows(ui_: &mut egui::Ui, sim: &SimState, near: Option<sim::frame::NodeI
         row("ΔV (VAC)", format!("{:.0} m/s", delta_v(engine.isp_vac, props.mass, p)));
         row("TWR", twr(engine.thrust_vac, props.mass, g).map_or("—".into(), |t| format!("{t:.2}")));
         row("MASS", format!("{:.1} t", props.mass / 1e3));
+        row("SHIP CLOCK", clock_offset(ship.proper_time_offset()));
     });
     if ship.debug() {
         ui_.label(egui::RichText::new("DEBUG MODE").monospace().color(theme::WARN));
@@ -377,6 +398,13 @@ pub fn draw_body_menu(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn clock_offsets_read_in_their_unit() {
+        assert_eq!(clock_offset(-3.2e-7), "-0.32 µs");
+        assert_eq!(clock_offset(0.0123), "+12.300 ms");
+        assert_eq!(clock_offset(-1.5), "-1.500 s");
+    }
 
     #[test]
     fn delta_v_and_twr_follow_the_rocket_equation() {

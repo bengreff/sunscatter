@@ -128,8 +128,12 @@ impl SimState {
     /// Why rails warp is not allowed right now, if it is not.
     pub fn rails_block(&self) -> Option<RailsBlock> {
         let ship = self.ship();
-        if self.controls.throttle != 0.0 || matches!(ship.phase, Phase::Powered { .. }) {
+        if self.controls.throttle != 0.0 {
             return Some(RailsBlock::Thrust);
+        }
+        if matches!(ship.phase, Phase::Powered { .. }) {
+            // Flown live: thrusting or in contact with the ground.
+            return Some(RailsBlock::Live);
         }
         if matches!(ship.phase, Phase::Landed { .. } | Phase::Crashed { .. }) {
             return None;
@@ -309,8 +313,10 @@ pub fn lookahead_turn(turn: usize, fleet: usize, active: usize) -> Option<usize>
 /// Why rails warp is not allowed.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum RailsBlock {
-    /// The throttle is open or the ship is under thrust.
+    /// The throttle is open.
     Thrust,
+    /// Flown in live ticks (near the ground, or thrust just ended).
+    Live,
     /// Below a body's rails floor (D062): (body, floor altitude in m).
     Floor { body: NodeId, floor: f64 },
 }

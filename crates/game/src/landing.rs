@@ -38,13 +38,30 @@ pub fn impact(sim: &SimState, i: usize) -> Option<Impact> {
     let last = tr.last();
     let end = last.end?;
     let EndKind::Surface { body } = end.kind else { return None };
-    let t = last.t0.add_seconds(end.t);
+    let t_end = last.t0.add_seconds(end.t);
     let (anchor, r, v) = last.eval(end.t)?;
-    let p = sim.world.source(body)?.physical.as_ref()?;
-    let k = sim.world.snapshot(t).relative(body, anchor);
+    let src = sim.world.source(body)?;
+    let p = src.physical.as_ref()?;
+    let k = sim.world.snapshot(t_end).relative(body, anchor);
     let rel = r - k.r;
-    let ground_v = p.rotation.omega(t).raw().cross(rel);
-    Some(Impact { body, t, speed: (v - k.v - ground_v).length(), anchor, r })
+    let v_srf = v - k.v - p.rotation.omega(t_end).raw().cross(rel);
+    // The coast ends where live contact flight takes over, `live_height`
+    // above the ground; the lowest point still has to fall the rest.
+    let vessel = &sim.fleet[i];
+    let lowest = vessel.mass_props().com.z - vessel.craft.bottom_z;
+    let drop = (vessel.live_height() - lowest).max(0.0);
+    let (up, g) = (rel.normalize(), src.gm / rel.length_squared());
+    let (dt, v_down) = fall(-v_srf.dot(up), g, drop);
+    let speed = (v_srf - up * v_srf.dot(up)).length().hypot(v_down);
+    Some(Impact { body, t: t_end.add_seconds(dt), speed, anchor, r: r - up * drop })
+}
+
+/// Falling `drop` metres from a downward speed `v_down` under gravity `g`:
+/// the time taken and the downward speed at the end.
+pub fn fall(v_down: f64, g: f64, drop: f64) -> (f64, f64) {
+    let v_end = (v_down * v_down + 2.0 * g * drop).sqrt();
+    let dt = if g > 0.0 { (v_end - v_down) / g } else { drop / v_down.max(1e-6) };
+    (dt, v_end)
 }
 
 /// Height (m) above the ground at which a vertical descent at `v_down`
@@ -150,6 +167,13 @@ mod tests {
         assert!((h - 100.0 * 100.0 / 6.0).abs() < 1e-9);
         assert_eq!(braking_height(-5.0, 4.0, 1.0), Some(0.0), "going up: no braking needed");
         assert_eq!(braking_height(10.0, 1.0, 1.62), None, "cannot stop");
+    }
+
+    #[test]
+    fn falling_the_last_metres() {
+        let (dt, v) = fall(10.0, 1.62, 15.0);
+        assert!((v - (100.0f64 + 2.0 * 1.62 * 15.0).sqrt()).abs() < 1e-12);
+        assert!((10.0 * dt + 0.5 * 1.62 * dt * dt - 15.0).abs() < 1e-9);
     }
 
     #[test]
