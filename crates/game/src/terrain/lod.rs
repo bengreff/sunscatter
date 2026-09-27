@@ -216,14 +216,14 @@ pub fn update(
             let c = &body.chunks[key];
             if let Ok((mut t, mut vis, mut tag)) = chunks_q.get_mut(c.entity) {
                 *t = Transform { translation: (m * c.center + centre).as_vec3(), rotation: rot, scale: Vec3::ONE };
-                *vis = Visibility::Visible;
+                vis.set_if_neq(Visibility::Visible);
                 let q = (morph * MORPH_TAG_SCALE) as u32;
                 if tag.0 != q {
                     tag.0 = q;
                 }
             }
         }
-        let selected: Vec<ChunkKey> = selected.into_iter().map(|(k, _)| k).collect();
+        let selected: std::collections::HashSet<ChunkKey> = selected.into_iter().map(|(k, _)| k).collect();
         let evict: Vec<ChunkKey> = body
             .chunks
             .iter()
@@ -233,7 +233,7 @@ pub fn update(
         for (k, c) in &body.chunks {
             if c.last_used != frame || !selected.contains(k) {
                 if let Ok((_, mut vis, _)) = chunks_q.get_mut(c.entity) {
-                    *vis = Visibility::Hidden;
+                    vis.set_if_neq(Visibility::Hidden);
                 }
             }
         }
