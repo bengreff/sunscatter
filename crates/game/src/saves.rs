@@ -6,12 +6,12 @@
 //! are not saved: loading resets warp to 1x and tracks every vessel.
 
 use crate::camera::{CameraRig, Focus};
+use crate::commands::{GameCommand, InputContext, Keys};
 use crate::interface::toasts::Toasts;
 use crate::persist::Persist;
 use crate::state::{Prediction, SimState};
 use crate::tracking::Tracked;
 use bevy::prelude::*;
-use bevy_egui::input::EguiWantsInput;
 use bevy_egui::{egui, EguiContexts};
 use sim::save::{SaveError, SaveGame};
 use std::path::{Path, PathBuf};
@@ -99,12 +99,21 @@ pub fn save(sim: &SimState, path: &Path) -> Result<(), SaveError> {
     SaveGame::capture(&sim.world, sim.clock, &sim.fleet, sim.vessel_ids, sim.active, sim.controls).write(path)
 }
 
-/// Loads `path` into `sim` (warp back to 1x). On error `sim` is unchanged.
-pub fn load(sim: &mut SimState, path: &Path) -> Result<(), SaveError> {
+/// Reads and checks a save for `sim`'s world (a load is then a
+/// `GameCommand::Restore`).
+pub fn read(sim: &SimState, path: &Path) -> Result<SaveGame, SaveError> {
     let save = SaveGame::read(path, &sim.world)?;
     if save.vessels.is_empty() {
         return Err(SaveError::Format("the save has no vessels".into()));
     }
+    Ok(save)
+}
+
+/// Loads `path` into `sim` at once (warp back to 1x). On error `sim` is
+/// unchanged. The game loads through `read` and a command; this is for tests.
+#[cfg(test)]
+pub fn load(sim: &mut SimState, path: &Path) -> Result<(), SaveError> {
+    let save = read(sim, path)?;
     restore(sim, save);
     Ok(())
 }
@@ -150,17 +159,15 @@ pub fn fmt_time(t: SystemTime) -> String {
 #[allow(clippy::too_many_arguments)]
 pub fn keys(
     keys: Res<ButtonInput<KeyCode>>,
-    egui: Res<EguiWantsInput>,
+    ctx: Res<InputContext>,
     time: Res<Time>,
     persist: Res<Persist>,
     mut ui: ResMut<SaveUi>,
     mut toasts: ResMut<Toasts>,
-    mut sim: ResMut<SimState>,
-    mut pred: ResMut<Prediction>,
-    mut tracked: ResMut<Tracked>,
-    mut rig: ResMut<CameraRig>,
+    sim: Res<SimState>,
+    mut commands: MessageWriter<GameCommand>,
 ) {
-    if egui.wants_any_keyboard_input() {
+    if !ctx.allows(Keys::Menus) {
         return;
     }
     let now = time.elapsed_secs_f64();
@@ -172,9 +179,9 @@ pub fn keys(
         }
     }
     if keys.just_pressed(KeyCode::F9) {
-        match load(&mut sim, &path) {
-            Ok(()) => {
-                after_load(&sim, &mut pred, &mut tracked, &mut rig);
+        match read(&sim, &path) {
+            Ok(save) => {
+                commands.write(GameCommand::Restore(Box::new(save)));
                 ui.notify(&mut toasts, now, "Quickloaded".into(), false);
             }
             Err(e) => ui.notify(&mut toasts, now, format!("Quickload failed: {e}"), true),
@@ -194,10 +201,8 @@ pub fn draw(
     persist: Res<Persist>,
     mut ui: ResMut<SaveUi>,
     mut toasts: ResMut<Toasts>,
-    mut sim: ResMut<SimState>,
-    mut pred: ResMut<Prediction>,
-    mut tracked: ResMut<Tracked>,
-    mut rig: ResMut<CameraRig>,
+    sim: Res<SimState>,
+    mut commands: MessageWriter<GameCommand>,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
     let now = time.elapsed_secs_f64();
@@ -251,9 +256,9 @@ pub fn draw(
         }
     }
     if let Some(e) = to_load.and_then(|k| ui.list.get(k).cloned()) {
-        match load(&mut sim, &e.path) {
-            Ok(()) => {
-                after_load(&sim, &mut pred, &mut tracked, &mut rig);
+        match read(&sim, &e.path) {
+            Ok(save) => {
+                commands.write(GameCommand::Restore(Box::new(save)));
                 ui.notify(&mut toasts, now, format!("Loaded \"{}\"", e.name), false);
             }
             Err(err) => ui.notify(&mut toasts, now, format!("Cannot load \"{}\": {err}", e.name), true),

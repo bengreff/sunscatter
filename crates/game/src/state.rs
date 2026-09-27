@@ -1,6 +1,7 @@
 //! Simulation state owned by the app: the world, the fleet, the clock and
 //! time warp, the player's controls, and trajectory predictions.
 
+use crate::commands::{GameCommand, InputContext, Keys};
 use crate::trajectory::{self, settings::OrbitSettings};
 use bevy::prelude::*;
 use bevy::tasks::{futures::check_ready, AsyncComputeTaskPool, ComputeTaskPool, Task};
@@ -122,16 +123,27 @@ impl SimState {
 pub fn read_controls(
     keys: Res<ButtonInput<KeyCode>>,
     time: Res<Time>,
-    egui: Res<bevy_egui::input::EguiWantsInput>,
-    menu: Res<crate::interface::pause::PauseMenu>,
-    station: Res<crate::tracking::TrackingStation>,
+    ctx: Res<InputContext>,
     mut sim: ResMut<SimState>,
+    mut commands: MessageWriter<GameCommand>,
 ) {
     let dt = time.delta_secs_f64();
+    if ctx.allows(Keys::Warp) {
+        let level = sim.effective_warp();
+        if keys.just_pressed(KeyCode::Period) {
+            commands.write(GameCommand::SetWarp(level + 1));
+        }
+        if keys.just_pressed(KeyCode::Comma) {
+            commands.write(GameCommand::SetWarp(level.saturating_sub(1)));
+        }
+        if keys.just_pressed(KeyCode::Slash) {
+            commands.write(GameCommand::SetWarp(0));
+        }
+    }
     let c = &mut sim.controls;
-    // Typing in a text field (e.g. a save name), the pause menu and the
-    // tracking station (R would reset the ship unseen) do not fly the ship.
-    if egui.wants_any_keyboard_input() || menu.open || station.open {
+    // Typing in a text field, the pause menu and the tracking station (R
+    // would reset the ship unseen) do not fly the ship.
+    if !ctx.allows(Keys::Flight) {
         c.rotate = DVec3::ZERO;
         return;
     }
@@ -161,21 +173,11 @@ pub fn read_controls(
         axis(KeyCode::KeyD, KeyCode::KeyA),
         axis(KeyCode::KeyE, KeyCode::KeyQ),
     );
-
-    if keys.just_pressed(KeyCode::Period) {
-        sim.warp = (sim.effective_warp() + 1).min(WARP_LEVELS.len() - 1);
-    }
-    if keys.just_pressed(KeyCode::Comma) {
-        sim.warp = sim.effective_warp().saturating_sub(1);
-    }
-    if keys.just_pressed(KeyCode::Slash) {
-        sim.warp = 0;
-    }
     if keys.just_pressed(KeyCode::KeyR) {
-        sim.reset();
+        commands.write(GameCommand::Reset);
     }
-    if keys.just_pressed(KeyCode::F2) {
-        sim.spawn_test_ships(10);
+    if keys.just_pressed(KeyCode::F2) && ctx.allows(Keys::Debug) {
+        commands.write(GameCommand::SpawnTestShips(10));
     }
 }
 

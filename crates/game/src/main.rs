@@ -8,6 +8,7 @@ mod atmosphere;
 mod bench;
 mod body_visual;
 mod camera;
+mod commands;
 mod demo;
 mod format;
 mod hud;
@@ -79,6 +80,8 @@ fn main() {
         .init_resource::<saves::SaveUi>()
         .init_resource::<tracking::Tracked>()
         .init_resource::<tracking::TrackingStation>()
+        .init_resource::<commands::InputContext>()
+        .add_message::<commands::GameCommand>()
         // After the settings defaults: replaces them with the saved settings.
         .add_plugins(persist::PersistPlugin)
         .add_plugins(navball::NavballPlugin)
@@ -87,6 +90,7 @@ fn main() {
         .add_systems(
             Update,
             (
+                commands::update_context,
                 interface::pause::keys,
                 interface::help::keys,
                 state::read_controls,
@@ -103,7 +107,10 @@ fn main() {
                 .chain()
                 .in_set(Stage::Input),
         )
-        .add_systems(Update, (saves::keys, tracking::update).chain().after(state::read_controls).in_set(Stage::Input))
+        .add_systems(
+            Update,
+            (saves::keys, tracking::update, commands::apply).chain().after(hud::pick_bodies).in_set(Stage::Input),
+        )
         .add_systems(
             Update,
             (interface::pause::track_launch, state::advance, state::update_prediction).chain().in_set(Stage::Simulate),

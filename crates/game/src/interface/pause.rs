@@ -7,11 +7,11 @@
 //! the active vessel was last about to lift off (a snapshot taken then).
 
 use super::theme;
-use crate::camera::CameraRig;
+use crate::commands::GameCommand;
 use crate::saves::SaveUi;
 use crate::settings_ui::SettingsUi;
-use crate::state::{Prediction, SimState};
-use crate::tracking::{Tracked, TrackingStation};
+use crate::state::SimState;
+use crate::tracking::TrackingStation;
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 use sim::save::SaveGame;
@@ -104,10 +104,7 @@ pub fn draw(
     mut saves: ResMut<SaveUi>,
     mut station: ResMut<TrackingStation>,
     snapshot: Res<LaunchSnapshot>,
-    mut sim: ResMut<SimState>,
-    mut pred: ResMut<Prediction>,
-    mut tracked: ResMut<Tracked>,
-    mut rig: ResMut<CameraRig>,
+    mut commands: MessageWriter<GameCommand>,
     mut exit: MessageWriter<AppExit>,
 ) -> Result {
     if !menu.open {
@@ -157,8 +154,7 @@ pub fn draw(
                     ui.add_space(8.0);
                     if button(ui, "Revert") {
                         if let Some(save) = &snapshot.0 {
-                            crate::saves::restore(&mut sim, save.clone());
-                            crate::saves::after_load(&sim, &mut pred, &mut tracked, &mut rig);
+                            commands.write(GameCommand::Restore(Box::new(save.clone())));
                         }
                         menu.open = false;
                     }

@@ -12,10 +12,10 @@
 //! orbit lines (the active vessel always does).
 
 use crate::camera::{self, CameraRig, Focus};
+use crate::commands::{GameCommand, InputContext, Keys};
 use crate::format::{distance as fmt_dist, duration as fmt_duration};
 use crate::state::{Prediction, SimState, WARP_LEVELS};
 use bevy::prelude::*;
-use bevy_egui::input::EguiWantsInput;
 use bevy_egui::{egui, EguiContexts};
 use sim::frame::NodeId;
 use sim::vessel::{Controls, Phase};
@@ -101,6 +101,23 @@ pub struct TrackingStation {
     confirm_delete: Option<usize>,
 }
 
+impl TrackingStation {
+    /// On leaving, the flight camera follows the active vessel (after a
+    /// switch).
+    pub fn follow_active_on_leave(&mut self) {
+        if let Some(saved) = self.saved.as_mut() {
+            saved.0 = Focus::Ship;
+        }
+    }
+
+    /// Forgets the selection and any pending delete (their indices may now
+    /// name other vessels).
+    pub fn clear_selection(&mut self) {
+        self.selected = None;
+        self.confirm_delete = None;
+    }
+}
+
 /// Makes vessel `i` active. Its controls start from throttle 0 with SAS on;
 /// the camera follows it.
 pub fn switch_to(sim: &mut SimState, rig: &mut CameraRig, pred: &mut Prediction, i: usize) {
@@ -138,26 +155,24 @@ pub fn delete_vessel(sim: &mut SimState, tracked: &mut Tracked, rig: &mut Camera
 #[allow(clippy::too_many_arguments)]
 pub fn update(
     keys: Res<ButtonInput<KeyCode>>,
-    egui: Res<EguiWantsInput>,
-    mut sim: ResMut<SimState>,
+    ctx: Res<InputContext>,
+    sim: Res<SimState>,
     mut rig: ResMut<CameraRig>,
-    mut pred: ResMut<Prediction>,
     mut tracked: ResMut<Tracked>,
     mut ts: ResMut<TrackingStation>,
+    mut commands: MessageWriter<GameCommand>,
 ) {
     tracked.sync(sim.fleet.len());
-    if !egui.wants_any_keyboard_input() {
-        if keys.just_pressed(KeyCode::F7) {
-            ts.open = !ts.open;
-        }
+    if ctx.allows(Keys::Menus) && keys.just_pressed(KeyCode::F7) {
+        ts.open = !ts.open;
+    }
+    if ctx.allows(Keys::Flight) {
         let n = sim.fleet.len();
         if keys.just_pressed(KeyCode::BracketRight) {
-            let i = (sim.active + 1) % n;
-            switch_to(&mut sim, &mut rig, &mut pred, i);
+            commands.write(GameCommand::Switch((sim.active + 1) % n));
         }
         if keys.just_pressed(KeyCode::BracketLeft) {
-            let i = (sim.active + n - 1) % n;
-            switch_to(&mut sim, &mut rig, &mut pred, i);
+            commands.write(GameCommand::Switch((sim.active + n - 1) % n));
         }
     }
     if let Focus::Vessel(i) = rig.focus {
@@ -271,11 +286,11 @@ fn group(phase: &Phase) -> &'static str {
 #[allow(clippy::too_many_arguments)]
 pub fn draw(
     mut contexts: EguiContexts,
-    mut sim: ResMut<SimState>,
+    sim: Res<SimState>,
     mut rig: ResMut<CameraRig>,
-    mut pred: ResMut<Prediction>,
     mut tracked: ResMut<Tracked>,
     mut ts: ResMut<TrackingStation>,
+    mut commands: MessageWriter<GameCommand>,
 ) -> Result {
     if !ts.open {
         return Ok(());
@@ -370,18 +385,12 @@ pub fn draw(
             }
             Action::FocusVessel(i) => focus_vessel(&sim, &mut rig, i),
             Action::Switch(i) => {
-                switch_to(&mut sim, &mut rig, &mut pred, i);
+                commands.write(GameCommand::Switch(i));
                 ts.open = false;
-                // Leaving restores the flight camera: follow the new vessel.
-                if let Some(saved) = ts.saved.as_mut() {
-                    saved.0 = Focus::Ship;
-                }
             }
             Action::AskDelete(i) => ts.confirm_delete = Some(i),
             Action::Delete(i) => {
-                delete_vessel(&mut sim, &mut tracked, &mut rig, i);
-                ts.confirm_delete = None;
-                ts.selected = None;
+                commands.write(GameCommand::Delete(i));
             }
             Action::Track(i, on) => tracked.set_tracked(i, on),
             Action::FocusBody(node) => camera::focus_body(&mut rig, &sim, node),

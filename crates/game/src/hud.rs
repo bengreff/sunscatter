@@ -152,7 +152,8 @@ fn warp_label(x: f64) -> String {
 pub fn draw(
     mut contexts: EguiContexts,
     fps: Res<FpsMeter>,
-    mut sim: ResMut<SimState>,
+    sim: Res<SimState>,
+    mut commands: MessageWriter<crate::commands::GameCommand>,
     ui: Res<UiState>,
     mut iface: ResMut<InterfaceSettings>,
     station: Res<crate::tracking::TrackingStation>,
@@ -204,9 +205,9 @@ pub fn draw(
         });
     });
     if let Some(i) = set_warp {
-        sim.warp = i;
+        commands.write(crate::commands::GameCommand::SetWarp(i));
     }
-    let sim = sim.into_inner();
+    let sim = &*sim;
     let (anchor, r, _) = sim.ship().state_at(&sim.world, sim.clock);
     // Readouts are relative to the dominant body, like the navball's.
     let eph = &sim.world.eph;
