@@ -13,7 +13,6 @@
 pub mod approach;
 pub mod body;
 pub mod comms;
-pub mod contact;
 pub mod craft;
 pub mod ephem;
 pub mod forces;
