@@ -28,6 +28,11 @@ pub enum Effect {
         throttle: Option<f64>,
         sas: Option<bool>,
     },
+    /// A command sent over the network: it arrives after `delay` seconds.
+    Send {
+        delay: f64,
+        command: GameCommand,
+    },
 }
 
 fn schema(properties: Value, required: &[&str]) -> Value {
@@ -80,6 +85,20 @@ pub fn tools() -> Vec<Tool> {
             "go_to_mission_control",
             "Make mission control (the tracking station) your control location.",
             schema(json!({}), &[]),
+        ),
+        t(
+            "set_plan",
+            "Replace a vessel's planned burns (not yet ignited). Each burn: `in_s` seconds from now, and Δv \
+             components (m/s) prograde, normal and radial-out relative to the body the vessel is about now. \
+             From anywhere but aboard, the plan travels with the signal's light delay; without a signal it \
+             cannot be sent. Read the result with get_trajectory.",
+            schema(
+                json!({"id": id, "burns": {"type": "array", "items": {"type": "object", "properties": {
+                    "in_s": {"type": "number", "minimum": 0},
+                    "prograde": {"type": "number"}, "normal": {"type": "number"}, "radial": {"type": "number"}},
+                    "required": ["in_s"]}}}),
+                &["id", "burns"],
+            ),
         ),
         t(
             "set_controls",
@@ -218,6 +237,31 @@ fn run(tool: &str, args: &Value, sim: &SimState, comms: &Comms) -> Result<(Value
             (json!({"aboard": id.0}), vec![Effect::Command(GameCommand::Switch(id)), Effect::Station(false)])
         }
         "go_to_mission_control" => (json!({"location": "mission control"}), vec![Effect::Station(true)]),
+        "set_plan" => {
+            let id = vessel_id(args)?;
+            let i = sim.index_of(id).ok_or("no such vessel")?;
+            let delay = if comms.location == Location::Vessel(id) {
+                0.0
+            } else {
+                comms.signal(id).map(|s| s.delay).ok_or_else(|| format!("no signal to vessel {}", id.0))?
+            };
+            let burns = args.get("burns").and_then(Value::as_array).ok_or("missing array `burns`")?;
+            let body = sim.dominant_of(i);
+            let mut draft = Vec::new();
+            for b in burns {
+                let get = |k: &str| b.get(k).and_then(Value::as_f64).unwrap_or(0.0);
+                let in_s = b.get("in_s").and_then(Value::as_f64).ok_or("each burn needs `in_s`")?;
+                if in_s <= delay {
+                    return Err(format!("a burn in {in_s} s ignites before the plan arrives ({delay:.3} s)"));
+                }
+                let dv = glam::DVec3::new(get("prograde"), get("normal"), get("radial"));
+                draft.push(crate::planner::DraftBurn { t_start: sim.clock.add_seconds(in_s), dv, reference: body });
+            }
+            let plan = crate::planner::plan_from(&sim.fleet[i], &draft, sim.clock.add_seconds(delay));
+            let command = GameCommand::SetPlan { vessel: id, plan };
+            let effect = if delay > 0.0 { Effect::Send { delay, command } } else { Effect::Command(command) };
+            (json!({"sent": draft.len(), "arrives_in_s": delay, "about": name(body)}), vec![effect])
+        }
         "set_controls" => {
             if comms.location != Location::Vessel(sim.ship().id()) {
                 return Err("you are not aboard the active vessel (use switch_vessel)".into());
@@ -257,6 +301,7 @@ pub fn serve(
     mut sim: ResMut<SimState>,
     comms: Res<Comms>,
     mut station: ResMut<TrackingStation>,
+    mut in_flight: ResMut<crate::commands::InFlight>,
     mut commands: MessageWriter<GameCommand>,
 ) {
     // `SUNSCATTER_AGENT=<port>:<token>` turns the server on (demos, tests).
@@ -296,6 +341,7 @@ pub fn serve(
                     commands.write(c);
                 }
                 Effect::Station(open) => station.open = open,
+                Effect::Send { delay, command } => in_flight.send(sim.clock, delay, command),
                 Effect::Controls { throttle, sas } => {
                     if let Some(t) = throttle {
                         sim.controls.throttle = t;
@@ -358,6 +404,21 @@ mod tests {
         let ToolResult::Ok(v) = r else { panic!("{r:?}") };
         assert_eq!(v["about"], "Earth");
         assert!(v["altitude_m"].as_f64().unwrap() > 300_000.0);
+    }
+
+    #[test]
+    fn a_plan_from_mission_control_travels_with_the_delay() {
+        let (sim, mut comms) = setup();
+        let id = sim.fleet[1].id();
+        comms.location = Location::Site(0);
+        comms.signals.insert(id, Some(comms::Signal { delay: 0.02, rate: 1e6, via: vec![] }));
+        let args = json!({"id": id.0, "burns": [{"in_s": 600.0, "prograde": 100.0}]});
+        let (r, e) = answer("set_plan", &args, &sim, &comms);
+        assert!(matches!(r, ToolResult::Ok(_)), "{r:?}");
+        assert!(matches!(&e[..], [Effect::Send { delay, command: GameCommand::SetPlan { .. } }] if *delay == 0.02));
+        comms.signals.insert(id, None);
+        let (r, _) = answer("set_plan", &args, &sim, &comms);
+        assert!(matches!(r, ToolResult::Err(e) if e.contains("no signal")));
     }
 
     #[test]
