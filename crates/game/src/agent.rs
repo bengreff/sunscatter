@@ -101,6 +101,18 @@ pub fn tools() -> Vec<Tool> {
             ),
         ),
         t(
+            "get_landing_prediction",
+            "Where and when the active vessel's stored trajectory meets the ground: seconds from now, speed at \
+             impact relative to the ground (m/s), the body. Null if it does not.",
+            schema(json!({}), &[]),
+        ),
+        t(
+            "closest_approaches",
+            "Closest approaches between two vessels over their stored trajectories (nearest first): seconds \
+             from now, distance (m), relative speed (m/s).",
+            schema(json!({"a": id, "b": id}), &["a", "b"]),
+        ),
+        t(
             "set_controls",
             "Throttle (0–1) and SAS of the active vessel. Only aboard it (as its crew).",
             schema(
@@ -238,6 +250,12 @@ fn run(tool: &str, args: &Value, sim: &SimState, comms: &Comms) -> Result<(Value
         }
         "go_to_mission_control" => (json!({"location": "mission control"}), vec![Effect::Station(true)]),
         "set_plan" => set_plan(args, sim, comms)?,
+        "get_landing_prediction" => {
+            let hit = crate::landing::impact(sim, sim.active)
+                .map(|h| json!({"in_s": h.t.seconds_since(sim.clock), "speed_ms": h.speed, "body": name(h.body)}));
+            (json!({"impact": hit}), Vec::new())
+        }
+        "closest_approaches" => approaches(args, sim)?,
         "set_controls" => {
             if comms.location != Location::Vessel(sim.ship().id()) {
                 return Err("you are not aboard the active vessel (use switch_vessel)".into());
@@ -251,6 +269,26 @@ fn run(tool: &str, args: &Value, sim: &SimState, comms: &Comms) -> Result<(Value
         }
         _ => return Err(format!("unknown tool {tool}")),
     })
+}
+
+/// The `closest_approaches` tool.
+fn approaches(args: &Value, sim: &SimState) -> Result<(Value, Vec<Effect>), String> {
+    let get = |k: &str| args.get(k).and_then(Value::as_u64).map(VesselId).ok_or(format!("missing `{k}`"));
+    let (a, b) = (get("a")?, get("b")?);
+    let tr = |id: VesselId| {
+        sim.index_of(id)
+            .and_then(|i| sim.fleet[i].trajectory())
+            .ok_or(format!("vessel {} has no stored trajectory (not coasting)", id.0))
+    };
+    let (ta, tb) = (tr(a)?, tr(b)?);
+    let t1 = std::cmp::min_by(ta.computed_until(), tb.computed_until(), |x, y| x.seconds_since(*y).total_cmp(&0.0));
+    let list = sim::approach::closest_approaches(&sim.world, |t| ta.eval(t), |t| tb.eval(t), sim.clock, t1, 400);
+    let out: Vec<Value> = list
+        .iter()
+        .take(5)
+        .map(|c| json!({"in_s": c.t.seconds_since(sim.clock), "distance_m": c.distance, "speed_ms": c.speed}))
+        .collect();
+    Ok((json!({"approaches": out}), Vec::new()))
 }
 
 /// The `set_plan` tool.

@@ -27,8 +27,9 @@ The agent is at a **control location** like you (D067): mission control when the
 | `switch_vessel` | Go aboard a vessel (it becomes active) |
 | `go_to_mission_control` | Open the tracking station (mission control) |
 | `set_controls` | Throttle and SAS, aboard only |
-
-Planning tools (burns, landing prediction, closest approaches) come with the burn planner (realism-1 §6), on the same command API.
+| `set_plan` | Replace a vessel's planned burns (prograde/normal/radial Δv, time); sent with light delay |
+| `get_landing_prediction` | Impact time and speed of the active vessel's stored trajectory |
+| `closest_approaches` | Closest approaches between two vessels (nearest first) |
 
 ## For developers
 
