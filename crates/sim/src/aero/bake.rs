@@ -309,8 +309,15 @@ impl AeroBake {
             (w.w[0] * f64::from(rows[0][i]) + w.w[1] * f64::from(rows[1][i]) + w.w[2] * f64::from(rows[2][i])) / 255.0
         };
         let mut s = direction_sums(&self.geometry, d, f);
-        s.nose_radius = (0..3).map(|k| w.w[k] * self.nose_radius[w.dirs[k] as usize]).sum();
+        s.nose_radius = self.nose_radius_at(d);
         s
+    }
+
+    /// The effective nose radius at flow direction `d` (unit, body axes),
+    /// interpolated like [`Self::sums_at`] (without forming the sums).
+    pub fn nose_radius_at(&self, d: DVec3) -> f64 {
+        let w = self.grid.locate(d);
+        (0..3).map(|k| w.w[k] * self.nose_radius[w.dirs[k] as usize]).sum()
     }
 
     /// Each cell's exposure (0..1) at flow direction `d`, interpolated like

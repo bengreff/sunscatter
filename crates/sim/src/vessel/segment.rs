@@ -19,7 +19,7 @@ use super::anchor::preferred_anchor;
 use super::burn::BurnLaw;
 use crate::ephem::Snapshot;
 use crate::forces::{altitude_above, ActiveSources, DragModel, ForceContext};
-use crate::frame::NodeId;
+use crate::frame::{NodeId, Vec3};
 use crate::integrate::{hermite5, Dopri5, Dynamics, StepSample, StepState, Tolerance};
 use crate::math::{Compensated, CompensatedScalar};
 use crate::time::Epoch;
@@ -97,6 +97,12 @@ pub struct Segment {
     start: CoastStart,
     /// Planned burns started before this segment (its own index if a burn).
     pub(super) plan_index: usize,
+    /// Where the segment first descends into an atmosphere from above
+    /// (local time, body): a vessel is flown live from there
+    /// ([`super::aerothermal`]); the rest of the segment is a prediction
+    /// (with the attitude-independent drag), kept for display.
+    #[serde(default)]
+    pub entry: Option<(f64, NodeId)>,
 }
 
 /// Initial conditions and settings of a coast.
@@ -171,6 +177,7 @@ impl Segment {
             horizon_end,
             start,
             plan_index,
+            entry: None,
         };
         let integ = Dopri5::new(coast_tolerance());
         let f = seg.forces(world);
@@ -271,6 +278,9 @@ impl Segment {
             };
             let new =
                 Sample { anchor: self.anchor, s: sample, delta: self.state.x.value(), delta_rate: self.state.x_rate };
+            if self.entry.is_none() {
+                self.entry = self.find_entry(world, &prev, &new);
+            }
             if let Some((t_hit, body)) = self.find_contact(world, &prev, &new) {
                 let (r, v) = hermite5(&prev.s, &new.s, t_hit);
                 let (a, delta_rate) = self.forces(world).accel_rate(t_hit, r, v);
@@ -355,6 +365,41 @@ impl Segment {
             for _ in 0..60 {
                 let mid = 0.5 * (lo + hi);
                 if alt(mid) > 0.0 {
+                    lo = mid;
+                } else {
+                    hi = mid;
+                }
+            }
+            return Some((hi, src.node));
+        }
+        None
+    }
+
+    /// First descent below an atmosphere's top between two samples (from
+    /// at or above it at `a` to below at `b`), by bisection on the
+    /// interpolated altitude above the ellipsoid.
+    fn find_entry(&self, world: &World, a: &Sample, b: &Sample) -> Option<(f64, NodeId)> {
+        let snap_b = world.snapshot(self.t0.add_seconds(b.s.t));
+        for src in &world.sources {
+            let Some(p) = src.physical.as_ref() else { continue };
+            let Some(atm) = p.atmosphere else { continue };
+            let d = (b.s.r - snap_b.relative_r(src.node, self.anchor)).length();
+            if d > p.radius_eq + atm.top + 200_000.0 {
+                continue;
+            }
+            let alt = |t: f64| {
+                let (r, _) = hermite5(&a.s, &b.s, t);
+                let snap = world.snapshot(self.t0.add_seconds(t));
+                let d = r - snap.relative_r(src.node, self.anchor);
+                p.altitude(p.rotation.to_fixed(Vec3::from_raw(d), snap.t)) - atm.top
+            };
+            if alt(b.s.t) >= 0.0 || alt(a.s.t) < 0.0 {
+                continue;
+            }
+            let (mut lo, mut hi) = (a.s.t, b.s.t);
+            for _ in 0..60 {
+                let mid = 0.5 * (lo + hi);
+                if alt(mid) >= 0.0 {
                     lo = mid;
                 } else {
                     hi = mid;

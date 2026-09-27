@@ -7,7 +7,7 @@ use sim::frame::NodeId;
 use sim::kepler::Elements;
 use sim::sol;
 use sim::time::Epoch;
-use sim::vessel::{CoastStart, Controls, EndKind, Phase, Segment, SegmentEnd, Vessel, VesselId};
+use sim::vessel::{CoastStart, Controls, Destruction, EndKind, Phase, Segment, SegmentEnd, Vessel, VesselId};
 use sim::world::World;
 use std::sync::Arc;
 
@@ -211,27 +211,29 @@ fn parachute_descent_reaches_terminal_speed_and_lands_in_debug_mode() {
     let controls = Controls { chute: true, sas: true, ..Default::default() };
     // At its full mass the test craft reaches the ground at its terminal
     // speed under the parachute, √(2mg / ρ·CdA) ≈ 23 m/s: beyond its 8 m/s
-    // limit even after the gear's stroke.
+    // limit even after the gear's stroke. In the atmosphere it is flown
+    // live from the start.
     let mut vessel = Vessel::coasting(&w, VesselId(1), t, earth, r, v, sim::craft::test_craft());
+    assert!(matches!(vessel.phase, Phase::Powered { .. }), "{:?}", vessel.phase);
     let terminal = (2.0 * vessel.mass() * 9.80 / (1.225 * (vessel.craft.cd_area + vessel.craft.chute_cd_area))).sqrt();
     let mut debug = vessel.clone();
-    // The coast ends just above the ground (contact is flown live).
-    vessel.advance(&w, t.add_seconds(1.0), &controls, usize::MAX);
-    vessel.extend_coast(&w, t.add_seconds(3_600.0), usize::MAX);
-    let last = vessel.trajectory().unwrap().last();
-    let mut clock = last.t0.add_seconds(last.end.unwrap().t);
-    vessel.advance(&w, clock, &controls, usize::MAX);
-    assert!(matches!(vessel.phase, Phase::Powered { .. }), "{:?}", vessel.phase);
-    let (_, r1, v1) = vessel.state(&w);
-    let ground_v = e.rotation.omega(clock).raw().cross(r1);
-    let touchdown = (v1 - ground_v).length();
-    assert!((touchdown / terminal - 1.0).abs() < 0.05, "{touchdown} vs {terminal} m/s");
-    for _ in 0..600 {
-        clock = clock.add_seconds(1.0 / 60.0);
+    let mut clock = t;
+    let mut touchdown = 0.0;
+    for _ in 0..2_000 {
+        clock = clock.add_seconds(1.0);
         vessel.advance(&w, clock, &controls, usize::MAX);
+        if let Phase::Powered { .. } = vessel.phase {
+            let (_, r1, v1) = vessel.state(&w);
+            touchdown = (v1 - e.rotation.omega(clock).raw().cross(r1)).length();
+        } else {
+            break;
+        }
     }
+    assert!((touchdown / terminal - 1.0).abs() < 0.05, "{touchdown} vs {terminal} m/s");
     match vessel.phase {
-        Phase::Crashed { speed, .. } => assert!(speed > 8.0 && speed < touchdown, "{speed} m/s"),
+        Phase::Crashed { cause: Destruction::Impact { speed, .. }, .. } => {
+            assert!(speed > 8.0 && speed < 1.01 * touchdown, "{speed} m/s")
+        }
         other => panic!("expected a crash, got {other:?}"),
     }
     // Debug mode: infinite impact tolerance.

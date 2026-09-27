@@ -11,17 +11,24 @@
 //! * `Coasting` — on rails: a stored [`Trajectory`] of coasts and planned
 //!   burns ([`FlightPlan`]) that is sampled at any warp. A coast ends
 //!   [`live_height`](Vessel::live_height) above a surface; contact is flown live.
-//! * `Crashed` — a contact point hit too fast (D066).
+//! * `Crashed` — destroyed: a contact point hit too fast (D066), or
+//!   overheated (D065).
 //!
-//! Rotation input never breaks a coast: neither drag (isotropic until the
-//! cell aerodynamics of realism-1 §5) nor gravity depends on attitude, so
-//! translation and attitude are independent while unpowered. A planned
-//! burn's thrust follows its direction law, not the vessel's attitude.
+//! Inside an atmosphere a vessel is always live: aerodynamics and heating
+//! act on its cells every tick ([`aerothermal`]). A coast ends where it
+//! descends into an atmosphere; it starts only above every atmosphere.
+//! Rotation input never breaks a coast: its drag (for predictions through
+//! an atmosphere) is attitude-independent and gravity does not depend on
+//! attitude, so translation and attitude are independent while unpowered.
+//! A planned burn's thrust follows its direction law, not the vessel's
+//! attitude. The skin and interior temperatures step on a fixed lattice
+//! while coasting.
 //!
 //! The vessel carries its propellant (burned by the engine in powered ticks
 //! and in planned burns) and the **debug mode** flag (D064): infinite
 //! propellant, no overheating, infinite impact tolerance, all together.
 
+mod aerothermal;
 mod anchor;
 mod attitude;
 mod burn;
@@ -31,6 +38,7 @@ mod live;
 mod segment;
 mod trajectory;
 
+pub use aerothermal::{air_at, in_atmosphere, Air, VesselThermal, LATTICE, MAX_SKIP};
 pub use anchor::preferred_anchor;
 pub use attitude::{quat_from_rotvec, quat_z_to, rotvec_of, Attitude, AttitudeControl, RotationBase};
 pub use burn::{
@@ -82,16 +90,37 @@ pub enum Phase {
     Coasting {
         trajectory: Box<Trajectory>,
     },
-    /// Destroyed on impact: contact point `point` (an index into
-    /// `CraftParams::contacts`) closed at `speed` (m/s) along the ground
-    /// normal. The wreck stays where it hit, in the pose it hit with.
+    /// Destroyed (`cause`). The wreck stays where it was destroyed, fixed
+    /// to `body` (the ground it hit, or the body whose air burned it up),
+    /// in the pose it had.
     Crashed {
         body: NodeId,
         fixed: Vec3<BodyFixed>,
-        speed: f64,
         att_fixed: DQuat,
-        point: u32,
+        cause: Destruction,
     },
+}
+
+/// Why a vessel was destroyed.
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum Destruction {
+    /// Contact point `point` (an index into `CraftParams::contacts`) closed
+    /// at `speed` (m/s) along the ground normal (D066).
+    Impact { speed: f64, point: u32 },
+    /// A skin cell (`Some(index)`) or the interior (`None`) above its limit
+    /// at `temperature` (K) (D065).
+    Overheat { cell: Option<u32>, temperature: f64 },
+}
+
+impl Destruction {
+    /// One line for the player.
+    pub fn describe(&self) -> String {
+        match *self {
+            Destruction::Impact { speed, .. } => format!("CRASHED at {speed:.0} m/s"),
+            Destruction::Overheat { cell: Some(_), temperature } => format!("BURNED UP: skin at {temperature:.0} K"),
+            Destruction::Overheat { cell: None, temperature } => format!("OVERHEATED: interior at {temperature:.0} K"),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -129,6 +158,8 @@ pub struct Vessel {
     rest_ticks: u32,
     /// The ship clock: proper time minus coordinate time (D012).
     clock: ShipClock,
+    /// Skin and interior temperatures (D065).
+    thermal: VesselThermal,
 }
 
 /// The forces of a live tick from `t0`, with the proper-time rate.
@@ -169,6 +200,7 @@ impl Vessel {
         let p = src.physical.as_ref().expect("physical body");
         let deg = math::PI / 180.0;
         let crew = craft.spec.crew;
+        let cells = craft.design().cells.len();
         let craft = craft.params();
         let fixed = p.ground_point(lat_deg * deg, lon_deg * deg, craft.contact_height(craft.initial_propellant));
         let att_fixed = quat_z_to(fixed.raw().normalize());
@@ -187,6 +219,7 @@ impl Vessel {
             control: AttitudeControl::default(),
             rest_ticks: 0,
             clock: ShipClock::at(t, 0.0),
+            thermal: VesselThermal::uniform(cells, aerothermal::INITIAL_K, t),
         };
         v.sync_landed_attitude(world);
         if !v.holds_where_landed(world) {
@@ -198,6 +231,7 @@ impl Vessel {
     /// A vessel coasting from `(r, v)` relative to `anchor` at `t`.
     pub fn coasting(world: &World, id: VesselId, t: Epoch, anchor: NodeId, r: DVec3, v: DVec3, craft: &Craft) -> Self {
         let crew = craft.spec.crew;
+        let cells = craft.design().cells.len();
         let craft = craft.params();
         let mut vessel = Vessel {
             id,
@@ -214,8 +248,12 @@ impl Vessel {
             control: AttitudeControl::default(),
             rest_ticks: 0,
             clock: ShipClock::at(t, 0.0),
+            thermal: VesselThermal::uniform(cells, aerothermal::INITIAL_K, t),
         };
-        vessel.start_coast(world);
+        // Inside an atmosphere it is flown live.
+        if !in_atmosphere(world, &world.snapshot(t), anchor, r, aerothermal::LEAVE_ATMOSPHERE) {
+            vessel.start_coast(world);
+        }
         vessel
     }
 
@@ -244,6 +282,21 @@ impl Vessel {
     pub fn drag(&self) -> DragModel {
         let extra = if self.chute_deployed { self.craft.chute_cd_area } else { 0.0 };
         DragModel { cd_area: self.craft.cd_area + extra, mass: self.mass() }
+    }
+
+    /// Skin and interior temperatures at the vessel's thermal epoch.
+    pub fn thermal(&self) -> &VesselThermal {
+        &self.thermal
+    }
+
+    /// The hottest skin cell (K).
+    pub fn max_skin_temperature(&self) -> f64 {
+        self.thermal.max_skin()
+    }
+
+    /// The interior temperature (K).
+    pub fn internal_temperature(&self) -> f64 {
+        self.thermal.state.internal
     }
 
     /// Mass at the vessel's time (kg): dry plus propellant.
@@ -464,23 +517,24 @@ impl Vessel {
         self.control = AttitudeControl::default();
         self.rest_ticks = 0;
         self.clock.restart(self.time);
+        self.thermal.restart(self.time);
     }
 
-    /// Integrates one tick with constant thrust (adaptive substeps, exact
-    /// end). Returns the state and the tick's proper-time increment; `None`
-    /// if the integration fails (non-finite state or force).
+    /// Integrates one tick with a constant acceleration `thrust` (thrust
+    /// and lift) and `drag` (adaptive substeps, exact end). Returns the
+    /// state and the tick's proper-time increment; `None` if the
+    /// integration fails (non-finite state or force).
     fn integrate_tick(
         &self,
         world: &World,
-        anchor: NodeId,
-        r: DVec3,
-        v: DVec3,
+        (anchor, r, v): (NodeId, DVec3, DVec3),
         thrust: DVec3,
+        drag: DragModel,
     ) -> Option<(DVec3, DVec3, f64)> {
         let snap = world.snapshot(self.time);
         let active = ActiveSources::select(world, &snap, anchor, r);
         let f = TickForces {
-            ctx: ForceContext { world, anchor, active: &active, drag: Some(self.drag()), thrust },
+            ctx: ForceContext { world, anchor, active: &active, drag: Some(drag), thrust },
             t0: self.time,
         };
         let integ = Dopri5::new(Tolerance { h_max: TICK, ..coast_tolerance() });
@@ -515,6 +569,7 @@ impl Vessel {
 
     fn advance_coasting(&mut self, world: &World, target: Epoch, controls: &Controls, max_steps: usize) {
         if self.engine_running(controls) {
+            self.thermal_to_now(world);
             let (anchor, r, v) = self.state(world);
             self.phase = Phase::Powered { anchor, r, v };
             self.tick_accel = None;
@@ -529,16 +584,34 @@ impl Vessel {
         trajectory.extend(world, &self.plan, target, max_steps);
         let computed = trajectory.computed_until();
         let at_end = target.seconds_since(computed) >= 0.0;
-        let reach = if at_end { computed } else { target };
-        // Attitude before pruning: control ticks read the inertia at epochs
-        // after the vessel's time, which the trajectory still holds.
+        let mut reach = if at_end { computed } else { target };
+        // Into an atmosphere: flown live from the entry.
+        let entry = trajectory.entry_from(self.time).filter(|(e, _)| e.seconds_since(reach) <= 0.0);
+        if let Some((e, _)) = entry {
+            reach = e;
+        }
+        // Attitude and temperatures before pruning: control ticks read the
+        // inertia, and the thermal lattice the position, at epochs after the
+        // vessel's time, which the trajectory still holds.
         let (model, dry) = (self.craft.mass, self.craft.mass.dry_mass);
         let mass_now = dry + self.propellant;
         let inertia_at = |e: Epoch| model.at(trajectory.mass_at(e).unwrap_or(mass_now) - dry).inertia;
-        let times = (self.time, reach);
         let inertia_now = model.at(self.propellant).inertia;
         let torque = self.craft.torque;
-        advance_coast(&mut self.attitude, &mut self.control, times, controls, torque, inertia_now, inertia_at);
+        let design = self.craft.design().clone();
+        let mut t = self.time;
+        loop {
+            let e = self.thermal.next_lattice();
+            if e.seconds_since(reach) > 0.0 {
+                break;
+            }
+            advance_coast(&mut self.attitude, &mut self.control, (t, e), controls, torque, inertia_now, inertia_at);
+            t = e;
+            let (anchor, r, _) = trajectory.eval(e).expect("the lattice epoch is in the trajectory");
+            let sun = crate::light::sunlight(world, &world.snapshot(e), anchor, r);
+            aerothermal::coast_step(&design, &mut self.thermal, self.attitude.q.inverse() * sun, e, false);
+        }
+        advance_coast(&mut self.attitude, &mut self.control, (t, reach), controls, torque, inertia_now, inertia_at);
         trajectory.prune_before(reach);
         self.propellant = (trajectory.mass_at(reach).expect("the vessel's time is in its trajectory") - dry).max(0.0);
         let delta = trajectory.proper_time_at(reach).expect("the vessel's time is in its trajectory");
@@ -546,11 +619,24 @@ impl Vessel {
         let last = trajectory.last();
         let near_surface = matches!(last.end, Some(SegmentEnd { kind: EndKind::Surface { .. }, .. })) && at_end;
         self.time = reach;
-        if near_surface {
-            // Close to a surface: contact is flown in live ticks.
+        if entry.is_some() || near_surface {
+            // In an atmosphere or close to a surface: flown in live ticks.
+            self.thermal_to_now(world);
             let state = self.state(world);
             self.go_live(state);
         }
+    }
+
+    /// Steps the temperatures from their lattice epoch to the vessel's time
+    /// (a coast ends between lattice points).
+    fn thermal_to_now(&mut self, world: &World) {
+        if self.thermal.epoch.seconds_since(self.time) >= 0.0 {
+            return;
+        }
+        let (anchor, r, _) = self.state(world);
+        let sun = crate::light::sunlight(world, &world.snapshot(self.time), anchor, r);
+        let design = self.craft.design().clone();
+        aerothermal::coast_step(&design, &mut self.thermal, self.attitude.q.inverse() * sun, self.time, true);
     }
 
     /// Extends the current coast (if any) until `until`, with at most

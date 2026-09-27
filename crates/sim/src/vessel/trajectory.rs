@@ -81,6 +81,13 @@ impl Trajectory {
         seg.proper_time_at(t.seconds_since(seg.t0))
     }
 
+    /// The first atmosphere entry ([`Segment::entry`]) at or after `t`.
+    pub fn entry_from(&self, t: Epoch) -> Option<(Epoch, NodeId)> {
+        (self.segments.iter())
+            .filter_map(|s| s.entry.map(|(te, body)| (s.t0.add_seconds(te), body)))
+            .find(|(e, _)| e.seconds_since(t) >= 0.0)
+    }
+
     /// Mass at `t` (kg); `None` before the first segment.
     pub fn mass_at(&self, t: Epoch) -> Option<f64> {
         let seg = self.segment_at(t)?;

@@ -66,4 +66,35 @@ fn main() {
         println!("  sweeps per {dt} s step: {}", net.step(&mut s, &heat, 0.0, 3.0, dt, sim::thermal::DEFAULT_SWEEPS));
     }
     println!("({sink:.0?})");
+    vessel_ticks();
+}
+
+/// A whole live tick of a vessel entering (100 km, 7.6 km/s), and a
+/// coast's thermal lattice in low orbit (eclipses, tumbling: no skips).
+fn vessel_ticks() {
+    use sim::vessel::{Attitude, Controls, Vessel, VesselId};
+    let path = format!("{}/../../{}", env!("CARGO_MANIFEST_DIR"), sim::sol::EPHEMERIS_PATH);
+    let eph = sim::ephem::Ephemeris::from_bytes(&std::fs::read(path).unwrap()).unwrap();
+    let w = sim::world::World::sol(std::sync::Arc::new(eph));
+    let earth = w.find("Earth").unwrap();
+    let t0 = sim::sol::sol_epoch();
+    let re = 6_378_137.0;
+    let g = 1.5f64.to_radians();
+    let (r, v) = (DVec3::new(re + 100_000.0, 0.0, 0.0), DVec3::new(-g.sin(), g.cos(), 0.0) * 7_600.0);
+    let mut ship = Vessel::coasting(&w, VesselId(1), t0, earth.node, r, v, test_craft());
+    ship.set_debug(&w, true);
+    let controls = Controls { sas: true, ..Default::default() };
+    let secs = 60.0;
+    let clock = Instant::now();
+    ship.advance(&w, t0.add_seconds(secs), &controls, usize::MAX);
+    let us = clock.elapsed().as_secs_f64() * 1e6 / (secs / 0.02);
+    println!("vessel live tick in the atmosphere (aero, heating, integration): {us:.1} µs");
+    let (r, v) = (DVec3::new(re + 400_000.0, 0.0, 0.0), DVec3::new(0.0, (earth.gm / (re + 400_000.0)).sqrt(), 0.0));
+    let mut ship = Vessel::coasting(&w, VesselId(1), t0, earth.node, r, v, test_craft());
+    ship.set_attitude(Attitude { q: sim::vessel::quat_z_to(DVec3::X), omega: DVec3::new(0.01, 0.02, 0.0) });
+    let secs = 86_400.0;
+    let clock = Instant::now();
+    ship.advance(&w, t0.add_seconds(secs), &Controls::default(), usize::MAX);
+    let us = clock.elapsed().as_secs_f64() * 1e6 / (secs / sim::vessel::LATTICE);
+    println!("coast in LEO, per 60 s lattice point (integration, attitude, sunlight, thermal): {us:.1} µs");
 }

@@ -1,7 +1,8 @@
 //! Rigid-body rotation (realism-1 §3d): Euler's equations.
 //!
 //! * [`tick`] — one fixed step with a constant body torque (RK4 on the
-//!   attitude quaternion and body angular velocity), for control ticks.
+//!   attitude quaternion and body angular velocity), for control ticks;
+//!   [`tick_with`] with an attitude-dependent torque (aerodynamics).
 //! * [`FreeRotation`] — the exact torque-free motion (closed form: constant
 //!   spin, the symmetric top, or Jacobi elliptic functions for an
 //!   asymmetric body), evaluated at any time without stepping, so coasts
@@ -86,16 +87,24 @@ fn q_rate(q: DQuat, w: DVec3) -> DQuat {
 /// One step of `dt` with a constant body-axes `torque` (RK4 on Euler's
 /// equations `I ω̇ = τ − ω × Iω` and `q̇ = q ⊗ ω / 2`, body axes).
 pub fn tick(att: &Attitude, inertia: &DMat3, torque: DVec3, dt: f64) -> Attitude {
+    tick_with(att, inertia, |_| torque, dt)
+}
+
+/// [`tick`] with a torque that depends on the attitude: `torque(q)` (body
+/// axes) is evaluated at each RK4 stage's quaternion (not normalised), so
+/// attitude-dependent torques such as aerodynamic moments are integrated to
+/// the same order as the rotation.
+pub fn tick_with(att: &Attitude, inertia: &DMat3, torque: impl Fn(DQuat) -> DVec3, dt: f64) -> Attitude {
     let inv = inertia.inverse();
-    let w_rate = |w: DVec3| inv * (torque - w.cross(*inertia * w));
+    let w_rate = |q: DQuat, w: DVec3| inv * (torque(q) - w.cross(*inertia * w));
     let (q0, w0) = (att.q, att.q.inverse() * att.omega);
-    let (k1q, k1w) = (q_rate(q0, w0), w_rate(w0));
+    let (k1q, k1w) = (q_rate(q0, w0), w_rate(q0, w0));
     let (q1, w1) = (q0 + k1q * (0.5 * dt), w0 + k1w * (0.5 * dt));
-    let (k2q, k2w) = (q_rate(q1, w1), w_rate(w1));
+    let (k2q, k2w) = (q_rate(q1, w1), w_rate(q1, w1));
     let (q2, w2) = (q0 + k2q * (0.5 * dt), w0 + k2w * (0.5 * dt));
-    let (k3q, k3w) = (q_rate(q2, w2), w_rate(w2));
+    let (k3q, k3w) = (q_rate(q2, w2), w_rate(q2, w2));
     let (q3, w3) = (q0 + k3q * dt, w0 + k3w * dt);
-    let (k4q, k4w) = (q_rate(q3, w3), w_rate(w3));
+    let (k4q, k4w) = (q_rate(q3, w3), w_rate(q3, w3));
     let q = (q0 + (k1q + k2q * 2.0 + k3q * 2.0 + k4q) * (dt / 6.0)).normalize();
     let w = w0 + (k1w + k2w * 2.0 + k3w * 2.0 + k4w) * (dt / 6.0);
     Attitude { q, omega: q * w }

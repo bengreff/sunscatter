@@ -13,7 +13,7 @@ use sim::save::SaveGame;
 use sim::sol;
 use sim::terrain::Heightmap;
 use sim::time::Epoch;
-use sim::vessel::{Attitude, Controls, Phase, Vessel, VesselId, VesselIds};
+use sim::vessel::{Attitude, Controls, Destruction, Phase, Vessel, VesselId, VesselIds};
 use sim::world::World;
 use std::sync::Arc;
 
@@ -234,7 +234,9 @@ fn twelve_metres_per_second_on_the_hull_destroys_the_craft() {
     let d = Drop { inverted: true, speed: 12.0, gap: 0.01, ..Drop::default() };
     let mut ship = drop(&w, &d);
     fly(&w, &mut ship, 5.0, &Controls::default(), true);
-    let Phase::Crashed { speed, point, .. } = ship.phase else { panic!("{:?}", ship.phase) };
+    let Phase::Crashed { cause: Destruction::Impact { speed, point }, .. } = ship.phase else {
+        panic!("{:?}", ship.phase)
+    };
     assert_eq!(ship.craft.contacts[point as usize].kind, ContactKind::Hull);
     assert!((speed - 12.0).abs() < 0.1, "{speed} m/s");
     // Debug mode: infinite impact tolerance.
@@ -244,7 +246,9 @@ fn twelve_metres_per_second_on_the_hull_destroys_the_craft() {
     // On the gear at 12 m/s the feet bottom out still too fast.
     let mut gear = drop(&w, &Drop { inverted: false, ..d });
     fly(&w, &mut gear, 5.0, &Controls::default(), true);
-    let Phase::Crashed { point, speed, .. } = gear.phase else { panic!("{:?}", gear.phase) };
+    let Phase::Crashed { cause: Destruction::Impact { point, speed }, .. } = gear.phase else {
+        panic!("{:?}", gear.phase)
+    };
     println!("gear at 12 m/s: point {point} ({:?}) at {speed} m/s", gear.craft.contacts[point as usize].kind);
 }
 

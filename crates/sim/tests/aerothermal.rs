@@ -1,0 +1,288 @@
+//! Aerodynamics and heating of a flying vessel (realism-1 §5, D061, D064,
+//! D065): entries from low Earth orbit, sunlight in orbit, drag decay, and
+//! determinism (chunked == single pass, save/load, warp independence).
+
+use glam::DVec3;
+use sim::ephem::Ephemeris;
+use sim::frame::NodeId;
+use sim::kepler::Elements;
+use sim::save::SaveGame;
+use sim::sol;
+use sim::time::Epoch;
+use sim::vessel::{Attitude, CoastStart, Controls, Destruction, Phase, Segment, Vessel, VesselId, VesselIds};
+use sim::world::World;
+use std::sync::Arc;
+
+fn world() -> World {
+    let path = format!("{}/../../{}", env!("CARGO_MANIFEST_DIR"), sol::EPHEMERIS_PATH);
+    World::sol(Arc::new(Ephemeris::from_bytes(&std::fs::read(path).unwrap()).unwrap()))
+}
+
+fn t0() -> Epoch {
+    sol::sol_epoch().add_seconds(3.0 * 86_400.0)
+}
+
+const RE: f64 = 6_378_137.0;
+
+/// An orbit from `apo` down to `peri` (heights, m), starting at apoapsis.
+fn orbit(w: &World, apo: f64, peri: f64) -> (NodeId, DVec3, DVec3) {
+    let earth = w.find("Earth").unwrap();
+    let (ra, rp) = (RE + apo, RE + peri);
+    let el = Elements { a: 0.5 * (ra + rp), e: (ra - rp) / (ra + rp), i: 0.5, raan: 1.0, argp: 0.3, mean_anomaly: 3.0 };
+    let (r, v) = el.to_state(earth.gm);
+    (earth.node, r, v)
+}
+
+/// Where and how hot the skin got.
+#[derive(Debug, Default)]
+struct Peak {
+    skin: f64,
+    cell: usize,
+    internal: f64,
+}
+
+impl Peak {
+    fn record(&mut self, v: &Vessel) {
+        let skin = &v.thermal().state.skin;
+        for (i, &t) in skin.iter().enumerate() {
+            if t > self.skin {
+                (self.skin, self.cell) = (t, i);
+            }
+        }
+        self.internal = self.internal.max(v.internal_temperature());
+    }
+
+    fn describe(&self) -> String {
+        let craft = sim::craft::test_craft();
+        let c = &craft.cells.cells[self.cell];
+        let part = &craft.geometry.primitives[c.primitive as usize].name;
+        format!(
+            "peak skin {:.0} K at cell {} ({part}, centroid {:.2}, normal {:.2}), interior {:.1} K",
+            self.skin, self.cell, c.centroid, c.normal, self.internal
+        )
+    }
+}
+
+/// Flies an entry from a 200 × 40 km orbit in 1 s frames until the vessel
+/// is destroyed or lands.
+fn entry(debug: bool) -> (Vessel, Peak, f64) {
+    let w = world();
+    let (earth, r, v) = orbit(&w, 200_000.0, 40_000.0);
+    let mut ship = Vessel::coasting(&w, VesselId(1), t0(), earth, r, v, sim::craft::test_craft());
+    ship.set_debug(&w, debug);
+    assert!(matches!(ship.phase, Phase::Coasting { .. }));
+    let mut peak = Peak::default();
+    let mut t = t0();
+    let mut live = 0.0;
+    for _ in 0..20_000 {
+        t = t.add_seconds(1.0);
+        ship.advance(&w, t, &Controls::default(), usize::MAX);
+        peak.record(&ship);
+        if matches!(ship.phase, Phase::Powered { .. }) {
+            live += 1.0;
+        }
+        if matches!(ship.phase, Phase::Crashed { .. } | Phase::Landed { .. }) {
+            break;
+        }
+    }
+    (ship, peak, live)
+}
+
+#[test]
+fn an_entry_from_low_orbit_burns_up_the_test_craft() {
+    // No heat shield (D064): the realistic outcome is destruction (D065).
+    let (ship, peak, live) = entry(false);
+    println!("no debug: {}, {live:.0} s live, {:?}", peak.describe(), ship.phase);
+    let Phase::Crashed { cause: Destruction::Overheat { cell: Some(cell), temperature }, .. } = ship.phase else {
+        panic!("expected to burn up: {:?}", ship.phase)
+    };
+    assert!(temperature > ship.craft.thermal.skin_max_k, "{temperature}");
+    assert_eq!(cell as usize, peak.cell);
+}
+
+#[test]
+fn in_debug_mode_the_entry_is_survived() {
+    let (ship, peak, live) = entry(true);
+    println!("debug: {}, {live:.0} s live, {:?}", peak.describe(), ship.phase);
+    assert!(matches!(ship.phase, Phase::Landed { .. }), "{:?}", ship.phase);
+    // It got far hotter than its limit (no heat shield), and cooled on the
+    // way down.
+    assert!(peak.skin > 1.5 * ship.craft.thermal.skin_max_k, "{}", peak.describe());
+    assert!(ship.max_skin_temperature() < peak.skin);
+}
+
+/// A far orbit whose plane faces the Sun: never eclipsed.
+fn sunlit(w: &World, t: Epoch) -> (NodeId, DVec3, DVec3) {
+    let earth = w.find("Earth").unwrap();
+    let sun = w.find("Sun").unwrap();
+    let to_sun = w.snapshot(t).relative_r(sun.node, earth.node).normalize();
+    let a = 1.0e8;
+    let x = to_sun.cross(DVec3::Z).normalize();
+    let r = x * a;
+    let v = to_sun.cross(x) * (earth.gm / a).sqrt();
+    (earth.node, r, v)
+}
+
+#[test]
+fn a_craft_at_rest_in_sunlight_settles() {
+    let w = world();
+    let t = t0();
+    let (earth, r, v) = sunlit(&w, t);
+    let mut ship = Vessel::coasting(&w, VesselId(1), t, earth, r, v, sim::craft::test_craft());
+    // Side on to the Sun (the nose perpendicular to the light), not rotating.
+    let sun_dir = w.snapshot(t).relative_r(w.find("Sun").unwrap().node, earth).normalize();
+    let side = sim::vessel::quat_z_to(sun_dir.cross(DVec3::Z).normalize());
+    ship.set_attitude(Attitude { q: side, omega: DVec3::ZERO });
+    let (mut last_skin, mut last_internal) = (0.0, 0.0);
+    for day in 1..=6 {
+        let started = std::time::Instant::now();
+        ship.advance(&w, t.add_seconds(86_400.0 * day as f64), &Controls::default(), usize::MAX);
+        let (skin, internal) = (ship.max_skin_temperature(), ship.internal_temperature());
+        let cold = ship.thermal().state.skin.iter().fold(f64::MAX, |m, &x| m.min(x));
+        println!(
+            "day {day}: hottest skin {skin:.1} K, coldest {cold:.1} K, interior {internal:.1} K ({:.0} ms)",
+            started.elapsed().as_secs_f64() * 1e3
+        );
+        (last_skin, last_internal) = (skin, internal);
+    }
+    // Sunlit cells near the flat-plate equilibrium (ε = α: (S/σ)^¼ ≈ 394 K)
+    // less what they conduct away; the interior between the lit and dark sides.
+    assert!(last_skin > 300.0 && last_skin < 395.0, "{last_skin}");
+    assert!(last_internal > 150.0 && last_internal < 330.0, "{last_internal}");
+    // Settled, up to the Sun's apparent motion (1°/day against the fixed
+    // attitude, which slowly changes the lit side).
+    let started = std::time::Instant::now();
+    ship.advance(&w, t.add_seconds(86_400.0 * 7.0), &Controls::default(), usize::MAX);
+    println!("day 7 in {:.0} ms", started.elapsed().as_secs_f64() * 1e3);
+    assert!((ship.internal_temperature() - last_internal).abs() < 1.0);
+    assert!((ship.max_skin_temperature() - last_skin).abs() < 1.0);
+}
+
+#[test]
+fn coast_temperatures_do_not_depend_on_the_frame_rate() {
+    // Low orbit (eclipses) with the craft tumbling: 60 fps at 100x against
+    // one jump, three hours.
+    let w = world();
+    let (earth, r, v) = orbit(&w, 420_000.0, 400_000.0);
+    let mut a = Vessel::coasting(&w, VesselId(1), t0(), earth, r, v, sim::craft::test_craft());
+    let q = sim::vessel::quat_z_to(DVec3::new(0.3, 0.5, 0.8).normalize());
+    a.set_attitude(Attitude { q, omega: DVec3::new(0.01, -0.02, 0.005) });
+    let mut b = a.clone();
+    let end = t0().add_seconds(3.0 * 3600.0);
+    let mut t = t0();
+    while t < end {
+        t = t.add_seconds(100.0 / 60.0);
+        let t = if t > end { end } else { t };
+        a.advance(&w, t, &Controls::default(), usize::MAX);
+    }
+    b.advance(&w, end, &Controls::default(), usize::MAX);
+    assert_eq!(a.thermal(), b.thermal());
+    assert_eq!(a.attitude, b.attitude);
+    let skin = a.thermal().state.skin.iter().fold((f64::MAX, 0.0f64), |(lo, hi), &x| (lo.min(x), hi.max(x)));
+    println!("after 3 h in LEO: skin {:.1}–{:.1} K, interior {:.1} K", skin.0, skin.1, a.internal_temperature());
+}
+
+/// A vessel entering: 100 km, 7.6 km/s, 1.5° down.
+fn descending(w: &World) -> Vessel {
+    let earth = w.find("Earth").unwrap();
+    let r = DVec3::new(RE + 100_000.0, 0.0, 0.0);
+    let g = 1.5f64.to_radians();
+    let v = DVec3::new(-g.sin(), g.cos(), 0.0) * 7_600.0;
+    let mut ship = Vessel::coasting(w, VesselId(1), t0(), earth.node, r, v, sim::craft::test_craft());
+    ship.set_debug(w, true);
+    assert!(matches!(ship.phase, Phase::Powered { .. }), "live in the atmosphere");
+    ship
+}
+
+#[test]
+fn a_live_descent_in_frames_equals_one_jump() {
+    let w = world();
+    let mut a = descending(&w);
+    let mut b = a.clone();
+    let controls = Controls { sas: true, ..Default::default() };
+    let end = t0().add_seconds(60.0);
+    let mut t = t0();
+    while t < end {
+        t = t.add_seconds(1.0 / 60.0);
+        let t = if t > end { end } else { t };
+        a.advance(&w, t, &controls, usize::MAX);
+    }
+    b.advance(&w, end, &controls, usize::MAX);
+    assert_eq!(a, b);
+    assert!(a.max_skin_temperature() > 500.0, "{}", a.max_skin_temperature());
+}
+
+#[test]
+fn a_descent_continues_bit_identically_after_save_and_load() {
+    let w = world();
+    let mut ship = descending(&w);
+    let controls = Controls { sas: true, ..Default::default() };
+    let mid = t0().add_seconds(30.0);
+    ship.advance(&w, mid, &controls, usize::MAX);
+    let mut ids = VesselIds::default();
+    ids.allocate();
+    let text = SaveGame::capture(&w, mid, std::slice::from_ref(&ship), ids, 0, controls).to_ron();
+    let mut loaded = SaveGame::from_ron(&text).unwrap().vessels.remove(0);
+    assert_eq!(loaded, ship);
+    let end = t0().add_seconds(60.0);
+    ship.advance(&w, end, &controls, usize::MAX);
+    loaded.advance(&w, end, &controls, usize::MAX);
+    assert_eq!(loaded, ship);
+}
+
+#[test]
+fn drag_in_the_upper_atmosphere_decays_an_orbit() {
+    // Circular at 130 km, flown live for 300 s; and the coast model's
+    // prediction (attitude-independent drag area) from the same state.
+    let w = world();
+    let earth = w.find("Earth").unwrap();
+    let r0 = RE + 130_000.0;
+    let (r, v) = (DVec3::new(r0, 0.0, 0.0), DVec3::new(0.0, (earth.gm / r0).sqrt(), 0.0));
+    let energy = |r: DVec3, v: DVec3| 0.5 * v.length_squared() - earth.gm / r.length();
+    let mut ship = Vessel::coasting(&w, VesselId(1), t0(), earth.node, r, v, sim::craft::test_craft());
+    assert!(matches!(ship.phase, Phase::Powered { .. }));
+    let dt = 300.0;
+    ship.advance(&w, t0().add_seconds(dt), &Controls { sas: true, ..Default::default() }, usize::MAX);
+    let (_, r1, v1) = ship.state(&w);
+    let lost = energy(r, v) - energy(r1, v1);
+    // Specific power ½ρv³·CdA/m, with the density at 130 km and the drag
+    // area between the end-on and the mean areas.
+    let rho = earth.physical.as_ref().unwrap().atmosphere.unwrap().density(130_000.0);
+    let v_air = v.length() - 465.0 * 0.0; // equatorial plane: roughly prograde with the rotation
+    let per_area = 0.5 * rho * v_air.powi(3) / ship.mass() * dt;
+    println!("live: lost {lost:.1} J/kg in {dt} s ({:.1} m² effective Cd·A)", lost / per_area);
+    assert!(lost > 0.0 && lost / per_area > 3.0 && lost / per_area < 60.0, "{}", lost / per_area);
+    // The coast model (predictions) decays it too.
+    let mut seg = Segment::new(
+        &w,
+        t0(),
+        CoastStart {
+            anchor: earth.node,
+            r,
+            v,
+            drag: Some(ship.drag()),
+            contact_height: 0.0,
+            horizon: dt,
+            fixed_anchor: false,
+            proper_time: 0.0,
+        },
+    );
+    seg.extend(&w, usize::MAX);
+    let (_, r2, v2) = seg.eval(dt).unwrap();
+    let lost_coast = energy(r, v) - energy(r2, v2);
+    println!("coast: lost {lost_coast:.1} J/kg ({:.1} m²)", lost_coast / per_area);
+    assert!(lost_coast > 0.0 && (lost_coast / lost).abs() < 5.0 && (lost / lost_coast) < 5.0);
+}
+
+#[test]
+fn sunlight_is_the_solar_constant_by_day_and_nothing_in_earths_shadow() {
+    let w = world();
+    let snap = w.snapshot(t0());
+    let earth = w.find("Earth").unwrap().node;
+    let to_sun = snap.relative_r(w.find("Sun").unwrap().node, earth).normalize();
+    let day = sim::light::sunlight(&w, &snap, earth, to_sun * (RE + 400_000.0));
+    // Early January: Earth near perihelion (0.983 AU), 1361 / 0.983² ≈ 1408 W/m².
+    assert!((day.length() - 1408.0).abs() < 5.0, "{}", day.length());
+    assert!(day.normalize().dot(-to_sun) > 0.999_999);
+    assert_eq!(sim::light::sunlight(&w, &snap, earth, -to_sun * (RE + 400_000.0)), DVec3::ZERO);
+}

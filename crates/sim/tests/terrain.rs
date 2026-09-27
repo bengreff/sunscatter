@@ -109,11 +109,13 @@ fn falling_onto_a_mountain_is_detected_at_its_height() {
     let mut ship = Vessel::coasting(&w, VesselId(1), t, w.find("Earth").unwrap().node, r, v, sim::craft::test_craft());
     ship.advance(&w, t.add_seconds(600.0), &Controls::default(), usize::MAX);
     match ship.phase {
-        // The feet bottomed out and the hull hit: the centre of mass is
-        // within the gear's travel of its standing height on the plateau.
+        // A hull or foot point hit the plateau: the centre of mass is
+        // within the craft's reach of it (the fall is flown live with its
+        // aerodynamics, so it may hit tilted), not near the ellipsoid.
         Phase::Crashed { fixed, .. } => {
-            let h = e.altitude(fixed) - 3_000.0 - ship.contact_height();
-            assert!(h < 0.0 && h > -1.0, "{h} m");
+            let h = e.altitude(fixed) - 3_000.0;
+            let reach = ship.craft.contact_reach(ship.propellant());
+            assert!(h > ship.contact_height() - 1.0 && h < reach, "{h} m");
         }
         other => panic!("expected a crash, got {other:?}"),
     }

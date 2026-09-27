@@ -332,7 +332,7 @@ fn flight_panel(ui_: &mut egui::Ui, sim: &SimState, near: Option<sim::frame::Nod
         Phase::Landed { .. } => "LANDED".to_string(),
         Phase::Powered { .. } => "POWERED".to_string(),
         Phase::Coasting { .. } => "COASTING".to_string(),
-        Phase::Crashed { speed, .. } => format!("CRASHED at {speed:.0} m/s (R to reset)"),
+        Phase::Crashed { cause, .. } => format!("{} (R to reset)", cause.describe()),
     };
     ui_.label(egui::RichText::new(phase).monospace().color(theme::ACCENT));
     if let Some(body) = near.and_then(|b| sim.world.source(b)) {

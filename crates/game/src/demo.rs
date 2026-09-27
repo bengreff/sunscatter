@@ -585,8 +585,8 @@ pub fn run(
                     sim.warp = 0;
                     demo.next(Step::Landed);
                 }
-                Phase::Crashed { speed, .. } => {
-                    error!("demo: crashed at {speed:.1} m/s");
+                Phase::Crashed { cause, .. } => {
+                    error!("demo: destroyed: {cause:?}");
                     demo.next(Step::Done);
                 }
                 _ => {}
