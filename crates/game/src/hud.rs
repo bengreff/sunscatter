@@ -238,6 +238,14 @@ pub fn draw(
         if let Some(line) = crate::rendezvous::summary(&rv, sim) {
             ui_.label(egui::RichText::new(format!("target: {line}")).monospace().small().color(theme::TEXT));
         }
+        if sim.ship().crew() == 0 {
+            let link = comms.signal(sim.ship().id()).map_or("no signal: controls do not arrive".to_string(), |s| {
+                format!("controls arrive after {}", crate::format::delay(s.delay))
+            });
+            ui_.label(
+                egui::RichText::new(format!("PROBE, flown from mission control: {link}")).small().color(theme::WARN),
+            );
+        }
         let home = &comms.data.sites[comms.mission_control].name;
         ui_.label(
             egui::RichText::new(format!("{home}: {}", crate::comms::describe(comms.home.as_ref())))

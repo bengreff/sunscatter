@@ -29,9 +29,10 @@ pub enum Location {
 }
 
 /// The location from the view: the tracking station is mission control;
-/// flying is being aboard the active vessel.
-pub fn location_rule(station_open: bool, active: VesselId, mission_control: usize) -> Location {
-    if station_open {
+/// flying a crewed vessel is being aboard it; flying an uncrewed probe is
+/// doing it from mission control (D034).
+pub fn location_rule(station_open: bool, active: VesselId, crewed: bool, mission_control: usize) -> Location {
+    if station_open || !crewed {
         Location::Site(mission_control)
     } else {
         Location::Vessel(active)
@@ -119,7 +120,7 @@ pub fn retarded(r: DVec3, v: DVec3, delay: f64) -> DVec3 {
 /// Rebuilds the network and every vessel's signal at the location.
 pub fn update(sim: Res<SimState>, station: Res<TrackingStation>, mut comms: ResMut<Comms>) {
     let active = sim.ship().id();
-    comms.location = location_rule(station.open, active, comms.mission_control);
+    comms.location = location_rule(station.open, active, sim.ship().crew() > 0, comms.mission_control);
     let t = sim.clock;
     let (anchor, _, _) = sim.ship().state_at(&sim.world, t);
     let bodies = comms::occluders(&sim.world, t, anchor);
@@ -203,8 +204,9 @@ mod tests {
     #[test]
     fn the_station_is_mission_control_and_flying_is_aboard() {
         let id = VesselId(7);
-        assert_eq!(location_rule(true, id, 0), Location::Site(0));
-        assert_eq!(location_rule(false, id, 0), Location::Vessel(id));
+        assert_eq!(location_rule(true, id, true, 0), Location::Site(0));
+        assert_eq!(location_rule(false, id, true, 0), Location::Vessel(id));
+        assert_eq!(location_rule(false, id, false, 0), Location::Site(0), "a probe is flown from mission control");
     }
 
     #[test]

@@ -49,6 +49,8 @@ pub struct SimState {
     pub controls: Controls,
     /// Frames where the clock was held back by integration budget.
     pub compute_limited: bool,
+    /// Controls on their way to an uncrewed active vessel (D034).
+    pub remote: RemoteControls,
     /// The display rule for "which body is this about" (D056), rebuilt when
     /// the clock has moved by more than `DOMINANCE_REFRESH` (its radii
     /// change slowly). Display only (rule 1).
@@ -83,6 +85,7 @@ impl SimState {
             warp: 0,
             controls: Controls { sas: true, ..Default::default() },
             compute_limited: false,
+            remote: RemoteControls::default(),
         }
     }
 
@@ -164,7 +167,12 @@ impl SimState {
             };
             let (r, v) = el.to_state(earth.gm);
             let id = self.vessel_ids.allocate();
-            self.fleet.push(Vessel::coasting(&self.world, id, self.clock, earth.node, r, v, test_craft()));
+            let mut vessel = Vessel::coasting(&self.world, id, self.clock, earth.node, r, v, test_craft());
+            // Every other one is an uncrewed probe (flown with light delay).
+            if k % 2 == 1 {
+                vessel.set_crew(0);
+            }
+            self.fleet.push(vessel);
         }
     }
 }
@@ -243,6 +251,7 @@ pub fn advance(
     pause: Res<SimPause>,
     menu: Res<crate::interface::pause::PauseMenu>,
     orbits: Res<OrbitSettings>,
+    comms: Res<crate::comms::Comms>,
     mut sim: ResMut<SimState>,
     mut turn: Local<usize>,
 ) {
@@ -251,8 +260,15 @@ pub fn advance(
     }
     let level = sim.effective_warp();
     let warp = WARP_LEVELS[level];
+    // A probe acts on the controls that have reached it (D034).
+    let mut active_controls = if sim.ship().crew() > 0 {
+        sim.controls
+    } else {
+        let delay = comms.signal(sim.ship().id()).map(|s| s.delay);
+        let (clock, controls) = (sim.clock, sim.controls);
+        sim.remote.step(clock, controls, delay)
+    };
     // Rotation input is only honoured at physics warp.
-    let mut active_controls = sim.controls;
     if level > MAX_PHYSICS_WARP {
         active_controls.rotate = DVec3::ZERO;
     }
@@ -308,6 +324,34 @@ pub fn advance(
 /// at `turn` (wrapping); `None` if the active vessel is alone.
 pub fn lookahead_turn(turn: usize, fleet: usize, active: usize) -> Option<usize> {
     (0..fleet).map(|k| (turn + k) % fleet).find(|&i| i != active)
+}
+
+/// The controls an uncrewed vessel acts on: the operator's inputs, each
+/// arriving after the signal's light delay (or never, without a signal).
+#[derive(Clone, Debug, Default)]
+pub struct RemoteControls {
+    queue: std::collections::VecDeque<(Epoch, Controls)>,
+    /// What the vessel last received.
+    pub received: Controls,
+}
+
+impl RemoteControls {
+    /// Sends the operator's `controls` at `now` with one-way `delay` (s),
+    /// or nothing without a signal; returns what the vessel has at `now`.
+    pub fn step(&mut self, now: Epoch, controls: Controls, delay: Option<f64>) -> Controls {
+        if let Some(d) = delay {
+            self.queue.push_back((now.add_seconds(d), controls));
+        }
+        while self.queue.front().is_some_and(|(t, _)| now.seconds_since(*t) >= 0.0) {
+            self.received = self.queue.pop_front().expect("front").1;
+        }
+        self.received
+    }
+
+    /// Forgets everything in flight (switching vessels, loading).
+    pub fn reset(&mut self) {
+        *self = RemoteControls::default();
+    }
 }
 
 /// Why rails warp is not allowed.
@@ -412,6 +456,21 @@ mod tests {
             let got = below_rails_floor(w, t, anchor, DVec3::X * d).map(|b| b.0);
             assert_eq!(got, expected, "{d}");
         }
+    }
+
+    #[test]
+    fn remote_controls_arrive_after_the_delay_and_not_without_signal() {
+        let t = sol::sol_epoch();
+        let mut rc = RemoteControls::default();
+        let full = Controls { throttle: 1.0, ..Default::default() };
+        assert_eq!(rc.step(t, full, Some(1.3)).throttle, 0.0);
+        assert_eq!(rc.step(t.add_seconds(1.0), full, Some(1.3)).throttle, 0.0);
+        assert_eq!(rc.step(t.add_seconds(1.3), Controls::default(), Some(1.3)).throttle, 1.0);
+        // No signal: the vessel keeps what it last received.
+        assert_eq!(rc.step(t.add_seconds(10.0), Controls::default(), None).throttle, 0.0);
+        let mut rc = RemoteControls::default();
+        rc.step(t, full, None);
+        assert_eq!(rc.step(t.add_seconds(100.0), full, None).throttle, 0.0, "nothing sent without signal");
     }
 
     #[test]

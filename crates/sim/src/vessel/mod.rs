@@ -105,6 +105,9 @@ pub struct Vessel {
     pub time: Epoch,
     pub attitude: Attitude,
     pub chute_deployed: bool,
+    /// People aboard (0: an uncrewed probe, controlled from elsewhere with
+    /// light delay, D034, D067).
+    crew: u32,
     /// Propellant at `time` (kg).
     propellant: f64,
     /// Debug mode (D064): infinite propellant, no overheating, infinite
@@ -165,6 +168,7 @@ impl Vessel {
         let src = world.find(body).expect("known body");
         let p = src.physical.as_ref().expect("physical body");
         let deg = math::PI / 180.0;
+        let crew = craft.spec.crew;
         let craft = craft.params();
         let fixed = p.ground_point(lat_deg * deg, lon_deg * deg, craft.contact_height(craft.initial_propellant));
         let att_fixed = quat_z_to(fixed.raw().normalize());
@@ -176,6 +180,7 @@ impl Vessel {
             time: t,
             attitude: Attitude { q: DQuat::IDENTITY, omega: DVec3::ZERO },
             chute_deployed: false,
+            crew,
             debug: false,
             plan: FlightPlan::default(),
             tick_accel: None,
@@ -192,6 +197,7 @@ impl Vessel {
 
     /// A vessel coasting from `(r, v)` relative to `anchor` at `t`.
     pub fn coasting(world: &World, id: VesselId, t: Epoch, anchor: NodeId, r: DVec3, v: DVec3, craft: &Craft) -> Self {
+        let crew = craft.spec.crew;
         let craft = craft.params();
         let mut vessel = Vessel {
             id,
@@ -201,6 +207,7 @@ impl Vessel {
             time: t,
             attitude: Attitude { q: quat_z_to(r.normalize()), omega: DVec3::ZERO },
             chute_deployed: false,
+            crew,
             debug: false,
             plan: FlightPlan::default(),
             tick_accel: None,
@@ -219,6 +226,16 @@ impl Vessel {
 
     /// Proper time minus coordinate time, δ = τ − t (s), at the vessel's
     /// time: what the ship clock shows minus the game clock (D012).
+    /// People aboard (0: an uncrewed probe).
+    pub fn crew(&self) -> u32 {
+        self.crew
+    }
+
+    /// Changes the crew count (0 makes the vessel an uncrewed probe).
+    pub fn set_crew(&mut self, crew: u32) {
+        self.crew = crew;
+    }
+
     pub fn proper_time_offset(&self) -> f64 {
         self.clock.offset
     }

@@ -96,6 +96,7 @@ pub fn switch_to(sim: &mut SimState, rig: &mut CameraRig, pred: &mut Prediction,
     }
     sim.active = i;
     sim.controls = Controls { sas: true, ..Default::default() };
+    sim.remote.reset();
     *pred = Prediction::default();
     rig.focus = Focus::Ship;
 }
