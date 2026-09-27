@@ -12,6 +12,7 @@ mod camera;
 mod commands;
 mod comms;
 mod demo;
+mod demo_checks;
 mod format;
 mod hud;
 mod interface;
@@ -107,7 +108,14 @@ fn main() {
         )
         .add_systems(
             Update,
-            (camera::update, comms::update, rendezvous::update, map::update, demo::check_map_view, demo::log_fps)
+            (
+                camera::update,
+                comms::update,
+                rendezvous::update,
+                map::update,
+                demo::check_map_view,
+                demo_checks::log_fps,
+            )
                 .chain()
                 .in_set(Stage::Camera),
         )
@@ -156,7 +164,7 @@ fn main() {
                 .after(hud::draw),
         );
     if demo_mode {
-        app.add_plugins(demo::PipelineGuardPlugin);
+        app.add_plugins(demo_checks::PipelineGuardPlugin);
     }
     app.run();
 }
