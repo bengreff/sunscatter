@@ -9,7 +9,7 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  # Fast feedback: everything except Bevy. Only `-p sim -p ephem-tool -p asset-tool`
+  # Fast feedback: everything except Bevy. Only `-p sim -p ephem-tool -p asset-tool -p mcp`
   # (never `--workspace`, which would build Bevy for clippy).
   sim:
     name: sim (${{ matrix.os }})
@@ -35,10 +35,10 @@ jobs:
       - name: Decision references
         shell: bash
         run: tools/check_decision_refs.sh
-      - name: Clippy (sim, ephem-tool, asset-tool)
-        run: cargo clippy -p sim -p ephem-tool -p asset-tool --all-targets --locked -- -D warnings
-      - name: Tests (sim, asset-tool)
-        run: cargo test -p sim -p asset-tool --locked
+      - name: Clippy (sim, ephem-tool, asset-tool, mcp)
+        run: cargo clippy -p sim -p ephem-tool -p asset-tool -p mcp --all-targets --locked -- -D warnings
+      - name: Tests (sim, asset-tool, mcp)
+        run: cargo test -p sim -p asset-tool -p mcp --locked
 
   # The Bevy app. Slow when the cache is cold; runs in parallel with `sim`.
   game:

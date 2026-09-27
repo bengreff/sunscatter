@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/sim", "crates/game", "crates/ephem-tool", "crates/asset-tool"]
+members = ["crates/sim", "crates/game", "crates/ephem-tool", "crates/asset-tool", "crates/mcp"]
 exclude = ["archive"]
 
 [workspace.package]

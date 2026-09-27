@@ -15,6 +15,7 @@ Real-scale 3D spaceflight, mission-design and logistics game in Rust. Being rebu
 - `crates/sim` — simulation core. **No engine dependencies.** f64, frame-typed, deterministic.
 - `crates/game` — Bevy app (rendering, input, UI). Converts sim state to camera-relative f32 each frame.
 - `crates/ephem-tool`, `crates/asset-tool` — offline generation of committed data (`data/`).
+- `crates/mcp` — the MCP server (local HTTP, JSON-RPC); knows nothing of the game, which answers tool calls each frame.
 
 ## Commands
 - `cargo test -p sim` — fast sim tests (run constantly).
@@ -23,7 +24,7 @@ Real-scale 3D spaceflight, mission-design and logistics game in Rust. Being rebu
 - Body data lives in `data/bodies/<body>/` (`body.ron` for sim, `visual.ron` for game, maps baked by `cargo run -p asset-tool --release -- all`).
 - `cargo run -p sim --release --example bench_coast` — coast integration cost per step.
 - `cargo run -p ephem-tool --release -- sol` — regenerate the Solar System ephemeris (needs `data/external/de440s.bsp`; see the tool's docs). The golden tests fail if the shipped file and code disagree.
-- `cargo clippy -p sim -p ephem-tool -p asset-tool --all-targets -- -D warnings`, `cargo fmt --all`, `tools/check_file_sizes.sh`.
+- `cargo clippy -p sim -p ephem-tool -p asset-tool -p mcp --all-targets -- -D warnings`, `cargo fmt --all`, `tools/check_file_sizes.sh`.
 - CI: a fast `sim` job (no Bevy; fmt, file sizes, decision references, clippy, tests) and a separate `game` job, on macOS and Windows. `tools/check_decision_refs.sh` fails on citations of deleted (superseded) decisions.
 - Windows: at the end of a big session, try `ssh backhouse` (the owner's PC) and run the demo there (procedure: `docs/windows.md`); if it doesn't connect, skip it.
 - Hooks (`.claude/settings.json`, scripts in `tools/hooks/`): the handoff is loaded at session start, `cargo check` of the owning crate runs after editing a `.rs` file, and `cargo test -p sim` runs on stop. Failures are fed back (exit 2).
