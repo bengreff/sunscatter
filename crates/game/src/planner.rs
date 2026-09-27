@@ -86,6 +86,43 @@ fn next_apsides(sim: &SimState, i: usize) -> (Option<f64>, Option<f64>) {
         .map_or((None, None), |o| crate::navball::rules::time_to_apsides(&o.elements, o.mu))
 }
 
+/// A first-guess intercept of vessel `j` by vessel `i` (D008: two-body
+/// Lambert arcs about `i`'s dominant body, departures over the next orbit
+/// and transfer times of 0.1–1.5 orbits, the cheapest kept). Positions come
+/// from both stored trajectories; the burn is then flown and drawn by the
+/// N-body sim, so the planner shows how close it really gets.
+pub fn intercept(sim: &SimState, i: usize, j: usize) -> Option<DraftBurn> {
+    let (a, b) = (sim.fleet[i].trajectory()?, sim.fleet[j].trajectory()?);
+    let body = sim.dominant_of(i);
+    let mu = sim.world.source(body)?.gm;
+    let (anchor, r, v) = sim.fleet[i].state_at(&sim.world, sim.clock);
+    let k = sim.world.snapshot(sim.clock).relative(body, anchor);
+    let el = sim::kepler::Elements::from_state(r - k.r, v - k.v, mu);
+    let period = if el.e < 1.0 { std::f64::consts::TAU / el.mean_motion(mu) } else { 3600.0 };
+    let rel = |tr: &sim::vessel::Trajectory, t: Epoch| {
+        let (n, r, v) = tr.eval(t)?;
+        let k = sim.world.snapshot(t).relative(body, n);
+        Some((r - k.r, v - k.v))
+    };
+    let mut best: Option<(f64, Epoch, DVec3, DVec3, DVec3)> = None;
+    for kd in 1..=24 {
+        let t_dep = sim.clock.add_seconds((period * f64::from(kd) / 24.0).max(60.0));
+        let Some((r1, v1)) = rel(a, t_dep) else { continue };
+        for kt in 0..24 {
+            let tof = period * (0.1 + 1.4 * f64::from(kt) / 23.0);
+            let Some((r2, _)) = rel(b, t_dep.add_seconds(tof)) else { continue };
+            let Some((w1, _)) = sim::kepler::lambert::lambert(r1, r2, tof, mu, r1.cross(v1)) else { continue };
+            let dv = (w1 - v1).length();
+            if best.is_none_or(|b| dv < b.0) {
+                best = Some((dv, t_dep, w1 - v1, r1, v1));
+            }
+        }
+    }
+    let (_, t_start, dv, r1, v1) = best?;
+    let (p, n, rad) = sim::vessel::prograde_normal_radial(r1, v1);
+    Some(DraftBurn { t_start, dv: DVec3::new(dv.dot(p), dv.dot(n), dv.dot(rad)), reference: body })
+}
+
 /// Toggles the planner (N) for the active vessel.
 pub fn keys(
     keys: Res<ButtonInput<KeyCode>>,
@@ -109,6 +146,7 @@ pub fn draw(
     time: Res<Time>,
     sim: Res<SimState>,
     comms: Res<Comms>,
+    nav: Res<crate::navball::Navball>,
     mut planner: ResMut<Planner>,
     mut in_flight: ResMut<InFlight>,
     mut toasts: ResMut<Toasts>,
@@ -185,6 +223,17 @@ pub fn draw(
                     add(Some(600.0));
                 }
             });
+            let target = match nav.target {
+                Some(crate::navball::NavTarget::Vessel(t)) => sim.index_of(t),
+                _ => None,
+            };
+            let button = egui::Button::new("+ intercept the target (first guess)");
+            if ui.add_enabled(target.is_some(), button).clicked() {
+                match target.and_then(|j| intercept(&sim, i, j)) {
+                    Some(b) => planner.draft.push(b),
+                    None => toasts.push(time.elapsed_secs_f64(), "No intercept found in the computed lines", true),
+                }
+            }
             ui.label(format!("axes about {body_name} (prograde, normal, radial-out)"));
             let short = total > available;
             let colour =
@@ -226,6 +275,21 @@ pub fn draw(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_intercept_between_two_test_ships_is_found_and_affordable() {
+        let mut sim = SimState::new();
+        sim.spawn_test_ships(2);
+        let until = sim.clock.add_seconds(40_000.0);
+        let world = sim.world.clone();
+        for v in &mut sim.fleet {
+            v.extend_coast(&world, until, 200_000);
+        }
+        let b = intercept(&sim, 1, 2).expect("an intercept");
+        assert!(b.t_start.seconds_since(sim.clock) >= 60.0);
+        let dv = b.dv.length();
+        assert!(dv > 1.0 && dv < 3000.0, "{dv}");
+    }
 
     #[test]
     fn burn_time_follows_the_rocket_equation() {
