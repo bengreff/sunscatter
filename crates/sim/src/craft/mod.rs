@@ -6,10 +6,12 @@
 
 pub mod cells;
 pub mod file;
+pub mod mass;
 pub mod mesh;
 
 pub use cells::{Cell, CellOptions, Cells, ContactKind, ContactPoint, Neighbour};
 pub use file::{CraftFile, GeometryFile, Primitive, Shape, Skin, Tank};
+pub use mass::{MassModel, MassProps};
 pub use mesh::{RenderMesh, Resolution, Surface};
 
 use crate::body::DataError;
@@ -38,6 +40,8 @@ pub struct Craft {
     pub mesh: RenderMesh,
     /// Surface cells and contact points (D065).
     pub cells: Cells,
+    /// Dry shell and tank, for mass properties at any fill.
+    pub mass: MassModel,
 }
 
 impl Craft {
@@ -45,7 +49,9 @@ impl Craft {
     pub fn build(id: CraftId, spec: CraftFile, geometry: GeometryFile, res: &Resolution, opts: &CellOptions) -> Self {
         let surface = mesh::union_surface(&geometry.primitives, res);
         let cells = cells::build_cells(&surface, &geometry.primitives, &geometry.skin, opts);
-        Craft { id, spec, mesh: surface.render_mesh(), surface, cells, geometry }
+        let g = &geometry;
+        let mass = MassModel::new(&surface, &g.primitives, &g.skin, spec.dry_mass, &g.tank, spec.propellant.capacity);
+        Craft { id, spec, mesh: surface.render_mesh(), surface, cells, geometry, mass }
     }
 }
 
