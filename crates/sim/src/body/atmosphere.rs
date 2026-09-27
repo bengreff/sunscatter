@@ -57,6 +57,10 @@ pub struct Atmosphere {
     /// Sutton–Graves stagnation heating constant (SI, `thermal::sutton_graves`).
     #[serde(default = "air_defaults::sutton_graves_k")]
     pub sutton_graves_k: f64,
+    /// Tauber–Sutton radiative stagnation heating, if the relation has
+    /// this atmosphere (`thermal::tauber_sutton`).
+    #[serde(default)]
+    pub radiative_heating: Option<crate::thermal::TauberSutton>,
     /// The tabulated profile; the exponential model without it.
     #[serde(default)]
     pub table: Option<AtmosphereTable>,

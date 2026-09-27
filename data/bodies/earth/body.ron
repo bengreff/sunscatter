@@ -25,9 +25,10 @@
         // ellipsoid. Flight sees air below `top` only (the live boundary and
         // the rails floor, D062). Air: γ, the collision diameter for the mean
         // free path (US 1976), Sutton–Graves stagnation heating constant
-        // (NASA TR R-376).
+        // (NASA TR R-376), Tauber–Sutton radiative heating (1991).
         atmosphere: Some((
             top: 150000.0, gamma: 1.4, collision_diameter: 3.65e-10, sutton_graves_k: 1.7415e-4,
+            radiative_heating: Some(Earth),
             // (altitude m, temperature K, pressure Pa, density kg/m³, mean molar mass kg/mol)
             table: Some([
                 (0.0, 288.150, 1.01325e+05, 1.22500e+00, 0.0289644),

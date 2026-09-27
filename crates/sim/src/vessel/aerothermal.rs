@@ -185,6 +185,7 @@ pub struct Air {
     pub temperature: f64,
     pub gamma: f64,
     pub sutton_graves_k: f64,
+    pub radiative_heating: Option<thermal::TauberSutton>,
 }
 
 impl Air {
@@ -217,6 +218,7 @@ pub fn air_at(world: &World, snap: &Snapshot, anchor: NodeId, r: DVec3, v: DVec3
             temperature: state.temperature,
             gamma: atm.gamma,
             sutton_graves_k: atm.sutton_graves_k,
+            radiative_heating: atm.radiative_heating,
         });
     }
     None
@@ -310,6 +312,15 @@ impl<'a> AeroTick<'a> {
     }
 }
 
+/// Stagnation heat flux (W/m²) in `air` at nose radius `rn`: convective
+/// (Sutton–Graves) plus shock-layer radiation (Tauber–Sutton, where the
+/// atmosphere has it).
+pub fn stagnation_flux(air: &Air, rn: f64) -> f64 {
+    let v = air.wind.length();
+    let convective = thermal::sutton_graves(air.sutton_graves_k, air.rho, rn, v);
+    convective + air.radiative_heating.map_or(0.0, |m| thermal::tauber_sutton(m, air.rho, rn, v))
+}
+
 /// Scratch buffers of the heat inputs.
 struct Buffers {
     heat: Vec<f64>,
@@ -353,7 +364,7 @@ pub fn live_step(
         let flow = aero_tick.flow(q.normalize());
         let rn = design.bake.nose_radius_at(flow.dir);
         input.flow_dir = flow.dir;
-        input.q_stag = thermal::sutton_graves(air.sutton_graves_k, air.rho, rn, air.wind.length());
+        input.q_stag = stagnation_flux(air, rn);
     }
     let mut b = Buffers::new(design);
     thermal::cell_heat(&design.bake, &design.cells, &input, &mut b.scratch, &mut b.heat);

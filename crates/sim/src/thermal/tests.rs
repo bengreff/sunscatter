@@ -289,3 +289,55 @@ fn the_node_network_is_stable_at_large_steps_and_fast_at_ticks() {
         assert!(sweeps <= 4, "{sweeps}");
     }
 }
+#[test]
+fn tauber_sutton_velocity_function_and_range() {
+    // Published f(V) points (Tauber & Sutton 1991, as reproduced by Brandis
+    // & Johnston 2014): through them exactly; none below 9 km/s.
+    let unit = |v: f64| tauber_sutton(TauberSutton::Earth, 1e-4, 1.0, v) / 1e4;
+    let scale = |v: f64| {
+        let a = (1.072e6 * math::exp(-1.88 * math::ln(v)) * math::exp(-0.325 * math::ln(1e-4))).min(1.0);
+        4.736e4 * math::exp(1.22 * math::ln(1e-4)) * math::exp(a * math::ln(1.0))
+    };
+    for (v, f) in [(10_000.0, 35.0), (11_000.0, 151.0), (12_000.0, 359.0), (16_000.0, 2040.0)] {
+        assert!((unit(v) / (scale(v) * f) - 1.0).abs() < 1e-12, "{v}");
+    }
+    assert_eq!(unit(8_900.0), 0.0);
+    assert_eq!(tauber_sutton(TauberSutton::Mars, 1e-4, 1.0, 5_900.0), 0.0);
+    // Mars at 7 km/s, ρ 1e-4, Rn 1 m: 2.35e4 · 1e-4^1.19 · 8.1 W/cm².
+    let mars = tauber_sutton(TauberSutton::Mars, 1e-4, 1.0, 7_000.0) / 1e4;
+    assert!((mars - 2.35e4 * math::exp(1.19 * math::ln(1e-4)) * 8.1).abs() < 1e-9 * mars);
+}
+
+#[test]
+fn radiative_heating_at_stardust_and_lunar_return_speeds() {
+    let atm = crate::body::earth().atmosphere.unwrap();
+    let split = |h: f64, v: f64, rn: f64| {
+        let rho = atm.density(h);
+        (sutton_graves(SUTTON_GRAVES_EARTH, rho, rn, v), tauber_sutton(TauberSutton::Earth, rho, rn, v))
+    };
+    // Stardust at peak heating: 61 km, Mach 35.2 (≈ 11.0 km/s; Desai et
+    // al., "Entry Trajectory Issues for the Stardust Sample Return
+    // Capsule", 1999), Rn 0.2202 m. Olynick, Chen & Tauber (J. Spacecraft
+    // and Rockets 36(3), 1999): radiation about 10 % of the stagnation
+    // heating at peak heating, from a coupled radiation–ablation solution
+    // (ablation products absorb; Tauber–Sutton has none and its Rn is
+    // below the fit's 0.3 m).
+    let (conv, rad) = split(61_000.0, 11_000.0, 0.2202);
+    let share = rad / (conv + rad);
+    println!(
+        "Stardust peak heating: convective {:.0}, radiative {:.0} W/cm² ({:.0} %)",
+        conv / 1e4,
+        rad / 1e4,
+        share * 100.0
+    );
+    assert!(share > 0.05 && share < 0.2, "{share}");
+    // A 4.5 m nose at 60 km: radiation overtakes convection between 9.5
+    // and 11 km/s (Anderson, Hypersonic and High-Temperature Gas Dynamics,
+    // fig. 18.10, uncoupled), and dominates at interplanetary return.
+    let ratio = |v: f64| {
+        let (c, r) = split(60_000.0, v, 4.5);
+        r / c
+    };
+    assert!(ratio(9_500.0) < 1.0 && ratio(11_000.0) > 1.0, "{} {}", ratio(9_500.0), ratio(11_000.0));
+    assert!(ratio(16_000.0) > 5.0);
+}
