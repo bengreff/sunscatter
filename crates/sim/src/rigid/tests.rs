@@ -149,3 +149,25 @@ fn a_constant_torque_spins_up_at_torque_over_inertia() {
     assert!((a.omega.z - 0.1).abs() < 1e-12, "{}", a.omega);
     assert!((angle_between(a.q, DQuat::IDENTITY) - 0.05).abs() < 1e-12);
 }
+
+#[test]
+#[ignore = "timing; run with --ignored --nocapture"]
+fn timing() {
+    let q0 = quat_from_rotvec(DVec3::new(0.4, 0.1, -0.2));
+    for (name, inertia, w) in [cases()[0].clone(), cases()[2].clone()] {
+        let att = Attitude { q: q0, omega: q0 * w };
+        let n = 2000;
+        let t0 = std::time::Instant::now();
+        let mut acc = 0.0;
+        for k in 0..n {
+            acc += FreeRotation::new(&att, &inertia).at(1000.0 + k as f64).q.w;
+        }
+        let per = t0.elapsed() / n;
+        let t1 = std::time::Instant::now();
+        let mut a = att;
+        for _ in 0..n {
+            a = tick(&a, &inertia, DVec3::new(1.0, 2.0, 3.0), 0.02);
+        }
+        println!("{name}: new + at {per:?}, RK4 tick {:?} ({acc:.1} {})", t1.elapsed() / n, a.q.w);
+    }
+}
