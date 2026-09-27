@@ -193,7 +193,18 @@ impl Vessel {
                     }
                 },
             };
-            aerothermal::live_step(&design, &mut self.thermal, heat_tick, att0, sun_body, TICK);
+            let engine_heat = engine.heat(out.thrust, out.mdot);
+            let propellant = if self.debug { self.propellant } else { (self.propellant - out.mdot * TICK).max(0.0) };
+            aerothermal::live_step(
+                &design,
+                &mut self.thermal,
+                heat_tick,
+                att0,
+                sun_body,
+                engine_heat,
+                propellant,
+                TICK,
+            );
             if !self.debug {
                 self.propellant = (self.propellant - out.mdot * TICK).max(0.0);
             }
@@ -296,14 +307,11 @@ impl Vessel {
         let Some(hot) = crate::thermal::check(&self.thermal.state, t.skin_max_k, t.internal_max_k) else {
             return false;
         };
-        let cause = match hot {
-            crate::thermal::Overheat::Cell(i) => {
-                Destruction::Overheat { cell: Some(i), temperature: self.thermal.state.skin[i as usize] }
-            }
-            crate::thermal::Overheat::Internal => {
-                Destruction::Overheat { cell: None, temperature: self.thermal.state.internal }
-            }
+        let temperature = match hot {
+            crate::thermal::Overheat::Cell(i) => self.thermal.state.skin[i as usize],
+            crate::thermal::Overheat::Node(j) => self.thermal.state.nodes[j as usize],
         };
+        let cause = Destruction::Overheat { at: hot, temperature };
         let Some(body) = air.or_else(|| self.nearest_surface(world, anchor, r).map(|(b, _)| b)) else {
             // Nothing to fix the wreck to (deep space): it keeps flying.
             return false;

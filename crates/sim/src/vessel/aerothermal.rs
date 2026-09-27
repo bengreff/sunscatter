@@ -28,6 +28,8 @@
 //! Radiation goes to deep space ([`SINK_K`]) everywhere for now: planet IR,
 //! albedo and convective cooling come later.
 
+use super::burn::BurnLaw;
+use super::segment::{Segment, SegmentKind};
 use crate::aero::{self, Flow};
 use crate::craft::CraftDesign;
 use crate::ephem::Snapshot;
@@ -65,16 +67,54 @@ pub struct VesselThermal {
     /// Coasts: the sunlight (body axes, W/m²) of the last solved lattice
     /// step, if that step settled.
     settled: Option<DVec3>,
+    /// Coasts: planned burns not yet stepped past: start, end (once known)
+    /// and the engine's heat (W), in start order.
+    burns: Vec<(Epoch, Option<Epoch>, f64)>,
 }
 
 impl VesselThermal {
-    pub fn uniform(cells: usize, t: f64, epoch: Epoch) -> Self {
-        VesselThermal { state: ThermalState::uniform(cells, t), epoch, lattice: epoch, settled: None }
+    pub fn uniform(cells: usize, nodes: usize, t: f64, epoch: Epoch) -> Self {
+        let state = ThermalState::uniform(cells, nodes, t);
+        VesselThermal { state, epoch, lattice: epoch, settled: None, burns: Vec::new() }
     }
 
     /// Hottest skin cell (K).
     pub fn max_skin(&self) -> f64 {
-        self.state.skin.iter().fold(0.0, |m, &t| m.max(t))
+        thermal::hottest(&self.state.skin).map_or(0.0, |h| h.1)
+    }
+
+    /// Hottest interior node: (K, index).
+    pub fn max_node(&self) -> (f64, usize) {
+        thermal::hottest(&self.state.nodes).map_or((0.0, 0), |(i, t)| (t, i))
+    }
+
+    /// Records the planned burns of `segments` that reach past the last
+    /// lattice point and start by `reach`, with the engine heat `heat(law)`
+    /// (W), before the trajectory drops them.
+    pub fn record_burns(&mut self, segments: &[Segment], reach: Epoch, heat: impl Fn(&BurnLaw) -> f64) {
+        for seg in segments {
+            let SegmentKind::Burn(law) = &seg.kind else { continue };
+            let end = seg.end.map(|e| seg.t0.add_seconds(e.t));
+            if seg.t0.seconds_since(reach) > 0.0 || end.is_some_and(|e| e.seconds_since(self.lattice) <= 0.0) {
+                continue;
+            }
+            match self.burns.iter_mut().find(|b| b.0 == seg.t0) {
+                Some(b) => b.1 = end,
+                None => self.burns.push((seg.t0, end, heat(law))),
+            }
+        }
+        self.burns.sort_by(|a, b| a.0.seconds_since(b.0).total_cmp(&0.0));
+    }
+
+    /// Engine heat (J) of the recorded burns over (a, b].
+    fn burn_energy(&self, a: Epoch, b: Epoch) -> f64 {
+        (self.burns.iter())
+            .map(|&(start, end, w)| {
+                let from = if start.seconds_since(a) > 0.0 { start } else { a };
+                let to = end.filter(|e| e.seconds_since(b) < 0.0).unwrap_or(b);
+                w * to.seconds_since(from).max(0.0)
+            })
+            .sum()
     }
 
     /// Restarts the clock at `epoch` without stepping (landed vessels).
@@ -82,6 +122,7 @@ impl VesselThermal {
         self.epoch = epoch;
         self.lattice = epoch;
         self.settled = None;
+        self.burns.clear();
     }
 
     /// The next coast lattice point.
@@ -230,23 +271,38 @@ impl<'a> AeroTick<'a> {
 struct Buffers {
     heat: Vec<f64>,
     scratch: Vec<f64>,
+    node_heat: Vec<f64>,
+    node_capacity: Vec<f64>,
 }
 
 impl Buffers {
-    fn new(n: usize) -> Self {
-        Buffers { heat: vec![0.0; n], scratch: vec![0.0; n] }
+    fn new(design: &CraftDesign) -> Self {
+        let (n, m) = (design.cells.len(), design.nodes());
+        Buffers { heat: vec![0.0; n], scratch: vec![0.0; n], node_heat: vec![0.0; m], node_capacity: vec![0.0; m] }
     }
 }
 
+/// Heat into the nodes (W) with the engine giving `engine_heat` (W), and
+/// the nodes' capacities with `propellant` kg aboard.
+fn node_inputs(design: &CraftDesign, engine_heat: f64, propellant: f64, b: &mut Buffers) {
+    b.node_heat.fill(0.0);
+    b.node_heat[design.engine_node as usize] = engine_heat;
+    design.node_capacity(propellant, &mut b.node_capacity);
+}
+
 /// One live tick of heating: `state` advanced by `dt` with the flow and
-/// stagnation flux of `air` (if any) and the sunlight `sun_body` (W/m²,
-/// body axes). The flow is taken at attitude `q`.
+/// stagnation flux of `air` (if any), the sunlight `sun_body` (W/m², body
+/// axes) and the engine's heat `engine_heat` (W, into its node), with
+/// `propellant` kg aboard. The flow is taken at attitude `q`.
+#[allow(clippy::too_many_arguments)]
 pub fn live_step(
     design: &CraftDesign,
     th: &mut VesselThermal,
     tick: Option<(&AeroTick, &Air)>,
     q: DQuat,
     sun_body: DVec3,
+    engine_heat: f64,
+    propellant: f64,
     dt: f64,
 ) {
     let mut input = HeatInput { flow_dir: DVec3::ZERO, q_stag: 0.0, sun: sun_body };
@@ -256,37 +312,49 @@ pub fn live_step(
         input.flow_dir = flow.dir;
         input.q_stag = thermal::sutton_graves(air.sutton_graves_k, air.rho, rn, air.wind.length());
     }
-    let mut b = Buffers::new(design.cells.len());
+    let mut b = Buffers::new(design);
     thermal::cell_heat(&design.bake, &design.cells, &input, &mut b.scratch, &mut b.heat);
-    design.network.step(&mut th.state, &b.heat, 0.0, SINK_K, dt, DEFAULT_SWEEPS);
+    node_inputs(design, engine_heat, propellant, &mut b);
+    design.network.step(&mut th.state, &b.heat, &b.node_heat, &b.node_capacity, SINK_K, dt, DEFAULT_SWEEPS);
     th.restart(th.epoch.add_seconds(dt));
 }
 
 /// The coast step at `epoch` (a lattice point; or, with `last`, the end of
-/// the coast) with the sunlight `sun_body` (W/m², body axes): solves from
-/// the state's epoch (spanning skipped lattice points), or skips while
-/// settled under the same sunlight for less than [`MAX_SKIP`]. Returns
-/// whether the network was solved.
-pub fn coast_step(design: &CraftDesign, th: &mut VesselThermal, sun_body: DVec3, epoch: Epoch, last: bool) -> bool {
+/// the coast) with the sunlight `sun_body` (W/m², body axes) and
+/// `propellant` kg aboard: solves from the state's epoch (spanning skipped
+/// lattice points; the planned burns' engine heat over that span goes into
+/// the engine's node), or skips while settled under the same sunlight, with
+/// no burn, for less than [`MAX_SKIP`]. Returns whether the network was
+/// solved.
+pub fn coast_step(
+    design: &CraftDesign,
+    th: &mut VesselThermal,
+    sun_body: DVec3,
+    propellant: f64,
+    epoch: Epoch,
+    last: bool,
+) -> bool {
     let dt = epoch.seconds_since(th.epoch);
     th.lattice = epoch;
     if dt <= 0.0 {
         return false;
     }
-    if let Some(s) = th.settled.filter(|_| !last && dt < MAX_SKIP) {
+    let burn = th.burn_energy(th.epoch, epoch);
+    if let Some(s) = th.settled.filter(|_| !last && dt < MAX_SKIP && burn == 0.0) {
         if (sun_body - s).length() <= SUN_SAME * s.length().max(1.0) {
             return false;
         }
     }
     let input = HeatInput { flow_dir: DVec3::ZERO, q_stag: 0.0, sun: sun_body };
-    let mut b = Buffers::new(design.cells.len());
+    let mut b = Buffers::new(design);
     thermal::cell_heat(&design.bake, &design.cells, &input, &mut b.scratch, &mut b.heat);
+    node_inputs(design, burn / dt, propellant, &mut b);
     let before = th.state.clone();
-    design.network.step(&mut th.state, &b.heat, 0.0, SINK_K, dt, DEFAULT_SWEEPS);
-    let change = (th.state.skin.iter().zip(&before.skin))
-        .map(|(a, b)| (a - b).abs())
-        .fold((th.state.internal - before.internal).abs(), f64::max);
-    th.settled = (!last && change <= SETTLED_K * (dt / LATTICE)).then_some(sun_body);
+    design.network.step(&mut th.state, &b.heat, &b.node_heat, &b.node_capacity, SINK_K, dt, DEFAULT_SWEEPS);
+    let change = |now: &[f64], was: &[f64]| now.iter().zip(was).map(|(a, b)| (a - b).abs()).fold(0.0, f64::max);
+    let change = change(&th.state.skin, &before.skin).max(change(&th.state.nodes, &before.nodes));
+    th.settled = (!last && burn == 0.0 && change <= SETTLED_K * (dt / LATTICE)).then_some(sun_body);
     th.epoch = epoch;
+    th.burns.retain(|b| b.1.is_none_or(|end| end.seconds_since(epoch) > 0.0));
     true
 }

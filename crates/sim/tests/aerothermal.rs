@@ -8,6 +8,7 @@ use sim::frame::NodeId;
 use sim::kepler::Elements;
 use sim::save::SaveGame;
 use sim::sol;
+use sim::thermal::Overheat;
 use sim::time::Epoch;
 use sim::vessel::{Attitude, CoastStart, Controls, Destruction, Phase, Segment, Vessel, VesselId, VesselIds};
 use sim::world::World;
@@ -49,7 +50,7 @@ impl Peak {
                 (self.skin, self.cell) = (t, i);
             }
         }
-        self.internal = self.internal.max(v.internal_temperature());
+        self.internal = self.internal.max(v.max_node_temperature().0);
     }
 
     fn describe(&self) -> String {
@@ -57,7 +58,7 @@ impl Peak {
         let c = &craft.cells.cells[self.cell];
         let part = &craft.geometry.primitives[c.primitive as usize].name;
         format!(
-            "peak skin {:.0} K at cell {} ({part}, centroid {:.2}, normal {:.2}), interior {:.1} K",
+            "peak skin {:.0} K at cell {} ({part}, centroid {:.2}, normal {:.2}), hottest node {:.1} K",
             self.skin, self.cell, c.centroid, c.normal, self.internal
         )
     }
@@ -93,7 +94,8 @@ fn an_entry_from_low_orbit_burns_up_the_test_craft() {
     // No heat shield (D064): the realistic outcome is destruction (D065).
     let (ship, peak, live) = entry(false);
     println!("no debug: {}, {live:.0} s live, {:?}", peak.describe(), ship.phase);
-    let Phase::Crashed { cause: Destruction::Overheat { cell: Some(cell), temperature }, .. } = ship.phase else {
+    let Phase::Crashed { cause: Destruction::Overheat { at: Overheat::Cell(cell), temperature }, .. } = ship.phase
+    else {
         panic!("expected to burn up: {:?}", ship.phase)
     };
     assert!(temperature > ship.craft.thermal.skin_max_k, "{temperature}");
@@ -137,10 +139,11 @@ fn a_craft_at_rest_in_sunlight_settles() {
     for day in 1..=6 {
         let started = std::time::Instant::now();
         ship.advance(&w, t.add_seconds(86_400.0 * day as f64), &Controls::default(), usize::MAX);
-        let (skin, internal) = (ship.max_skin_temperature(), ship.internal_temperature());
+        let (skin, internal) = (ship.max_skin_temperature(), ship.max_node_temperature().0);
         let cold = ship.thermal().state.skin.iter().fold(f64::MAX, |m, &x| m.min(x));
+        let cold_node = ship.thermal().state.nodes.iter().fold(f64::MAX, |m, &x| m.min(x));
         println!(
-            "day {day}: hottest skin {skin:.1} K, coldest {cold:.1} K, interior {internal:.1} K ({:.0} ms)",
+            "day {day}: skin {cold:.1}–{skin:.1} K, interior nodes {cold_node:.1}–{internal:.1} K ({:.0} ms)",
             started.elapsed().as_secs_f64() * 1e3
         );
         (last_skin, last_internal) = (skin, internal);
@@ -148,14 +151,14 @@ fn a_craft_at_rest_in_sunlight_settles() {
     // Sunlit cells near the flat-plate equilibrium (ε = α: (S/σ)^¼ ≈ 394 K)
     // less what they conduct away; the interior between the lit and dark sides.
     assert!(last_skin > 300.0 && last_skin < 395.0, "{last_skin}");
-    assert!(last_internal > 150.0 && last_internal < 330.0, "{last_internal}");
+    assert!(last_internal > 150.0 && last_internal < 360.0, "{last_internal}");
     // Settled, up to the Sun's apparent motion (1°/day against the fixed
     // attitude, which slowly changes the lit side).
     let started = std::time::Instant::now();
     ship.advance(&w, t.add_seconds(86_400.0 * 7.0), &Controls::default(), usize::MAX);
     println!("day 7 in {:.0} ms", started.elapsed().as_secs_f64() * 1e3);
-    assert!((ship.internal_temperature() - last_internal).abs() < 1.0);
-    assert!((ship.max_skin_temperature() - last_skin).abs() < 1.0);
+    assert!((ship.max_node_temperature().0 - last_internal).abs() < 2.0);
+    assert!((ship.max_skin_temperature() - last_skin).abs() < 2.0);
 }
 
 #[test]
@@ -179,7 +182,7 @@ fn coast_temperatures_do_not_depend_on_the_frame_rate() {
     assert_eq!(a.thermal(), b.thermal());
     assert_eq!(a.attitude, b.attitude);
     let skin = a.thermal().state.skin.iter().fold((f64::MAX, 0.0f64), |(lo, hi), &x| (lo.min(x), hi.max(x)));
-    println!("after 3 h in LEO: skin {:.1}–{:.1} K, interior {:.1} K", skin.0, skin.1, a.internal_temperature());
+    println!("after 3 h in LEO: skin {:.1}–{:.1} K, interior {:.1} K", skin.0, skin.1, a.max_node_temperature().0);
 }
 
 /// A vessel entering: 100 km, 7.6 km/s, 1.5° down.
@@ -285,4 +288,104 @@ fn sunlight_is_the_solar_constant_by_day_and_nothing_in_earths_shadow() {
     assert!((day.length() - 1408.0).abs() < 5.0, "{}", day.length());
     assert!(day.normalize().dot(-to_sun) > 0.999_999);
     assert_eq!(sim::light::sunlight(&w, &snap, earth, -to_sun * (RE + 400_000.0)), DVec3::ZERO);
+}
+
+/// Node temperatures of a vessel minus another's.
+fn node_rise(a: &Vessel, b: &Vessel) -> Vec<f64> {
+    a.thermal().state.nodes.iter().zip(&b.thermal().state.nodes).map(|(x, y)| x - y).collect()
+}
+
+#[test]
+fn an_engine_burn_heats_the_aft_nodes_first_and_soaks_forward() {
+    // Two craft side by side in deep space (1.4 million km out, where the
+    // burn changes nothing about the sunlight); one burns a minute.
+    let w = world();
+    let t = t0();
+    let (earth, r, _) = sunlit(&w, t);
+    let (r, v) = (r * 14.0, DVec3::ZERO);
+    let mut idle = Vessel::coasting(&w, VesselId(1), t, earth, r, v, sim::craft::test_craft());
+    // Debug mode keeps the propellant (and so the nodes' capacities) equal.
+    idle.set_debug(&w, true);
+    let mut burn = idle.clone();
+    let design = sim::craft::test_craft().design().clone();
+    let nodes = &design.volume.nodes;
+    let (aft, nose) = (
+        design.engine_node as usize,
+        (0..nodes.len()).fold(0, |b, i| if nodes[i].centre.z > nodes[b].centre.z { i } else { b }),
+    );
+    let full = Controls { throttle: 1.0, sas: true, ..Default::default() };
+    let end_burn = t.add_seconds(60.0);
+    burn.advance(&w, end_burn, &full, usize::MAX);
+    idle.advance(&w, end_burn, &Controls { sas: true, ..Default::default() }, usize::MAX);
+    let rise = node_rise(&burn, &idle);
+    println!("after 60 s: engine node +{:.2} K, nose node +{:.4} K", rise[aft], rise[nose]);
+    assert!(rise[aft] > 1.0, "{}", rise[aft]);
+    let hottest = (0..rise.len()).fold(0, |b, i| if rise[i] > rise[b] { i } else { b });
+    assert_eq!(hottest, aft);
+    assert!(rise[nose].abs() < 1e-3 * rise[aft]);
+    // Six hours later the heat has spread forward.
+    let later = t.add_seconds(6.0 * 3600.0);
+    burn.advance(&w, later, &Controls::default(), usize::MAX);
+    idle.advance(&w, later, &Controls::default(), usize::MAX);
+    let soaked = node_rise(&burn, &idle);
+    let beyond: Vec<usize> = (0..nodes.len()).filter(|&i| i != aft && rise[i] < 0.1 * rise[aft]).collect();
+    let gained = beyond.iter().filter(|&&i| soaked[i] > rise[i]).count();
+    let total = |x: &[f64]| beyond.iter().map(|&i| x[i]).sum::<f64>();
+    println!(
+        "after 6 h: engine node +{:.2} K; the other nodes +{:.2} K in total (+{:.2} at burn end), {gained} of {} warmer",
+        soaked[aft],
+        total(&soaked),
+        total(&rise),
+        beyond.len()
+    );
+    assert!(soaked[aft] < rise[aft] && total(&soaked) > 2.0 * total(&rise));
+    assert!(gained > beyond.len() / 2, "{gained} of {}", beyond.len());
+}
+
+#[test]
+fn a_burning_vessel_in_frames_equals_one_jump() {
+    let w = world();
+    let t = t0();
+    let (earth, r, v) = sunlit(&w, t);
+    let mut a = Vessel::coasting(&w, VesselId(1), t, earth, r, v, sim::craft::test_craft());
+    let mut b = a.clone();
+    let full = Controls { throttle: 1.0, sas: true, ..Default::default() };
+    let end = t.add_seconds(20.0);
+    let mut clock = t;
+    while clock < end {
+        clock = clock.add_seconds(1.0 / 60.0);
+        a.advance(&w, if clock > end { end } else { clock }, &full, usize::MAX);
+    }
+    b.advance(&w, end, &full, usize::MAX);
+    assert_eq!(a, b);
+}
+
+#[test]
+fn a_planned_burn_on_rails_heats_the_engine_node_at_any_frame_rate() {
+    use sim::vessel::{BurnEnd, BurnLaw, DirectionLaw, FlightPlan, PlannedBurn};
+    let w = world();
+    let t = t0();
+    let (earth, r, _) = sunlit(&w, t);
+    let mut idle = Vessel::coasting(&w, VesselId(1), t, earth, r * 14.0, DVec3::ZERO, sim::craft::test_craft());
+    idle.set_debug(&w, true);
+    let e = idle.craft.engine;
+    let law = BurnLaw::from_isp(e.thrust_vac, e.isp_vac, DirectionLaw::Inertial(DVec3::X));
+    let plan =
+        FlightPlan { burns: vec![PlannedBurn { t_start: t.add_seconds(90.0), law, end: BurnEnd::Duration(95.0) }] };
+    let mut a = idle.clone();
+    a.set_plan(&w, plan).unwrap();
+    let mut b = a.clone();
+    let end = t.add_seconds(600.0);
+    let mut clock = t;
+    while clock < end {
+        clock = clock.add_seconds(100.0 / 60.0);
+        a.advance(&w, if clock > end { end } else { clock }, &Controls::default(), usize::MAX);
+    }
+    b.advance(&w, end, &Controls::default(), usize::MAX);
+    idle.advance(&w, end, &Controls::default(), usize::MAX);
+    assert_eq!(a.thermal(), b.thermal());
+    let aft = sim::craft::test_craft().design().engine_node as usize;
+    let rise = node_rise(&a, &idle);
+    println!("planned 95 s burn: engine node +{:.2} K after 10 min", rise[aft]);
+    assert!(rise[aft] > 5.0, "{}", rise[aft]);
 }

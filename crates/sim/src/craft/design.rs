@@ -1,15 +1,16 @@
 //! What is derived once per craft design and shared by every vessel of it
-//! (realism-1 §5): the aerodynamic bake (`sim::aero`) and the thermal
-//! network (`sim::thermal`).
+//! (realism-1 §5): the aerodynamic bake (`sim::aero`), the interior volume
+//! grid (`super::volume`) and the thermal network over its cells and nodes
+//! (`sim::thermal`, D065 revised).
 //!
 //! Never saved: a vessel's [`super::CraftParams`] holds a [`DesignSlot`]
 //! that is filled by [`super::Craft::params`] and, after loading a save,
 //! rebuilt from the craft's files on first use ([`design_of`]). The bake is
 //! deterministic, so a rebuilt design is the same bits.
 
-use super::{Cell, Craft, CraftId};
+use super::{Cell, Craft, CraftId, VolumeGrid};
 use crate::aero::{self, AeroBake, BakeOptions, Flow};
-use crate::thermal::{InternalNode, ThermalNetwork};
+use crate::thermal::{Interior, ThermalNetwork};
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -21,6 +22,16 @@ const MEAN_DRAG_MACH: f64 = 10.0;
 pub struct CraftDesign {
     pub bake: AeroBake,
     pub network: ThermalNetwork,
+    /// The interior nodes.
+    pub volume: VolumeGrid,
+    /// Heat capacity of each node without propellant (J/K).
+    pub dry_capacity: Vec<f64>,
+    /// Specific heat of the propellant (J/(kg·K)).
+    pub propellant_specific_heat: f64,
+    /// Tank capacity (kg).
+    pub tank_capacity: f64,
+    /// The node the engine's heat goes into (at its mount).
+    pub engine_node: u32,
     /// The surface cells (normals, areas, emissivities for the heat inputs).
     pub cells: Vec<Cell>,
     /// Subsonic drag coefficient (craft data).
@@ -36,11 +47,52 @@ impl CraftDesign {
     pub fn new(craft: &Craft) -> Self {
         let bake = aero::bake(&craft.surface, &craft.cells, &BakeOptions::default());
         let t = &craft.spec.thermal;
-        let internal = InternalNode { capacity: t.internal_capacity, coefficient: t.internal_coupling };
-        let network = ThermalNetwork::new(&craft.cells.cells, internal);
+        let s = &craft.surface;
+        let bounds = s
+            .positions
+            .iter()
+            .fold((glam::DVec3::splat(f64::MAX), glam::DVec3::splat(f64::MIN)), |b, p| (b.0.min(*p), b.1.max(*p)));
+        let volume = VolumeGrid::new(&craft.geometry.primitives, bounds, &craft.geometry.tank, t.node_size);
+        let cells = &craft.cells.cells;
+        // Each cell couples to the node just beneath it (else the nearest).
+        let cell_node = cells.iter().map(|c| volume.nearest(c.centroid - c.normal * (0.25 * t.node_size))).collect();
+        let k = t.interior_conductivity;
+        let links = volume.links.iter().map(|&(a, b, area)| (a, b, k * area / t.node_size)).collect();
+        let interior = Interior { nodes: volume.nodes.len(), cell_node, coupling: t.internal_coupling, links };
+        let network = ThermalNetwork::new(cells, &interior);
+        // The dry mass less the skin, spread by volume.
+        let skin: f64 = cells.iter().map(|c| c.skin_mass()).sum();
+        let per_m3 = (craft.spec.dry_mass - skin).max(0.0) / volume.volume();
+        let dry_capacity = volume.nodes.iter().map(|n| n.volume * per_m3 * t.interior_specific_heat).collect();
+        let m = &craft.spec.engine.mount;
+        let engine_node = volume.nearest(m.pos + m.dir.normalize() * (0.25 * t.node_size));
         let cd0 = craft.spec.aero.cd0;
         let mean_drag_area = mean_drag_area(&bake, cd0);
-        CraftDesign { bake, network, cells: craft.cells.cells.clone(), cd0, mean_drag_area }
+        CraftDesign {
+            bake,
+            network,
+            volume,
+            dry_capacity,
+            propellant_specific_heat: t.propellant_specific_heat,
+            tank_capacity: craft.spec.propellant.capacity,
+            engine_node,
+            cells: cells.clone(),
+            cd0,
+            mean_drag_area,
+        }
+    }
+
+    /// Each node's heat capacity (J/K) with `propellant` kg in the tank.
+    pub fn node_capacity(&self, propellant: f64, out: &mut [f64]) {
+        let fill = if self.tank_capacity > 0.0 { propellant / self.tank_capacity } else { 0.0 };
+        self.volume.propellant(propellant, fill, out);
+        for (o, dry) in out.iter_mut().zip(&self.dry_capacity) {
+            *o = dry + *o * self.propellant_specific_heat;
+        }
+    }
+
+    pub fn nodes(&self) -> usize {
+        self.dry_capacity.len()
     }
 }
 

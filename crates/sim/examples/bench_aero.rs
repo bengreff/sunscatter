@@ -3,7 +3,7 @@
 use glam::DVec3;
 use sim::aero::{aero_forces, bake, BakeOptions, Flow};
 use sim::craft::test_craft;
-use sim::thermal::{cell_heat, HeatInput, InternalNode, ThermalNetwork, ThermalState};
+use sim::thermal::{cell_heat, HeatInput, ThermalState};
 use std::time::Instant;
 
 fn main() {
@@ -23,8 +23,14 @@ fn main() {
         );
     }
     let b = bake(&c.surface, &c.cells, &BakeOptions::default());
-    let net = ThermalNetwork::new(&c.cells.cells, InternalNode { capacity: 4.0e6, coefficient: 2.0 });
-    let mut state = ThermalState::uniform(c.cells.cells.len(), 290.0);
+    // The design's network: skin cells and interior volume nodes (full tank).
+    let d = c.design();
+    let net = &d.network;
+    let mut cap = vec![0.0; d.nodes()];
+    d.node_capacity(c.spec.propellant.capacity, &mut cap);
+    let node_heat = vec![0.0; d.nodes()];
+    println!("interior: {} volume nodes", d.nodes());
+    let mut state = ThermalState::uniform(c.cells.cells.len(), d.nodes(), 290.0);
     let mut heat = vec![0.0; c.cells.cells.len()];
     let mut exposure = vec![0.0; c.cells.cells.len()];
     let n = 10_000;
@@ -38,10 +44,10 @@ fn main() {
         sink += f + m;
         let input = HeatInput { flow_dir: dir, q_stag: 1e6, sun: DVec3::new(1361.0, 0.0, 0.0) };
         cell_heat(&b, &c.cells.cells, &input, &mut exposure, &mut heat);
-        net.step(&mut state, &heat, 0.0, 3.0, 0.02, sim::thermal::DEFAULT_SWEEPS);
+        net.step(&mut state, &heat, &node_heat, &cap, 3.0, 0.02, sim::thermal::DEFAULT_SWEEPS);
     }
     let us = clock.elapsed().as_secs_f64() * 1e6 / n as f64;
-    println!("per tick (aero forces + cell heating + thermal step, 512 cells): {us:.1} µs  ({sink:.0?})");
+    println!("per tick (aero forces + cell heating + thermal step, 512 cells + nodes): {us:.1} µs  ({sink:.0?})");
     let dir = DVec3::new(0.1, 0.1, -1.0).normalize();
     let time = |what: &str, f: &mut dyn FnMut()| {
         let clock = Instant::now();
@@ -58,12 +64,15 @@ fn main() {
     time("cell_heat (flow + sun)", &mut || cell_heat(&b, &c.cells.cells, &input, &mut exposure, &mut heat));
     let mut sweeps = 0;
     time("thermal step (20 ms)", &mut || {
-        sweeps = net.step(&mut state, &heat, 0.0, 3.0, 0.02, sim::thermal::DEFAULT_SWEEPS)
+        sweeps = net.step(&mut state, &heat, &node_heat, &cap, 3.0, 0.02, sim::thermal::DEFAULT_SWEEPS)
     });
     println!("  sweeps per 20 ms step: {sweeps}");
     for dt in [60.0, 600.0] {
         let mut s = state.clone();
-        println!("  sweeps per {dt} s step: {}", net.step(&mut s, &heat, 0.0, 3.0, dt, sim::thermal::DEFAULT_SWEEPS));
+        println!(
+            "  sweeps per {dt} s step: {}",
+            net.step(&mut s, &heat, &node_heat, &cap, 3.0, dt, sim::thermal::DEFAULT_SWEEPS)
+        );
     }
     println!("({sink:.0?})");
     vessel_ticks();

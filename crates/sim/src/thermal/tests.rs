@@ -11,7 +11,12 @@ fn craft_bake() -> &'static AeroBake {
     B.get_or_init(|| bake(&test_craft().surface, &test_craft().cells, &BakeOptions::default()))
 }
 
-const INTERNAL: InternalNode = InternalNode { capacity: 4.0e6, coefficient: 2.0 };
+/// One interior node of 4e6 J/K, 2 W/(m²·K) to every cell.
+fn one_node(cells: &[Cell]) -> ThermalNetwork {
+    ThermalNetwork::new(cells, &Interior::single(cells.len(), 2.0))
+}
+const CAP: [f64; 1] = [4.0e6];
+const NO_HEAT: [f64; 1] = [0.0];
 
 fn one_cell(emissivity: f64) -> Cell {
     Cell {
@@ -32,11 +37,11 @@ fn an_isolated_cell_relaxes_to_radiative_equilibrium() {
     let (q, eps) = (5.0e4, 0.8);
     let want = math::sqrt_pos(math::sqrt_pos(q / (eps * STEFAN_BOLTZMANN)));
     let cell = one_cell(eps);
-    let net = ThermalNetwork::new(std::slice::from_ref(&cell), InternalNode { capacity: 1.0, coefficient: 0.0 });
+    let net = ThermalNetwork::new(std::slice::from_ref(&cell), &Interior::single(1, 0.0));
     for (dt, steps) in [(0.02, 100_000), (600.0, 20)] {
-        let mut s = ThermalState::uniform(1, 290.0);
+        let mut s = ThermalState::uniform(1, 1, 290.0);
         for _ in 0..steps {
-            net.step(&mut s, &[q * cell.area], 0.0, 0.0, dt, DEFAULT_SWEEPS);
+            net.step(&mut s, &[q * cell.area], &NO_HEAT, &[1.0], 0.0, dt, DEFAULT_SWEEPS);
         }
         assert!((s.skin[0] / want - 1.0).abs() < 1e-9, "dt {dt}: {} vs {want}", s.skin[0]);
     }
@@ -44,23 +49,26 @@ fn an_isolated_cell_relaxes_to_radiative_equilibrium() {
 }
 
 fn wavy_start(n: usize) -> ThermalState {
-    ThermalState { skin: (0..n).map(|i| 250.0 + 300.0 * (math::sin(i as f64 * 0.7) + 1.0)).collect(), internal: 280.0 }
+    ThermalState {
+        skin: (0..n).map(|i| 250.0 + 300.0 * (math::sin(i as f64 * 0.7) + 1.0)).collect(),
+        nodes: vec![280.0],
+    }
 }
 
 #[test]
 fn conduction_conserves_energy() {
     let cells = &test_craft().cells.cells;
-    let mut net = ThermalNetwork::new(cells, INTERNAL);
+    let mut net = one_node(cells);
     net.radiation.fill(0.0);
     let zero = vec![0.0; cells.len()];
     for (dt, steps) in [(0.02, 200), (60.0, 30)] {
         let mut s = wavy_start(cells.len());
-        let e0 = net.heat_content(&s);
+        let e0 = net.heat_content(&s, &CAP);
         let spread0 = s.skin.iter().fold(0.0f64, |m, t| m.max((t - 550.0).abs()));
         for _ in 0..steps {
-            net.step(&mut s, &zero, 0.0, 0.0, dt, DEFAULT_SWEEPS);
+            net.step(&mut s, &zero, &NO_HEAT, &CAP, 0.0, dt, DEFAULT_SWEEPS);
         }
-        let e = net.heat_content(&s);
+        let e = net.heat_content(&s, &CAP);
         assert!((e / e0 - 1.0).abs() < 1e-9, "dt {dt}: {e} vs {e0}");
         // And it did conduct: the skin is smoother than it started.
         let spread = s.skin.iter().fold(0.0f64, |m, t| m.max((t - 550.0).abs()));
@@ -90,7 +98,7 @@ fn sutton_graves_matches_published_points() {
 #[test]
 fn large_steps_are_stable() {
     let cells = &test_craft().cells.cells;
-    let net = ThermalNetwork::new(cells, INTERNAL);
+    let net = one_node(cells);
     let b = craft_bake();
     let mut heat = vec![0.0; cells.len()];
     let mut scratch = vec![0.0; cells.len()];
@@ -102,25 +110,25 @@ fn large_steps_are_stable() {
     let bound = math::sqrt_pos(math::sqrt_pos(peak / (0.8 * STEFAN_BOLTZMANN)));
     // Same end state (steady) from 20 ms and 600 s steps; bounded and
     // positive throughout the big steps.
-    let mut fine = ThermalState::uniform(cells.len(), 290.0);
+    let mut fine = ThermalState::uniform(cells.len(), 1, 290.0);
     for _ in 0..(3600.0 / 0.5) as usize {
-        net.step(&mut fine, &heat, 0.0, 3.0, 0.5, DEFAULT_SWEEPS);
+        net.step(&mut fine, &heat, &NO_HEAT, &CAP, 3.0, 0.5, DEFAULT_SWEEPS);
     }
-    let mut coarse = ThermalState::uniform(cells.len(), 290.0);
+    let mut coarse = ThermalState::uniform(cells.len(), 1, 290.0);
     for _ in 0..6 {
-        net.step(&mut coarse, &heat, 0.0, 3.0, 600.0, DEFAULT_SWEEPS);
+        net.step(&mut coarse, &heat, &NO_HEAT, &CAP, 3.0, 600.0, DEFAULT_SWEEPS);
         assert!(coarse.skin.iter().all(|&t| t.is_finite() && t > 0.0 && t < 1.05 * bound), "{bound}");
-        assert!(coarse.internal.is_finite() && coarse.internal > 0.0);
+        assert!(coarse.nodes[0].is_finite() && coarse.nodes[0] > 0.0);
     }
     for i in 0..cells.len() {
         assert!((coarse.skin[i] / fine.skin[i] - 1.0).abs() < 0.02, "cell {i}: {} vs {}", coarse.skin[i], fine.skin[i]);
     }
     // A hot craft with nothing heating it cools monotonically at 600 s steps.
-    let mut s = ThermalState::uniform(cells.len(), 2000.0);
+    let mut s = ThermalState::uniform(cells.len(), 1, 2000.0);
     let zero = vec![0.0; cells.len()];
     let mut last = f64::MAX;
     for _ in 0..20 {
-        net.step(&mut s, &zero, 0.0, 3.0, 600.0, DEFAULT_SWEEPS);
+        net.step(&mut s, &zero, &NO_HEAT, &CAP, 3.0, 600.0, DEFAULT_SWEEPS);
         let hottest = s.skin.iter().fold(0.0f64, |m, &t| m.max(t));
         assert!(hottest < last && s.skin.iter().all(|&t| t > 3.0), "{hottest}");
         last = hottest;
@@ -174,13 +182,13 @@ fn sunlight_is_absorbed_on_the_lit_silhouette() {
 
 #[test]
 fn overheat_reports_the_hottest_cell_then_the_interior() {
-    let s = |skin: Vec<f64>, internal: f64| ThermalState { skin, internal };
+    let s = |skin: Vec<f64>, node: f64| ThermalState { skin, nodes: vec![300.0, node] };
     let cases = [
         (s(vec![300.0, 900.0, 1000.0], 350.0), None),
         (s(vec![300.0, 1200.0, 1500.0], 350.0), Some(Overheat::Cell(2))),
         (s(vec![1500.0, 1200.0, 1500.0], 500.0), Some(Overheat::Cell(0))),
-        (s(vec![300.0, 900.0, 1000.0], 450.0), Some(Overheat::Internal)),
-        (s(vec![], 450.0), Some(Overheat::Internal)),
+        (s(vec![300.0, 900.0, 1000.0], 450.0), Some(Overheat::Node(1))),
+        (s(vec![], 450.0), Some(Overheat::Node(1))),
     ];
     for (state, want) in cases {
         assert_eq!(check(&state, 1100.0, 400.0), want, "{state:?}");
@@ -204,11 +212,79 @@ fn the_cell_balance_is_solved_from_any_guess() {
 #[test]
 fn live_ticks_converge_in_a_few_sweeps() {
     let cells = &test_craft().cells.cells;
-    let net = ThermalNetwork::new(cells, INTERNAL);
+    let net = one_node(cells);
     let mut s = wavy_start(cells.len());
     let heat: Vec<f64> = cells.iter().map(|c| 2.0e4 * c.area).collect();
     for _ in 0..10 {
-        let sweeps = net.step(&mut s, &heat, 0.0, 3.0, 0.02, DEFAULT_SWEEPS);
+        let sweeps = net.step(&mut s, &heat, &NO_HEAT, &CAP, 3.0, 0.02, DEFAULT_SWEEPS);
+        assert!(sweeps <= 4, "{sweeps}");
+    }
+}
+
+/// The test craft's network over its interior volume nodes, and the nodes'
+/// capacities with a full tank.
+fn with_nodes() -> (&'static ThermalNetwork, Vec<f64>) {
+    let d = test_craft().design();
+    let mut cap = vec![0.0; d.nodes()];
+    d.node_capacity(test_craft().spec.propellant.capacity, &mut cap);
+    (&d.network, cap)
+}
+
+#[test]
+fn node_conduction_conserves_energy() {
+    let (net, cap) = with_nodes();
+    let mut net = net.clone();
+    net.radiation.fill(0.0);
+    let (n, m) = (net.cells(), net.nodes());
+    let zero = vec![0.0; n];
+    for (dt, steps) in [(0.02, 100), (60.0, 30), (3600.0, 5)] {
+        let mut s = wavy_start(n);
+        s.nodes = (0..m).map(|j| 200.0 + 150.0 * (math::cos(j as f64 * 1.3) + 1.0)).collect();
+        let e0 = net.heat_content(&s, &cap);
+        for _ in 0..steps {
+            net.step(&mut s, &zero, &vec![0.0; m], &cap, 0.0, dt, DEFAULT_SWEEPS);
+        }
+        let e = net.heat_content(&s, &cap);
+        assert!((e / e0 - 1.0).abs() < 1e-9, "dt {dt}: {e} vs {e0}");
+    }
+}
+
+#[test]
+fn a_heated_node_settles_at_the_analytic_temperature() {
+    // One cell (radiating) over one node heated by Q through a coupling G:
+    // steady state εσA·T_c⁴ = Q and T_n = T_c + Q/G.
+    let cell = one_cell(0.8);
+    let (q, coupling) = (500.0, 20.0);
+    let net = ThermalNetwork::new(std::slice::from_ref(&cell), &Interior::single(1, coupling));
+    let g = coupling * cell.area;
+    let t_cell = math::sqrt_pos(math::sqrt_pos(q / (0.8 * STEFAN_BOLTZMANN * cell.area)));
+    let mut s = ThermalState::uniform(1, 1, 290.0);
+    for _ in 0..200 {
+        net.step(&mut s, &[0.0], &[q], &[5.0e4], 0.0, 3600.0, DEFAULT_SWEEPS);
+    }
+    assert!((s.skin[0] / t_cell - 1.0).abs() < 1e-9, "{} vs {t_cell}", s.skin[0]);
+    assert!((s.nodes[0] / (t_cell + q / g) - 1.0).abs() < 1e-9, "{} vs {}", s.nodes[0], t_cell + q / g);
+}
+
+#[test]
+fn the_node_network_is_stable_at_large_steps_and_fast_at_ticks() {
+    let (net, cap) = with_nodes();
+    let d = test_craft().design();
+    let cells = &test_craft().cells.cells;
+    let mut heat = vec![0.0; cells.len()];
+    let mut scratch = vec![0.0; cells.len()];
+    let input = HeatInput { flow_dir: DVec3::ZERO, q_stag: 0.0, sun: DVec3::new(-1361.0, 0.0, 0.0) };
+    cell_heat(craft_bake(), cells, &input, &mut scratch, &mut heat);
+    let mut node_heat = vec![0.0; net.nodes()];
+    node_heat[d.engine_node as usize] = 1.0e3;
+    let mut s = ThermalState::uniform(cells.len(), net.nodes(), 290.0);
+    for _ in 0..20 {
+        let sweeps = net.step(&mut s, &heat, &node_heat, &cap, 2.725, 3600.0, DEFAULT_SWEEPS);
+        assert!(sweeps < DEFAULT_SWEEPS, "converged: {sweeps}");
+        assert!(s.skin.iter().chain(&s.nodes).all(|&t| t.is_finite() && t > 100.0 && t < 1000.0));
+    }
+    for _ in 0..10 {
+        let sweeps = net.step(&mut s, &heat, &node_heat, &cap, 2.725, 0.02, DEFAULT_SWEEPS);
         assert!(sweeps <= 4, "{sweeps}");
     }
 }

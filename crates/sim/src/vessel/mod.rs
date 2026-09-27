@@ -107,9 +107,9 @@ pub enum Destruction {
     /// Contact point `point` (an index into `CraftParams::contacts`) closed
     /// at `speed` (m/s) along the ground normal (D066).
     Impact { speed: f64, point: u32 },
-    /// A skin cell (`Some(index)`) or the interior (`None`) above its limit
-    /// at `temperature` (K) (D065).
-    Overheat { cell: Option<u32>, temperature: f64 },
+    /// A skin cell or an interior node above its limit at `temperature`
+    /// (K) (D065).
+    Overheat { at: crate::thermal::Overheat, temperature: f64 },
 }
 
 impl Destruction {
@@ -117,8 +117,12 @@ impl Destruction {
     pub fn describe(&self) -> String {
         match *self {
             Destruction::Impact { speed, .. } => format!("CRASHED at {speed:.0} m/s"),
-            Destruction::Overheat { cell: Some(_), temperature } => format!("BURNED UP: skin at {temperature:.0} K"),
-            Destruction::Overheat { cell: None, temperature } => format!("OVERHEATED: interior at {temperature:.0} K"),
+            Destruction::Overheat { at: crate::thermal::Overheat::Cell(_), temperature } => {
+                format!("BURNED UP: skin at {temperature:.0} K")
+            }
+            Destruction::Overheat { at: crate::thermal::Overheat::Node(_), temperature } => {
+                format!("OVERHEATED: interior at {temperature:.0} K")
+            }
         }
     }
 }
@@ -200,7 +204,7 @@ impl Vessel {
         let p = src.physical.as_ref().expect("physical body");
         let deg = math::PI / 180.0;
         let crew = craft.spec.crew;
-        let cells = craft.design().cells.len();
+        let (cells, nodes) = (craft.design().cells.len(), craft.design().nodes());
         let craft = craft.params();
         let fixed = p.ground_point(lat_deg * deg, lon_deg * deg, craft.contact_height(craft.initial_propellant));
         let att_fixed = quat_z_to(fixed.raw().normalize());
@@ -219,7 +223,7 @@ impl Vessel {
             control: AttitudeControl::default(),
             rest_ticks: 0,
             clock: ShipClock::at(t, 0.0),
-            thermal: VesselThermal::uniform(cells, aerothermal::INITIAL_K, t),
+            thermal: VesselThermal::uniform(cells, nodes, aerothermal::INITIAL_K, t),
         };
         v.sync_landed_attitude(world);
         if !v.holds_where_landed(world) {
@@ -231,7 +235,7 @@ impl Vessel {
     /// A vessel coasting from `(r, v)` relative to `anchor` at `t`.
     pub fn coasting(world: &World, id: VesselId, t: Epoch, anchor: NodeId, r: DVec3, v: DVec3, craft: &Craft) -> Self {
         let crew = craft.spec.crew;
-        let cells = craft.design().cells.len();
+        let (cells, nodes) = (craft.design().cells.len(), craft.design().nodes());
         let craft = craft.params();
         let mut vessel = Vessel {
             id,
@@ -248,7 +252,7 @@ impl Vessel {
             control: AttitudeControl::default(),
             rest_ticks: 0,
             clock: ShipClock::at(t, 0.0),
-            thermal: VesselThermal::uniform(cells, aerothermal::INITIAL_K, t),
+            thermal: VesselThermal::uniform(cells, nodes, aerothermal::INITIAL_K, t),
         };
         // Inside an atmosphere it is flown live.
         if !in_atmosphere(world, &world.snapshot(t), anchor, r, aerothermal::LEAVE_ATMOSPHERE) {
@@ -294,9 +298,11 @@ impl Vessel {
         self.thermal.max_skin()
     }
 
-    /// The interior temperature (K).
-    pub fn internal_temperature(&self) -> f64 {
-        self.thermal.state.internal
+    /// The hottest interior node: its temperature (K) and centre (body
+    /// axes, m).
+    pub fn max_node_temperature(&self) -> (f64, DVec3) {
+        let (t, i) = self.thermal.max_node();
+        (t, self.craft.design().volume.nodes[i].centre)
     }
 
     /// Mass at the vessel's time (kg): dry plus propellant.
@@ -599,6 +605,10 @@ impl Vessel {
         let inertia_now = model.at(self.propellant).inertia;
         let torque = self.craft.torque;
         let design = self.craft.design().clone();
+        let engine = self.craft.engine;
+        let heat = |law: &BurnLaw| engine.heat(law.thrust, engine.mdot_max() * law.thrust / engine.thrust_vac);
+        self.thermal.record_burns(&trajectory.segments, reach, heat);
+        let propellant_at = |e: Epoch| (trajectory.mass_at(e).unwrap_or(mass_now) - dry).max(0.0);
         let mut t = self.time;
         loop {
             let e = self.thermal.next_lattice();
@@ -609,7 +619,8 @@ impl Vessel {
             t = e;
             let (anchor, r, _) = trajectory.eval(e).expect("the lattice epoch is in the trajectory");
             let sun = crate::light::sunlight(world, &world.snapshot(e), anchor, r);
-            aerothermal::coast_step(&design, &mut self.thermal, self.attitude.q.inverse() * sun, e, false);
+            let sun = self.attitude.q.inverse() * sun;
+            aerothermal::coast_step(&design, &mut self.thermal, sun, propellant_at(e), e, false);
         }
         advance_coast(&mut self.attitude, &mut self.control, (t, reach), controls, torque, inertia_now, inertia_at);
         trajectory.prune_before(reach);
@@ -636,7 +647,8 @@ impl Vessel {
         let (anchor, r, _) = self.state(world);
         let sun = crate::light::sunlight(world, &world.snapshot(self.time), anchor, r);
         let design = self.craft.design().clone();
-        aerothermal::coast_step(&design, &mut self.thermal, self.attitude.q.inverse() * sun, self.time, true);
+        let sun = self.attitude.q.inverse() * sun;
+        aerothermal::coast_step(&design, &mut self.thermal, sun, self.propellant, self.time, true);
     }
 
     /// Extends the current coast (if any) until `until`, with at most

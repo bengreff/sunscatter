@@ -12,17 +12,26 @@
         min_throttle: 0.1,
         gimbal_deg: 5.0,
         mount: (pos: (0.0, 0.0, -3.2), dir: (0.0, 0.0, 1.0)),   // thrust along +Z
+        // Of the jet power (½·F·vₑ ≈ 470 MW), 1–2 % reaches the chamber wall,
+        // but regenerative cooling returns nearly all of it to the flow: what
+        // soaks into the structure at the mount is taken as 0.02 % (~94 kW).
+        heat_fraction: 2.0e-4,
     ),
     attitude_control: (torque: (40.0e3, 40.0e3, 20.0e3)),  // N·m per body axis (abstract RCS/wheels)
     chute: (cd_area: 600.0, deploy_max_q: 40.0e3, mount: (0.0, 0.0, 3.2)),
     aero: (cd0: 0.8),                // subsonic Cd on the projected area (blunt body)
-    // D065: clean destruction above either limit. The interior: 4 t of dry
-    // structure and equipment at ~1 kJ/(kg·K) (the propellant is not
-    // counted: insulated tanks). Skin to interior through insulation and
-    // structure at 2 W/(m²·K): with ~150 m² of skin a time constant of
-    // ~4 h, so an entry (minutes) barely warms it and a day in the sun
-    // settles it.
-    thermal: (skin_max_k: 1100.0, internal_max_k: 400.0, internal_capacity: 4.0e6, internal_coupling: 2.0),
+    // D065 (revised): skin cells and interior volume nodes on a 1 m grid.
+    // Any cell above skin_max_k or node above internal_max_k destroys the
+    // craft. The interior: the dry mass less the skin (~2.8 t of structure
+    // and equipment) spread by volume at ~0.9 kJ/(kg·K), and the propellant
+    // where it sits in the tank (NTO/MMH ≈ 1.5–2.9 kJ/(kg·K): 2.0). Nodes
+    // conduct through an effective 5 W/(m·K) (sparse aluminium structure);
+    // skin to the node beneath through insulation and frames at 2 W/(m²·K).
+    thermal: (
+        skin_max_k: 1100.0, internal_max_k: 400.0,
+        node_size: 1.0, interior_specific_heat: 900.0, propellant_specific_heat: 2000.0,
+        interior_conductivity: 5.0, internal_coupling: 2.0,
+    ),
     impact: (max_speed: 8.0),        // m/s at any contact point, beyond the gear's stroke
     // Ground contact (D066). Feet: 20 t on four feet sink ~12 cm on Earth
     // (~2 cm on the Moon), damped at ζ ≈ 0.7 per foot; the stroke stops 5 cm

@@ -10,6 +10,7 @@ pub mod engine;
 pub mod file;
 pub mod mass;
 pub mod mesh;
+pub mod volume;
 
 pub use cells::{Cell, CellOptions, Cells, ContactKind, ContactPoint, Neighbour};
 pub use design::{design_of, CraftDesign, DesignSlot};
@@ -17,6 +18,7 @@ pub use engine::{Engine, EngineOutput};
 pub use file::{AeroFile, ContactFile, CraftFile, GeometryFile, Primitive, Shape, Skin, Spring, Tank, ThermalLimits};
 pub use mass::{MassModel, MassProps};
 pub use mesh::{RenderMesh, Resolution, Surface};
+pub use volume::{VolumeGrid, VolumeNode};
 
 use crate::body::DataError;
 use std::path::{Path, PathBuf};
@@ -202,7 +204,7 @@ mod tests {
         assert_eq!((s.engine.min_throttle, s.engine.gimbal_deg), (0.1, 5.0));
         assert_eq!(s.attitude_control.torque, glam::DVec3::new(40e3, 40e3, 20e3));
         assert_eq!((s.chute.cd_area, s.thermal.skin_max_k, s.thermal.internal_max_k), (600.0, 1100.0, 400.0));
-        assert_eq!((s.aero.cd0, s.thermal.internal_capacity, s.thermal.internal_coupling), (0.8, 4.0e6, 2.0));
+        assert_eq!((s.aero.cd0, s.thermal.node_size, s.thermal.internal_coupling), (0.8, 1.0, 2.0));
         assert_eq!((s.impact.max_speed, s.antenna.gain_dbi, s.antenna.power_w), (8.0, 20.0, 20.0));
         assert_eq!(c.geometry.primitives.iter().filter(|p| p.foot).count(), 4);
         let p = c.params();
@@ -227,7 +229,8 @@ mod tests {
             (("dir: (0.0, 0.0, 1.0)", "dir: (0.0, 0.0, 0.0)"), ("", ""), CRAFT_FILE, "mount.dir"),
             (("crew: 3,", "crew: 3, wings: 2,"), ("", ""), CRAFT_FILE, "wings"),
             (("cd0: 0.8", "cd0: 0.0"), ("", ""), CRAFT_FILE, "aero.cd0"),
-            (("internal_capacity: 4.0e6", "internal_capacity: -1.0"), ("", ""), CRAFT_FILE, "internal_capacity"),
+            (("node_size: 1.0", "node_size: 0.0"), ("", ""), CRAFT_FILE, "node_size"),
+            (("heat_fraction: 2.0e-4", "heat_fraction: 1.5"), ("", ""), CRAFT_FILE, "heat_fraction"),
             (("", ""), ("radius: 1.8", "radius: 0.0"), GEOMETRY_FILE, "tank.radius"),
             (("", ""), ("emissivity: 0.8", "emissivity: 1.5"), GEOMETRY_FILE, "emissivity"),
             (("", ""), ("height: 0.35", "height: 2.0"), GEOMETRY_FILE, "height"),

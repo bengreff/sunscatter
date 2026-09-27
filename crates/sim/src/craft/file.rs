@@ -46,6 +46,9 @@ pub struct EngineFile {
     /// Gimbal range about the mount (deg).
     pub gimbal_deg: f64,
     pub mount: Mount,
+    /// Share of the jet power (½·F·vₑ) that heats the craft's interior at
+    /// the mount while it runs (D065).
+    pub heat_fraction: f64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -83,17 +86,25 @@ pub struct AeroFile {
     pub cd0: f64,
 }
 
-/// Temperature limits (D065): exceeding either destroys the craft; and the
-/// internal node of the thermal network (`sim::thermal`).
+/// Temperature limits (D065): a skin cell or an interior node above its
+/// limit destroys the craft; and the interior volume nodes of the thermal
+/// network (`sim::craft::volume`, `sim::thermal`).
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct ThermalLimits {
     pub skin_max_k: f64,
+    /// The limit of every interior node for now.
     pub internal_max_k: f64,
-    /// Heat capacity of the interior (J/K).
-    pub internal_capacity: f64,
-    /// Conductance from each skin cell to the interior per unit of the
-    /// cell's area (W/(m²·K)).
+    /// Edge of the interior grid's cubes (m).
+    pub node_size: f64,
+    /// Specific heat of the dry interior (structure and equipment: the dry
+    /// mass less the skin, spread by volume) and of the propellant (J/(kg·K)).
+    pub interior_specific_heat: f64,
+    pub propellant_specific_heat: f64,
+    /// Effective conductivity of the interior between nodes (W/(m·K)).
+    pub interior_conductivity: f64,
+    /// Conductance from each skin cell to the node beneath it per unit of
+    /// the cell's area (W/(m²·K)).
     pub internal_coupling: f64,
 }
 
@@ -285,9 +296,17 @@ pub fn validate_craft(c: &CraftFile) -> Result<(), String> {
     finite_vec("chute.mount", c.chute.mount)?;
     positive("thermal.skin_max_k", c.thermal.skin_max_k)?;
     positive("thermal.internal_max_k", c.thermal.internal_max_k)?;
-    positive("thermal.internal_capacity", c.thermal.internal_capacity)?;
-    if !(c.thermal.internal_coupling.is_finite() && c.thermal.internal_coupling >= 0.0) {
-        return Err(format!("thermal.internal_coupling must be non-negative, got {}", c.thermal.internal_coupling));
+    let t = &c.thermal;
+    positive("thermal.node_size", t.node_size)?;
+    positive("thermal.interior_specific_heat", t.interior_specific_heat)?;
+    positive("thermal.propellant_specific_heat", t.propellant_specific_heat)?;
+    for (what, x) in [("interior_conductivity", t.interior_conductivity), ("internal_coupling", t.internal_coupling)] {
+        if !(x.is_finite() && x >= 0.0) {
+            return Err(format!("thermal.{what} must be non-negative, got {x}"));
+        }
+    }
+    if !(e.heat_fraction.is_finite() && (0.0..1.0).contains(&e.heat_fraction)) {
+        return Err(format!("engine.heat_fraction must be in [0, 1), got {}", e.heat_fraction));
     }
     positive("aero.cd0", c.aero.cd0)?;
     positive("impact.max_speed", c.impact.max_speed)?;
