@@ -10,6 +10,7 @@
 //!   through the lowest common ancestor in the frame tree, never by subtracting
 //!   two large absolute coordinates.
 
+pub mod aero;
 pub mod approach;
 pub mod body;
 pub mod comms;
