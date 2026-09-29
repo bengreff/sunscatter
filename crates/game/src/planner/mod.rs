@@ -97,6 +97,12 @@ pub fn plan_from(vessel: &Vessel, draft: &[DraftBurn], now: Epoch) -> FlightPlan
     burns.extend(new);
     FlightPlan { burns }
 }
+/// A warning when a burn `until` seconds away is sooner than the turn the
+/// maneuver hold needs before it (`lead`, s): the burn then starts before
+/// the craft is aligned.
+pub fn turn_warning(until: f64, lead: f64) -> Option<String> {
+    (until < lead).then(|| format!("turning takes ~{lead:.0} s: ignition before the craft is aligned"))
+}
 
 /// Burn time (s) for `dv` from mass `m0` at vacuum thrust and Isp.
 pub fn burn_time(dv: f64, m0: f64, thrust: f64, isp: f64) -> f64 {
@@ -264,6 +270,12 @@ pub fn draw(
                 let t = burn_time(dv, mass, engine.thrust_vac, engine.isp_vac);
                 ui.label(egui::RichText::new(format!("{dv:.1} m/s about {name}, burn {}", fmt_duration(t))).small());
                 ui.label(egui::RichText::new(after_burn(&sim, &list, b.t_start.add_seconds(t), predicted)).small());
+                // The maneuver hold turns the craft this long before
+                // ignition (D075); a burn sooner than that starts unaligned.
+                let lead = sim::vessel::BurnCraft::of(&vessel.craft).turn_lead(mass);
+                if let Some(text) = turn_warning(b.t_start.seconds_since(now), lead) {
+                    ui.label(egui::RichText::new(text).small().color(crate::interface::theme::WARN));
+                }
                 mass *= (-dv / (engine.isp_vac * G0)).exp();
                 total += dv;
             }
@@ -387,6 +399,13 @@ mod tests {
             assert!((drag_dv(px) - dv).abs() < 1e-9, "{px} px: {}", drag_dv(px));
         }
         assert!((1..600).all(|k| drag_dv(f64::from(k)) > drag_dv(f64::from(k - 1))), "monotonic");
+    }
+
+    #[test]
+    fn a_burn_sooner_than_the_turn_warns() {
+        assert!(turn_warning(10.0, 38.0).is_some());
+        assert!(turn_warning(38.0, 38.0).is_none());
+        assert!(turn_warning(600.0, 38.0).is_none());
     }
 
     #[test]
