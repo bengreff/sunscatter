@@ -14,13 +14,19 @@
 //! those of the translation alone), stored with each sample with its rate
 //! and evaluated between samples by cubic Hermite interpolation.
 //! Segments are chained into a [`super::Trajectory`].
+//!
+//! A burn advances on the tick lattice, its attitude flown with it
+//! ([`super::flown`], D075): one "step" of a burn is one tick, its samples
+//! the tick ends.
 
 use super::anchor::preferred_anchor;
+use super::attitude::{Attitude, AttitudeControl};
 use super::burn::BurnLaw;
+use super::flown::Flight;
 use crate::ephem::{Snapshot, SnapshotCache};
 use crate::forces::{altitude_above, ActiveSources, DragModel, ForceContext};
 use crate::frame::{NodeId, Vec3};
-use crate::integrate::{hermite5, Dopri5, Dynamics, StepSample, StepState, Tolerance};
+use crate::integrate::{hermite5, Dopri5, Dynamics, NonFinite, StepSample, StepState, Tolerance};
 use crate::math::{Compensated, CompensatedScalar};
 use crate::time::Epoch;
 use crate::world::World;
@@ -103,6 +109,9 @@ pub struct Segment {
     /// (with the attitude-independent drag), kept for display.
     #[serde(default)]
     pub entry: Option<(f64, NodeId)>,
+    /// A burn's attitude, flown with it.
+    #[serde(default)]
+    flight: Option<Box<Flight>>,
 }
 
 /// Initial conditions and settings of a coast.
@@ -128,12 +137,14 @@ impl Segment {
     /// Starts a coast at `t0` (mass from the drag model, if any).
     pub fn new(world: &World, t0: Epoch, start: CoastStart) -> Self {
         let mass = start.drag.map_or(0.0, |d| d.mass);
-        Self::start(world, t0, start, mass, SegmentKind::Coast, EndKind::Horizon, 0)
+        Self::start(world, t0, start, mass, SegmentKind::Coast, EndKind::Horizon, 0, None)
     }
 
     /// Starts a segment of `kind` at `t0` with mass `mass`; reaching
     /// `start.horizon` ends it with `horizon_end`. A burn whose law or
-    /// duration cannot be flown ends at once as [`EndKind::Failed`].
+    /// duration cannot be flown ends at once as [`EndKind::Failed`]. A burn
+    /// is flown from `flight` (its attitude at ignition).
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn start(
         world: &World,
         t0: Epoch,
@@ -142,6 +153,7 @@ impl Segment {
         kind: SegmentKind,
         horizon_end: EndKind,
         plan_index: usize,
+        flight: Option<Flight>,
     ) -> Self {
         let CoastStart { anchor, r, v, drag, contact_height, horizon, fixed_anchor, proper_time } = start;
         let valid = match kind {
@@ -178,6 +190,7 @@ impl Segment {
             start,
             plan_index,
             entry: None,
+            flight: flight.filter(|_| matches!(kind, SegmentKind::Burn(_))).map(Box::new),
         };
         let integ = Dopri5::new(coast_tolerance());
         let f = seg.forces(world, &snaps);
@@ -201,6 +214,7 @@ impl Segment {
             drag: self.drag,
             mass0: self.mass0,
             kind: &self.kind,
+            thrust: self.flight.as_ref().map_or(DVec3::ZERO, |f| f.thrust),
         }
     }
 
@@ -260,20 +274,37 @@ impl Segment {
                 return taken;
             }
             let prev = *self.samples.last().expect("segment has a first sample");
-            let step = {
-                // Field-level borrows: the forces read `active`/`drag` while
-                // the integrator mutates `state`.
-                let f = Forces {
-                    world,
-                    snaps: &snaps,
-                    t0: self.t0,
-                    anchor: self.anchor,
-                    active: &self.active,
-                    drag: self.drag,
-                    mass0: self.mass0,
-                    kind: &self.kind,
-                };
-                integ.step(&f, &mut self.state, self.horizon)
+            let step = match (&self.kind, self.flight.as_deref_mut()) {
+                (SegmentKind::Burn(law), Some(flight)) => {
+                    let f = Forces {
+                        world,
+                        snaps: &snaps,
+                        t0: self.t0,
+                        anchor: self.anchor,
+                        active: &self.active,
+                        drag: self.drag,
+                        mass0: self.mass0,
+                        kind: &self.kind,
+                        thrust: DVec3::ZERO,
+                    };
+                    burn_tick(&integ, f, law, &mut self.state, flight, self.horizon)
+                }
+                _ => {
+                    // Field-level borrows: the forces read `active`/`drag` while
+                    // the integrator mutates `state`.
+                    let f = Forces {
+                        world,
+                        snaps: &snaps,
+                        t0: self.t0,
+                        anchor: self.anchor,
+                        active: &self.active,
+                        drag: self.drag,
+                        mass0: self.mass0,
+                        kind: &self.kind,
+                        thrust: DVec3::ZERO,
+                    };
+                    integ.step(&f, &mut self.state, self.horizon)
+                }
             };
             let Ok(sample) = step else {
                 self.end = Some(SegmentEnd { t: prev.s.t, kind: EndKind::Failed });
@@ -329,6 +360,7 @@ impl Segment {
                     drag: self.drag,
                     mass0: self.mass0,
                     kind: &self.kind,
+                    thrust: self.flight.as_ref().map_or(DVec3::ZERO, |f| f.thrust),
                 };
                 (self.state.a, self.state.x_rate) = f.accel_rate_with(snap, self.state.t, r, v);
             }
@@ -439,6 +471,31 @@ impl Segment {
             }
             self.samples.drain(..keep_from);
         }
+        if let Some(f) = self.flight.as_deref_mut() {
+            f.prune_before(t);
+        }
+    }
+
+    /// A burn's attitude at local time `t` (`None` for a coast or a bare
+    /// burn, or before the burn).
+    pub fn attitude_at(&self, t: f64) -> Option<Attitude> {
+        let f = self.flight.as_deref().filter(|f| f.craft.is_some())?;
+        f.attitude_at(t.min(self.computed_until()))
+    }
+
+    /// A burn's attitude and control at ignition.
+    pub fn flight_start(&self) -> Option<(Attitude, AttitudeControl)> {
+        self.flight.as_deref().filter(|f| f.craft.is_some()).map(|f| f.start)
+    }
+
+    /// A burn's attitude and control after its last computed tick.
+    pub fn flight_end(&self) -> Option<(Attitude, AttitudeControl)> {
+        self.flight.as_deref().filter(|f| f.craft.is_some()).map(|f| (f.att, f.control))
+    }
+
+    /// The flight a burn was started with (to fly it again).
+    pub(super) fn flight(&self) -> Option<&Flight> {
+        self.flight.as_deref()
     }
 
     /// State at local time `t`: (anchor, r, v). `None` if not computed yet.
@@ -512,12 +569,14 @@ struct Forces<'a, 'w> {
     drag: Option<DragModel>,
     mass0: f64,
     kind: &'a SegmentKind,
+    /// A burn's thrust acceleration for the current tick (inertial, m/s²).
+    thrust: DVec3,
 }
 
 impl Dynamics for Forces<'_, '_> {
     /// Acceleration at local time `t`.
     fn accel(&self, t: f64, r: DVec3, v: DVec3) -> DVec3 {
-        self.snaps.with(self.t0.add_seconds(t), |snap| self.context(snap, t, r, v).accel_with(snap, r, v))
+        self.snaps.with(self.t0.add_seconds(t), |snap| self.context(t).accel_with(snap, r, v))
     }
 
     /// Acceleration and proper-time rate at local time `t`.
@@ -528,19 +587,45 @@ impl Dynamics for Forces<'_, '_> {
 
 impl Forces<'_, '_> {
     fn accel_rate_with(&self, snap: &Snapshot, t: f64, r: DVec3, v: DVec3) -> (DVec3, f64) {
-        self.context(snap, t, r, v).accel_rate(snap, r, v)
+        self.context(t).accel_rate(snap, r, v)
     }
 
     /// The forces at local time `t` (thrust and drag mass of a burn).
-    fn context(&self, snap: &Snapshot, t: f64, r: DVec3, v: DVec3) -> ForceContext<'_> {
+    fn context(&self, t: f64) -> ForceContext<'_> {
         let (drag, thrust) = match self.kind {
             SegmentKind::Coast => (self.drag, DVec3::ZERO),
-            SegmentKind::Burn(law) => {
+            SegmentKind::Burn(_) => {
                 let m = mass_at(self.kind, self.mass0, t);
-                let dir = law.direction.direction(snap, self.anchor, r, v);
-                (self.drag.map(|d| DragModel { mass: m, ..d }), dir * (law.thrust / m))
+                (self.drag.map(|d| DragModel { mass: m, ..d }), self.thrust)
             }
         };
         ForceContext { world: self.world, anchor: self.anchor, active: self.active, drag, thrust }
+    }
+}
+
+/// One tick of a burn ([`super::flown`]): the attitude and thrust for the
+/// tick from the state at its start, then the translation to its end with
+/// that thrust (one or more integrator steps, the last clamped to the
+/// tick's end). Returns the sample at the tick's end.
+fn burn_tick(
+    integ: &Dopri5,
+    mut f: Forces,
+    law: &BurnLaw,
+    state: &mut StepState,
+    flight: &mut Flight,
+    horizon: f64,
+) -> Result<StepSample, NonFinite> {
+    let t = state.t;
+    let t_end = flight.next_tick_end(horizon);
+    let (r, v) = (state.r.value(), state.v.value());
+    let dir = f.snaps.with(f.t0.add_seconds(t), |snap| law.direction.direction(snap, f.anchor, r, v));
+    let masses = (mass_at(f.kind, f.mass0, t), mass_at(f.kind, f.mass0, t_end));
+    f.thrust = flight.tick(law, dir, masses, t_end - t, t_end);
+    (state.a, state.x_rate) = f.accel_rate(t, r, v);
+    loop {
+        let sample = integ.step(&f, state, t_end)?;
+        if state.t >= t_end {
+            return Ok(sample);
+        }
     }
 }

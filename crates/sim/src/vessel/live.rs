@@ -151,7 +151,8 @@ impl Vessel {
             };
             let act = Actuators { torque: self.craft.torque, gimbal: Some(gimbal) };
             let before = (self.attitude, self.control);
-            let cmd = attitude::command(&self.attitude, &props.inertia, &mut self.control, controls, &act, TICK);
+            let aim = self.aim(world, &snap, (anchor, r, v), controls);
+            let cmd = attitude::command(&self.attitude, &props.inertia, &mut self.control, controls, &act, &aim, TICK);
             let (r1, v1, touching, delta) = match contact_body {
                 None => {
                     let next = rigid::tick_with(&self.attitude, &props.inertia, |q| cmd.torque + aero_torque(q), TICK);

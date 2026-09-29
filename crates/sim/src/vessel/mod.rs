@@ -20,8 +20,9 @@
 //! Rotation input never breaks a coast: its drag (for predictions through
 //! an atmosphere) is attitude-independent and gravity does not depend on
 //! attitude, so translation and attitude are independent while unpowered.
-//! A planned burn's thrust follows its direction law, not the vessel's
-//! attitude. The skin and interior temperatures step on a fixed lattice
+//! A planned burn is flown by the attitude (D075): the maneuver hold turns
+//! the craft before ignition and the thrust follows the attitude
+//! ([`flown`]). The skin and interior temperatures step on a fixed lattice
 //! while coasting.
 //!
 //! The vessel carries its propellant (burned by the engine in powered ticks
@@ -34,6 +35,8 @@ mod attitude;
 mod burn;
 mod clock;
 mod coast;
+mod flown;
+mod hold;
 mod id;
 mod live;
 mod segment;
@@ -48,6 +51,8 @@ pub use burn::{
     prograde_normal_radial, BurnEnd, BurnLaw, BurnLimits, DirectionLaw, FlightPlan, PlanError, PlannedBurn, G0,
 };
 pub use clock::{landed_rate, ShipClock, LANDED_STEP};
+pub use flown::BurnCraft;
+pub use hold::{hold_direction, turn_lead, HoldInputs, HoldMode, SpeedReference, TargetState};
 pub use id::{VesselId, VesselIds};
 pub use segment::{coast_tolerance, CoastStart, EndKind, Sample, Segment, SegmentEnd, SegmentKind};
 pub use trajectory::Trajectory;
@@ -76,6 +81,19 @@ pub struct Controls {
     pub rotate: DVec3,
     pub sas: bool,
     pub chute: bool,
+    /// What SAS holds (D075).
+    #[serde(default)]
+    pub hold: HoldMode,
+    /// The velocity prograde and retrograde follow (the navball's mode).
+    #[serde(default)]
+    pub speed: SpeedReference,
+    /// The body prograde and retrograde are relative to (the navball's
+    /// reference; a control choice, never physics). `None`: the anchor.
+    #[serde(default)]
+    pub reference: Option<NodeId>,
+    /// What the target modes aim at.
+    #[serde(default)]
+    pub target: Option<TargetState>,
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -579,7 +597,9 @@ impl Vessel {
             fixed_anchor: false,
             proper_time: self.clock.offset,
         };
-        let trajectory = Trajectory::new(world, self.time, start, self.mass(), &self.plan, self.burn_limits());
+        let seed = (self.attitude, self.control);
+        let (plan, limits, craft) = (&self.plan, self.burn_limits(), BurnCraft::of(&self.craft));
+        let trajectory = Trajectory::flown(world, self.time, start, self.mass(), plan, limits, craft, seed);
         self.phase = Phase::Coasting { trajectory: Box::new(trajectory) };
     }
 

@@ -11,7 +11,7 @@
 //! vessel's state relative to that body, and the physics is unchanged by it
 //! (rule 1: no reference bodies).
 
-use crate::ephem::Snapshot;
+use crate::ephem::{Kinematics, Snapshot};
 use crate::frame::NodeId;
 use crate::math;
 use crate::time::Epoch;
@@ -35,13 +35,26 @@ impl DirectionLaw {
     /// to `anchor`. The reference body's state comes from the frame tree
     /// (lowest common ancestor), never from subtracting absolute positions.
     pub fn direction(&self, snap: &Snapshot, anchor: NodeId, r: DVec3, v: DVec3) -> DVec3 {
+        self.direction_from(|node| snap.relative(node, anchor), anchor, r, v)
+    }
+
+    /// As [`DirectionLaw::direction`], with `relative(node)` giving a
+    /// node's state relative to `anchor` (called only for a tracking law
+    /// whose reference is not the anchor).
+    pub fn direction_from(
+        &self,
+        relative: impl FnOnce(NodeId) -> Kinematics,
+        anchor: NodeId,
+        r: DVec3,
+        v: DVec3,
+    ) -> DVec3 {
         match *self {
             DirectionLaw::Inertial(d) => d.normalize(),
             DirectionLaw::Tracking { reference, axes } => {
                 let (rel_r, rel_v) = if reference == anchor {
                     (r, v)
                 } else {
-                    let k = snap.relative(reference, anchor);
+                    let k = relative(reference);
                     (r - k.r, v - k.v)
                 };
                 let (prograde, normal, radial) = prograde_normal_radial(rel_r, rel_v);

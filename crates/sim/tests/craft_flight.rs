@@ -7,7 +7,7 @@ use sim::ephem::Ephemeris;
 use sim::kepler::Elements;
 use sim::sol;
 use sim::time::Epoch;
-use sim::vessel::{Controls, Phase, Vessel, VesselId, TICK};
+use sim::vessel::{Controls, HoldMode, Phase, SpeedReference, Vessel, VesselId, TICK};
 use sim::world::World;
 use std::sync::Arc;
 
@@ -37,7 +37,16 @@ fn fly(w: &World, ship: &mut Vessel, seconds: f64, controls: &Controls) {
     }
 }
 
-const FULL: Controls = Controls { throttle: 1.0, rotate: DVec3::ZERO, sas: true, chute: false };
+const FULL: Controls = Controls {
+    throttle: 1.0,
+    rotate: DVec3::ZERO,
+    sas: true,
+    chute: false,
+    hold: HoldMode::Stability,
+    speed: SpeedReference::Orbit,
+    reference: None,
+    target: None,
+};
 
 #[test]
 fn powered_ticks_burn_propellant_at_the_engine_rate() {
