@@ -74,8 +74,8 @@ pub fn tools() -> Vec<Tool> {
         ),
         t(
             "get_trajectory",
-            "A vessel's predicted path from now: `points` samples (time from now in s, position relative to the \
-             body it is about now, m).",
+            "A vessel's predicted path from now, through its planned burns: `points` samples (time from now \
+             in s, position relative to the body it is about now, m).",
             schema(json!({"id": id, "points": {"type": "integer", "minimum": 2, "maximum": 1000}}), &["id"]),
         ),
         t(
@@ -229,17 +229,26 @@ fn run(
                 return Err(format!("no signal from vessel {}", id.0));
             }
             let n = args.get("points").and_then(Value::as_u64).unwrap_or(100).clamp(2, 1000) as usize;
-            let seg = sim.fleet[i].segment().ok_or("the vessel is not coasting")?;
-            let (t0, t1) = crate::trajectory::future_span(seg, sim.clock).ok_or("no prediction yet")?;
+            // Every stored segment from now: coasts and planned burns.
+            let segs: Vec<&sim::vessel::Segment> = match sim.fleet[i].trajectory() {
+                Some(tr) => tr.segments.iter().collect(),
+                None if i == sim.active => prediction.into_iter().collect(),
+                None => Vec::new(),
+            };
+            let last = segs.last().ok_or("the vessel has no predicted path")?;
+            let (t0, t1) = (sim.clock, last.t0.add_seconds(last.computed_until()));
+            let span = t1.seconds_since(t0);
+            if span <= 0.0 {
+                return Err("no prediction yet".into());
+            }
             let body = sim.dominant_of(i);
-            let now = sim.clock.seconds_since(seg.t0);
             let points: Vec<Value> = (0..n)
                 .filter_map(|k| {
-                    let t = t0 + (t1 - t0) * k as f64 / (n - 1) as f64;
-                    let (anchor, r, _) = seg.eval(t)?;
-                    let at = seg.t0.add_seconds(t);
+                    let s = span * k as f64 / (n - 1) as f64;
+                    let at = t0.add_seconds(s);
+                    let (anchor, r, _) = crate::trajectory::eval_at(&segs, at)?;
                     let b = sim.world.snapshot(at).relative_r(body, anchor);
-                    Some(json!({"t_s": t - now, "position_m": (r - b).to_array()}))
+                    Some(json!({"t_s": s, "position_m": (r - b).to_array()}))
                 })
                 .collect();
             (json!({"about": name(body), "points": points}), Vec::new())
