@@ -37,7 +37,7 @@ Complete realism of flight, with every bit of the ship's internals abstracted.
 | 24 | MCP tools | The landing predictor "does not work at all because there is inconsistency with orbital/surface velocity and no drag representation." |
 | 25 | Launch-site patch, Moon craters | No. |
 | 26 | Sound | No. |
-| 27 | Pending decisions | Haze: moot (minimal graphics). Chute: keep. Engine heat: unchanged. Stability: a stable craft (2). |
+| 27 | Pending decisions | Haze: moot (minimal graphics). Chute: keep. Stability: a stable craft (2). Engine heat: not answered (still open). |
 
 ## Playtest scope
 
