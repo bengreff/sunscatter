@@ -16,13 +16,13 @@ pub const KEYS: &[(&str, &[(&str, &str)])] = &[
     (
         "Flight",
         &[
-            ("Shift / Ctrl", "throttle up / down"),
+            ("Shift / Ctrl", "throttle up / down (hold Alt: fine)"),
             ("Z / X", "full / cut throttle"),
             ("W S / A D / Q E", "pitch / yaw / roll"),
             ("T", "SAS on / off"),
             ("1–6", "hold: stability, prograde, retrograde, target, anti-target, maneuver"),
             ("P", "deploy parachute"),
-            ("R", "reset to the pad"),
+            ("R R", "reset to the pad (press twice)"),
         ],
     ),
     ("Time", &[(". / ,", "warp up / down"), ("/", "warp 1x (rails warp needs throttle 0)"), ("Esc", "pause menu")]),

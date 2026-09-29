@@ -241,8 +241,9 @@ pub fn draw(
     // Readouts are relative to the dominant body, like the navball's.
     let dominant = sim.dominant_of(sim.active);
 
+    let mut throttle = None;
     panel(ctx, &mut iface, PanelId::Flight, |ui_| {
-        flight_panel(ui_, sim, &aps, Some(dominant));
+        throttle = flight_panel(ui_, sim, &aps, Some(dominant));
         if let Some(line) = crate::rendezvous::summary(&rv, sim) {
             ui_.label(egui::RichText::new(format!("target: {line}")).monospace().small().color(theme::TEXT));
         }
@@ -262,6 +263,9 @@ pub fn draw(
                 .color(if comms.home.is_some() { theme::DIM } else { theme::WARN }),
         );
     });
+    if let Some(t) = throttle {
+        commands.write(crate::commands::GameCommand::SetThrottle(t));
+    }
 
     panel(ctx, &mut iface, PanelId::Debug, |ui_| {
         let anchor_name = &sim.world.eph.node(anchor).name;
@@ -348,7 +352,7 @@ fn flight_panel(
     sim: &SimState,
     aps: &crate::trajectory::apsides::Apsides,
     near: Option<sim::frame::NodeId>,
-) {
+) -> Option<f64> {
     let dim = |t: &str| egui::RichText::new(t).monospace().small().color(theme::DIM);
     let ship = sim.ship();
     let (anchor, r, v) = ship.state_at(&sim.world, sim.clock);
@@ -357,13 +361,13 @@ fn flight_panel(
         Phase::Landed { .. } => "LANDED".to_string(),
         Phase::Powered { .. } => "POWERED".to_string(),
         Phase::Coasting { .. } => "COASTING".to_string(),
-        Phase::Crashed { cause, .. } => format!("{} (R to reset)", cause.describe()),
+        Phase::Crashed { cause, .. } => format!("{} (R R to reset)", cause.describe()),
     };
     ui_.label(egui::RichText::new(phase).monospace().color(theme::ACCENT));
     if let Some(body) = near.and_then(|b| sim.world.source(b)) {
         let k = snap.relative(body.node, anchor);
         let rel = r - k.r;
-        let Some(p) = body.physical.as_ref() else { return };
+        let p = body.physical.as_ref()?;
         let fixed = p.rotation.to_fixed(sim::frame::Vec3::from_raw(rel), sim.clock);
         let alt = p.altitude(fixed);
         let above_ground = p.altitude_above_surface(fixed);
@@ -398,7 +402,6 @@ fn flight_panel(
             row("ALT (TERRAIN)", crate::format::distance(above_ground));
             row("SURFACE V", format!("{:.1} m/s", v_srf.length()));
             row("ORBIT V", format!("{:.1} m/s", v_orb.length()));
-            row("V/S", format!("{:+.1} m/s", v_srf.dot(rel.normalize())));
             row("Ap", apsis(next_ap));
             row("Pe", apsis(next_pe));
             if let Some(i) = impact {
@@ -407,13 +410,16 @@ fn flight_panel(
         });
     }
     craft_rows(ui_, sim, near);
-    let c = sim.controls;
-    ui_.add(egui::ProgressBar::new(c.throttle as f32).text(format!("throttle {:.0}%", c.throttle * 100.0)));
-    ui_.monospace(format!(
-        "SAS {}   chute {}",
-        if c.sas { "on" } else { "off" },
-        if ship.chute_deployed { "DEPLOYED" } else { "stowed" }
-    ));
+    // The throttle: drag or type a value (keys: Shift/Ctrl, Alt for fine).
+    let mut t = sim.controls.throttle * 100.0;
+    let changed = ui_
+        .horizontal(|ui_| {
+            ui_.label(dim("THROTTLE"));
+            ui_.add(egui::Slider::new(&mut t, 0.0..=100.0).suffix(" %").fixed_decimals(1)).changed()
+        })
+        .inner;
+    ui_.monospace(format!("chute {}", if ship.chute_deployed { "DEPLOYED" } else { "stowed" }));
+    changed.then_some(t / 100.0)
 }
 
 /// The double-click body menu (in flight and in the tracking station).

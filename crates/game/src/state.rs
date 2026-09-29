@@ -199,6 +199,8 @@ pub fn read_controls(
     ctx: Res<InputContext>,
     mut sim: ResMut<SimState>,
     mut commands: MessageWriter<GameCommand>,
+    mut toasts: ResMut<crate::interface::toasts::Toasts>,
+    mut reset_pressed: Local<Option<f64>>,
 ) {
     let dt = time.delta_secs_f64();
     if ctx.allows(Keys::Warp) {
@@ -220,12 +222,14 @@ pub fn read_controls(
         c.rotate = DVec3::ZERO;
         return;
     }
-    if keys.pressed(KeyCode::ShiftLeft) || keys.pressed(KeyCode::ShiftRight) {
-        c.throttle = (c.throttle + 0.6 * dt).min(1.0);
-    }
-    if keys.pressed(KeyCode::ControlLeft) || keys.pressed(KeyCode::ControlRight) {
-        c.throttle = (c.throttle - 0.6 * dt).max(0.0);
-    }
+    let held = |a: KeyCode, b: KeyCode| keys.pressed(a) || keys.pressed(b);
+    c.throttle = throttle_after(
+        c.throttle,
+        held(KeyCode::ShiftLeft, KeyCode::ShiftRight),
+        held(KeyCode::ControlLeft, KeyCode::ControlRight),
+        held(KeyCode::AltLeft, KeyCode::AltRight),
+        dt,
+    );
     if keys.just_pressed(KeyCode::KeyZ) {
         c.throttle = 1.0;
     }
@@ -254,11 +258,38 @@ pub fn read_controls(
         axis(KeyCode::KeyE, KeyCode::KeyQ),
     );
     if keys.just_pressed(KeyCode::KeyR) {
-        commands.write(GameCommand::Reset);
+        let now = time.elapsed_secs_f64();
+        if reset_confirmed(*reset_pressed, now) {
+            commands.write(GameCommand::Reset);
+            *reset_pressed = None;
+        } else {
+            toasts.push(now, "Press R again to reset to the pad", false);
+            *reset_pressed = Some(now);
+        }
     }
     if keys.just_pressed(KeyCode::F2) && ctx.allows(Keys::Debug) {
         commands.write(GameCommand::SpawnTestShips(10));
     }
+}
+
+/// Throttle ramp rates (per second): normal, and fine while Alt is held.
+pub const THROTTLE_RATE: f64 = 0.6;
+pub const THROTTLE_RATE_FINE: f64 = 0.05;
+
+/// The throttle after `dt` seconds with the up/down keys held; `fine`
+/// slows the ramp for small adjustments (hovering, docking).
+pub fn throttle_after(throttle: f64, up: bool, down: bool, fine: bool, dt: f64) -> f64 {
+    let rate = if fine { THROTTLE_RATE_FINE } else { THROTTLE_RATE };
+    let step = rate * dt * (f64::from(u8::from(up)) - f64::from(u8::from(down)));
+    (throttle + step).clamp(0.0, 1.0)
+}
+
+/// A second press of R within this many seconds resets the ship.
+pub const RESET_CONFIRM_S: f64 = 2.0;
+
+/// Whether a press of R at `now` confirms one at `previous`.
+pub fn reset_confirmed(previous: Option<f64>, now: f64) -> bool {
+    previous.is_some_and(|p| now - p <= RESET_CONFIRM_S)
 }
 
 /// Freezes the clock (used by the demo while it captures every graphics
@@ -480,6 +511,30 @@ mod tests {
             let got = below_rails_floor(w, t, anchor, DVec3::X * d).map(|b| b.0);
             assert_eq!(got, expected, "{d}");
         }
+    }
+
+    #[test]
+    fn throttle_keys_ramp_and_clamp() {
+        // (start, up, down, fine, dt, expected)
+        let cases = [
+            (0.0, true, false, false, 0.5, 0.3),
+            (0.0, true, false, true, 1.0, 0.05),
+            (0.5, false, true, false, 0.5, 0.2),
+            (0.5, true, true, false, 1.0, 0.5),
+            (0.95, true, false, false, 1.0, 1.0),
+            (0.02, false, true, true, 1.0, 0.0),
+        ];
+        for (t, up, down, fine, dt, want) in cases {
+            let got = throttle_after(t, up, down, fine, dt);
+            assert!((got - want).abs() < 1e-12, "{t} {up} {down} {fine} {dt}: {got}");
+        }
+    }
+
+    #[test]
+    fn reset_needs_a_second_press() {
+        assert!(!reset_confirmed(None, 10.0));
+        assert!(reset_confirmed(Some(9.0), 10.0));
+        assert!(!reset_confirmed(Some(7.0), 10.0));
     }
 
     #[test]

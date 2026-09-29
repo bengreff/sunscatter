@@ -42,6 +42,8 @@ pub enum GameCommand {
     SetPlan { vessel: VesselId, plan: FlightPlan },
     /// The active vessel's attitude hold (D075); turns SAS on.
     SetHold(HoldMode),
+    /// The active vessel's throttle, 0–1 (the flight panel's slider).
+    SetThrottle(f64),
 }
 
 /// Commands on their way to a vessel at light speed (D063, D067): applied
@@ -129,6 +131,7 @@ pub fn apply(
                 sim.controls.hold = *mode;
                 sim.controls.sas = true;
             }
+            GameCommand::SetThrottle(t) => sim.controls.throttle = t.clamp(0.0, 1.0),
             GameCommand::SetDebug(on) => {
                 let sim = &mut *sim;
                 for v in &mut sim.fleet {
