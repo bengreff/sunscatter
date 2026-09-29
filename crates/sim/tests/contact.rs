@@ -180,8 +180,10 @@ fn a_two_degree_slope_holds() {
     assert!(moved.dot(n) < 0.0 && moved.dot(n) > -0.1, "sank {} m", -moved.dot(n));
     let nose = att_fixed * DVec3::Z;
     let (_, _, up) = enu(d.lat, d.lon);
-    assert!((libm::acos(nose.dot(up)) / DEG - 2.0).abs() < 0.05, "{}°", libm::acos(nose.dot(up)) / DEG);
-    assert!(tilt_from(&w, &ship, "Moon", n) < 0.05);
+    // The downhill feet carry more of the tall craft's weight and sink ~1 cm
+    // more over the 6.4 m between feet: ~0.1° more.
+    assert!((libm::acos(nose.dot(up)) / DEG - 2.0).abs() < 0.15, "{}°", libm::acos(nose.dot(up)) / DEG);
+    assert!(tilt_from(&w, &ship, "Moon", n) < 0.15);
 }
 
 /// Worst tilt from the slope normal (deg) over `seconds`, and the vessel.
@@ -199,20 +201,20 @@ fn tilt_on_slope(deg: f64, d: &Drop, seconds: usize) -> (f64, Vessel) {
 
 #[test]
 fn a_steep_slope_tips_the_craft_over() {
-    // Empty tank (highest centre of mass), two feet downhill: it tips once
-    // the centre of mass is beyond the downhill edge of the feet, at
-    // atan(2.12 m / 3.35 m) ≈ 32°; it would slide at atan(0.8) ≈ 39°. So a
-    // 30° slope holds, just, and 35° tips it over. Debug mode, so falling
-    // over does not destroy it.
+    // Empty tank, two feet downhill: it tips once the centre of mass is
+    // beyond the downhill edge of the feet (feet 3.2 m out on the axes, so
+    // the edge is 3.2/√2 = 2.26 m from the axis), at atan(2.26 m / ~8 m) ≈
+    // 16°; it would slide at atan(0.8) ≈ 39°. So a 13° slope holds and 20°
+    // tips it over. Debug mode, so falling over does not destroy it.
     let d = Drop { yaw: 45.0, propellant: 0.0, debug: true, ..Drop::default() };
     let ship = drop(&world(), &d);
-    let edge = 3.0 * std::f64::consts::FRAC_1_SQRT_2;
+    let edge = 3.2 * std::f64::consts::FRAC_1_SQRT_2;
     let tip = libm::atan(edge / (ship.mass_props().com.z - ship.craft.bottom_z)) / DEG;
-    assert!(tip > 31.0 && tip < 34.0, "tip angle {tip}°");
-    let (worst, ship) = tilt_on_slope(35.0, &d, 20);
-    assert!(worst > 60.0, "35°: tilted at most {worst}° from the slope normal ({:?})", ship.phase);
-    let (worst, ship) = tilt_on_slope(30.0, &d, 20);
-    assert!(worst < 2.0 && matches!(ship.phase, Phase::Landed { .. }), "30°: {worst}°, {:?}", ship.phase);
+    assert!(tip > 15.0 && tip < 17.0, "tip angle {tip}°");
+    let (worst, ship) = tilt_on_slope(20.0, &d, 20);
+    assert!(worst > 60.0, "20°: tilted at most {worst}° from the slope normal ({:?})", ship.phase);
+    let (worst, ship) = tilt_on_slope(13.0, &d, 20);
+    assert!(worst < 2.0 && matches!(ship.phase, Phase::Landed { .. }), "13°: {worst}°, {:?}", ship.phase);
     let (worst, ship) = tilt_on_slope(2.0, &d, 20);
     assert!(worst < 0.5 && matches!(ship.phase, Phase::Landed { .. }), "2°: {worst}°, {:?}", ship.phase);
 }

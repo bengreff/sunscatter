@@ -122,15 +122,16 @@ fn cone_newtonian_forces_match_the_sin2_integral() {
 
 #[test]
 fn symmetric_shapes_have_no_side_force_at_zero_incidence() {
-    for (b, name) in [(cone(), "cone"), (craft_bake(), "craft")] {
+    // Zero up to the cells' asymmetry (they are split at equal area, not
+    // symmetrically): a larger share of the slender craft's small end-on
+    // force.
+    for (b, name, tol) in [(cone(), "cone", 5e-3), (craft_bake(), "craft", 2e-2)] {
         for d in [DVec3::Z, -DVec3::Z] {
             for (mach, kn) in [(0.5, 1e-5), (1.0, 1e-5), (3.0, 1e-5), (10.0, 1e-5), (10.0, 0.1), (10.0, 100.0)] {
                 let (force, moment) = aero_forces(b, &flow(d, mach, kn), 0.8);
                 let side = (force - d * force.dot(d)).length();
-                // Zero up to the cells' asymmetry (they are split at equal
-                // area, not symmetrically).
-                assert!(side < 5e-3 * force.length(), "{name} {d} M {mach} Kn {kn}: {force}");
-                assert!(moment.length() < 5e-3 * force.length() * b.length, "{name} {d} M {mach}: {moment}");
+                assert!(side < tol * force.length(), "{name} {d} M {mach} Kn {kn}: {force}");
+                assert!(moment.length() < tol * force.length() * b.length, "{name} {d} M {mach}: {moment}");
             }
         }
     }
@@ -175,8 +176,14 @@ fn wilmoth_bridge_table() {
 /// Restoring or not: tilted 5° from the trim, the torque about the CoM
 /// turns the upwind axis back toward the oncoming air.
 fn restoring(b: &AeroBake, com: DVec3, trim_flow: DVec3, mach: f64, knudsen: f64) -> bool {
-    let d = math::rotate_axis(trim_flow, DVec3::Y, 5.0f64.to_radians());
-    let (force, moment) = aero_forces(b, &flow(d, mach, knudsen), 0.8);
+    restoring_from(b, com, trim_flow, (mach, knudsen), 5.0, 0.8)
+}
+
+/// [`restoring`] tilted `deg` degrees from the trim, with subsonic drag
+/// coefficient `cd0`.
+fn restoring_from(b: &AeroBake, com: DVec3, trim_flow: DVec3, (mach, knudsen): (f64, f64), deg: f64, cd0: f64) -> bool {
+    let d = math::rotate_axis(trim_flow, DVec3::Y, deg.to_radians());
+    let (force, moment) = aero_forces(b, &flow(d, mach, knudsen), cd0);
     let torque = moment - com.cross(force);
     // The upwind body axis â = −trim_flow turns as τ × â; the air comes from −d.
     torque.cross(-trim_flow).dot(-d) > 0.0
@@ -219,19 +226,31 @@ fn a_blunt_capsule_trims_heat_shield_first() {
 }
 
 #[test]
-fn the_test_craft_is_unstable_nose_first_in_continuum_flow() {
-    // Nose first, the capsule cone ahead of the CoM carries a normal force
-    // linear in incidence (the cylinder's only quadratic): the centre of
-    // pressure is ahead of the CoM, full or empty. In free-molecular flow
-    // the force is drag along the flow at the projected area's centroid,
-    // which moves aft as the body's side comes into view: stable.
+fn the_test_craft_is_stable_nose_first_at_every_mach_number() {
+    // D074. Below M 5 the fins' lift and the skirt's area growth put the
+    // centre of pressure behind the CoM; hypersonic (Newtonian) the skirt's
+    // normal force, linear in incidence at the base, outweighs the nose
+    // cone's; free molecular the side area behind the CoM (fins, skirt)
+    // does. Full and empty, at small and large incidence (up to 60°, where
+    // the side of the body is broadside and the fins have stalled), the
+    // torque turns the nose back into the air.
     let c = test_craft();
     for propellant in [0.0, c.spec.propellant.capacity] {
         let com = c.mass.at(propellant).com;
-        for mach in [0.5, 2.0, 10.0] {
-            assert!(!restoring(craft_bake(), com, -DVec3::Z, mach, 1e-5), "M {mach}, CoM {com}");
+        let regimes = [0.3, 0.9, 1.2, 2.0, 5.0, 10.0, 25.0].map(|m| (m, 1e-5)).into_iter().chain([(25.0, 100.0)]);
+        for (mach, kn) in regimes {
+            for deg in [2.0, 5.0, 20.0, 60.0] {
+                assert!(
+                    restoring_from(craft_bake(), com, -DVec3::Z, (mach, kn), deg, c.spec.aero.cd0),
+                    "M {mach} Kn {kn} at {deg}°, CoM {com}"
+                );
+            }
         }
-        assert!(restoring(craft_bake(), com, -DVec3::Z, 10.0, 100.0), "free molecular, CoM {com}");
+        // Tail first is the unstable trim (it turns around).
+        for mach in [0.9, 2.0, 10.0] {
+            let tail_first = restoring_from(craft_bake(), com, DVec3::Z, (mach, 1e-5), 5.0, c.spec.aero.cd0);
+            assert!(!tail_first, "tail first, M {mach}, CoM {com}");
+        }
     }
 }
 
@@ -240,29 +259,42 @@ fn the_bell_shadows_the_base_when_flying_base_first() {
     let b = craft_bake();
     let mut f = vec![0.0; b.cells];
     b.exposure_at(DVec3::Z, &mut f);
-    let cells = &test_craft().cells.cells;
-    let (mut shadowed, mut open) = (0, 0);
-    for (i, c) in cells.iter().enumerate() {
-        let base = c.normal.dot(-DVec3::Z) > 0.99 && (c.centroid.z + 3.2).abs() < 1e-6;
-        let r = c.centroid.truncate().length();
-        let off_legs = c.centroid.x.abs().min(c.centroid.y.abs()) > 0.4;
-        if base && r > 0.35 && r < 0.65 {
-            assert!(f[i] < 0.25, "cell {i} at r {r}: {}", f[i]);
+    let c = test_craft();
+    let named = |i: usize, names: &[&str]| {
+        names.contains(&c.geometry.primitives[c.cells.cells[i].primitive as usize].name.as_str())
+    };
+    let (mut shadowed, mut open, mut area, mut exposed) = (0, 0, 0.0, 0.0);
+    for (i, cell) in c.cells.cells.iter().enumerate() {
+        // The skirt's base disc at z = −6 (r 0.35–1.5 m); the bell (r 0.35 m
+        // at the base, 0.8 m at its mouth 1 m below) shadows it to r 0.8.
+        let base = named(i, &["skirt"]) && cell.normal.dot(-DVec3::Z) > 0.99 && (cell.centroid.z + 6.0).abs() < 1e-6;
+        let r = cell.centroid.truncate().length();
+        if base {
+            area += cell.area;
+            exposed += cell.area * f[i];
+        }
+        // Cells are ~0.4 m²: the inner ring straddles the bell's rim.
+        if base && r < 0.7 {
+            assert!(f[i] < 0.3, "cell {i} at r {r}: {}", f[i]);
             shadowed += 1;
         }
-        if base && r > 1.1 && off_legs {
-            assert!(f[i] > 0.75, "cell {i} at r {r}: {}", f[i]);
+        if base && r > 1.15 {
+            assert!(f[i] > 0.95, "cell {i} at r {r}: {}", f[i]);
             open += 1;
         }
         // Back faces are never exposed.
-        if c.normal.dot(DVec3::Z) > 0.0 {
+        if cell.normal.dot(DVec3::Z) > 0.0 {
             assert_eq!(f[i], 0.0);
         }
     }
     assert!(shadowed > 0 && open > 0, "{shadowed} {open}");
-    // Nose first, the stagnation region is the nose cap (radius 0.875 m).
+    // The exposed share: the ring outside the bell's mouth.
+    let want = (1.5f64.powi(2) - 0.8f64.powi(2)) / (1.5f64.powi(2) - 0.35f64.powi(2));
+    assert!((exposed / area / want - 1.0).abs() < 0.1, "{} vs {want}", exposed / area);
+    // Nose first, the stagnation region is the rounded tip (radius 0.5 m),
+    // not the fin tops 10 m downstream that face the flow too.
     let rn = b.sums_at(-DVec3::Z).nose_radius;
-    assert!((rn / 0.875 - 1.0).abs() < 0.1, "Rn {rn}");
+    assert!((rn / 0.5 - 1.0).abs() < 0.1, "Rn {rn}");
 }
 
 #[test]

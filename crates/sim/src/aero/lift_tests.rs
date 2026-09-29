@@ -87,10 +87,20 @@ fn a_flat_plate_wing_has_the_finite_wing_lift_slope() {
 }
 
 #[test]
-fn round_and_stubby_parts_are_not_fins() {
-    // The test craft's legs (thin struts) and feet (discs 0.6 m across,
-    // 0.12 m thick) are not wings.
-    assert!(craft_bake().fins.is_empty(), "{:?}", craft_bake().fins.len());
+fn the_test_crafts_fins_are_found_and_its_round_and_stubby_parts_are_not() {
+    // Its four tail fins (boxes 8 cm thick) are fins; its legs (thin
+    // struts) and feet (discs 0.6 m across, 0.12 m thick) are not wings.
+    let fins = &craft_bake().fins;
+    let prims = &crate::craft::test_craft().geometry.primitives;
+    let cells = &crate::craft::test_craft().cells.cells;
+    assert_eq!(fins.len(), 4);
+    for f in fins {
+        let name = &prims[cells[f.cells[0] as usize].primitive as usize].name;
+        assert!(name.starts_with("fin"), "{name}");
+        assert!(f.cells.iter().all(|&i| cells[i as usize].primitive == cells[f.cells[0] as usize].primitive));
+        // Upright plates (normal across the long axis) of ~3–4 m² outside the skirt.
+        assert!(f.normal.z.abs() < 1e-3 && f.area > 3.0 && f.area < 5.2, "{name}: {f:?}");
+    }
 }
 
 /// A Sears–Haack body along Z, `l` long, radius `r` at the middle, as 32

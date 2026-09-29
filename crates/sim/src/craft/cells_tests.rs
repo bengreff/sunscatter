@@ -39,12 +39,22 @@ fn cells_cover_the_surface_and_it_is_closed_with_outward_normals() {
         })
         .sum();
     let prims = &test_craft().geometry.primitives;
-    let stack: f64 = prims[1..4].iter().map(|p| analytic_volume(&p.shape)).sum();
-    let bell = analytic_volume(&prims[0].shape);
+    let v = |name: &str| analytic_volume(&prims.iter().find(|p| p.name == name).unwrap().shape);
+    let pi = std::f64::consts::PI;
+    // The union, by hand: the skirt (z −6 to −4.5), the body above it
+    // (π·1.04²·8.5), the cabin cone, the nose cap beyond the cone's end
+    // (0.396 of its 0.5 m sphere), the bell below the skirt (r 0.8 → 0.391
+    // over 1 m), the feet and the fins beyond the skirt's widest radius
+    // (1.28 m of each 2 m span). At most: plus the legs, the fins' remaining parts and
+    // the whole nose cap.
+    let frustum = |h: f64, a: f64, b: f64| pi * h * (a * a + a * b + b * b) / 3.0;
     let feet: f64 = prims.iter().filter(|p| p.foot).map(|p| analytic_volume(&p.shape)).sum();
-    let legs: f64 = prims[4..8].iter().map(|p| analytic_volume(&p.shape)).sum();
-    // The nose cap overlaps nothing; the legs are partly inside the body.
-    let (lo, hi) = (stack + bell + feet, stack + bell + feet + legs);
+    let legs: f64 = prims.iter().filter(|p| p.name.starts_with("leg")).map(|p| analytic_volume(&p.shape)).sum();
+    let fins: f64 = prims.iter().filter(|p| p.name.starts_with("fin")).map(|p| analytic_volume(&p.shape)).sum();
+    let fins_out = fins * 1.28 / 2.0;
+    let nose_out = pi * 0.396 * 0.396 * (1.5 - 0.396) / 3.0;
+    let lo = v("skirt") + pi * 1.04 * 1.04 * 8.5 + v("cabin") + nose_out + frustum(1.0, 0.8, 0.391) + feet + fins_out;
+    let hi = lo + legs + (fins - fins_out) + v("nose");
     assert!(volume > 0.99 * lo && volume < 1.01 * hi, "volume {volume}, expected {lo}..{hi}");
     // Each triangle faces out of its own primitive: just inside it along −n,
     // outside everything along +n (away from the joints).
@@ -69,10 +79,13 @@ fn cells_are_smaller_where_the_surface_curves() {
         let v: Vec<f64> = c.cells.iter().filter(|c| c.primitive == p).map(|c| c.area).collect();
         v.iter().sum::<f64>() / v.len() as f64
     };
-    let body = mean_area("service body");
-    for (small, ratio) in [("nose", 0.6), ("foot +X", 0.7), ("leg +Y", 0.5), ("engine bell", 0.9)] {
-        assert!(mean_area(small) < ratio * body, "{small}: {} m² vs service body {body} m²", mean_area(small));
+    // Against the flat fins; the body (radius 1 m) curves too.
+    let flat = mean_area("fin +X");
+    for (name, ratio) in [("body", 0.9), ("nose", 0.6), ("foot +X", 0.6), ("leg +Y", 0.4), ("engine bell", 0.9)] {
+        println!("{name}: {:.3} m² (fin {flat:.3} m²)", mean_area(name));
+        assert!(mean_area(name) < ratio * flat, "{name}: {} m² vs fin {flat} m²", mean_area(name));
     }
+    assert!(mean_area("nose") < mean_area("body"));
 }
 
 #[test]
@@ -106,15 +119,16 @@ fn contact_points_are_the_feet_and_the_hull() {
     let feet: Vec<_> = c.contacts.iter().filter(|p| p.kind == ContactKind::Foot).collect();
     assert_eq!(feet.len(), 4);
     for f in &feet {
-        assert_eq!(f.pos.z, -4.6);
+        assert_eq!(f.pos.z, -7.7);
         assert!(prims[c.cells[f.cell as usize].primitive as usize].foot);
     }
     let hull: Vec<_> = c.contacts.iter().filter(|p| p.kind == ContactKind::Hull).collect();
     assert!(hull.len() > 20, "{} hull points", hull.len());
-    // The nose tip and the service body's rim are on the hull.
+    // The nose tip (6.8 m), the skirt's rim and the fin tips are on the hull.
     let top = hull.iter().map(|p| p.pos.z).fold(f64::MIN, f64::max);
-    assert!(top > 3.1, "highest hull point at {top} m");
-    assert!(hull.iter().any(|p| p.pos.truncate().length() > 1.9 && p.pos.z < -3.0), "no bottom rim point");
+    assert!(top > 6.5, "highest hull point at {top} m");
+    assert!(hull.iter().any(|p| p.pos.truncate().length() > 1.3 && p.pos.z < -5.5), "no skirt rim point");
+    assert!(hull.iter().any(|p| p.pos.truncate().length() > 2.6), "no fin tip point");
     // Every contact point's cell is flagged, and only those.
     let flagged = c.cells.iter().filter(|c| c.contact).count();
     assert_eq!(flagged, c.contacts.len());

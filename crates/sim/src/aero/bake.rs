@@ -358,15 +358,26 @@ pub fn direction_sums(cells: &[CellGeometry], d: DVec3, f: impl Fn(usize) -> f64
 /// Effective nose radius for direction `d`: the regression r = r₀ + Rn·t of
 /// the lateral offsets r on the lateral normal components t over the
 /// stagnation region (exposed cells with sin θ ≥ 0.7; exact for a sphere,
-/// c = O + Rn·n). Bounded by twice the radius of the projected area's disc
-/// (a flat face). Without a smooth stagnation region (an edge or a point
-/// facing the flow), the size of the best-facing exposed cell.
+/// c = O + Rn·n) at the front: within half the projected disc's diameter
+/// of the most upstream such cell (a sphere's region is 0.3·Rn deep), so
+/// faces far downstream (a rocket's fin tops) are not part of the nose.
+/// Bounded by twice the radius of the projected area's disc (a flat face).
+/// Without a smooth stagnation region (an edge or a point facing the flow),
+/// the size of the best-facing exposed cell.
 fn nose(cells: &[CellGeometry], d: DVec3, f: impl Fn(usize) -> f64, area: f64) -> f64 {
+    let cap = 2.0 * (area / crate::math::PI).max(0.0).sqrt();
+    let facing = |i: usize, c: &CellGeometry| -c.normal.dot(d) >= NOSE_MIN_SIN && f(i) >= 0.5;
+    let front = cells
+        .iter()
+        .enumerate()
+        .filter(|&(i, c)| facing(i, c))
+        .map(|(_, c)| -c.centroid.dot(d))
+        .fold(f64::NEG_INFINITY, f64::max);
     let (mut sw, mut sr, mut st) = (0.0, DVec3::ZERO, DVec3::ZERO);
     let mut stag: Vec<(f64, DVec3, DVec3)> = Vec::new();
     for (i, c) in cells.iter().enumerate() {
-        let (sin, w) = (-c.normal.dot(d), c.area * f(i));
-        if sin >= NOSE_MIN_SIN && f(i) >= 0.5 {
+        let w = c.area * f(i);
+        if facing(i, c) && -c.centroid.dot(d) >= front - 0.5 * cap {
             let r = c.centroid - d * c.centroid.dot(d);
             let t = c.normal - d * c.normal.dot(d);
             sw += w;
@@ -375,7 +386,6 @@ fn nose(cells: &[CellGeometry], d: DVec3, f: impl Fn(usize) -> f64, area: f64) -
             stag.push((w, r, t));
         }
     }
-    let cap = 2.0 * (area / crate::math::PI).max(0.0).sqrt();
     if stag.len() >= 3 && sw > 0.0 {
         let (rm, tm) = (sr / sw, st / sw);
         let (num, den) = stag.iter().fold((0.0, 0.0), |(num, den), &(w, r, t)| {

@@ -228,12 +228,18 @@ mod tests {
             assert!(a > 0.0 && minor2 > 0.0 && i.determinant() > 0.0, "{p} kg: {i}");
             assert!(a + b >= cc && b + cc >= a && cc + a >= b, "triangle inequality at {p} kg: {i}");
             assert!((i - i.transpose()).x_axis.length() < 1e-9 * a, "symmetric");
-            // The tank is low in the service body: propellant lowers the CoM.
+            // The CoM is the mass-weighted mean of the dry CoM and the
+            // propellant's (the tank fills from its base at z = −1).
             if k > 0 {
-                assert!(props.com.z < dry_z, "{p} kg: {} vs dry {dry_z}", props.com.z);
+                let h = 4.7 * p / 16000.0;
+                let want = (dry_z * 4000.0 + (-1.0 + 0.5 * h) * p) / (4000.0 + p);
+                assert!((props.com.z - want).abs() < 1e-9, "{p} kg: {} vs {want}", props.com.z);
             }
-            // Symmetric about Z (four legs): the centre of mass is on the axis.
-            assert!(props.com.truncate().length() < 1e-9);
+            // Symmetric about Z (four fins, four legs): the centre of mass
+            // is on the axis, up to the fin boxes' triangulation (the
+            // union trims them against the body along one diagonal of
+            // each face: ~20 µm).
+            assert!(props.com.truncate().length() < 1e-4, "{p} kg: {}", props.com);
         }
     }
 }

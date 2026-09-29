@@ -174,14 +174,16 @@ mod tests {
     fn the_test_craft_interior_matches_its_solids() {
         let g = grid();
         let c = test_craft();
-        // Service body π·2²·3.2, capsule frustum πh/3(R²+Rr+r²), bell, nose
-        // cap and legs (small): the grid's volume within a sample layer.
-        let body = std::f64::consts::PI * 4.0 * 3.2;
-        let capsule = std::f64::consts::PI * 2.9 / 3.0 * (4.0 + 1.4 + 0.49);
+        // The skirt, the body above it (π·1.04²·8.5) and the cabin cone; the
+        // bell, nose cap, fins and legs (small): the grid's volume within
+        // a sample layer.
+        let pi = std::f64::consts::PI;
+        let frustum = |h: f64, a: f64, b: f64| pi * h * (a * a + a * b + b * b) / 3.0;
+        let main = frustum(1.5, 1.52, 1.04) + pi * 1.04 * 1.04 * 8.5 + frustum(2.4, 1.04, 0.49);
         let analytic: f64 = c.geometry.primitives.iter().map(|p| crate::craft::mesh::analytic_volume(&p.shape)).sum();
-        assert!(analytic > body + capsule);
+        assert!(analytic > main);
         let v = g.volume();
-        assert!((v / (body + capsule) - 1.0).abs() < 0.1, "{v} vs {}", body + capsule);
+        assert!((v / main - 1.0).abs() < 0.1, "{v} vs {main}");
         println!("{} nodes, {} links, {v:.1} m³", g.nodes.len(), g.links.len());
         assert!(g.nodes.len() > 40 && g.nodes.len() < 200);
         // Every link joins face neighbours with a positive open area.
@@ -199,10 +201,10 @@ mod tests {
             let total: f64 = out.iter().sum();
             assert!((total - 1000.0).abs() < 1e-9, "{fill}: {total}");
             // Nothing above the level (plus a sample).
-            let level = -3.0 + 2.8 * fill + 0.25;
+            let level = -1.0 + 4.7 * fill + 0.25;
             for (n, m) in g.nodes.iter().zip(&out) {
                 if *m > 0.0 {
-                    let lowest = n.tank.iter().fold(f64::MAX, |a, &h| a.min(h)) - 3.0;
+                    let lowest = n.tank.iter().fold(f64::MAX, |a, &h| a.min(h)) - 1.0;
                     assert!(lowest <= level, "{fill}: node at {} holds {m}", n.centre);
                 }
             }

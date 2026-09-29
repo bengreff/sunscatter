@@ -35,17 +35,20 @@ pub const DEFAULT_SWEEPS: usize = 128;
 
 /// Over-relaxation of the skin cells' updates for a step of `dt` (s): none
 /// for live ticks (converged in 2–4 sweeps); at coast steps the skin's
-/// conduction around the craft converges slowly, and over-relaxing halves
-/// to fifths the sweeps (measured on the test craft: 60 s 31 → 24 sweeps,
-/// 600 s 132 → 60, 3600 s 290 → 60). The fixed point, and so the solution,
-/// is the same.
+/// conduction along the craft converges slowly, and over-relaxing cuts the
+/// sweeps (measured on the finned test craft, 14.5 m long, from a uniform
+/// start in sunlight: 60 s 28 sweeps at 1.3; 600 s 77 at 1.6 (130 at 1.8);
+/// 3600 s 257 at 1.6, 163 at 1.7, 104 at 1.75, 182 at 1.85).
+/// The fixed point, and so the solution, is the same.
 pub fn relaxation(dt: f64) -> f64 {
     if dt < 1.0 {
         1.0
     } else if dt < 300.0 {
         1.3
-    } else {
+    } else if dt < 1800.0 {
         1.6
+    } else {
+        1.75
     }
 }
 /// Sweeps stop when the largest change is below this × the hottest temperature.

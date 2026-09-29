@@ -111,11 +111,12 @@ fn falling_onto_a_mountain_is_detected_at_its_height() {
     match ship.phase {
         // A hull or foot point hit the plateau: the centre of mass is
         // within the craft's reach of it (the fall is flown live with its
-        // aerodynamics, so it may hit tilted), not near the ellipsoid.
+        // aerodynamics: the finned rocket falls nose first, D074, and may
+        // hit tilted), not near the ellipsoid 3 km below.
         Phase::Crashed { fixed, .. } => {
             let h = e.altitude(fixed) - 3_000.0;
             let reach = ship.craft.contact_reach(ship.propellant());
-            assert!(h > ship.contact_height() - 1.0 && h < reach, "{h} m");
+            assert!(h > 0.0 && h < reach, "{h} m");
         }
         other => panic!("expected a crash, got {other:?}"),
     }

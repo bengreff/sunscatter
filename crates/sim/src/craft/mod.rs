@@ -204,17 +204,19 @@ mod tests {
         assert_eq!((s.engine.min_throttle, s.engine.gimbal_deg), (0.1, 5.0));
         assert_eq!(s.attitude_control.torque, glam::DVec3::new(40e3, 40e3, 20e3));
         assert_eq!((s.chute.cd_area, s.thermal.skin_max_k, s.thermal.internal_max_k), (600.0, 1100.0, 400.0));
-        assert_eq!((s.aero.cd0, s.thermal.node_size, s.thermal.internal_coupling), (0.8, 1.0, 2.0));
+        assert_eq!((s.aero.cd0, s.thermal.node_size, s.thermal.internal_coupling), (0.45, 1.0, 2.0));
         assert_eq!((s.impact.max_speed, s.antenna.gain_dbi, s.antenna.power_w), (8.0, 20.0, 20.0));
         assert_eq!(c.geometry.primitives.iter().filter(|p| p.foot).count(), 4);
         let p = c.params();
-        assert_eq!(p.bottom_z, -4.6);
+        assert_eq!(p.bottom_z, -7.7);
         // The mean hypersonic drag area: Cp,max/2 ≈ 0.92 on the mean
         // projected area, which lies between the end-on silhouette (the
-        // body's disc π·2² and the feet) and the side view (~4 m × 8 m).
-        let silhouette = std::f64::consts::PI * (4.0 + 4.0 * 0.09);
-        assert!(p.cd_area > 0.92 * silhouette && p.cd_area < 0.92 * 40.0, "{} vs {silhouette}", p.cd_area);
-        assert!(p.contact_height(16000.0) > 2.0 && p.contact_height(16000.0) < p.contact_height(0.0));
+        // skirt's disc π·1.5², the fins beyond it and the feet) and the
+        // side view (~14.5 m × 2 m plus the fins, skirt and legs, < 45 m²).
+        let silhouette = std::f64::consts::PI * (2.25 + 4.0 * 0.09) + 4.0 * 1.3 * 0.08;
+        assert!(p.cd_area > 0.92 * silhouette && p.cd_area < 0.92 * 45.0, "{} vs {silhouette}", p.cd_area);
+        // The tank is forward (a static margin, D074): full, the CoM is higher.
+        assert!(p.contact_height(0.0) > 7.0 && p.contact_height(16000.0) > p.contact_height(0.0));
     }
 
     #[test]
@@ -228,12 +230,12 @@ mod tests {
             (("min_throttle: 0.1", "min_throttle: 0.0"), ("", ""), CRAFT_FILE, "min_throttle"),
             (("dir: (0.0, 0.0, 1.0)", "dir: (0.0, 0.0, 0.0)"), ("", ""), CRAFT_FILE, "mount.dir"),
             (("crew: 3,", "crew: 3, wings: 2,"), ("", ""), CRAFT_FILE, "wings"),
-            (("cd0: 0.8", "cd0: 0.0"), ("", ""), CRAFT_FILE, "aero.cd0"),
+            (("cd0: 0.45", "cd0: 0.0"), ("", ""), CRAFT_FILE, "aero.cd0"),
             (("node_size: 1.0", "node_size: 0.0"), ("", ""), CRAFT_FILE, "node_size"),
             (("heat_fraction: 2.0e-4", "heat_fraction: 1.5"), ("", ""), CRAFT_FILE, "heat_fraction"),
-            (("", ""), ("radius: 1.8", "radius: 0.0"), GEOMETRY_FILE, "tank.radius"),
+            (("", ""), ("radius: 0.95", "radius: 0.0"), GEOMETRY_FILE, "tank.radius"),
             (("", ""), ("emissivity: 0.8", "emissivity: 1.5"), GEOMETRY_FILE, "emissivity"),
-            (("", ""), ("height: 0.35", "height: 2.0"), GEOMETRY_FILE, "height"),
+            (("", ""), ("height: 0.604", "height: 2.0"), GEOMETRY_FILE, "height"),
         ];
         for ((c_from, c_to), (g_from, g_to), file, words) in cases {
             let c = if c_from.is_empty() { craft.clone() } else { craft.replacen(c_from, c_to, 1) };

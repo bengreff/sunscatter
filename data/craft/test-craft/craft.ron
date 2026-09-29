@@ -11,15 +11,19 @@
         isp_vac: 320.0, isp_sl: 280.0,   // s; Isp and thrust fall with ambient pressure
         min_throttle: 0.1,
         gimbal_deg: 5.0,
-        mount: (pos: (0.0, 0.0, -3.2), dir: (0.0, 0.0, 1.0)),   // thrust along +Z
+        mount: (pos: (0.0, 0.0, -5.9), dir: (0.0, 0.0, 1.0)),   // the bell's throat; thrust along +Z
         // Of the jet power (½·F·vₑ ≈ 470 MW), 1–2 % reaches the chamber wall,
         // but regenerative cooling returns nearly all of it to the flow: what
         // soaks into the structure at the mount is taken as 0.02 % (~94 kW).
         heat_fraction: 2.0e-4,
     ),
     attitude_control: (torque: (40.0e3, 40.0e3, 20.0e3)),  // N·m per body axis (abstract RCS/wheels)
-    chute: (cd_area: 600.0, deploy_max_q: 40.0e3, mount: (0.0, 0.0, 3.2)),
-    aero: (cd0: 0.8),                // subsonic Cd on the projected area (blunt body)
+    // At the nose: under the chute the rocket hangs tail down, on its legs.
+    chute: (cd_area: 600.0, deploy_max_q: 40.0e3, mount: (0.0, 0.0, 6.8)),
+    // Subsonic Cd on the projected area: a slender body's end-on ~0.3 (base
+    // drag included) plus the legs, feet and fin edges; ~1 broadside is the
+    // Newtonian distribution's (the aero model scales the shape's).
+    aero: (cd0: 0.45),
     // D065 (revised): skin cells and interior volume nodes on a 1 m grid.
     // Any cell above skin_max_k or node above internal_max_k destroys the
     // craft. The interior: the dry mass less the skin (~2.8 t of structure
