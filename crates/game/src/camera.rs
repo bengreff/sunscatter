@@ -5,6 +5,7 @@
 //! placed relative to it (our floating origin: the engine only ever sees small
 //! f32 camera-relative coordinates).
 
+use crate::commands::{InputContext, Keys};
 use crate::relations;
 use crate::state::SimState;
 use bevy::input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll, MouseScrollUnit};
@@ -14,7 +15,12 @@ use glam::DVec3;
 use sim::ephem::Snapshot;
 use sim::forces::altitude_above;
 use sim::frame::NodeId;
+use sim::time::Epoch;
+use sim::vessel::Vessel;
 use sim::world::World;
+
+mod rules;
+pub use rules::*;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Focus {
@@ -36,6 +42,28 @@ pub struct CameraRig {
     pub anchor: NodeId,
     pub cam_pos: DVec3,
     pub up: DVec3,
+    /// The horizontal direction yaw is measured from, perpendicular to `up`:
+    /// carried from frame to frame ([`carry_reference`]), reset to
+    /// [`basis`] when the focus changes.
+    pub reference: DVec3,
+    /// Where `up` comes from, and where it is turning from while the
+    /// reference body changes (`up_blend` of the turn done, 0..1).
+    pub up_ref: UpRef,
+    pub up_from: UpRef,
+    pub up_blend: f64,
+    /// The focus and sim time of the last frame.
+    pub last: Option<(Focus, Epoch)>,
+}
+
+/// What the camera's up is.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum UpRef {
+    /// Away from a body's centre (a vessel focus: the local vertical).
+    Away(NodeId),
+    /// A body's pole (a body focus).
+    Pole(NodeId),
+    /// Inertial +Z (no body).
+    Fixed,
 }
 
 impl Default for CameraRig {
@@ -48,6 +76,11 @@ impl Default for CameraRig {
             anchor: NodeId(0),
             cam_pos: DVec3::ZERO,
             up: DVec3::Z,
+            reference: DVec3::X,
+            up_ref: UpRef::Fixed,
+            up_from: UpRef::Fixed,
+            up_blend: 1.0,
+            last: None,
         }
     }
 }
@@ -79,7 +112,8 @@ pub fn setup(mut commands: Commands, demo: Option<ResMut<crate::demo::Demo>>, mu
     }
 }
 
-/// Mouse drag orbits, scroll zooms; F focuses the nearest body, backtick the ship.
+/// Mouse drag orbits, scroll zooms; F focuses the nearest body, backtick the
+/// ship (in flight only, `InputContext`).
 #[allow(clippy::too_many_arguments)]
 pub fn read_input(
     keys: Res<ButtonInput<KeyCode>>,
@@ -87,6 +121,7 @@ pub fn read_input(
     motion: Res<AccumulatedMouseMotion>,
     scroll: Res<AccumulatedMouseScroll>,
     egui: Res<EguiWantsInput>,
+    ctx: Res<InputContext>,
     sim: Res<SimState>,
     controls: Res<crate::persist::ControlsSettings>,
     mut rig: ResMut<CameraRig>,
@@ -106,15 +141,17 @@ pub fn read_input(
                 MouseScrollUnit::Line => f64::from(scroll.delta.y),
                 MouseScrollUnit::Pixel => f64::from(scroll.delta.y) * controls.trackpad_lines_per_px,
             };
-            rig.distance = zoom(rig.distance, lines, controls.wheel_zoom).max(min_distance(rig.focus));
+            let min = min_distance(rig.focus, focus_radius(&sim, rig.focus));
+            rig.distance = zoom(rig.distance, lines, controls.wheel_zoom).max(min);
         }
         // A rotation or zoom into a surface is refused: the camera stops.
         let new = (rig.yaw, rig.pitch, rig.distance);
         if new != old {
             let (anchor, target, up) = focus_frame(&sim, &rig);
             let snap = sim.world.snapshot(sim.clock);
+            let e1 = carry_reference(rig.reference, up, None);
             let clear = |(yaw, pitch, distance): (f64, f64, f64)| {
-                let p = target + view_dir(up, yaw, pitch) * distance;
+                let p = target + view_dir(e1, up, yaw, pitch) * distance;
                 clearance(&sim.world, &snap, anchor, p) - surface_margin(distance)
             };
             if !accept(clear(old), clear(new)) {
@@ -122,65 +159,40 @@ pub fn read_input(
             }
         }
     }
-    // Typing (a save name) does not move the camera.
-    let typing = egui.wants_any_keyboard_input();
-    if keys.just_pressed(KeyCode::Backquote) && !typing {
-        rig.focus = Focus::Ship;
-        rig.distance = 60.0;
+    if !ctx.allows(Keys::Flight) {
+        return;
     }
-    if keys.just_pressed(KeyCode::KeyF) && !typing {
+    if keys.just_pressed(KeyCode::Backquote) {
+        rig.focus = Focus::Ship;
+        // The per-frame placement keeps it clear of the ground.
+        rig.distance = default_distance(focus_radius(&sim, Focus::Ship));
+    }
+    if keys.just_pressed(KeyCode::KeyF) {
         if let Some(body) = nearest_body(&sim) {
             focus_body_near_ship(&mut rig, &sim, body);
         }
     }
 }
 
-/// Closest and farthest camera distances from the focus (m).
-pub const MIN_DISTANCE: f64 = 5.0;
-pub const MAX_DISTANCE: f64 = 5.0e12;
-/// Closest camera distance to a vessel: outside its bounding sphere.
-pub const VESSEL_MIN_DISTANCE: f64 = 1.2 * crate::map::VESSEL_RADIUS;
+/// Bounding radius of a craft about its centre of mass (m): its farthest
+/// contact point (feet and hull points).
+pub fn craft_radius(v: &Vessel) -> f64 {
+    let com = v.mass_props().com;
+    let r = v.craft.contacts.iter().map(|c| (c.pos - com).length()).fold(0.0, f64::max);
+    if r > 0.0 {
+        r
+    } else {
+        crate::map::VESSEL_RADIUS
+    }
+}
 
-/// Closest allowed distance to a focus (a body's surface is handled by
-/// [`clearance`] instead).
-pub fn min_distance(focus: Focus) -> f64 {
+/// The bounding radius of the focused craft (0 for a body).
+fn focus_radius(sim: &SimState, focus: Focus) -> f64 {
     match focus {
-        Focus::Ship | Focus::Vessel(_) => VESSEL_MIN_DISTANCE,
-        Focus::Body(_) => MIN_DISTANCE,
+        Focus::Ship => craft_radius(sim.ship()),
+        Focus::Vessel(id) => sim.index_of(id).map_or(crate::map::VESSEL_RADIUS, |i| craft_radius(&sim.fleet[i])),
+        Focus::Body(_) => 0.0,
     }
-}
-
-/// Height the camera keeps above any surface (m) at a focus distance.
-pub fn surface_margin(distance: f64) -> f64 {
-    (0.002 * distance).max(2.0)
-}
-
-/// Whether a camera move is allowed, from the clearance (m, negative when
-/// too close) before and after: it stays clear, or it moves out of a
-/// surface it was already too close to (the surface can move under it).
-pub fn accept(old: f64, new: f64) -> bool {
-    new >= 0.0 || new >= old
-}
-
-/// The distance along the view ray to place the camera: `distance` if clear
-/// there, else the farthest clear point between `min` and `distance`, so a
-/// surface rising behind the camera pushes it towards the focus. `clear(s)`
-/// is the clearance at distance `s`. If the focus side is not clear either,
-/// `distance` is kept (nothing better exists on this ray).
-pub fn pull_in(distance: f64, min: f64, clear: impl Fn(f64) -> f64) -> f64 {
-    if clear(distance) >= 0.0 || clear(min) < 0.0 {
-        return distance;
-    }
-    let (mut lo, mut hi) = (min, distance);
-    for _ in 0..40 {
-        let mid = 0.5 * (lo + hi);
-        if clear(mid) >= 0.0 {
-            lo = mid;
-        } else {
-            hi = mid;
-        }
-    }
-    lo
 }
 
 /// Height of point `p` (relative to `anchor`) above the nearest surface:
@@ -197,18 +209,6 @@ pub fn clearance(world: &World, snap: &Snapshot, anchor: NodeId, p: DVec3) -> f6
             Some(if body.solid && d < 50_000.0 { altitude_above(world, snap, anchor, s.node, p).0 } else { d })
         })
         .fold(f64::INFINITY, f64::min)
-}
-
-/// Unit vector from the focus to the camera.
-pub fn view_dir(up: DVec3, yaw: f64, pitch: f64) -> DVec3 {
-    let (e1, e2) = basis(up);
-    (e1 * yaw.cos() + e2 * yaw.sin()) * pitch.cos() + up * pitch.sin()
-}
-
-/// The focus distance after zooming in by `lines` wheel lines, each a factor
-/// of `per_line`.
-pub fn zoom(distance: f64, lines: f64, per_line: f64) -> f64 {
-    (distance * per_line.powf(-lines)).clamp(MIN_DISTANCE, MAX_DISTANCE)
 }
 
 /// The body nearest the active ship (see [`relations::nearest_body`]).
@@ -230,8 +230,9 @@ pub fn focus_body_near_ship(rig: &mut CameraRig, sim: &SimState, body: NodeId) {
     let rel = r - snap.relative(body, anchor).r;
     let radius = sim.world.source(body).and_then(|s| s.physical.as_ref()).map_or(1.0e6, |p| p.radius_eq);
     let up = body_up(sim, body);
+    // The reference the next frame starts from (a new focus: `basis`).
     let (e1, e2) = basis(up);
-    let d = rel.normalize();
+    let d = safe_dir(rel, e1);
     rig.pitch = d.dot(up).clamp(-1.0, 1.0).asin();
     rig.yaw = d.dot(e2).atan2(d.dot(e1));
     rig.distance = rel.length() + 0.15 * radius;
@@ -249,139 +250,101 @@ fn body_up(sim: &SimState, body: NodeId) -> DVec3 {
     sim.world.source(body).and_then(|s| s.physical.as_ref()).map_or(DVec3::Z, |p| p.rotation.pole(sim.clock))
 }
 
-/// Two unit vectors perpendicular to `up` (and to each other).
-pub fn basis(up: DVec3) -> (DVec3, DVec3) {
-    let seed = if up.cross(DVec3::Z).length() > 1e-6 { DVec3::Z } else { DVec3::X };
-    let e1 = up.cross(seed).normalize();
-    (e1, up.cross(e1))
-}
-
-/// The camera frame's anchor, the focus position in it and the camera's up.
-fn focus_frame(sim: &SimState, rig: &CameraRig) -> (NodeId, DVec3, DVec3) {
+/// The camera frame's anchor, the focus position in it and where its up
+/// comes from.
+fn focus_target(sim: &SimState, focus: Focus) -> (NodeId, DVec3, UpRef) {
     let (anchor, ship_r, _) = sim.ship().state_at(&sim.world, sim.clock);
     let snap = sim.world.snapshot(sim.clock);
-    let (target, up) = match rig.focus {
-        Focus::Ship => {
-            let near = nearest_body(sim).map_or(DVec3::ZERO, |b| snap.relative(b, anchor).r);
-            (ship_r, (ship_r - near).normalize())
-        }
+    let away = |b: Option<NodeId>| b.map_or(UpRef::Fixed, UpRef::Away);
+    match focus {
+        Focus::Ship => (anchor, ship_r, away(nearest_body(sim))),
         Focus::Vessel(id) => {
             let i = sim.index_of(id).unwrap_or(sim.active);
             let (va, vr, _) = sim.fleet[i].state_at(&sim.world, sim.clock);
-            let r = snap.relative_r(va, anchor) + vr;
-            let near = nearest_body_to(sim, i).map_or(DVec3::ZERO, |b| snap.relative(b, anchor).r);
-            (r, (r - near).normalize())
+            (anchor, snap.relative_r(va, anchor) + vr, away(nearest_body_to(sim, i)))
         }
-        Focus::Body(b) => (snap.relative(b, anchor).r, body_up(sim, b)),
+        Focus::Body(b) => (anchor, snap.relative(b, anchor).r, UpRef::Pole(b)),
+    }
+}
+
+/// The up an [`UpRef`] gives for a focus at `target` (relative to `anchor`).
+fn up_of(sim: &SimState, snap: &Snapshot, anchor: NodeId, target: DVec3, up: UpRef) -> DVec3 {
+    match up {
+        UpRef::Away(b) => safe_dir(target - snap.relative_r(b, anchor), body_up(sim, b)),
+        UpRef::Pole(b) => body_up(sim, b),
+        UpRef::Fixed => DVec3::Z,
+    }
+}
+
+/// The camera frame's anchor, the focus position in it and the camera's up
+/// (turning between reference bodies as the rig says).
+fn focus_frame(sim: &SimState, rig: &CameraRig) -> (NodeId, DVec3, DVec3) {
+    let (anchor, target, _) = focus_target(sim, rig.focus);
+    let snap = sim.world.snapshot(sim.clock);
+    let to = up_of(sim, &snap, anchor, target, rig.up_ref);
+    let up = if rig.up_blend >= 1.0 {
+        to
+    } else {
+        blended_up(up_of(sim, &snap, anchor, target, rig.up_from), to, rig.up_blend)
     };
     (anchor, target, up)
 }
 
-pub fn update(sim: Res<SimState>, mut rig: ResMut<CameraRig>, mut cam: Query<&mut Transform, With<MainCamera>>) {
-    let (anchor, target, up) = focus_frame(&sim, &rig);
-    let snap = sim.world.snapshot(sim.clock);
-    let d = view_dir(up, rig.yaw, rig.pitch);
-    // The focus moved a surface into the view ray: slide in, keeping the
-    // chosen distance for when the way is clear again.
-    let margin = surface_margin(rig.distance);
-    let clear = |s: f64| clearance(&sim.world, &snap, anchor, target + d * s) - margin;
-    let distance = pull_in(rig.distance, min_distance(rig.focus), clear);
-    rig.anchor = anchor;
-    rig.cam_pos = target + d * distance;
-    rig.up = up;
-    if let Ok(mut t) = cam.single_mut() {
-        *t = Transform::IDENTITY.looking_to((-d).as_vec3(), up.as_vec3());
-    }
+/// The rotation of the ground under the focus since `since` (axis, angle),
+/// when the focus is low over the body its up comes from.
+fn ground_spin(sim: &SimState, rig: &CameraRig, target: DVec3, anchor: NodeId, since: Epoch) -> Option<(DVec3, f64)> {
+    let UpRef::Away(b) = rig.up_ref else { return None };
+    let p = sim.world.source(b)?.physical.as_ref()?;
+    let altitude = (target - sim.world.snapshot(sim.clock).relative_r(b, anchor)).length() - p.radius_eq;
+    co_rotates(altitude, p.radius_eq)
+        .then(|| (p.rotation.pole(sim.clock), p.rotation.w_rate * sim.clock.seconds_since(since)))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn zoom_table() {
-        // (distance, lines, per line, expected)
-        let cases = [
-            (1000.0, 1.0, 1.072, 1000.0 / 1.072),
-            (1000.0, -1.0, 1.072, 1072.0),
-            (1000.0, 0.0, 1.072, 1000.0),
-            (6.0, 10.0, 1.072, MIN_DISTANCE),
-            (4.0e12, -10.0, 1.072, MAX_DISTANCE),
-        ];
-        for (d, lines, per_line, expected) in cases {
-            assert!((zoom(d, lines, per_line) - expected).abs() < 1e-9 * expected, "{d} {lines}");
+pub fn update(
+    sim: Res<SimState>,
+    time: Res<Time>,
+    mut rig: ResMut<CameraRig>,
+    mut cam: Query<&mut Transform, With<MainCamera>>,
+) {
+    let exists = match rig.focus {
+        Focus::Vessel(id) => sim.index_of(id).is_some(),
+        _ => true,
+    };
+    rig.focus = resolve_focus(rig.focus, exists);
+    let (anchor, target, up_ref) = focus_target(&sim, rig.focus);
+    let last = rig.last;
+    let new_focus = last.is_none_or(|(f, _)| f != rig.focus);
+    if new_focus {
+        (rig.up_ref, rig.up_from, rig.up_blend) = (up_ref, up_ref, 1.0);
+    } else if up_ref != rig.up_ref {
+        // A new nearest body: turn to it rather than snap.
+        (rig.up_from, rig.up_ref, rig.up_blend) = (rig.up_ref, up_ref, 0.0);
+    } else {
+        rig.up_blend = (rig.up_blend + time.delta_secs_f64() / UP_BLEND_SECONDS).min(1.0);
+    }
+    let (_, _, up) = focus_frame(&sim, &rig);
+    rig.reference = match last {
+        Some((_, since)) if !new_focus => {
+            let spin = ground_spin(&sim, &rig, target, anchor, since);
+            carry_reference(rig.reference, up, spin)
         }
-        // Two lines at the new speed equal one at the old (1.15 per line).
-        assert!((zoom(1000.0, 2.0, 1.072) / (1000.0 / 1.15) - 1.0).abs() < 1e-3);
-    }
-
-    /// Clearance above a 1,000 m sphere at the origin with a 200 m mountain
-    /// around +x, minus the margin.
-    fn world_clear(p: DVec3, distance: f64) -> f64 {
-        let mountain = 200.0 * (p.normalize().dot(DVec3::X) - 0.9).max(0.0) * 10.0;
-        p.length() - 1000.0 - mountain - surface_margin(distance)
-    }
-
-    #[test]
-    fn zooming_or_rotating_into_terrain_is_refused() {
-        // (case, clearance before, after, accepted)
-        let cases = [
-            ("clear to clear", 50.0, 20.0, true),
-            ("zoom into the ground", 5.0, -1.0, false),
-            ("already too close, moving out", -3.0, -1.0, true),
-            ("already too close, moving in", -3.0, -4.0, false),
-            ("exactly at the margin", 1.0, 0.0, true),
-        ];
-        for (case, old, new, expected) in cases {
-            assert_eq!(accept(old, new), expected, "{case}");
-        }
-    }
-
-    #[test]
-    fn orbiting_below_a_mountain_stops_at_its_slope() {
-        // Ship 20 m above the plain at +z; the camera swings down towards the
-        // mountain at +x, 300 m away.
-        let target = DVec3::new(0.0, 0.0, 1020.0);
-        let up = DVec3::Z;
-        let d = 300.0;
-        let clear = |pitch: f64| world_clear(target + view_dir(up, 0.0, pitch) * d, d);
-        let mut pitch: f64 = 0.8;
-        let mut stopped = false;
-        while pitch > -1.5 {
-            let next = pitch - 0.01;
-            if !accept(clear(pitch), clear(next)) {
-                stopped = true;
-                break;
-            }
-            pitch = next;
-        }
-        assert!(stopped, "the camera went into the ground");
-        assert!(clear(pitch) >= 0.0 && pitch < 0.2, "stopped at pitch {pitch}");
-    }
-
-    #[test]
-    fn a_rising_surface_pulls_the_camera_in() {
-        let target = DVec3::new(0.0, 0.0, 1050.0);
-        let dir = DVec3::new(0.6, 0.0, -0.8);
-        let clear = |s: f64| world_clear(target + dir * s, 100.0);
-        // 100 m out along a descending ray is underground; 10 m is not.
-        assert!(clear(100.0) < 0.0 && clear(10.0) > 0.0);
-        let s = pull_in(100.0, 10.0, clear);
-        assert!(clear(s).abs() < 1e-6 && s < 100.0 && s > 10.0, "{s}");
-        assert_eq!(pull_in(30.0, 10.0, |_| 1.0), 30.0, "clear: unchanged");
-        assert_eq!(pull_in(30.0, 10.0, |_| -1.0), 30.0, "nothing clear on the ray");
-    }
-
-    #[test]
-    fn the_camera_stays_outside_the_ship() {
-        let d = zoom(20.0, 30.0, 1.072).max(min_distance(Focus::Ship));
-        assert_eq!(d, 1.2 * crate::map::VESSEL_RADIUS);
-        assert_eq!(min_distance(Focus::Body(NodeId(3))), MIN_DISTANCE);
-    }
-
-    #[test]
-    fn margin_grows_with_distance() {
-        assert_eq!(surface_margin(60.0), 2.0);
-        assert_eq!(surface_margin(1.0e6), 2000.0);
+        _ => basis(up).0,
+    };
+    rig.last = Some((rig.focus, sim.clock));
+    let snap = sim.world.snapshot(sim.clock);
+    let d = view_dir(rig.reference, up, rig.yaw, rig.pitch);
+    // The focus moved a surface into the view ray: slide in, keeping the
+    // chosen distance for when the way is clear again; with nothing clear
+    // on the ray, rise above the ground.
+    let margin = surface_margin(rig.distance);
+    let clear = |p: DVec3| clearance(&sim.world, &snap, anchor, p) - margin;
+    let min = min_distance(rig.focus, focus_radius(&sim, rig.focus));
+    let cam_pos = place(target, d, rig.distance, min, up, clear);
+    rig.anchor = anchor;
+    rig.cam_pos = cam_pos;
+    rig.up = up;
+    if let Ok(mut t) = cam.single_mut() {
+        let look = safe_dir(target - cam_pos, -d);
+        *t = Transform::IDENTITY.looking_to(look.as_vec3(), up.as_vec3());
     }
 }

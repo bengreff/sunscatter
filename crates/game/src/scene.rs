@@ -144,10 +144,22 @@ pub fn update_bodies(
             if let Ok((mut lt, mut l)) = light.single_mut() {
                 // The shared light carries the flux at the camera; each lit
                 // body rescales it to its own distance (lighting.rs).
-                *lt = Transform::IDENTITY.looking_to(-pos.normalize().as_vec3(), Vec3::Z);
+                let dir = -pos.normalize().as_vec3();
+                *lt = Transform::IDENTITY.looking_to(dir, light_up(dir));
                 l.illuminance = crate::lighting::flux(lm, pos.length()) as f32;
             }
         }
+    }
+}
+
+/// An up vector for a light shining along `dir` (unit): +Z unless the
+/// light shines (nearly) along it, then +X, so the orientation is never
+/// degenerate.
+pub fn light_up(dir: Vec3) -> Vec3 {
+    if dir.cross(Vec3::Z).length() > 1e-3 {
+        Vec3::Z
+    } else {
+        Vec3::X
     }
 }
 
@@ -227,5 +239,26 @@ pub fn update_ships(
             MeshMaterial3d(material),
             Transform::IDENTITY,
         ));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_sun_light_has_a_valid_up_in_every_direction() {
+        // (direction, expected up)
+        let cases = [
+            (Vec3::X, Vec3::Z),
+            (Vec3::Z, Vec3::X),
+            (-Vec3::Z, Vec3::X),
+            (Vec3::new(0.0, 1e-5, 1.0).normalize(), Vec3::X),
+        ];
+        for (dir, up) in cases {
+            assert_eq!(light_up(dir), up, "{dir:?}");
+            let t = Transform::IDENTITY.looking_to(dir, light_up(dir));
+            assert!((t.forward().as_vec3() - dir).length() < 1e-5 && t.rotation.is_finite());
+        }
     }
 }
