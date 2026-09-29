@@ -51,6 +51,8 @@ A short map to search before building anything: who owns what, the frame order, 
 | Panel layout, theme, pause menu, key help | `game::interface` (`layout` is pure data) | saved in `settings.ron` |
 | Discrete changes to the simulation (warp, switch, delete, load, revert, reset); which keys act | `game::commands` (`GameCommand`, `InputContext`) | the hook for MCP and scripting |
 | Haze strength, our sky compositing shader | `game::sky::haze` (`render_sky.wgsl`, copied from Bevy) | |
+| Flight keys: throttle ramp (fine with Alt), reset confirmation | `game::state` (`throttle_after`, `reset_confirmed`) | the slider sends `GameCommand::SetThrottle` |
+| Whether a vessel's engine runs now (display), the flame mark | `game::scene` (`engine_on`, `update_flames`) | a stored burn segment, or live flight with the throttle open |
 | Where files live | `game::persist` | `SUNSCATTER_HOME` override |
 | Number/unit formatting (distance, speed, duration) | `game::format` | |
 

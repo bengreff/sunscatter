@@ -1,6 +1,6 @@
 # Feature plan: playtest 1 (flight you can trust)
 
-**Status:** building, 2026-09-28. From the owner interview of the same day ([record](../plans/interview-2026-09-28.md)); decisions D073–D076. The owner asked for the work to be done unattended ("make this an acceptable thing for me to playtest for 5 hours"), so the plan was not reviewed before building.
+**Status:** built 2026-09-29 (not yet played by the owner). From the owner interview of the same day ([record](../plans/interview-2026-09-28.md)); decisions D073–D076. The owner asked for the work to be done unattended ("make this an acceptable thing for me to playtest for 5 hours"), so the plan was not reviewed before building.
 
 **The number-one rule:** an accurate spaceflight simulator; graphics bare and functional (D073). Everything is flown with debug mode on (D064).
 
@@ -70,6 +70,8 @@
 - Reset needs confirmation.
 - Minimal heat readout: hottest skin cell and hottest interior node as a fraction of their limits.
 - A static flame mark behind the bell while the engine runs.
+
+- **Built (lead):** fine throttle (hold Alt: 5 %/s; `state::throttle_after`), a throttle slider in the flight panel (`GameCommand::SetThrottle`), reset needs R twice within 2 s (`state::reset_confirmed`); V/S and SAS only on the navball; the heat readout already existed (skin and interior maxima against their limits); a static flame cone behind the bell while the engine runs, live or in a stored burn (`scene::update_flames`); the flight panel names a wreck's cause while it still moves. Ctrl stays throttle-down (egui does not take it; no conflict seen in play). Also: one impact source (the landing prediction feeds the apsis list; the map leaves the active vessel's marker to the landing panel), the planner warns when a burn is sooner than the turn (D075), MCP `get_trajectory` through planned burns, and closest approach to a target body (the pass height over the Moon).
 
 ## Order
 
