@@ -1,82 +1,105 @@
-//! Powered-landing aids (realism-1 §6b): where and when the active vessel
-//! meets the surface, and when to start braking.
+//! Landing aids (playtest-1 §C): the landing panel and the impact marker,
+//! read from `sim::landing` (the vessel's own force model integrated to
+//! the ground, surface-retrograde attitude, current throttle and chute).
 //!
-//! The impact is read from the stored trajectory: a coast ends at the
-//! surface (`EndKind::Surface`, found on the detailed terrain, D059), so the
-//! prediction is exactly what the vessel will do if nothing changes.
+//! The prediction runs on a background task a few times a second and is
+//! swapped in when complete. The marker is the body-fixed impact point
+//! carried by the body's rotation to the current clock.
 
 use crate::format;
 use crate::interface::theme;
 use crate::map;
 use crate::state::SimState;
 use bevy::prelude::*;
+use bevy::tasks::{futures::check_ready, AsyncComputeTaskPool, Task};
 use bevy_egui::{egui, EguiContexts};
-use glam::DVec3;
-use sim::frame::{NodeId, Vec3};
+use sim::craft::CraftParams;
+use sim::landing::{self, AssumedAttitude, Braking, Impact, LandingStart, Limits};
 use sim::time::Epoch;
-use sim::vessel::{EndKind, Phase};
+use sim::vessel::{Phase, Vessel, VesselId};
+use sim::world::World;
 
-/// Below this height above the terrain the landing panel shows (m).
+/// Below this radar altitude the landing panel shows (m).
 pub const PANEL_BELOW: f64 = 20_000.0;
-/// Impacts further ahead than this are not marked (s): a year-long transfer
-/// that ends on a body is not a landing.
-pub const MARK_WITHIN: f64 = 86_400.0;
+/// The panel also shows when the impact is this close (s).
+pub const PANEL_WITHIN: f64 = 900.0;
+/// Braking solutions are computed for impacts this close (s).
+pub const BRAKING_WITHIN: f64 = 1_800.0;
+/// The braking solution stops the lowest contact point this high (m).
+pub const BRAKING_MARGIN: f64 = 10.0;
+/// Seconds between background predictions.
+const EVERY: f64 = 0.25;
 
-/// Where the stored trajectory meets a surface.
+/// One prediction for a vessel.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Impact {
-    pub body: NodeId,
-    pub t: Epoch,
-    /// Speed relative to the ground at impact (m/s).
-    pub speed: f64,
-    /// Position relative to the vessel's current anchor frame at impact:
-    /// (anchor, r).
-    pub anchor: NodeId,
-    pub r: DVec3,
+pub struct Landing {
+    pub vessel: VesselId,
+    pub impact: Option<Impact>,
+    pub braking: Option<Braking>,
 }
 
-/// The impact of vessel `i`'s path, if it ends on a surface: its stored
-/// trajectory while coasting, else `prediction` (the background coast from
-/// now while it flies live, e.g. in the atmosphere).
-pub fn impact(sim: &SimState, i: usize, prediction: Option<&sim::vessel::Segment>) -> Option<Impact> {
-    let last = match sim.fleet[i].trajectory() {
-        Some(tr) => tr.last(),
-        None => prediction?,
+/// The prediction start for a vessel flying with `throttle` and `chute`.
+pub fn start_of(world: &World, vessel: &Vessel, throttle: f64, chute: bool) -> Option<LandingStart> {
+    LandingStart::of_vessel(world, vessel, throttle, chute, AssumedAttitude::SurfaceRetrograde)
+}
+
+/// Predicts the impact from `start` and, when it is near, the braking
+/// solution.
+pub fn predict(world: &World, craft: &CraftParams, vessel: VesselId, start: &LandingStart) -> Landing {
+    let descent = landing::predict_impact(world, craft, start, Limits::two_orbits(world, start));
+    let braking = descent
+        .impact
+        .filter(|h| h.t.seconds_since(start.t) < BRAKING_WITHIN)
+        .and_then(|_| landing::braking_solution(world, craft, &descent, BRAKING_MARGIN));
+    Landing { vessel, impact: descent.impact, braking }
+}
+
+/// The latest prediction for the active vessel, and the one being computed.
+#[derive(Resource, Default)]
+pub struct LandingPrediction {
+    pub latest: Option<Landing>,
+    task: Option<Task<Landing>>,
+    since_last: f64,
+}
+
+/// Starts a background prediction for the active vessel every [`EVERY`]
+/// seconds (one at a time) and swaps in the finished one.
+pub fn update(time: Res<Time>, sim: Res<SimState>, mut pred: ResMut<LandingPrediction>) {
+    if let Some(task) = pred.task.as_mut() {
+        if let Some(done) = check_ready(task) {
+            pred.latest = Some(done);
+            pred.task = None;
+        }
+    }
+    let ship = sim.ship();
+    if pred.latest.is_some_and(|l| l.vessel != ship.id()) {
+        pred.latest = None;
+    }
+    pred.since_last += time.delta_secs_f64();
+    if pred.task.is_some() || pred.since_last < EVERY {
+        return;
+    }
+    pred.since_last = 0.0;
+    let Some(start) = start_of(&sim.world, ship, sim.controls.throttle, sim.controls.chute) else {
+        pred.latest = None;
+        return;
     };
-    let end = last.end?;
-    let EndKind::Surface { body } = end.kind else { return None };
-    let t_end = last.t0.add_seconds(end.t);
-    let (anchor, r, v) = last.eval(end.t)?;
-    let src = sim.world.source(body)?;
-    let p = src.physical.as_ref()?;
-    let k = sim.world.snapshot(t_end).relative(body, anchor);
-    let rel = r - k.r;
-    let v_srf = v - k.v - p.rotation.omega(t_end).raw().cross(rel);
-    // The coast ends where live contact flight takes over, `live_height`
-    // above the ground; the lowest point still has to fall the rest.
-    let vessel = &sim.fleet[i];
-    let lowest = vessel.mass_props().com.z - vessel.craft.bottom_z;
-    let drop = (vessel.live_height() - lowest).max(0.0);
-    let (up, g) = (rel.normalize(), src.gm / rel.length_squared());
-    let (dt, v_down) = fall(-v_srf.dot(up), g, drop);
-    let speed = (v_srf - up * v_srf.dot(up)).length().hypot(v_down);
-    Some(Impact { body, t: t_end.add_seconds(dt), speed, anchor, r: r - up * drop })
+    let (world, craft, id) = (sim.world.clone(), ship.craft.clone(), ship.id());
+    pred.task = Some(AsyncComputeTaskPool::get().spawn(async move { predict(&world, &craft, id, &start) }));
 }
 
-/// Falling `drop` metres from a downward speed `v_down` under gravity `g`:
-/// the time taken and the downward speed at the end.
-pub fn fall(v_down: f64, g: f64, drop: f64) -> (f64, f64) {
-    let v_end = (v_down * v_down + 2.0 * g * drop).sqrt();
-    let dt = if g > 0.0 { (v_end - v_down) / g } else { drop / v_down.max(1e-6) };
-    (dt, v_end)
+/// Signed seconds from the clock to `t`.
+fn from_now(t: Epoch, clock: Epoch) -> f64 {
+    t.seconds_since(clock)
 }
 
-/// Height (m) above the ground at which a vertical descent at `v_down`
-/// (m/s, positive down) must start braking at full thrust to stop at the
-/// ground, with thrust acceleration `a` and gravity `g` (m/s²): v²/(2(a−g)).
-/// `None` if the craft cannot stop (a ≤ g).
-pub fn braking_height(v_down: f64, a: f64, g: f64) -> Option<f64> {
-    (a > g).then(|| v_down.max(0.0).powi(2) / (2.0 * (a - g)))
+/// "BURN IN" text: the time to ignition, or NOW once it has passed.
+pub fn burn_in(seconds: f64) -> String {
+    if seconds > 0.0 {
+        format::duration(seconds)
+    } else {
+        "NOW".into()
+    }
 }
 
 /// The landing panel and the impact marker.
@@ -86,7 +109,7 @@ pub fn draw(
     cam: Query<(&Camera, &Transform, &Projection), With<crate::camera::MainCamera>>,
     rig: Res<crate::camera::CameraRig>,
     station: Res<crate::tracking::TrackingStation>,
-    pred: Res<crate::state::Prediction>,
+    pred: Res<LandingPrediction>,
 ) -> Result {
     if station.open {
         return Ok(());
@@ -95,21 +118,12 @@ pub fn draw(
     if matches!(ship.phase, Phase::Landed { .. } | Phase::Crashed { .. }) {
         return Ok(());
     }
-    let i = sim.active;
-    let body = sim.dominant_of(i);
-    let Some(src) = sim.world.source(body) else { return Ok(()) };
-    let Some(p) = src.physical.as_ref() else { return Ok(()) };
-    let (anchor, r, v) = ship.state_at(&sim.world, sim.clock);
-    let k = sim.world.snapshot(sim.clock).relative(body, anchor);
-    let rel = r - k.r;
-    let fixed = p.rotation.to_fixed(Vec3::from_raw(rel), sim.clock);
-    let height = p.altitude_above_surface(fixed);
-    let pred = (i == sim.active).then_some(pred.segment.as_ref()).flatten();
-    let hit = impact(&sim, i, pred).filter(|h| h.t.seconds_since(sim.clock) < MARK_WITHIN);
+    let latest = pred.latest.filter(|l| l.vessel == ship.id());
+    let hit = latest.and_then(|l| l.impact).filter(|h| from_now(h.t, sim.clock) > 0.0);
     let ctx = contexts.ctx_mut()?;
-    // The impact point, in any view.
+    // The impact point, where that ground is now, in any view.
     if let (Some(hit), Some(view)) = (hit, map::view(&cam)) {
-        let c = sim.world.snapshot(sim.clock).relative_r(hit.anchor, rig.anchor) + hit.r - rig.cam_pos;
+        let c = hit.ground_at(&sim.world, sim.clock, rig.anchor) - rig.cam_pos;
         if let Some(s) = view.project(c) {
             let painter = ctx.layer_painter(egui::LayerId::background());
             let red = egui::Color32::from_rgb(255, 80, 60);
@@ -117,48 +131,54 @@ pub fn draw(
             painter.text(
                 egui::pos2(s.x + 10.0, s.y),
                 egui::Align2::LEFT_CENTER,
-                format!("impact in {}", format::duration(hit.t.seconds_since(sim.clock))),
+                format!("impact in {}", format::duration(from_now(hit.t, sim.clock))),
                 egui::FontId::monospace(12.0),
                 red,
             );
         }
     }
-    if height > PANEL_BELOW {
+    let (anchor, r, v) = ship.state_at(&sim.world, sim.clock);
+    let snap = sim.world.snapshot(sim.clock);
+    let Some(body) = landing::nearest_surface(&sim.world, &snap, anchor, r) else { return Ok(()) };
+    let m = landing::surface_motion(&sim.world, &snap, anchor, body, r, v);
+    let radar = m.height - ship.contact_height();
+    let near_impact = hit.is_some_and(|h| from_now(h.t, sim.clock) < PANEL_WITHIN);
+    if radar > PANEL_BELOW && !near_impact {
         return Ok(());
     }
-    let up = rel.normalize();
-    let v_srf = v - k.v - p.rotation.omega(sim.clock).raw().cross(rel);
-    let v_up = v_srf.dot(up);
-    let v_horizontal = (v_srf - up * v_up).length();
-    let g = src.gm / rel.length_squared();
-    let a = ship.craft.engine.thrust_vac / ship.mass_props().mass;
+    let twr = landing::twr(&ship.craft, ship.propellant(), m.pressure, m.gravity);
+    let braking = latest.and_then(|l| l.braking);
     egui::Window::new("Landing").anchor(egui::Align2::RIGHT_BOTTOM, [-12.0, -12.0]).resizable(false).show(ctx, |ui| {
         let dim = |t: &str| egui::RichText::new(t).monospace().small().color(theme::DIM);
         egui::Grid::new("landing_grid").num_columns(2).show(ui, |ui| {
-            let mut row = |label: &str, value: String| {
+            let mut row = |label: &str, value: String, warn: bool| {
                 ui.label(dim(label));
-                ui.monospace(value);
+                ui.label(egui::RichText::new(value).monospace().color(if warn { theme::WARN } else { theme::TEXT }));
                 ui.end_row();
             };
-            row("RADAR ALT", format::distance(height));
-            row("V/S", format!("{v_up:+.1} m/s"));
-            row("H SPEED", format!("{v_horizontal:.1} m/s"));
-            row("TWR", format!("{:.2}", a / g));
+            row("RADAR ALT", format::distance(radar), false);
+            row("V/S", format!("{:+.1} m/s", m.v_vertical), false);
+            row("H SPEED", format!("{:.1} m/s", m.v_horizontal), false);
+            row("TWR", format!("{twr:.2}"), twr < 1.0);
             match hit {
                 Some(h) => {
-                    row("IMPACT IN", format::duration(h.t.seconds_since(sim.clock)));
-                    row("AT", format!("{:.1} m/s", h.speed));
+                    row("IMPACT IN", format::duration(from_now(h.t, sim.clock)), false);
+                    row("IMPACT V/S", format!("{:+.1} m/s", h.v_vertical), false);
+                    row("IMPACT H", format!("{:.1} m/s", h.v_horizontal), false);
+                    row("AT", format!("{:+.3}° {:+.3}°", h.lat.to_degrees(), h.lon.to_degrees()), false);
                 }
-                None => row("IMPACT", "none".into()),
+                None => row("IMPACT", "none".into(), false),
             }
-            match braking_height(-v_up, a, g) {
-                Some(b) => {
-                    let colour = if height <= b * 1.2 { theme::WARN } else { theme::TEXT };
-                    ui.label(dim("BRAKE AT"));
-                    ui.label(egui::RichText::new(format::distance(b)).monospace().color(colour));
-                    ui.end_row();
+            match (hit, braking) {
+                (_, Some(b)) => {
+                    let t = from_now(b.t_ignite, sim.clock);
+                    row("BURN IN", burn_in(t), t < 10.0);
+                    row("IGNITE AT", format::distance(b.ignite_height), false);
                 }
-                None => row("BRAKE", "cannot stop".into()),
+                (Some(h), None) if from_now(h.t, sim.clock) < BRAKING_WITHIN => {
+                    row("BRAKE", "cannot stop".into(), true);
+                }
+                _ => {}
             }
         });
     });
@@ -170,48 +190,33 @@ mod tests {
     use super::*;
 
     #[test]
-    fn braking_height_is_the_stopping_distance() {
-        // 100 m/s down on the Moon (1.62 m/s²) at 3 m/s² net... a = 4.62.
-        let h = braking_height(100.0, 4.62, 1.62).unwrap();
-        assert!((h - 100.0 * 100.0 / 6.0).abs() < 1e-9);
-        assert_eq!(braking_height(-5.0, 4.0, 1.0), Some(0.0), "going up: no braking needed");
-        assert_eq!(braking_height(10.0, 1.0, 1.62), None, "cannot stop");
+    fn burn_in_counts_down_then_says_now() {
+        assert_eq!(burn_in(-1.0), "NOW");
+        assert_eq!(burn_in(0.0), "NOW");
+        assert_eq!(burn_in(65.0), format::duration(65.0));
     }
 
     #[test]
-    fn falling_the_last_metres() {
-        let (dt, v) = fall(10.0, 1.62, 15.0);
-        assert!((v - (100.0f64 + 2.0 * 1.62 * 15.0).sqrt()).abs() < 1e-12);
-        assert!((10.0 * dt + 0.5 * 1.62 * dt * dt - 15.0).abs() < 1e-9);
-    }
-
-    #[test]
-    fn a_falling_ship_predicts_its_impact() {
+    fn a_falling_ship_predicts_its_impact_and_braking() {
         let mut sim = SimState::new();
-        // A ship 200 km above Earth (above the atmosphere: coasting)
-        // falling straight down.
-        let earth = sim.world.find("Earth").unwrap().clone();
-        let re = earth.physical.as_ref().unwrap().radius_eq;
+        // 3 km above the Moon's surface falling at 50 m/s.
+        let moon = sim.world.find("Moon").unwrap().clone();
+        let p = moon.physical.as_ref().unwrap();
+        let fixed = p.ground_point(0.1, 0.2, 3_000.0);
+        let r = p.rotation.to_inertial(fixed, sim.clock).raw();
+        let v = p.rotation.omega(sim.clock).raw().cross(r) - r.normalize() * 50.0;
         let id = sim.vessel_ids.allocate();
-        let r = DVec3::X * (re + 200_000.0);
-        let v = sim::vessel::Vessel::coasting(
-            &sim.world,
-            id,
-            sim.clock,
-            earth.node,
-            r,
-            DVec3::ZERO,
-            sim::craft::test_craft(),
-        );
-        sim.fleet.push(v);
-        let i = sim.fleet.len() - 1;
-        let world = sim.world.clone();
-        let until = sim.clock.add_seconds(600.0);
-        sim.fleet[i].extend_coast(&world, until, 100_000);
-        let hit = impact(&sim, i, None).expect("it hits the ground");
-        // Free fall from 200 km with drag lower down: about four minutes.
+        let ship = Vessel::coasting(&sim.world, id, sim.clock, moon.node, r, v, sim::craft::test_craft());
+        sim.fleet.push(ship);
+        let ship = sim.fleet.last().unwrap();
+        let start = start_of(&sim.world, ship, 0.0, false).expect("flying");
+        let l = predict(&sim.world, &ship.craft, id, &start);
+        let hit = l.impact.expect("it lands");
         let dt = hit.t.seconds_since(sim.clock);
-        assert!(dt > 150.0 && dt < 400.0, "{dt}");
-        assert!(hit.speed > 100.0, "{}", hit.speed);
+        assert!(dt > 20.0 && dt < 60.0, "{dt}");
+        assert!(hit.v_vertical < -50.0 && hit.v_horizontal < 1.0, "{hit:?}");
+        let b = l.braking.expect("a full tank can stop");
+        assert!(b.t_ignite > sim.clock && b.t_ignite < hit.t);
+        assert!(b.ignite_height > 0.0 && b.ignite_height < 3_000.0);
     }
 }

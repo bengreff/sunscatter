@@ -104,7 +104,9 @@ fn main() {
         )
         .add_systems(
             Update,
-            (interface::pause::track_launch, state::advance, state::update_prediction).chain().in_set(Stage::Simulate),
+            (interface::pause::track_launch, state::advance, state::update_prediction, landing::update)
+                .chain()
+                .in_set(Stage::Simulate),
         )
         .add_systems(
             Update,
@@ -178,6 +180,7 @@ impl Plugin for GameState {
     fn build(&self, app: &mut App) {
         app.insert_resource(state::SimState::new())
             .init_resource::<state::Prediction>()
+            .init_resource::<landing::LandingPrediction>()
             .init_resource::<state::SimPause>()
             .init_resource::<camera::CameraRig>()
             .init_resource::<hud::UiState>()

@@ -103,8 +103,12 @@ pub fn tools() -> Vec<Tool> {
         ),
         t(
             "get_landing_prediction",
-            "Where and when the active vessel's stored trajectory meets the ground: seconds from now, speed at \
-             impact relative to the ground (m/s), the body. Null if it does not.",
+            "Where, when and how fast the active vessel meets the ground if it keeps its throttle and chute, \
+             pointing surface-retrograde (its own gravity, drag, lift and thrust model): seconds from now, \
+             the body, latitude/longitude (deg), ground height (m), vertical and horizontal speed relative \
+             to the ground (m/s); the full-thrust braking burn that stops 10 m above the ground (seconds \
+             to ignition, its altitude; null if it cannot stop); and the current radar altitude, vertical \
+             and horizontal surface speed and TWR (thrust at ambient pressure, local gravity).",
             schema(json!({}), &[]),
         ),
         t(
@@ -238,11 +242,7 @@ fn run(
         }
         "go_to_mission_control" => (json!({"location": "mission control"}), vec![Effect::Station(true)]),
         "set_plan" => set_plan(args, sim, comms)?,
-        "get_landing_prediction" => {
-            let hit = crate::landing::impact(sim, sim.active, prediction)
-                .map(|h| json!({"in_s": h.t.seconds_since(sim.clock), "speed_ms": h.speed, "body": name(h.body)}));
-            (json!({"impact": hit}), Vec::new())
-        }
+        "get_landing_prediction" => (landing_json(sim), Vec::new()),
         "closest_approaches" => approaches(args, sim)?,
         "set_controls" => {
             if comms.location != Location::Vessel(sim.ship().id()) {
@@ -312,6 +312,38 @@ fn get_vessel(
         "altitude_m": rel.length() - radius, "orbit": orbit, "signal": signal_json(Some(signal)),
     });
     Ok((out, Vec::new()))
+}
+
+/// The `get_landing_prediction` tool: the landing panel's numbers.
+fn landing_json(sim: &SimState) -> Value {
+    let ship = sim.ship();
+    let name = |n: sim::frame::NodeId| sim.world.eph.node(n).name.clone();
+    let Some(start) = crate::landing::start_of(&sim.world, ship, sim.controls.throttle, sim.controls.chute) else {
+        return json!({"impact": null, "braking": null, "surface": null});
+    };
+    let l = crate::landing::predict(&sim.world, &ship.craft, ship.id(), &start);
+    let (anchor, r, v) = ship.state_at(&sim.world, sim.clock);
+    let snap = sim.world.snapshot(sim.clock);
+    let m = sim::landing::surface_motion(&sim.world, &snap, anchor, start.body, r, v);
+    let impact = l.impact.map(|h| {
+        json!({
+            "in_s": h.t.seconds_since(sim.clock), "body": name(h.body),
+            "lat_deg": h.lat.to_degrees(), "lon_deg": h.lon.to_degrees(), "ground_height_m": h.height,
+            "speed_ms": h.speed, "vertical_ms": h.v_vertical, "horizontal_ms": h.v_horizontal,
+        })
+    });
+    let braking = l.braking.map(|b| {
+        json!({
+            "ignite_in_s": b.t_ignite.seconds_since(sim.clock), "ignite_altitude_m": b.ignite_height,
+            "stop_in_s": b.t_stop.seconds_since(sim.clock), "stop_height_m": b.stop_height,
+        })
+    });
+    let surface = json!({
+        "body": name(start.body), "radar_altitude_m": m.height - ship.contact_height(),
+        "vertical_ms": m.v_vertical, "horizontal_ms": m.v_horizontal,
+        "twr": sim::landing::twr(&ship.craft, ship.propellant(), m.pressure, m.gravity),
+    });
+    json!({"impact": impact, "braking": braking, "surface": surface})
 }
 
 /// The `closest_approaches` tool.
