@@ -312,11 +312,23 @@ Streamable HTTP on localhost, off by default. Agent commands have the origin of 
 **D070: The aerodynamics model's required reach.** *Decided, 2026-09-26 (owner).*
 Simplified is fine, as long as it models, semi-accurately: lift; rocket flight at low and high altitude at all speeds (subsonic, transonic, supersonic, hypersonic, rarefied); and entry from interplanetary velocities (to ~16 km/s). No flow-field solver. The model's limitations are recorded in [design/aero-thermal.md](design/aero-thermal.md).
 
-**D071: Medium must run full screen at full frame rate on the reference Mac.** *Decided, 2026-09-27 (owner).*
-A new performance benchmark alongside D028: the Medium tier, full screen on the reference Mac (M2 Pro, Retina), holds the display's frame rate (120 fps). Measured by the owner on 2026-09-27: Low reaches 120 fps, Medium drops to 40 fps in the lower atmosphere (GPU-bound; terrain/texture shading suspected).
-
 **D072: The 3D view renders at a scale of the window's resolution, 1× logical pixels by default.** *Decided, 2026-09-27 (owner).*
 A render-scale setting: by default the 3D scene renders at logical resolution (on Retina, a quarter of the physical pixels) and is scaled up; the UI stays at native resolution. "Native" is selectable.
+
+**D073: Graphics are bare and functional; only the minimal tier is developed.** *Decided, 2026-09-28 (owner). Replaces D071.*
+- The owner's number-one rule: a 100% accurate spaceflight simulator; graphics do not matter at this phase. Cartoon looks are welcome as long as the physics is realistic.
+- The minimal tier is the default and the only one developed: a blue sky at sea level, stars, sunlight from the Sun's direction, shadows, and a very simple ground texture for depth perception. The higher tiers stay in the code and are not worked on.
+- The minimal tier runs full screen at the display's frame rate on the reference Mac.
+
+**D074: The test craft is a finned rocket, stable nose-first.** *Decided, 2026-09-28 (owner).*
+Its shape makes it aerodynamically stable nose-first at every Mach number, on ascent and on entry. It is still a debug craft (D064): flown with debug mode on, so reaching orbit, heating and the parachute's landing speed are not design problems; a real staged rocket comes with the parts model.
+
+**D075: Attitude hold has five modes, and planned burns are flown by the attitude.** *Decided, 2026-09-28 (owner).*
+- Modes: **stability** (kill rotation, hold the attitude), **prograde**, **retrograde**, **target**, **maneuver**. Prograde and retrograde follow the navball's speed reference (orbital, surface or target), stated on screen.
+- Thrust is always along the craft's actual attitude. A planned burn is flown by the maneuver hold: the craft turns with its own attitude control and the burn's thrust follows the attitude, live and in the predicted plan alike.
+
+**D076: Apsis markers are extrema of distance on the predicted trajectory.** *Decided, 2026-09-28 (owner).*
+A marker is placed wherever the predicted trajectory (through planned burns) reaches a local maximum or minimum of distance from the dominant body, kept only when it differs from its neighbouring extremum by a significant fraction of the altitude. Nothing comes from osculating elements, so an escape trajectory has no apoapsis.
 
 ## Open questions
 
