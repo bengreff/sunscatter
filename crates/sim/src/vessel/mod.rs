@@ -39,7 +39,7 @@ mod live;
 mod segment;
 mod trajectory;
 
-pub use aerothermal::{air_at, coast_sunlight, in_atmosphere, Air, VesselThermal, LATTICE, MAX_SKIP};
+pub use aerothermal::{air_at, coast_sunlight, in_atmosphere, AeroTick, Air, VesselThermal, LATTICE, MAX_SKIP};
 pub use coast::THERMAL_SOLVE_UNITS;
 
 pub use anchor::preferred_anchor;
