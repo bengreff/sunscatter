@@ -170,6 +170,7 @@ pub fn draw(
     ui: Res<UiState>,
     mut iface: ResMut<InterfaceSettings>,
     station: Res<crate::tracking::TrackingStation>,
+    aps: Res<crate::trajectory::apsides::Apsides>,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
     let (y, mo, d, h, mi, s) = sim.clock.to_calendar();
@@ -241,7 +242,7 @@ pub fn draw(
     let dominant = sim.dominant_of(sim.active);
 
     panel(ctx, &mut iface, PanelId::Flight, |ui_| {
-        flight_panel(ui_, sim, Some(dominant));
+        flight_panel(ui_, sim, &aps, Some(dominant));
         if let Some(line) = crate::rendezvous::summary(&rv, sim) {
             ui_.label(egui::RichText::new(format!("target: {line}")).monospace().small().color(theme::TEXT));
         }
@@ -342,7 +343,12 @@ fn craft_rows(ui_: &mut egui::Ui, sim: &SimState, near: Option<sim::frame::NodeI
     }
 }
 
-fn flight_panel(ui_: &mut egui::Ui, sim: &SimState, near: Option<sim::frame::NodeId>) {
+fn flight_panel(
+    ui_: &mut egui::Ui,
+    sim: &SimState,
+    aps: &crate::trajectory::apsides::Apsides,
+    near: Option<sim::frame::NodeId>,
+) {
     let dim = |t: &str| egui::RichText::new(t).monospace().small().color(theme::DIM);
     let ship = sim.ship();
     let (anchor, r, v) = ship.state_at(&sim.world, sim.clock);
@@ -363,9 +369,24 @@ fn flight_panel(ui_: &mut egui::Ui, sim: &SimState, near: Option<sim::frame::Nod
         let above_ground = p.altitude_above_surface(fixed);
         let v_orb = v - k.v;
         let v_srf = v_orb - p.rotation.omega(sim.clock).raw().cross(rel);
-        let el = crate::relations::orbit_about(&sim.world, sim.clock, anchor, r, v, body.node)
-            .expect("nearest body is a source")
-            .elements;
+        // The next apsides on the predicted trajectory (D076), named by body
+        // when not about the current one.
+        let list = aps.get(ship.id());
+        let (next_ap, next_pe) = list.map_or((None, None), |a| a.next_after(sim.clock));
+        let apsis = |a: Option<&crate::trajectory::apsides::Apsis>| {
+            a.map_or_else(
+                || "-".to_string(),
+                |a| {
+                    let d = crate::format::distance(a.altitude);
+                    if a.body == body.node {
+                        d
+                    } else {
+                        format!("{d} ({})", sim.world.eph.node(a.body).name)
+                    }
+                },
+            )
+        };
+        let impact = list.and_then(|a| a.impact).filter(|i| i.t.seconds_since(sim.clock) > 0.0);
         egui::Grid::new("flight_grid").num_columns(2).spacing([10.0, 2.0]).show(ui_, |ui_| {
             let mut row = |label: &str, value: String| {
                 ui_.label(dim(label));
@@ -378,8 +399,11 @@ fn flight_panel(ui_: &mut egui::Ui, sim: &SimState, near: Option<sim::frame::Nod
             row("SURFACE V", format!("{:.1} m/s", v_srf.length()));
             row("ORBIT V", format!("{:.1} m/s", v_orb.length()));
             row("V/S", format!("{:+.1} m/s", v_srf.dot(rel.normalize())));
-            row("Ap", crate::format::distance(el.apoapsis() - p.radius_eq));
-            row("Pe", crate::format::distance(el.periapsis() - p.radius_eq));
+            row("Ap", apsis(next_ap));
+            row("Pe", apsis(next_pe));
+            if let Some(i) = impact {
+                row("IMPACT", format!("in {}", crate::format::duration(i.t.seconds_since(sim.clock))));
+            }
         });
     }
     craft_rows(ui_, sim, near);

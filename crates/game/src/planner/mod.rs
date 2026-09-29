@@ -10,11 +10,14 @@
 //! From anywhere but aboard the vessel, the plan travels at light speed
 //! (D063, D067); without a signal it cannot be sent.
 
+mod view;
+
 use crate::commands::{GameCommand, InFlight};
 use crate::comms::{Comms, Location};
-use crate::format::{delay as fmt_delay, duration as fmt_duration};
+use crate::format::{delay as fmt_delay, distance as fmt_distance, duration as fmt_duration};
 use crate::interface::toasts::Toasts;
 use crate::state::SimState;
+use crate::trajectory::apsides::{Apsides, VesselApsides};
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 use glam::DVec3;
@@ -38,6 +41,31 @@ pub struct Planner {
     /// The vessel the draft is for (the active one when opened).
     pub vessel: Option<VesselId>,
     pub draft: Vec<DraftBurn>,
+    /// The handle being dragged.
+    drag: Option<Drag>,
+    /// Where the left button went down outside the windows (a click on the
+    /// line is a press and release in place).
+    press: Option<Vec2>,
+}
+
+/// A handle drag in progress: which burn and Δv component, the axis's
+/// positive screen direction, where the drag started and the component's
+/// value then.
+#[derive(Clone, Copy, Debug)]
+struct Drag {
+    burn: usize,
+    axis: usize,
+    dir: Vec2,
+    from: Vec2,
+    dv0: f64,
+}
+
+/// Δv change (m/s) for a handle dragged `px` pixels outward (negative:
+/// inward): cubic, so small drags trim by centimetres per second and long
+/// ones reach kilometres per second (10 px → 1 cm/s, 100 px → 10 m/s,
+/// 500 px → 1.25 km/s).
+pub fn drag_dv(px: f64) -> f64 {
+    10.0 * (px / 100.0).powi(3)
 }
 
 /// The draft form of a vessel's plan: the burns not yet ignited.
@@ -76,14 +104,23 @@ pub fn burn_time(dv: f64, m0: f64, thrust: f64, isp: f64) -> f64 {
     m0 * (1.0 - (-dv / (isp * G0)).exp()) / mdot
 }
 
-/// Times (s from now) of the next apoapsis and periapsis of vessel `i` about
-/// its dominant body, from its osculating orbit.
-fn next_apsides(sim: &SimState, i: usize) -> (Option<f64>, Option<f64>) {
-    let v = &sim.fleet[i];
-    let (anchor, r, vel) = v.state_at(&sim.world, sim.clock);
-    let body = sim.dominant_of(i);
-    crate::relations::orbit_about(&sim.world, sim.clock, anchor, r, vel, body)
-        .map_or((None, None), |o| crate::navball::rules::time_to_apsides(&o.elements, o.mu))
+/// The first apsides after a burn ends, from the predicted trajectory
+/// (D076); only once the draft is the plan the trajectory was computed with.
+fn after_burn(sim: &SimState, list: &VesselApsides, end: Epoch, predicted: bool) -> String {
+    if !predicted {
+        return "set the plan to see Ap/Pe after it".into();
+    }
+    let (ap, pe) = list.next_after(end);
+    let show = |a: Option<&crate::trajectory::apsides::Apsis>| {
+        a.map_or_else(
+            || "-".to_string(),
+            |a| format!("{} ({})", fmt_distance(a.altitude), sim.world.eph.node(a.body).name),
+        )
+    };
+    match list.impact.filter(|m| m.t.seconds_since(end) > 0.0 && pe.is_none_or(|p| p.t.seconds_since(m.t) > 0.0)) {
+        Some(m) => format!("then Ap {}, impact on {}", show(ap), sim.world.eph.node(m.body).name),
+        None => format!("then Ap {}, Pe {}", show(ap), show(pe)),
+    }
 }
 
 /// A first-guess intercept of vessel `j` by vessel `i` (D008: two-body
@@ -123,56 +160,25 @@ pub fn intercept(sim: &SimState, i: usize, j: usize) -> Option<DraftBurn> {
     Some(DraftBurn { t_start, dv: DVec3::new(dv.dot(p), dv.dot(n), dv.dot(rad)), reference: body })
 }
 
-/// The time of the line sample nearest to `cursor` on screen, if within
-/// `max_px`: (time, screen point) samples in order along the line.
-pub fn nearest_on_screen(samples: &[(Epoch, Vec2)], cursor: Vec2, max_px: f32) -> Option<Epoch> {
-    samples
-        .iter()
-        .map(|(t, p)| (*t, p.distance(cursor)))
-        .filter(|(_, d)| *d <= max_px)
-        .min_by(|a, b| a.1.total_cmp(&b.1))
-        .map(|(t, _)| t)
+/// The time of the point on a drawn run nearest to `cursor` on screen, if
+/// within `max_px`, and its distance: `run` is (time, screen point) in order
+/// along the line; the time is interpolated along the nearest piece.
+pub fn nearest_on_screen(run: &[(Epoch, Vec2)], cursor: Vec2, max_px: f32) -> Option<(Epoch, f32)> {
+    let mut best: Option<(Epoch, f32)> = None;
+    for w in run.windows(2) {
+        let ((ta, a), (tb, b)) = (w[0], w[1]);
+        let ab = b - a;
+        let f =
+            if ab.length_squared() > 0.0 { ((cursor - a).dot(ab) / ab.length_squared()).clamp(0.0, 1.0) } else { 0.0 };
+        let d = cursor.distance(a + ab * f);
+        if d <= max_px && best.is_none_or(|(_, bd)| d < bd) {
+            best = Some((ta.add_seconds(f64::from(f) * tb.seconds_since(ta)), d));
+        }
+    }
+    best
 }
 
-/// With the planner open, a click on the active vessel's line adds a burn
-/// there (edit its Δv in the window).
-#[allow(clippy::too_many_arguments)]
-pub fn pick_on_line(
-    mut contexts: EguiContexts,
-    mouse: Res<ButtonInput<MouseButton>>,
-    sim: Res<SimState>,
-    rig: Res<crate::camera::CameraRig>,
-    ui: Res<crate::hud::UiState>,
-    cam: Query<(&Camera, &Transform, &Projection), With<crate::camera::MainCamera>>,
-    window: Query<&Window>,
-    mut planner: ResMut<Planner>,
-) -> Result {
-    if !planner.open || !mouse.just_pressed(MouseButton::Left) || planner.vessel != Some(sim.ship().id()) {
-        return Ok(());
-    }
-    let ctx = contexts.ctx_mut()?;
-    if ctx.is_pointer_over_egui() {
-        return Ok(());
-    }
-    let Some(cursor) = window.single().ok().and_then(Window::cursor_position) else { return Ok(()) };
-    let (Some(view), Some(tr)) = (crate::map::view(&cam), sim.ship().trajectory()) else { return Ok(()) };
-    let Some(plotter) = crate::trajectory::Plotter::new(&sim, &rig, ui.plot_frame) else { return Ok(()) };
-    let end = tr.computed_until();
-    let span = end.seconds_since(sim.clock).min(86_400.0);
-    let samples: Vec<(Epoch, Vec2)> = (1..=600)
-        .filter_map(|k| {
-            let t = sim.clock.add_seconds(span * f64::from(k) / 600.0);
-            let (anchor, r, _) = tr.eval(t)?;
-            Some((t, view.project(plotter.plot(anchor, r, t))?))
-        })
-        .collect();
-    if let Some(t) = nearest_on_screen(&samples, cursor, 8.0) {
-        let reference = sim.dominant_of(sim.active);
-        planner.draft.push(DraftBurn { t_start: t, dv: DVec3::ZERO, reference });
-        planner.draft.sort_by(|a, b| a.t_start.seconds_since(b.t_start).total_cmp(&0.0));
-    }
-    Ok(())
-}
+pub use view::pick_on_line;
 
 /// Toggles the planner (N) for the active vessel.
 pub fn keys(
@@ -202,6 +208,7 @@ pub fn draw(
     mut in_flight: ResMut<InFlight>,
     mut toasts: ResMut<Toasts>,
     mut commands: MessageWriter<GameCommand>,
+    aps: Res<Apsides>,
 ) -> Result {
     if !planner.open {
         return Ok(());
@@ -217,7 +224,12 @@ pub fn draw(
     let now = sim.clock;
     let body = sim.dominant_of(i);
     let body_name = sim.world.eph.node(body).name.clone();
-    let (next_ap, next_pe) = next_apsides(&sim, i);
+    // The next apsides on the predicted trajectory (D076), and whether it
+    // shows this draft (the plan set on the vessel).
+    let list = aps.get(id).cloned().unwrap_or_default();
+    let (next_ap, next_pe) = list.next_after(now);
+    let (next_ap, next_pe) = (next_ap.copied(), next_pe.copied());
+    let predicted = planner.draft == draft_from(vessel.plan(), now);
     let mut open = planner.open;
     let mut send = false;
     egui::Window::new(format!("Burn planner: Vessel {} (N)", id.0)).open(&mut open).default_width(380.0).show(
@@ -251,6 +263,7 @@ pub fn draw(
                 let dv = b.dv.length();
                 let t = burn_time(dv, mass, engine.thrust_vac, engine.isp_vac);
                 ui.label(egui::RichText::new(format!("{dv:.1} m/s about {name}, burn {}", fmt_duration(t))).small());
+                ui.label(egui::RichText::new(after_burn(&sim, &list, b.t_start.add_seconds(t), predicted)).small());
                 mass *= (-dv / (engine.isp_vac * G0)).exp();
                 total += dv;
             }
@@ -259,21 +272,21 @@ pub fn draw(
             }
             ui.separator();
             ui.horizontal(|ui| {
-                let mut add = |t: Option<f64>| {
-                    if let Some(t) = t {
-                        planner.draft.push(DraftBurn { t_start: now.add_seconds(t), dv: DVec3::ZERO, reference: body });
-                    }
+                let mut add = |t: Epoch, reference: NodeId| {
+                    planner.draft.push(DraftBurn { t_start: t, dv: DVec3::ZERO, reference });
+                    planner.draft.sort_by(|a, b| a.t_start.seconds_since(b.t_start).total_cmp(&0.0));
                 };
-                if ui.add_enabled(next_ap.is_some(), egui::Button::new("+ at Ap")).clicked() {
-                    add(next_ap);
+                if ui.add_enabled(next_ap.is_some(), egui::Button::new("+ at next Ap")).clicked() {
+                    next_ap.inspect(|a| add(a.t, a.body));
                 }
-                if ui.add_enabled(next_pe.is_some(), egui::Button::new("+ at Pe")).clicked() {
-                    add(next_pe);
+                if ui.add_enabled(next_pe.is_some(), egui::Button::new("+ at next Pe")).clicked() {
+                    next_pe.inspect(|a| add(a.t, a.body));
                 }
                 if ui.button("+ in 10 min").clicked() {
-                    add(Some(600.0));
+                    add(now.add_seconds(600.0), body);
                 }
             });
+            ui.label(egui::RichText::new("or click the line; drag a burn's handles to shape it").small());
             let target = match nav.target {
                 Some(crate::navball::NavTarget::Vessel(t)) => sim.index_of(t),
                 _ => None,
@@ -291,6 +304,15 @@ pub fn draw(
                 if short && !vessel.debug() { crate::interface::theme::WARN } else { crate::interface::theme::TEXT };
             ui.label(
                 egui::RichText::new(format!("total {total:.0} m/s of {available:.0} m/s available")).color(colour),
+            );
+            let m0 = vessel.mass_props().mass;
+            ui.label(
+                egui::RichText::new(format!(
+                    "propellant {:.0} kg of {:.0} kg on board",
+                    m0 - mass,
+                    vessel.propellant()
+                ))
+                .color(colour),
             );
             let signal = comms.signal(id);
             let delay = if comms.location == Location::Vessel(id) { Some(0.0) } else { signal.map(|s| s.delay) };
@@ -343,12 +365,28 @@ mod tests {
     }
 
     #[test]
-    fn a_click_picks_the_nearest_sample_within_reach() {
+    fn a_click_picks_the_nearest_point_on_the_line_within_reach() {
         let t0 = sim::sol::sol_epoch();
         let samples: Vec<(Epoch, Vec2)> =
             (0..10).map(|k| (t0.add_seconds(f64::from(k)), Vec2::new(10.0 * k as f32, 0.0))).collect();
-        assert_eq!(nearest_on_screen(&samples, Vec2::new(41.0, 3.0), 8.0), Some(t0.add_seconds(4.0)));
+        // Between samples 4 and 5, a tenth of the way: interpolated.
+        let (t, d) = nearest_on_screen(&samples, Vec2::new(41.0, 3.0), 8.0).expect("near");
+        assert!((t.seconds_since(t0) - 4.1).abs() < 1e-6 && (d - 3.0).abs() < 1e-6);
         assert_eq!(nearest_on_screen(&samples, Vec2::new(41.0, 30.0), 8.0), None);
+        // Past the end: the end point, if within reach.
+        let (t, _) = nearest_on_screen(&samples, Vec2::new(95.0, 0.0), 8.0).expect("near the end");
+        assert_eq!(t, t0.add_seconds(9.0));
+    }
+
+    #[test]
+    fn handle_drags_map_to_delta_v_cubically() {
+        // (pixels, m/s): fine near the node, coarse far out, odd.
+        let table =
+            [(0.0, 0.0), (10.0, 0.01), (50.0, 1.25), (100.0, 10.0), (200.0, 80.0), (500.0, 1250.0), (-100.0, -10.0)];
+        for (px, dv) in table {
+            assert!((drag_dv(px) - dv).abs() < 1e-9, "{px} px: {}", drag_dv(px));
+        }
+        assert!((1..600).all(|k| drag_dv(f64::from(k)) > drag_dv(f64::from(k - 1))), "monotonic");
     }
 
     #[test]

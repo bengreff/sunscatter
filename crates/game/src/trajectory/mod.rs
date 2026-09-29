@@ -1,20 +1,20 @@
-//! Trajectory display: stored segments resampled into the plotting frame,
-//! apsides found along them (the true extrema of distance to the primary
-//! along the N-body trajectory, not conic elements), and how long vessel and
-//! body lines are ([`line`], [`settings`]; D056).
+//! Trajectory display: stored segments sampled into the plotting frame
+//! ([`lines`]), apsides found along them ([`apsides`]: the extrema of
+//! distance on the N-body trajectory, D076), and how long vessel and body
+//! lines are ([`line`], [`settings`]; D056).
 
+pub mod apsides;
 pub mod clip;
 pub mod line;
+pub mod lines;
 pub mod settings;
 
+pub use lines::draw;
+
 use crate::camera::CameraRig;
-use crate::hud::{PlotFrame, UiState};
-use crate::map::MapView;
-use crate::map_view::ObjectId;
+use crate::hud::PlotFrame;
 use crate::relations::{Dominance, Orbit};
-use crate::state::{Prediction, SimState};
-use crate::tracking::Tracked;
-use bevy::prelude::*;
+use crate::state::SimState;
 use glam::{DMat3, DVec3};
 use line::{Limits, LineRule};
 use settings::OrbitSettings;
@@ -22,11 +22,8 @@ use sim::ephem::Ephemeris;
 use sim::frame::NodeId;
 use sim::kepler::Elements;
 use sim::time::Epoch;
-use sim::vessel::{Segment, SegmentKind, Vessel};
+use sim::vessel::{Segment, Vessel};
 use sim::world::World;
-
-/// Number of points used to draw a trajectory.
-pub const TRAJECTORY_POINTS: usize = 600;
 
 /// Earth–Moon rotating basis at `t` (x → Moon, z → orbit normal).
 fn rotating_basis(world: &World, t: Epoch) -> DMat3 {
@@ -78,12 +75,6 @@ pub fn future_span(seg: &Segment, now: Epoch) -> Option<(f64, f64)> {
     let t_start = now.seconds_since(seg.t0).max(seg.samples.first().map_or(0.0, |s| s.s.t));
     let t_end = seg.computed_until();
     (t_end > t_start).then_some((t_start, t_end))
-}
-
-/// The active vessel's displayed segment: the stored one while coasting,
-/// otherwise the background prediction.
-pub fn active_segment<'a>(sim: &'a SimState, pred: &'a Prediction) -> Option<&'a Segment> {
-    sim.ship().segment().or(pred.segment.as_ref())
 }
 
 /// Most stored samples scanned for one vessel line (bounds per-frame work
@@ -191,111 +182,9 @@ pub fn body_line(
     Some((orbit, out))
 }
 
-/// An apsis on the displayed trajectory.
-#[derive(Clone, Copy, Debug)]
-pub struct Apsis {
-    pub is_apo: bool,
-    /// Local segment time.
-    pub t: f64,
-    /// Distance from the primary's centre (m).
-    pub distance: f64,
-}
-
-/// Finds apsides of `seg` relative to `primary` over `[t0, t1]`: local
-/// extrema of the sampled distance, refined by a parabola through the three
-/// samples around each extremum.
-pub fn apsides(world: &World, seg: &Segment, primary: NodeId, t0: f64, t1: f64, n: usize) -> Vec<Apsis> {
-    let dist = |t: f64| {
-        let (anchor, r, _) = seg.eval(t)?;
-        Some((r + world.eph.relative(anchor, primary, seg.t0.add_seconds(t)).r).length())
-    };
-    let ts: Vec<f64> = (0..n).map(|k| t0 + (t1 - t0) * k as f64 / (n - 1) as f64).collect();
-    let ds: Vec<Option<f64>> = ts.iter().map(|&t| dist(t)).collect();
-    let mut out = Vec::new();
-    for k in 1..n - 1 {
-        let (Some(a), Some(b), Some(c)) = (ds[k - 1], ds[k], ds[k + 1]) else { continue };
-        let is_apo = b > a && b >= c;
-        let is_peri = b < a && b <= c;
-        if !(is_apo || is_peri) {
-            continue;
-        }
-        let h = ts[k + 1] - ts[k];
-        let denom = a - 2.0 * b + c;
-        let offset = if denom.abs() > 0.0 { 0.5 * (a - c) / denom } else { 0.0 };
-        let t = ts[k] + offset.clamp(-1.0, 1.0) * h;
-        let distance = dist(t).unwrap_or(b);
-        out.push(Apsis { is_apo, t, distance });
-    }
-    out
-}
-
-/// Draws the future trajectories of the active vessel and of tracked vessels
-/// that are in map view, resampled at
-/// uniform times with the segment's own interpolation, so the line starts
-/// exactly at the ship and stays smooth.
-#[allow(clippy::too_many_arguments)]
-pub fn draw(
-    sim: Res<SimState>,
-    rig: Res<CameraRig>,
-    pred: Res<Prediction>,
-    ui: Res<UiState>,
-    map: Res<MapView>,
-    tracked: Res<Tracked>,
-    orbits: Res<OrbitSettings>,
-    cam: Query<&Transform, With<crate::camera::MainCamera>>,
-    mut gizmos: Gizmos,
-) {
-    let Ok(cam) = cam.single() else { return };
-    let forward = cam.forward().as_vec3();
-    let Some(plotter) = Plotter::new(&sim, &rig, ui.plot_frame) else { return };
-    for (i, vessel) in sim.fleet.iter().enumerate() {
-        let active = i == sim.active;
-        if (!active && !tracked.is_tracked(vessel.id())) || !map.in_map(ObjectId::Vessel(vessel.id())) {
-            continue;
-        }
-        // The segments to draw: the powered prediction, or the stored
-        // trajectory from now through every planned burn.
-        let segs: Vec<&Segment> = match (active, vessel.trajectory()) {
-            (_, Some(tr)) => tr.segments.iter().filter(|s| s.t0.add_seconds(s.computed_until()) > sim.clock).collect(),
-            (true, None) => active_segment(&sim, &pred).into_iter().collect(),
-            (false, None) => Vec::new(),
-        };
-        let Some(&first) = segs.first() else { continue };
-        let points = if active { TRAJECTORY_POINTS } else { TRAJECTORY_POINTS / 3 };
-        let mut after_burn = false;
-        let mut first_run = true;
-        for (n, &seg) in segs.iter().enumerate() {
-            let Some((t_start, t_end)) = future_span(seg, sim.clock) else { continue };
-            // The line rule (D056) on the last segment: one revolution by default.
-            let t_end = if n + 1 == segs.len() {
-                t_end.min(vessel_line_end(&sim.world, seg, t_start, &orbits).0)
-            } else {
-                t_end
-            };
-            let burn = matches!(seg.kind, SegmentKind::Burn(_));
-            after_burn |= burn;
-            let colour = match (burn, after_burn, active) {
-                (true, _, _) => Color::srgb(1.0, 0.35, 0.2),
-                (false, true, _) => Color::srgb(0.3, 0.85, 1.0),
-                (false, false, true) => Color::srgb(1.0, 0.85, 0.2),
-                (false, false, false) => Color::srgba(0.7, 0.75, 0.8, 0.6),
-            };
-            let resampled: Vec<Vec3> = (0..points)
-                .filter_map(|k| {
-                    let t = t_start + (t_end - t_start) * k as f64 / (points - 1) as f64;
-                    let (anchor, r, _) = seg.eval(t)?;
-                    Some(plotter.plot(anchor, r, seg.t0.add_seconds(t)).as_vec3())
-                })
-                .collect();
-            // The first line starts at the ship (a powered prediction was
-            // computed a moment ago).
-            let start = (active && std::mem::take(&mut first_run) && std::ptr::eq(seg, first)).then(|| {
-                let (ship_anchor, ship_r, _) = sim.ship().state_at(&sim.world, sim.clock);
-                (sim.world.snapshot(sim.clock).relative_r(ship_anchor, rig.anchor) + ship_r - rig.cam_pos).as_vec3()
-            });
-            for run in clip::front_runs(start.into_iter().chain(resampled), forward, 1.0) {
-                gizmos.linestrip(run, colour);
-            }
-        }
-    }
+/// State at `t` along `segs` (in time order): the last segment starting at
+/// or before `t`.
+pub fn eval_at(segs: &[&Segment], t: Epoch) -> Option<(NodeId, DVec3, DVec3)> {
+    let seg = segs.iter().rev().find(|s| t.seconds_since(s.t0) >= 0.0)?;
+    seg.eval(t.seconds_since(seg.t0))
 }

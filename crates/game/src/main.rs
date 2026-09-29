@@ -135,6 +135,7 @@ fn main() {
             )
                 .in_set(Stage::Scene),
         )
+        .add_systems(Update, trajectory::apsides::update.after(state::update_prediction).in_set(Stage::Simulate))
         .add_systems(
             EguiPrimaryContextPass,
             (
@@ -189,6 +190,8 @@ impl Plugin for GameState {
             .init_resource::<settings_ui::SettingsUi>()
             .init_resource::<bench::Bench>()
             .init_resource::<map::MapView>()
+            .init_resource::<trajectory::apsides::Apsides>()
+            .init_resource::<trajectory::lines::Lines>()
             .init_resource::<saves::SaveUi>()
             .init_resource::<tracking::Tracked>()
             .init_resource::<tracking::TrackingStation>()

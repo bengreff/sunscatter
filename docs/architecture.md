@@ -35,6 +35,9 @@ A short map to search before building anything: who owns what, the frame order, 
 | Nearest body (camera clearance only), display primary, dominance ("which body is this about", one instance in `SimState`), osculating orbit (vessels and bodies), orbit size | `game::relations` | display only, never physics |
 | Map view: what is visible/hoverable, per object | `game::map_view` (rule, D054); `game::map` gathers sizes and draws | pure functions + table tests |
 | Orbit-line length (revolutions, caps, settings) | `game::trajectory` (`line`, `settings`); dominance in `game::relations::Dominance` (D056) | display only |
+| Apoapsides, periapsides and impact of a vessel's predicted trajectory (extrema of distance to the dominant body, D076), cached per vessel | `game::trajectory::apsides` | every Ap/Pe readout reads it (map markers, navball, flight panel, tracking, MCP, planner); nothing shows osculating Ap/Pe |
+| Vessel lines: adaptive sampling of stored segments, frustum culling, the drawn points kept per frame (`Lines`) | `game::trajectory::lines` | the renderer never integrates; picking reads `Lines` |
+| Burn planner: draft, handles (drag → Δv, `drag_dv`), clicks on the line | `game::planner` (`view` for the 3D/map part) | the plan is sent as `GameCommand::SetPlan` |
 | Lighting: star flux per object, eclipses, planetshine (D055) | `game::lighting` (rules; fills the terrain uniforms; the shader mirrors `sim::light::eclipse_factor` and fades sky light through twilight) | ambient/starlight in `game::sky`; exposure fixed (D055) |
 | Camera pose and limits, zoom, collision with surfaces and the ship, yaw reference and up blending | `game::camera` (pure rules in `camera::rules`) | terrain via `sim::forces::altitude_above` |
 | Navball: attitude, markers, mode, flight readouts | `game::navball` (rules in `navball::rules`) | |

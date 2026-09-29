@@ -15,6 +15,7 @@ use crate::camera::{self, CameraRig, Focus};
 use crate::commands::{GameCommand, InputContext, Keys};
 use crate::format::{distance as fmt_dist, duration as fmt_duration};
 use crate::state::{Prediction, SimState, WARP_LEVELS};
+use crate::trajectory::apsides::Apsides;
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 use sim::frame::NodeId;
@@ -166,13 +167,15 @@ pub fn update(
 pub struct VesselInfo {
     pub primary: Option<NodeId>,
     pub status: String,
-    /// Periapsis and apoapsis altitudes above the equatorial radius (m);
-    /// apoapsis is infinite on escape.
-    pub apsides: Option<(f64, f64)>,
+    /// The next periapsis and apoapsis altitudes on the predicted
+    /// trajectory (D076; no apoapsis on an escape), and seconds to impact.
+    pub pe: Option<f64>,
+    pub ap: Option<f64>,
+    pub impact: Option<f64>,
     pub period: Option<f64>,
 }
 
-pub fn vessel_info(sim: &SimState, i: usize) -> VesselInfo {
+pub fn vessel_info(sim: &SimState, aps: &Apsides, i: usize) -> VesselInfo {
     let vessel = &sim.fleet[i];
     let primary = Some(sim.dominant_of(i));
     let name = |n: NodeId| sim.world.eph.node(n).name.clone();
@@ -182,13 +185,16 @@ pub fn vessel_info(sim: &SimState, i: usize) -> VesselInfo {
         Phase::Powered { .. } => "powered".into(),
         Phase::Coasting { .. } => "coasting".into(),
     };
-    let mut info = VesselInfo { primary, status, apsides: None, period: None };
+    let mut info = VesselInfo { primary, status, pe: None, ap: None, impact: None, period: None };
     let flying = matches!(vessel.phase, Phase::Powered { .. } | Phase::Coasting { .. });
     if let (true, Some(body)) = (flying, primary.and_then(|p| sim.world.source(p))) {
+        if let Some(list) = aps.get(vessel.id()) {
+            let (ap, pe) = list.next_after(sim.clock);
+            (info.ap, info.pe) = (ap.map(|a| a.altitude), pe.map(|a| a.altitude));
+            info.impact = list.impact.map(|m| m.t.seconds_since(sim.clock)).filter(|&s| s > 0.0);
+        }
         let (anchor, r, v) = vessel.state_at(&sim.world, sim.clock);
         if let Some(o) = crate::relations::orbit_about(&sim.world, sim.clock, anchor, r, v, body.node) {
-            let radius = body.physical.as_ref().map_or(0.0, |p| p.radius_eq);
-            info.apsides = Some((o.elements.periapsis() - radius, o.elements.apoapsis() - radius));
             info.period = o.period();
         }
     }
@@ -257,6 +263,7 @@ pub fn draw(
     mut tracked: ResMut<Tracked>,
     mut ts: ResMut<TrackingStation>,
     comms: Res<crate::comms::Comms>,
+    aps: Res<Apsides>,
     mut commands: MessageWriter<GameCommand>,
 ) -> Result {
     if !ts.open {
@@ -324,7 +331,7 @@ pub fn draw(
             ui.separator();
             match ts.selected {
                 Some(Selection::Vessel(id)) if sim.index_of(id).is_some() => {
-                    vessel_details(ui, &sim, &tracked, &ts, &comms, id, &mut actions)
+                    vessel_details(ui, &aps, &sim, &tracked, &ts, &comms, id, &mut actions)
                 }
                 Some(Selection::Body(node)) => {
                     ui.strong(&sim.world.eph.node(node).name);
@@ -378,8 +385,10 @@ pub fn focus_vessel(sim: &SimState, rig: &mut CameraRig, id: VesselId) {
     rig.distance = 3.0 * from;
 }
 
+#[allow(clippy::too_many_arguments)]
 fn vessel_details(
     ui: &mut egui::Ui,
+    aps: &Apsides,
     sim: &SimState,
     tracked: &Tracked,
     ts: &TrackingStation,
@@ -389,7 +398,7 @@ fn vessel_details(
 ) {
     let Some(i) = sim.index_of(id) else { return };
     let active = i == sim.active;
-    let info = vessel_info(sim, i);
+    let info = vessel_info(sim, aps, i);
     ui.strong(tracked.name(id));
     ui.monospace(format!("status {}", info.status));
     ui.monospace(format!("signal {}", crate::comms::describe(comms.signal(id))));
@@ -399,9 +408,12 @@ fn vessel_details(
         }
     }
     ui.monospace(format!("about  {}", info.primary.map_or_else(|| "-".into(), |p| sim.world.eph.node(p).name.clone())));
-    if let Some((pe, ap)) = info.apsides {
-        let ap = if ap.is_finite() { fmt_dist(ap) } else { "escape".into() };
-        ui.monospace(format!("Pe {}   Ap {}", fmt_dist(pe), ap));
+    if info.pe.is_some() || info.ap.is_some() {
+        let show = |x: Option<f64>| x.map_or_else(|| "-".into(), fmt_dist);
+        ui.monospace(format!("Pe {}   Ap {}", show(info.pe), show(info.ap)));
+    }
+    if let Some(t) = info.impact {
+        ui.monospace(format!("impact in {}", fmt_duration(t)));
     }
     if let Some(p) = info.period {
         ui.monospace(format!("period {}", fmt_duration(p)));
@@ -479,8 +491,13 @@ mod tests {
         assert_eq!(rig.focus, Focus::Vessel(ids[3]), "the focus still names the same vessel");
         assert!(tracked.is_tracked(ids[0]), "a deleted vessel leaves no tracking state");
         assert!(!delete_vessel(&mut sim, &mut tracked, &mut rig, ids[0]), "deleting twice does nothing");
-        let info = vessel_info(&sim, 1);
-        let (pe, ap) = info.apsides.expect("coasting in orbit");
+        let until = sim.clock.add_seconds(12_000.0);
+        let world = sim.world.clone();
+        sim.fleet[1].extend_coast(&world, until, 200_000);
+        let mut aps = Apsides::default();
+        aps.refresh(&sim, &pred);
+        let info = vessel_info(&sim, &aps, 1);
+        let (pe, ap) = (info.pe.expect("a periapsis"), info.ap.expect("an apoapsis"));
         assert!(info.status == "coasting" && pe > 300_000.0 && ap < 500_000.0, "{pe} {ap}");
     }
 }

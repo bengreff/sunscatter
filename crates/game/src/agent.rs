@@ -58,7 +58,8 @@ pub fn tools() -> Vec<Tool> {
         t(
             "get_vessel",
             "A vessel as seen from your location (light-delayed): position and velocity relative to the body it is \
-             about (inertial axes, m and m/s), altitude, osculating orbit, signal. Fails without a signal.",
+             about (inertial axes, m and m/s), altitude, orbit (the next apsides and any impact along the predicted \
+             trajectory; inclination, eccentricity and period osculating), signal. Fails without a signal.",
             schema(json!({"id": id}), &["id"]),
         ),
         t(
@@ -200,33 +201,7 @@ fn run(
                 .collect();
             (json!({"bodies": bodies}), Vec::new())
         }
-        "get_vessel" => {
-            let id = vessel_id(args)?;
-            let i = sim.index_of(id).ok_or("no such vessel")?;
-            let signal = comms.signal(id).ok_or_else(|| {
-                let heard = comms.last_contact.get(&id).map(|t| epoch_text(*t)).unwrap_or_else(|| "never".into());
-                format!("no signal from vessel {} at {} (last heard {heard})", id.0, comms.location_name())
-            })?;
-            let v = &sim.fleet[i];
-            let body = sim.dominant_of(i);
-            let (anchor, r, vel) = v.state_at(&sim.world, sim.clock);
-            let k = sim.world.snapshot(sim.clock).relative(body, anchor);
-            let (rel, v_rel) = (comms::retarded(r - k.r, vel - k.v, signal.delay), vel - k.v);
-            let orbit = crate::relations::orbit_about(&sim.world, sim.clock, anchor, r, vel, body);
-            let radius = sim.world.source(body).and_then(|s| s.physical.as_ref()).map_or(0.0, |p| p.radius_eq);
-            let orbit = orbit.map(|o| {
-                json!({"periapsis_altitude_m": o.elements.periapsis() - radius,
-                       "apoapsis_altitude_m": o.elements.apoapsis() - radius,
-                       "inclination_deg": o.elements.i.to_degrees(), "eccentricity": o.elements.e,
-                       "period_s": o.period()})
-            });
-            let out = json!({
-                "id": id.0, "status": status(&v.phase), "about": name(body), "seen_delay_s": signal.delay,
-                "position_m": rel.to_array(), "velocity_ms": v_rel.to_array(),
-                "altitude_m": rel.length() - radius, "orbit": orbit, "signal": signal_json(Some(signal)),
-            });
-            (out, Vec::new())
-        }
+        "get_vessel" => get_vessel(args, sim, comms, prediction)?,
         "get_trajectory" => {
             let id = vessel_id(args)?;
             let i = sim.index_of(id).ok_or("no such vessel")?;
@@ -282,6 +257,61 @@ fn run(
         }
         _ => return Err(format!("unknown tool {tool}")),
     })
+}
+
+/// The `get_vessel` tool.
+fn get_vessel(
+    args: &Value,
+    sim: &SimState,
+    comms: &Comms,
+    prediction: Option<&sim::vessel::Segment>,
+) -> Result<(Value, Vec<Effect>), String> {
+    let name = |n: sim::frame::NodeId| sim.world.eph.node(n).name.clone();
+    let id = vessel_id(args)?;
+    let i = sim.index_of(id).ok_or("no such vessel")?;
+    let signal = comms.signal(id).ok_or_else(|| {
+        let heard = comms.last_contact.get(&id).map(|t| epoch_text(*t)).unwrap_or_else(|| "never".into());
+        format!("no signal from vessel {} at {} (last heard {heard})", id.0, comms.location_name())
+    })?;
+    let v = &sim.fleet[i];
+    let body = sim.dominant_of(i);
+    let (anchor, r, vel) = v.state_at(&sim.world, sim.clock);
+    let k = sim.world.snapshot(sim.clock).relative(body, anchor);
+    let (rel, v_rel) = (comms::retarded(r - k.r, vel - k.v, signal.delay), vel - k.v);
+    let orbit = crate::relations::orbit_about(&sim.world, sim.clock, anchor, r, vel, body);
+    let radius = sim.world.source(body).and_then(|s| s.physical.as_ref()).map_or(0.0, |p| p.radius_eq);
+    // Apsides from the predicted trajectory (D076), not the conic.
+    let segs: Vec<&sim::vessel::Segment> = match v.trajectory() {
+        Some(tr) => tr.segments.iter().collect(),
+        None if i == sim.active => prediction.into_iter().collect(),
+        None => Vec::new(),
+    };
+    let aps = crate::trajectory::apsides::of_segments(sim, &segs);
+    let (ap, pe) = aps.next_after(sim.clock);
+    let upcoming: Vec<Value> = aps
+        .list
+        .iter()
+        .filter(|a| a.t.seconds_since(sim.clock) > 0.0)
+        .take(8)
+        .map(|a| {
+            json!({"kind": if a.is_apo { "apoapsis" } else { "periapsis" }, "body": name(a.body),
+                   "altitude_m": a.altitude, "in_s": a.t.seconds_since(sim.clock)})
+        })
+        .collect();
+    let impact = aps.impact.filter(|m| m.t.seconds_since(sim.clock) > 0.0);
+    let orbit = orbit.map(|o| {
+        json!({"periapsis_altitude_m": pe.map(|a| a.altitude), "apoapsis_altitude_m": ap.map(|a| a.altitude),
+               "apsides": upcoming,
+               "impact": impact.map(|m| json!({"body": name(m.body), "in_s": m.t.seconds_since(sim.clock)})),
+               "inclination_deg": o.elements.i.to_degrees(), "eccentricity": o.elements.e,
+               "period_s": o.period()})
+    });
+    let out = json!({
+        "id": id.0, "status": status(&v.phase), "about": name(body), "seen_delay_s": signal.delay,
+        "position_m": rel.to_array(), "velocity_ms": v_rel.to_array(),
+        "altitude_m": rel.length() - radius, "orbit": orbit, "signal": signal_json(Some(signal)),
+    });
+    Ok((out, Vec::new()))
 }
 
 /// The `closest_approaches` tool.

@@ -7,8 +7,6 @@
 //! +Y).
 
 use glam::{DQuat, DVec3};
-use sim::kepler::Elements;
-use std::f64::consts::{PI, TAU};
 
 /// Below this altitude the navball shows surface mode, above it orbit mode.
 pub const SURFACE_MODE_BELOW: f64 = 36_000.0;
@@ -212,24 +210,6 @@ pub fn ball_colour(el: f64) -> [f32; 3] {
     let ground = lerp([156.0, 98.0, 52.0], [74.0, 42.0, 20.0], (-el).max(0.0));
     let t = ((el as f64 / HORIZON_BLEND + 1.0) * 0.5).clamp(0.0, 1.0) as f32;
     lerp(ground, sky, t)
-}
-
-/// Times (s) to the next apoapsis and periapsis of an osculating orbit;
-/// `None` when there is none ahead (no apoapsis when unbound, no periapsis
-/// after it on an escape).
-pub fn time_to_apsides(el: &Elements, mu: f64) -> (Option<f64>, Option<f64>) {
-    let n = el.mean_motion(mu);
-    if n.is_nan() || n <= 0.0 {
-        return (None, None);
-    }
-    let m = el.mean_anomaly;
-    if el.e < 1.0 {
-        let ap = (PI - m).rem_euclid(TAU) / n;
-        let pe = (-m).rem_euclid(TAU) / n;
-        (Some(ap), Some(pe))
-    } else {
-        (None, (m < 0.0).then(|| -m / n))
-    }
 }
 
 /// The altitude shown above the ball, with its label: above the ground in

@@ -50,6 +50,8 @@
 - Culling: lines are sampled adaptively and segments outside the view frustum skipped; `vessel_line_end` computed once per frame per vessel.
 - Planner: add a node anywhere on the drawn line (including after earlier burns); draggable prograde/normal/radial handles on the node in the 3D view; Ap/Pe after each burn from the same apsis list.
 
+- **Built (playable):** `trajectory::apsides` (r·v sign changes on the stored samples, Illinois refinement on the segment interpolant, runs split per dominant body, significance 0.5 % of altitude — a real LEO orbit from osculating e = 0.001 swings only ≈3 km (0.8 %) under J2, and those are its apsides; incremental cache per vessel); impact from a `Surface` segment end. Map markers for every apsis and the impact along each drawn line (labelled for the active vessel); navball, flight panel (next Ap/Pe, body named if different, IMPACT row), tracking station, MCP `get_vessel` (next Ap/Pe, upcoming list, impact) and the planner read it. `trajectory::lines`: samples follow the path (≤2° velocity turn, ≤1 h), subdivided where a chord strays >1 px on screen, frustum-culled; built once per frame and kept in `Lines` for markers and picking. Planner (`planner::view`): click (press+release in place) anywhere on the drawn line, any segment; six egui drag handles per burn (cubic `drag_dv`); aboard, releasing a drag sets the plan; per-burn Ap/Pe after it; total Δv and propellant vs on board. Left: a circular orbit shows no Ap/Pe (by D076's filter); `state::lookahead_until` still calls `vessel_line_end` separately.
+
 ## F. Interface cleanup
 
 - One place per readout (the navball keeps attitude and speed; the flight panel keeps position, orbit, craft, controls).

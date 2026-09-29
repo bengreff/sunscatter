@@ -9,11 +9,12 @@ use crate::map_view::{self, Object, ObjectId, Visibility};
 use crate::scene::BodyDefs;
 use crate::state::{Prediction, SimState};
 use crate::tracking::{Tracked, TrackingStation};
-use crate::trajectory::{self, settings::OrbitSettings, Plotter};
+use crate::trajectory::{self, apsides::Apsides, lines::Lines, settings::OrbitSettings, Plotter};
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use bevy_egui::{egui, EguiContexts};
 use glam::DVec3;
+use sim::time::Epoch;
 
 /// A vessel's bounding radius for the map-view rule (m).
 pub const VESSEL_RADIUS: f64 = 10.0;
@@ -52,8 +53,10 @@ pub struct View {
     gt: GlobalTransform,
     /// Pixels per radian at the centre of the view.
     focal: f64,
-    /// Viewport height (logical px) and vertical field of view (rad).
+    /// Viewport height (logical px), width over height, and vertical
+    /// field of view (rad).
     height: f64,
+    aspect: f64,
     fov: f64,
 }
 
@@ -64,6 +67,16 @@ impl View {
 
     pub fn focal(&self) -> f64 {
         self.focal
+    }
+
+    /// Vertical field of view (rad).
+    pub fn fov(&self) -> f64 {
+        self.fov
+    }
+
+    /// Viewport width over height.
+    pub fn aspect(&self) -> f64 {
+        self.aspect
     }
 
     /// Projected radius (px) of a sphere of `radius` at camera-relative `p`.
@@ -82,7 +95,9 @@ pub fn view(cam: &Query<(&Camera, &Transform, &Projection), With<MainCamera>>) -
         _ => 0.8,
     };
     let height = f64::from(size.y);
-    Some(View { cam: c.clone(), gt: GlobalTransform::from(*t), focal: height * 0.5 / (fov * 0.5).tan(), height, fov })
+    let aspect = f64::from(size.x) / height.max(1.0);
+    let focal = height * 0.5 / (fov * 0.5).tan();
+    Some(View { cam: c.clone(), gt: GlobalTransform::from(*t), focal, height, aspect, fov })
 }
 
 /// Gathers every object's sizes and classifies it (after the camera moves).
@@ -200,7 +215,8 @@ pub fn draw_overlay(
     window: Query<&Window, With<PrimaryWindow>>,
     tracked: Res<Tracked>,
     mut station: ResMut<TrackingStation>,
-    orbits: Res<crate::trajectory::settings::OrbitSettings>,
+    aps: Res<Apsides>,
+    lines: Res<Lines>,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
     let Some(v) = view(&cam) else { return Ok(()) };
@@ -223,8 +239,8 @@ pub fn draw_overlay(
             }
         }
     }
-    if map.in_map(ObjectId::Vessel(sim.ship().id())) {
-        draw_apsides(&painter, &sim, &rig, &pred, &ui, &v, &map, &orbits);
+    if let Some(plotter) = Plotter::new(&sim, &rig, ui.plot_frame) {
+        draw_apsides(&painter, &sim, &pred, &v, &map, &aps, &lines, &plotter);
     }
 
     let cursor = window.single().ok().and_then(Window::cursor_position);
@@ -263,50 +279,48 @@ pub fn draw_overlay(
     Ok(())
 }
 
+/// Apsis markers (D076) and the impact point along the drawn part of each
+/// vessel line; labelled with altitude and time for the active vessel.
 #[allow(clippy::too_many_arguments)]
 fn draw_apsides(
     painter: &egui::Painter,
     sim: &SimState,
-    rig: &CameraRig,
     pred: &Prediction,
-    ui: &UiState,
     v: &View,
     map: &MapView,
-    orbits: &crate::trajectory::settings::OrbitSettings,
+    aps: &Apsides,
+    lines: &Lines,
+    plotter: &Plotter,
 ) {
-    let Some(seg) = trajectory::active_segment(sim, pred) else { return };
-    let Some((t0, t1)) = trajectory::future_span(seg, sim.clock) else { return };
-    // Only along the drawn line (D056), not the whole computed segment.
-    let t1 = t1.min(trajectory::vessel_line_end(&sim.world, seg, t0, orbits).0);
-    let primary = sim.dominant_of(sim.active);
-    let Some(plotter) = Plotter::new(sim, rig, ui.plot_frame) else { return };
-    let radius = sim.world.source(primary).and_then(|s| s.physical.as_ref()).map_or(0.0, |p| p.radius_eq);
-    let now = sim.clock.seconds_since(seg.t0);
-    let mut seen = (false, false);
-    for a in trajectory::apsides(&sim.world, seg, primary, t0, t1, trajectory::TRAJECTORY_POINTS) {
-        // Label only the next apoapsis and periapsis.
-        let first = if a.is_apo { &mut seen.0 } else { &mut seen.1 };
-        if std::mem::replace(first, true) {
-            continue;
+    for line in &lines.vessels {
+        let (Some(i), Some(list)) = (sim.index_of(line.id), aps.get(line.id)) else { continue };
+        let segs = trajectory::apsides::vessel_segments(sim, pred, i);
+        let shown = |t: Epoch| t.seconds_since(sim.clock) > 0.0 && line.end.seconds_since(t) >= 0.0;
+        let marks = list.list.iter().map(|a| (a.t, Some(a))).chain(list.impact.map(|m| (m.t, None)));
+        for (t, apsis) in marks.filter(|(t, _)| shown(*t)) {
+            let Some((anchor, r, _)) = trajectory::eval_at(&segs, t) else { continue };
+            let c = plotter.plot(anchor, r, t);
+            let Some(s) = v.project(c).filter(|&s| !map_view::occluded(&map.objects, s, c.length())) else { continue };
+            let (name, color) = match apsis {
+                Some(a) if a.is_apo => ("Ap", egui::Color32::from_rgb(120, 200, 255)),
+                Some(_) => ("Pe", egui::Color32::from_rgb(255, 170, 90)),
+                None => ("Impact", egui::Color32::from_rgb(255, 80, 80)),
+            };
+            let size = if line.active { 4.0 } else { 3.0 };
+            painter.circle_filled(egui::pos2(s.x, s.y), size, color);
+            let label = match (line.active, apsis) {
+                (false, _) => name.to_string(),
+                (true, Some(a)) => {
+                    format!(
+                        "{name} {}\nin {}",
+                        format::distance(a.altitude),
+                        format::duration(t.seconds_since(sim.clock))
+                    )
+                }
+                (true, None) => format!("{name}\nin {}", format::duration(t.seconds_since(sim.clock))),
+            };
+            let font = egui::FontId::monospace(if line.active { 12.0 } else { 10.0 });
+            painter.text(egui::pos2(s.x + 8.0, s.y - 8.0), egui::Align2::LEFT_BOTTOM, label, font, color);
         }
-        let Some((anchor, r, _)) = seg.eval(a.t) else { continue };
-        let c = plotter.plot(anchor, r, seg.t0.add_seconds(a.t));
-        let Some(s) = v.project(c).filter(|&s| !map_view::occluded(&map.objects, s, c.length())) else { continue };
-        let color =
-            if a.is_apo { egui::Color32::from_rgb(120, 200, 255) } else { egui::Color32::from_rgb(255, 170, 90) };
-        painter.circle_filled(egui::pos2(s.x, s.y), 4.0, color);
-        let label = format!(
-            "{} {}\nin {}",
-            if a.is_apo { "Ap" } else { "Pe" },
-            format::distance(a.distance - radius),
-            format::duration(a.t - now)
-        );
-        painter.text(
-            egui::pos2(s.x + 8.0, s.y - 8.0),
-            egui::Align2::LEFT_BOTTOM,
-            label,
-            egui::FontId::monospace(12.0),
-            color,
-        );
     }
 }

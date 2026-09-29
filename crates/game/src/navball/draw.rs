@@ -42,12 +42,13 @@ pub fn draw(
     station: Res<TrackingStation>,
     mut iface: ResMut<InterfaceSettings>,
     mut nav: ResMut<Navball>,
+    aps: Res<crate::trajectory::apsides::Apsides>,
 ) -> Result {
     if station.open {
         return Ok(());
     }
     let ctx = contexts.ctx_mut()?;
-    let Some(state) = nav_state(&sim, &tracked, &mut nav) else { return Ok(()) };
+    let Some(state) = nav_state(&sim, &tracked, &aps, &mut nav) else { return Ok(()) };
     let shown = nav.readouts(time.elapsed_secs_f64(), &state).clone();
     let (locked, current_target) = (nav.locked, nav.target);
     let ball = iface.navball_size;

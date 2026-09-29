@@ -194,25 +194,6 @@ fn vertical_speed_and_g_load() {
 }
 
 #[test]
-fn time_to_apsides_follows_the_mean_anomaly() {
-    let mu = 3.986_004_418e14;
-    let el = |e: f64, a: f64, m: f64| Elements { a, e, i: 0.3, raan: 0.0, argp: 0.0, mean_anomaly: m };
-    let circ = el(0.1, 7.0e6, 0.0);
-    let period = circ.period(mu);
-    let (ap, pe) = time_to_apsides(&circ, mu);
-    assert!(close(pe.unwrap(), 0.0, 1e-6) && close(ap.unwrap(), period / 2.0, 1e-6));
-    let (ap, pe) = time_to_apsides(&el(0.1, 7.0e6, PI), mu);
-    assert!(close(ap.unwrap(), 0.0, 1e-6) && close(pe.unwrap(), period / 2.0, 1e-6));
-    let (ap, pe) = time_to_apsides(&el(0.1, 7.0e6, 1.5 * PI), mu);
-    assert!(close(ap.unwrap(), 0.75 * period, 1e-6) && close(pe.unwrap(), 0.25 * period, 1e-6));
-    // Hyperbolic: periapsis ahead only before it.
-    let hyp = el(1.5, -2.0e7, -1.0);
-    let (ap, pe) = time_to_apsides(&hyp, mu);
-    assert!(ap.is_none() && close(pe.unwrap(), 1.0 / hyp.mean_motion(mu), 1e-6));
-    assert_eq!(time_to_apsides(&el(1.5, -2.0e7, 1.0), mu), (None, None));
-}
-
-#[test]
 fn altitude_follows_the_speed_mode() {
     // (mode, expected label and value) for 1,200 m above the ground, 1,500 m above the sea.
     let cases = [

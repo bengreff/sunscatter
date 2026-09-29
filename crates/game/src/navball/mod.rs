@@ -9,9 +9,9 @@
 mod draw;
 pub mod rules;
 
-use crate::relations;
 use crate::state::SimState;
 use crate::tracking::Tracked;
+use crate::trajectory::apsides::Apsides;
 use bevy::prelude::*;
 use glam::DVec3;
 use rules::{Angles, Local, Markers, Mode, Ship};
@@ -129,7 +129,7 @@ pub fn proper_accel(world: &World, t: Epoch, vessel: &Vessel, throttle: f64) -> 
 }
 
 /// Gathers the navball state for the active vessel, updating the mode.
-pub fn nav_state(sim: &SimState, tracked: &Tracked, nav: &mut Navball) -> Option<NavState> {
+pub fn nav_state(sim: &SimState, tracked: &Tracked, aps: &Apsides, nav: &mut Navball) -> Option<NavState> {
     let vessel = sim.ship();
     let t = sim.clock;
     let (anchor, r, v) = vessel.state_at(&sim.world, t);
@@ -159,14 +159,9 @@ pub fn nav_state(sim: &SimState, tracked: &Tracked, nav: &mut Navball) -> Option
     let local = rules::local_frame(rel, p.rotation.pole(t));
     let ship = rules::ship_axes(vessel.attitude.q);
     let in_atmosphere = p.atmosphere.as_ref().is_some_and(|a| alt < a.top);
-    let orbit = relations::orbit_about(&sim.world, t, anchor, r, v, body);
-    // On the ground the "orbit" is the surface's rotation, with the ship at
-    // its apoapsis: noise flipped the time to Ap between 0 and a period.
     let grounded = matches!(vessel.phase, Phase::Landed { .. } | Phase::Crashed { .. });
-    let (time_to_ap, time_to_pe) = match orbit.filter(|_| !grounded) {
-        Some(o) => rules::time_to_apsides(&o.elements, o.mu),
-        None => (None, None),
-    };
+    // The next apsides on the predicted trajectory (D076).
+    let (time_to_ap, time_to_pe) = aps.get(vessel.id()).map_or((None, None), |a| a.times_to_next(t));
     Some(NavState {
         mode: nav.mode,
         ship,
