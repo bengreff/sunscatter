@@ -25,9 +25,15 @@ pub struct ShipVisual(pub usize);
 #[derive(Component)]
 pub struct SunLight;
 
+/// The engine-on mark behind vessel `.0`'s bell (a static flame, D073).
+#[derive(Component)]
+pub struct FlameVisual(pub usize);
+
 #[derive(Resource)]
 pub struct Assets3d {
     ship_mesh: Handle<Mesh>,
+    flame_mesh: Handle<Mesh>,
+    flame_material: Handle<StandardMaterial>,
 }
 
 pub fn setup(
@@ -86,7 +92,16 @@ pub fn setup(
     commands.spawn((SunLight, DirectionalLight { illuminance: 128_000.0, ..default() }, cascades, Transform::IDENTITY));
     commands.insert_resource(GlobalAmbientLight { brightness: 0.0, ..default() });
     commands.insert_resource(defs);
-    commands.insert_resource(Assets3d { ship_mesh: meshes.add(craft_mesh(&sim::craft::test_craft().mesh)) });
+    commands.insert_resource(Assets3d {
+        ship_mesh: meshes.add(craft_mesh(&sim::craft::test_craft().mesh)),
+        flame_mesh: meshes.add(Cone { radius: FLAME_RADIUS, height: FLAME_LENGTH }),
+        flame_material: materials.add(StandardMaterial {
+            base_color: Color::srgb(1.0, 0.6, 0.2),
+            emissive: LinearRgba::rgb(40.0, 14.0, 3.0),
+            unlit: true,
+            ..default()
+        }),
+    });
 }
 
 /// A Bevy mesh from a craft's render mesh (body axes, +Z the nose).
@@ -160,6 +175,71 @@ pub fn light_up(dir: Vec3) -> Vec3 {
         Vec3::Z
     } else {
         Vec3::X
+    }
+}
+
+/// The flame mark: a cone this long and wide (m), starting this far behind
+/// the engine's mount point (the bell's throat) along the exhaust.
+const FLAME_LENGTH: f32 = 8.0;
+const FLAME_RADIUS: f32 = 0.7;
+const FLAME_START: f64 = 1.1;
+
+/// Whether vessel `i`'s engine is running now: a burn segment of its stored
+/// trajectory, or live flight with the throttle open (and propellant, or
+/// debug mode).
+pub fn engine_on(sim: &SimState, i: usize) -> bool {
+    let v = &sim.fleet[i];
+    if let Some(seg) = v.trajectory().and_then(|tr| tr.segment_at(sim.clock)) {
+        return matches!(seg.kind, sim::vessel::SegmentKind::Burn(_));
+    }
+    i == sim.active
+        && matches!(v.phase, sim::vessel::Phase::Powered { .. })
+        && sim.controls.throttle > 0.0
+        && (v.debug() || v.propellant() > 0.0)
+}
+
+/// Places the flame marks: shown behind the bell of every vessel whose
+/// engine runs, hidden otherwise.
+pub fn update_flames(
+    mut commands: Commands,
+    sim: Res<SimState>,
+    assets: Res<Assets3d>,
+    ships: Query<(&ShipVisual, &Transform), Without<FlameVisual>>,
+    mut flames: Query<(Entity, &FlameVisual, &mut Transform, &mut Visibility)>,
+) {
+    let mut seen = vec![false; sim.fleet.len()];
+    for (entity, flame, mut t, mut vis) in &mut flames {
+        let Some(vessel) = sim.fleet.get(flame.0) else {
+            commands.entity(entity).despawn();
+            continue;
+        };
+        seen[flame.0] = true;
+        let ship = ships.iter().find(|(s, _)| s.0 == flame.0).map(|(_, t)| *t);
+        let (Some(ship), true) = (ship, engine_on(&sim, flame.0)) else {
+            *vis = Visibility::Hidden;
+            continue;
+        };
+        let e = &vessel.craft.engine;
+        // The cone's axis is +Y with its apex up: point the apex down the exhaust.
+        let exhaust = -e.mount_dir;
+        let centre = e.mount_pos + exhaust * (FLAME_START + f64::from(FLAME_LENGTH) / 2.0);
+        let local = Transform {
+            translation: centre.as_vec3(),
+            rotation: Quat::from_rotation_arc(Vec3::Y, exhaust.as_vec3()),
+            scale: Vec3::ONE,
+        };
+        *t = ship * local;
+        *vis = Visibility::Visible;
+    }
+    for (i, _) in seen.iter().enumerate().filter(|(_, s)| !**s) {
+        commands.spawn((
+            FlameVisual(i),
+            Mesh3d(assets.flame_mesh.clone()),
+            MeshMaterial3d(assets.flame_material.clone()),
+            NotShadowCaster,
+            Transform::IDENTITY,
+            Visibility::Hidden,
+        ));
     }
 }
 

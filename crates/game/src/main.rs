@@ -128,6 +128,7 @@ fn main() {
                 atmosphere::update,
                 atmosphere::update_sky_light,
                 scene::update_ships,
+                scene::update_flames.after(scene::update_ships),
                 (terrain::update, lighting::update_terrain).chain(),
                 terrain::update_textures,
                 sky::update_stars,
