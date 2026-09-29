@@ -10,7 +10,8 @@
         noise_temperature_k: 50.0,
         // Below this rate (bit/s) a link is unusable.
         min_rate_bps: 10.0,
-        // Ground stations see vessels above this elevation (deg).
+        // The horizon mask (deg) of a site that states none, and of a vessel
+        // on the ground. Each site may state its own (`min_elevation_deg`).
         min_elevation_deg: 6.0,
         // Ground network between sites on one body: signal speed / c.
         ground_speed_factor: 0.7,
@@ -22,19 +23,36 @@
         // Mission control (D067): the tracking station is "being here".
         (name: "Houston", body: "Earth", lat_deg: 29.5593, lon_deg: -95.0900, height_m: 10.0,
          kind: MissionControl, antenna: None),
-        // The launch pad (sim's pad, Kennedy Space Center): no antenna, wired.
+        // The launch pad (sim's pad, Kennedy Space Center): wired, with the
+        // pad's own radio (a low-gain omni on the tower) so the link holds
+        // from T+0 while the vessel climbs overhead.
         (name: "Kennedy pad", body: "Earth", lat_deg: 28.6082, lon_deg: -80.66, height_m: 0.0,
-         kind: LaunchSite, antenna: None),
-        // Merritt Island (MILA), the launch site's tracking station: 9 m dish,
-        // ~55 dBi at X band, 2 kW.
+         kind: LaunchSite, antenna: Some((gain_dbi: 3.0, power_w: 10.0)), min_elevation_deg: Some(0.5)),
+        // Eastern Range tracking stations along a due-east ascent from the
+        // Cape: 9-10 m telemetry dishes, ~55 dBi at X band, 2 kW. Launch and
+        // range tracking works down to ~0.5 deg elevation.
+        // Merritt Island (MILA), the launch site's tracking station.
         (name: "Merritt Island", body: "Earth", lat_deg: 28.5086, lon_deg: -80.6931, height_m: 5.0,
-         kind: GroundStation, antenna: Some((gain_dbi: 55.0, power_w: 2000.0))),
-        // Deep Space Network complexes: 70 m dishes, ~74 dBi at X band, 20 kW.
+         kind: GroundStation, antenna: Some((gain_dbi: 55.0, power_w: 2000.0)), min_elevation_deg: Some(0.5)),
+        // Jonathan Dickinson Missile Tracking Annex (Jupiter, Florida).
+        (name: "Jonathan Dickinson", body: "Earth", lat_deg: 26.9837, lon_deg: -80.1086, height_m: 10.0,
+         kind: GroundStation, antenna: Some((gain_dbi: 55.0, power_w: 2000.0)), min_elevation_deg: Some(0.5)),
+        // Bermuda (Cooper's Island), north of the ascent track.
+        (name: "Bermuda", body: "Earth", lat_deg: 32.3513, lon_deg: -64.6582, height_m: 10.0,
+         kind: GroundStation, antenna: Some((gain_dbi: 55.0, power_w: 2000.0)), min_elevation_deg: Some(0.5)),
+        // Antigua Air Station, south of it.
+        (name: "Antigua", body: "Earth", lat_deg: 17.1370, lon_deg: -61.7760, height_m: 10.0,
+         kind: GroundStation, antenna: Some((gain_dbi: 55.0, power_w: 2000.0)), min_elevation_deg: Some(0.5)),
+        // Ascension Island, far downrange (orbit insertion and first pass).
+        (name: "Ascension", body: "Earth", lat_deg: -7.9069, lon_deg: -14.4025, height_m: 150.0,
+         kind: GroundStation, antenna: Some((gain_dbi: 55.0, power_w: 2000.0)), min_elevation_deg: Some(0.5)),
+        // Deep Space Network complexes: 70 m dishes, ~74 dBi at X band, 20 kW;
+        // tracked above 6 deg (DSN 810-005).
         (name: "Goldstone", body: "Earth", lat_deg: 35.4267, lon_deg: -116.8900, height_m: 1000.0,
-         kind: GroundStation, antenna: Some((gain_dbi: 74.0, power_w: 20000.0))),
+         kind: GroundStation, antenna: Some((gain_dbi: 74.0, power_w: 20000.0)), min_elevation_deg: Some(6.0)),
         (name: "Madrid", body: "Earth", lat_deg: 40.4314, lon_deg: -4.2481, height_m: 830.0,
-         kind: GroundStation, antenna: Some((gain_dbi: 74.0, power_w: 20000.0))),
+         kind: GroundStation, antenna: Some((gain_dbi: 74.0, power_w: 20000.0)), min_elevation_deg: Some(6.0)),
         (name: "Canberra", body: "Earth", lat_deg: -35.4014, lon_deg: 148.9817, height_m: 690.0,
-         kind: GroundStation, antenna: Some((gain_dbi: 74.0, power_w: 20000.0))),
+         kind: GroundStation, antenna: Some((gain_dbi: 74.0, power_w: 20000.0)), min_elevation_deg: Some(6.0)),
     ],
 )

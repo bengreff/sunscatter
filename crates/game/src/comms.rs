@@ -155,7 +155,8 @@ pub fn update(sim: Res<SimState>, station: Res<TrackingStation>, mut comms: ResM
                 site.kind == comms::SiteKind::LaunchSite
                     && node.is_some_and(|n| (n.pos - pos).length() < comms.data.link.umbilical_range_m)
             });
-        nodes.push(Node { pos, antenna: Some(VESSEL_ANTENNA), ground, wired });
+        let min_elevation_deg = comms.data.link.min_elevation_deg;
+        nodes.push(Node { pos, antenna: Some(VESSEL_ANTENNA), ground, min_elevation_deg, wired });
         names.push(format!("Vessel {}", v.id().0));
     }
     let occluders: Vec<_> = bodies.iter().map(|b| b.1).collect();

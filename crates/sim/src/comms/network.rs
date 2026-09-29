@@ -14,6 +14,8 @@ pub struct Node {
     pub antenna: Option<Antenna>,
     /// On the ground: the occluder (index) it stands on, and local up.
     pub ground: Option<(usize, DVec3)>,
+    /// On the ground: the horizon mask (deg) it sees and is seen above.
+    pub min_elevation_deg: f64,
     /// On the ground network (sites; not a landed vessel).
     pub wired: bool,
 }
@@ -74,7 +76,7 @@ fn link(a: &Node, b: &Node, occluders: &[Occluder], p: &LinkParams) -> Option<(f
     let (aa, ab) = (a.antenna?, b.antenna?);
     for (from, to) in [(a, b), (b, a)] {
         if let Some((_, up)) = from.ground {
-            if !above_horizon(from.pos, up, to.pos, p.min_elevation_deg) {
+            if !above_horizon(from.pos, up, to.pos, from.min_elevation_deg) {
                 return None;
             }
         }
@@ -150,17 +152,24 @@ mod tests {
             pos: up * R,
             antenna: antenna.then_some(Antenna { gain_dbi: 74.0, power_w: 2e4 }),
             ground: Some((0, up)),
+            min_elevation_deg: 6.0,
             wired: true,
         }
     }
 
     fn craft(pos: DVec3) -> Node {
-        Node { pos, antenna: Some(Antenna { gain_dbi: 20.0, power_w: 20.0 }), ground: None, wired: false }
+        Node {
+            pos,
+            antenna: Some(Antenna { gain_dbi: 20.0, power_w: 20.0 }),
+            ground: None,
+            min_elevation_deg: 0.0,
+            wired: false,
+        }
     }
 
     #[test]
     fn mission_control_reaches_a_ship_through_the_station_that_sees_it() {
-        let earth = Occluder { centre: DVec3::ZERO, radius: R };
+        let earth = Occluder::sphere(DVec3::ZERO, R);
         // 0: mission control (no antenna) at lon 0; 1: a station at 90°;
         // 2: a station at 180°; 3: a ship in LEO above lon 180°.
         let nodes = [site(0.0, false), site(90.0, true), site(180.0, true), craft(DVec3::new(-(R + 4e5), 0.0, 0.0))];
@@ -176,8 +185,8 @@ mod tests {
 
     #[test]
     fn a_ship_behind_the_moon_has_no_path() {
-        let earth = Occluder { centre: DVec3::ZERO, radius: R };
-        let moon = Occluder { centre: DVec3::new(3.84e8, 0.0, 0.0), radius: 1.737e6 };
+        let earth = Occluder::sphere(DVec3::ZERO, R);
+        let moon = Occluder::sphere(DVec3::new(3.84e8, 0.0, 0.0), 1.737e6);
         let nodes = [site(0.0, true), craft(DVec3::new(3.84e8 + 2e6, 0.0, 0.0))];
         let g = Graph::new(&nodes, &[earth, moon], &params());
         assert!(best_path(&g, 0, 1).is_none());
@@ -191,12 +200,12 @@ mod tests {
 
     #[test]
     fn a_relay_ship_carries_the_signal_around_the_body() {
-        let moon = Occluder { centre: DVec3::ZERO, radius: 1.737e6 };
+        let moon = Occluder::sphere(DVec3::ZERO, 1.737e6);
         // A lander on the far side (ground on body 0) and a relay above it
         // that also sees a distant station (a ship far away on the other side).
         let up = DVec3::X;
         let antenna = Some(Antenna { gain_dbi: 20.0, power_w: 20.0 });
-        let lander = Node { pos: up * 1.737e6, antenna, ground: Some((0, up)), wired: false };
+        let lander = Node { pos: up * 1.737e6, antenna, ground: Some((0, up)), min_elevation_deg: 6.0, wired: false };
         let relay = craft(DVec3::new(1.737e6 + 5e6, 0.0, 1e7));
         let far = craft(DVec3::new(-3e8, 0.0, 1e8));
         let g = Graph::new(&[lander, relay, far], &[moon], &params());

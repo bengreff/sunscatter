@@ -7,8 +7,9 @@
 //! only decide what a control location sees and when its commands arrive.
 //!
 //! Model:
-//! - A link exists when the line of sight is clear (bodies are spheres; a
-//!   ground site also needs its partner above `min_elevation_deg`) and the
+//! - A link exists when the line of sight is clear (bodies are their
+//!   reference ellipsoids; a ground site also needs its partner above its
+//!   elevation mask, per site in the data) and the
 //!   Shannon rate of the link budget is at least `min_rate_bps`.
 //! - Sites on one body are joined by a ground network at
 //!   `ground_speed_factor` × c along the great circle, with no rate limit.
@@ -52,6 +53,8 @@ pub struct LinkParams {
     pub bandwidth_hz: f64,
     pub noise_temperature_k: f64,
     pub min_rate_bps: f64,
+    /// The horizon mask (deg) of a site without its own, and of a vessel on
+    /// the ground.
     pub min_elevation_deg: f64,
     pub ground_speed_factor: f64,
     /// A vessel landed within this distance of a launch site is on the
@@ -80,9 +83,18 @@ pub struct Site {
     pub height_m: f64,
     pub kind: SiteKind,
     pub antenna: Option<Antenna>,
+    /// The site's horizon mask (deg): it links only above this elevation.
+    /// Absent: the link default.
+    #[serde(default)]
+    pub min_elevation_deg: Option<f64>,
 }
 
 impl Site {
+    /// The horizon mask (deg) in force at this site.
+    pub fn min_elevation(&self, link: &LinkParams) -> f64 {
+        self.min_elevation_deg.unwrap_or(link.min_elevation_deg)
+    }
+
     /// Body-fixed position on `body`.
     pub fn fixed(&self, body: &BodyPhysical) -> Vec3<BodyFixed> {
         let rad = math::PI / 180.0;
@@ -115,6 +127,9 @@ impl CommsData {
         for s in &data.sites {
             if !(s.lat_deg.abs() <= 90.0 && s.lon_deg.abs() <= 360.0 && s.height_m.is_finite()) {
                 return Err(format!("site {}: bad position", s.name));
+            }
+            if !(0.0..90.0).contains(&s.min_elevation(l)) {
+                return Err(format!("site {}: elevation mask must be in [0, 90) deg", s.name));
             }
         }
         Ok(data)
