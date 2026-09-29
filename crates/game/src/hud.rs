@@ -357,11 +357,14 @@ fn flight_panel(
     let ship = sim.ship();
     let (anchor, r, v) = ship.state_at(&sim.world, sim.clock);
     let snap = sim.world.snapshot(sim.clock);
-    let phase = match &ship.phase {
-        Phase::Landed { .. } => "LANDED".to_string(),
-        Phase::Powered { .. } => "POWERED".to_string(),
-        Phase::Coasting { .. } => "COASTING".to_string(),
-        Phase::Crashed { cause, .. } => format!("{} (R R to reset)", cause.describe()),
+    // A wreck still moving shows its cause at once (it becomes `Crashed`
+    // only when it comes to rest).
+    let phase = match (&ship.phase, ship.destruction()) {
+        (_, Some(cause)) => format!("{} (R R to reset)", cause.describe()),
+        (Phase::Landed { .. }, None) => "LANDED".to_string(),
+        (Phase::Powered { .. }, None) => "POWERED".to_string(),
+        (Phase::Coasting { .. }, None) => "COASTING".to_string(),
+        (Phase::Crashed { cause, .. }, None) => format!("{} (R R to reset)", cause.describe()),
     };
     ui_.label(egui::RichText::new(phase).monospace().color(theme::ACCENT));
     if let Some(body) = near.and_then(|b| sim.world.source(b)) {
