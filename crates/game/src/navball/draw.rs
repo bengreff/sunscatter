@@ -163,7 +163,7 @@ fn orbit_column(ui: &mut egui::Ui, s: &NavState, sim: &SimState) {
         ("Ap in", t(s.time_to_ap)),
         ("Pe in", t(s.time_to_pe)),
         ("Burn in", t(s.maneuver.map(|m| m.1))),
-        ("SAS", if c.sas { "HOLD".into() } else { "OFF".into() }),
+        ("SAS", rules::sas_label(&c, &s.body)),
         ("THR", format!("{:.0}%", c.throttle * 100.0)),
     ];
     readout_grid(ui, "nav_orbit", &rows);

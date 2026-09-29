@@ -221,6 +221,31 @@ pub fn mode_altitude(mode: Mode, above_terrain: f64, above_sea_level: f64) -> (&
     }
 }
 
+/// The speed reference the hold's prograde and retrograde follow: the
+/// navball's mode (D075).
+pub fn speed_reference(mode: Mode) -> sim::vessel::SpeedReference {
+    match mode {
+        Mode::Surface => sim::vessel::SpeedReference::Surface,
+        Mode::Orbit => sim::vessel::SpeedReference::Orbit,
+        Mode::Target => sim::vessel::SpeedReference::Target,
+    }
+}
+
+/// The SAS readout: off, or the hold mode, with the speed reference and
+/// body for prograde and retrograde (stated, D075).
+pub fn sas_label(controls: &sim::vessel::Controls, body: &str) -> String {
+    use sim::vessel::{HoldMode, SpeedReference};
+    if !controls.sas {
+        return "OFF".into();
+    }
+    let mode = controls.hold.label();
+    match (controls.hold, controls.speed) {
+        (HoldMode::Prograde | HoldMode::Retrograde, SpeedReference::Target) => format!("{mode} (TARGET)"),
+        (HoldMode::Prograde | HoldMode::Retrograde, s) => format!("{mode} ({} {body})", s.label()),
+        _ => mode.into(),
+    }
+}
+
 #[cfg(test)]
 #[path = "rules_tests.rs"]
 mod tests;

@@ -18,7 +18,7 @@ use crate::tracking::{self, Tracked, TrackingStation};
 use bevy::prelude::*;
 use sim::save::SaveGame;
 use sim::time::Epoch;
-use sim::vessel::{FlightPlan, VesselId};
+use sim::vessel::{FlightPlan, HoldMode, VesselId};
 
 #[derive(Message, Clone, Debug, PartialEq)]
 pub enum GameCommand {
@@ -40,6 +40,8 @@ pub enum GameCommand {
     /// Replace a vessel's flight plan (a vessel-directed command: from
     /// anywhere but aboard it, it travels with the signal's light delay).
     SetPlan { vessel: VesselId, plan: FlightPlan },
+    /// The active vessel's attitude hold (D075); turns SAS on.
+    SetHold(HoldMode),
 }
 
 /// Commands on their way to a vessel at light speed (D063, D067): applied
@@ -122,6 +124,10 @@ pub fn apply(
                         }
                     },
                 }
+            }
+            GameCommand::SetHold(mode) => {
+                sim.controls.hold = *mode;
+                sim.controls.sas = true;
             }
             GameCommand::SetDebug(on) => {
                 let sim = &mut *sim;

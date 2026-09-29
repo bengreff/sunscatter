@@ -234,3 +234,22 @@ fn a_line_on_the_rim_is_drawn_whatever_the_noise() {
     }
     assert!(!faces_viewer(-0.01));
 }
+
+#[test]
+fn sas_label_table() {
+    use sim::vessel::{Controls, HoldMode, SpeedReference};
+    let c = |sas, hold, speed| Controls { sas, hold, speed, ..Controls::default() };
+    let cases = [
+        (c(false, HoldMode::Prograde, SpeedReference::Orbit), "OFF"),
+        (c(true, HoldMode::Stability, SpeedReference::Orbit), "STABILITY"),
+        (c(true, HoldMode::Prograde, SpeedReference::Orbit), "PROGRADE (ORBIT Earth)"),
+        (c(true, HoldMode::Retrograde, SpeedReference::Surface), "RETROGRADE (SURFACE Earth)"),
+        (c(true, HoldMode::Prograde, SpeedReference::Target), "PROGRADE (TARGET)"),
+        (c(true, HoldMode::AntiTarget, SpeedReference::Surface), "ANTI-TARGET"),
+        (c(true, HoldMode::Maneuver, SpeedReference::Orbit), "MANEUVER"),
+    ];
+    for (controls, expected) in cases {
+        assert_eq!(sas_label(&controls, "Earth"), expected);
+    }
+    assert_eq!(speed_reference(Mode::Surface), SpeedReference::Surface);
+}

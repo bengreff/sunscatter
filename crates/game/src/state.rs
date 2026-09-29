@@ -13,7 +13,7 @@ use sim::frame::NodeId;
 use sim::kepler::Elements;
 use sim::sol;
 use sim::time::Epoch;
-use sim::vessel::{Controls, Phase, Segment, Vessel, VesselId, VesselIds, TICK};
+use sim::vessel::{Controls, HoldMode, Phase, Segment, Vessel, VesselId, VesselIds, TICK};
 use sim::world::World;
 use std::sync::Arc;
 
@@ -182,6 +182,16 @@ impl SimState {
     }
 }
 
+/// The keys that pick an attitude hold mode.
+pub const HOLD_KEYS: [(KeyCode, HoldMode); 6] = [
+    (KeyCode::Digit1, HoldMode::Stability),
+    (KeyCode::Digit2, HoldMode::Prograde),
+    (KeyCode::Digit3, HoldMode::Retrograde),
+    (KeyCode::Digit4, HoldMode::Target),
+    (KeyCode::Digit5, HoldMode::AntiTarget),
+    (KeyCode::Digit6, HoldMode::Maneuver),
+];
+
 /// Keyboard → controls, warp, and meta actions.
 pub fn read_controls(
     keys: Res<ButtonInput<KeyCode>>,
@@ -224,6 +234,13 @@ pub fn read_controls(
     }
     if keys.just_pressed(KeyCode::KeyT) {
         c.sas = !c.sas;
+    }
+    // Hold modes (D075): 1 stability, 2 prograde, 3 retrograde, 4 target,
+    // 5 anti-target, 6 maneuver.
+    for (key, mode) in HOLD_KEYS {
+        if keys.just_pressed(key) {
+            commands.write(GameCommand::SetHold(mode));
+        }
     }
     if keys.just_pressed(KeyCode::KeyP) {
         c.chute = true;

@@ -15,7 +15,7 @@ use crate::tracking::TrackingStation;
 use bevy::prelude::*;
 use mcp::{Server, Tool, ToolResult};
 use serde_json::{json, Value};
-use sim::vessel::{Phase, VesselId};
+use sim::vessel::{HoldMode, Phase, VesselId};
 
 /// What answering a call does besides answering.
 #[derive(Debug, PartialEq)]
@@ -34,6 +34,16 @@ pub enum Effect {
         command: GameCommand,
     },
 }
+
+/// The hold modes by name (the `set_controls` tool).
+const HOLD_NAMES: [(&str, HoldMode); 6] = [
+    ("stability", HoldMode::Stability),
+    ("prograde", HoldMode::Prograde),
+    ("retrograde", HoldMode::Retrograde),
+    ("target", HoldMode::Target),
+    ("anti_target", HoldMode::AntiTarget),
+    ("maneuver", HoldMode::Maneuver),
+];
 
 fn schema(properties: Value, required: &[&str]) -> Value {
     json!({"type": "object", "properties": properties, "required": required})
@@ -119,9 +129,15 @@ pub fn tools() -> Vec<Tool> {
         ),
         t(
             "set_controls",
-            "Throttle (0–1) and SAS of the active vessel. Only aboard it (as its crew).",
+            "Throttle (0–1), SAS and the attitude hold of the active vessel. Only aboard it (as its crew). \
+             Prograde and retrograde follow the navball's speed reference (orbit, surface or target) about \
+             its reference body; a planned burn is flown by the maneuver hold on its own.",
             schema(
-                json!({"throttle": {"type": "number", "minimum": 0, "maximum": 1}, "sas": {"type": "boolean"}}),
+                json!({
+                    "throttle": {"type": "number", "minimum": 0, "maximum": 1},
+                    "sas": {"type": "boolean"},
+                    "hold": {"type": "string", "enum": HOLD_NAMES.map(|(n, _)| n)}
+                }),
                 &[],
             ),
         ),
@@ -253,7 +269,21 @@ fn run(
                 return Err("throttle must be in 0–1".into());
             }
             let sas = args.get("sas").and_then(Value::as_bool);
-            (json!({"throttle": throttle, "sas": sas}), vec![Effect::Controls { throttle, sas }])
+            let hold = match args.get("hold").and_then(Value::as_str) {
+                None => None,
+                Some(name) => Some(
+                    HOLD_NAMES
+                        .iter()
+                        .find(|(n, _)| *n == name)
+                        .map(|(_, m)| *m)
+                        .ok_or(format!("unknown hold `{name}`"))?,
+                ),
+            };
+            let mut effects = vec![Effect::Controls { throttle, sas }];
+            // After SAS: choosing a hold turns SAS on.
+            effects.extend(hold.map(|m| Effect::Command(GameCommand::SetHold(m))));
+            let hold = hold.map(|m| m.label());
+            (json!({"throttle": throttle, "sas": sas, "hold": hold}), effects)
         }
         _ => return Err(format!("unknown tool {tool}")),
     })
@@ -552,5 +582,15 @@ mod tests {
         comms.location = Location::Vessel(sim.ship().id());
         let (_, e) = answer("set_controls", &json!({"throttle": 0.5, "sas": false}), &sim, &comms, None);
         assert_eq!(e, vec![Effect::Controls { throttle: Some(0.5), sas: Some(false) }]);
+        let (_, e) = answer("set_controls", &json!({"hold": "retrograde"}), &sim, &comms, None);
+        assert_eq!(
+            e,
+            vec![
+                Effect::Controls { throttle: None, sas: None },
+                Effect::Command(GameCommand::SetHold(HoldMode::Retrograde))
+            ]
+        );
+        let (r, _) = answer("set_controls", &json!({"hold": "sideways"}), &sim, &comms, None);
+        assert!(matches!(r, ToolResult::Err(e) if e.contains("unknown hold")));
     }
 }

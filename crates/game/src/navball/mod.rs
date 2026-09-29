@@ -18,7 +18,7 @@ use rules::{Angles, Local, Markers, Mode, Ship};
 use sim::forces::{ActiveSources, ForceContext};
 use sim::frame::NodeId;
 use sim::time::Epoch;
-use sim::vessel::{Phase, Vessel};
+use sim::vessel::{Phase, TargetState, Vessel};
 use sim::world::World;
 
 /// Readouts refresh at most this often (s) so numbers don't jiggle.
@@ -29,6 +29,7 @@ pub struct NavballPlugin;
 impl Plugin for NavballPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Navball>()
+            .add_systems(Update, feed_hold.before(crate::state::advance))
             .add_systems(bevy_egui::EguiPrimaryContextPass, draw::draw.after(crate::hud::draw));
     }
 }
@@ -100,6 +101,27 @@ fn target_state(
             Some((tracked.name(id), k.r + r, k.v + v))
         }
     }
+}
+
+/// States the navball's references in the controls for the attitude hold
+/// (D075): the speed reference (its mode), the reference body (its
+/// dominant body) and the target (a body exactly, a vessel at its state
+/// now). A control choice, never physics.
+fn feed_hold(mut sim: ResMut<SimState>, nav: Res<Navball>) {
+    let t = sim.clock;
+    let reference = sim.dominant_of(sim.active);
+    let target = nav.target.and_then(|tg| match tg {
+        NavTarget::Body(node) => Some(TargetState { anchor: node, epoch: t, r: DVec3::ZERO, v: DVec3::ZERO }),
+        NavTarget::Vessel(id) => {
+            let i = sim.index_of(id).filter(|&i| i != sim.active)?;
+            let (anchor, r, v) = sim.fleet[i].state_at(&sim.world, t);
+            Some(TargetState { anchor, epoch: t, r, v })
+        }
+    });
+    let c = &mut sim.controls;
+    c.speed = rules::speed_reference(nav.mode);
+    c.reference = Some(reference);
+    c.target = target;
 }
 
 /// Proper (non-gravitational) acceleration of `vessel` at its state
