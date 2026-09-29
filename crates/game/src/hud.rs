@@ -418,7 +418,11 @@ fn flight_panel(
     let changed = ui_
         .horizontal(|ui_| {
             ui_.label(dim("THROTTLE"));
-            ui_.add(egui::Slider::new(&mut t, 0.0..=100.0).suffix(" %").fixed_decimals(1)).changed()
+            let r = ui_.add(egui::Slider::new(&mut t, 0.0..=100.0).suffix(" %").fixed_decimals(1));
+            // Only a change the player made: the slider's own rounding of
+            // the displayed value must not send the throttle back (it
+            // would undo key and script changes every frame).
+            r.changed() && (r.dragged() || r.has_focus() || r.clicked())
         })
         .inner;
     ui_.monospace(format!("chute {}", if ship.chute_deployed { "DEPLOYED" } else { "stowed" }));
