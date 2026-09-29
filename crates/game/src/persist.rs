@@ -66,14 +66,34 @@ impl Default for ControlsSettings {
     }
 }
 
+/// The graphics settings' version: a file saved with an older one gets the
+/// default graphics (save compatibility is not required, D063). 1: Minimal
+/// became the default tier (D073).
+pub const GRAPHICS_VERSION: u32 = 1;
+
 /// The settings file.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SettingsFile {
+    /// Missing in files from before versioning: 0.
+    #[serde(default)]
+    pub graphics_version: u32,
     pub graphics: GraphicsSettings,
     pub controls: ControlsSettings,
     pub interface: InterfaceSettings,
     pub orbits: OrbitSettings,
+}
+
+impl Default for SettingsFile {
+    fn default() -> Self {
+        SettingsFile {
+            graphics_version: GRAPHICS_VERSION,
+            graphics: GraphicsSettings::default(),
+            controls: ControlsSettings::default(),
+            interface: InterfaceSettings::default(),
+            orbits: OrbitSettings::default(),
+        }
+    }
 }
 
 impl SettingsFile {
@@ -82,7 +102,11 @@ impl SettingsFile {
     }
 
     pub fn from_ron(text: &str) -> Result<Self, String> {
-        ron::from_str(text).map_err(|e| e.to_string())
+        let mut s: Self = ron::from_str(text).map_err(|e| e.to_string())?;
+        if s.graphics_version < GRAPHICS_VERSION {
+            (s.graphics_version, s.graphics) = (GRAPHICS_VERSION, GraphicsSettings::default());
+        }
+        Ok(s)
     }
 
     /// Reads `path`; `Ok(None)` if it does not exist.
@@ -160,8 +184,13 @@ fn save_settings(
     orbits: Res<OrbitSettings>,
     mut persist: ResMut<Persist>,
 ) {
-    let current =
-        SettingsFile { graphics: *graphics, controls: *controls, interface: interface.clone(), orbits: orbits.clone() };
+    let current = SettingsFile {
+        graphics_version: GRAPHICS_VERSION,
+        graphics: *graphics,
+        controls: *controls,
+        interface: interface.clone(),
+        orbits: orbits.clone(),
+    };
     let now = time.elapsed_secs_f64();
     if !persist.enabled || bench.running() || current == persist.saved || now - persist.last_write < WRITE_INTERVAL {
         return;
@@ -202,6 +231,7 @@ mod tests {
         let path = dir.join("settings.ron");
         assert_eq!(SettingsFile::read(&path), Ok(None));
         let s = SettingsFile {
+            graphics_version: GRAPHICS_VERSION,
             graphics: GraphicsSettings { bloom: false, ..GraphicsSettings::preset(Tier::Ultra) },
             controls: ControlsSettings {
                 wheel_zoom: 1.2,
@@ -236,8 +266,26 @@ mod tests {
         // A renamed key from an older build is ignored, not an error.
         let old = SettingsFile::from_ron("(controls: (trackpad_zoom_speed: 0.25))").unwrap();
         assert_eq!(old.controls, ControlsSettings::default());
-        let partial = SettingsFile::from_ron("(graphics: (bloom: false))").unwrap();
-        assert_eq!(partial.graphics, GraphicsSettings { bloom: false, ..GraphicsSettings::default() });
+        let partial =
+            SettingsFile::from_ron(&format!("(graphics_version: {GRAPHICS_VERSION}, graphics: (bloom: true))"));
+        assert_eq!(partial.unwrap().graphics, GraphicsSettings { bloom: true, ..GraphicsSettings::default() });
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn graphics_from_an_older_version_reset_to_the_default() {
+        // (file, expected tier)
+        let cases = [
+            ("(graphics: (tier: Some(Ultra)), controls: (invert_y: true))", Tier::Minimal),
+            ("(graphics_version: 0, graphics: (tier: Some(High)))", Tier::Minimal),
+            (&format!("(graphics_version: {GRAPHICS_VERSION}, graphics: (tier: Some(High)))") as &str, Tier::High),
+        ];
+        for (text, tier) in cases {
+            let s = SettingsFile::from_ron(text).unwrap();
+            assert_eq!(s.graphics.tier, Some(tier), "{text}");
+            assert_eq!(s.graphics_version, GRAPHICS_VERSION);
+        }
+        // Other settings are kept.
+        assert!(SettingsFile::from_ron(cases[0].0).unwrap().controls.invert_y);
     }
 }

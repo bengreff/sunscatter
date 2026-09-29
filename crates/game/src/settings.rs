@@ -1,15 +1,20 @@
 //! Graphics settings (D048): five tiers, each a preset over individual
 //! feature toggles and quality knobs. Every toggle can be changed on its own;
 //! changing anything applies live (no restart).
+//!
+//! Minimal is the default and the only tier developed (D073): terrain
+//! relief (the drawn ground is the physical one), a blue sky from the
+//! lookup-table atmosphere, stars, shadows and the simple ground pattern
+//! (terrain detail off); no bloom, flare, glint, planetshine or sky light.
 
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 pub enum Tier {
+    #[default]
     Minimal,
     Low,
-    #[default]
     Medium,
     High,
     Ultra,
@@ -102,7 +107,14 @@ impl GraphicsSettings {
             haze: 1.0,
         };
         match tier {
-            Tier::Minimal => base,
+            Tier::Minimal => GraphicsSettings {
+                terrain: true,
+                atmosphere: AtmosphereQuality::Lut,
+                star_magnitude: 5.0,
+                shadows: true,
+                msaa: MsaaLevel::X2,
+                ..base
+            },
             Tier::Low => GraphicsSettings {
                 terrain: true,
                 texture_size: 4096,
@@ -222,5 +234,17 @@ mod tests {
         assert_eq!(hazy.with_preset(Tier::High).haze, 0.5);
         let custom = GraphicsSettings { bloom: false, ..GraphicsSettings::preset(Tier::Ultra) };
         assert_eq!(custom.matching_tier(), None);
+    }
+
+    #[test]
+    fn minimal_is_the_default_and_draws_what_physics_uses() {
+        let m = GraphicsSettings::preset(Tier::Minimal);
+        assert_eq!(Tier::default(), Tier::Minimal);
+        // Relief on (the drawn ground is the physical ground), a sky, stars
+        // and shadows; the costly effects off.
+        assert!(m.terrain && m.shadows && m.star_magnitude >= 5.0);
+        assert_eq!(m.atmosphere, AtmosphereQuality::Lut);
+        assert!(!(m.detail || m.bloom || m.flare || m.ocean_glint || m.earthshine || m.sky_light));
+        assert_ne!(m.msaa, MsaaLevel::X4);
     }
 }

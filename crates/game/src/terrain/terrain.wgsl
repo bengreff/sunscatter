@@ -1,6 +1,7 @@
 // Terrain surface: StandardMaterial lighting with the body's colour map
 // looked up per fragment from the body-fixed direction (no UV seams or pole
-// pinching), a close-range procedural detail layer, and water shading from
+// pinching), a close-range procedural detail layer (or, with it off, a
+// simple patch pattern), and water shading from
 // the body's water mask, also looked up per fragment (so it does not change
 // with the LOD level; CPU mirror and tests in water.rs).
 
@@ -68,6 +69,8 @@ struct TerrainParams {
 @group(#{MATERIAL_BIND_GROUP}) @binding(108) var ground_normal_sampler: sampler;
 
 const PI: f32 = 3.14159265;
+// Distance (m) over which the simple ground pattern fades out.
+const SIMPLE_GROUND_M: f32 = 20000.0;
 
 // Area of overlap of two discs (radii r1, r2, centres d apart); mirrors
 // `sim::light::disc_overlap` (tested there).
@@ -315,6 +318,26 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
             color = mix(color, base2 * rel_col * tone, fade * (1.0 - water));
             let tn_n = normalize(vec3(tn.xy * fade * (1.0 - water), max(tn.z, 0.1)));
             n_out = perturb(n_out, dp1, dp2, duv1, duv2, tn_n);
+        }
+    }
+    // Without the detail layer (the Minimal tier, D073): a simple ground
+    // pattern for depth perception near the ground, lighter and darker
+    // patches at four scales (5 m to 320 m on Earth). Each scale fades out
+    // before its patches shrink under ~2 pixels, so nothing shimmers.
+    if terrain.flags.x == 0u && water < 1.0 {
+        let near = clamp(1.0 - dist / SIMPLE_GROUND_M, 0.0, 1.0);
+        if near > 0.0 {
+            let foot = max(length(duv1), length(duv2));
+            var tone = 0.0;
+            var freq = 0.125;
+            var amp = 0.5;
+            for (var k = 0; k < 4; k++) {
+                let w = clamp(1.0 - foot * freq * 2.0, 0.0, 1.0);
+                tone += amp * w * (noise(in.uv * freq, 256.0 * freq) - 0.5);
+                freq *= 4.0;
+                amp *= 0.7;
+            }
+            color *= 1.0 + tone * 0.8 * near * (1.0 - water);
         }
     }
     // Water lies at sea level: shade it with the sphere's normal at this

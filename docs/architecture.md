@@ -31,18 +31,18 @@ A short map to search before building anything: who owns what, the frame order, 
 | Starlight at a point: star flux, eclipses by body spheres; an orbit's sunlit fraction and orbit-averaged sunlight | `sim::light` (`sunlight`, `eclipse_factor`, `orbit_sunlit_fraction`, `orbit_average_sunlight`) | the one eclipse rule; `game::lighting` re-exports it |
 | Rigid-body rotation: Euler's equations (RK4 control ticks), exact torque-free motion (constant spin, symmetric top, Jacobi elliptic for asymmetric bodies), principal axes | `sim::rigid` (`free`, `elliptic`) | the vessel's attitude goes through it (realism-1 §3d) |
 | Saves | `sim::save` (format), `game::saves` (UI, files) | |
-| Comm network: sites, link budget, line of sight, light time, relay paths (D068) | `sim::comms` | sites and link constants in `data/comms.ron` |
+| Comm network: sites, link budget, line of sight (bodies are their reference ellipsoids), light time, relay paths (D068) | `sim::comms` | sites (with per-site elevation masks) and link constants in `data/comms.ron` |
 | Nearest body (camera clearance only), display primary, dominance ("which body is this about", one instance in `SimState`), osculating orbit (vessels and bodies), orbit size | `game::relations` | display only, never physics |
 | Map view: what is visible/hoverable, per object | `game::map_view` (rule, D054); `game::map` gathers sizes and draws | pure functions + table tests |
 | Orbit-line length (revolutions, caps, settings) | `game::trajectory` (`line`, `settings`); dominance in `game::relations::Dominance` (D056) | display only |
 | Lighting: star flux per object, eclipses, planetshine (D055) | `game::lighting` (rules; fills the terrain uniforms; the shader mirrors `sim::light::eclipse_factor` and fades sky light through twilight) | ambient/starlight in `game::sky`; exposure fixed (D055) |
-| Camera pose and limits, zoom, collision with surfaces and the ship | `game::camera` | terrain via `sim::forces::altitude_above` |
+| Camera pose and limits, zoom, collision with surfaces and the ship, yaw reference and up blending | `game::camera` (pure rules in `camera::rules`) | terrain via `sim::forces::altitude_above` |
 | Navball: attitude, markers, mode, flight readouts | `game::navball` (rules in `navball::rules`) | |
 | A vessel's state at the clock (for drawing) | `sim::vessel::Vessel::state_at` | never integrates (rule 4) |
 | Fps readout (0.5 s windows) | `game::hud::FpsMeter` | |
 | Terrain meshes and LOD, geomorphing | `game::terrain` (`lod`, `mesh`) | heights via `sim` |
 | Terrain look: colour map, water mask, ground textures, waves | `game::terrain` (`material`, `water`, `ground`, `terrain.wgsl`) | textures in `data/textures/terrain` (CC0) |
-| Graphics tiers and toggles | `game::settings`; the settings screen in `game::settings_ui` | |
+| Graphics tiers and toggles | `game::settings`; the settings screen in `game::settings_ui` | Minimal is the default and only developed tier (D073); `persist::GRAPHICS_VERSION` resets older saved graphics |
 | Panel layout, theme, pause menu, key help | `game::interface` (`layout` is pure data) | saved in `settings.ron` |
 | Discrete changes to the simulation (warp, switch, delete, load, revert, reset); which keys act | `game::commands` (`GameCommand`, `InputContext`) | the hook for MCP and scripting |
 | Haze strength, our sky compositing shader | `game::sky::haze` (`render_sky.wgsl`, copied from Bevy) | |
