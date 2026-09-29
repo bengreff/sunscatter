@@ -14,6 +14,7 @@
 //! the stored trajectory grows; the navball, flight panel, tracking station,
 //! MCP tools, planner and map markers all read them here.
 
+use crate::landing::{Landing, LandingPrediction};
 use crate::state::{Prediction, SimState};
 use bevy::prelude::*;
 use glam::DVec3;
@@ -272,6 +273,8 @@ struct Entry {
     keys: Vec<SegKey>,
     scanner: Scanner,
     result: VesselApsides,
+    /// The stored trajectory's own impact (a coast ending on a surface).
+    stored_impact: Option<Impact>,
 }
 
 /// Where a scan resumes: the segment and the first sample not yet fed.
@@ -329,6 +332,7 @@ impl Entry {
             Some(SegmentEnd { t, kind: EndKind::Surface { body } }) => Some(Impact { t: s.t0.add_seconds(t), body }),
             _ => None,
         });
+        self.stored_impact = impact;
         self.result = VesselApsides { list: self.scanner.apsides(radius), impact };
         true
     }
@@ -353,11 +357,20 @@ impl Apsides {
     }
 
     /// Brings every vessel's list up to date with its stored trajectory.
-    pub fn refresh(&mut self, sim: &SimState, pred: &Prediction) {
+    /// A vessel with a landing prediction (`sim::landing`: its own force
+    /// model with thrust, lift and the chute) takes its impact from it, so
+    /// every readout shows the same impact as the landing panel.
+    pub fn refresh(&mut self, sim: &SimState, pred: &Prediction, landing: Option<&Landing>) {
         self.entries.retain(|id, _| sim.index_of(*id).is_some());
         for i in 0..sim.fleet.len() {
+            let id = sim.fleet[i].id();
             let segs = vessel_segments(sim, pred, i);
-            self.entries.entry(sim.fleet[i].id()).or_default().update(sim, &segs);
+            let e = self.entries.entry(id).or_default();
+            e.update(sim, &segs);
+            e.result.impact = match landing.filter(|l| l.vessel == id) {
+                Some(l) => l.impact.map(|h| Impact { t: h.t, body: h.body }),
+                None => e.stored_impact,
+            };
         }
     }
 
@@ -369,8 +382,8 @@ impl Apsides {
 }
 
 /// Keeps [`Apsides`] current (after the simulation step).
-pub fn update(sim: Res<SimState>, pred: Res<Prediction>, mut aps: ResMut<Apsides>) {
-    aps.refresh(&sim, &pred);
+pub fn update(sim: Res<SimState>, pred: Res<Prediction>, landing: Res<LandingPrediction>, mut aps: ResMut<Apsides>) {
+    aps.refresh(&sim, &pred, landing.latest.as_ref());
 }
 
 #[cfg(test)]

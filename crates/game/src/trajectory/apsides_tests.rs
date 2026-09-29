@@ -164,11 +164,11 @@ fn a_real_low_orbit_has_one_ap_and_pe_per_revolution() {
     assert!(got.impact.is_none());
     // The cache matches a fresh computation, and extends incrementally.
     let mut cache = Apsides::default();
-    cache.refresh(&sim, &pred);
+    cache.refresh(&sim, &pred, None);
     assert_eq!(cache.get(sim.fleet[i].id()), Some(&got));
     let until = sim.clock.add_seconds(5.0 * 5_600.0);
     sim.fleet[i].extend_coast(&world, until, 200_000);
-    cache.refresh(&sim, &pred);
+    cache.refresh(&sim, &pred, None);
     assert_eq!(cache.get(sim.fleet[i].id()), Some(&Apsides::compute(&sim, &pred, i)));
     assert!(cache.get(sim.fleet[i].id()).unwrap().list.len() > got.list.len());
 }

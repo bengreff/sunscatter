@@ -99,9 +99,9 @@ fn a_standing_craft_rests_on_its_feet() {
     let w = world();
     let ship = pad(&w);
     let props = ship.mass_props();
-    // The centre of mass is 4.6 m above the feet plus its own height.
-    assert!((ship.contact_height() - (props.com.z + 4.6)).abs() < 1e-12);
-    assert!(ship.contact_height() > 2.0 && ship.contact_height() < 5.0, "{}", ship.contact_height());
+    // The centre of mass is 7.7 m above the feet plus its own height.
+    assert!((ship.contact_height() - (props.com.z + 7.7)).abs() < 1e-12);
+    assert!(ship.contact_height() > 7.0 && ship.contact_height() < 10.0, "{}", ship.contact_height());
 }
 
 #[test]

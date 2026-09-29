@@ -495,7 +495,7 @@ mod tests {
         let world = sim.world.clone();
         sim.fleet[1].extend_coast(&world, until, 200_000);
         let mut aps = Apsides::default();
-        aps.refresh(&sim, &pred);
+        aps.refresh(&sim, &pred, None);
         let info = vessel_info(&sim, &aps, 1);
         let (pe, ap) = (info.pe.expect("a periapsis"), info.ap.expect("an apoapsis"));
         assert!(info.status == "coasting" && pe > 300_000.0 && ap < 500_000.0, "{pe} {ap}");

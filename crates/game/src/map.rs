@@ -296,7 +296,10 @@ fn draw_apsides(
         let (Some(i), Some(list)) = (sim.index_of(line.id), aps.get(line.id)) else { continue };
         let segs = trajectory::apsides::vessel_segments(sim, pred, i);
         let shown = |t: Epoch| t.seconds_since(sim.clock) > 0.0 && line.end.seconds_since(t) >= 0.0;
-        let marks = list.list.iter().map(|a| (a.t, Some(a))).chain(list.impact.map(|m| (m.t, None)));
+        // The active vessel's impact is drawn by `landing` at its ground
+        // point (the prediction flies its own model, not this line).
+        let impact = list.impact.filter(|_| !line.active);
+        let marks = list.list.iter().map(|a| (a.t, Some(a))).chain(impact.map(|m| (m.t, None)));
         for (t, apsis) in marks.filter(|(t, _)| shown(*t)) {
             let Some((anchor, r, _)) = trajectory::eval_at(&segs, t) else { continue };
             let c = plotter.plot(anchor, r, t);

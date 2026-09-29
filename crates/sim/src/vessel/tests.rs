@@ -103,7 +103,8 @@ fn coasting_rotation_input_is_independent_of_frame_rate() {
     let rate = frames.craft.torque.z / props.inertia.z_axis.z;
     let spin = frames.attitude.body_rate();
     assert!((spin.z - rate * 10.0).abs() <= rate * TICK * 1.01, "spin {spin} rad/s, {rate} rad/s²");
-    assert!(spin.truncate().length() < 1e-9 * spin.z);
+    // Up to the products of inertia of the mesh's asymmetry (~20 µm).
+    assert!(spin.truncate().length() < 1e-5 * spin.z, "{spin}");
     assert_eq!(frames.attitude, jump.attitude);
     // Any input: the same bits at 60 fps and in one jump.
     let mixed = Controls { rotate: DVec3::new(0.3, -1.0, 0.5), ..Controls::default() };
