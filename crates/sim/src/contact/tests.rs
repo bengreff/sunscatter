@@ -85,21 +85,41 @@ fn ground_normal_of_planes_and_spheres() {
 }
 
 #[test]
-fn rest_counter_table() {
-    let slow = DVec3::X * 0.01;
-    let fast = DVec3::X * 0.2;
-    let spin = DVec3::Z * 0.05;
-    // (count, touching, input, v, ω) → new count
+fn kinetic_energy_table() {
+    // 2 kg, inertia diag(1, 2, 3) kg·m²; q a quarter turn about Z (body X
+    // is inertial Y).
+    let inertia = DMat3::from_diagonal(DVec3::new(1.0, 2.0, 3.0));
+    let q = DQuat::from_rotation_z(std::f64::consts::FRAC_PI_2);
+    // (v, ω inertial) → J/kg
     let cases = [
-        (0, true, false, slow, DVec3::ZERO, 1),
-        (49, true, false, slow, DVec3::X * 0.005, 50),
-        (30, false, false, slow, DVec3::ZERO, 0), // in the air
-        (30, true, true, slow, DVec3::ZERO, 0),   // thrust or rotation input
-        (30, true, false, fast, DVec3::ZERO, 0),
-        (30, true, false, slow, spin, 0),
+        (DVec3::X * 0.1, DVec3::ZERO, 0.005),
+        (DVec3::ZERO, DVec3::Z * 1.0, 0.75), // ½·3·1²/2
+        (DVec3::ZERO, DVec3::Y * 1.0, 0.25), // inertial Y is body X: ½·1/2
+        (DVec3::ZERO, DVec3::X * 1.0, 0.5),  // inertial X is body −Y: ½·2/2
+        (DVec3::Y * 1.0, DVec3::Z * 1.0, 1.25),
     ];
-    for (count, touching, input, v, w, expected) in cases {
-        assert_eq!(rest_ticks(count, touching, input, v, w), expected, "{count} {touching} {input} {v} {w}");
+    for (v, w, expected) in cases {
+        let k = kinetic_per_mass(2.0, &inertia, q, v, w);
+        assert!((k - expected).abs() < 1e-12, "{v} {w}: {k} vs {expected}");
+    }
+}
+
+#[test]
+fn rest_counter_table() {
+    let still = 0.5 * 0.01 * 0.01;
+    let moving = 0.5 * 0.2 * 0.2;
+    // (count, touching, input, kinetic, stable) → new count
+    let cases = [
+        (0, true, false, still, true, 1),
+        (49, true, false, still, true, 50),
+        (30, false, false, still, true, 0),     // in the air
+        (30, true, true, still, true, 0),       // thrust or rotation input
+        (30, true, false, moving, true, 0),     // bouncing or sliding
+        (30, true, false, still, false, 0),     // balanced but not stable (tipping)
+        (0, true, false, REST_ENERGY, true, 0), // the threshold is exclusive
+    ];
+    for (count, touching, input, k, stable, expected) in cases {
+        assert_eq!(rest_ticks(count, touching, input, k, stable), expected, "{count} {touching} {input} {k} {stable}");
     }
 }
 
@@ -129,9 +149,16 @@ fn holds_table() {
     ];
     for (deg, mu, expected) in cases {
         let support = on(mu);
-        assert_eq!(holds(com, tilted(deg), &support), expected, "{deg}° μ {mu}");
+        assert_eq!(holds(com, tilted(deg), &support, 0.0), expected, "{deg}° μ {mu}");
     }
     // Two points cannot hold, nor can a centre of mass beside them.
-    assert!(!holds(com, -DVec3::Z, &on(0.8)[..2]));
-    assert!(!holds(DVec3::new(5.0, 0.0, 3.6), -DVec3::Z, &on(0.8)));
+    assert!(!holds(com, -DVec3::Z, &on(0.8)[..2], 0.0));
+    assert!(!holds(DVec3::new(5.0, 0.0, 3.6), -DVec3::Z, &on(0.8), 0.0));
+    // The margin: the centre of mass 2.12 m inside the edge between two
+    // feet (seen from above): holds with 2 m to spare, not with 2.2 m; and
+    // 1.12 m inside it once moved 1 m towards it.
+    assert!(holds(com, -DVec3::Z, &on(0.8), 2.0));
+    assert!(!holds(com, -DVec3::Z, &on(0.8), 2.2));
+    let shifted = com + DVec3::new(1.0, 1.0, 0.0) * std::f64::consts::FRAC_1_SQRT_2;
+    assert!(holds(shifted, -DVec3::Z, &on(0.8), 1.1) && !holds(shifted, -DVec3::Z, &on(0.8), 1.15));
 }

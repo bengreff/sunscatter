@@ -222,14 +222,18 @@ fn parachute_descent_reaches_terminal_speed_and_lands_in_debug_mode() {
     for _ in 0..2_000 {
         clock = clock.add_seconds(1.0);
         vessel.advance(&w, clock, &controls, usize::MAX);
-        if let Phase::Powered { .. } = vessel.phase {
-            let (_, r1, v1) = vessel.state(&w);
-            touchdown = (v1 - e.rotation.omega(clock).raw().cross(r1)).length();
-        } else {
+        if vessel.destruction().is_some() || !matches!(vessel.phase, Phase::Powered { .. }) {
             break;
         }
+        let (_, r1, v1) = vessel.state(&w);
+        touchdown = (v1 - e.rotation.omega(clock).raw().cross(r1)).length();
     }
     assert!((touchdown / terminal - 1.0).abs() < 0.05, "{touchdown} vs {terminal} m/s");
+    // Destroyed at the impact; the wreck comes to rest.
+    for _ in 0..600 {
+        clock = clock.add_seconds(1.0);
+        vessel.advance(&w, clock, &controls, usize::MAX);
+    }
     match vessel.phase {
         Phase::Crashed { cause: Destruction::Impact { speed, .. }, .. } => {
             assert!(speed > 8.0 && speed < 1.01 * touchdown, "{speed} m/s")

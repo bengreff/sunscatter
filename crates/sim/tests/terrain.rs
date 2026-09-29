@@ -148,8 +148,13 @@ fn shipped_heightmaps_have_the_expected_landmarks() {
         assert!(deep < -9_000.0, "{deep}");
         assert!(pad.abs() < 20.0, "{pad}");
         assert_eq!(e.surface_height_latlon(11.3733 * DEG, 142.5917 * DEG), 0.0, "sea is solid at 0");
+        // Placed standing at the summit (live instead of landed where the
+        // rough ground does not hold the tall craft on its feet).
         let ship = Vessel::landed_at(&w, VesselId(1), "Earth", 27.9881, 86.925, t0(), sim::craft::test_craft());
-        let Phase::Landed { fixed, .. } = ship.phase else { unreachable!() };
+        let fixed = match ship.phase {
+            Phase::Landed { fixed, .. } => fixed,
+            _ => e.rotation.to_fixed(Vec3::from_raw(ship.state(&w).1), t0()),
+        };
         let surface = e.surface_height_latlon(27.9881 * DEG, 86.925 * DEG);
         assert!((e.altitude(fixed) - surface - ship.contact_height()).abs() < 1.0);
         assert!((surface - everest).abs() < 500.0, "detail stays near the base: {surface} vs {everest}");

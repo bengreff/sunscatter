@@ -76,6 +76,8 @@ struct Drop {
     gap: f64,
     /// Speed towards the ground (m/s).
     speed: f64,
+    /// Speed along the ground, to the east (m/s).
+    sideways: f64,
     propellant: f64,
     debug: bool,
 }
@@ -91,6 +93,7 @@ impl Default for Drop {
             yaw: 0.0,
             gap: 0.02,
             speed: 0.0,
+            sideways: 0.0,
             propellant: 16_000.0,
             debug: false,
         }
@@ -132,7 +135,8 @@ fn drop(w: &World, d: &Drop) -> Vessel {
     let b2i = body_axes(w, d.body, t0());
     let omega = p.rotation.omega(t0()).raw();
     let r = b2i * fixed;
-    let v = omega.cross(r) - b2i * n * d.speed;
+    let (east, _, _) = enu(d.lat, d.lon);
+    let v = omega.cross(r) - b2i * n * d.speed + b2i * (east - n * east.dot(n)).normalize() * d.sideways;
     let mut ship = Vessel::coasting(w, VesselId(1), t0(), src.node, r, v, test_craft());
     ship.set_propellant(w, d.propellant);
     ship.set_debug(w, d.debug);
@@ -176,7 +180,9 @@ fn a_two_degree_slope_holds() {
     let n = normal(&d);
     // Settled on its feet (a few cm) without sliding, tilted with the slope.
     let moved = fixed.raw() - start;
-    assert!((moved - n * moved.dot(n)).length() < 0.02, "slid {} m", moved.length());
+    // The regularised friction creeps at ~stick_speed·tan 2°/μ ≈ 2 mm/s
+    // while the gear bounces and settles.
+    assert!((moved - n * moved.dot(n)).length() < 0.08, "slid {} m", moved.length());
     assert!(moved.dot(n) < 0.0 && moved.dot(n) > -0.1, "sank {} m", -moved.dot(n));
     let nose = att_fixed * DVec3::Z;
     let (_, _, up) = enu(d.lat, d.lon);
@@ -235,22 +241,36 @@ fn twelve_metres_per_second_on_the_hull_destroys_the_craft() {
     let w = slope_world(0.0);
     let d = Drop { inverted: true, speed: 12.0, gap: 0.01, ..Drop::default() };
     let mut ship = drop(&w, &d);
-    fly(&w, &mut ship, 5.0, &Controls::default(), true);
-    let Phase::Crashed { cause: Destruction::Impact { speed, point }, .. } = ship.phase else {
-        panic!("{:?}", ship.phase)
-    };
+    // Destroyed at the impact, but not frozen: the wreck bounces (its
+    // centre of mass rises again) and comes to rest later.
+    let (mut lowest, mut rose, mut destroyed_at) = (f64::INFINITY, false, None);
+    let start = ship.time;
+    for k in 1..=60 * 60 {
+        ship.advance(&w, start.add_seconds(k as f64 / 60.0), &Controls::default(), usize::MAX);
+        if ship.destruction().is_some() {
+            destroyed_at.get_or_insert(k);
+            let h = fixed_of(&w, &ship, "Moon").length();
+            rose |= h > lowest + 0.01;
+            lowest = lowest.min(h);
+        }
+        if matches!(ship.phase, Phase::Crashed { .. }) {
+            break;
+        }
+    }
+    let Some(Destruction::Impact { speed, point }) = ship.destruction() else { panic!("{:?}", ship.phase) };
     assert_eq!(ship.craft.contacts[point as usize].kind, ContactKind::Hull);
     assert!((speed - 12.0).abs() < 0.1, "{speed} m/s");
+    assert!(matches!(ship.phase, Phase::Crashed { .. }), "the wreck comes to rest: {:?}", ship.phase);
+    assert!(rose, "the wreck bounced");
+    assert!(destroyed_at.is_some_and(|k| k < 10), "destroyed at the impact: frame {destroyed_at:?}");
     // Debug mode: infinite impact tolerance.
     let mut debug = drop(&w, &Drop { debug: true, ..d });
     fly(&w, &mut debug, 2.0, &Controls::default(), true);
-    assert!(!matches!(debug.phase, Phase::Crashed { .. }));
+    assert!(debug.destruction().is_none());
     // On the gear at 12 m/s the feet bottom out still too fast.
     let mut gear = drop(&w, &Drop { inverted: false, ..d });
-    fly(&w, &mut gear, 5.0, &Controls::default(), true);
-    let Phase::Crashed { cause: Destruction::Impact { point, speed }, .. } = gear.phase else {
-        panic!("{:?}", gear.phase)
-    };
+    fly(&w, &mut gear, 60.0, &Controls::default(), true);
+    let Some(Destruction::Impact { point, speed }) = gear.destruction() else { panic!("{:?}", gear.phase) };
     println!("gear at 12 m/s: point {point} ({:?}) at {speed} m/s", gear.craft.contacts[point as usize].kind);
 }
 
@@ -296,9 +316,9 @@ fn sixty_fps_and_one_jump_land_identically() {
 fn landed_for_a_day_at_a_million_x_never_wakes() {
     let w = slope_world(2.0);
     let mut ship = drop(&w, &Drop { slope: 2.0, ..Drop::default() });
-    fly(&w, &mut ship, 20.0, &Controls::default(), true);
-    let Phase::Landed { body, fixed, att_fixed } = ship.phase.clone() else { panic!("{:?}", ship.phase) };
     let controls = Controls { sas: true, ..Controls::default() };
+    fly(&w, &mut ship, 20.0, &controls, true);
+    let Phase::Landed { body, fixed, att_fixed } = ship.phase.clone() else { panic!("{:?}", ship.phase) };
     let start = ship.time;
     let mut t = start;
     while t.seconds_since(start) < 86_400.0 {
@@ -311,4 +331,164 @@ fn landed_for_a_day_at_a_million_x_never_wakes() {
     ship.advance(&w, t.add_seconds(0.1), &turn, usize::MAX);
     assert!(matches!(ship.phase, Phase::Powered { .. }));
     let _: NodeId = body;
+}
+
+/// The four control cases the scenarios run in: SAS off and on, debug
+/// mode off and on.
+const CASES: [(bool, bool); 4] = [(false, false), (true, false), (false, true), (true, true)];
+
+/// Flies at 60 fps for up to `seconds`, calling `each` after every frame;
+/// stops once landed or crashed.
+fn fly_watching(w: &World, ship: &mut Vessel, seconds: f64, controls: &Controls, mut each: impl FnMut(&Vessel)) {
+    let start = ship.time;
+    for k in 1..=(seconds * 60.0) as usize {
+        ship.advance(w, start.add_seconds(k as f64 / 60.0), controls, usize::MAX);
+        each(ship);
+        if matches!(ship.phase, Phase::Landed { .. } | Phase::Crashed { .. }) {
+            return;
+        }
+    }
+}
+
+#[test]
+fn a_drop_from_two_metres_bounces_then_settles() {
+    // Moon, flat: 2.5 m/s at touchdown. The gear (ζ ≈ 0.3) throws the
+    // craft back up (its centre of mass rises after the first contact),
+    // then it settles upright and freezes.
+    let w = slope_world(0.0);
+    for (sas, debug) in CASES {
+        let d = Drop { gap: 2.0, debug, ..Drop::default() };
+        let mut ship = drop(&w, &d);
+        let touch = fixed_of(&w, &ship, "Moon").length() - 2.0;
+        let (mut lowest, mut rise) = (f64::INFINITY, 0.0f64);
+        let controls = Controls { sas, ..Controls::default() };
+        fly_watching(&w, &mut ship, 30.0, &controls, |s| {
+            let h = fixed_of(&w, s, "Moon").length();
+            if h < touch {
+                lowest = lowest.min(h);
+            }
+            rise = rise.max(h - lowest);
+        });
+        assert!(rise > 0.05, "sas {sas} debug {debug}: rose {rise} m after the first contact");
+        assert!(matches!(ship.phase, Phase::Landed { .. }), "sas {sas} debug {debug}: {:?}", ship.phase);
+        assert!(tilt_from(&w, &ship, "Moon", normal(&d)) < 0.5, "sas {sas} debug {debug}");
+    }
+}
+
+#[test]
+fn a_sideways_touchdown_slides_then_stops() {
+    // Moon, flat: set down (2 cm above the ground) moving 0.8 m/s east
+    // (below the ~1 m/s that would tip the tall craft over its feet; a
+    // vertical touchdown speed would take μ times its speed at once, in
+    // the impact's friction). Friction stops it within about v²/(2μg) ≈
+    // 0.25 m, upright.
+    let w = slope_world(0.0);
+    for (sas, debug) in CASES {
+        let d = Drop { sideways: 0.8, debug, ..Drop::default() };
+        let mut ship = drop(&w, &d);
+        let start = fixed_of(&w, &ship, "Moon");
+        let controls = Controls { sas, ..Controls::default() };
+        fly_watching(&w, &mut ship, 30.0, &controls, |_| {});
+        let Phase::Landed { fixed, .. } = ship.phase else { panic!("sas {sas} debug {debug}: {:?}", ship.phase) };
+        let n = normal(&d);
+        let moved = fixed.raw() - start;
+        let slid = (moved - n * moved.dot(n)).length();
+        println!("sas {sas} debug {debug}: slid {slid:.3} m");
+        // It would have gone 0.8 m/s × ~0.07 s of the gap before touching.
+        assert!(slid > 0.1 && slid < 1.0, "sas {sas} debug {debug}: slid {slid} m");
+        assert!(tilt_from(&w, &ship, "Moon", n) < 1.0, "sas {sas} debug {debug}");
+        assert!(ship.destruction().is_none());
+    }
+}
+
+#[test]
+fn a_steep_slope_tips_it_over_and_it_comes_to_rest_lying_down() {
+    // Moon, 30°, two feet downhill, full: past the tip angle (~14°). The
+    // weight's moment about the downhill feet (20 t × 1.62 m/s² × ~2.5 m ≈
+    // 80 kN·m) exceeds the attitude control's 40 kN·m, so SAS cannot stop
+    // it. It falls over (the nose may hit hard enough to destroy it, not in
+    // debug mode) and comes to rest lying on the slope, never frozen
+    // mid-fall.
+    let w = slope_world(25.0);
+    for (sas, debug) in CASES {
+        let d = Drop { slope: 25.0, yaw: 45.0, debug, ..Drop::default() };
+        let mut ship = drop(&w, &d);
+        let controls = Controls { sas, ..Controls::default() };
+        fly_watching(&w, &mut ship, 120.0, &controls, |_| {});
+        let tilt = tilt_from(&w, &ship, "Moon", normal(&d));
+        println!("sas {sas} debug {debug}: {tilt:.1}° from the slope normal, {:?}", ship.destruction());
+        assert!(matches!(ship.phase, Phase::Landed { .. } | Phase::Crashed { .. }), "sas {sas} debug {debug}");
+        assert!(tilt > 60.0, "sas {sas} debug {debug}: at rest {tilt}° from the slope normal");
+        assert!(!debug || ship.destruction().is_none());
+    }
+}
+
+#[test]
+fn sas_balances_the_craft_within_its_torque_authority() {
+    // Moon, 20°, empty (tip angle ~16°): the overhang's moment (4 t × 1.62
+    // m/s² × ~0.5 m ≈ 3 kN·m) is well within the 40 kN·m authority. With
+    // SAS the craft leans onto its downhill feet and is held there,
+    // balanced and live (not at rest: two feet do not hold it); without,
+    // it falls over.
+    let w = slope_world(20.0);
+    let d = Drop { slope: 20.0, yaw: 45.0, propellant: 0.0, debug: true, ..Drop::default() };
+    let mut held = drop(&w, &d);
+    fly_watching(&w, &mut held, 30.0, &Controls { sas: true, ..Controls::default() }, |_| {});
+    let tilt = tilt_from(&w, &held, "Moon", normal(&d));
+    assert!(matches!(held.phase, Phase::Powered { .. }) && tilt > 2.0 && tilt < 15.0, "{tilt}° {:?}", held.phase);
+    let mut free = drop(&w, &d);
+    fly_watching(&w, &mut free, 120.0, &Controls::default(), |_| {});
+    assert!(tilt_from(&w, &free, "Moon", normal(&d)) > 60.0);
+}
+
+#[test]
+fn landed_with_throttle_lifts_off() {
+    let w = world();
+    let t = sol::sol_epoch().add_seconds(86_400.0);
+    for (sas, debug) in CASES {
+        let mut ship = Vessel::landed_at(&w, VesselId(1), "Earth", 28.6082, -80.6041, t, test_craft());
+        ship.set_debug(&w, debug);
+        let h0 = ship.state(&w).1.length();
+        let controls = Controls { sas, throttle: 1.0, ..Controls::default() };
+        let start = ship.time;
+        for k in 1..=5 * 60 {
+            ship.advance(&w, start.add_seconds(k as f64 / 60.0), &controls, usize::MAX);
+        }
+        // 300 kN on 20 t: ~5 m/s² up for 5 s.
+        let climbed = ship.state(&w).1.length() - h0;
+        assert!(climbed > 30.0, "sas {sas} debug {debug}: climbed {climbed} m");
+        assert!(matches!(ship.phase, Phase::Powered { .. }));
+    }
+}
+
+#[test]
+fn the_rocket_stands_on_the_pad_at_spawn_and_after_save_and_load() {
+    let w = world();
+    let t = sol::sol_epoch().add_seconds(86_400.0);
+    let ship = Vessel::landed_at(&w, VesselId(1), "Earth", 28.6082, -80.6041, t, test_craft());
+    let Phase::Landed { fixed, .. } = ship.phase else { panic!("{:?}", ship.phase) };
+    let mut ids = VesselIds::default();
+    ids.allocate();
+    let text = SaveGame::capture(&w, t, std::slice::from_ref(&ship), ids, 0, Controls::default()).to_ron();
+    let mut loaded = SaveGame::from_ron(&text).unwrap().vessels.remove(0);
+    assert_eq!(loaded, ship);
+    // After the load its pose is checked again: it holds, so it stays.
+    for (sas, debug) in CASES {
+        let mut s = loaded.clone();
+        s.set_debug(&w, debug);
+        let controls = Controls { sas, ..Controls::default() };
+        let start = s.time;
+        for k in 1..=10 * 60 {
+            s.advance(&w, start.add_seconds(k as f64 / 60.0), &controls, usize::MAX);
+        }
+        // A debug-mode change wakes it; it settles again on its feet.
+        let Phase::Landed { fixed: now, .. } = s.phase else { panic!("sas {sas} debug {debug}: {:?}", s.phase) };
+        assert!(
+            (now.raw() - fixed.raw()).length() < 0.2,
+            "sas {sas} debug {debug}: moved {}",
+            (now.raw() - fixed.raw()).length()
+        );
+    }
+    loaded.advance(&w, t.add_seconds(3600.0), &Controls::default(), usize::MAX);
+    assert_eq!(loaded.phase, ship.phase);
 }

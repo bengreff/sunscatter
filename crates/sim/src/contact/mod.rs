@@ -13,14 +13,25 @@
 //!
 //! Forces and torques go into the vessel's rigid body in fixed substeps
 //! ([`SUBSTEPS`] of the 20 ms tick) while any contact point is within
-//! [`NEAR`] of the surface. A closing speed above the craft's impact limit
-//! at a hull point, or at a foot past its stroke, destroys the craft (unless
-//! debug mode). When every speed stays below the rest thresholds for
-//! [`REST_TICKS`] ticks, the vessel freezes into `Landed` with its pose.
+//! [`NEAR`] of the surface. A point past its free travel (a hull point, or
+//! a foot past its stroke) still closing faster than the craft's impact
+//! limit after the substep's contact force destroys the craft (unless
+//! debug mode); the wreck keeps its dynamics (engine and controls cut)
+//! until it comes to rest.
+//!
+//! **Rest** ([`rest_ticks`]): the vessel freezes (into `Landed`, or a wreck
+//! into `Crashed`) after [`REST_TICKS`] ticks in a row touching, with no
+//! input, with its kinetic energy relative to the ground below
+//! [`REST_ENERGY`] per kilogram, and, if intact, standing stably
+//! ([`holds`] on the points touching now: at least three, the centre of
+//! mass inside their polygon by [`REST_MARGIN`], the ground within their
+//! friction). A vessel caught at the top of a bounce or balanced while
+//! tipping is not at rest.
 //!
 //! The rules ([`normal_force`], [`friction_force`], [`impact`],
-//! [`ground_normal`], [`holds`], [`rest_ticks`]) are pure functions with
-//! table tests; [`forces`] sums them over the points for one substep.
+//! [`ground_normal`], [`holds`], [`kinetic_per_mass`], [`rest_ticks`]) are
+//! pure functions with table tests; [`forces`] sums them over the points
+//! for one substep, and [`support`] lists the points touching.
 
 use crate::body::BodyPhysical;
 use crate::craft::{ContactFile, ContactKind, ContactPoint};
@@ -38,12 +49,17 @@ pub const NEAR: f64 = 10.0;
 /// Extra height a live vessel with its engine off climbs above [`NEAR`]
 /// before returning to a coast (m): hysteresis, so it does not alternate.
 pub const LEAVE: f64 = 5.0;
-/// Rest thresholds: centre-of-mass speed relative to the ground (m/s) and
-/// angular velocity relative to the body's rotation (rad/s).
-pub const REST_SPEED: f64 = 0.05;
-pub const REST_RATE: f64 = 0.01;
-/// Ticks every speed must stay below the thresholds before freezing (1 s).
+/// Rest threshold: kinetic energy relative to the ground per kilogram
+/// (J/kg): that of 5 cm/s (translation and rotation together).
+pub const REST_ENERGY: f64 = 0.5 * 0.05 * 0.05;
+/// Ticks the vessel must stay at rest before freezing (1 s).
 pub const REST_TICKS: u32 = 50;
+/// Least distance of the centre of mass (seen along gravity) inside the
+/// support polygon for a stable stance (m).
+pub const REST_MARGIN: f64 = 0.02;
+/// A frozen pose's contact points within this clearance are its support
+/// when it is checked again (m; they are sunk by millimetres to centimetres).
+pub const SUPPORT_CLEARANCE: f64 = 0.01;
 /// Finite-difference step for the terrain normal (m).
 pub const NORMAL_STEP: f64 = 0.5;
 
@@ -100,10 +116,21 @@ pub fn ground_normal(clearance: impl Fn(DVec3) -> f64, p: DVec3, step: f64) -> D
     (up + east * slope(east) + north * slope(north)).normalize()
 }
 
+/// Kinetic energy per kilogram (J/kg) of a rigid body of `mass` and body-axes
+/// `inertia` (about its centre of mass) with attitude `q` (body → inertial),
+/// moving at `v_rel` and turning at `w_rel` (inertial axes) relative to the
+/// ground.
+pub fn kinetic_per_mass(mass: f64, inertia: &DMat3, q: DQuat, v_rel: DVec3, w_rel: DVec3) -> f64 {
+    let w = q.inverse() * w_rel;
+    0.5 * v_rel.length_squared() + 0.5 * w.dot(*inertia * w) / mass
+}
+
 /// New rest counter after a tick: counts ticks in a row that touch the
-/// ground with no input and every speed below the thresholds.
-pub fn rest_ticks(count: u32, touching: bool, input: bool, v_rel: DVec3, w_rel: DVec3) -> u32 {
-    if touching && !input && v_rel.length() < REST_SPEED && w_rel.length() < REST_RATE {
+/// ground with no input, kinetic energy `kinetic` (J/kg, relative to the
+/// ground) below [`REST_ENERGY`] and a stance that `stable` (see [`holds`];
+/// a wreck needs none).
+pub fn rest_ticks(count: u32, touching: bool, input: bool, kinetic: f64, stable: bool) -> u32 {
+    if touching && !input && kinetic < REST_ENERGY && stable {
         count + 1
     } else {
         0
@@ -113,8 +140,9 @@ pub fn rest_ticks(count: u32, touching: bool, input: bool, v_rel: DVec3, w_rel: 
 /// Whether a craft standing still holds on the ground: the ground under each
 /// support point is no steeper than its friction allows, and its centre of
 /// mass, seen along gravity (`down`, unit), is inside the polygon of the
-/// support points. `support` is (position, ground normal, friction).
-pub fn holds(com: DVec3, down: DVec3, support: &[(DVec3, DVec3, f64)]) -> bool {
+/// support points by at least `margin` (m). `support` is (position, ground
+/// normal, friction).
+pub fn holds(com: DVec3, down: DVec3, support: &[(DVec3, DVec3, f64)], margin: f64) -> bool {
     let slides = support.iter().any(|&(_, n, mu)| {
         let c = -n.dot(down);
         c <= 0.0 || (1.0 - c * c) > mu * mu * c * c
@@ -133,7 +161,11 @@ pub fn holds(com: DVec3, down: DVec3, support: &[(DVec3, DVec3, f64)]) -> bool {
     if hull.len() < 3 {
         return false;
     }
-    (0..hull.len()).all(|i| cross(hull[i], hull[(i + 1) % hull.len()], c) > 0.0)
+    (0..hull.len()).all(|i| {
+        let (p, q) = (hull[i], hull[(i + 1) % hull.len()]);
+        let edge = ((q[0] - p[0]) * (q[0] - p[0]) + (q[1] - p[1]) * (q[1] - p[1])).sqrt();
+        cross(p, q, c) > margin * edge
+    })
 }
 
 /// z component of `(p − o) × (q − o)`.
@@ -213,6 +245,40 @@ impl<'a> Ground<'a> {
     }
 }
 
+/// The points of `points` within `clearance` (m) of the ground (touching:
+/// 0), as `(position, ground normal, friction)` in the anchor frame, for
+/// [`holds`].
+pub fn support(
+    ground: &Ground,
+    pose: &Pose,
+    points: &[ContactPoint],
+    c: &ContactFile,
+    clearance: f64,
+) -> Vec<(DVec3, DVec3, f64)> {
+    points
+        .iter()
+        .filter_map(|cp| {
+            let p = pose.r + pose.q * (cp.pos - pose.com);
+            let fixed = ground.fixed(p);
+            let mu = match cp.kind {
+                ContactKind::Foot => c.foot.friction,
+                ContactKind::Hull => c.hull.friction,
+            };
+            (ground.physical.altitude_above_surface(fixed) <= clearance)
+                .then(|| (p, ground.normal_at_fixed(fixed.raw()), mu))
+        })
+        .collect()
+}
+
+/// Closing speed (m/s, positive towards the ground) of contact point `cp`
+/// of `pose` along the ground normal under it.
+pub fn closing_speed(ground: &Ground, pose: &Pose, cp: &ContactPoint) -> f64 {
+    let lever = pose.q * (cp.pos - pose.com);
+    let p = pose.r + lever;
+    let n = ground.normal_at_fixed(ground.fixed(p).raw());
+    -(pose.v + pose.omega.cross(lever) - ground.velocity(p)).dot(n)
+}
+
 /// The rigid body touching the ground (anchor frame, inertial axes).
 #[derive(Clone, Copy, Debug)]
 pub struct Pose {
@@ -245,7 +311,9 @@ pub struct ContactForces {
     pub torque: DVec3,
     /// Whether any point is on or below the surface.
     pub touching: bool,
-    /// The fastest point past its free travel above the impact limit.
+    /// The fastest point past its free travel closing above the impact
+    /// limit at the start of the substep (a candidate: it destroys the
+    /// craft if still too fast after the substep's force).
     pub impact: Option<Impact>,
 }
 

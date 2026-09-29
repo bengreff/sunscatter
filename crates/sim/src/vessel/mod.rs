@@ -6,13 +6,16 @@
 //! * `Powered` — live: fixed 20 ms ticks with controls latched per tick
 //!   (deterministic; limited to physics warp by the game), while thrusting
 //!   or near a surface. Near a surface each tick runs ground-contact
-//!   substeps ([`crate::contact`], [`live`]); at rest it freezes into
-//!   `Landed`, and thrust or rotation input wakes a landed vessel.
+//!   substeps ([`crate::contact`], [`live`]); at rest and standing stably
+//!   it freezes into `Landed`. Thrust, rotation input, a change of the
+//!   attitude mode or of debug mode, or a pose that no longer holds (checked
+//!   once after a load) wakes a landed vessel.
 //! * `Coasting` — on rails: a stored [`Trajectory`] of coasts and planned
 //!   burns ([`FlightPlan`]) that is sampled at any warp. A coast ends
 //!   [`live_height`](Vessel::live_height) above a surface; contact is flown live.
-//! * `Crashed` — destroyed: a contact point hit too fast (D066), or
-//!   overheated (D065).
+//! * `Crashed` — a wreck at rest. A vessel is destroyed when a contact
+//!   point hits too fast (D066) or it overheats (D065) ([`Vessel::destruction`]);
+//!   engine and controls are cut, and it flies on until it comes to rest.
 //!
 //! Inside an atmosphere a vessel is always live: aerodynamics and heating
 //! act on its cells every tick ([`aerothermal`]). A coast ends where it
@@ -39,6 +42,7 @@ mod flown;
 mod hold;
 mod id;
 mod live;
+use live::{attitude_mode, Checked};
 mod segment;
 mod trajectory;
 
@@ -111,9 +115,8 @@ pub enum Phase {
     Coasting {
         trajectory: Box<Trajectory>,
     },
-    /// Destroyed (`cause`). The wreck stays where it was destroyed, fixed
-    /// to `body` (the ground it hit, or the body whose air burned it up),
-    /// in the pose it had.
+    /// Destroyed (`cause`) and come to rest: the wreck is fixed to `body`
+    /// in the pose it came to rest in.
     Crashed {
         body: NodeId,
         fixed: Vec3<BodyFixed>,
@@ -181,6 +184,18 @@ pub struct Vessel {
     /// Live ticks in a row at rest on the ground ([`crate::contact::rest_ticks`]).
     #[serde(default)]
     rest_ticks: u32,
+    /// Why the vessel was destroyed, if it was: it flies on with engine
+    /// and controls cut until it rests (`Phase::Crashed`).
+    #[serde(default)]
+    destroyed: Option<Destruction>,
+    /// The attitude mode ([`attitude_mode`]) when it came to rest: changing
+    /// it wakes a landed vessel. `None`: whatever it is next.
+    #[serde(default)]
+    rest_mode: Option<Controls>,
+    /// Whether a landed pose has been checked to hold since the vessel was
+    /// built or loaded.
+    #[serde(skip)]
+    checked: Checked,
     /// The ship clock: proper time minus coordinate time (D012).
     clock: ShipClock,
     /// Skin and interior temperatures (D065).
@@ -243,6 +258,9 @@ impl Vessel {
             tick_accel: None,
             control: AttitudeControl::default(),
             rest_ticks: 0,
+            destroyed: None,
+            rest_mode: None,
+            checked: Checked(true),
             clock: ShipClock::at(t, 0.0),
             thermal: VesselThermal::uniform(cells, nodes, aerothermal::INITIAL_K, t),
         };
@@ -272,6 +290,9 @@ impl Vessel {
             tick_accel: None,
             control: AttitudeControl::default(),
             rest_ticks: 0,
+            destroyed: None,
+            rest_mode: None,
+            checked: Checked(true),
             clock: ShipClock::at(t, 0.0),
             thermal: VesselThermal::uniform(cells, nodes, aerothermal::INITIAL_K, t),
         };
@@ -359,8 +380,10 @@ impl Vessel {
             return;
         }
         self.debug = on;
-        if matches!(self.phase, Phase::Coasting { .. }) {
-            self.start_coast(world);
+        match self.phase {
+            Phase::Coasting { .. } => self.start_coast(world),
+            Phase::Landed { .. } => self.wake(world),
+            _ => {}
         }
     }
 
@@ -507,6 +530,9 @@ impl Vessel {
     pub fn advance(&mut self, world: &World, target: Epoch, controls: &Controls, budget: usize) -> Epoch {
         let target = if target > world.end() { world.end() } else { target };
         let mut budget = Budget { steps: budget, thermal: budget };
+        // A wreck has no engine or controls.
+        let cut = Controls::default();
+        let controls = if self.destroyed.is_some() { &cut } else { controls };
         loop {
             let before = (self.time, std::mem::discriminant(&self.phase));
             match &self.phase {
@@ -526,7 +552,11 @@ impl Vessel {
     }
 
     fn advance_landed(&mut self, world: &World, target: Epoch, controls: &Controls) {
-        if self.engine_running(controls) || controls.rotate != DVec3::ZERO {
+        let mode = attitude_mode(controls);
+        let changed = self.rest_mode.is_some_and(|m| m != mode);
+        self.rest_mode = Some(mode);
+        let holds = std::mem::replace(&mut self.checked, Checked(true)).0 || self.holds_where_landed(world);
+        if self.engine_running(controls) || controls.rotate != DVec3::ZERO || changed || !holds {
             self.wake(world);
             return;
         }

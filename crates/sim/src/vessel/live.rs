@@ -17,33 +17,29 @@
 //! A tick ends the live phase when the vessel
 //! * coasts: engine off, [`contact::LEAVE`] above the live height and
 //!   [`LEAVE_ATMOSPHERE`] above every atmosphere;
-//! * crashes: a contact point closes faster than the impact limit (not in
-//!   debug mode, D064);
-//! * burns up: a skin cell or the interior exceeds its limit (not in debug
-//!   mode, D064, D065);
-//! * rests: [`contact::REST_TICKS`] ticks in a row touching with every speed
-//!   below the rest thresholds and no input; it then freezes into `Landed`
-//!   with its pose.
+//! * rests ([`contact::rest_ticks`]): [`contact::REST_TICKS`] ticks in a
+//!   row touching, still and (intact) standing stably, with no input; it
+//!   then freezes into `Landed` with its pose, or a wreck into `Crashed`.
+//!
+//! A contact point hitting faster than the impact limit, or a skin cell or
+//! the interior above its limit, destroys the craft (not in debug mode,
+//! D064, D065): its engine and controls are cut, and it flies on (falls,
+//! bounces, tumbles) until it comes to rest.
 
 use super::aerothermal::{self, air_at, in_atmosphere, AeroTick, LEAVE_ATMOSPHERE};
 use super::attitude::{self, Actuators, Command, Gimbal};
-use super::{Controls, Destruction, Phase, Vessel, TICK};
+use super::{AttitudeControl, Controls, Destruction, FlightPlan, Phase, Vessel, TICK};
 use crate::contact::{self, Ground, Pose};
-use crate::craft::{ContactKind, MassProps};
+use crate::craft::MassProps;
 use crate::forces::{altitude_above, ambient_pressure, ActiveSources, DragModel, ForceContext};
 use crate::frame::NodeId;
 use crate::rigid;
 use crate::world::World;
 use glam::{DQuat, DVec3};
 
-/// How a contact tick ended early.
-enum Hit {
-    /// Destroyed at substep `k`: the state then, the impact, and the
-    /// proper-time increment until then.
-    Crash { k: usize, r: DVec3, att: super::Attitude, impact: contact::Impact, delta: f64 },
-    /// The state stopped being finite.
-    Failed,
-}
+/// A contact tick that could not be completed: the state stopped being
+/// finite.
+struct Failed;
 
 /// A completed contact tick.
 struct ContactTick {
@@ -53,9 +49,30 @@ struct ContactTick {
     touching: bool,
     /// Proper-time increment over the tick.
     delta: f64,
+    /// The impact that destroyed the craft during the tick (engine and
+    /// controls cut from then on).
+    impact: Option<contact::Impact>,
 }
 
 impl Vessel {
+    /// Why the vessel was destroyed, if it was (a wreck still moving, or at
+    /// rest in `Phase::Crashed`).
+    pub fn destruction(&self) -> Option<Destruction> {
+        match self.phase {
+            Phase::Crashed { cause, .. } => Some(cause),
+            _ => self.destroyed,
+        }
+    }
+
+    /// Destroyed by `cause`: engine and controls are cut (the flight plan
+    /// and the parachute go with them); it flies on until it rests.
+    pub(super) fn destroy(&mut self, cause: Destruction) {
+        self.destroyed = Some(cause);
+        self.chute_deployed = false;
+        self.plan = FlightPlan::default();
+        self.control = AttitudeControl::default();
+    }
+
     /// Height of the centre of mass above a surface below which the vessel
     /// flies live ticks with contact (m): its farthest contact point plus
     /// [`contact::NEAR`]. Coasts end here.
@@ -89,27 +106,27 @@ impl Vessel {
         best
     }
 
-    /// Whether the vessel, landed where it is, holds there
-    /// ([`contact::holds`] on its feet): scripted placements on ground too
-    /// steep for its friction start live instead.
+    /// Whether the vessel, landed where it is, holds there: [`contact::holds`]
+    /// on its contact points within [`contact::SUPPORT_CLEARANCE`] of the
+    /// ground. Scripted placements on ground too steep for its friction,
+    /// and saved poses that no longer hold, go live instead.
     pub(super) fn holds_where_landed(&self, world: &World) -> bool {
-        let Phase::Landed { body, fixed, att_fixed } = self.phase else { return true };
-        let p = world.source(body).and_then(|s| s.physical.as_ref()).expect("physical");
-        let com = self.mass_props().com;
-        let mu = self.craft.contact.foot.friction;
-        let support: Vec<_> = (self.craft.contacts.iter())
-            .filter(|c| c.kind == ContactKind::Foot)
-            .map(|c| {
-                let x = fixed.raw() + att_fixed * (c.pos - com);
-                let n = contact::ground_normal(
-                    |y| p.altitude_above_surface(crate::frame::Vec3::from_raw(y)),
-                    x,
-                    contact::NORMAL_STEP,
-                );
-                (x, n, mu)
-            })
-            .collect();
-        contact::holds(fixed.raw(), -fixed.raw().normalize(), &support)
+        let Phase::Landed { body, .. } = self.phase else { return true };
+        let (anchor, r, v) = self.state(world);
+        let ground = Ground::new(world, &world.snapshot(self.time), anchor, body);
+        let props = self.mass_props();
+        let pose = Pose {
+            r,
+            v,
+            q: self.attitude.q,
+            omega: self.attitude.omega,
+            com: props.com,
+            mass: props.mass,
+            inertia: props.inertia,
+        };
+        let c = &self.craft;
+        let support = contact::support(&ground, &pose, &c.contacts, &c.contact, contact::SUPPORT_CLEARANCE);
+        contact::holds(r, -(r - ground.center).normalize(), &support, 0.0)
     }
 
     pub(super) fn advance_powered(&mut self, world: &World, target: crate::time::Epoch, controls: &Controls) {
@@ -178,18 +195,13 @@ impl Vessel {
                 ) {
                     Ok(t) => {
                         self.attitude = attitude::finish(t.att, &mut self.control, &cmd, false);
+                        if let Some(im) = t.impact {
+                            self.destroy(Destruction::Impact { speed: im.speed, point: im.point });
+                        }
                         (t.r, t.v, t.touching, t.delta)
                     }
-                    Err(Hit::Failed) => {
+                    Err(Failed) => {
                         (self.attitude, self.control) = before;
-                        return;
-                    }
-                    Err(Hit::Crash { k, r, att, impact, delta }) => {
-                        self.time = self.time.add_seconds(TICK / contact::SUBSTEPS as f64 * k as f64);
-                        self.clock.add(self.time, delta);
-                        self.thermal.restart(self.time);
-                        let cause = Destruction::Impact { speed: impact.speed, point: impact.point };
-                        self.crash(world, anchor, body, r, att, cause);
                         return;
                     }
                 },
@@ -213,12 +225,10 @@ impl Vessel {
             self.clock.add(self.time, delta);
             self.phase = Phase::Powered { anchor, r: r1, v: v1 };
             self.tick_accel = Some((v1 - v) / TICK);
-            if self.overheated(world, anchor, r1, air.map(|a| a.body)) {
-                return;
-            }
+            self.check_overheat();
             if let Some(body) = contact_body {
                 let input = engine_on || controls.rotate != DVec3::ZERO;
-                if self.rest(world, anchor, body, touching, input) {
+                if self.rest(world, anchor, body, touching, input, controls) {
                     return;
                 }
             }
@@ -238,13 +248,16 @@ impl Vessel {
         thrust: f64,
         props: &MassProps,
         (drag, lift, aero_torque): (DragModel, DVec3, &dyn Fn(DQuat) -> DVec3),
-    ) -> Result<ContactTick, Hit> {
+    ) -> Result<ContactTick, Failed> {
         let h = TICK / contact::SUBSTEPS as f64;
         let active = ActiveSources::select(world, &world.snapshot(self.time), anchor, r);
         let drag = Some(drag);
         let mut att = self.attitude;
         let mut touching = false;
         let mut delta = 0.0;
+        let mut impact = None;
+        // Destroyed (now or before): engine and controls cut.
+        let mut dead = self.destroyed.is_some();
         for k in 0..contact::SUBSTEPS {
             let snap = world.snapshot(self.time.add_seconds(h * k as f64));
             let ground = Ground::new(world, &snap, anchor, body);
@@ -258,90 +271,124 @@ impl Vessel {
                 self.craft.impact_max_speed,
                 h,
             );
-            if let Some(impact) = c.impact.filter(|_| !self.debug) {
-                return Err(Hit::Crash { k, r, att, impact, delta });
-            }
             touching = c.touching;
+            let thrust = if dead { 0.0 } else { thrust };
             let thrust_accel = att.q * cmd.thrust_dir * (thrust / props.mass) + lift;
             let ctx = ForceContext { world, anchor, active: &active, drag, thrust: thrust_accel };
             let (a, rate) = ctx.accel_rate(&snap, r, v);
             let a = a + c.force / props.mass;
-            let torque = cmd.torque + att.q.inverse() * c.torque + aero_torque(att.q);
+            let command = if dead { DVec3::ZERO } else { cmd.torque };
+            let torque = command + att.q.inverse() * c.torque + aero_torque(att.q);
             if !(a.is_finite() && torque.is_finite()) {
-                return Err(Hit::Failed);
+                return Err(Failed);
             }
             delta += rate * h;
             v += a * h;
             r += v * h;
             att = rigid::tick(&att, &props.inertia, torque, h);
+            // An impact: the point past its free travel is still closing
+            // too fast after the substep's contact force (its closing speed
+            // at the start of the substep, the event's peak, is reported).
+            if let Some(im) = c.impact.filter(|_| !self.debug && !dead) {
+                let after = Pose { r, v, q: att.q, omega: att.omega, ..pose };
+                let point = &self.craft.contacts[im.point as usize];
+                if contact::closing_speed(&ground, &after, point) > self.craft.impact_max_speed {
+                    impact = Some(im);
+                    dead = true;
+                }
+            }
         }
-        Ok(ContactTick { r, v, att, touching, delta })
-    }
-
-    /// Destroyed (`cause`) at `r` (anchor-relative) with attitude `att`;
-    /// the wreck is fixed to `body`.
-    fn crash(
-        &mut self,
-        world: &World,
-        anchor: NodeId,
-        body: NodeId,
-        r: DVec3,
-        att: super::Attitude,
-        cause: Destruction,
-    ) {
-        let ground = Ground::new(world, &world.snapshot(self.time), anchor, body);
-        self.phase = Phase::Crashed { body, fixed: ground.fixed(r), att_fixed: fixed_attitude(&ground, att.q), cause };
-        self.chute_deployed = false;
-        self.tick_accel = None;
-        self.rest_ticks = 0;
-        self.sync_landed_attitude(world);
+        Ok(ContactTick { r, v, att, touching, delta, impact })
     }
 
     /// After a tick: destroyed if a temperature is above its limit (not in
-    /// debug mode, D064). The wreck is fixed to the body whose air it was
-    /// in (else the nearest surface's). Returns whether it was destroyed.
-    fn overheated(&mut self, world: &World, anchor: NodeId, r: DVec3, air: Option<NodeId>) -> bool {
-        if self.debug {
-            return false;
+    /// debug mode, D064).
+    fn check_overheat(&mut self) {
+        if self.debug || self.destroyed.is_some() {
+            return;
         }
         let t = &self.craft.thermal;
         let Some(hot) = crate::thermal::check(&self.thermal.state, t.skin_max_k, t.internal_max_k) else {
-            return false;
+            return;
         };
         let temperature = match hot {
             crate::thermal::Overheat::Cell(i) => self.thermal.state.skin[i as usize],
             crate::thermal::Overheat::Node(j) => self.thermal.state.nodes[j as usize],
         };
-        let cause = Destruction::Overheat { at: hot, temperature };
-        let Some(body) = air.or_else(|| self.nearest_surface(world, anchor, r).map(|(b, _)| b)) else {
-            // Nothing to fix the wreck to (deep space): it keeps flying.
-            return false;
-        };
-        let att = self.attitude;
-        self.crash(world, anchor, body, r, att, cause);
-        true
+        self.destroy(Destruction::Overheat { at: hot, temperature });
     }
 
-    /// Counts rest ticks after a contact tick; freezes into `Landed` (and
-    /// returns true) once the vessel has rested long enough.
-    fn rest(&mut self, world: &World, anchor: NodeId, body: NodeId, touching: bool, input: bool) -> bool {
+    /// Counts rest ticks after a contact tick; freezes into `Landed` (a
+    /// wreck into `Crashed`) and returns true once the vessel has rested
+    /// long enough. `controls` are remembered: changing the attitude mode
+    /// wakes a landed vessel.
+    fn rest(
+        &mut self,
+        world: &World,
+        anchor: NodeId,
+        body: NodeId,
+        touching: bool,
+        input: bool,
+        controls: &Controls,
+    ) -> bool {
         let Phase::Powered { r, v, .. } = self.phase else { return false };
         let ground = Ground::new(world, &world.snapshot(self.time), anchor, body);
-        let v_rel = v - ground.velocity(r);
-        let w_rel = self.attitude.omega - ground.omega;
-        self.rest_ticks = contact::rest_ticks(self.rest_ticks, touching, input, v_rel, w_rel);
+        let props = self.mass_props();
+        let (v_rel, w_rel) = (v - ground.velocity(r), self.attitude.omega - ground.omega);
+        let kinetic = contact::kinetic_per_mass(props.mass, &props.inertia, self.attitude.q, v_rel, w_rel);
+        // Stability is checked only when the rest could count (it needs
+        // the support points' ground normals).
+        let still = touching && !input && kinetic < contact::REST_ENERGY;
+        let stable = still
+            && (self.destroyed.is_some() || {
+                let pose = Pose {
+                    r,
+                    v,
+                    q: self.attitude.q,
+                    omega: self.attitude.omega,
+                    com: props.com,
+                    mass: props.mass,
+                    inertia: props.inertia,
+                };
+                let c = &self.craft;
+                let support = contact::support(&ground, &pose, &c.contacts, &c.contact, 0.0);
+                contact::holds(r, -(r - ground.center).normalize(), &support, contact::REST_MARGIN)
+            });
+        self.rest_ticks = contact::rest_ticks(self.rest_ticks, touching, input, kinetic, stable);
         if self.rest_ticks < contact::REST_TICKS {
             return false;
         }
-        self.phase =
-            Phase::Landed { body, fixed: ground.fixed(r), att_fixed: fixed_attitude(&ground, self.attitude.q) };
+        let (fixed, att_fixed) = (ground.fixed(r), fixed_attitude(&ground, self.attitude.q));
+        self.phase = match self.destroyed {
+            Some(cause) => Phase::Crashed { body, fixed, att_fixed, cause },
+            None => Phase::Landed { body, fixed, att_fixed },
+        };
         self.chute_deployed = false;
         self.tick_accel = None;
         self.rest_ticks = 0;
         self.control = Default::default();
+        self.rest_mode = Some(attitude_mode(controls));
         self.sync_landed_attitude(world);
         true
     }
+}
+
+/// Whether a landed pose has been checked since the vessel was built or
+/// loaded: bookkeeping, not state (every value compares equal; a check
+/// that passes changes nothing).
+#[derive(Clone, Copy, Debug, Default)]
+pub(super) struct Checked(pub(super) bool);
+
+impl PartialEq for Checked {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+/// The part of the controls that sets the attitude mode (SAS and its hold):
+/// a landed vessel wakes when it changes.
+pub(super) fn attitude_mode(c: &Controls) -> Controls {
+    Controls { throttle: 0.0, rotate: DVec3::ZERO, chute: false, reference: None, target: None, ..*c }
 }
 
 /// Body → body-fixed attitude of a vessel with body → inertial `q`.
