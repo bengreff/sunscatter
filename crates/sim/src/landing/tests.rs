@@ -194,6 +194,21 @@ fn the_braking_solution_stops_at_the_margin_when_flown() {
 }
 
 #[test]
+fn a_craft_already_touching_the_ground_predicts_without_panicking() {
+    // The centre of mass at ground level: the feet are already below it
+    // (seen in the demo at the end of a parachute descent).
+    let w = world();
+    let c = craft();
+    for u in [-5.0, 0.0] {
+        let start = start_over(&w, "Moon", (0.2, 0.4, 0.0), (0.0, 0.0, u));
+        let d = predict_impact(&w, &c, &start, limits());
+        let hit = d.impact.expect("an impact at once");
+        assert!(hit.t.seconds_since(start.t) < 1.0, "{}", hit.t.seconds_since(start.t));
+        let _ = braking_solution(&w, &c, &d, 10.0);
+    }
+}
+
+#[test]
 fn a_craft_that_cannot_stop_has_no_braking_solution() {
     let w = world();
     let c = craft();

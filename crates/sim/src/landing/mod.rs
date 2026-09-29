@@ -188,6 +188,10 @@ pub struct Descent {
 impl Descent {
     /// The state `(r, v)` at local time `t` (within the path).
     fn state(&self, t: f64) -> (DVec3, DVec3) {
+        // A path that ends where it starts (already touching) has one sample.
+        if let [only] = self.samples.as_slice() {
+            return (only.r, only.v);
+        }
         let i = self.samples.partition_point(|s| s.t <= t).clamp(1, self.samples.len() - 1);
         let (a, b) = (&self.samples[i - 1], &self.samples[i]);
         if a.t == b.t {
