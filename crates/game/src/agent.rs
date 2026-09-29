@@ -114,7 +114,8 @@ pub fn tools() -> Vec<Tool> {
         t(
             "get_landing_prediction",
             "Where, when and how fast the active vessel meets the ground if it keeps its throttle and chute, \
-             pointing surface-retrograde (its own gravity, drag, lift and thrust model): seconds from now, \
+             holding the attitude its controls give (surface prograde/retrograde holds follow the surface velocity, \
+             other holds keep the current attitude, SAS off noses into the wind) (its own gravity, drag, lift and thrust model): seconds from now, \
              the body, latitude/longitude (deg), ground height (m), vertical and horizontal speed relative \
              to the ground (m/s); the full-thrust braking burn that stops 10 m above the ground (seconds \
              to ignition, its altitude; null if it cannot stop); and the current radar altitude, vertical \
@@ -357,7 +358,7 @@ fn get_vessel(
 fn landing_json(sim: &SimState) -> Value {
     let ship = sim.ship();
     let name = |n: sim::frame::NodeId| sim.world.eph.node(n).name.clone();
-    let Some(start) = crate::landing::start_of(&sim.world, ship, sim.controls.throttle, sim.controls.chute) else {
+    let Some(start) = crate::landing::start_of(&sim.world, ship, &sim.controls) else {
         return json!({"impact": null, "braking": null, "surface": null});
     };
     let l = crate::landing::predict(&sim.world, &ship.craft, ship.id(), &start);

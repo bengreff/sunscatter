@@ -51,6 +51,9 @@ pub enum AssumedAttitude {
     /// Thrust (the engine's mount direction) against the velocity relative
     /// to the reference body's surface; straight up when at rest.
     SurfaceRetrograde,
+    /// Nose (the engine's mount direction) into the relative wind: a
+    /// statically stable craft left to itself (D074); straight up at rest.
+    SurfacePrograde,
     /// A fixed inertial attitude (body → inertial).
     Inertial(DQuat),
 }

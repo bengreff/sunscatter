@@ -126,10 +126,11 @@ impl<'a> Model<'a> {
     fn attitude(&self, snap: &Snapshot, anchor: NodeId, r: DVec3, v: DVec3) -> DQuat {
         match self.attitude {
             AssumedAttitude::Inertial(q) => q,
-            AssumedAttitude::SurfaceRetrograde => {
+            AssumedAttitude::SurfaceRetrograde | AssumedAttitude::SurfacePrograde => {
                 let v_srf = self.surface_velocity(snap, anchor, r, v);
+                let sign = if self.attitude == AssumedAttitude::SurfacePrograde { 1.0 } else { -1.0 };
                 let dir = if v_srf.length() > 1e-3 {
-                    -v_srf.normalize()
+                    v_srf.normalize() * sign
                 } else {
                     (r - snap.relative_r(self.body, anchor)).normalize()
                 };

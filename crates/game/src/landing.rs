@@ -1,6 +1,7 @@
 //! Landing aids (playtest-1 §C): the landing panel and the impact marker,
 //! read from `sim::landing` (the vessel's own force model integrated to
-//! the ground, surface-retrograde attitude, current throttle and chute).
+//! the ground with the attitude its controls will hold, the current
+//! throttle and chute).
 //!
 //! The prediction runs on a background task a few times a second and is
 //! swapped in when complete. The marker is the body-fixed impact point
@@ -13,10 +14,11 @@ use crate::state::SimState;
 use bevy::prelude::*;
 use bevy::tasks::{futures::check_ready, AsyncComputeTaskPool, Task};
 use bevy_egui::{egui, EguiContexts};
+use glam::DQuat;
 use sim::craft::CraftParams;
 use sim::landing::{self, AssumedAttitude, Braking, Impact, LandingStart, Limits};
 use sim::time::Epoch;
-use sim::vessel::{Phase, Vessel, VesselId};
+use sim::vessel::{Controls, HoldMode, Phase, SpeedReference, Vessel, VesselId};
 use sim::world::World;
 
 /// Below this radar altitude the landing panel shows (m).
@@ -38,9 +40,24 @@ pub struct Landing {
     pub braking: Option<Braking>,
 }
 
-/// The prediction start for a vessel flying with `throttle` and `chute`.
-pub fn start_of(world: &World, vessel: &Vessel, throttle: f64, chute: bool) -> Option<LandingStart> {
-    LandingStart::of_vessel(world, vessel, throttle, chute, AssumedAttitude::SurfaceRetrograde)
+/// The attitude the prediction assumes from the controls: what the hold
+/// will do (a surface prograde/retrograde hold follows the surface
+/// velocity; any other hold keeps the current attitude, which is exact for
+/// stability and a fair guess for the rest), and with SAS off a stable
+/// craft weathervanes nose into the wind (D074).
+pub fn assumed_attitude(c: &Controls, q: DQuat) -> AssumedAttitude {
+    match (c.sas, c.hold, c.speed) {
+        (false, _, _) => AssumedAttitude::SurfacePrograde,
+        (true, HoldMode::Retrograde, SpeedReference::Surface) => AssumedAttitude::SurfaceRetrograde,
+        (true, HoldMode::Prograde, SpeedReference::Surface) => AssumedAttitude::SurfacePrograde,
+        (true, _, _) => AssumedAttitude::Inertial(q),
+    }
+}
+
+/// The prediction start for a vessel flying with `controls`.
+pub fn start_of(world: &World, vessel: &Vessel, controls: &Controls) -> Option<LandingStart> {
+    let attitude = assumed_attitude(controls, vessel.attitude.q);
+    LandingStart::of_vessel(world, vessel, controls.throttle, controls.chute, attitude)
 }
 
 /// Predicts the impact from `start` and, when it is near, the braking
@@ -80,7 +97,7 @@ pub fn update(time: Res<Time>, sim: Res<SimState>, mut pred: ResMut<LandingPredi
         return;
     }
     pred.since_last = 0.0;
-    let Some(start) = start_of(&sim.world, ship, sim.controls.throttle, sim.controls.chute) else {
+    let Some(start) = start_of(&sim.world, ship, &sim.controls) else {
         pred.latest = None;
         return;
     };
@@ -190,6 +207,23 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_assumed_attitude_follows_the_controls() {
+        let q = DQuat::from_xyzw(0.0, 0.6, 0.0, 0.8);
+        let c = |sas, hold, speed| Controls { sas, hold, speed, ..Controls::default() };
+        let cases = [
+            (c(false, HoldMode::Retrograde, SpeedReference::Surface), AssumedAttitude::SurfacePrograde),
+            (c(true, HoldMode::Retrograde, SpeedReference::Surface), AssumedAttitude::SurfaceRetrograde),
+            (c(true, HoldMode::Prograde, SpeedReference::Surface), AssumedAttitude::SurfacePrograde),
+            (c(true, HoldMode::Retrograde, SpeedReference::Orbit), AssumedAttitude::Inertial(q)),
+            (c(true, HoldMode::Stability, SpeedReference::Surface), AssumedAttitude::Inertial(q)),
+            (c(true, HoldMode::Maneuver, SpeedReference::Orbit), AssumedAttitude::Inertial(q)),
+        ];
+        for (controls, want) in cases {
+            assert_eq!(assumed_attitude(&controls, q), want, "{controls:?}");
+        }
+    }
+
+    #[test]
     fn burn_in_counts_down_then_says_now() {
         assert_eq!(burn_in(-1.0), "NOW");
         assert_eq!(burn_in(0.0), "NOW");
@@ -209,7 +243,7 @@ mod tests {
         let ship = Vessel::coasting(&sim.world, id, sim.clock, moon.node, r, v, sim::craft::test_craft());
         sim.fleet.push(ship);
         let ship = sim.fleet.last().unwrap();
-        let start = start_of(&sim.world, ship, 0.0, false).expect("flying");
+        let start = start_of(&sim.world, ship, &Controls::default()).expect("flying");
         let l = predict(&sim.world, &ship.craft, id, &start);
         let hit = l.impact.expect("it lands");
         let dt = hit.t.seconds_since(sim.clock);
