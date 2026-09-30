@@ -416,7 +416,7 @@ impl Vessel {
 
     /// Whether the engine runs with these controls (a throttle, and
     /// propellant or debug mode).
-    fn engine_running(&self, controls: &Controls) -> bool {
+    pub fn engine_running(&self, controls: &Controls) -> bool {
         self.craft.engine.setting(controls.throttle) > 0.0 && (self.debug || self.propellant > 0.0)
     }
 

@@ -29,11 +29,17 @@ pub struct SunLight;
 #[derive(Component)]
 pub struct FlameVisual(pub usize);
 
+/// Vessel `.0`'s deployed parachute canopy (D073: a functional mark).
+#[derive(Component)]
+pub struct CanopyVisual(pub usize);
+
 #[derive(Resource)]
 pub struct Assets3d {
     ship_mesh: Handle<Mesh>,
     flame_mesh: Handle<Mesh>,
     flame_material: Handle<StandardMaterial>,
+    canopy_mesh: Handle<Mesh>,
+    canopy_material: Handle<StandardMaterial>,
 }
 
 pub fn setup(
@@ -99,6 +105,14 @@ pub fn setup(
             base_color: Color::srgb(1.0, 0.6, 0.2),
             emissive: LinearRgba::rgb(40.0, 14.0, 3.0),
             unlit: true,
+            ..default()
+        }),
+        // A unit shallow cone, scaled per vessel by `canopy`.
+        canopy_mesh: meshes.add(Cone { radius: 1.0, height: CANOPY_DEPTH }),
+        canopy_material: materials.add(StandardMaterial {
+            base_color: Color::srgb(0.95, 0.45, 0.2),
+            double_sided: true,
+            cull_mode: None,
             ..default()
         }),
     });
@@ -243,6 +257,72 @@ pub fn update_flames(
     }
 }
 
+/// Drag coefficient of a round canopy on its nominal area (Knacke,
+/// *Parachute Recovery Systems Design Manual*, NWC TP 6575, 1991, table
+/// 5-1: flat circular 0.75-0.80), used only to size the mark from Cd·A.
+const CANOPY_CD: f64 = 0.75;
+/// Suspension lines about one nominal diameter long (Knacke: 1.0-1.15 D0).
+const RISER_PER_DIAMETER: f64 = 1.0;
+/// The canopy mark's depth as a fraction of its radius.
+const CANOPY_DEPTH: f32 = 0.5;
+
+/// Where a deployed canopy sits (body axes): its centre, its axis (the
+/// direction the canopy trails, downwind of the mount) and its radius (m).
+/// `wind_body` is the air's velocity relative to the craft in body axes;
+/// without it (no air, no wind) the canopy trails beyond the mount along
+/// the mount's own direction from the centre of the body.
+fn canopy(cd_area: f64, mount: DVec3, wind_body: Option<DVec3>) -> (DVec3, DVec3, f64) {
+    let radius = (cd_area / CANOPY_CD / std::f64::consts::PI).sqrt();
+    let axis = wind_body.and_then(|w| w.try_normalize()).or_else(|| mount.try_normalize()).unwrap_or(DVec3::Z);
+    (mount + axis * (2.0 * radius * RISER_PER_DIAMETER), axis, radius)
+}
+
+/// Places the canopy marks: shown for every live vessel with its chute
+/// deployed, trailing downwind of its mount; hidden otherwise.
+pub fn update_canopies(
+    mut commands: Commands,
+    sim: Res<SimState>,
+    assets: Res<Assets3d>,
+    ships: Query<(&ShipVisual, &Transform), Without<CanopyVisual>>,
+    mut canopies: Query<(Entity, &CanopyVisual, &mut Transform, &mut Visibility)>,
+) {
+    let mut seen = vec![false; sim.fleet.len()];
+    let snap = sim.world.snapshot(sim.clock);
+    for (entity, c, mut t, mut vis) in &mut canopies {
+        let Some(vessel) = sim.fleet.get(c.0) else {
+            commands.entity(entity).despawn();
+            continue;
+        };
+        seen[c.0] = true;
+        let ship = ships.iter().find(|(s, _)| s.0 == c.0).map(|(_, t)| *t);
+        let live = matches!(vessel.phase, sim::vessel::Phase::Powered { .. });
+        let (Some(ship), true) = (ship, live && vessel.chute_deployed) else {
+            *vis = Visibility::Hidden;
+            continue;
+        };
+        let (anchor, r, v) = vessel.state_at(&sim.world, sim.clock);
+        let wind = sim::vessel::air_at(&sim.world, &snap, anchor, r, v).map(|a| vessel.attitude.q.inverse() * a.wind);
+        let (centre, axis, radius) = canopy(vessel.craft.chute_cd_area, vessel.craft.chute_mount, wind);
+        // The cone's axis is +Y with its apex up: the apex trails downwind.
+        let local = Transform {
+            translation: centre.as_vec3(),
+            rotation: Quat::from_rotation_arc(Vec3::Y, axis.as_vec3()),
+            scale: Vec3::splat(radius as f32),
+        };
+        *t = ship * local;
+        *vis = Visibility::Visible;
+    }
+    for (i, _) in seen.iter().enumerate().filter(|(_, s)| !**s) {
+        commands.spawn((
+            CanopyVisual(i),
+            Mesh3d(assets.canopy_mesh.clone()),
+            MeshMaterial3d(assets.canopy_material.clone()),
+            Transform::IDENTITY,
+            Visibility::Hidden,
+        ));
+    }
+}
+
 /// Ship base colours (sRGB) for other vessels and the active one.
 const SHIP_COLOR: [f32; 3] = [0.8, 0.8, 0.82];
 const ACTIVE_COLOR: [f32; 3] = [0.95, 0.85, 0.6];
@@ -340,5 +420,21 @@ mod tests {
             let t = Transform::IDENTITY.looking_to(dir, light_up(dir));
             assert!((t.forward().as_vec3() - dir).length() < 1e-5 && t.rotation.is_finite());
         }
+    }
+
+    #[test]
+    fn a_canopy_trails_downwind_of_its_mount_one_diameter_out() {
+        let mount = DVec3::new(0.0, 0.0, 6.8);
+        // Falling nose-up: the air comes from below, the canopy is above.
+        let (centre, axis, radius) = canopy(600.0, mount, Some(DVec3::new(0.0, 0.0, 23.0)));
+        assert!((radius - (800.0 / std::f64::consts::PI).sqrt()).abs() < 1e-9, "{radius}");
+        assert!((axis - DVec3::Z).length() < 1e-12);
+        assert!((centre - (mount + DVec3::Z * 2.0 * radius)).length() < 1e-9);
+        // Swinging: the canopy follows the wind, not the nose.
+        let (c, a, _) = canopy(600.0, mount, Some(DVec3::new(10.0, 0.0, 0.0)));
+        assert!((a - DVec3::X).length() < 1e-12 && c.x > 0.0);
+        // No wind: beyond the mount.
+        assert!((canopy(600.0, mount, Some(DVec3::ZERO)).1 - DVec3::Z).length() < 1e-12);
+        assert!((canopy(600.0, mount, None).1 - DVec3::Z).length() < 1e-12);
     }
 }

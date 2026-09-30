@@ -364,7 +364,7 @@ fn flight_panel(
     let phase = match (&ship.phase, ship.destruction()) {
         (_, Some(cause)) => format!("{} (R R to reset)", cause.describe()),
         (Phase::Landed { .. }, None) => "LANDED".to_string(),
-        (Phase::Powered { .. }, None) => "POWERED".to_string(),
+        (Phase::Powered { .. }, None) => live_word(ship.engine_running(&sim.controls), ship.chute_deployed).to_string(),
         (Phase::Coasting { .. }, None) => "COASTING".to_string(),
         (Phase::Crashed { cause, .. }, None) => format!("{} (R R to reset)", cause.describe()),
     };
@@ -461,9 +461,28 @@ pub fn draw_body_menu(
     Ok(())
 }
 
+/// What a live (integrated every tick) vessel is doing: only a running
+/// engine is "powered"; a craft under its chute, or gliding or falling with
+/// the engine off, is not.
+fn live_word(engine: bool, chute: bool) -> &'static str {
+    match (engine, chute) {
+        (true, _) => "POWERED",
+        (false, true) => "ON PARACHUTE",
+        (false, false) => "FLIGHT (engine off)",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn live_flight_is_powered_only_with_the_engine_running() {
+        assert_eq!(live_word(true, false), "POWERED");
+        assert_eq!(live_word(true, true), "POWERED");
+        assert_eq!(live_word(false, true), "ON PARACHUTE");
+        assert_eq!(live_word(false, false), "FLIGHT (engine off)");
+    }
 
     #[test]
     fn temperatures_warn_near_the_limit() {
