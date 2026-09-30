@@ -17,6 +17,7 @@ Everything known to be open after the realism-1 build, for the next owner interv
 Defaults taken 2026-09-30 while the owner was away (each reversible, recorded as a decision): engine heat to the nozzle bell (D077), attitude control only from RCS couples and the gimbal (D078), Ap/Pe on every closed orbit, near-circular labelled (D076).
 - The test craft's chute descends at ~23 m/s against the gear's 8 m/s limit; it survives only in debug mode (D074 debug craft). A bigger canopy or a braking burn?
 - RCS propellant is counted only in live flight, not on rails (D078).
+- Reentry from LEO nose-first overheats the test craft: skin 1109 K against 1100 K, interior 664 K against 400 K on the chute (demo 2026-09-30, debug mode; 304 K before the deorbit burn). No heat shield or insulation: a craft-design question (heat shield, blunt-end-first entry, or insulation in the thermal model).
 
 Settled 2026-09-28: haze (moot, D073), chute (keep), stability (finned rocket, D074).
 
