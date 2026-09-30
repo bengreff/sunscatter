@@ -13,7 +13,7 @@ use super::burn::{BurnLaw, FlightPlan};
 use super::clock::ShipClock;
 use super::hold::{aim, hold_inputs, maneuver_direction, Aim, AimKey, HoldMode, LazySnapshot};
 use super::segment::{EndKind, SegmentEnd, SegmentKind};
-use super::{Controls, Phase, Trajectory, Vessel};
+use super::{Controls, Phase, Trajectory, Vessel, TICK};
 use crate::craft::CraftParams;
 use crate::time::Epoch;
 use crate::world::World;
@@ -107,11 +107,19 @@ impl Vessel {
             let fly = Rails { world, trajectory, plan: &self.plan, craft: &self.craft, controls, inertia_now };
             fly.attitude(&mut self.attitude, &mut self.control, (t, reach), &inertia_at);
         }
-        // Keep the samples back to the attitude's base (a followed hold's is
-        // up to a follow step behind): holds aim from the state there.
+        // Keep the samples back to where the next frame's control resumes:
+        // a followed hold's base (up to a follow step behind), else at most
+        // a tick behind (a lattice point can fall just past the frame's end).
+        // Holds aim from the state there.
         let follows = self.control.settled.is_some() || self.control.waiting;
-        let base =
-            self.control.base.map(|b| b.epoch).filter(|&e| follows && reach.seconds_since(e) < 2.0 * FOLLOW_STEP);
+        let tick_back = reach.add_seconds(-TICK);
+        let base = self.control.base.map(|b| b.epoch).and_then(|e| {
+            if follows {
+                (reach.seconds_since(e) < 2.0 * FOLLOW_STEP).then_some(e)
+            } else {
+                Some(if e > tick_back { e } else { tick_back })
+            }
+        });
         let seg_start = trajectory.segment_at(reach).map(|s| s.t0);
         let keep = match (base, seg_start) {
             (Some(b), Some(s)) if b < reach => {

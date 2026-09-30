@@ -292,3 +292,23 @@ fn a_long_burn_on_rails_is_cheap() {
     println!("a {:.0} s burn and a 16,667 s frame: {:.1} ms", duration.unwrap(), cost * 1e3);
     assert!(ship.burn().is_none());
 }
+
+#[test]
+fn turning_attitudes_are_the_same_at_60_fps_and_in_one_jump() {
+    // Mid-turn, before any snap makes them equal again: a tick's lattice
+    // point can fall just past a frame's end, so the next frame's tick aims
+    // from samples the first frame must not prune.
+    let w = world();
+    for hold in [HoldMode::Stability, HoldMode::Prograde, HoldMode::Retrograde, HoldMode::Maneuver] {
+        let mut base = leo_ship(&w);
+        base.set_plan(&w, plan(&[burn(&w, 300.0, DVec3::new(60.0, 0.0, 0.0))])).unwrap();
+        let controls = Controls { reference: Some(earth(&w)), ..sas(hold) };
+        for seconds in [1.0, 5.0, 20.0] {
+            let end = t0().add_seconds(seconds);
+            let (mut frames, mut jump) = (base.clone(), base.clone());
+            fly_frames(&w, &mut frames, end, &controls);
+            jump.advance(&w, end, &controls, usize::MAX);
+            assert_eq!(frames.attitude, jump.attitude, "{hold:?} at {seconds} s");
+        }
+    }
+}
