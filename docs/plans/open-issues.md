@@ -14,9 +14,9 @@ Everything known to be open after the realism-1 build, for the next owner interv
 
 ## Owner decisions pending
 
-- Engine heat fraction (2e-4 of jet power, ~94 kW into one ~70 kg mount node): interior 1100–1500 K on long burns (debug mode hides it).
-- SAS on the ground balances the rocket on two feet on steep slopes (within its torque authority).
-- A near-circular orbit shows no Ap/Pe (D076 filter 0.5 %).
+Defaults taken 2026-09-30 while the owner was away (each reversible, recorded as a decision): engine heat to the nozzle bell (D077), attitude control only from RCS couples and the gimbal (D078), Ap/Pe on every closed orbit, near-circular labelled (D076).
+- The test craft's chute descends at ~23 m/s against the gear's 8 m/s limit; it survives only in debug mode (D074 debug craft). A bigger canopy or a braking burn?
+- RCS propellant is counted only in live flight, not on rails (D078).
 
 Settled 2026-09-28: haze (moot, D073), chute (keep), stability (finned rocket, D074).
 

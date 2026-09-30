@@ -75,7 +75,8 @@ impl Craft {
             id: self.id.clone(),
             engine: Engine::from_file(&self.spec.engine),
             mass: self.mass,
-            torque: self.spec.attitude_control.torque,
+            torque: self.spec.attitude_control.rcs.torque(),
+            rcs_flow: self.spec.attitude_control.rcs.flow(),
             cd_area: design.mean_drag_area,
             chute_cd_area: self.spec.chute.cd_area,
             chute_mount: self.spec.chute.mount,
@@ -97,8 +98,11 @@ pub struct CraftParams {
     pub id: CraftId,
     pub engine: Engine,
     pub mass: MassModel,
-    /// Attitude-control torque authority per body axis (N·m).
+    /// Attitude-control torque authority per body axis (N·m): the RCS
+    /// couples.
     pub torque: glam::DVec3,
+    /// RCS propellant flow per body axis at full command (kg/s).
+    pub rcs_flow: glam::DVec3,
     /// Attitude-independent hull drag area Cd·A (m²) of coasts and
     /// predictions: [`CraftDesign::mean_drag_area`]. Live ticks use the
     /// full aerodynamics of the design.
@@ -202,7 +206,8 @@ mod tests {
         assert_eq!((s.crew, s.dry_mass, s.propellant.mass, s.propellant.capacity), (3, 4000.0, 16000.0, 16000.0));
         assert_eq!((s.engine.thrust_vac, s.engine.isp_vac, s.engine.isp_sl), (300e3, 320.0, 280.0));
         assert_eq!((s.engine.min_throttle, s.engine.gimbal_deg), (0.1, 5.0));
-        assert_eq!(s.attitude_control.torque, glam::DVec3::new(40e3, 40e3, 20e3));
+        let rcs = &s.attitude_control.rcs;
+        assert_eq!((rcs.thrust, rcs.isp, rcs.fore_z, rcs.aft_z, rcs.radius), (445.0, 290.0, 3.6, -5.4, 1.04));
         assert_eq!((s.chute.cd_area, s.thermal.skin_max_k, s.thermal.internal_max_k), (600.0, 1100.0, 400.0));
         assert_eq!((s.aero.cd0, s.thermal.node_size, s.thermal.internal_coupling), (0.45, 1.0, 2.0));
         assert_eq!((s.impact.max_speed, s.antenna.gain_dbi, s.antenna.power_w), (8.0, 20.0, 20.0));

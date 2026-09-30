@@ -333,6 +333,9 @@ A marker is placed wherever the predicted trajectory (through planned burns) rea
 **D077: Engine heat leaves with the exhaust and by radiation from the nozzle; the interior warms only through the mount.** *Default taken 2026-09-30 (owner unavailable; reversible).*
 The chamber's wall heat returns to the flow (regenerative cooling) and is not a heat source. The radiatively cooled nozzle extension absorbs a share of the jet power sized so it runs near 1400 K (coated niobium), radiates it away, and conducts to the craft only through its mount (~1 W/K). Each skin material has its own temperature limit. Numbers and sources in [design/aero-thermal.md](design/aero-thermal.md). Replaces the earlier 2e-4 of the jet power into the mount's node, which drove the interior to 1100–1500 K on long burns.
 
+**D078: Attitude control is only what real actuators give: RCS couples and the engine's gimbal.** *Default taken 2026-09-30 (owner unavailable; reversible).*
+A craft declares its reaction-control thrusters (thrust, Isp, fore and aft ring stations, quad radius); SAS and the pilot get the pure couples they make (pitch and yaw `2·F·Δz`, roll `8·F·r`) plus the gimbal while the engine runs, and nothing else: no abstract torque, no reaction wheels (none big enough fly on craft this size), no special case on the ground. The thrusters burn the main propellant in live flight (their share of full command times their flow); with none left (outside debug mode) only the gimbal turns the craft. The test craft carries Apollo SM-class 445 N thrusters: 8.0 kN·m pitch and yaw, 3.7 kN·m roll (was 40/40/20 kN·m). On rails (coasts, planned burns) the torque limit holds but RCS propellant is not yet counted.
+
 ## Open questions
 
 1. What kind of organization the player leads (D027).

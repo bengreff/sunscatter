@@ -116,7 +116,7 @@ One part for the whole ship (D060, revised by D064/D065). It is a **debug craft*
         gimbal_deg: 5.0,
         mount: (pos: (0, 0, -3.2), dir: (0, 0, 1)),   // body axes, thrust along +Z
     ),
-    attitude_control: (torque: (40e3, 40e3, 20e3)),  // N·m per body axis (abstract RCS/wheels)
+    attitude_control: (rcs: (thrust: 445.0, isp: 290.0, fore_z: 3.6, aft_z: -5.4, radius: 1.04)),  // D078 (was an abstract 40/40/20 kN·m)
     chute: (cd_area: 600.0, deploy_max_q: 40e3, mount: (0, 0, 4.0)),
     thermal: (skin_max_k: 1100.0, internal_max_k: 400.0),   // D065: clean destruction
     impact: (max_speed: 8.0),        // m/s at any contact cell, beyond the gear's stroke

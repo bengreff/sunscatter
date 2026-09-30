@@ -21,7 +21,12 @@
         // ~1640 K). The bell joins the craft only at the throat.
         nozzle_heat_fraction: 2.2e-3,
     ),
-    attitude_control: (torque: (40.0e3, 40.0e3, 20.0e3)),  // N·m per body axis (abstract RCS/wheels)
+    // D078: RCS only (no wheels). Apollo SM RCS thrusters (Marquardt
+    // R-4D, 445 N, Isp ~290 s in pulses; Apollo Operations Handbook) in
+    // fore and aft rings of four quads on the hull: pitch/yaw couples
+    // 2·445·9.0 = 8.0 kN·m, roll 8·445·1.04 = 3.7 kN·m, drawing 0.63 kg/s
+    // (pitch, yaw) and 1.25 kg/s (roll) of the main propellant at full.
+    attitude_control: (rcs: (thrust: 445.0, isp: 290.0, fore_z: 3.6, aft_z: -5.4, radius: 1.04)),
     // At the nose: under the chute the rocket hangs tail down, on its legs.
     chute: (cd_area: 600.0, deploy_max_q: 40.0e3, mount: (0.0, 0.0, 6.8)),
     // Subsonic Cd on the projected area: a slender body's end-on ~0.3 (base

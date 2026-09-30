@@ -166,7 +166,9 @@ impl Vessel {
                 thrust: out.thrust,
                 max_angle: engine.gimbal,
             };
-            let act = Actuators { torque: self.craft.torque, gimbal: Some(gimbal) };
+            // The RCS draws on the main propellant: dry, only the gimbal turns.
+            let rcs_fed = self.debug || self.propellant > 0.0;
+            let act = Actuators { torque: if rcs_fed { self.craft.torque } else { DVec3::ZERO }, gimbal: Some(gimbal) };
             let before = (self.attitude, self.control);
             let aim = self.aim(world, &snap, (anchor, r, v), controls);
             let cmd = attitude::command(&self.attitude, &props.inertia, &mut self.control, controls, &act, &aim, TICK);
@@ -207,7 +209,8 @@ impl Vessel {
                 },
             };
             let engine_heat = engine.heat(out.thrust, out.mdot);
-            let propellant = if self.debug { self.propellant } else { (self.propellant - out.mdot * TICK).max(0.0) };
+            let mdot = out.mdot + cmd.rcs.dot(self.craft.rcs_flow);
+            let propellant = if self.debug { self.propellant } else { (self.propellant - mdot * TICK).max(0.0) };
             aerothermal::live_step(
                 &design,
                 &mut self.thermal,
@@ -218,9 +221,7 @@ impl Vessel {
                 propellant,
                 TICK,
             );
-            if !self.debug {
-                self.propellant = (self.propellant - out.mdot * TICK).max(0.0);
-            }
+            self.propellant = propellant;
             self.time = self.time.add_seconds(TICK);
             self.clock.add(self.time, delta);
             self.phase = Phase::Powered { anchor, r: r1, v: v1 };

@@ -185,6 +185,9 @@ pub struct Command {
     pub torque: DVec3,
     /// Thrust direction (body axes, after gimbal).
     pub thrust_dir: DVec3,
+    /// Attitude-control use per body axis, a fraction of full command in
+    /// [0, 1] (what the RCS fires).
+    pub rcs: DVec3,
     sas: bool,
     saturated: bool,
     /// A direction hold: where the attitude is at the tick's end if it
@@ -286,7 +289,8 @@ pub fn command(
         Some(g) => g.deflect(u * gimbal_axes),
         None => (DVec3::Z, DVec3::ZERO),
     };
-    Command { torque: u * act.torque + thrust_torque, thrust_dir, sas, saturated, snap_to }
+    let rcs = DVec3::select(act.torque.cmpgt(DVec3::ZERO), u.abs(), DVec3::ZERO);
+    Command { torque: u * act.torque + thrust_torque, thrust_dir, rcs, sas, saturated, snap_to }
 }
 
 /// SAS bookkeeping after a tick flown with `cmd`. `alone`: the command was

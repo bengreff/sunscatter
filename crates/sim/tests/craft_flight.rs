@@ -49,11 +49,26 @@ const FULL: Controls = Controls {
 };
 
 #[test]
+fn rcs_burns_propellant_at_its_flow_per_axis() {
+    let w = world();
+    let mut ship = pad(&w);
+    // A full roll command on the pad, engine off (D078).
+    let roll = Controls { throttle: 0.0, rotate: DVec3::Z, sas: false, ..FULL };
+    fly(&w, &mut ship, 2.0, &roll);
+    let ticks = libm::round(ship.time.seconds_since(t0()) / TICK);
+    let burned = 16_000.0 - ship.propellant();
+    let flow = ship.craft.rcs_flow.z;
+    assert!((flow - 8.0 * 445.0 / (290.0 * 9.806_65)).abs() < 1e-12, "{flow}");
+    assert!(ticks > 0.0 && (burned / (ticks * flow * TICK) - 1.0).abs() < 1e-9, "{burned} kg in {ticks} ticks");
+}
+
+#[test]
 fn powered_ticks_burn_propellant_at_the_engine_rate() {
     let w = world();
     let mut ship = pad(&w);
     let mdot = ship.craft.engine.mdot_max();
-    fly(&w, &mut ship, 10.0, &FULL);
+    // SAS off: the RCS stays quiet and only the engine burns.
+    fly(&w, &mut ship, 10.0, &Controls { sas: false, ..FULL });
     assert!(matches!(ship.phase, Phase::Powered { .. }), "lifted off");
     let ticks = libm::round(ship.time.seconds_since(t0()) / TICK);
     let burned = 16_000.0 - ship.propellant();

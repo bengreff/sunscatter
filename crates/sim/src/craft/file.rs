@@ -65,8 +65,45 @@ pub struct Mount {
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AttitudeControlFile {
-    /// Torque authority per body axis (N·m): abstract RCS and wheels.
-    pub torque: DVec3,
+    /// Reaction-control thrusters: the only attitude actuator besides the
+    /// engine's gimbal (no reaction wheels: wheels big enough to turn a
+    /// 20 t craft do not fly on such craft).
+    pub rcs: RcsFile,
+}
+
+/// Reaction-control thrusters in two rings (fore and aft) of four quads
+/// around the body axis, at ±X and ±Y (the Shuttle's forward and aft RCS
+/// layout). Attitude uses pure couples only (no net force): pitch and yaw
+/// fire two lateral thrusters in one ring against two in the other, roll
+/// fires the tangential thruster of every quad.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RcsFile {
+    /// Thrust of one thruster (N).
+    pub thrust: f64,
+    /// Specific impulse (s); the thrusters draw on the main propellant.
+    pub isp: f64,
+    /// Body-axis stations of the fore and aft rings (m).
+    pub fore_z: f64,
+    pub aft_z: f64,
+    /// Distance of the quads from the body axis (m).
+    pub radius: f64,
+}
+
+impl RcsFile {
+    /// Couple per body axis at full command (N·m): pitch and yaw
+    /// `2·F·(fore − aft)`, roll `8·F·r`.
+    pub fn torque(&self) -> DVec3 {
+        let pitch = 2.0 * self.thrust * (self.fore_z - self.aft_z);
+        DVec3::new(pitch, pitch, 8.0 * self.thrust * self.radius)
+    }
+
+    /// Propellant flow per body axis at full command (kg/s): four
+    /// thrusters for pitch or yaw, eight for roll.
+    pub fn flow(&self) -> DVec3 {
+        let one = self.thrust / (self.isp * crate::vessel::G0);
+        DVec3::new(4.0 * one, 4.0 * one, 8.0 * one)
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -299,9 +336,15 @@ pub fn validate_craft(c: &CraftFile) -> Result<(), String> {
     }
     finite_vec("engine.mount.pos", e.mount.pos)?;
     nonzero_vec("engine.mount.dir", e.mount.dir)?;
-    let t = c.attitude_control.torque;
-    if !(t.is_finite() && t.min_element() >= 0.0) {
-        return Err(format!("attitude_control.torque must be non-negative, got {t}"));
+    let r = &c.attitude_control.rcs;
+    if !(r.thrust.is_finite() && r.thrust >= 0.0 && r.isp.is_finite() && r.isp > 0.0) {
+        return Err(format!("attitude_control.rcs needs thrust >= 0 and isp > 0, got {} N, {} s", r.thrust, r.isp));
+    }
+    if !(r.fore_z.is_finite() && r.aft_z.is_finite() && r.fore_z > r.aft_z && r.radius.is_finite() && r.radius >= 0.0) {
+        return Err(format!(
+            "attitude_control.rcs needs fore_z > aft_z and radius >= 0, got {}, {}, {}",
+            r.fore_z, r.aft_z, r.radius
+        ));
     }
     if !(c.chute.cd_area.is_finite() && c.chute.cd_area >= 0.0) {
         return Err(format!("chute.cd_area must be non-negative, got {}", c.chute.cd_area));
