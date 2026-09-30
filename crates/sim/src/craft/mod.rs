@@ -208,7 +208,7 @@ mod tests {
         assert_eq!((s.engine.min_throttle, s.engine.gimbal_deg), (0.1, 5.0));
         let rcs = &s.attitude_control.rcs;
         assert_eq!((rcs.thrust, rcs.isp, rcs.fore_z, rcs.aft_z, rcs.radius), (445.0, 290.0, 3.6, -5.4, 1.04));
-        assert_eq!((s.chute.cd_area, s.thermal.skin_max_k, s.thermal.internal_max_k), (600.0, 1100.0, 400.0));
+        assert_eq!((s.chute.cd_area, s.thermal.skin_max_k, s.thermal.internal_max_k), (1560.0, 1100.0, 400.0));
         assert_eq!((s.aero.cd0, s.thermal.node_size, s.thermal.internal_coupling), (0.45, 1.0, 2.0));
         assert_eq!((s.impact.max_speed, s.antenna.gain_dbi, s.antenna.power_w), (8.0, 20.0, 20.0));
         assert_eq!(c.geometry.primitives.iter().filter(|p| p.foot).count(), 4);

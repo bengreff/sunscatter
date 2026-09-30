@@ -210,8 +210,9 @@ fn parachute_descent_reaches_terminal_speed_and_lands_in_debug_mode() {
     let v = e.rotation.omega(t).raw().cross(r);
     let controls = Controls { chute: true, sas: true, ..Default::default() };
     // At its full mass the test craft reaches the ground at its terminal
-    // speed under the parachute, √(2mg / ρ·CdA) ≈ 23 m/s: beyond its 8 m/s
-    // limit even after the gear's stroke. In the atmosphere it is flown
+    // speed under the parachute, √(2mg / ρ·CdA) ≈ 14 m/s: beyond its 8 m/s
+    // limit even after the gear's stroke (the chute is sized for a light
+    // craft). In the atmosphere it is flown
     // live from the start.
     let mut vessel = Vessel::coasting(&w, VesselId(1), t, earth, r, v, sim::craft::test_craft());
     assert!(matches!(vessel.phase, Phase::Powered { .. }), "{:?}", vessel.phase);
@@ -244,6 +245,27 @@ fn parachute_descent_reaches_terminal_speed_and_lands_in_debug_mode() {
     debug.set_debug(&w, true);
     debug.advance(&w, t.add_seconds(3_600.0), &controls, usize::MAX);
     assert!(matches!(debug.phase, Phase::Landed { .. }), "{:?}", debug.phase);
+}
+
+#[test]
+fn a_light_craft_lands_intact_under_its_parachute() {
+    let w = world();
+    let (earth, _) = earth(&w);
+    let e = sim::body::earth();
+    let t = t0();
+    let deg = std::f64::consts::PI / 180.0;
+    let fixed = e.surface_point(28.6 * deg, -80.6 * deg, 3_000.0);
+    let r = e.rotation.to_inertial(fixed, t).raw();
+    let v = e.rotation.omega(t).raw().cross(r);
+    let controls = Controls { chute: true, sas: true, ..Default::default() };
+    // Dry 4 t plus a 1 t reserve: the landing mass the chute is sized
+    // for (~7 m/s at sea level, under the gear's 8 m/s).
+    let mut vessel = Vessel::coasting(&w, VesselId(1), t, earth, r, v, sim::craft::test_craft());
+    vessel.set_propellant(&w, 1_000.0);
+    let terminal = (2.0 * vessel.mass() * 9.80 / (1.225 * (vessel.craft.cd_area + vessel.craft.chute_cd_area))).sqrt();
+    assert!(terminal > 6.0 && terminal < 7.5, "{terminal} m/s");
+    vessel.advance(&w, t.add_seconds(1_800.0), &controls, usize::MAX);
+    assert!(matches!(vessel.phase, Phase::Landed { .. }), "{:?}", vessel.phase);
 }
 
 #[test]

@@ -28,7 +28,12 @@
     // (pitch, yaw) and 1.25 kg/s (roll) of the main propellant at full.
     attitude_control: (rcs: (thrust: 445.0, isp: 290.0, fore_z: 3.6, aft_z: -5.4, radius: 1.04)),
     // At the nose: under the chute the rocket hangs tail down, on its legs.
-    chute: (cd_area: 600.0, deploy_max_q: 40.0e3, mount: (0.0, 0.0, 6.8)),
+    // Four Apollo-class mains (25.4 m ringsails; Apollo's three brought
+    // ~5.9 t down at ~9 m/s, NASA TN D-7437: Cd·A ~390 m² each). Sized for
+    // the landing mass (dry 4 t + 1 t reserve) at ~7 m/s, under the legs'
+    // 8 m/s (Soyuz's main: 7.2 m/s, ESA). A full 20 t craft comes down at
+    // ~14 m/s: land light or on the engine.
+    chute: (cd_area: 1560.0, deploy_max_q: 40.0e3, mount: (0.0, 0.0, 6.8)),
     // Subsonic Cd on the projected area: a slender body's end-on ~0.3 (base
     // drag included) plus the legs, feet and fin edges; ~1 broadside is the
     // Newtonian distribution's (the aero model scales the shape's).
