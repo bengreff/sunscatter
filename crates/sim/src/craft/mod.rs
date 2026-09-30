@@ -232,7 +232,12 @@ mod tests {
             (("crew: 3,", "crew: 3, wings: 2,"), ("", ""), CRAFT_FILE, "wings"),
             (("cd0: 0.45", "cd0: 0.0"), ("", ""), CRAFT_FILE, "aero.cd0"),
             (("node_size: 1.0", "node_size: 0.0"), ("", ""), CRAFT_FILE, "node_size"),
-            (("heat_fraction: 2.0e-4", "heat_fraction: 1.5"), ("", ""), CRAFT_FILE, "heat_fraction"),
+            (
+                ("nozzle_heat_fraction: 2.2e-3", "nozzle_heat_fraction: 1.5"),
+                ("", ""),
+                CRAFT_FILE,
+                "nozzle_heat_fraction",
+            ),
             (("", ""), ("radius: 0.95", "radius: 0.0"), GEOMETRY_FILE, "tank.radius"),
             (("", ""), ("emissivity: 0.8", "emissivity: 1.5"), GEOMETRY_FILE, "emissivity"),
             (("", ""), ("height: 0.604", "height: 2.0"), GEOMETRY_FILE, "height"),

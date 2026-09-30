@@ -307,8 +307,8 @@ impl Vessel {
         if self.debug || self.destroyed.is_some() {
             return;
         }
-        let t = &self.craft.thermal;
-        let Some(hot) = crate::thermal::check(&self.thermal.state, t.skin_max_k, t.internal_max_k) else {
+        let (design, t) = (self.craft.design(), &self.craft.thermal);
+        let Some(hot) = crate::thermal::check(&self.thermal.state, &design.skin_max, t.internal_max_k) else {
             return;
         };
         let temperature = match hot {

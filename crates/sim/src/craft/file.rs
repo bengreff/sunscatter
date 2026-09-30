@@ -46,9 +46,11 @@ pub struct EngineFile {
     /// Gimbal range about the mount (deg).
     pub gimbal_deg: f64,
     pub mount: Mount,
-    /// Share of the jet power (½·F·vₑ) that heats the craft's interior at
-    /// the mount while it runs (D065).
-    pub heat_fraction: f64,
+    /// Share of the jet power (½·F·vₑ) absorbed by the nozzle's radiatively
+    /// cooled wall (the geometry's `nozzle` primitive) while it runs (D077);
+    /// the chamber's wall heat goes back into the flow (regenerative
+    /// cooling) and is not a heat source.
+    pub nozzle_heat_fraction: f64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -176,6 +178,15 @@ pub struct Skin {
     pub conductivity: f64,
     /// m.
     pub thickness: f64,
+    /// The material's temperature limit (K); the craft's `skin_max_k` if
+    /// not given.
+    #[serde(default)]
+    pub max_k: Option<f64>,
+    /// Conductance to the interior node beneath per unit area
+    /// (W/(m²·K)); the craft's `internal_coupling` if not given (a nozzle
+    /// joined only at its mount has its own).
+    #[serde(default)]
+    pub coupling: Option<f64>,
 }
 
 /// The propellant region: a cylinder from `base` along `axis` (its length is
@@ -199,6 +210,9 @@ pub struct Primitive {
     /// Overrides the default skin.
     #[serde(default)]
     pub skin: Option<Skin>,
+    /// The engine's nozzle: its cells take the engine's wall heat (D077).
+    #[serde(default)]
+    pub nozzle: bool,
 }
 
 /// A closed primitive solid in body axes (m).
@@ -305,8 +319,8 @@ pub fn validate_craft(c: &CraftFile) -> Result<(), String> {
             return Err(format!("thermal.{what} must be non-negative, got {x}"));
         }
     }
-    if !(e.heat_fraction.is_finite() && (0.0..1.0).contains(&e.heat_fraction)) {
-        return Err(format!("engine.heat_fraction must be in [0, 1), got {}", e.heat_fraction));
+    if !(e.nozzle_heat_fraction.is_finite() && (0.0..1.0).contains(&e.nozzle_heat_fraction)) {
+        return Err(format!("engine.nozzle_heat_fraction must be in [0, 1), got {}", e.nozzle_heat_fraction));
     }
     positive("aero.cd0", c.aero.cd0)?;
     positive("impact.max_speed", c.impact.max_speed)?;
@@ -342,7 +356,14 @@ fn validate_skin(what: &str, s: &Skin) -> Result<(), String> {
     if !(s.conductivity.is_finite() && s.conductivity >= 0.0) {
         return Err(format!("{what}.conductivity must be non-negative, got {}", s.conductivity));
     }
-    positive(&format!("{what}.thickness"), s.thickness)
+    positive(&format!("{what}.thickness"), s.thickness)?;
+    if let Some(t) = s.max_k {
+        positive(&format!("{what}.max_k"), t)?;
+    }
+    match s.coupling {
+        Some(g) if !(g.is_finite() && g >= 0.0) => Err(format!("{what}.coupling must be non-negative, got {g}")),
+        _ => Ok(()),
+    }
 }
 
 fn validate_shape(what: &str, s: &Shape) -> Result<(), String> {
@@ -397,6 +418,9 @@ pub fn validate_geometry(g: &GeometryFile) -> Result<(), String> {
         if let Some(s) = &p.skin {
             validate_skin(&format!("{what}.skin"), s)?;
         }
+    }
+    if g.primitives.iter().filter(|p| p.nozzle).count() > 1 {
+        return Err("at most one primitive may be the nozzle".into());
     }
     Ok(())
 }

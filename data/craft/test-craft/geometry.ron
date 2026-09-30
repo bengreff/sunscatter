@@ -22,8 +22,15 @@
         (
             name: "engine bell",
             shape: Frustum(base: (0.0, 0.0, -7.0), axis: (0.0, 0.0, 1.1), r_base: 0.8, r_top: 0.35),
-            // Niobium alloy, 1 mm, dark coating.
-            skin: Some((areal_mass: 8.6, specific_heat: 270.0, emissivity: 0.85, conductivity: 50.0, thickness: 0.001)),
+            // The radiatively cooled nozzle extension (D077): niobium alloy
+            // C-103, 1 mm, silicide coating (ε ≈ 0.7–0.82; C-103 service
+            // limit ≈ 1640 K). It is joined to the craft only at the throat
+            // (the chamber and its gimbal mount): ~1 W/K in all.
+            skin: Some((
+                areal_mass: 8.6, specific_heat: 270.0, emissivity: 0.8, conductivity: 50.0, thickness: 0.001,
+                max_k: Some(1640.0), coupling: Some(0.2),
+            )),
+            nozzle: true,
         ),
         (name: "skirt", shape: Frustum(base: (0.0, 0.0, -6.0), axis: (0.0, 0.0, 1.5), r_base: 1.52, r_top: 1.04)),
         (name: "body", shape: Cylinder(base: (0.0, 0.0, -5.8), axis: (0.0, 0.0, 9.8), radius: 1.04)),

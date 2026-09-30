@@ -5,14 +5,21 @@ use crate::craft::mesh::union_surface;
 use crate::craft::{test_craft, CellOptions, Cells, Primitive, Resolution, Shape, Skin, Surface};
 use std::sync::OnceLock;
 
-const SKIN: Skin =
-    Skin { areal_mass: 8.1, specific_heat: 900.0, emissivity: 0.8, conductivity: 150.0, thickness: 0.003 };
+const SKIN: Skin = Skin {
+    areal_mass: 8.1,
+    specific_heat: 900.0,
+    emissivity: 0.8,
+    conductivity: 150.0,
+    thickness: 0.003,
+    max_k: None,
+    coupling: None,
+};
 
 pub(super) fn shape(shapes: &[Shape]) -> (Surface, Cells) {
     let prims: Vec<Primitive> = shapes
         .iter()
         .enumerate()
-        .map(|(i, &shape)| Primitive { name: format!("p{i}"), shape, foot: false, skin: None })
+        .map(|(i, &shape)| Primitive { name: format!("p{i}"), shape, foot: false, skin: None, nozzle: false })
         .collect();
     let s = union_surface(&prims, &Resolution::default());
     let cells = build_cells(&s, &prims, &SKIN, &CellOptions::default());

@@ -456,6 +456,7 @@ mod tests {
             shape: Shape::Cylinder { base: DVec3::Z * z0, axis: DVec3::Z * h, radius: 1.0 },
             foot: false,
             skin: None,
+            nozzle: false,
         };
         let s = union_surface(&[prim(0.0, 1.0), prim(1.0, 2.0)], &Resolution::default());
         let exact = analytic_area(&Shape::Cylinder { base: DVec3::ZERO, axis: DVec3::Z * 3.0, radius: 1.0 });

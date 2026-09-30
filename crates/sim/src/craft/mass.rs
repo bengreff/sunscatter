@@ -142,6 +142,7 @@ mod tests {
             shape: Shape::Cylinder { base, axis: DVec3::Z * h, radius },
             foot: false,
             skin: None,
+            nozzle: false,
         };
         let s = union_surface(std::slice::from_ref(&prim), &Resolution::default());
         let tank = Tank { base, axis: DVec3::Z * h, radius };

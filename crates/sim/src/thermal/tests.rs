@@ -27,6 +27,8 @@ fn one_cell(emissivity: f64) -> Cell {
         areal_mass: 8.1,
         specific_heat: 900.0,
         emissivity,
+        max_k: None,
+        coupling: None,
         contact: false,
         neighbours: Vec::new(),
     }
@@ -182,17 +184,22 @@ fn sunlight_is_absorbed_on_the_lit_silhouette() {
 }
 
 #[test]
-fn overheat_reports_the_hottest_cell_then_the_interior() {
+fn overheat_reports_the_cell_furthest_over_its_limit_then_the_interior() {
     let s = |skin: Vec<f64>, node: f64| ThermalState { skin, nodes: vec![300.0, node] };
     let cases = [
         (s(vec![300.0, 900.0, 1000.0], 350.0), None),
         (s(vec![300.0, 1200.0, 1500.0], 350.0), Some(Overheat::Cell(2))),
-        (s(vec![1500.0, 1200.0, 1500.0], 500.0), Some(Overheat::Cell(0))),
+        (s(vec![1500.0, 1200.0, 1400.0], 500.0), Some(Overheat::Cell(0))),
         (s(vec![300.0, 900.0, 1000.0], 450.0), Some(Overheat::Node(1))),
-        (s(vec![], 450.0), Some(Overheat::Node(1))),
+        (s(vec![300.0, 1200.0, 1080.0], 350.0), Some(Overheat::Cell(2))),
+        (s(vec![300.0, 1600.0, 1000.0], 350.0), None),
+        (s(vec![300.0, 1700.0, 1000.0], 350.0), Some(Overheat::Cell(1))),
     ];
+    // Cell 1 is a nozzle's niobium (D077), with its own limit.
+    let limits = [1100.0, 1640.0, 1050.0];
     for (state, want) in cases {
-        assert_eq!(check(&state, 1100.0, 400.0), want, "{state:?}");
+        let limits = &limits[..state.skin.len()];
+        assert_eq!(check(&state, limits, 400.0), want, "{state:?}");
     }
 }
 

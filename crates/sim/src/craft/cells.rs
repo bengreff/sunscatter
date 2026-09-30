@@ -62,6 +62,10 @@ pub struct Cell {
     pub areal_mass: f64,
     pub specific_heat: f64,
     pub emissivity: f64,
+    /// The skin material's temperature limit (K) and conductance to its
+    /// node per unit area (W/(m²·K)), where the material sets its own.
+    pub max_k: Option<f64>,
+    pub coupling: Option<f64>,
     /// A contact point (a foot, or on the convex hull).
     pub contact: bool,
     pub neighbours: Vec<Neighbour>,
@@ -232,6 +236,8 @@ pub fn build_cells(s: &Surface, primitives: &[Primitive], default_skin: &Skin, o
                 areal_mass: skin.areal_mass,
                 specific_heat: skin.specific_heat,
                 emissivity: skin.emissivity,
+                max_k: skin.max_k,
+                coupling: skin.coupling,
                 contact: false,
                 neighbours: Vec::new(),
             }

@@ -296,10 +296,17 @@ fn node_rise(a: &Vessel, b: &Vessel) -> Vec<f64> {
     a.thermal().state.nodes.iter().zip(&b.thermal().state.nodes).map(|(x, y)| x - y).collect()
 }
 
+/// The hottest nozzle cell of a vessel (K).
+fn nozzle_max(v: &Vessel) -> f64 {
+    let design = v.craft.design();
+    design.nozzle_cells.iter().map(|&(i, _)| v.thermal().state.skin[i as usize]).fold(0.0, f64::max)
+}
+
 #[test]
-fn an_engine_burn_heats_the_aft_nodes_first_and_soaks_forward() {
-    // Two craft side by side in deep space (1.4 million km out, where the
-    // burn changes nothing about the sunlight); one burns a minute.
+fn a_long_burn_heats_the_nozzle_to_radiative_equilibrium_and_barely_the_interior() {
+    // D077. Two craft side by side in deep space (1.4 million km out, where
+    // the burn changes nothing about the sunlight); one burns five minutes
+    // at full thrust (an Apollo LOI-length burn).
     let w = world();
     let t = t0();
     let (earth, r, _) = sunlit(&w, t);
@@ -314,33 +321,46 @@ fn an_engine_burn_heats_the_aft_nodes_first_and_soaks_forward() {
         design.engine_node as usize,
         (0..nodes.len()).fold(0, |b, i| if nodes[i].centre.z > nodes[b].centre.z { i } else { b }),
     );
+    let cells = &sim::craft::test_craft().cells.cells;
+    let area: f64 = design.nozzle_cells.iter().map(|&(i, _)| cells[i as usize].area).sum();
+    let n = design.nozzle_cells.len();
+    let g: f64 = design.nozzle_cells.iter().map(|&(i, _)| design.network.to_node[i as usize]).sum();
+    println!("nozzle: {n} cells, {area:.2} m², {g:.2} W/K to the mount");
+    // Joined at the throat only: about a watt per kelvin (D077).
+    assert!(g > 0.5 && g < 2.0, "{g}");
     let full = Controls { throttle: 1.0, sas: true, ..Default::default() };
-    let end_burn = t.add_seconds(60.0);
-    burn.advance(&w, end_burn, &full, usize::MAX);
-    idle.advance(&w, end_burn, &Controls { sas: true, ..Default::default() }, usize::MAX);
-    let rise = node_rise(&burn, &idle);
-    println!("after 60 s: engine node +{:.2} K, nose node +{:.4} K", rise[aft], rise[nose]);
-    assert!(rise[aft] > 1.0, "{}", rise[aft]);
+    let coast = Controls { sas: true, ..Default::default() };
+    burn.advance(&w, t.add_seconds(240.0), &full, usize::MAX);
+    let before = nozzle_max(&burn);
+    burn.advance(&w, t.add_seconds(300.0), &full, usize::MAX);
+    idle.advance(&w, t.add_seconds(300.0), &coast, usize::MAX);
+    let (nozzle, rise) = (nozzle_max(&burn), node_rise(&burn, &idle));
     let hottest = (0..rise.len()).fold(0, |b, i| if rise[i] > rise[b] { i } else { b });
-    assert_eq!(hottest, aft);
-    assert!(rise[nose].abs() < 1e-3 * rise[aft]);
-    // Six hours later the heat has spread forward.
-    let later = t.add_seconds(6.0 * 3600.0);
-    burn.advance(&w, later, &Controls::default(), usize::MAX);
-    idle.advance(&w, later, &Controls::default(), usize::MAX);
-    let soaked = node_rise(&burn, &idle);
-    let beyond: Vec<usize> = (0..nodes.len()).filter(|&i| i != aft && rise[i] < 0.1 * rise[aft]).collect();
-    let gained = beyond.iter().filter(|&&i| soaked[i] > rise[i]).count();
-    let total = |x: &[f64]| beyond.iter().map(|&i| x[i]).sum::<f64>();
     println!(
-        "after 6 h: engine node +{:.2} K; the other nodes +{:.2} K in total (+{:.2} at burn end), {gained} of {} warmer",
-        soaked[aft],
-        total(&soaked),
-        total(&rise),
-        beyond.len()
+        "after 300 s: nozzle {nozzle:.0} K ({:+.1} K in the last minute), mount node +{:.2} K, nose +{:.5} K",
+        nozzle - before,
+        rise[aft],
+        rise[nose]
     );
-    assert!(soaked[aft] < rise[aft] && total(&soaked) > 2.0 * total(&rise));
-    assert!(gained > beyond.len() / 2, "{gained} of {}", beyond.len());
+    // A radiatively cooled niobium extension runs near 1300–1500 K in
+    // equilibrium, below the C-103 limit.
+    assert!((1300.0..1500.0).contains(&nozzle), "{nozzle}");
+    assert!((nozzle - before).abs() < 10.0, "not yet in equilibrium: {before} → {nozzle}");
+    assert!(nozzle < design.skin_max[design.nozzle_cells[0].0 as usize]);
+    // Through the ~1 W/K mount only: the interior barely warms.
+    assert_eq!(hottest, aft);
+    assert!(rise[aft] > 0.1 && rise[aft] < 10.0, "{}", rise[aft]);
+    // The nose differs only through the attitude's small differences in
+    // sunlight (the burning craft's gimbal).
+    assert!(rise[nose].abs() < 0.1, "{}", rise[nose]);
+    // An hour later the nozzle has cooled; the heat that soaked in spreads.
+    let later = t.add_seconds(3900.0);
+    burn.advance(&w, later, &coast, usize::MAX);
+    idle.advance(&w, later, &coast, usize::MAX);
+    let soaked = node_rise(&burn, &idle);
+    println!("an hour later: nozzle {:.0} K, mount node +{:.2} K", nozzle_max(&burn), soaked[aft]);
+    assert!(nozzle_max(&burn) - nozzle_max(&idle) < 20.0);
+    assert!(soaked.iter().all(|&x| x < 10.0), "{soaked:?}");
 }
 
 #[test]
@@ -362,7 +382,7 @@ fn a_burning_vessel_in_frames_equals_one_jump() {
 }
 
 #[test]
-fn a_planned_burn_on_rails_heats_the_engine_node_at_any_frame_rate() {
+fn a_planned_burn_on_rails_heats_the_engine_at_any_frame_rate() {
     use sim::vessel::{BurnEnd, BurnLaw, DirectionLaw, FlightPlan, PlannedBurn};
     let w = world();
     let t = t0();
@@ -387,8 +407,9 @@ fn a_planned_burn_on_rails_heats_the_engine_node_at_any_frame_rate() {
     assert_eq!(a.thermal(), b.thermal());
     let aft = sim::craft::test_craft().design().engine_node as usize;
     let rise = node_rise(&a, &idle);
-    println!("planned 95 s burn: engine node +{:.2} K after 10 min", rise[aft]);
-    assert!(rise[aft] > 5.0, "{}", rise[aft]);
+    let nozzle = nozzle_max(&a) - nozzle_max(&idle);
+    println!("planned 95 s burn: nozzle {nozzle:+.1} K, mount node +{:.3} K after 10 min", rise[aft]);
+    assert!(rise[aft] > 0.01 && rise[aft] < 10.0, "{}", rise[aft]);
 }
 
 #[test]

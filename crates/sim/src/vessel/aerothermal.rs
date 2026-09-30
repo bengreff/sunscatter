@@ -94,6 +94,12 @@ impl VesselThermal {
         thermal::hottest(&self.state.skin).map_or(0.0, |h| h.1)
     }
 
+    /// The skin cell closest to its limit (`skin_max`, per cell): its
+    /// temperature and limit (K).
+    pub fn skin_nearest_limit(&self, skin_max: &[f64]) -> (f64, f64) {
+        thermal::nearest_limit(&self.state.skin, skin_max).map_or((0.0, 1.0), |(_, t, m)| (t, m))
+    }
+
     /// Hottest interior node: (K, index).
     pub fn max_node(&self) -> (f64, usize) {
         thermal::hottest(&self.state.nodes).map_or((0.0, 0), |(i, t)| (t, i))
@@ -347,17 +353,20 @@ impl Buffers {
     }
 }
 
-/// Heat into the nodes (W) with the engine giving `engine_heat` (W), and
-/// the nodes' capacities with `propellant` kg aboard.
-fn node_inputs(design: &CraftDesign, engine_heat: f64, propellant: f64, b: &mut Buffers) {
+/// The engine's wall heat `engine_heat` (W) into the nozzle's cells (D077),
+/// no heat released in the nodes, and the nodes' capacities with
+/// `propellant` kg aboard.
+fn engine_and_nodes(design: &CraftDesign, engine_heat: f64, propellant: f64, b: &mut Buffers) {
+    for &(i, share) in &design.nozzle_cells {
+        b.heat[i as usize] += engine_heat * share;
+    }
     b.node_heat.fill(0.0);
-    b.node_heat[design.engine_node as usize] = engine_heat;
     design.node_capacity(propellant, &mut b.node_capacity);
 }
 
 /// One live tick of heating: `state` advanced by `dt` with the flow and
 /// stagnation flux of `air` (if any), the sunlight `sun_body` (W/m², body
-/// axes) and the engine's heat `engine_heat` (W, into its node), with
+/// axes) and the engine's wall heat `engine_heat` (W, into the nozzle), with
 /// `propellant` kg aboard. The flow is taken at attitude `q`.
 #[allow(clippy::too_many_arguments)]
 pub fn live_step(
@@ -379,7 +388,7 @@ pub fn live_step(
     }
     let mut b = Buffers::new(design);
     thermal::cell_heat(&design.bake, &design.cells, &input, &mut b.scratch, &mut b.heat);
-    node_inputs(design, engine_heat, propellant, &mut b);
+    engine_and_nodes(design, engine_heat, propellant, &mut b);
     design.network.step(&mut th.state, &b.heat, &b.node_heat, &b.node_capacity, SINK_K, dt, DEFAULT_SWEEPS);
     th.restart(th.epoch.add_seconds(dt));
 }
@@ -388,7 +397,7 @@ pub fn live_step(
 /// the coast) with the sunlight `sun_body` (W/m², body axes) and
 /// `propellant` kg aboard: solves from the state's epoch (spanning skipped
 /// lattice points; the planned burns' engine heat over that span goes into
-/// the engine's node), or skips the point. A point is skipped while the
+/// the nozzle), or skips the point. A point is skipped while the
 /// sunlight is the same as at the last solve (within [`SUN_SAME`]), no
 /// burn heats the span and the last solve's rate of change says the
 /// temperatures have moved less than [`STEP_CHANGE_K`] since (at most
@@ -416,7 +425,7 @@ pub fn coast_step(
     let input = HeatInput { flow_dir: DVec3::ZERO, q_stag: 0.0, sun: sun_body };
     let mut b = Buffers::new(design);
     thermal::cell_heat(&design.bake, &design.cells, &input, &mut b.scratch, &mut b.heat);
-    node_inputs(design, burn / dt, propellant, &mut b);
+    engine_and_nodes(design, burn / dt, propellant, &mut b);
     let before = th.state.clone();
     let (heat, node_heat, capacity) = (&b.heat, &b.node_heat, &b.node_capacity);
     design.network.step_to(&mut th.state, heat, node_heat, capacity, SINK_K, dt, DEFAULT_SWEEPS, COAST_CONVERGED);

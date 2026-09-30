@@ -138,7 +138,7 @@ fn contact_points_are_the_feet_and_the_hull() {
 /// determinism: CI runs this on macOS (ARM64) and Windows (x86-64).
 #[test]
 fn cells_match_golden_hash() {
-    let prim = |shape, foot| Primitive { name: String::new(), shape, foot, skin: None };
+    let prim = |shape, foot| Primitive { name: String::new(), shape, foot, skin: None, nozzle: false };
     let prims = [
         prim(Shape::Cylinder { base: DVec3::ZERO, axis: DVec3::Z * 2.0, radius: 1.0 }, false),
         prim(Shape::SphereCap { center: DVec3::Z * 1.5, axis: DVec3::Z, radius: 1.2, height: 1.0 }, false),

@@ -330,6 +330,9 @@ Its shape makes it aerodynamically stable nose-first at every Mach number, on as
 **D076: Apsis markers are extrema of distance on the predicted trajectory.** *Decided, 2026-09-28 (owner).*
 A marker is placed wherever the predicted trajectory (through planned burns) reaches a local maximum or minimum of distance from the dominant body, kept only when it differs from its neighbouring extremum by a significant fraction of the altitude. Nothing comes from osculating elements, so an escape trajectory has no apoapsis.
 
+**D077: Engine heat leaves with the exhaust and by radiation from the nozzle; the interior warms only through the mount.** *Default taken 2026-09-30 (owner unavailable; reversible).*
+The chamber's wall heat returns to the flow (regenerative cooling) and is not a heat source. The radiatively cooled nozzle extension absorbs a share of the jet power sized so it runs near 1400 K (coated niobium), radiates it away, and conducts to the craft only through its mount (~1 W/K). Each skin material has its own temperature limit. Numbers and sources in [design/aero-thermal.md](design/aero-thermal.md). Replaces the earlier 2e-4 of the jet power into the mount's node, which drove the interior to 1100–1500 K on long burns.
+
 ## Open questions
 
 1. What kind of organization the player leads (D027).

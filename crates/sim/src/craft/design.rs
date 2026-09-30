@@ -30,8 +30,13 @@ pub struct CraftDesign {
     pub propellant_specific_heat: f64,
     /// Tank capacity (kg).
     pub tank_capacity: f64,
-    /// The node the engine's heat goes into (at its mount).
+    /// The node at the engine's mount.
     pub engine_node: u32,
+    /// The nozzle's cells and each one's share of the engine's wall heat
+    /// (by area; D077).
+    pub nozzle_cells: Vec<(u32, f64)>,
+    /// Each cell's temperature limit (K): its material's, else the craft's.
+    pub skin_max: Vec<f64>,
     /// The surface cells (normals, areas, emissivities for the heat inputs).
     pub cells: Vec<Cell>,
     /// Subsonic drag coefficient (craft data).
@@ -54,8 +59,14 @@ impl CraftDesign {
             .fold((glam::DVec3::splat(f64::MAX), glam::DVec3::splat(f64::MIN)), |b, p| (b.0.min(*p), b.1.max(*p)));
         let volume = VolumeGrid::new(&craft.geometry.primitives, bounds, &craft.geometry.tank, t.node_size);
         let cells = &craft.cells.cells;
-        // Each cell couples to the node just beneath it (else the nearest).
-        let cell_node = cells.iter().map(|c| volume.nearest(c.centroid - c.normal * (0.25 * t.node_size))).collect();
+        let m = &craft.spec.engine.mount;
+        let engine_node = volume.nearest(m.pos + m.dir.normalize() * (0.25 * t.node_size));
+        let nozzle = |c: &super::Cell| craft.geometry.primitives[c.primitive as usize].nozzle;
+        // Each cell couples to the node just beneath it (else the nearest);
+        // the nozzle, joined only at its throat, to the mount's (D077).
+        let cell_node = (cells.iter())
+            .map(|c| if nozzle(c) { engine_node } else { volume.nearest(c.centroid - c.normal * (0.25 * t.node_size)) })
+            .collect();
         let k = t.interior_conductivity;
         let links = volume.links.iter().map(|&(a, b, area)| (a, b, k * area / t.node_size)).collect();
         let interior = Interior { nodes: volume.nodes.len(), cell_node, coupling: t.internal_coupling, links };
@@ -64,8 +75,12 @@ impl CraftDesign {
         let skin: f64 = cells.iter().map(|c| c.skin_mass()).sum();
         let per_m3 = (craft.spec.dry_mass - skin).max(0.0) / volume.volume();
         let dry_capacity = volume.nodes.iter().map(|n| n.volume * per_m3 * t.interior_specific_heat).collect();
-        let m = &craft.spec.engine.mount;
-        let engine_node = volume.nearest(m.pos + m.dir.normalize() * (0.25 * t.node_size));
+        let nozzle_area: f64 = cells.iter().filter(|c| nozzle(c)).map(|c| c.area).sum();
+        let nozzle_cells = (cells.iter().enumerate())
+            .filter(|(_, c)| nozzle(c))
+            .map(|(i, c)| (i as u32, c.area / nozzle_area))
+            .collect();
+        let skin_max = cells.iter().map(|c| c.max_k.unwrap_or(t.skin_max_k)).collect();
         let cd0 = craft.spec.aero.cd0;
         let mean_drag_area = mean_drag_area(&bake, cd0);
         CraftDesign {
@@ -76,6 +91,8 @@ impl CraftDesign {
             propellant_specific_heat: t.propellant_specific_heat,
             tank_capacity: craft.spec.propellant.capacity,
             engine_node,
+            nozzle_cells,
+            skin_max,
             cells: cells.clone(),
             cd0,
             mean_drag_area,

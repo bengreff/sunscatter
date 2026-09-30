@@ -31,8 +31,8 @@ pub struct Engine {
     pub mount_dir: DVec3,
     /// Nozzle exit area (m²), from the Isp pair.
     pub exit_area: f64,
-    /// Share of the jet power that heats the interior at the mount (D065).
-    pub heat_fraction: f64,
+    /// Share of the jet power absorbed by the nozzle's wall (D077).
+    pub nozzle_heat_fraction: f64,
 }
 
 /// Thrust (N) and propellant mass flow (kg/s).
@@ -53,15 +53,15 @@ impl Engine {
             mount_pos: f.mount.pos,
             mount_dir: f.mount.dir.normalize(),
             exit_area: f.thrust_vac * (1.0 - f.isp_sl / f.isp_vac) / P_SEA_LEVEL,
-            heat_fraction: f.heat_fraction,
+            nozzle_heat_fraction: f.nozzle_heat_fraction,
         }
     }
 
-    /// Heat released into the interior (W) while giving `thrust` (N) at
+    /// Heat absorbed by the nozzle's wall (W) while giving `thrust` (N) at
     /// mass flow `mdot` (kg/s): the share of the jet power ½·F·vₑ, vₑ = F/ṁ.
     pub fn heat(&self, thrust: f64, mdot: f64) -> f64 {
         if mdot > 0.0 {
-            self.heat_fraction * 0.5 * thrust * thrust / mdot
+            self.nozzle_heat_fraction * 0.5 * thrust * thrust / mdot
         } else {
             0.0
         }
@@ -124,7 +124,7 @@ mod tests {
         let e = engine();
         let out = e.output(1.0, 0.0);
         let jet = 0.5 * out.thrust * e.isp_vac * G0;
-        assert!((e.heat(out.thrust, out.mdot) / (2.0e-4 * jet) - 1.0).abs() < 1e-12);
+        assert!((e.heat(out.thrust, out.mdot) / (e.nozzle_heat_fraction * jet) - 1.0).abs() < 1e-12);
         assert_eq!(e.heat(0.0, 0.0), 0.0);
     }
 

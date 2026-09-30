@@ -12,10 +12,14 @@
         min_throttle: 0.1,
         gimbal_deg: 5.0,
         mount: (pos: (0.0, 0.0, -5.9), dir: (0.0, 0.0, 1.0)),   // the bell's throat; thrust along +Z
-        // Of the jet power (½·F·vₑ ≈ 470 MW), 1–2 % reaches the chamber wall,
-        // but regenerative cooling returns nearly all of it to the flow: what
-        // soaks into the structure at the mount is taken as 0.02 % (~94 kW).
-        heat_fraction: 2.0e-4,
+        // D077: of the jet power (½·F·vₑ ≈ 470 MW), 0.5–5 % crosses the
+        // walls (Sutton & Biblarz, Rocket Propulsion Elements), most of it
+        // near the throat. The chamber's share goes back into the flow
+        // (regenerative cooling), so it heats nothing. The radiatively
+        // cooled extension (the bell) takes 0.22 % (~1 MW): its equilibrium
+        // is then ~1400 K, where coated niobium extensions run (C-103 limit
+        // ~1640 K). The bell joins the craft only at the throat.
+        nozzle_heat_fraction: 2.2e-3,
     ),
     attitude_control: (torque: (40.0e3, 40.0e3, 20.0e3)),  // N·m per body axis (abstract RCS/wheels)
     // At the nose: under the chute the rocket hangs tail down, on its legs.

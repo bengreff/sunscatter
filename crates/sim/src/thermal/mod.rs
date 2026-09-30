@@ -102,7 +102,7 @@ pub struct Interior {
     /// The node beneath each cell.
     pub cell_node: Vec<u32>,
     /// Conductance from each cell to its node per unit of the cell's area
-    /// (W/(m²·K)).
+    /// (W/(m²·K)), unless the cell's material sets its own.
     pub coupling: f64,
     /// Node–node conductances (W/K).
     pub links: Vec<(u32, u32, f64)>,
@@ -172,10 +172,23 @@ pub fn hottest(t: &[f64]) -> Option<(usize, f64)> {
     )
 }
 
-/// The hottest cell above `skin_max`, else the hottest node above `node_max`.
-pub fn check(state: &ThermalState, skin_max: f64, node_max: f64) -> Option<Overheat> {
-    match (hottest(&state.skin), hottest(&state.nodes)) {
-        (Some((i, t)), _) if t > skin_max => Some(Overheat::Cell(i as u32)),
+/// The cell closest to its limit: (index, temperature, limit), the lowest
+/// index on ties; `skin_max` holds each cell's limit (K).
+pub fn nearest_limit(skin: &[f64], skin_max: &[f64]) -> Option<(usize, f64, f64)> {
+    skin.iter().zip(skin_max).enumerate().fold(None, |best: Option<(usize, f64, f64)>, (i, (&t, &m))| {
+        if best.is_none_or(|(_, b, bm)| t / m > b / bm) {
+            Some((i, t, m))
+        } else {
+            best
+        }
+    })
+}
+
+/// The cell furthest above its limit in `skin_max` (per cell, K), else the
+/// hottest node above `node_max`.
+pub fn check(state: &ThermalState, skin_max: &[f64], node_max: f64) -> Option<Overheat> {
+    match (nearest_limit(&state.skin, skin_max), hottest(&state.nodes)) {
+        (Some((i, t, m)), _) if t > m => Some(Overheat::Cell(i as u32)),
         (_, Some((j, t))) if t > node_max => Some(Overheat::Node(j as u32)),
         _ => None,
     }
@@ -217,7 +230,7 @@ impl ThermalNetwork {
         ThermalNetwork {
             capacity: cells.iter().map(|c| c.skin_mass() * c.specific_heat).collect(),
             radiation: cells.iter().map(|c| c.emissivity * STEFAN_BOLTZMANN * c.area).collect(),
-            to_node: cells.iter().map(|c| interior.coupling * c.area).collect(),
+            to_node: cells.iter().map(|c| c.coupling.unwrap_or(interior.coupling) * c.area).collect(),
             cell_node: interior.cell_node.clone(),
             start,
             links,

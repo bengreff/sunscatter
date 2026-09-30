@@ -336,9 +336,11 @@ fn craft_rows(ui_: &mut egui::Ui, sim: &SimState, near: Option<sim::frame::NodeI
         row("TWR", twr(engine.thrust_vac, props.mass, g).map_or("—".into(), |t| format!("{t:.2}")));
         row("MASS", format!("{:.1} t", props.mass / 1e3));
         let limits = &ship.craft.thermal;
-        let skin = ship.max_skin_temperature();
+        // The skin cell closest to its own material's limit (the nozzle's
+        // is its niobium's, D077).
+        let (skin, skin_limit) = ship.skin_nearest_limit();
         let (node, _) = ship.max_node_temperature();
-        row("SKIN MAX", temperature(skin, limits.skin_max_k));
+        row("SKIN MAX", temperature(skin, skin_limit));
         row("INTERIOR MAX", temperature(node, limits.internal_max_k));
         row("SHIP CLOCK", clock_offset(ship.proper_time_offset()));
     });

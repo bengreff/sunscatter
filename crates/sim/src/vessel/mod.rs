@@ -340,6 +340,12 @@ impl Vessel {
         self.thermal.max_skin()
     }
 
+    /// The skin cell closest to its material's limit: its temperature and
+    /// that limit (K).
+    pub fn skin_nearest_limit(&self) -> (f64, f64) {
+        self.thermal.skin_nearest_limit(&self.craft.design().skin_max)
+    }
+
     /// The hottest interior node: its temperature (K) and centre (body
     /// axes, m).
     pub fn max_node_temperature(&self) -> (f64, DVec3) {
