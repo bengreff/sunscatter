@@ -314,8 +314,11 @@ fn draw_apsides(
             let label = match (line.active, apsis) {
                 (false, _) => name.to_string(),
                 (true, Some(a)) => {
+                    // D076: a near-circular orbit shows its highest and
+                    // lowest point, labelled as such.
+                    let circular = if a.near_circular { " (near-circular)" } else { "" };
                     format!(
-                        "{name} {}\nin {}",
+                        "{name} {}{circular}\nin {}",
                         format::distance(a.altitude),
                         format::duration(t.seconds_since(sim.clock))
                     )

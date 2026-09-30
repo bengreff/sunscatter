@@ -335,7 +335,8 @@ fn get_vessel(
         .take(8)
         .map(|a| {
             json!({"kind": if a.is_apo { "apoapsis" } else { "periapsis" }, "body": name(a.body),
-                   "altitude_m": a.altitude, "in_s": a.t.seconds_since(sim.clock)})
+                   "altitude_m": a.altitude, "in_s": a.t.seconds_since(sim.clock),
+                   "near_circular": a.near_circular})
         })
         .collect();
     let impact = aps.impact.filter(|m| m.t.seconds_since(sim.clock) > 0.0);

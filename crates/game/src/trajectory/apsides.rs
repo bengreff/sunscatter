@@ -7,10 +7,14 @@
 //!
 //! Extrema are sign changes of r·v on the stored samples (relative to each
 //! point's dominant body), refined by a root search on the segment's own
-//! interpolant. A change of dominant body starts a new run. An extremum is
-//! kept only when it differs from its neighbour by more than
-//! [`SIGNIFICANCE`] of the altitude (J2 and lunar wobbles of a near-circular
-//! orbit are not apsides). Results are cached per vessel and extended as
+//! interpolant. A change of dominant body, and the start and end of a burn,
+//! start a new run. An extremum is kept only when it differs from its
+//! neighbour by more than [`SIGNIFICANCE`] of the altitude (J2 and lunar
+//! wobbles of a near-circular orbit are not apsides). A closed run whose
+//! extrema are all below that (a near-circular orbit) still shows its
+//! highest and lowest points, one Ap and one Pe per revolution, marked
+//! [`Apsis::near_circular`]. Altitudes are above the body's reference
+//! ellipsoid under the apsis, like the flight panel's. Results are cached per vessel and extended as
 //! the stored trajectory grows; the navball, flight panel, tracking station,
 //! MCP tools, planner and map markers all read them here.
 
@@ -19,8 +23,9 @@ use crate::state::{Prediction, SimState};
 use bevy::prelude::*;
 use glam::DVec3;
 use sim::frame::NodeId;
+use sim::frame::Vec3;
 use sim::time::Epoch;
-use sim::vessel::{EndKind, Segment, SegmentEnd, VesselId};
+use sim::vessel::{EndKind, Segment, SegmentEnd, SegmentKind, VesselId};
 use std::collections::HashMap;
 
 /// An extremum is kept when it differs from its neighbouring extremum by
@@ -33,7 +38,9 @@ use std::collections::HashMap;
 /// the Moon's pull on high orbits add extrema pairs that differ by less
 /// than that at moderate inclinations; 0.5 % (2 km at 400 km) drops those
 /// and keeps the once-per-revolution apsides. Only a very nearly circular
-/// polar orbit may still show extra wobble apsides.
+/// polar orbit may still show extra wobble apsides. A closed orbit whose
+/// swing is below this still shows one Ap and one Pe per revolution, marked
+/// near-circular.
 pub const SIGNIFICANCE: f64 = 0.005;
 
 /// One apsis on the predicted trajectory.
@@ -45,8 +52,11 @@ pub struct Apsis {
     pub body: NodeId,
     /// Distance from the body's centre (m).
     pub distance: f64,
-    /// Above the body's equatorial radius (m).
+    /// Above the body's reference ellipsoid (sea level) under the apsis (m).
     pub altitude: f64,
+    /// On a near-circular arc: the highest or lowest point of a revolution
+    /// whose swing is below [`SIGNIFICANCE`] of the altitude.
+    pub near_circular: bool,
 }
 
 /// Where the trajectory reaches a surface.
@@ -77,12 +87,19 @@ impl VesselApsides {
     }
 }
 
-/// A raw (unfiltered) extremum.
+/// A raw (unfiltered) extremum: its time and position relative to the body
+/// (inertial axes).
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Raw {
     t: Epoch,
-    distance: f64,
+    r: DVec3,
     is_apo: bool,
+}
+
+impl Raw {
+    fn distance(&self) -> f64 {
+        self.r.length()
+    }
 }
 
 /// Points about one dominant body.
@@ -108,6 +125,8 @@ struct Prev {
 pub struct Scanner {
     runs: Vec<Run>,
     prev: Option<Prev>,
+    /// The next point starts a new run ([`Self::split`]).
+    split: bool,
 }
 
 impl Scanner {
@@ -116,9 +135,16 @@ impl Scanner {
         self.prev.map(|p| p.body)
     }
 
+    /// Starts a new run at the next point (a burn starts or ends): the
+    /// orbits either side have their own apsides. An extremum between the
+    /// last point and the next goes to the new run.
+    pub fn split(&mut self) {
+        self.split = true;
+    }
+
     /// Feeds the next point: position and velocity relative to its dominant
     /// `body`. On a sign change of r·v since the previous point,
-    /// `refine(t_prev, t)` gives the extremum's time and distance (`None`:
+    /// `refine(t_prev, t)` gives the extremum's time and position (`None`:
     /// the midpoint and the nearer sample are used).
     pub fn push(
         &mut self,
@@ -126,7 +152,7 @@ impl Scanner {
         body: NodeId,
         r: DVec3,
         v: DVec3,
-        refine: impl FnOnce(Epoch, Epoch) -> Option<(Epoch, f64)>,
+        refine: impl FnOnce(Epoch, Epoch) -> Option<(Epoch, DVec3)>,
     ) {
         let (rv, d) = (r.dot(v), r.length());
         let prev = match self.prev {
@@ -140,33 +166,46 @@ impl Scanner {
         if t.seconds_since(prev.t) <= 0.0 {
             return;
         }
+        if std::mem::take(&mut self.split) {
+            self.runs.push(Run { body, start: d, end: d, extrema: Vec::new() });
+        }
         let run = self.runs.last_mut().expect("a run is open");
         let is_apo = prev.rv > 0.0 && rv <= 0.0;
         let is_peri = prev.rv < 0.0 && rv >= 0.0;
         if is_apo || is_peri {
-            let (te, de) = refine(prev.t, t).unwrap_or_else(|| {
+            let (te, re) = refine(prev.t, t).unwrap_or_else(|| {
                 let pick = if is_apo { run.end.max(d) } else { run.end.min(d) };
-                (prev.t.add_seconds(0.5 * t.seconds_since(prev.t)), pick)
+                (prev.t.add_seconds(0.5 * t.seconds_since(prev.t)), r * (pick / d))
             });
-            run.extrema.push(Raw { t: te, distance: de, is_apo });
+            run.extrema.push(Raw { t: te, r: re, is_apo });
         }
         run.end = d;
         self.prev = Some(Prev { t, body, rv });
     }
 
-    /// The significant extrema of every run, in time order; `radius` gives
-    /// a body's equatorial radius.
-    pub fn apsides(&self, radius: impl Fn(NodeId) -> f64) -> Vec<Apsis> {
+    /// The significant extrema of every run, in time order (a near-circular
+    /// closed run: its highest and lowest point per revolution).
+    /// `surface(body, t, r)` is the radius of the body's reference
+    /// ellipsoid under the position `r` (relative, inertial) at `t`; `mu`
+    /// a body's GM (m³/s²).
+    pub fn apsides(&self, surface: impl Fn(NodeId, Epoch, DVec3) -> f64, mu: impl Fn(NodeId) -> f64) -> Vec<Apsis> {
         let mut out = Vec::new();
         for run in &self.runs {
-            let r = radius(run.body);
-            for e in significant(run.start, run.end, &run.extrema, r, SIGNIFICANCE) {
+            let raw: Vec<(Raw, f64)> = run.extrema.iter().map(|e| (*e, surface(run.body, e.t, e.r))).collect();
+            let mut kept = significant(run.start, run.end, &raw, SIGNIFICANCE);
+            let closed = raw.iter().any(|e| e.0.is_apo) && raw.iter().any(|e| !e.0.is_apo);
+            let near_circular = kept.is_empty() && closed;
+            if near_circular {
+                kept = per_revolution(&raw, mu(run.body));
+            }
+            for (e, radius) in kept {
                 out.push(Apsis {
                     is_apo: e.is_apo,
                     t: e.t,
                     body: run.body,
-                    distance: e.distance,
-                    altitude: e.distance - r,
+                    distance: e.distance(),
+                    altitude: e.distance() - radius,
+                    near_circular,
                 });
             }
         }
@@ -174,30 +213,52 @@ impl Scanner {
     }
 }
 
+/// Extrema with the radius of the surface under each (m).
+type Placed = (Raw, f64);
+
+/// The adjacent pair (a maximum and a minimum) that differ least among
+/// those `allowed(difference, a, b)`; dropping it keeps the others
+/// alternating.
+fn weakest_pair(e: &[Placed], allowed: impl Fn(f64, &Placed, &Placed) -> bool) -> Option<usize> {
+    (0..e.len().saturating_sub(1))
+        .map(|i| (i, (e[i].0.distance() - e[i + 1].0.distance()).abs()))
+        .filter(|&(i, diff)| allowed(diff, &e[i], &e[i + 1]))
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .map(|(i, _)| i)
+}
+
 /// The extrema of a run that are significant: repeatedly drops the adjacent
-/// pair (a maximum and a minimum) that differ least, while they differ by
-/// less than `fraction` of the lower one's altitude above `radius`. A single
-/// remaining extremum is dropped when the run's ends are as close to it.
-fn significant(start: f64, end: f64, extrema: &[Raw], radius: f64, fraction: f64) -> Vec<Raw> {
-    let threshold = |a: f64, b: f64| fraction * (a.min(b) - radius).max(0.0);
+/// pair that differ least while they differ by less than `fraction` of the
+/// lower one's altitude. A single remaining extremum is dropped when the
+/// run's ends are as close to it.
+fn significant(start: f64, end: f64, extrema: &[Placed], fraction: f64) -> Vec<Placed> {
+    let altitude = |x: &Placed| (x.0.distance() - x.1).max(0.0);
     let mut e = extrema.to_vec();
-    loop {
-        let weakest = (0..e.len().saturating_sub(1))
-            .map(|i| (i, (e[i].distance - e[i + 1].distance).abs()))
-            .filter(|&(i, diff)| diff < threshold(e[i].distance, e[i + 1].distance))
-            .min_by(|a, b| a.1.total_cmp(&b.1));
-        match weakest {
-            Some((i, _)) => {
-                e.drain(i..i + 2);
-            }
-            None => break,
-        }
+    while let Some(i) = weakest_pair(&e, |diff, a, b| diff < fraction * altitude(a).min(altitude(b))) {
+        e.drain(i..i + 2);
     }
     if let [x] = e[..] {
-        let near = |d: f64| (x.distance - d).abs() < threshold(x.distance, d);
+        let near = |d: f64| (x.0.distance() - d).abs() < fraction * altitude(&x).min((d - x.1).max(0.0));
         if near(start) && near(end) {
             e.clear();
         }
+    }
+    e
+}
+
+/// A near-circular closed run's extrema reduced to about one maximum and
+/// one minimum per revolution (the period from the mean distance and `mu`):
+/// the weakest pairs are dropped first, so what stays are the largest
+/// swings, alternating.
+fn per_revolution(extrema: &[Placed], mu: f64) -> Vec<Placed> {
+    let (first, last) = (extrema[0].0.t, extrema[extrema.len() - 1].0.t);
+    let a = extrema.iter().map(|e| e.0.distance()).sum::<f64>() / extrema.len() as f64;
+    let period = if mu > 0.0 { std::f64::consts::TAU * (a * a * a / mu).sqrt() } else { f64::INFINITY };
+    let revolutions = (last.seconds_since(first) / period).floor().max(0.0) as usize + 1;
+    let mut e = extrema.to_vec();
+    while e.len() > 2 * revolutions {
+        let Some(i) = weakest_pair(&e, |_, _, _| true) else { break };
+        e.drain(i..i + 2);
     }
     e
 }
@@ -310,8 +371,12 @@ impl Entry {
             return false;
         }
         let eph = &sim.world.eph;
+        let burn = |seg: &Segment| matches!(seg.kind, SegmentKind::Burn(_));
         for (k, seg) in segs.iter().enumerate().skip(from_seg) {
             let start = if k == from_seg { from_sample } else { 0 };
+            if start == 0 && k > 0 && burn(seg) != burn(segs[k - 1]) {
+                self.scanner.split();
+            }
             for s in &seg.samples[start.min(seg.samples.len())..] {
                 let epoch = seg.t0.add_seconds(s.s.t);
                 let body = sim.dominance.of(eph, epoch, s.anchor, s.s.r, None, self.scanner.last_body());
@@ -321,19 +386,25 @@ impl Entry {
                     let g = |t: f64| relative_to(sim, seg, t, body).map(|(r, v)| r.dot(v));
                     let t = refine_root(g, a, b, g(a)?, g(b)?, 1e-3);
                     let (r, _) = relative_to(sim, seg, t, body)?;
-                    Some((seg.t0.add_seconds(t), r.length()))
+                    Some((seg.t0.add_seconds(t), r))
                 };
                 self.scanner.push(epoch, body, s.s.r - rel.r, s.s.v - rel.v, refine);
             }
         }
         self.keys = keys;
-        let radius = |b: NodeId| sim.world.source(b).and_then(|s| s.physical.as_ref()).map_or(0.0, |p| p.radius_eq);
+        let surface = |b: NodeId, t: Epoch, r: DVec3| {
+            sim.world.source(b).and_then(|s| s.physical.as_ref()).map_or(0.0, |p| {
+                let fixed = p.rotation.to_fixed(Vec3::from_raw(r), t).raw();
+                p.ellipsoid_radius(fixed.z / fixed.length())
+            })
+        };
+        let mu = |b: NodeId| sim.world.source(b).map_or(0.0, |s| s.gm);
         let impact = segs.last().and_then(|s| match s.end {
             Some(SegmentEnd { t, kind: EndKind::Surface { body } }) => Some(Impact { t: s.t0.add_seconds(t), body }),
             _ => None,
         });
         self.stored_impact = impact;
-        self.result = VesselApsides { list: self.scanner.apsides(radius), impact };
+        self.result = VesselApsides { list: self.scanner.apsides(surface, mu), impact };
         true
     }
 }

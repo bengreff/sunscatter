@@ -5,6 +5,7 @@ use sim::vessel::Vessel;
 use std::f64::consts::TAU;
 
 const R_EARTH: f64 = 6_378_137.0;
+const MU_EARTH: f64 = 3.986_004_418e14;
 
 fn t0() -> Epoch {
     sim::sol::sol_epoch()
@@ -15,6 +16,18 @@ fn t0() -> Epoch {
 /// the profile itself.
 fn scan(d: impl Fn(f64) -> (f64, f64) + Copy, a: f64, b: f64, dt: f64, body_at: impl Fn(f64) -> NodeId) -> Vec<Apsis> {
     let mut s = Scanner::default();
+    feed(&mut s, d, a, b, dt, body_at);
+    s.apsides(|_, _, _| R_EARTH, |_| MU_EARTH)
+}
+
+fn feed(
+    s: &mut Scanner,
+    d: impl Fn(f64) -> (f64, f64) + Copy,
+    a: f64,
+    b: f64,
+    dt: f64,
+    body_at: impl Fn(f64) -> NodeId,
+) {
     let n = ((b - a) / dt).ceil() as usize;
     for k in 0..=n {
         let t = (a + k as f64 * dt).min(b);
@@ -23,11 +36,10 @@ fn scan(d: impl Fn(f64) -> (f64, f64) + Copy, a: f64, b: f64, dt: f64, body_at: 
             let g = |x: f64| Some(d(x).0 * d(x).1);
             let (xa, xb) = (ta.seconds_since(t0()), tb.seconds_since(t0()));
             let x = refine_root(g, xa, xb, g(xa)?, g(xb)?, 1e-6);
-            Some((t0().add_seconds(x), d(x).0))
+            Some((t0().add_seconds(x), DVec3::X * d(x).0))
         };
         s.push(t0().add_seconds(t), body_at(t), DVec3::X * r, DVec3::X * v, refine);
     }
-    s.apsides(|_| R_EARTH)
 }
 
 const EARTH: NodeId = NodeId(3);
@@ -68,9 +80,10 @@ fn apsides_of_profiles() {
             scan(orbit(a, 0.01, 600.0, 120.0), q, 3.0 * period + q, 2.0, |_| EARTH),
         ),
         // A near-circular orbit (Ap − Pe ≈ 0.7 km) wobbling twice per
-        // revolution by J2's size at 45° (0.8 km): no apsis at all.
+        // revolution by J2's size at 45° (0.8 km): no significant apsis, so
+        // its highest and lowest point per revolution (near-circular).
         (
-            Case { name: "near-circular", apo: 0, peri: 0 },
+            Case { name: "near-circular", apo: 3, peri: 3 },
             scan(orbit(a, 0.00005, 800.0, 2.0), q, 3.0 * period + q, 10.0, |_| EARTH),
         ),
         // A hyperbolic flyby from before periapsis: one Pe, no Ap.
@@ -92,6 +105,8 @@ fn apsides_of_profiles() {
         (Case { name: "descent", apo: 0, peri: 0 }, scan(|t| (a - 50.0 * t, -50.0), 0.0, 8_000.0, 10.0, |_| EARTH)),
     ];
     for (case, got) in cases {
+        let circular = case.name == "near-circular";
+        assert!(got.iter().all(|x| x.near_circular == circular), "{}: {got:?}", case.name);
         let apo = got.iter().filter(|x| x.is_apo).count();
         let peri = got.len() - apo;
         assert_eq!((apo, peri), (case.apo, case.peri), "{}: {got:?}", case.name);
@@ -121,8 +136,37 @@ fn a_change_of_dominant_body_splits_the_runs() {
 }
 
 #[test]
+fn a_burn_splits_an_eccentric_orbit_from_the_near_circular_one_after_it() {
+    // Two revolutions eccentric, a burn, two near-circular: each arc keeps
+    // its own Ap and Pe (without the split the circular arc's wobble was
+    // dropped as insignificant beside the eccentric apsides).
+    let period = 5_550.0;
+    // Periapsis at 400 km, circularised there (continuous within 0.4 km).
+    let low = R_EARTH + 400_000.0;
+    let a = (low + 800.0) / 0.95;
+    let mut s = Scanner::default();
+    feed(&mut s, orbit(a, 0.05, 0.0, 1.0), 0.0, 2.0 * period, 10.0, |_| EARTH);
+    s.split();
+    feed(&mut s, orbit(low, 0.00005, 800.0, 2.0), 2.0 * period + 10.0, 4.0 * period + 1_000.0, 10.0, |_| EARTH);
+    let got = s.apsides(|_, _, _| R_EARTH, |_| MU_EARTH);
+    let (circular, eccentric): (Vec<&Apsis>, Vec<&Apsis>) = got.iter().partition(|x| x.near_circular);
+    assert!(eccentric.len() >= 3 && eccentric.iter().all(|x| x.t.seconds_since(t0()) < 2.0 * period), "{got:?}");
+    let apo = circular.iter().filter(|x| x.is_apo).count();
+    // About two revolutions: one Ap and one Pe per revolution (an odd
+    // count of raw extrema leaves one of them once).
+    assert!((1..=2).contains(&apo) && (1..=2).contains(&(circular.len() - apo)) && circular.len() >= 3, "{got:?}");
+}
+
+#[test]
 fn next_after_skips_the_past() {
-    let at = |s: f64, is_apo| Apsis { is_apo, t: t0().add_seconds(s), body: EARTH, distance: 0.0, altitude: 0.0 };
+    let at = |s: f64, is_apo| Apsis {
+        is_apo,
+        t: t0().add_seconds(s),
+        body: EARTH,
+        distance: 0.0,
+        altitude: 0.0,
+        near_circular: false,
+    };
     let v =
         VesselApsides { list: vec![at(-10.0, true), at(5.0, false), at(20.0, true), at(40.0, false)], impact: None };
     assert_eq!(v.times_to_next(t0()), (Some(20.0), Some(5.0)));
@@ -154,12 +198,16 @@ fn a_real_low_orbit_has_one_ap_and_pe_per_revolution() {
     // Osculating e = 0.001 at a = 6778 km, but under J2 the orbit is nearly
     // frozen: the distance swings ≈3 km once per revolution (Ap ≈ 393 km,
     // Pe ≈ 390 km above the equatorial radius) — the conic's 407/393 km is
-    // not what happens.
-    for a in &apo {
-        assert!(a.body == earth && (a.altitude - 393_200.0).abs() < 2_000.0, "{a:?}");
-    }
-    for a in &peri {
-        assert!((a.altitude - 390_200.0).abs() < 2_000.0, "{a:?}");
+    // not what happens. Altitudes are above the ellipsoid under the apsis:
+    // at least that much, at most 21.4 km more (Earth's polar flattening).
+    let p = sim.world.source(earth).unwrap().physical.clone().unwrap();
+    for (list, want) in [(&apo, 393_200.0), (&peri, 390_200.0)] {
+        for a in list {
+            assert!(a.body == earth && (a.distance - R_EARTH - want).abs() < 2_000.0, "{a:?}");
+            assert!(!a.near_circular);
+            let lift = a.altitude - (a.distance - R_EARTH);
+            assert!((0.0..p.radius_eq - p.radius_polar).contains(&lift), "{a:?}");
+        }
     }
     assert!(got.impact.is_none());
     // The cache matches a fresh computation, and extends incrementally.
