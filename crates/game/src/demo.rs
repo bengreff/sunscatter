@@ -411,6 +411,20 @@ pub fn run(
             if !demo.shot_taken {
                 demo.shot_taken = true;
                 demo.capture("orbit_day");
+                // A playtest start in low orbit, out of debug mode.
+                let mut fleet = sim.fleet.clone();
+                fleet[sim.active].set_debug(&sim.world, false);
+                let save = sim::save::SaveGame::capture(
+                    &sim.world,
+                    sim.clock,
+                    &fleet,
+                    sim.vessel_ids,
+                    sim.active,
+                    sim::vessel::Controls { throttle: 0.0, ..sim.controls },
+                );
+                if let Err(e) = save.write(&demo.dir.join("orbit_save.ron")) {
+                    warn!("demo: orbit save failed: {e:?}");
+                }
             } else if demo.bench && !demo.benching && bench.view != "orbit" {
                 bench.start("orbit", *settings);
                 demo.benching = true;
