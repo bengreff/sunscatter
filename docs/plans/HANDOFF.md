@@ -25,7 +25,8 @@ A SessionStart hook loads this file automatically after `/clear` or at startup. 
 
 ## Open for the owner
 
-- The pending list in `docs/plans/open-issues.md` ("Owner decisions pending"): D077–D079 defaults, a full 20 t craft tearing its mains (land light or on the engine), nose-first LEO reentry overheating the craft, the near-circular Ap/Pe label.
+- Answered 2026-10-01 (recorded in D064, D076, D078, D079): full craft tearing its mains kept; reentry overheating accepted (heat shield later as a part); SAS on slopes kept; near-circular Ap/Pe plain (measured steady under warp).
+- `docs/design/triton-lessons.md` (what transfers from triton, sunscatter as a long-horizon AI benchmark over MCP) ends with five questions for the owner; turn the answers into decisions.
 
 ## Gotchas
 
