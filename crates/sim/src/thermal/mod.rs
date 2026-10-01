@@ -213,6 +213,16 @@ fn csr<T: Copy>(n: usize, pairs: impl Iterator<Item = (u32, T)> + Clone) -> (Vec
 }
 
 impl ThermalNetwork {
+    /// The skin's shortest radiative time constant at `skin` (s):
+    /// `C / (4·εσA·T³)` per cell, how fast the hottest thin cell cools
+    /// (a 1 mm niobium bell at 1400 K: ~5 s; the hull at 290 K: ~1600 s).
+    pub fn radiative_time(&self, skin: &[f64]) -> f64 {
+        (self.capacity.iter().zip(&self.radiation).zip(skin))
+            .filter(|((_, r), _)| **r > 0.0)
+            .map(|((c, r), t)| c / (4.0 * r * t * t * t))
+            .fold(f64::INFINITY, f64::min)
+    }
+
     /// The network of `cells` (their skin data and neighbour conductances)
     /// over `interior`.
     pub fn new(cells: &[Cell], interior: &Interior) -> Self {

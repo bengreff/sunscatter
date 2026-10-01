@@ -144,3 +144,30 @@ fn debug_mode_and_propellant_are_saved() {
     assert_eq!(back.vessels[0], ship);
     assert!(back.vessels[0].debug() && back.vessels[0].propellant() == 1234.5);
 }
+
+#[test]
+fn the_nozzle_bell_cools_in_seconds_after_cutoff() {
+    let w = world();
+    let mut ship = leo(&w);
+    ship.set_debug(&w, true);
+    // Two minutes at full thrust bring the bell to ~1400 K (D077).
+    let burn = Controls { sas: false, ..FULL };
+    fly(&w, &mut ship, 120.0, &burn);
+    assert!(ship.max_skin_temperature() > 1300.0, "{}", ship.max_skin_temperature());
+    // Off: the 1 mm niobium bell radiates (C/4εσT³ ≈ 5 s at 1400 K); by
+    // hand ~830 K after 30 s and ~500 K after 136 s as a bare plate. The
+    // coast lattice resolves it, the same at 60 fps and in one jump.
+    let coast = Controls { sas: false, ..Controls::default() };
+    let mut jump = ship.clone();
+    let after = |s: f64| t0().add_seconds(120.0 + s);
+    for k in 1..=(30 * 60) {
+        ship.advance(&w, after(k as f64 / 60.0), &coast, usize::MAX);
+    }
+    jump.advance(&w, after(30.0), &coast, usize::MAX);
+    let hot = ship.max_skin_temperature();
+    assert_eq!(hot, jump.max_skin_temperature());
+    assert!(hot > 750.0 && hot < 1000.0, "{hot} K after 30 s");
+    ship.advance(&w, after(136.0), &coast, usize::MAX);
+    let cooler = ship.max_skin_temperature();
+    assert!(cooler > 450.0 && cooler < 650.0, "{cooler} K after 136 s");
+}

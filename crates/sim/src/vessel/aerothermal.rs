@@ -14,10 +14,12 @@
 //! [`thermal::cell_heat`] with the sunlight (eclipses by body spheres,
 //! [`crate::light`]); one implicit thermal step per tick.
 //!
-//! **Coasts** (above every atmosphere): the temperatures step on a fixed
-//! [`LATTICE`] from the vessel's thermal epoch (sunlight and radiation
-//! only), with the attitude and position at each lattice epoch, so 60 fps
-//! and one long jump give the same bits. The sunlight of a coast step is
+//! **Coasts** (above every atmosphere): the temperatures step on a
+//! lattice from the vessel's thermal epoch (sunlight and radiation only),
+//! with the attitude and position at each lattice epoch, so 60 fps and one
+//! long jump give the same bits. Its spacing follows the state: twice the
+//! skin's shortest radiative time constant, at most [`LATTICE`] (a bell
+//! hot from a burn cools on steps of seconds, a cold craft on 600 s). The sunlight of a coast step is
 //! averaged over the vessel's osculating orbit ([`coast_sunlight`]: the
 //! orbit's sunlit fraction, for bound orbits of at most
 //! [`ORBIT_AVERAGE_PERIOD`]), so the input changes only slowly. While the
@@ -45,6 +47,8 @@ use glam::{DQuat, DVec3};
 /// The coast thermal lattice (s): a third of the test craft's skin time
 /// constant (C/(4εσT³) ≈ 1,600 s at 290 K).
 pub const LATTICE: f64 = 600.0;
+/// The shortest coast lattice spacing (s).
+pub const MIN_STEP: f64 = 1.0;
 /// Radiative sink temperature (K): the cosmic background.
 pub const SINK_K: f64 = 2.725;
 /// Temperature of a new vessel (K).
@@ -81,12 +85,26 @@ pub struct VesselThermal {
     /// Coasts: planned burns not yet stepped past: start, end (once known)
     /// and the engine's heat (W), in start order.
     burns: Vec<(Epoch, Option<Epoch>, f64)>,
+    /// Coasts: the spacing (s) to the next lattice point ([`lattice_step`]).
+    #[serde(default = "lattice_default")]
+    step: f64,
+}
+
+fn lattice_default() -> f64 {
+    LATTICE
+}
+
+/// The coast lattice spacing after a solve to `state` (s): twice the
+/// skin's shortest radiative time constant, within [`MIN_STEP`] and
+/// [`LATTICE`].
+fn lattice_step(design: &CraftDesign, state: &ThermalState) -> f64 {
+    (2.0 * design.network.radiative_time(&state.skin)).clamp(MIN_STEP, LATTICE)
 }
 
 impl VesselThermal {
     pub fn uniform(cells: usize, nodes: usize, t: f64, epoch: Epoch) -> Self {
         let state = ThermalState::uniform(cells, nodes, t);
-        VesselThermal { state, epoch, lattice: epoch, hold: None, burns: Vec::new() }
+        VesselThermal { state, epoch, lattice: epoch, hold: None, burns: Vec::new(), step: LATTICE }
     }
 
     /// Hottest skin cell (K).
@@ -161,7 +179,7 @@ impl VesselThermal {
 
     /// The next coast lattice point.
     pub fn next_lattice(&self) -> Epoch {
-        self.lattice.add_seconds(LATTICE)
+        self.lattice.add_seconds(self.step)
     }
 }
 
@@ -391,6 +409,7 @@ pub fn live_step(
     engine_and_nodes(design, engine_heat, propellant, &mut b);
     design.network.step(&mut th.state, &b.heat, &b.node_heat, &b.node_capacity, SINK_K, dt, DEFAULT_SWEEPS);
     th.restart(th.epoch.add_seconds(dt));
+    th.step = lattice_step(design, &th.state);
 }
 
 /// The coast step at `epoch` (a lattice point; or, with `last`, the end of
@@ -436,6 +455,7 @@ pub fn coast_step(
     let span = if change > 0.0 { (STEP_CHANGE_K * dt / change).min(MAX_SKIP) } else { MAX_SKIP };
     th.hold = (!last && burn == 0.0).then_some((sun_body, span));
     th.epoch = epoch;
+    th.step = lattice_step(design, &th.state);
     th.burns.retain(|b| b.1.is_none_or(|end| end.seconds_since(epoch) > 0.0));
     true
 }
