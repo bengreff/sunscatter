@@ -50,27 +50,35 @@ pub fn knudsen(mean_free_path: f64, length: f64) -> f64 {
     mean_free_path / length
 }
 
-/// Density ratio ρ₂/ρ₁ across a strong normal shock in equilibrium air
-/// against the flight speed (m/s): dissociation and ionisation soak up
-/// the energy, and the gas behind the shock is far denser than a γ = 1.4
-/// gas's 6. Approximate readings of the equilibrium normal-shock curves
-/// for altitudes of 50–60 km (Anderson, *Hypersonic and High-Temperature
-/// Gas Dynamics*, ch. 14, after Hansen's equilibrium-air properties; ±10 %,
-/// the ratio grows a little with altitude, which is left out: Cp,max ≈
-/// 2 − ρ₁/ρ₂ moves by under 1 % over an entry's altitudes).
-const SHOCK_DENSITY_RATIO: [(f64, f64); 12] = [
+/// Density ratio ρ₂/ρ₁ across a normal shock in equilibrium air against
+/// the flight speed (m/s): dissociation and ionisation soak up the energy,
+/// and the gas behind the shock is far denser than a γ = 1.4 gas's 6.
+/// Hunt & Souders, *Normal- and Oblique-Shock Flow Parameters in
+/// Equilibrium Air*, NASA SP-3093 (1975), the 90° rows of Table VIII
+/// (53.34 km) to 7.9 km/s, Table IX (60.96 km) to 9.8 km/s and Table X
+/// (68.58 km) above, each at the altitude where an entry flies that fast.
+/// The ratio peaks near 8.5 km/s (oxygen fully dissociated) and dips
+/// before nitrogen goes; it grows ~5 % per 8 km of altitude, which is left
+/// out (Cp,max ≈ 2 − ρ₁/ρ₂ moves by under 0.5 %). 6 at 2 km/s is the
+/// perfect-gas strong-shock limit, joining the table at 2.4 km/s.
+const SHOCK_DENSITY_RATIO: [(f64, f64); 17] = [
     (2_000.0, 6.0),
-    (3_000.0, 6.8),
-    (4_000.0, 8.0),
-    (5_000.0, 9.3),
-    (6_000.0, 10.3),
-    (7_000.0, 11.2),
-    (8_000.0, 11.8),
-    (9_000.0, 12.4),
-    (10_000.0, 13.2),
-    (11_000.0, 14.2),
-    (12_000.0, 15.0),
-    (16_000.0, 16.5),
+    (2_438.4, 7.208),
+    (3_048.0, 9.196),
+    (3_657.6, 10.785),
+    (4_267.2, 10.899),
+    (4_876.8, 11.660),
+    (5_486.4, 12.873),
+    (6_096.0, 14.076),
+    (6_705.6, 15.147),
+    (7_315.2, 16.032),
+    (7_924.8, 16.671),
+    (8_534.4, 17.596),
+    (9_144.0, 16.929),
+    (9_753.6, 16.022),
+    (10_363.2, 16.399),
+    (10_972.8, 16.623),
+    (11_582.4, 16.897),
 ];
 
 /// Equilibrium-air normal-shock density ratio at `speed` (m/s): the
@@ -158,16 +166,22 @@ mod tests {
         let cp = |v: f64, m: f64| cp_max(real_gas_gamma(EARTH_AIR_GAMMA, v), m);
         let lunar = cp(11_000.0, 36.0);
         assert!(lunar > 1.9 && lunar < 2.0, "{lunar}");
-        assert!((lunar - (2.0 - 1.0 / 14.2)).abs() < 0.01, "{lunar}");
+        assert!((lunar - (2.0 - 1.0 / 16.62)).abs() < 0.01, "{lunar}");
+        // SP-3093's normal-shock rows: 7.2084 at 2.4384 km/s, 16.671 at
+        // 7.9248 (53.34 km), 17.596 at 8.5344 (60.96 km, the peak).
+        assert_eq!(shock_density_ratio(2_438.4), 7.208);
+        assert_eq!(shock_density_ratio(7_924.8), 16.671);
+        assert_eq!(shock_density_ratio(8_534.4), 17.596);
         // Low speed: the perfect gas.
         assert_eq!(real_gas_gamma(1.4, 1_000.0), 1.4);
         assert!((cp(1_500.0, 5.0) - cp_max(1.4, 5.0)).abs() < 1e-15);
-        // Rising with speed, continuous.
-        let mut last = 0.0;
-        for k in 0..200 {
+        // Continuous, within 1.9–2.0 above 3.6 km/s (it dips past the peak).
+        let mut last = cp(1_000.0, 1_000.0 / 300.0);
+        for k in 1..200 {
             let v = 1_000.0 + 100.0 * k as f64;
             let c = cp(v, v / 300.0);
-            assert!(c >= last - 1e-12, "{v}");
+            assert!((c - last).abs() < 0.03, "{v}");
+            assert!(v < 3_600.0 || (c > 1.9 && c < 2.0), "{v}: {c}");
             last = c;
         }
     }

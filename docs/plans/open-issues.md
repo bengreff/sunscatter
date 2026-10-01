@@ -25,7 +25,7 @@ Settled 2026-09-28: haze (moot, D073), chute (keep), stability (finned rocket, D
 ## Physics and model gaps
 
 - Aero (D070 table in `docs/design/aero-thermal.md`): no base drag vs Mach, no plume effects, no body–fin interference, crossflow Cd constant in Mach, adiabatic smooth-wall friction, no supersonic area rule, radiative heating spread like convection, no ablation.
-- Unverified constants written from memory: Wilmoth bridge form; Tauber–Sutton Earth half-km table points and the Mars table; real-gas γ_eff curve (±10 %). Mars has no atmosphere data.
+- Aero constants checked against sources on 2026-09-30: Wilmoth bridge exact (NTRS 20040105522); Sutton–Graves k for Earth and Mars (TFAWS 2012); Tauber–Sutton Mars C, a, b (West & Brandis 2020, NTRS 20200002354); the equilibrium-air shock density ratio was 12–30 % low and is now NASA SP-3093's table (Cp,max moved ~1 %). Still unchecked: Tauber–Sutton's Earth constants and both f(V) tables (the 1991 paper is not on NTRS; they matter only above 9 km/s, lunar return). Mars has no atmosphere data.
 - No air above `top` (150 km): orbital decay above 150 km not modelled.
 - Coast skin temperatures are orbit averages (eclipse swing only in live flight); radiation to 2.725 K, no planet infrared; landed/crashed vessels keep their temperatures.
 - Every vessel carries the same antenna constant (`game::comms::VESSEL_ANTENNA`), not from craft data.

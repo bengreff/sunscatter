@@ -5,7 +5,9 @@
 //!   Convective Heating Equation for Arbitrary Gas Mixtures", NASA TR R-376
 //!   (1971): q̇ = k·√(ρ/Rn)·V³ (SI; k = 1.7415e-4 Earth air, 1.9027e-4
 //!   Mars), cold fully catalytic wall; stated accuracy ≈ 10 % for blunt
-//!   bodies. The nose radius Rn is the bake's per-direction estimate
+//!   bodies. Both k checked against NASA's TFAWS 2012 aerothermodynamics
+//!   course; West & Brandis (AIAA 2020, NTRS 20200002354, Eq. 2) give
+//!   1.83e-4 for 97 % CO₂ / 3 % N₂, 4 % lower and inside the stated 10 %. The nose radius Rn is the bake's per-direction estimate
 //!   ([`crate::aero::DirSums::nose_radius`]).
 //! * **Radiative stagnation flux** (shock-layer radiation, [`tauber_sutton`]):
 //!   Tauber & Sutton, "Stagnation-Point Radiative Heating Relations for
@@ -14,7 +16,10 @@
 //!   4.736e4, b = 1.22, a = 1.072e6·V^−1.88·ρ^−0.325 (at most 1), f(V)
 //!   tabulated 9–16 km/s (fitted for ρ 6.7e-5–6.3e-4, Rn 0.3–3 m); Mars
 //!   (97 % CO₂): C = 2.35e4, a = 0.526, b = 1.19, f(V) 6–9 km/s. Stated
-//!   accuracy ±20–30 % in range (equilibrium, no radiative cooling).
+//!   accuracy ±20–30 % in range (equilibrium, no radiative cooling). The
+//!   Mars constants match West & Brandis (above; fitted 6.5–9 km/s, ρ
+//!   1e-4–1e-3, Rn 1–23 m); the Earth constants and both f(V) tables are
+//!   from memory and unchecked (the 1991 paper is not on NTRS).
 //!   Added to the convective flux and spread over the cells the same way.
 //! * **Distribution:** each cell receives q̇·g, g = f·sin^1.5 θ (a Lees-type
 //!   falloff from the stagnation point with the local incidence; f the

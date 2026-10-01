@@ -77,8 +77,12 @@ fn entry(debug: bool) -> (Vessel, Peak, f64) {
     let mut live = 0.0;
     for _ in 0..20_000 {
         t = t.add_seconds(1.0);
+        let intact = ship.destruction().is_none();
         ship.advance(&w, t, &Controls::default(), usize::MAX);
-        peak.record(&ship);
+        // The peak of the intact craft: a wreck flies on and heats further.
+        if intact {
+            peak.record(&ship);
+        }
         if matches!(ship.phase, Phase::Powered { .. }) {
             live += 1.0;
         }

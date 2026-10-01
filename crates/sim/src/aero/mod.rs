@@ -7,7 +7,7 @@
 //! * **Hypersonic continuum (M ≥ 5):** modified Newtonian, Cp = Cp,max·sin²θ
 //!   on exposed cells, Cp,max from the Rayleigh pitot formula ([`air::cp_max`])
 //!   with the effective γ of equilibrium air behind the shock at the
-//!   flight speed ([`air::real_gas_gamma`]: Cp,max 1.84 → ≈ 1.93 at
+//!   flight speed ([`air::real_gas_gamma`]: Cp,max 1.84 → ≈ 1.94 at
 //!   11 km/s).
 //! * **Subsonic (M < 0.8):** pressure drag q·Cd₀·A along the flow (A the
 //!   projected area, Cd₀ a craft property; blunt bodies ≈ 0.8): the Newtonian pressure
