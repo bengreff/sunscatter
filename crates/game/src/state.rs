@@ -33,8 +33,8 @@ pub const PAD_LON: f64 = -80.66;
 /// Per-vessel, per-frame integration budgets (steps, ~7 µs each) so a frame
 /// never stalls. When a coast can't keep up, the clock is held back: warp is
 /// then limited by compute, never the physics.
-const COAST_STEPS_PER_FRAME: usize = 1_200;
-const LOOKAHEAD_STEPS_PER_FRAME: usize = 1_500;
+pub(crate) const COAST_STEPS_PER_FRAME: usize = 1_200;
+pub(crate) const LOOKAHEAD_STEPS_PER_FRAME: usize = 1_500;
 const OTHER_LOOKAHEAD_STEPS_PER_FRAME: usize = 300;
 
 #[derive(Resource)]

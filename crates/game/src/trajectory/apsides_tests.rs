@@ -240,3 +240,73 @@ fn a_suborbital_coast_ends_in_an_impact_not_a_periapsis() {
     assert_eq!(impact.body, earth.node);
     assert!(got.list.iter().all(|a| a.is_apo && a.t.seconds_since(impact.t) < 0.0), "{got:?}");
 }
+
+/// The next Ap and Pe a frame shows: (epoch, altitude, near-circular).
+type Shown = [Option<(Epoch, f64, bool)>; 2];
+
+/// The playtest save's near-circular orbit flown frame by frame as
+/// `state::advance` does (60 fps, the same per-frame budgets, one
+/// revolution of look-ahead) for `frames` frames at `warp`: the next Ap
+/// and Pe each frame shows.
+fn fly_an_orbit(el: Elements, warp: f64, frames: usize) -> Vec<(Epoch, Shown)> {
+    use crate::state::{COAST_STEPS_PER_FRAME, LOOKAHEAD_STEPS_PER_FRAME};
+    let mut sim = SimState::new();
+    let earth = sim.world.find("Earth").unwrap().clone();
+    let (r, v) = el.to_state(earth.gm);
+    let id = sim.vessel_ids.allocate();
+    sim.fleet.push(Vessel::coasting(&sim.world, id, sim.clock, earth.node, r, v, sim::craft::test_craft()));
+    sim.active = sim.fleet.len() - 1;
+    let (orbits, pred, controls) =
+        (crate::trajectory::settings::OrbitSettings::default(), Prediction::default(), sim.controls);
+    let mut aps = Apsides::default();
+    let mut out = Vec::new();
+    for _ in 0..frames {
+        let target = sim.clock.add_seconds(warp / 60.0);
+        let world = sim.world.clone();
+        let ship = &mut sim.fleet[sim.active];
+        sim.clock = ship.advance(&world, target, &controls, COAST_STEPS_PER_FRAME);
+        if let Some(seg) = ship.trajectory().map(|t| t.last()) {
+            let until = crate::trajectory::lookahead_until(&world, seg, sim.clock, &orbits);
+            ship.extend_coast(&world, until, LOOKAHEAD_STEPS_PER_FRAME);
+        }
+        aps.refresh(&sim, &pred, None);
+        let list = aps.get(sim.ship().id()).unwrap();
+        let (ap, pe) = list.next_after(sim.clock);
+        let shown = |a: Option<&Apsis>| a.map(|a| (a.t, a.altitude, a.near_circular));
+        out.push((sim.clock, [shown(ap), shown(pe)]));
+    }
+    out
+}
+
+/// D076 (owner, 2026-10-01): a near-circular orbit's highest and lowest
+/// points show as plain Ap and Pe only if they hold still. Flown at 1x,
+/// 100x and 1000x: no marker moves before the clock reaches it, and every
+/// frame shows what 1x shows at the same time. Measured over 36,000 frames
+/// (10 minutes at 60 fps) per warp up to 1000x in release: never moved.
+#[test]
+fn near_circular_markers_hold_still_at_every_warp() {
+    // 5,600 km up: J2 and the Moon move the distance by ~3 km, under
+    // SIGNIFICANCE of the altitude, so the run is near-circular.
+    let el = Elements { a: 12_000_000.0, e: 0.0002, i: 0.5, raan: 0.6, argp: 0.0, mean_anomaly: 0.3 };
+    let frames = 3_600;
+    let reference = fly_an_orbit(el, 1.0, frames);
+    for warp in [1.0, 100.0, 1_000.0] {
+        let run = if warp == 1.0 { reference.clone() } else { fly_an_orbit(el, warp, frames) };
+        for w in run.windows(2) {
+            let now = w[1].0;
+            for k in 0..2 {
+                let (x, y) = (w[0].1[k].unwrap(), w[1].1[k].unwrap());
+                assert!(y.2, "warp {warp}: not near-circular");
+                if x.0.seconds_since(now) > 0.0 {
+                    assert_eq!((x.0, x.1), (y.0, y.1), "warp {warp}: moved before it was reached");
+                }
+            }
+        }
+        for (t, s) in &run {
+            let i = reference.partition_point(|(rt, _)| rt < t).min(reference.len() - 1);
+            if reference[i].0 == *t {
+                assert_eq!(*s, reference[i].1, "warp {warp} against 1x");
+            }
+        }
+    }
+}
