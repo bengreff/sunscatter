@@ -182,3 +182,18 @@ fn saves_with_duplicate_or_unissued_vessel_ids_are_rejected() {
     let unissued = load(&[pad(VesselId(3))], ids_up_to(2));
     assert!(matches!(unissued, Err(SaveError::Format(_))), "unissued id accepted");
 }
+
+/// The directed playtest's save (docs/plans/playtest-2026-10-01.md) loads,
+/// carries the current test craft, and its vessel coasts on.
+#[test]
+fn the_playtest_save_loads_with_the_current_test_craft() {
+    let w = world();
+    let path = format!("{}/../../docs/plans/playtest-2026-10-01-orbit.ron", env!("CARGO_MANIFEST_DIR"));
+    let save = SaveGame::read(std::path::Path::new(&path), &w).unwrap();
+    let mut vessel = save.vessels[0].clone();
+    let craft = sim::craft::test_craft().params();
+    assert_eq!(vessel.craft.chute, craft.chute, "{}", ron::to_string(&craft.chute).unwrap());
+    assert_eq!(vessel.craft, craft);
+    let t = vessel.time.add_seconds(600.0);
+    assert_eq!(vessel.advance(&w, t, &Controls::default(), usize::MAX), t);
+}
