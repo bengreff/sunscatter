@@ -14,13 +14,14 @@ Everything known to be open after the realism-1 build, for the next owner interv
 
 ## Owner decisions pending
 
-Defaults taken 2026-09-30 while the owner was away (each reversible, recorded as a decision): engine heat to the nozzle bell (D077), attitude control only from RCS couples and the gimbal (D078), Ap/Pe on every closed orbit, near-circular labelled (D076).
+Defaults taken 2026-09-30 while the owner was away (each reversible, recorded as a decision): engine heat to the nozzle bell (D077), attitude control only from RCS couples and the gimbal (D078). Ap/Pe on every closed orbit (D076) settled by the owner 2026-10-01: plain markers, no near-circular label.
 - The test craft's chute was undersized (600 m² Cd·A: 23 m/s at 20 t, measured in the demo). Resized 2026-09-30 to four Apollo-class mains, 1560 m² (NASA TN D-7437: Apollo's three 25.4 m mains, ~5.9 t at ~9 m/s; Soyuz's 1000 m² main, 7.2 m/s, ESA): ~7 m/s at the 5 t landing mass it is sized for, at a full 20 t the reefed mains tear (D079): land light or on the engine. For comparison the Shuttle SRB's three 41 m mains brought 77 t down at 23 m/s (NASA NTRS 19840047186).
 - Parachutes (D079, 2026-09-30): drogue, reefed mains and tearing on overload are built. Still simplified: the fill constants n (7 ringsail, 10 ribbon) are from memory; no opening-force overshoot (Knacke's Cx); a cluster shares its load evenly. The test craft's mains are sized for 5 t and tear at a full 20 t (measured in `a_full_craft_tears_its_mains…`).
 - RCS propellant is counted only in live flight, not on rails (D078).
 - Reentry from LEO nose-first overheats the test craft: skin 1109 K against 1100 K, interior 664 K against 400 K on the chute (demo 2026-09-30, debug mode; 304 K before the deorbit burn). No heat shield or insulation: a craft-design question (heat shield, blunt-end-first entry, or insulation in the thermal model).
 
 Settled 2026-09-28: haze (moot, D073), chute (keep), stability (finned rocket, D074).
+Settled 2026-10-01 (owner): a full craft tearing its mains is kept (D079); nose-first reentry overheating is accepted, heat shield later as a part (D064); SAS on a slope kept (D078); near-circular Ap/Pe plain (D076).
 
 ## Physics and model gaps
 
