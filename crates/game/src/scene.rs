@@ -296,13 +296,13 @@ pub fn update_canopies(
         seen[c.0] = true;
         let ship = ships.iter().find(|(s, _)| s.0 == c.0).map(|(_, t)| *t);
         let live = matches!(vessel.phase, sim::vessel::Phase::Powered { .. });
-        let (Some(ship), true) = (ship, live && vessel.chute_deployed) else {
+        let (Some(ship), true) = (ship, live && vessel.chute.open()) else {
             *vis = Visibility::Hidden;
             continue;
         };
         let (anchor, r, v) = vessel.state_at(&sim.world, sim.clock);
         let wind = sim::vessel::air_at(&sim.world, &snap, anchor, r, v).map(|a| vessel.attitude.q.inverse() * a.wind);
-        let (centre, axis, radius) = canopy(vessel.craft.chute_cd_area, vessel.craft.chute_mount, wind);
+        let (centre, axis, radius) = canopy(vessel.chute.cd_area(&vessel.craft.chute), vessel.craft.chute.mount, wind);
         // The cone's axis is +Y with its apex up: the apex trails downwind.
         let local = Transform {
             translation: centre.as_vec3(),

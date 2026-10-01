@@ -16,7 +16,7 @@ pub struct CraftFile {
     pub propellant: PropellantFile,
     pub engine: EngineFile,
     pub attitude_control: AttitudeControlFile,
-    pub chute: ChuteFile,
+    pub chute: crate::chute::ChuteSpec,
     pub aero: AeroFile,
     pub thermal: ThermalLimits,
     pub impact: ImpactLimits,
@@ -104,17 +104,6 @@ impl RcsFile {
         let one = self.thrust / (self.isp * crate::vessel::G0);
         DVec3::new(4.0 * one, 4.0 * one, 8.0 * one)
     }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct ChuteFile {
-    /// Drag coefficient × area when deployed (m²).
-    pub cd_area: f64,
-    /// Highest dynamic pressure at which it can deploy (Pa).
-    pub deploy_max_q: f64,
-    /// Attachment point (body axes, m).
-    pub mount: DVec3,
 }
 
 /// Aerodynamic data the cells cannot give (D061, `sim::aero`).
@@ -288,6 +277,34 @@ pub enum Shape {
     },
 }
 
+fn validate_chute(c: &crate::chute::ChuteSpec) -> Result<(), String> {
+    finite_vec("chute.mount", c.mount)?;
+    positive("chute.main_height", c.main_height)?;
+    for (name, canopy) in c.drogue.iter().map(|d| ("chute.drogue", d)).chain([("chute.main", &c.main)]) {
+        for (what, x) in [
+            ("cd_area", canopy.cd_area),
+            ("diameter", canopy.diameter),
+            ("fill_constant", canopy.fill_constant),
+            ("deploy_max_q", canopy.deploy_max_q),
+            ("max_load", canopy.max_load),
+        ] {
+            positive(&format!("{name}.{what}"), x)?;
+        }
+        let first = canopy.reefing.first().map_or(1.0, |r| r.cd_fraction);
+        if canopy.deploy_max_q * canopy.cd_area * first > canopy.max_load {
+            return Err(format!("{name}: opening at deploy_max_q would exceed max_load"));
+        }
+        let mut last = 0.0;
+        for r in &canopy.reefing {
+            if !(r.cd_fraction > 0.0 && r.cd_fraction < 1.0 && r.until.is_finite() && r.until > last) {
+                return Err(format!("{name}.reefing needs fractions in (0, 1) and rising times, got {r:?}"));
+            }
+            last = r.until;
+        }
+    }
+    Ok(())
+}
+
 fn positive(what: &str, x: f64) -> Result<(), String> {
     if x.is_finite() && x > 0.0 {
         Ok(())
@@ -346,11 +363,7 @@ pub fn validate_craft(c: &CraftFile) -> Result<(), String> {
             r.fore_z, r.aft_z, r.radius
         ));
     }
-    if !(c.chute.cd_area.is_finite() && c.chute.cd_area >= 0.0) {
-        return Err(format!("chute.cd_area must be non-negative, got {}", c.chute.cd_area));
-    }
-    positive("chute.deploy_max_q", c.chute.deploy_max_q)?;
-    finite_vec("chute.mount", c.chute.mount)?;
+    validate_chute(&c.chute)?;
     positive("thermal.skin_max_k", c.thermal.skin_max_k)?;
     positive("thermal.internal_max_k", c.thermal.internal_max_k)?;
     let t = &c.thermal;

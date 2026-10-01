@@ -364,7 +364,7 @@ fn flight_panel(
     let phase = match (&ship.phase, ship.destruction()) {
         (_, Some(cause)) => format!("{} (R R to reset)", cause.describe()),
         (Phase::Landed { .. }, None) => "LANDED".to_string(),
-        (Phase::Powered { .. }, None) => live_word(ship.engine_running(&sim.controls), ship.chute_deployed).to_string(),
+        (Phase::Powered { .. }, None) => live_word(ship.engine_running(&sim.controls), ship.chute.open()).to_string(),
         (Phase::Coasting { .. }, None) => "COASTING".to_string(),
         (Phase::Crashed { cause, .. }, None) => format!("{} (R R to reset)", cause.describe()),
     };
@@ -427,7 +427,10 @@ fn flight_panel(
             r.changed() && (r.dragged() || r.has_focus() || r.clicked())
         })
         .inner;
-    ui_.monospace(format!("chute {}", if ship.chute_deployed { "DEPLOYED" } else { "stowed" }));
+    let (anchor, r, v) = ship.state_at(&sim.world, sim.clock);
+    let air = sim::vessel::air_at(&sim.world, &sim.world.snapshot(sim.clock), anchor, r, v);
+    let q = air.map(|a| 0.5 * a.rho * a.wind.length_squared());
+    ui_.monospace(chute_line(&ship.chute, &ship.craft.chute, q));
     changed.then_some(t / 100.0)
 }
 
@@ -472,9 +475,57 @@ fn live_word(engine: bool, chute: bool) -> &'static str {
     }
 }
 
+/// The chute's state, and before the command the dynamic pressure against
+/// the first canopy's design opening q (sim::chute, D079): above it the
+/// canopy may tear.
+fn chute_line(state: &sim::chute::ChuteState, spec: &sim::chute::ChuteSpec, q: Option<f64>) -> String {
+    use sim::chute::CanopyState::{Failed, Open, Stowed};
+    let stage = |name: &str, c: &sim::chute::Canopy, age: f64| {
+        format!("{name}{}", if c.reefed(age) { " (reefed)" } else { "" })
+    };
+    let torn = match (state.drogue, state.main) {
+        (_, Failed) => " (MAIN TORN)",
+        (Failed, _) => " (DROGUE TORN)",
+        _ => "",
+    };
+    let now = match (spec.drogue.as_ref(), state.drogue, state.main) {
+        _ if !state.armed => {
+            let first = spec.drogue.as_ref().unwrap_or(&spec.main);
+            let q = q.map_or("-".to_string(), |q| format!("{:.1}", q / 1e3));
+            return format!("chute stowed, q {q} / {:.1} kPa", first.deploy_max_q / 1e3);
+        }
+        (_, _, Open { age, .. }) => stage("MAIN", &spec.main, age),
+        (Some(d), Open { age, .. }, _) => stage("DROGUE", d, age),
+        (_, _, Stowed) => format!("ARMED, main at {}", crate::format::distance(spec.main_height)),
+        _ => "gone".to_string(),
+    };
+    format!("chute {now}{torn}")
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_chute_line_shows_the_stage_and_the_opening_q() {
+        use sim::chute::{CanopyState, ChuteState};
+        let spec = sim::craft::test_craft().params().chute;
+        let stowed = ChuteState::default();
+        assert_eq!(chute_line(&stowed, &spec, Some(3_210.0)), "chute stowed, q 3.2 / 5.5 kPa");
+        let drogue = ChuteState { armed: true, drogue: CanopyState::Open { age: 1.0, diameter: 1.0 }, ..stowed };
+        assert_eq!(chute_line(&drogue, &spec, None), "chute DROGUE (reefed)");
+        let main = ChuteState {
+            drogue: CanopyState::Released,
+            main: CanopyState::Open { age: 20.0, diameter: 9.0 },
+            ..drogue
+        };
+        assert_eq!(chute_line(&main, &spec, None), "chute MAIN");
+        let torn = ChuteState { main: CanopyState::Failed, ..main };
+        assert_eq!(chute_line(&torn, &spec, None), "chute gone (MAIN TORN)");
+        let waiting = ChuteState { drogue: CanopyState::Failed, main: CanopyState::Stowed, ..main };
+        assert!(chute_line(&waiting, &spec, None).starts_with("chute ARMED, main at 3"));
+        assert!(chute_line(&waiting, &spec, None).ends_with("(DROGUE TORN)"));
+    }
 
     #[test]
     fn live_flight_is_powered_only_with_the_engine_running() {

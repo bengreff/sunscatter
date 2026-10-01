@@ -283,7 +283,7 @@ The altitude is data per body, chosen by rule: the top of the atmosphere, or on 
 
 **D064: The test craft is a debug craft with a realistic engine, and debug mode is one switch.** *Decided, 2026-09-26.*
 - The engine is realistic but abstracted: thrust, Isp (vacuum and sea level) and mass flow as numbers, no engine simulation and no elaborate plume graphics.
-- **Debug mode** turns on, together: infinite propellant, no overheating, infinite impact tolerance. Otherwise the craft is destroyed at its limits.
+- **Debug mode** turns on, together: infinite propellant, no overheating, infinite impact tolerance, unbreakable parachutes (D079). Otherwise the craft is destroyed at its limits.
 - No heat shield.
 
 **D065: Heat is a network of surface cells and interior volume nodes, independent of parts.** *Decided, 2026-09-26; revised the same evening (owner).*
@@ -335,6 +335,13 @@ The chamber's wall heat returns to the flow (regenerative cooling) and is not a 
 
 **D078: Attitude control is only what real actuators give: RCS couples and the engine's gimbal.** *Default taken 2026-09-30 (owner unavailable; reversible).*
 A craft declares its reaction-control thrusters (thrust, Isp, fore and aft ring stations, quad radius); SAS and the pilot get the pure couples they make (pitch and yaw `2·F·Δz`, roll `8·F·r`) plus the gimbal while the engine runs, and nothing else: no abstract torque, no reaction wheels (none big enough fly on craft this size), no special case on the ground. The thrusters burn the main propellant in live flight (their share of full command times their flow); with none left (outside debug mode) only the gimbal turns the craft. The test craft carries Apollo SM-class 445 N thrusters: 8.0 kN·m pitch and yaw, 3.7 kN·m roll (was 40/40/20 kN·m). On rails (coasts, planned burns) the torque limit holds but RCS propellant is not yet counted.
+
+**D079: Parachutes open in a sourced sequence and an overload tears them; nothing refuses the command.** *Default taken 2026-09-30 (Director, owner unavailable; reversible).*
+- **Sequence** (`sim::chute`): **P** arms it. The drogue opens at once; the main opens below `main_height` above the ground once the drogue is out of its reefing, and the drogue is cut away. This is the Apollo, Orion and Soyuz order (Apollo: drogues at 24,000 ft, mains at ~11,000 ft; NASA TN D-7437).
+- **Reefing and filling:** each canopy opens through timed reefed stages (Apollo's mains 6.8 % of full Cd·A for 6 s, then 25.7 % to 10 s; its drogues 57 % for 10 s), and its mouth grows at V/n (Knacke's t_f = n·D/V). The fill constants n (7 ringsail, 10 ribbon) are from memory, not checked.
+- **Overload fails physically:** a canopy whose drag exceeds its breaking load tears and is lost. A command above `deploy_max_q` is not refused, because no real system refuses one: the pilot fires the mortar, and the canopy holds or not. Real canopies hold somewhat above their design load (Apollo's mains passed ultimate tests at 1.39× the design limit, TN D-7437; a CPAS main took 40,000 lb above its limit undamaged, NTRS 20110011562; CPAS is certified at 110 % q for 3 s, NTRS 20190026520) and fail beyond it (an Apollo gore split at 20,000 to 23,000 lb while disreefing). So the breaking load is the design limit × 1.39, and `deploy_max_q` is the design opening q, shown on the HUD.
+- **Simplified, known:** the load is q·Cd·A as the canopy fills, without the added-mass overshoot (Knacke's Cx). A cluster shares it evenly (Apollo's lead canopy took ~1.9× the mean).
+- The test craft carries two Apollo drogues (5.5 kPa design q) and four Apollo mains (3.27 kPa), sized for its 5 t landing mass. At a full 20 t the mains tear.
 
 ## Open questions
 

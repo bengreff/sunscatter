@@ -78,8 +78,7 @@ impl Craft {
             torque: self.spec.attitude_control.rcs.torque(),
             rcs_flow: self.spec.attitude_control.rcs.flow(),
             cd_area: design.mean_drag_area,
-            chute_cd_area: self.spec.chute.cd_area,
-            chute_mount: self.spec.chute.mount,
+            chute: self.spec.chute.clone(),
             thermal: self.spec.thermal,
             impact_max_speed: self.spec.impact.max_speed,
             contact: self.spec.contact,
@@ -107,10 +106,8 @@ pub struct CraftParams {
     /// predictions: [`CraftDesign::mean_drag_area`]. Live ticks use the
     /// full aerodynamics of the design.
     pub cd_area: f64,
-    /// Parachute Cd·A when deployed (m²).
-    pub chute_cd_area: f64,
-    /// Where the parachute pulls (body axes, m).
-    pub chute_mount: glam::DVec3,
+    /// The parachutes.
+    pub chute: crate::chute::ChuteSpec,
     /// Temperature limits and the interior's heat capacity and coupling.
     pub thermal: ThermalLimits,
     /// Highest touchdown speed that is not a crash (m/s; D066 refines it
@@ -208,7 +205,7 @@ mod tests {
         assert_eq!((s.engine.min_throttle, s.engine.gimbal_deg), (0.1, 5.0));
         let rcs = &s.attitude_control.rcs;
         assert_eq!((rcs.thrust, rcs.isp, rcs.fore_z, rcs.aft_z, rcs.radius), (445.0, 290.0, 3.6, -5.4, 1.04));
-        assert_eq!((s.chute.cd_area, s.thermal.skin_max_k, s.thermal.internal_max_k), (1560.0, 1100.0, 400.0));
+        assert_eq!((s.chute.main.cd_area, s.thermal.skin_max_k, s.thermal.internal_max_k), (1560.0, 1100.0, 400.0));
         assert_eq!((s.aero.cd0, s.thermal.node_size, s.thermal.internal_coupling), (0.45, 1.0, 2.0));
         assert_eq!((s.impact.max_speed, s.antenna.gain_dbi, s.antenna.power_w), (8.0, 20.0, 20.0));
         assert_eq!(c.geometry.primitives.iter().filter(|p| p.foot).count(), 4);

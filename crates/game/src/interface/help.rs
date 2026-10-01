@@ -21,7 +21,7 @@ pub const KEYS: &[(&str, &[(&str, &str)])] = &[
             ("W S / A D / Q E", "pitch / yaw / roll"),
             ("T", "SAS on / off"),
             ("1–6", "hold: stability, prograde, retrograde, target, anti-target, maneuver"),
-            ("P", "deploy parachute"),
+            ("P", "parachutes: drogue now, mains low"),
             ("R R", "reset to the pad (press twice)"),
         ],
     ),

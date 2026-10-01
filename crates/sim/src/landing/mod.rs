@@ -71,7 +71,8 @@ pub struct LandingStart {
     pub infinite: bool,
     /// Throttle held throughout (0: engine off).
     pub throttle: f64,
-    pub chute: bool,
+    /// The parachutes, armed if the command is given.
+    pub chute: crate::chute::ChuteState,
     pub attitude: AssumedAttitude,
     /// The body the surface-relative quantities refer to (retrograde,
     /// vertical and horizontal speed, the braking stop).
@@ -79,18 +80,19 @@ pub struct LandingStart {
 }
 
 impl LandingStart {
-    /// A flying vessel's prediction start with `throttle` and the chute as
-    /// deployed (or `chute`). A coast with planned burns starts after the
+    /// A flying vessel's prediction start with `throttle` and its chutes
+    /// (armed by `chute_command`). A coast with planned burns starts after the
     /// last one, once its trajectory is computed that far (the plan is
     /// flown). `None` for landed and crashed vessels.
     pub fn of_vessel(
         world: &World,
         vessel: &Vessel,
         throttle: f64,
-        chute: bool,
+        chute_command: bool,
         attitude: AssumedAttitude,
     ) -> Option<Self> {
-        let chute = chute || vessel.chute_deployed;
+        let mut chute = if vessel.destruction().is_none() { vessel.chute } else { Default::default() };
+        chute.armed |= chute_command;
         let (t, (anchor, r, v), propellant, throttle) = match &vessel.phase {
             Phase::Landed { .. } | Phase::Crashed { .. } => return None,
             Phase::Coasting { trajectory } => {

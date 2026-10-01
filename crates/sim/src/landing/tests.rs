@@ -42,7 +42,7 @@ fn start_over(w: &World, body: &str, (lat, lon, height): (f64, f64, f64), (e, n,
         propellant: 2_000.0,
         infinite: false,
         throttle: 0.0,
-        chute: false,
+        chute: Default::default(),
         attitude: AssumedAttitude::SurfaceRetrograde,
         body: src.node,
     }
@@ -145,7 +145,8 @@ fn under_the_parachute_the_impact_speed_is_the_terminal_velocity() {
     let c = craft();
     // Over the sea (a flat surface at sea level), 3 km up, falling slowly.
     let mut start = start_over(&w, "Earth", (0.5, -1.2, 3_000.0), (0.0, 0.0, -10.0));
-    start.chute = true;
+    // Armed below the main's height: the prediction flies the full main.
+    start.chute.armed = true;
     let d = predict_impact(&w, &c, &start, limits());
     let hit = d.impact.expect("it lands");
     let last = d.samples.last().unwrap();
@@ -153,7 +154,7 @@ fn under_the_parachute_the_impact_speed_is_the_terminal_velocity() {
     let air = air_at(&w, &snap, start.anchor, last.r, last.v).unwrap();
     let props = c.mass.at(start.propellant);
     let q = quat_z_to(last.r.normalize()) * quat_z_to(c.engine.mount_dir).inverse();
-    let tick = AeroTick::new(c.design(), &air, props.com, Some((c.chute_cd_area, c.chute_mount))).unwrap();
+    let tick = AeroTick::new(c.design(), &air, props.com, Some((c.chute.main.cd_area, c.chute.mount))).unwrap();
     let (cd_area, _) = tick.drag_and_lift(q, props.mass);
     let g = w.find("Earth").unwrap().gm / last.r.length_squared();
     let terminal = (2.0 * props.mass * g / (air.rho * cd_area)).sqrt();

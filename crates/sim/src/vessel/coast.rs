@@ -41,10 +41,8 @@ impl Vessel {
             self.control.base = None;
             return;
         }
-        if controls.chute && !self.chute_deployed {
-            self.chute_deployed = true;
-            self.start_coast(world); // drag changed: a new segment from now
-        }
+        // Armed now, opened by the first live tick (no air to fill it here).
+        self.chute.armed |= controls.chute;
         let Phase::Coasting { trajectory } = &mut self.phase else { unreachable!() };
         // At a burn's ignition: flown from the attitude the vessel has.
         let control = AttitudeControl { base: None, ..self.control };

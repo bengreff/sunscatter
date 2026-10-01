@@ -29,6 +29,7 @@
 use super::aerothermal::{self, air_at, in_atmosphere, AeroTick, LEAVE_ATMOSPHERE};
 use super::attitude::{self, Actuators, Command, Gimbal};
 use super::{AttitudeControl, Controls, Destruction, FlightPlan, Phase, Vessel, TICK};
+use crate::chute;
 use crate::contact::{self, Ground, Pose};
 use crate::craft::MassProps;
 use crate::forces::{altitude_above, ambient_pressure, ActiveSources, DragModel, ForceContext};
@@ -68,7 +69,7 @@ impl Vessel {
     /// and the parachute go with them); it flies on until it rests.
     pub(super) fn destroy(&mut self, cause: Destruction) {
         self.destroyed = Some(cause);
-        self.chute_deployed = false;
+        self.chute = Default::default();
         self.plan = FlightPlan::default();
         self.control = AttitudeControl::default();
     }
@@ -144,13 +145,20 @@ impl Vessel {
                 self.start_coast(world);
                 return;
             }
-            self.chute_deployed |= controls.chute;
             let props = self.mass_props();
             let engine = self.craft.engine;
             let p = ambient_pressure(world, &snap, anchor, r);
             let design = self.craft.design().clone();
             let air = air_at(world, &snap, anchor, r, v);
-            let chute = self.chute_deployed.then_some((self.craft.chute_cd_area, self.craft.chute_mount));
+            if self.destroyed.is_none() {
+                let speed = air.as_ref().map_or(0.0, |a| a.wind.length());
+                let q = air.as_ref().map_or(0.0, |a| 0.5 * a.rho * speed * speed);
+                let height = near.map_or(f64::INFINITY, |(_, h)| h);
+                let flow = chute::Flow { q, speed, height };
+                self.chute.step(&self.craft.chute, controls.chute, flow, TICK, self.debug);
+            }
+            let chute_area = self.chute.cd_area(&self.craft.chute);
+            let chute = (chute_area > 0.0).then_some((chute_area, self.craft.chute.mount));
             let aero = air.as_ref().and_then(|a| AeroTick::new(&design, a, props.com, chute));
             let (cd_area, lift) =
                 aero.as_ref().map_or((0.0, DVec3::ZERO), |a| a.drag_and_lift(self.attitude.q, props.mass));
@@ -364,7 +372,7 @@ impl Vessel {
             Some(cause) => Phase::Crashed { body, fixed, att_fixed, cause },
             None => Phase::Landed { body, fixed, att_fixed },
         };
-        self.chute_deployed = false;
+        self.chute = Default::default();
         self.tick_accel = None;
         self.rest_ticks = 0;
         self.control = Default::default();

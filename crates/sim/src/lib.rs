@@ -13,6 +13,7 @@
 pub mod aero;
 pub mod approach;
 pub mod body;
+pub mod chute;
 pub mod comms;
 pub mod contact;
 pub mod craft;

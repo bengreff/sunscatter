@@ -75,7 +75,7 @@ pub(super) struct Model<'a> {
     design: &'a CraftDesign,
     body: NodeId,
     attitude: AssumedAttitude,
-    chute: bool,
+    chute: crate::chute::ChuteState,
     infinite: bool,
 }
 
@@ -159,7 +159,13 @@ impl<'a> Model<'a> {
         } else {
             0.0
         };
-        let chute = self.chute.then_some((self.craft.chute_cd_area, self.craft.chute_mount));
+        let chute_area = if self.chute.armed {
+            let height = Ground::new(self.world, snap, run.anchor, self.body).clearance(r);
+            self.chute.predicted_cd_area(&self.craft.chute, height)
+        } else {
+            0.0
+        };
+        let chute = (chute_area > 0.0).then_some((chute_area, self.craft.chute.mount));
         let air = air_at(self.world, snap, run.anchor, r, v);
         let aero = air.as_ref().and_then(|a| AeroTick::new(self.design, a, props.com, chute));
         let (cd_area, lift) = aero.map_or((0.0, DVec3::ZERO), |a| a.drag_and_lift(q, props.mass));

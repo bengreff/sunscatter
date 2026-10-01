@@ -28,12 +28,37 @@
     // (pitch, yaw) and 1.25 kg/s (roll) of the main propellant at full.
     attitude_control: (rcs: (thrust: 445.0, isp: 290.0, fore_z: 3.6, aft_z: -5.4, radius: 1.04)),
     // At the nose: under the chute the rocket hangs tail down, on its legs.
-    // Four Apollo-class mains (25.4 m ringsails; Apollo's three brought
-    // ~5.9 t down at ~9 m/s, NASA TN D-7437: Cd·A ~390 m² each). Sized for
-    // the landing mass (dry 4 t + 1 t reserve) at ~7 m/s, under the legs'
-    // 8 m/s (Soyuz's main: 7.2 m/s, ESA). A full 20 t craft comes down at
-    // ~14 m/s: land light or on the engine.
-    chute: (cd_area: 1560.0, deploy_max_q: 40.0e3, mount: (0.0, 0.0, 6.8)),
+    // Apollo's Earth landing system scaled from three mains to four (NASA
+    // TN D-7437, read 2026-09-30): the command fires the drogues, the mains
+    // open below 11,000 ft (3.35 km) and the drogues are cut away.
+    // Drogues: two 16.5 ft (5.03 m) conical ribbons, 114 ft² Cd·A each,
+    // reefed to 65 ft² for 10 s; design limit load 17,200 lb (76.5 kN)
+    // each; mortar fired at up to 114.8 psf (5.5 kPa) in qualification
+    // (Orion CPAS: 19-115 psf, NTRS 20070020416).
+    // Mains: four 83.5 ft (25.45 m) ringsails, 4200 ft² (390 m²) each,
+    // reefed to 285 ft² for 6 s, then 1080 ft² to 10 s; design limit
+    // 23,800 lb (105.9 kN) each; pilots fired at up to 68.4 psf (3.27 kPa).
+    // Sized for the landing mass (dry 4 t + 1 t reserve) at ~7 m/s, under
+    // the legs' 8 m/s (Soyuz's main: 7.2 m/s, ESA). Breaking loads: the
+    // design limit × 1.39 (Apollo's mains passed ultimate tests above
+    // 33,000 lb), the cluster sharing evenly. A full 20 t craft tears its
+    // mains at the first disreef: land light or on the engine.
+    // Fill constants n are Knacke's typical ribbon and ringsail values,
+    // from memory (unsourced); the peak loads hardly depend on them.
+    chute: (
+        mount: (0.0, 0.0, 6.8),
+        drogue: Some((
+            cd_area: 21.18, diameter: 5.03, fill_constant: 10.0,
+            reefing: [(cd_fraction: 0.570, until: 10.0)],
+            deploy_max_q: 5.5e3, max_load: 212.7e3,
+        )),
+        main: (
+            cd_area: 1560.0, diameter: 25.45, fill_constant: 7.0,
+            reefing: [(cd_fraction: 0.0679, until: 6.0), (cd_fraction: 0.2571, until: 10.0)],
+            deploy_max_q: 3.27e3, max_load: 588.6e3,
+        ),
+        main_height: 3350.0,
+    ),
     // Subsonic Cd on the projected area: a slender body's end-on ~0.3 (base
     // drag included) plus the legs, feet and fin edges; ~1 broadside is the
     // Newtonian distribution's (the aero model scales the shape's).

@@ -161,7 +161,9 @@ pub struct Vessel {
     /// The vessel's current time (it may trail the game clock by < one tick).
     pub time: Epoch,
     pub attitude: Attitude,
-    pub chute_deployed: bool,
+    /// The parachutes (`sim::chute`).
+    #[serde(default)]
+    pub chute: crate::chute::ChuteState,
     /// People aboard (0: an uncrewed probe, controlled from elsewhere with
     /// light delay, D034, D067).
     crew: u32,
@@ -251,7 +253,7 @@ impl Vessel {
             phase: Phase::Landed { body: src.node, fixed, att_fixed },
             time: t,
             attitude: Attitude { q: DQuat::IDENTITY, omega: DVec3::ZERO },
-            chute_deployed: false,
+            chute: Default::default(),
             crew,
             debug: false,
             plan: FlightPlan::default(),
@@ -283,7 +285,7 @@ impl Vessel {
             phase: Phase::Powered { anchor, r, v },
             time: t,
             attitude: Attitude { q: quat_z_to(r.normalize()), omega: DVec3::ZERO },
-            chute_deployed: false,
+            chute: Default::default(),
             crew,
             debug: false,
             plan: FlightPlan::default(),
@@ -324,9 +326,9 @@ impl Vessel {
         self.clock.offset
     }
 
-    /// The drag model in use (with the parachute's area once deployed).
+    /// The drag model in use (with the open parachutes' area).
     pub fn drag(&self) -> DragModel {
-        let extra = if self.chute_deployed { self.craft.chute_cd_area } else { 0.0 };
+        let extra = self.chute.cd_area(&self.craft.chute);
         DragModel { cd_area: self.craft.cd_area + extra, mass: self.mass() }
     }
 
