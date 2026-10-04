@@ -35,3 +35,10 @@ A SessionStart hook loads this file automatically after `/clear` or at startup. 
 - `cargo fmt --all` fails while another agent has a half-written module; use `cargo fmt -p <crate>`.
 - egui widgets can report `changed()` from their own rounding: gate commands on real interaction (the throttle slider bug).
 - Saves are not compatible across versions (D063). The playtest save embeds `CraftParams`: when the test craft changes, update the save (`save_load::the_playtest_save_loads_with_the_current_test_craft` fails until you do).
+
+## Pending from the Director (2026-10-04; sunscatter is now outside the Director's scope)
+- `docs/design/triton-lessons.md` ends with 5 questions. The Director's suggested answers, not yet confirmed by Ben:
+  agents pay simulated time per MCP call; comms passes/data rates come with the first probe missions; a minimal,
+  script-editable fault protection in the simplified ship OS. Benchmark audience and first task are Ben's call
+  (Director lean: side feature, first task long-horizon such as a relay constellation kept up for a simulated year).
+- The directed playtest `docs/plans/playtest-2026-10-01.md` has not been played yet.
