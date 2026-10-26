@@ -30,6 +30,7 @@ mod scene;
 mod settings;
 mod settings_ui;
 mod sky;
+mod staging;
 mod state;
 mod terrain;
 mod tracking;

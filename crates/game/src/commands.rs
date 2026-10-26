@@ -44,6 +44,8 @@ pub enum GameCommand {
     SetHold(HoldMode),
     /// The active vessel's throttle, 0–1 (the flight panel's slider).
     SetThrottle(f64),
+    /// Activate the active vessel's next stage (Space, the Staging menu).
+    NextStage,
 }
 
 /// Commands on their way to a vessel at light speed (D063, D067): applied
@@ -132,6 +134,17 @@ pub fn apply(
                 sim.controls.sas = true;
             }
             GameCommand::SetThrottle(t) => sim.controls.throttle = t.clamp(0.0, 1.0),
+            GameCommand::NextStage => {
+                let mut controls = sim.controls;
+                let done = crate::staging::activate_next(
+                    &crate::staging::StageInputs::of(sim.ship(), &sim.controls),
+                    &mut controls,
+                );
+                sim.controls = controls;
+                if done.is_none() {
+                    toasts.push(time.elapsed_secs_f64(), "No stage left to activate", false);
+                }
+            }
             GameCommand::SetDebug(on) => {
                 let sim = &mut *sim;
                 for v in &mut sim.fleet {

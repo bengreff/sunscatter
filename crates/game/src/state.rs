@@ -249,6 +249,9 @@ pub fn read_controls(
     if keys.just_pressed(KeyCode::KeyP) {
         c.chute = true;
     }
+    if keys.just_pressed(KeyCode::Space) {
+        commands.write(GameCommand::NextStage);
+    }
     let axis =
         |pos: KeyCode, neg: KeyCode| f64::from(u8::from(keys.pressed(pos))) - f64::from(u8::from(keys.pressed(neg)));
     // Body axes: +Z nose. Pitch about X (W/S), yaw about Y (A/D), roll about Z (Q/E).
