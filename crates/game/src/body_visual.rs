@@ -230,7 +230,10 @@ mod tests {
     #[test]
     fn shipped_zones_parse_and_fit_the_palette() {
         for name in ["Earth", "Moon"] {
-            let z = super::load(name).unwrap().zones.unwrap_or_else(|| panic!("{name} has zones"));
+            let def = super::load(name).unwrap();
+            // The zone colours are sampled with the colour map's sampler.
+            assert!(def.color_map.is_some(), "{name}: zones need a colour map");
+            let z = def.zones.unwrap_or_else(|| panic!("{name} has zones"));
             assert!(!z.list.is_empty() && z.list.len() < crate::terrain::zones::MAX_ZONES, "{name}");
             assert!((0.0..=1.0).contains(&z.tint), "{name}");
             assert!(z.list.iter().all(|d| d.pattern.scale_m > 0.0 && (0.0..1.0).contains(&d.pattern.contrast)));

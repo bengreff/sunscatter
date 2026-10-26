@@ -86,13 +86,14 @@ pub struct TerrainExt {
     #[texture(107, dimension = "2d_array")]
     #[sampler(108)]
     pub ground_normal: Option<Handle<Image>>,
-    /// Zone indices (`zones::ZoneMap`, sea filled), gathered per fragment.
+    /// Zone indices (`zones::ZoneMap`, sea filled), read with `textureLoad`.
+    /// No samplers of their own: the fragment stage allows 16, and High's
+    /// view bindings plus these would be 17 (a crash, 2026-10-25).
     #[texture(109)]
-    #[sampler(110)]
     pub zone_map: Option<Handle<Image>>,
-    /// Zone colours and sea-floor shallowness, mipmapped (`zones::far_image`).
-    #[texture(111)]
-    #[sampler(112)]
+    /// Zone colours and sea-floor shallowness, mipmapped
+    /// (`zones::far_image`), sampled with `color_map`'s sampler.
+    #[texture(110)]
     pub zone_far: Option<Handle<Image>>,
 }
 

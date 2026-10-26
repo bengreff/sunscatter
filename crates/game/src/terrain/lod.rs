@@ -243,7 +243,8 @@ pub fn update(
             }
         }
         if let Some(mut mat) = materials.get_mut(&body.material) {
-            let zones_loaded = mat.extension.zone_map.is_some();
+            // The zone colours use the colour map's sampler, so both must be in.
+            let zones_loaded = mat.extension.zone_map.is_some() && mat.extension.color_map.is_some();
             let p = &mut mat.extension.params;
             p.fixed_x = m.x_axis.as_vec3().extend(0.0);
             p.fixed_y = m.y_axis.as_vec3().extend(0.0);

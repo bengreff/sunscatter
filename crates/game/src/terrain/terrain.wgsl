@@ -8,8 +8,8 @@
 // With surface zones (D073, crisp-surfaces.md; CPU mirrors and tests in
 // zones.rs) the colour map is replaced: one domain warp moves the lookups
 // of the zone map and the water mask, the coast is the bilinear sea
-// fraction thresholded at 0.5 over one pixel, zone edges are picked from a
-// gather of 4 zone texels and antialiased against the runner-up, each zone
+// fraction thresholded at 0.5 over one pixel, zone edges are picked from
+// the 4 zone texels around the point and antialiased against the runner-up, each zone
 // has a procedural pattern, and a mipmapped zone-colour texture takes over
 // once a pixel covers about a zone texel.
 
@@ -83,10 +83,12 @@ struct TerrainParams {
 @group(#{MATERIAL_BIND_GROUP}) @binding(106) var ground_color_sampler: sampler;
 @group(#{MATERIAL_BIND_GROUP}) @binding(107) var ground_normal: texture_2d_array<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(108) var ground_normal_sampler: sampler;
+// Zone indices, read with textureLoad (no sampler: the fragment stage's 16
+// samplers are all taken at High and Ultra).
 @group(#{MATERIAL_BIND_GROUP}) @binding(109) var zone_map: texture_2d<f32>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(110) var zone_sampler: sampler;
-@group(#{MATERIAL_BIND_GROUP}) @binding(111) var zone_far: texture_2d<f32>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(112) var zone_far_sampler: sampler;
+// Zone colours, sampled with the colour map's sampler (the same settings;
+// zones are drawn only once the colour map is loaded).
+@group(#{MATERIAL_BIND_GROUP}) @binding(110) var zone_far: texture_2d<f32>;
 
 const PI: f32 = 3.14159265;
 // Distance (m) over which the simple ground pattern fades out.
@@ -292,16 +294,27 @@ fn zone_surface(uv: vec2<f32>, dx: vec2<f32>, dy: vec2<f32>, p: vec3<f32>, foot:
     let jy = dy * zs;
     // Near: pixels smaller than half a zone texel; far: a texel or more.
     let far = smoothstep(0.5, 1.0, max(length(jx), length(jy)));
-    let far_c = textureSampleGrad(zone_far, zone_far_sampler, uv, dx, dy);
+    let far_c = textureSampleGrad(zone_far, color_sampler, uv, dx, dy);
     o.shallow = far_c.a;
     var near = vec3(0.0);
     if far < 1.0 {
         let t = uv * zs - 0.5;
         let i = floor(t);
         let f = t - i;
-        // Gathered at the 2x2 block's shared corner, so the hardware picks
-        // exactly the texels these weights are for.
-        let ids = vec4<u32>(textureGather(0, zone_map, zone_sampler, (i + 1.0) / zs) * 255.0 + 0.5);
+        // The 4 texels around the point, in gather order (longitude wraps,
+        // latitude clamps; zones::texel_block).
+        let n = vec2<i32>(textureDimensions(zone_map, 0));
+        let x0 = ((i32(i.x) % n.x) + n.x) % n.x;
+        let x1 = (x0 + 1) % n.x;
+        let y0 = clamp(i32(i.y), 0, n.y - 1);
+        let y1 = clamp(i32(i.y) + 1, 0, n.y - 1);
+        let g = vec4(
+            textureLoad(zone_map, vec2(x0, y1), 0).r,
+            textureLoad(zone_map, vec2(x1, y1), 0).r,
+            textureLoad(zone_map, vec2(x1, y0), 0).r,
+            textureLoad(zone_map, vec2(x0, y0), 0).r,
+        );
+        let ids = vec4<u32>(g * 255.0 + 0.5);
         let w = gather_w(f);
         // Each zone's summed weight; the largest wins (zones::pick).
         let s = vec4(dot(w, eq4(ids, ids.x)), dot(w, eq4(ids, ids.y)), dot(w, eq4(ids, ids.z)), dot(w, eq4(ids, ids.w)));
@@ -325,7 +338,7 @@ fn zone_surface(uv: vec2<f32>, dx: vec2<f32>, dy: vec2<f32>, p: vec3<f32>, foot:
         }
         // The satellite tint, baked in the far texture: its base level over
         // the palette, both bilinear, so it varies smoothly.
-        let base = textureSampleLevel(zone_far, zone_far_sampler, uv, 0.0).rgb;
+        let base = textureSampleLevel(zone_far, color_sampler, uv, 0.0).rgb;
         let pal = zone_col(ids.x).rgb * w.x + zone_col(ids.y).rgb * w.y + zone_col(ids.z).rgb * w.z + zone_col(ids.w).rgb * w.w;
         let tint = base / max(pal, vec3(1e-5));
         let pat = terrain.zone_pattern[min(win, 15u)];
