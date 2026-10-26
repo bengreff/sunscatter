@@ -402,17 +402,29 @@ fn make_segment(
                 BurnFrom::Coast(a) => a,
                 BurnFrom::Exact(_) => DVec3::ZERO,
             };
-            let start = CoastStart { horizon, ..start };
             let kind = SegmentKind::Burn(law);
             if let (Some(l), Some(c)) = (limbo, craft.filter(|_| law.thrust < LOW_THRUST * mass)) {
+                // Boil-off drains the tank with the engine: the burn ends
+                // when it is empty, its Δv by the total flow (never thrust
+                // from the boiled propellant).
+                let dry = limits.dry_mass;
+                let horizon = b.end.duration_with_loss(&law, mass, dry, l.boil_off).unwrap_or(f64::NAN);
+                let start = CoastStart { horizon, ..start };
                 let axis = c.engine.mount_dir;
                 let snap = world.snapshot(t);
                 let p = pointing::on_law(&law.direction, &att, axis, world, &snap, (start.anchor, start.r, start.v));
                 let limbo = Some(Box::new(l.with(p, Some(LowThrust { thrust: law.thrust, axis }))));
                 return Segment::start(world, t, start, mass, kind, EndKind::BurnEnd, i, None, limbo);
             }
+            let start = CoastStart { horizon, ..start };
             let flight = Flight::new(craft, att, control, accel0);
-            let limbo = limbo.map(|l| Box::new(l.with(Pointing::Mean, None)));
+            // A flown (chemical) burn of minutes takes no boil-off: its thrust
+            // is the engine's mass flow alone (`flown::Flight::tick`).
+            let limbo = limbo.map(|l| {
+                let mut flown = l.with(Pointing::Mean, None);
+                flown.boil_off = 0.0;
+                Box::new(flown)
+            });
             Segment::start(world, t, start, mass, kind, EndKind::BurnEnd, i, Some(flight), limbo)
         }
         Some(b) if b.t_start.seconds_since(t) <= coast_horizon => {

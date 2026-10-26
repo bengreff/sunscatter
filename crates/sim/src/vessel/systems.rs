@@ -47,3 +47,15 @@ impl Vessel {
         });
     }
 }
+
+impl Vessel {
+    /// Sets the propellant boil-off (kg/s, [`crate::systems::Consumables`]):
+    /// a mass flow the trajectory integrates, so a coast restarts from now
+    /// with it.
+    pub fn set_boil_off(&mut self, world: &World, rate: f64) {
+        self.systems.consumables.boil_off = rate.max(0.0);
+        if matches!(self.phase, Phase::Coasting { .. }) {
+            self.start_coast(world);
+        }
+    }
+}

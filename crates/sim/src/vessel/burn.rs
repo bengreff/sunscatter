@@ -134,19 +134,26 @@ impl BurnEnd {
     /// As [`BurnEnd::duration`], but stopping at burnout when the mass
     /// reaches `dry_mass` (if positive).
     pub fn duration_limited(&self, law: &BurnLaw, m0: f64, dry_mass: f64) -> Option<f64> {
-        if !law.is_valid() || !(m0.is_finite() && m0 > 0.0) {
+        self.duration_with_loss(law, m0, dry_mass, 0.0)
+    }
+
+    /// As [`BurnEnd::duration_limited`], with propellant also lost at
+    /// `loss` kg/s (boil-off) while the engine burns: the tank empties at
+    /// `(m0 − dry)/(ṁ + loss)`, and the Δv of a falling mass under constant
+    /// thrust is `F/(ṁ + loss)·ln(m0/m1)`.
+    pub fn duration_with_loss(&self, law: &BurnLaw, m0: f64, dry_mass: f64, loss: f64) -> Option<f64> {
+        if !law.is_valid() || !(m0.is_finite() && m0 > 0.0) || !(loss.is_finite() && loss >= 0.0) {
             return None;
         }
+        let flow = law.mass_flow + loss;
         let d = match *self {
             BurnEnd::Duration(d) => d,
             // Δv = (F/ṁ) ln(m0/m1)  ⇒  t = (m0/ṁ)(1 − exp(−Δv ṁ/F)).
-            BurnEnd::DeltaV(dv) if law.mass_flow > 0.0 => {
-                m0 / law.mass_flow * (1.0 - math::exp(-dv * law.mass_flow / law.thrust))
-            }
+            BurnEnd::DeltaV(dv) if flow > 0.0 => m0 / flow * (1.0 - math::exp(-dv * flow / law.thrust)),
             BurnEnd::DeltaV(dv) => dv * m0 / law.thrust,
         };
-        let d = if dry_mass > 0.0 && law.mass_flow > 0.0 { d.min((m0 - dry_mass).max(0.0) / law.mass_flow) } else { d };
-        (d.is_finite() && d >= 0.0 && m0 - law.mass_flow * d > 0.0).then_some(d)
+        let d = if dry_mass > 0.0 && flow > 0.0 { d.min((m0 - dry_mass).max(0.0) / flow) } else { d };
+        (d.is_finite() && d >= 0.0 && m0 - flow * d > 0.0).then_some(d)
     }
 }
 

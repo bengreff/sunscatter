@@ -260,7 +260,10 @@ impl Limbo {
             };
             a += force * (pressure / mass);
         });
-        if let (Some(t), Some(att)) = (self.thrust, att) {
+        // No thrust from a tank boiled empty (the burn ends there; this
+        // guards the last stage's rounding at the dry-mass floor).
+        let fed = self.boil_off == 0.0 || mass > self.dry_mass;
+        if let (Some(t), Some(att)) = (self.thrust.filter(|_| fed), att) {
             a += att.q * t.axis * (t.thrust / mass);
         }
         a
