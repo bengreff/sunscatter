@@ -307,11 +307,17 @@ pub struct AeroTick<'a> {
     layer: Option<aero::friction::FlowLayer>,
 }
 
+/// Below this dynamic pressure (Pa) a live tick has no aerodynamics: at
+/// sea level a wind of 4 cm/s, on 100 m² under 0.1 N. It spares the force
+/// model of a craft standing on its pad in air that turns with the ground
+/// (its wind is rounding error), evaluated at every contact substep.
+pub const AERO_Q_FLOOR: f64 = 1e-3;
+
 impl<'a> AeroTick<'a> {
-    /// `None` without air or wind.
+    /// `None` without air, or with a dynamic pressure under [`AERO_Q_FLOOR`].
     pub fn new(design: &'a CraftDesign, air: &Air, com: DVec3, chute: Option<(f64, DVec3)>) -> Option<Self> {
         let speed = air.wind.length();
-        if speed.is_nan() || speed <= 0.0 {
+        if speed.is_nan() || speed <= 0.0 || air.q() < AERO_Q_FLOOR {
             return None;
         }
         Some(AeroTick {

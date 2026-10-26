@@ -20,6 +20,7 @@
 //!   blunt shapes, whose drag rise is bounded (Apollo's C_D rises ≈ 0.5
 //!   from M 0.8 to 1.2; a sphere's about as much).
 
+use super::bake::CellGeometry;
 use crate::math;
 use glam::DVec3;
 
@@ -51,6 +52,58 @@ pub fn area_along(tris: &[(DVec3, DVec3, f64)], d: DVec3, lo: f64, hi: f64) -> V
         area.push(sum.max(0.0));
     }
     area
+}
+
+/// Cross-section areas along `d` at STATIONS + 1 boundaries over `lo..hi`
+/// (positions along `d` relative to `centre`) from the cells: each cell's
+/// −V·d (V = Σ A·n over its triangles, its vector area: exact for any
+/// cell, a ring's included) spread evenly over its extent along `d` (its
+/// centroid ± its half extent; a planar rectangle's area grows linearly
+/// across it), as [`area_along`] does from the triangles at a few
+/// hundredths the work. Cells whose mean normal turns downstream more than
+/// 45° are separated.
+pub fn area_along_cells(
+    cells: &[CellGeometry],
+    vector: &[DVec3],
+    centre: DVec3,
+    d: DVec3,
+    lo: f64,
+    hi: f64,
+) -> Vec<f64> {
+    let dx = ((hi - lo) / STATIONS as f64).max(1e-9);
+    let mut bins = vec![0.0; STATIONS];
+    for (c, v) in cells.iter().zip(vector) {
+        if c.normal.dot(d) > SEPARATED {
+            continue;
+        }
+        let x = (c.centroid - centre).dot(d);
+        spread(&mut bins, lo, dx, x, c.half_extent(d), -v.dot(d));
+    }
+    let mut area = Vec::with_capacity(STATIONS + 1);
+    let mut sum = 0.0;
+    area.push(0.0);
+    for b in bins {
+        sum += b;
+        area.push(sum.max(0.0));
+    }
+    area
+}
+
+/// Adds `w` to `bins` (width `dx` from `lo`) spread evenly over `x ± h`
+/// (all of it into the bin of `x` where `h` is nil; held inside the bins).
+pub fn spread(bins: &mut [f64], lo: f64, dx: f64, x: f64, h: f64, w: f64) {
+    let n = bins.len();
+    let last = (n - 1) as f64;
+    let (a, b) = (((x - h - lo) / dx).clamp(0.0, n as f64), ((x + h - lo) / dx).clamp(0.0, n as f64));
+    if b - a < 1e-9 {
+        bins[a.floor().min(last) as usize] += w;
+        return;
+    }
+    let (ka, kb) = (a.floor().min(last) as usize, (b.ceil() as usize).clamp(1, n) - 1);
+    for (k, bin) in bins.iter_mut().enumerate().take(kb + 1).skip(ka) {
+        let overlap = (b.min(k as f64 + 1.0) - a.max(k as f64)).max(0.0);
+        *bin += w * overlap / (b - a);
+    }
 }
 
 /// Terms of the sine series of A′ (the rest is discretisation noise,

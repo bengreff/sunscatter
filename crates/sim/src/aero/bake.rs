@@ -203,7 +203,60 @@ const NONE: u32 = u32::MAX;
 /// Stagnation-region cells for the nose radius: incidence sin θ at least this.
 const NOSE_MIN_SIN: f64 = 0.7;
 
-/// Bakes a craft design from its surface and cells.
+/// What every direction of the bake reads.
+struct Shared<'a> {
+    surface: &'a Surface,
+    cells: &'a Cells,
+    geometry: &'a [CellGeometry],
+    /// Each cell's vector area Σ A·n (m²).
+    vector: &'a [DVec3],
+    tri_normal: &'a [DVec3],
+    /// Triangles grouped by cell (so each cell's covered pixels are counted once).
+    order: &'a [u32],
+    centre: DVec3,
+    raster: usize,
+}
+
+/// One direction's bake.
+struct Direction {
+    exposure: Vec<u8>,
+    nose_radius: f64,
+    extent: f64,
+    wave: f64,
+    relief: [(f32, f32); super::relief::STATIONS],
+    /// Projected area (for the Knudsen length).
+    area: f64,
+}
+
+/// A thread's working buffers.
+struct Scratch {
+    raster: Raster,
+    proj: Vec<DVec3>,
+    won: Vec<u32>,
+    f: Vec<f64>,
+}
+
+impl Scratch {
+    fn new(shared: &Shared) -> Self {
+        let (n, nc) = (shared.raster, shared.cells.cells.len());
+        Scratch {
+            raster: Raster {
+                n,
+                depth: vec![0.0; n * n],
+                owner: vec![NONE; n * n],
+                stamp: vec![NONE; n * n],
+                covered: vec![0; nc],
+            },
+            proj: vec![DVec3::ZERO; shared.surface.positions.len()],
+            won: vec![0; nc],
+            f: vec![0.0; nc],
+        }
+    }
+}
+
+/// Bakes a craft design from its surface and cells. The directions are
+/// independent: they are baked on all available cores, each into its own
+/// slot (the same bits on any number of threads).
 pub fn bake(surface: &Surface, cells: &Cells, opts: &BakeOptions) -> AeroBake {
     let grid = Geodesic::new(opts.level);
     let nc = cells.cells.len();
@@ -215,195 +268,128 @@ pub fn bake(surface: &Surface, cells: &Cells, opts: &BakeOptions) -> AeroBake {
     let centre = (lo + hi) * 0.5;
     let radius = surface.positions.iter().map(|p| (*p - centre).length()).fold(0.0, f64::max).max(1e-6);
     let tri_normal: Vec<DVec3> = (0..surface.triangles.len()).map(|t| surface.triangle(t).1).collect();
-    // Triangles grouped by cell (so each cell's covered pixels are counted once).
     let mut order: Vec<u32> = (0..surface.triangles.len() as u32).collect();
     order.sort_by_key(|&t| (cells.tri_cell[t as usize], t));
-    let n = opts.raster;
-    let mut r =
-        Raster { n, depth: vec![0.0; n * n], owner: vec![NONE; n * n], stamp: vec![NONE; n * n], covered: vec![0; nc] };
     let mut geometry: Vec<CellGeometry> = cells.cells.iter().map(CellGeometry::of).collect();
     spreads(surface, cells, &mut geometry);
     let tris: Vec<(DVec3, DVec3, f64)> = (0..surface.triangles.len()).map(|t| surface.triangle(t)).collect();
     let sections = BodySections::new(&tris, &surface.positions);
-    let mut fins = find_fins(surface, cells, &geometry, WING_RATIO * 2.0 * radius);
+    let mut vector = vec![DVec3::ZERO; nc];
+    for (t, &(_, n, a)) in tris.iter().enumerate() {
+        vector[cells.tri_cell[t] as usize] += n * a;
+    }
+    let mut fins = super::fin_search::find_fins(surface, cells, &geometry, WING_RATIO * 2.0 * radius);
     super::slender::attach(&mut fins, &geometry, &sections);
-    let mut extent = Vec::with_capacity(grid.dirs.len());
-    let mut wave = Vec::with_capacity(grid.dirs.len());
-    // Triangles relative to the centre (as the projections below).
-    let rel: Vec<(DVec3, DVec3, f64)> = tris.iter().map(|&(c, n, a)| (c - centre, n, a)).collect();
-    let mut nose_radius = Vec::with_capacity(grid.dirs.len());
-    let mut exposure = Vec::with_capacity(grid.dirs.len() * nc);
-    let mut proj = vec![DVec3::ZERO; surface.positions.len()];
-    let mut won = vec![0u32; nc];
-    let mut f = vec![0.0; nc];
-    let mut max_area: f64 = 0.0;
-    let mut relief = Vec::with_capacity(grid.dirs.len() * super::relief::STATIONS);
-    for &d in &grid.dirs {
-        let (u, v, _) = basis(d);
-        // The raster spans the craft's projection (square pixels), so a
-        // slender body seen end-on is as well resolved as seen broadside.
-        let (mut u0, mut u1, mut v0, mut v1) = (f64::INFINITY, f64::NEG_INFINITY, f64::INFINITY, f64::NEG_INFINITY);
-        for p in &surface.positions {
-            let x = *p - centre;
-            (u0, u1) = (u0.min(x.dot(u)), u1.max(x.dot(u)));
-            (v0, v1) = (v0.min(x.dot(v)), v1.max(x.dot(v)));
-        }
-        let span = (u1 - u0).max(v1 - v0).max(1e-9) * (1.0 + 1e-9);
-        let scale = n as f64 / span;
-        for (p, q) in surface.positions.iter().zip(proj.iter_mut()) {
-            let x = *p - centre;
-            *q = DVec3::new((x.dot(u) - u0) * scale, (x.dot(v) - v0) * scale, x.dot(d));
-        }
-        let (lo, hi) = proj.iter().fold((f64::INFINITY, f64::NEG_INFINITY), |(a, b), q| (a.min(q.z), b.max(q.z)));
-        extent.push(hi - lo);
-        // The area distribution along d.
-        let areas = super::wave::area_along(&rel, d, lo, hi);
-        wave.push(super::wave::wave_drag_area(&areas, (hi - lo) / super::wave::STATIONS as f64));
-        relief.extend(super::relief::ratios(&rel, d, lo, hi));
-        r.depth.fill(f64::INFINITY);
-        r.owner.fill(NONE);
-        r.stamp.fill(NONE);
-        r.covered.fill(0);
-        for &t in &order {
-            if tri_normal[t as usize].dot(d) >= 0.0 {
-                continue;
-            }
-            let tri = surface.triangles[t as usize].map(|i| proj[i as usize]);
-            r.fill(tri, cells.tri_cell[t as usize]);
-        }
-        won.fill(0);
-        for &o in &r.owner {
-            if o != NONE {
-                won[o as usize] += 1;
-            }
-        }
-        let pixel = span / n as f64;
-        for (i, c) in cells.cells.iter().enumerate() {
-            f[i] = if c.normal.dot(d) >= 0.0 {
-                0.0
-            } else if r.covered[i] > 0 {
-                (f64::from(won[i]) / f64::from(r.covered[i])).min(1.0)
-            } else {
-                let x = c.centroid - centre;
-                let px = ((x.dot(u) - u0) * scale).floor().clamp(0.0, (n - 1) as f64) as usize;
-                let py = ((x.dot(v) - v0) * scale).floor().clamp(0.0, (n - 1) as f64) as usize;
-                let front = r.depth[py * n + px];
-                if front < x.dot(d) - 2.0 * pixel {
-                    0.0
-                } else {
-                    1.0
+    let shared = Shared {
+        surface,
+        cells,
+        geometry: &geometry,
+        vector: &vector,
+        tri_normal: &tri_normal,
+        order: &order,
+        centre,
+        raster: opts.raster,
+    };
+    let dirs = &grid.dirs;
+    let threads = std::thread::available_parallelism().map_or(1, |n| n.get()).clamp(1, 16).min(dirs.len().max(1));
+    let chunk = dirs.len().div_ceil(threads);
+    let mut baked: Vec<Option<Direction>> = Vec::with_capacity(dirs.len());
+    baked.resize_with(dirs.len(), || None);
+    std::thread::scope(|s| {
+        for (block, slots) in dirs.chunks(chunk.max(1)).zip(baked.chunks_mut(chunk.max(1))) {
+            let shared = &shared;
+            s.spawn(move || {
+                let mut scratch = Scratch::new(shared);
+                for (&d, slot) in block.iter().zip(slots) {
+                    *slot = Some(direction(shared, &mut scratch, d));
                 }
-            };
-            exposure.push((f[i] * 255.0).round() as u8);
+            });
         }
-        // From the quantised exposure, as the run time sees it.
-        let fq = |i: usize| f64::from(exposure[exposure.len() - nc + i]) / 255.0;
-        let area = direction_sums(&geometry, d, fq).area;
-        max_area = f64::max(max_area, area);
-        nose_radius.push(nose(&geometry, d, fq, area));
+    });
+    let mut exposure = Vec::with_capacity(dirs.len() * nc);
+    let (mut nose_radius, mut extent, mut wave) = (Vec::new(), Vec::new(), Vec::new());
+    let mut relief = Vec::with_capacity(dirs.len() * super::relief::STATIONS);
+    let mut max_area: f64 = 0.0;
+    for b in baked.into_iter().map(|b| b.expect("every direction baked")) {
+        exposure.extend_from_slice(&b.exposure);
+        nose_radius.push(b.nose_radius);
+        extent.push(b.extent);
+        wave.push(b.wave);
+        relief.extend(b.relief);
+        max_area = f64::max(max_area, b.area);
     }
     let length = if max_area > 0.0 { 2.0 * (max_area / crate::math::PI).sqrt() } else { 2.0 * radius };
     AeroBake { grid, geometry, exposure, nose_radius, cells: nc, length, extent, wave, sections, fins, relief }
 }
 
-/// The fins: cells whose opposite face (anti-parallel, straight through
-/// the part along −n, on the same primitive) is closer than `thin`,
-/// grouped by primitive; a group
-/// is a fin when its cells lie in two parallel planes (each side's normals
-/// within 8° of their mean) and it is thin for its size (thickness under
-/// [`FIN_THICKNESS`] × √planform).
-fn find_fins(surface: &Surface, cells: &Cells, geometry: &[CellGeometry], thin: f64) -> Vec<Fin> {
-    let mut by_primitive: Vec<(u32, Vec<u32>, f64)> = Vec::new();
-    // A fin's opposite face is its own primitive's: each cell is cast only
-    // against those triangles (O(cells × triangles per primitive)).
-    let primitives = cells.cells.iter().map(|c| c.primitive as usize + 1).max().unwrap_or(0);
-    let mut own: Vec<Vec<u32>> = vec![Vec::new(); primitives];
-    for (t, &cell) in cells.tri_cell.iter().enumerate() {
-        own[cells.cells[cell as usize].primitive as usize].push(t as u32);
+/// Bakes one direction `d`.
+fn direction(shared: &Shared, scratch: &mut Scratch, d: DVec3) -> Direction {
+    let (surface, cells, centre, n) = (shared.surface, shared.cells, shared.centre, shared.raster);
+    let nc = cells.cells.len();
+    let Scratch { raster: r, proj, won, f } = scratch;
+    let (u, v, _) = basis(d);
+    // The raster spans the craft's projection (square pixels), so a
+    // slender body seen end-on is as well resolved as seen broadside.
+    let (mut u0, mut u1, mut v0, mut v1) = (f64::INFINITY, f64::NEG_INFINITY, f64::INFINITY, f64::NEG_INFINITY);
+    let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
+    for (p, q) in surface.positions.iter().zip(proj.iter_mut()) {
+        let x = *p - centre;
+        *q = DVec3::new(x.dot(u), x.dot(v), x.dot(d));
+        (u0, u1) = (u0.min(q.x), u1.max(q.x));
+        (v0, v1) = (v0.min(q.y), v1.max(q.y));
+        (lo, hi) = (lo.min(q.z), hi.max(q.z));
     }
-    for (i, g) in geometry.iter().enumerate() {
-        let n = g.normal;
-        let mut nearest = f64::INFINITY;
-        for &t in &own[cells.cells[i].primitive as usize] {
-            let tri = &surface.triangles[t as usize];
-            let [a, b, c] = tri.map(|k| surface.positions[k as usize]);
-            let tn = (b - a).cross(c - a);
-            if tn.dot(n) >= -0.9 * tn.length() {
-                continue;
-            }
-            if let Some(t) = ray_triangle(g.centroid, -n, a, b, c) {
-                if t > 1e-6 {
-                    nearest = nearest.min(t);
-                }
-            }
+    let span = (u1 - u0).max(v1 - v0).max(1e-9) * (1.0 + 1e-9);
+    let scale = n as f64 / span;
+    for q in proj.iter_mut() {
+        (q.x, q.y) = ((q.x - u0) * scale, (q.y - v0) * scale);
+    }
+    // The area distribution along d, and the perimeter's, from the cells.
+    let areas = super::wave::area_along_cells(shared.geometry, shared.vector, centre, d, lo, hi);
+    let wave = super::wave::wave_drag_area(&areas, (hi - lo) / super::wave::STATIONS as f64);
+    let relief = super::relief::ratios_cells(shared.geometry, shared.vector, centre, d, lo, hi);
+    r.depth.fill(f64::INFINITY);
+    r.owner.fill(NONE);
+    r.stamp.fill(NONE);
+    r.covered.fill(0);
+    for &t in shared.order {
+        if shared.tri_normal[t as usize].dot(d) >= 0.0 {
+            continue;
         }
-        if nearest < thin {
-            let p = cells.cells[i].primitive;
-            match by_primitive.iter_mut().find(|e| e.0 == p) {
-                Some(e) => {
-                    e.1.push(i as u32);
-                    e.2 = e.2.max(nearest);
-                }
-                None => by_primitive.push((p, vec![i as u32], nearest)),
-            }
+        let tri = surface.triangles[t as usize].map(|i| proj[i as usize]);
+        r.fill(tri, cells.tri_cell[t as usize]);
+    }
+    won.fill(0);
+    for &o in &r.owner {
+        if o != NONE {
+            won[o as usize] += 1;
         }
     }
-    by_primitive
-        .into_iter()
-        .filter_map(|(_, list, thickness)| {
-            let n0 = geometry[list[0] as usize].normal;
-            let (mut normal, mut area, mut centroid, mut total) = (DVec3::ZERO, 0.0, DVec3::ZERO, 0.0);
-            for &i in &list {
-                let g = &geometry[i as usize];
-                if g.normal.dot(n0) > 0.0 {
-                    normal += g.normal * g.area;
-                    area += g.area;
-                }
-                centroid += g.centroid * g.area;
-                total += g.area;
+    let pixel = span / n as f64;
+    let mut exposure = Vec::with_capacity(nc);
+    for (i, c) in cells.cells.iter().enumerate() {
+        f[i] = if c.normal.dot(d) >= 0.0 {
+            0.0
+        } else if r.covered[i] > 0 {
+            (f64::from(won[i]) / f64::from(r.covered[i])).min(1.0)
+        } else {
+            let x = c.centroid - centre;
+            let px = ((x.dot(u) - u0) * scale).floor().clamp(0.0, (n - 1) as f64) as usize;
+            let py = ((x.dot(v) - v0) * scale).floor().clamp(0.0, (n - 1) as f64) as usize;
+            let front = r.depth[py * n + px];
+            if front < x.dot(d) - 2.0 * pixel {
+                0.0
+            } else {
+                1.0
             }
-            if area <= 0.0 || normal.length_squared() == 0.0 {
-                return None;
-            }
-            let normal = normal.normalize();
-            let flat = list.iter().all(|&i| geometry[i as usize].normal.dot(normal).abs() > FIN_FLAT);
-            (flat && thickness < FIN_THICKNESS * area.sqrt()).then(|| Fin {
-                cells: list,
-                normal,
-                area,
-                centroid: centroid / total,
-                body_radius: 0.0,
-                semispan: 0.0,
-            })
-        })
-        .collect()
-}
-
-/// A fin's two sides are planes: normals within this cosine (8°) of the mean.
-const FIN_FLAT: f64 = 0.99;
-/// A fin is thinner than this × the square root of its planform area.
-const FIN_THICKNESS: f64 = 0.1;
-
-/// Distance along the unit ray `dir` from `o` to triangle abc (Möller–Trumbore).
-fn ray_triangle(o: DVec3, dir: DVec3, a: DVec3, b: DVec3, c: DVec3) -> Option<f64> {
-    let (e1, e2) = (b - a, c - a);
-    let p = dir.cross(e2);
-    let det = e1.dot(p);
-    if det.abs() < 1e-15 {
-        return None;
+        };
+        exposure.push((f[i] * 255.0).round() as u8);
     }
-    let inv = 1.0 / det;
-    let s = o - a;
-    let u = s.dot(p) * inv;
-    if !(0.0..=1.0).contains(&u) {
-        return None;
-    }
-    let q = s.cross(e1);
-    let v = dir.dot(q) * inv;
-    if v < 0.0 || u + v > 1.0 {
-        return None;
-    }
-    Some(e2.dot(q) * inv)
+    // From the quantised exposure, as the run time sees it.
+    let fq = |i: usize| f64::from(exposure[i]) / 255.0;
+    let area = direction_sums(shared.geometry, d, fq).area;
+    let nose_radius = nose(shared.geometry, d, fq, area);
+    Direction { exposure, nose_radius, extent: hi - lo, wave, relief, area }
 }
 
 /// The sums for direction `d` given each cell's exposure (no nose radius).

@@ -329,8 +329,9 @@ fn the_bake_is_deterministic() {
 
 /// Golden hash of the unit-sphere bake (identical on every platform).
 /// 2026-10-26: the Knudsen length became the maximum body diameter (was
-/// the bounding-sphere diameter); then the layer's 3D relief was baked.
-const SPHERE_BAKE_HASH: u64 = 0x286d_75b8_f9aa_0ec4;
+/// the bounding-sphere diameter); then the layer's 3D relief was baked;
+/// then the area and perimeter distributions came from the cells.
+const SPHERE_BAKE_HASH: u64 = 0xa09c_5df9_19c5_7322;
 
 /// A thin flat plate, `l` long along X, 2 m wide, 4 mm thick.
 fn plate(l: f64) -> AeroBake {

@@ -19,6 +19,7 @@
 //! directions. At incidence the windward and leeward rays share one
 //! perimeter (the cross-section's), an approximation.
 
+use super::bake::CellGeometry;
 use glam::DVec3;
 
 /// Slabs along the flow.
@@ -48,6 +49,39 @@ pub fn ratios(tris: &[(DVec3, DVec3, f64)], d: DVec3, lo: f64, hi: f64) -> [(f32
         perimeter[k] += p * (1.0 - f);
         perimeter[k + 1] += p * f;
     }
+    from_perimeter(&perimeter, dx)
+}
+
+/// [`ratios`] from the cells (positions relative to `centre`, vector areas
+/// `vector`): each cell's perimeter share spread evenly over its extent
+/// along `d`
+/// ([`super::wave::spread`]), at a few hundredths the work of the triangles.
+pub fn ratios_cells(
+    cells: &[CellGeometry],
+    vector: &[DVec3],
+    centre: DVec3,
+    d: DVec3,
+    lo: f64,
+    hi: f64,
+) -> [(f32, f32); STATIONS] {
+    let dx = ((hi - lo) / STATIONS as f64).max(1e-9);
+    let mut perimeter = [0.0; STATIONS];
+    for (c, v) in cells.iter().zip(vector) {
+        if c.normal.dot(d) > SEPARATED {
+            continue;
+        }
+        // Σ A·√(1 − (n·d)²) over the triangles, from the vector area V:
+        // √(A² − (V·d)²), exact for a planar cell (a ring's, across its
+        // axis, up to π/2 high).
+        let vd = v.dot(d);
+        let p = (c.area * c.area - vd * vd).max(0.0).sqrt() / dx;
+        super::wave::spread(&mut perimeter, lo, dx, (c.centroid - centre).dot(d), c.half_extent(d), p);
+    }
+    from_perimeter(&perimeter, dx)
+}
+
+/// The ratios from the perimeters of the slabs (width `dx`).
+fn from_perimeter(perimeter: &[f64; STATIONS], dx: f64) -> [(f32, f32); STATIONS] {
     // P linear between the slab middles (from its value extrapolated to
     // the front, at least 0): ∫P² exact, ∫P^1.25 by trapezoids.
     let pow = |p: f64| if p > 0.0 { crate::math::exp(1.25 * crate::math::ln(p)) } else { 0.0 };

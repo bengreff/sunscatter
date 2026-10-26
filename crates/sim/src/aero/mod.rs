@@ -39,6 +39,7 @@ pub mod bake;
 pub mod base;
 pub mod boundary;
 pub mod crossflow;
+mod fin_search;
 pub mod friction;
 pub mod geodesic;
 pub mod relief;
