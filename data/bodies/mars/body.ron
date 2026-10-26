@@ -16,12 +16,59 @@
             w0_deg: 176.049863,
             w_rate_deg_per_day: 350.891982443,
         ),
-        atmosphere: None,
+        atmosphere: Some((
+            // Skeleton (solar-system.md). 0-40 km: NASA Glenn Research Center's Mars
+            // model (T = -31 - 0.000998 h below 7 km, -23.4 - 0.00222 h above, deg C;
+            // p = 0.699 exp(-0.00009 h) kPa; rho = p / (0.1921 (T + 273.1))), a fit to
+            // Mars Global Surveyor data. Above 40 km: isothermal at its 40 km temperature
+            // and hydrostatic (H = RT/(Mg) = 8.32 km with g = 3.711): our assumption,
+            // within a few times of aerobraking densities near 100 km; the real upper
+            // atmosphere varies tenfold with season and dust. CO2 (M = 43.34 g/mol, 95 %),
+            // gamma 1.29; VHS collision diameter of CO2 (Bird 1994); Sutton-Graves and
+            // Tauber-Sutton for Mars.
+            top: 150000.0, gamma: 1.29, collision_diameter: 5.62e-10, sutton_graves_k: 1.9027e-4,
+            radiative_heating: Some(Mars),
+            // (altitude m, temperature K, pressure Pa, density kg/m3, mean molar mass kg/mol)
+            table: Some([
+                (0.0, 242.150, 6.99000e+02, 1.50299e-02, 0.04334),
+                (2000.0, 240.154, 5.83854e+02, 1.26584e-02, 0.04334),
+                (4000.0, 238.158, 4.87676e+02, 1.06618e-02, 0.04334),
+                (6000.0, 236.162, 4.07341e+02, 8.98075e-03, 0.04334),
+                (8000.0, 231.990, 3.40240e+02, 7.63629e-03, 0.04334),
+                (10000.0, 227.550, 2.84192e+02, 6.50284e-03, 0.04334),
+                (12000.0, 223.110, 2.37377e+02, 5.53975e-03, 0.04334),
+                (14000.0, 218.670, 1.98274e+02, 4.72116e-03, 0.04334),
+                (16000.0, 214.230, 1.65613e+02, 4.02519e-03, 0.04334),
+                (18000.0, 209.790, 1.38331e+02, 3.43330e-03, 0.04334),
+                (20000.0, 205.350, 1.15544e+02, 2.92975e-03, 0.04334),
+                (22000.0, 200.910, 9.65104e+01, 2.50123e-03, 0.04334),
+                (24000.0, 196.470, 8.06123e+01, 2.13643e-03, 0.04334),
+                (26000.0, 192.030, 6.73330e+01, 1.82576e-03, 0.04334),
+                (28000.0, 187.590, 5.62413e+01, 1.56111e-03, 0.04334),
+                (30000.0, 183.150, 4.69767e+01, 1.33557e-03, 0.04334),
+                (32000.0, 178.710, 3.92382e+01, 1.14328e-03, 0.04334),
+                (34000.0, 174.270, 3.27745e+01, 9.79289e-04, 0.04334),
+                (36000.0, 169.830, 2.73756e+01, 8.39362e-04, 0.04334),
+                (38000.0, 165.390, 2.28660e+01, 7.19921e-04, 0.04334),
+                (40000.0, 160.950, 1.90993e+01, 6.17922e-04, 0.04334),
+                (50000.0, 160.950, 5.74189e+00, 1.85960e-04, 0.04334),
+                (60000.0, 160.950, 1.72621e+00, 5.59058e-05, 0.04334),
+                (70000.0, 160.950, 5.18956e-01, 1.68072e-05, 0.04334),
+                (80000.0, 160.950, 1.56016e-01, 5.05280e-06, 0.04334),
+                (90000.0, 160.950, 4.69036e-02, 1.51904e-06, 0.04334),
+                (100000.0, 160.950, 1.41008e-02, 4.56676e-07, 0.04334),
+                (110000.0, 160.950, 4.23918e-03, 1.37292e-07, 0.04334),
+                (120000.0, 160.950, 1.27444e-03, 4.12747e-08, 0.04334),
+                (130000.0, 160.950, 3.83140e-04, 1.24086e-08, 0.04334),
+                (140000.0, 160.950, 1.15185e-04, 3.73043e-09, 0.04334),
+                (150000.0, 160.950, 3.46285e-05, 1.12149e-09, 0.04334),
+            ]),
+        )),
         anchor_zone: None,
         relativistic: false,
         solid: true,
-        // Rails warp is disabled below this altitude (m, D062): no terrain yet, so the margin above the ellipsoid.
-        rails_floor: 2000.0,
+        // Rails warp is disabled below this altitude (m, D062): the top of the atmosphere.
+        rails_floor: 150000.0,
         heightmap: None,
         sea_level: None,
     ),

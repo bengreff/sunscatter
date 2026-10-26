@@ -1,6 +1,6 @@
 # The Solar System (D084)
 
-**Status:** *playable* for motion and physical data (every body is on its real orbit, deterministic, tested against JPL); *skeleton* for looks (one base colour per body, no maps) and for the atmospheres of Venus, Mars and Titan (not yet in the data). Built 2026-10-26 (overnight run, SOL workstream).
+**Status:** *playable* for motion and physical data (every body is on its real orbit, deterministic, tested against JPL); *skeleton* for looks (one base colour per body, no maps) and for the atmospheres of Venus, Mars and Titan (sourced near the surface, assumed above). Built 2026-10-26 (overnight run, SOL workstream).
 
 **Scope (D084, the D014 rule, largest first):** the 8 planets; the dwarf planets Ceres, Pluto, Eris, Haumea, Makemake, Gonggong, Quaoar, Sedna, Orcus; every moon over 100 km mean radius: Io, Europa, Ganymede, Callisto; Mimas, Enceladus, Tethys, Dione, Rhea, Titan, Hyperion, Iapetus, Phoebe; Miranda, Ariel, Umbriel, Titania, Oberon; Triton, Proteus, Nereid; Charon; Dysnomia, Hi'iaka, Vanth. 44 bodies (was 11). Moons over 5 km: not done (see [Open](#open)).
 
@@ -33,7 +33,7 @@ The pieces are pure functions of the committed inputs; `ephem-tool sol` regenera
 
 Radii and rotation for every body from the IAU WGCCRE 2015 report via NAIF's `pck00011.tpc`: triaxial radii as an oblate spheroid (equatorial √(ab), polar c); slow periodic pole terms linearised about 2055, with the measured worst angle against the full series over 2030–2080 written in each file (Neptune 0.013°, Triton 0.83°, Miranda 4.3° from its fast librations); prime-meridian periodic terms left out. Mars's pole was 1.6° off in the old file (constant terms only); now within 0.0002°. Bodies without an IAU model (Hyperion, Nereid, the TNOs) have placeholders, marked: a pole along the satellite's orbit normal (computed from the JPL states) or the ecliptic pole, a spin from lightcurves. J2 where measured: planets (NASA fact sheet; Juno, Cassini, Jacobson), Io, Europa, Ganymede, Callisto (Schubert et al. 2004), Titan (Iess 2010), Enceladus (Iess 2014), rescaled to each file's radius; J4, J6 for the giants in the catalog. GMs in the catalog (Horizons pages; estimates marked: Sedna, Nereid, Dysnomia's split). Rocky and icy bodies are `solid` (smooth ellipsoids, rails floor 2 km); the gas giants are not (no surface, no atmosphere model yet).
 
-**Not done:** atmospheres of Venus, Mars and Titan. Sourced inputs found: the VIRA lower atmosphere of Venus (0–65 km, Seiff et al. 1985), the NASA Glenn Mars model (equations, valid low down), Huygens's surface values for Titan. Upper-atmosphere rows (VIRA above 65 km, Keating et al. 1985 above 100 km; Mars above 40 km; Titan's HASI profile) were not found in time, and continuing the tables exponentially would make aerobraking 10–300× too dense high up.
+**Atmospheres (skeleton):** Venus: the VIRA table to 65 km (Seiff et al. 1985), then isothermal at 243 K and hydrostatic to a 140 km top (about 3× VIRA's density at 100 km, far too dense in the thermosphere beyond 120 km). Mars: NASA Glenn's model to 40 km, then isothermal at 161 K and hydrostatic to 150 km (within a few times of aerobraking densities near 100 km). Titan: an exponential from Huygens's surface values (1,467 hPa, 93.65 K; H = 21 km) to 600 km, far too thin above ~200 km where the real scale height doubles. The isothermal continuations are our assumption (the table's own exponential extrapolation would be 1,000× too dense at 150 km on Mars); each file says so. Rails floors at the tops (D062). Needed: VIRA's upper tables (Keating et al. 1985), a Mars upper-atmosphere model (Mars-GRAM), Huygens HASI's profile.
 
 ### Visual data (`visual.ron`)
 
@@ -76,7 +76,7 @@ Where the coast's extra 5.3 µs goes: ~2.1 µs in the per-step searches over sol
 ## Open
 
 - Moons over 5 km (about 80 more): the fastest (Metis 7 h, Naiad 7 h) would cost ~12 MB each as 100 m tables and need 60 s steps. Needs a decision: rails or tables at a looser tolerance for small moons, or test particles.
-- Atmospheres of Venus, Mars, Titan (above). Gas giants: no surface or atmosphere model (vessels pass through).
+- Upper atmospheres of Venus, Mars, Titan (above). Gas giants: no surface or atmosphere model (vessels pass through).
 - Initial states fitted to Horizons over the window (removes the linear drifts).
 - C¹ table fits (anchor zones for moons and planets beyond Earth; free segments for planets).
 - 1,000 years (above).

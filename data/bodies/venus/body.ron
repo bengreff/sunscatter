@@ -16,12 +16,56 @@
             w0_deg: 160.2,
             w_rate_deg_per_day: -1.4813688,
         ),
-        atmosphere: None,
+        atmosphere: Some((
+            // Skeleton (solar-system.md). 0-65 km: the Venus International Reference
+            // Atmosphere (Seiff et al. 1985, Adv. Space Res. 5(11)), temperature and
+            // pressure (bar) as reproduced in Wikipedia's "Atmosphere of Venus",
+            // density from the ideal gas (65.5 kg/m3 at the surface; NASA's fact sheet
+            // gives ~65). Above 65 km: isothermal at 243 K and hydrostatic (H = 5.25 km,
+            // g = 8.87): our assumption, ~3x VIRA's density at 100 km and far above the
+            // real thermosphere's beyond 120 km (VIRA's upper tables, Keating et al. 1985,
+            // not yet transcribed). 96.5 % CO2, 3.5 % N2 (M = 43.45 g/mol); gamma 1.29;
+            // VHS collision diameter of CO2 (Bird 1994); Sutton-Graves for CO2/N2 (the
+            // Mars constant); no radiative heating relation.
+            top: 140000.0, gamma: 1.29, collision_diameter: 5.62e-10, sutton_graves_k: 1.9027e-4,
+            // (altitude m, temperature K, pressure Pa, density kg/m3, mean molar mass kg/mol)
+            table: Some([
+                (0.0, 735.150, 9.21000e+06, 6.54695e+01, 0.04345),
+                (5000.0, 697.150, 6.66500e+06, 4.99608e+01, 0.04345),
+                (10000.0, 658.150, 4.73900e+06, 3.76285e+01, 0.04345),
+                (15000.0, 621.150, 3.30400e+06, 2.77971e+01, 0.04345),
+                (20000.0, 579.150, 2.25200e+06, 2.03204e+01, 0.04345),
+                (25000.0, 537.150, 1.49300e+06, 1.45251e+01, 0.04345),
+                (30000.0, 495.150, 9.85100e+05, 1.03968e+01, 0.04345),
+                (35000.0, 453.150, 5.91700e+05, 6.82363e+00, 0.04345),
+                (40000.0, 416.150, 3.50100e+05, 4.39641e+00, 0.04345),
+                (45000.0, 383.150, 1.97900e+05, 2.69918e+00, 0.04345),
+                (50000.0, 348.150, 1.06600e+05, 1.60010e+00, 0.04345),
+                (55000.0, 300.150, 5.31400e+04, 9.25207e-01, 0.04345),
+                (60000.0, 263.150, 2.35700e+04, 4.68071e-01, 0.04345),
+                (65000.0, 243.150, 9.76500e+03, 2.09872e-01, 0.04345),
+                (70000.0, 243.150, 3.76454e+03, 8.09082e-02, 0.04345),
+                (75000.0, 243.150, 1.45128e+03, 3.11912e-02, 0.04345),
+                (80000.0, 243.150, 5.59487e+02, 1.20246e-02, 0.04345),
+                (85000.0, 243.150, 2.15689e+02, 4.63565e-03, 0.04345),
+                (90000.0, 243.150, 8.31511e+01, 1.78710e-03, 0.04345),
+                (95000.0, 243.150, 3.20558e+01, 6.88951e-04, 0.04345),
+                (100000.0, 243.150, 1.23579e+01, 2.65600e-04, 0.04345),
+                (105000.0, 243.150, 4.76415e+00, 1.02392e-04, 0.04345),
+                (110000.0, 243.150, 1.83664e+00, 3.94735e-05, 0.04345),
+                (115000.0, 243.150, 7.08050e-01, 1.52176e-05, 0.04345),
+                (120000.0, 243.150, 2.72963e-01, 5.86657e-06, 0.04345),
+                (125000.0, 243.150, 1.05231e-01, 2.26164e-06, 0.04345),
+                (130000.0, 243.150, 4.05678e-02, 8.71892e-07, 0.04345),
+                (135000.0, 243.150, 1.56394e-02, 3.36126e-07, 0.04345),
+                (140000.0, 243.150, 6.02920e-03, 1.29581e-07, 0.04345),
+            ]),
+        )),
         anchor_zone: None,
         relativistic: false,
         solid: true,
-        // Rails warp is disabled below this altitude (m, D062): no terrain yet, so the margin above the ellipsoid.
-        rails_floor: 2000.0,
+        // Rails warp is disabled below this altitude (m, D062): the top of the atmosphere.
+        rails_floor: 140000.0,
         heightmap: None,
         sea_level: None,
     ),

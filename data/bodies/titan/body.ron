@@ -18,12 +18,23 @@
             w0_deg: 186.5855,
             w_rate_deg_per_day: 22.5769768,
         ),
-        atmosphere: None,
+        atmosphere: Some((
+            // Skeleton (solar-system.md): an exponential, isothermal at the surface.
+            // Huygens HASI at the surface: 1,467 hPa, 93.65 K (Fulchignoni et al. 2005,
+            // Nature 438, 785); 95.1 % N2, 4.9 % CH4 near the surface (Niemann et al.
+            // 2005): M = 27.426 g/mol, rho0 = 5.167 kg/m3, H = RT/(Mg) = 20.97 km
+            // (g = 1.3539). The real scale height grows to 40-50 km in the warmer upper
+            // atmosphere (Horst 2017: 15-50 km), so this is far too thin above ~200 km
+            // (a HASI table would replace it). N2: gamma 1.4, VHS diameter 4.17e-10 m
+            // (Bird 1994), mean free path 1.141e-08 m at the surface; Sutton-Graves for N2.
+            rho0: 5.1672, scale_height: 20969.6, p0: 146700.0, molar_mass: 0.027426, gamma: 1.4,
+            mean_free_path: 1.1408e-08, top: 600000.0, sutton_graves_k: 1.7415e-4,
+        )),
         anchor_zone: None,
         relativistic: false,
         solid: true,
-        // Rails warp is disabled below this altitude (m, D062): no terrain yet, so the margin above the ellipsoid.
-        rails_floor: 2000.0,
+        // Rails warp is disabled below this altitude (m, D062): the top of the atmosphere.
+        rails_floor: 600000.0,
         heightmap: None,
         sea_level: None,
     ),

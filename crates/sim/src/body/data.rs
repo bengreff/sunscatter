@@ -326,6 +326,31 @@ mod tests {
         assert_eq!(def.physical.rotation.dec, 20.0 * DEG);
     }
 
+    /// Venus, Mars and Titan carry their sourced surface values, and density
+    /// falls monotonically through each layer's join to the top (D084).
+    #[test]
+    fn the_new_atmospheres_load_with_their_surface_values() {
+        // (body, surface pressure Pa, surface density kg/m³, a join height m)
+        for (name, p0, rho0, join) in
+            [("venus", 92.1e5, 65.5, 65_000.0), ("mars", 699.0, 0.0150, 40_000.0), ("titan", 1.467e5, 5.17, 1e5)]
+        {
+            let def = load_default(name);
+            let atm = def.physical.atmosphere.as_ref().unwrap_or_else(|| panic!("{name} has air"));
+            assert!((atm.pressure(0.0) / p0 - 1.0).abs() < 0.01, "{name}: {}", atm.pressure(0.0));
+            assert!((atm.density(0.0) / rho0 - 1.0).abs() < 0.01, "{name}: {}", atm.density(0.0));
+            assert_eq!(def.physical.rails_floor, atm.top, "{name}: rails floor at the top (D062)");
+            let mut last = f64::INFINITY;
+            for k in 0..=200 {
+                let h = atm.top * k as f64 / 200.0 * 0.999;
+                let rho = atm.density(h);
+                assert!(rho > 0.0 && rho < last, "{name} at {h} m: {rho}");
+                last = rho;
+            }
+            let (below, above) = (atm.density(join - 1.0), atm.density(join + 1.0));
+            assert!((below / above - 1.0).abs() < 1e-3, "{name}: continuous at {join} m");
+        }
+    }
+
     #[test]
     fn directory_names_are_lower_case_letters_and_digits() {
         assert_eq!(body_dir_name("Earth"), "earth");
