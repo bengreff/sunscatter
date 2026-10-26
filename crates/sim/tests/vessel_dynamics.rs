@@ -332,13 +332,18 @@ fn a_nominal_descent_opens_drogues_then_reefed_mains_within_their_design_loads()
         vessel.phase
     );
     assert!(matches!(vessel.phase, Phase::Landed { .. }), "{:?}", vessel.phase);
-    // Each canopy opened under its design q, and each peak between the
-    // weight (it decelerates the craft) and Apollo's design limit loads
-    // (2 × 17,200 lb drogues, 4 × 23,800 lb mains; TN D-7437). In g the
-    // light craft feels more than Apollo's 2.9 g main design (37,500 lb on
-    // 13,000 lb): four mains on 5 t against three on 5.9 t.
+    // Each canopy opened under its design q, and each peak between most of
+    // the weight (they decelerate the craft) and Apollo's design limit
+    // loads (2 × 17,200 lb drogues, 4 × 23,800 lb mains; TN D-7437). In g
+    // the light craft feels more than Apollo's 2.9 g main design (37,500 lb
+    // on 13,000 lb): four mains on 5 t against three on 5.9 t. Hanging
+    // tail-down under the drogue its fins are upstream: since they lift
+    // with the body's interference (D085, Pitts–Nielsen–Kaattari) it swings
+    // to ~120° and its own broadside drag shares the deceleration, so the
+    // drogue peaks near 1.0 g (1.4 g before); the main opened slower.
     assert!(drogue_q.unwrap() < d.deploy_max_q && main_q.unwrap() < m.deploy_max_q);
-    assert!(drogue_peak < 2.0 * 76.5e3 && drogue_peak > weight, "{drogue_peak}");
+    assert!(main_q.unwrap() < drogue_q.unwrap(), "the drogue decelerated it");
+    assert!(drogue_peak < 2.0 * 76.5e3 && drogue_peak > 0.8 * weight, "{drogue_peak}");
     assert!(main_peak < 4.0 * 105.9e3 && main_peak > weight, "{main_peak}");
     assert!(drogue_peak < d.max_load && main_peak < m.max_load);
 }

@@ -125,6 +125,69 @@ fn the_test_crafts_fins_are_found_and_its_round_and_stubby_parts_are_not() {
     }
 }
 
+#[test]
+fn the_interference_factors_are_pitts_nielsen_and_kaattari_s() {
+    // NACA Report 1307, eqs. 14 and 21 (chart 1): (r/s, K_W(B), K_B(W)).
+    let table = [
+        (0.0, 1.0, 0.0),
+        (0.1, 1.077, 0.133),
+        (0.3, 1.253, 0.437),
+        (0.5, 1.450, 0.800),
+        (0.7, 1.663, 1.227),
+        (0.9, 1.886, 1.724),
+        (1.0, 2.0, 2.0),
+    ];
+    for (x, kwb, kbw) in table {
+        let (a, b) = slender::interference(x);
+        assert!((a - kwb).abs() < 1e-3 && (b - kbw).abs() < 1e-3, "r/s {x}: {a} {b}");
+        assert!((a + b - (1.0 + x) * (1.0 + x)).abs() < 1e-12 || x >= 1.0);
+    }
+}
+
+#[test]
+fn fins_on_a_body_lift_with_the_interference_factors() {
+    // A cylinder (radius 0.5 m, 10 m) with two fins at its tail (exposed
+    // span 1 m along ±Y, chord 1.2 m, normal ±X): r/s = 1/3, K_W(B) + K_B(W) =
+    // (4/3)² = 1.778; the pair is a wing of aspect ratio (2·1)²/2.4 = 1.67,
+    // Helmbold's slope at M 0.3 2.30 /rad. The fins add 1.778·2.30 =
+    // 4.10 /rad on their 2.4 m² to the body's normal force.
+    let body = Shape::Cylinder { base: DVec3::ZERO, axis: DVec3::Z * 10.0, radius: 0.5 };
+    let fin = |y: f64| Shape::Box { center: DVec3::new(0.0, y, 1.0), half: DVec3::new(0.02, 0.6, 0.6) };
+    let (s, c) = shape(&[body, fin(0.9), fin(-0.9)]);
+    let with = bake(&s, &c, &BakeOptions::default());
+    let (s, c) = shape(&[body]);
+    let alone = bake(&s, &c, &BakeOptions::default());
+    assert_eq!(with.fins.len(), 2);
+    for f in &with.fins {
+        assert!((f.body_radius / 0.5 - 1.0).abs() < 0.02 && (f.semispan / 1.5 - 1.0).abs() < 0.02, "{f:?}");
+    }
+    let a = 2f64.to_radians();
+    let normal = |b: &AeroBake| {
+        let f = flow(DVec3::new(math::sin(a), 0.0, -math::cos(a)), 0.3, 1e-5);
+        aero_forces(b, &f, 0.3).0.x / (f.q * 2.4 * math::sin(a) * math::cos(a))
+    };
+    let added = normal(&with) - normal(&alone);
+    println!("fins on the body: {added:.3} /rad (Pitts–Nielsen–Kaattari × Helmbold 4.10)");
+    // The bake measures each exposed panel at 1.26 m² (cells straddling
+    // the root), +5 % area and +3.5 % slope; the fins' sections add 0.07
+    // of Munk's term to the body's.
+    assert!((added / 4.10 - 1.0).abs() < 0.12, "{added}");
+    // The free-standing wing keeps its own aspect ratio and no factors.
+    assert_eq!(wing().fins[0].semispan, 0.0);
+}
+
+#[test]
+fn the_test_crafts_fins_are_mounted_on_its_body() {
+    // Fins from r 0.8 to 2.8 m on a body of radius 1.04–1.08 m at their
+    // centroid's station (the skirt flares to 1.52 m along their chord):
+    // r/s ≈ 0.38, the fins' lift ×(1 + r/s)² ≈ 1.9.
+    for f in &craft_bake().fins {
+        let x = f.body_radius / f.semispan;
+        assert!(f.body_radius > 1.0 && f.body_radius < 1.2 && (f.semispan - 2.8).abs() < 0.1, "{f:?}");
+        assert!(x > 0.34 && x < 0.43, "{x}");
+    }
+}
+
 /// A Sears–Haack body along Z, `l` long, radius `r` at the middle, as 32
 /// frustums: r(ξ) = r·(4ξ(1−ξ))^¾.
 fn sears_haack(l: f64, r: f64) -> AeroBake {

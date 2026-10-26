@@ -30,6 +30,15 @@
 //!   the flow (chord) and its area. It stalls: full to 15°, gone at 30°
 //!   (the Newtonian pressure carries the flat plate beyond). At the
 //!   quarter chord subsonic, the half chord supersonic.
+//! * **Fins on a body** ([`attach`], [`interference`]): a fin whose root
+//!   meets the body is half of a wing of twice its aspect ratio (the body a
+//!   reflection plane; the exposed panels joined, as in Pitts, Nielsen &
+//!   Kaattari, NACA Report 1307), its lift multiplied by K_W(B) and the
+//!   lift it carries onto the body, K_B(W), added on the body's axis at
+//!   its station: slender-body values at every Mach number (the report's
+//!   supersonic carryover, smaller behind short afterbodies, is not
+//!   modelled). A cruciform is two planar pairs (Spreiter, NACA Report
+//!   962): each fin takes its own incidence.
 
 use super::bake::CellGeometry;
 use crate::math;
@@ -202,6 +211,87 @@ pub struct Fin {
     pub area: f64,
     /// Area centroid.
     pub centroid: DVec3,
+    /// Where it is mounted on the body ([`attach`]): the body's radius at
+    /// its root and the semispan from the body's axis to its tip (m); 0
+    /// for a free-standing wing.
+    pub body_radius: f64,
+    pub semispan: f64,
+}
+
+/// Mounts the fins on the body: a fin whose root lies within 25 % of the
+/// body's radius of the body's surface is mounted, with r the body's radius
+/// at its station (from the cross-section there, less the fins' own
+/// sections, thickness × exposed span) and its semispan s the tip's
+/// distance from the axis; others stand free.
+pub fn attach(fins: &mut [Fin], cells: &[CellGeometry], b: &BodySections) {
+    /// A fin's extent: along the axis, from it (root, tip), and across.
+    struct Extent {
+        x: (f64, f64),
+        root: f64,
+        tip: f64,
+        thickness: f64,
+    }
+    let extents: Vec<Option<Extent>> = fins
+        .iter()
+        .map(|fin| {
+            let rel = fin.centroid - b.point;
+            let radial = rel - b.axis * rel.dot(b.axis);
+            if radial.length() < 1e-9 {
+                return None;
+            }
+            let e = radial.normalize();
+            let inf = f64::INFINITY;
+            let mut r = Extent { x: (inf, -inf), root: inf, tip: -inf, thickness: 0.0 };
+            let (mut n_lo, mut n_hi) = (inf, -inf);
+            for &i in &fin.cells {
+                let c = &cells[i as usize];
+                let p = c.centroid - b.point;
+                let (x, h, rad, hr) = (p.dot(b.axis), c.half_extent(b.axis), p.dot(e), c.half_extent(e));
+                r.x = (r.x.0.min(x - h), r.x.1.max(x + h));
+                (r.root, r.tip) = (r.root.min(rad - hr), r.tip.max(rad + hr));
+                (n_lo, n_hi) = (n_lo.min(p.dot(fin.normal)), n_hi.max(p.dot(fin.normal)));
+            }
+            r.thickness = n_hi - n_lo;
+            Some(r)
+        })
+        .collect();
+    for (fin, extent) in fins.iter_mut().zip(&extents) {
+        let Some(own) = extent else { continue };
+        let x = (fin.centroid - b.point).dot(b.axis);
+        let j = ((x - b.x0) / b.dx).clamp(0.0, STATIONS as f64);
+        let (i, f) = ((j.floor() as usize).min(STATIONS - 1), j - j.floor());
+        let area = b.area[i] * (1.0 - f) + b.area[i + 1] * f;
+        let r0 = (area / math::PI).sqrt();
+        let fins_there: f64 = (extents.iter().flatten())
+            .filter(|e| e.x.0 <= x && x <= e.x.1)
+            .map(|e| e.thickness * (e.tip - r0).max(0.0))
+            .sum();
+        let radius = ((area - fins_there).max(0.0) / math::PI).sqrt();
+        if radius > 0.0 && own.root < 1.25 * radius && own.tip > radius {
+            (fin.body_radius, fin.semispan) = (radius, own.tip);
+        }
+    }
+}
+
+/// Pitts, Nielsen & Kaattari's slender-body interference factors for a
+/// body of radius r carrying fins of semispan s (NACA Report 1307, 1957,
+/// eqs. 14 and 21): the lift of the fins in the presence of the body,
+/// K_W(B), and the lift they carry over onto the body, K_B(W), each as a
+/// multiple of the fins alone (the exposed panels joined into one wing).
+/// K_W(B) + K_B(W) = (1 + r/s)².
+pub fn interference(r_over_s: f64) -> (f64, f64) {
+    let x = r_over_s.clamp(0.0, 1.0);
+    if x >= 0.9999 {
+        return (2.0, 2.0);
+    }
+    if x <= 0.0 {
+        return (1.0, 0.0);
+    }
+    let atan = |z: f64| math::atan2(z, 1.0);
+    let u = 1.0 / x - x;
+    let brace = (1.0 + x * x * x * x) * (0.5 * atan(0.5 * u) + 0.25 * math::PI) - x * x * (u + 2.0 * atan(x));
+    let kwb = 2.0 / math::PI * brace / ((1.0 - x) * (1.0 - x));
+    (kwb, (1.0 + x) * (1.0 + x) - kwb)
 }
 
 /// Finite-wing normal-force slope (per radian) at Mach `mach` for aspect
@@ -232,8 +322,11 @@ fn stall(alpha: f64) -> f64 {
 }
 
 /// A fin's normal force and moment about the craft origin, per unit q, for
-/// the flow direction `d` at Mach `mach`.
-pub fn fin_normal(fin: &Fin, cells: &[CellGeometry], d: DVec3, mach: f64) -> (DVec3, DVec3) {
+/// the flow direction `d` at Mach `mach`. A fin mounted on the body (`axis`
+/// through `point`) is half of a wing of twice its aspect ratio (the body
+/// a reflection plane), its lift raised by K_W(B) and its carryover K_B(W)
+/// acting on the body's axis at its station ([`interference`]).
+pub fn fin_normal(fin: &Fin, cells: &[CellGeometry], d: DVec3, mach: f64, b: &BodySections) -> (DVec3, DVec3) {
     let s = -fin.normal.dot(d);
     let t = d + fin.normal * s;
     let along = t.length();
@@ -249,7 +342,8 @@ pub fn fin_normal(fin: &Fin, cells: &[CellGeometry], d: DVec3, mach: f64) -> (DV
         (lo.min(x - h), hi.max(x + h))
     });
     let chord = (hi - lo).max(1e-9);
-    let ar = fin.area / (chord * chord);
+    let mounted = fin.semispan > 0.0;
+    let ar = fin.area / (chord * chord) * if mounted { 2.0 } else { 1.0 };
     let cn = fin_slope(mach, ar) * math::sin(alpha) * math::cos(alpha) * stall(alpha);
     let force = -fin.normal * (cn * fin.area);
     // Quarter chord subsonic, half chord supersonic.
@@ -261,5 +355,10 @@ pub fn fin_normal(fin: &Fin, cells: &[CellGeometry], d: DVec3, mach: f64) -> (DV
         0.25 + 0.25 * (mach - 0.8) / 0.4
     };
     let at = fin.centroid + t * (lo + cp * chord - fin.centroid.dot(t));
-    (force, at.cross(force))
+    if !mounted {
+        return (force, at.cross(force));
+    }
+    let (kwb, kbw) = interference(fin.body_radius / fin.semispan);
+    let on_axis = b.point + b.axis * (at - b.point).dot(b.axis);
+    (force * (kwb + kbw), at.cross(force * kwb) + on_axis.cross(force * kbw))
 }

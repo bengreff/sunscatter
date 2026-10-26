@@ -190,7 +190,8 @@ pub fn bake(surface: &Surface, cells: &Cells, opts: &BakeOptions) -> AeroBake {
     spreads(surface, cells, &mut geometry);
     let tris: Vec<(DVec3, DVec3, f64)> = (0..surface.triangles.len()).map(|t| surface.triangle(t)).collect();
     let sections = BodySections::new(&tris, &surface.positions);
-    let fins = find_fins(surface, cells, &geometry, WING_RATIO * 2.0 * radius);
+    let mut fins = find_fins(surface, cells, &geometry, WING_RATIO * 2.0 * radius);
+    super::slender::attach(&mut fins, &geometry, &sections);
     let mut extent = Vec::with_capacity(grid.dirs.len());
     let mut wave = Vec::with_capacity(grid.dirs.len());
     // Triangles relative to the centre (as the projections below).
@@ -325,6 +326,8 @@ fn find_fins(surface: &Surface, cells: &Cells, geometry: &[CellGeometry], thin: 
                 normal,
                 area,
                 centroid: centroid / total,
+                body_radius: 0.0,
+                semispan: 0.0,
             })
         })
         .collect()
@@ -499,7 +502,8 @@ impl AeroBake {
             .chain(b.area.iter().copied())
             .for_each(&mut put);
         for f in &self.fins {
-            f.normal.to_array().into_iter().chain(f.centroid.to_array()).chain([f.area]).for_each(&mut put);
+            let (n, c) = (f.normal.to_array(), f.centroid.to_array());
+            n.into_iter().chain(c).chain([f.area, f.body_radius, f.semispan]).for_each(&mut put);
             f.cells.iter().for_each(|&c| put(f64::from(c)));
         }
         bytes.extend_from_slice(&self.exposure);

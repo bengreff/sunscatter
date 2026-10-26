@@ -147,7 +147,7 @@ fn continuum(bake: &AeroBake, s: &DirSums, d: DVec3, flow: &Flow, cd0: f64) -> (
         m += (bm + at.cross(axial) - m) * sw;
     }
     for fin in &bake.fins {
-        let (ff, fm) = slender::fin_normal(fin, &bake.geometry, d, mach);
+        let (ff, fm) = slender::fin_normal(fin, &bake.geometry, d, mach, &bake.sections);
         f += ff * lift;
         m += fm * lift;
     }
