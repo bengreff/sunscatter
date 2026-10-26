@@ -368,6 +368,13 @@ First every planet, dwarf planet and moon over 100 km radius, through the motion
 **D085: Aerodynamics: full-body cells with boundary-layer turbulence, fast enough for breakups.** *Decided, 2026-10-26 (owner).*
 Close the D070 gaps listed in `docs/design/aero-thermal.md`. Model laminar–turbulent transition and its effect on friction and heating over the whole body. Stay fast enough for 1–2 large craft live, or many small pieces after a breakup.
 
+**D086: Committed map data may grow to about 150 MB for the Solar System.** *Default taken 2026-10-26 (owner away; reversible). Revises D046's ~60 MB total.*
+- D046's rule stands: public-domain sources, downsampled, each file under ~50 MB, close to final. The total grows to ~150 MB so the planets and moons get real maps like Earth's (D073): heights where a global DEM exists, colour, zones, roughness.
+- Bodies without global data get procedural surfaces from their measured statistics (albedo, colour, crater density), stated as such.
+
+**D087: Exposure follows the starlight at the camera.** *Default taken 2026-10-26 (owner away; reversible). Refines D055's fixed exposure.*
+- The camera's exposure is scaled by the stellar flux at the camera's position (a photographer setting exposure for the light where they are), never by the scene's luminance. Near Earth nothing changes; at Saturn (1 % of Earth's sunlight) a day side reads like Earth's, and night sides stay as dark relative to day sides as D055 requires. A setting can turn it off.
+
 ## Open questions
 
 1. What kind of organization the player leads (D027).
