@@ -564,6 +564,51 @@ mod tests {
         assert_eq!(lookahead_turn(5, 3, 2), Some(0));
     }
 
+    /// D081: rails warp is refused while any craft is live, with the
+    /// reason; craft in limbo (perturbed coasts: thin-air drag, light, a
+    /// low-thrust burn under way) never refuse it.
+    #[test]
+    fn only_live_craft_refuse_rails_warp_and_limbo_craft_do_not() {
+        use sim::vessel::{BurnEnd, BurnLaw, DirectionLaw, FlightPlan, PlannedBurn, SegmentKind};
+        let mut sim = SimState::new();
+        let w = sim.world.clone();
+        let earth = w.find("Earth").unwrap();
+        let re = earth.physical.as_ref().unwrap().radius_eq;
+        let circular = |h: f64| {
+            let r = re + h;
+            (DVec3::new(r, 0.0, 0.0), DVec3::new(0.0, (earth.gm / r).sqrt(), 0.0))
+        };
+        let craft = |sim: &mut SimState, h: f64| {
+            let (r, v) = circular(h);
+            let id = sim.vessel_ids.allocate();
+            Vessel::coasting(&w, id, sim.clock, earth.node, r, v, test_craft())
+        };
+        // On the pad, nothing else flying: allowed.
+        assert_eq!(sim.rails_block(), None);
+        // Limbo: drag decay at 300 km, and a 0.5 N burn spiralling up.
+        let decaying = craft(&mut sim, 300_000.0);
+        let mut spiral = craft(&mut sim, 700_000.0);
+        let law = BurnLaw::from_isp(0.5, 3_000.0, DirectionLaw::Tracking { reference: earth.node, axes: DVec3::X });
+        let burn = PlannedBurn { t_start: sim.clock, law, end: BurnEnd::Duration(30.0 * 86_400.0) };
+        spiral.set_plan(&w, FlightPlan { burns: vec![burn] }).unwrap();
+        spiral.advance(&w, sim.clock.add_seconds(3_600.0), &Controls { sas: true, ..Default::default() }, 1_200);
+        assert!(matches!(spiral.segment().unwrap().kind, SegmentKind::Burn(_)), "burning on rails");
+        sim.fleet.extend([decaying, spiral]);
+        assert_eq!(sim.rails_block(), None, "limbo craft do not refuse rails warp");
+        // A craft in the air (live below the boundary, 100 km): refused, named.
+        let entering = craft(&mut sim, 100_000.0);
+        let id = entering.id();
+        assert!(matches!(entering.phase, Phase::Powered { .. }));
+        sim.fleet.push(entering);
+        assert_eq!(sim.rails_block(), Some(RailsBlock::OtherLive(id)));
+        // The active vessel's own reasons come first.
+        sim.controls.throttle = 0.5;
+        assert_eq!(sim.rails_block(), Some(RailsBlock::Thrust));
+        sim.controls.throttle = 0.0;
+        sim.active = sim.fleet.len() - 1;
+        assert_eq!(sim.rails_block(), Some(RailsBlock::Live));
+    }
+
     #[test]
     fn only_a_lagging_live_vessel_holds_the_clock() {
         let t = sol::sol_epoch();

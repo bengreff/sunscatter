@@ -1,6 +1,6 @@
 # Feature: limbo (perturbed coasts and system lattices)
 
-**Status:** design (2026-10-26, overnight LIMBO workstream). Decisions: D081 (limbo for 10+ craft, warp-invariant), D024/rule 4 (the stored trajectory is the truth), D025 (radiation pressure, thin-air drag, rotation through coasts), D029 (burns on rails), D033 (systems), D062 (rails floor), D075 (thrust along the attitude from the hold).
+**Status:** playable in the sim (2026-10-26, overnight LIMBO workstream): every coasting vessel is a perturbed coast and has systems; tested for warp invariance and against references (below). No UI yet (systems are not shown; the planner builds burns from the craft's engine, and the test craft has no low-thrust engine, so low thrust is reached through a plan's law). Decisions: D081 (limbo for 10+ craft, warp-invariant), D024/rule 4 (the stored trajectory is the truth), D025 (radiation pressure, thin-air drag, rotation through coasts), D029 (burns on rails), D033 (systems), D062 (rails floor), D075 (thrust along the attitude from the hold).
 
 The owner (2026-10-26): "absolutely ensure 10+ craft can be in a limbo state where there are constant forces acting on them and their internal systems are evolving according to extrapolated models that DO NOT change behavior as timewarp changes", up to 1,000,000×.
 
@@ -58,3 +58,39 @@ D081: rails warp is refused while any craft is live (`game::state::rails_block`)
 - Physics: drag decay against King-Hele's rate and an ISS-like ballistic coefficient; SRP against the flat-plate value; a low-thrust spiral's Δv against Edelbaum; a decaying orbit hands over to live flight at the boundary and the live descent continues.
 - Save/load mid-limbo and mid-lattice continue bit for bit.
 - Cost: ten limbo craft at 1,000,000× (`examples/bench_limbo`), µs per vessel per frame.
+
+## As built (2026-10-26)
+
+Code: `sim::vessel::pointing` (attitude laws, the regime rule), `sim::vessel::limbo` (the force model, the live boundary), `sim::forces::surface` (the per-design table), `sim::forces::radiation` (starlight with eclipses), `sim::systems` (the lattice, power, consumables), `sim::vessel::coast` and `vessel::systems` (wiring). Commits 9dd436c, 53a672c and the ones after.
+
+**Choices made where the design was silent:**
+- Every vessel coast is perturbed (`Trajectory::perturbed`); bare segments (`Segment::new`, tests, the golden hash) keep the old attitude-independent drag below `top`. A coast without a model (an older save) is restarted as perturbed.
+- A new coast starts with its attitude unknown (`Mean`) and is restarted at once (same epoch) if the regime is lawful: `start_coast` does not know the controls, the next advance does.
+- The `Track` frame's reference is resolved once per segment (the navball's reference, else the anchor then); a re-anchoring later changes the rule and restarts the coast, as the controller would turn to the new reference.
+- `Track` holds the roll fixed in the orbital frame, not the follow lattice's chain of smallest rotations (`attitude::advance_coast`): the two agree for planar motion and differ slowly in roll when the orbit plane precesses; inside a known segment the law is the truth.
+- Low-thrust burns are flown held on their law from ignition (the turn before them is still flown by the controller during the coast's turn lead); a burn whose craft is not settled at ignition has its attitude snapped onto the law there (an instant turn: documented simplification).
+- Boil-off is excluded from tick-flown (chemical) burns and from the rocket-equation duration of a Δv-ended burn; it floors at the dry mass.
+- `Vessel::advance` returns where a coast reaches the live boundary, so the game holds its clock and caps the warp instead of flying a rails-warp frame of live ticks through the air.
+- Live flight still sees no air above `top` (150 km), so the boundary never hands over above it; a thrusting live vessel above 150 km feels no drag (≈1e-5 of its thrust for the test craft).
+- The systems lattice step is 60 s; its environment is the instantaneous sunlight with eclipses at the vessel (the eclipse swing of the battery is resolved), unlike the thermal lattice's orbit averages.
+- Coast thermal steps for a frame-held craft on a short orbit take the sunlight averaged over one revolution (24 fixed phases from the ascending node) and for a fast tumbler the isotropic average: coast temperatures were orbit averages already. Moons of closed moon systems (`World::open_clusters`) are neither occluders nor air.
+
+**Measured** (tests in `crates/sim/tests/limbo.rs`, `limbo_physics.rs`; `examples/bench_limbo`):
+
+| What | Result | Reference |
+|---|---|---|
+| Invariance | a month of 0.5 N low thrust, a year of drag decay at 300 km with systems (battery, boil-off), a year of radiation pressure at 20,000 km (held and tumbling): the same bits in one call and in game frames at 1×, 1,000×, 1,000,000×; save/load mid-burn and between lattice points | rule 4 |
+| Drag decay, broadside, 400 km equatorial | 127.5 m/day | King-Hele 127.8 m/day (US76 ρ) |
+| ISS-like ballistic number 86.5 kg/m² | 3.8 km/month | observed 1.5–4 km/month at solar minimum to ~100 m/day near maximum (NASA SpaceMath; BN: Oleson & Benson, NASA/TM-2002-211313) |
+| SRP on a 10 m plate, 0–60°, specular and diffuse | within 0.2 % | Montenbruck & Gill eq. 3.73 |
+| 20-day 2 N spiral from 1,000 km | 778.2 m/s (rocket eq.) | Edelbaum 776.3 m/s |
+| Hand-over from a decaying 165 km orbit | live at 140.8 km, q 0.100 Pa; energy loss 0.7 J/(kg·s) live, 0.7 in the coast at the boundary | — |
+| Anchor invariance (drag, light, 1 N), Earth vs Earth–Moon barycentre | 3.4 mm in 6 h | rule 1 |
+| Cost at 1,000,000× (release, one thread) | per vessel per frame: LEO drag 5.8 ms, low thrust 4.0 ms, high orbit 1.1 ms; ten craft 41 ms serially, never compute-limited; a perturbed LEO step 14 µs (bare 10 µs) | the game advances vessels in parallel |
+
+**Not done / limits:**
+- The coast thermal lattice takes the thin air's free-molecular heating ½ρv³ (bridged in Kn) on the cells facing it, orbit-averaged like the sunlight (12 samples; tested: 49.5 W/m² at 200 km = ½ρv³); the continuum heating of the transitional regime just above the boundary is not modelled (the bridge lowers the flux towards it).
+- Drag uses US76 (mean activity): no solar cycle, no diurnal bulge.
+- No planet albedo or infrared pressure; the Sun's disc is the only light.
+- Power is a placeholder (no power paths, D033); consumables are only boil-off; crew and life support come with parts.
+- The D062 rails floor still blocks rails warp for the active ship below 150 km even while it coasts (limbo) there; D081 alone would allow it.

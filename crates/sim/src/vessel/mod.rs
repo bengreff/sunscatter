@@ -38,6 +38,7 @@ mod attitude;
 mod burn;
 mod clock;
 mod coast;
+mod coast_heat;
 mod flown;
 mod hold;
 mod id;
@@ -51,6 +52,7 @@ mod trajectory;
 
 pub use aerothermal::{air_at, coast_sunlight, in_atmosphere, AeroTick, Air, VesselThermal, LATTICE, MAX_SKIP};
 pub use coast::THERMAL_SOLVE_UNITS;
+pub use coast_heat::{coast_air, coast_suns, CoastSun};
 
 pub use anchor::preferred_anchor;
 pub use attitude::{quat_from_rotvec, quat_z_to, rotvec_of, Attitude, AttitudeControl, RotationBase};

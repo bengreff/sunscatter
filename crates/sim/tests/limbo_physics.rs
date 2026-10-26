@@ -364,3 +364,35 @@ fn a_perturbed_coast_does_not_depend_on_its_anchor() {
     println!("anchor invariance: worst {worst:.2e} m; perturbations moved it {:.0} m", (r_end - r_bare).length());
     assert!((r_end - r_bare).length() > 1_000.0);
 }
+
+#[test]
+fn thin_air_heats_a_coasting_craft_at_the_free_molecular_rate() {
+    // Held prograde at 200 km over the equator: the coast thermal lattice
+    // takes ½ρv³ (full accommodation) on the cells facing the air, which
+    // comes along −Z in body axes (nose first), averaged over the orbit.
+    let w = world();
+    let earth = w.find("Earth").unwrap();
+    let p = earth.physical.as_ref().unwrap();
+    let r0 = RE + 200_000.0;
+    let v0 = (earth.gm / r0).sqrt();
+    let (r, v) = (DVec3::new(r0, 0.0, 0.0), DVec3::new(0.0, v0, 0.0));
+    let snap = w.snapshot(t0());
+    let att = Attitude { q: sim::vessel::quat_z_to(v.normalize()), omega: DVec3::ZERO };
+    let law = DirectionLaw::Tracking { reference: earth.node, axes: DVec3::X };
+    let pointing = pointing::on_law(&law, &att, DVec3::Z, &w, &snap, (earth.node, r, v));
+    let length = sim::craft::test_craft().design().bake.length;
+    let air = sim::vessel::coast_air(&w, t0(), (earth.node, r, v), Some(&pointing), &att, length);
+    let mean = air.iter().map(|a| a.1).sum::<f64>() / air.len() as f64;
+    let rho = p.atmosphere.as_ref().unwrap().profile(200_000.0, earth.gm / (RE * RE)).rho;
+    let v_rel = v0 - p.rotation.w_rate * r0;
+    let expected = 0.5 * rho * v_rel.powi(3);
+    println!("thin air at 200 km: {mean:.1} W/m² over {} samples (½ρv³ {expected:.1})", air.len());
+    assert!((mean / expected - 1.0).abs() < 0.05, "{mean} vs {expected}");
+    for (d, _) in &air {
+        assert!(d.dot(DVec3::NEG_Z) > 0.99, "the air comes at the nose: {d}");
+    }
+    // Above ~600 km there is none worth counting.
+    let high = DVec3::new(RE + 800_000.0, 0.0, 0.0);
+    let vh = DVec3::new(0.0, (earth.gm / high.length()).sqrt(), 0.0);
+    assert!(sim::vessel::coast_air(&w, t0(), (earth.node, high, vh), Some(&pointing), &att, length).is_empty());
+}

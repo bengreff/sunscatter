@@ -34,6 +34,7 @@
 //! albedo and convective cooling come later.
 
 use super::burn::BurnLaw;
+use super::coast_heat::CoastSun;
 use super::segment::{Segment, SegmentKind};
 use crate::aero::{self, Flow};
 use crate::craft::CraftDesign;
@@ -93,6 +94,9 @@ pub struct VesselThermal {
     /// sunlight.
     #[serde(default)]
     hold_power: f64,
+    /// Coasts: the thin air's key ([`CoastSun`]) at the last solve.
+    #[serde(default)]
+    hold_air: DVec3,
 }
 
 fn lattice_default() -> f64 {
@@ -109,7 +113,16 @@ fn lattice_step(design: &CraftDesign, state: &ThermalState) -> f64 {
 impl VesselThermal {
     pub fn uniform(cells: usize, nodes: usize, t: f64, epoch: Epoch) -> Self {
         let state = ThermalState::uniform(cells, nodes, t);
-        VesselThermal { state, epoch, lattice: epoch, hold: None, burns: Vec::new(), step: LATTICE, hold_power: 0.0 }
+        VesselThermal {
+            state,
+            epoch,
+            lattice: epoch,
+            hold: None,
+            burns: Vec::new(),
+            step: LATTICE,
+            hold_power: 0.0,
+            hold_air: DVec3::ZERO,
+        }
     }
 
     /// Hottest skin cell (K).
@@ -168,7 +181,8 @@ impl VesselThermal {
         let k = libm::round(dt / LATTICE) as u64;
         let power = if dt > 0.0 { self.burn_energy(self.epoch, e) / dt } else { 0.0 };
         let steady = (power - self.hold_power).abs() <= SUN_SAME * self.hold_power.max(1.0);
-        dt < span && !k.is_multiple_of(SUN_CHECK_POINTS) && steady
+        // Thin air turns in body axes with the orbit even for a still craft.
+        dt < span && !k.is_multiple_of(SUN_CHECK_POINTS) && steady && self.hold_air == DVec3::ZERO
     }
 
     /// Passes lattice point `e` (see [`Self::passes`]).
@@ -199,117 +213,6 @@ pub fn coast_sunlight(world: &World, t: Epoch, anchor: NodeId, r: DVec3, v: DVec
     let snap = world.snapshot(t);
     crate::light::orbit_average_sunlight(world, &snap, anchor, r, v, ORBIT_AVERAGE_PERIOD)
         .unwrap_or_else(|| crate::light::sunlight(world, &snap, anchor, r))
-}
-
-/// Samples of a coast step's average over an orbit ([`coast_suns`]).
-const ORBIT_SAMPLES: usize = 24;
-
-/// The sunlight a coast step takes, in body axes: one vector, or samples
-/// whose heating is averaged; `key` stands for it in the skip test (the
-/// lattice skips while the key holds within 1 %).
-#[derive(Clone, Debug, PartialEq)]
-pub struct CoastSun {
-    pub suns: Vec<DVec3>,
-    pub key: DVec3,
-}
-
-impl CoastSun {
-    pub fn one(sun_body: DVec3) -> Self {
-        CoastSun { suns: vec![sun_body], key: sun_body }
-    }
-}
-
-/// The sunlight of a coast step at `t` in body axes, for a vessel at
-/// `(r, v)` relative to `anchor` with attitude `att`, its segment held by
-/// `pointing` (`super::pointing`, if the attitude is known):
-/// * held in an orbital frame on a bound orbit of at most
-///   [`ORBIT_AVERAGE_PERIOD`] clear of its body (a prograde hold in low
-///   orbit): averaged over one revolution of the osculating orbit, which
-///   turns the craft once against the Sun: [`ORBIT_SAMPLES`] points at
-///   fixed mean anomalies, each in the pointing's attitude there, dark in
-///   the body's cylindrical shadow (as `light::orbit_sunlit_fraction`); the
-///   key is their mean;
-/// * tumbling torque-free faster than once per [`LATTICE`]: isotropic, the
-///   coast sunlight's flux from the 12 directions of an icosahedron (a
-///   tumble's average over orientations); the key is the flux;
-/// * otherwise the coast sunlight ([`coast_sunlight`]) in the attitude now.
-///
-/// Coast temperatures are orbit averages already (the eclipse swing is not
-/// shown); averaging the attitude's turn the same way keeps a held or
-/// tumbling craft's input steady, so its lattice skips like a still one's.
-pub fn coast_suns(
-    world: &World,
-    t: Epoch,
-    (anchor, r, v): (NodeId, DVec3, DVec3),
-    pointing: Option<&super::pointing::Pointing>,
-    att: &super::Attitude,
-) -> CoastSun {
-    use super::pointing::Pointing;
-    match pointing {
-        Some(p @ Pointing::Track { .. }) => {
-            if let Some(suns) = orbit_suns(world, t, (anchor, r, v), p) {
-                let key = suns.iter().sum::<DVec3>() / suns.len() as f64;
-                return CoastSun { suns, key };
-            }
-        }
-        Some(Pointing::Free { .. }) if att.omega.length() * LATTICE > 2.0 * crate::math::PI => {
-            let flux = coast_sunlight(world, t, anchor, r, v).length();
-            let phi = 0.5 * (1.0 + 5.0f64.sqrt());
-            let mut suns = Vec::with_capacity(12);
-            for (a, b) in [(1.0, phi), (1.0, -phi), (-1.0, phi), (-1.0, -phi)] {
-                for d in [DVec3::new(0.0, a, b), DVec3::new(a, b, 0.0), DVec3::new(b, 0.0, a)] {
-                    suns.push(d.normalize() * flux);
-                }
-            }
-            return CoastSun { suns, key: DVec3::new(flux, 0.0, 0.0) };
-        }
-        _ => {}
-    }
-    CoastSun::one(att.q.inverse() * coast_sunlight(world, t, anchor, r, v))
-}
-
-/// The orbit-averaged samples of [`coast_suns`] for a frame-held pointing,
-/// if the orbit qualifies.
-fn orbit_suns(
-    world: &World,
-    t: Epoch,
-    (anchor, r, v): (NodeId, DVec3, DVec3),
-    p: &super::pointing::Pointing,
-) -> Option<Vec<DVec3>> {
-    let body = world.source(anchor)?;
-    let phys = body.physical.as_ref().filter(|b| b.luminosity == 0.0)?;
-    let el = crate::kepler::Elements::from_state(r, v, body.gm);
-    if !(el.e < 1.0 && el.a * (1.0 - el.e) > phys.radius_eq && el.period(body.gm) <= ORBIT_AVERAGE_PERIOD) {
-        return None;
-    }
-    let snap = world.snapshot(t);
-    let stars: Vec<(DVec3, f64)> = (world.sources.iter())
-        .filter_map(|s| s.physical.as_ref().filter(|x| x.luminosity > 0.0).map(|x| (s, x.luminosity)))
-        .map(|(s, l)| {
-            let at_star = snap.relative_r(s.node, anchor);
-            let d = (r - at_star).length();
-            (at_star.normalize(), crate::light::star_flux(l, d))
-        })
-        .collect();
-    let n = ORBIT_SAMPLES;
-    let mut suns = Vec::with_capacity(n);
-    for k in 0..n {
-        // Fixed phases from the ascending node, not the vessel's (nor the
-        // perigee's, ill-defined on a near-circular orbit): the samples do
-        // not slide round the orbit from one lattice point to the next.
-        let m = 2.0 * crate::math::PI * (k as f64 + 0.5) / n as f64 - el.argp;
-        let (rk, vk) = crate::kepler::Elements { mean_anomaly: m, ..el }.to_state(body.gm);
-        let q = p.attitude(world, &snap, anchor, rk, vk)?.q;
-        let mut flux = DVec3::ZERO;
-        for &(to_star, s) in &stars {
-            let along = rk.dot(to_star);
-            if along >= 0.0 || (rk - to_star * along).length_squared() >= phys.radius_eq * phys.radius_eq {
-                flux -= to_star * s;
-            }
-        }
-        suns.push(q.inverse() * flux);
-    }
-    Some(suns)
 }
 
 /// The air around a vessel at one instant.
@@ -561,7 +464,9 @@ pub fn coast_step(
     // A burn's heat over the span must be steady too (a low-thrust burn of
     // days); one starting, ending or changing makes the step solve.
     let steady = (burn / dt - th.hold_power).abs() <= SUN_SAME * th.hold_power.max(1.0);
-    if let Some((s, span)) = th.hold.filter(|_| !last && steady) {
+    let air_key = sun.air_key();
+    let same_air = (air_key - th.hold_air).length() <= SUN_SAME * th.hold_air.length().max(1.0);
+    if let Some((s, span)) = th.hold.filter(|_| !last && steady && same_air) {
         if dt < span && (sun_body - s).length() <= SUN_SAME * s.length().max(1.0) {
             return false;
         }
@@ -583,6 +488,19 @@ pub fn coast_step(
             }
         }
     }
+    // Free-molecular heating on the cells facing the air, shaded by the
+    // craft itself (the bake's exposure for each flow direction), averaged
+    // over the samples.
+    let w = 1.0 / sun.air.len().max(1) as f64;
+    for &(d, flux) in &sun.air {
+        design.bake.exposure_at(d, &mut b.scratch);
+        for ((h, c), &f) in b.heat.iter_mut().zip(&design.cells).zip(b.scratch.iter()) {
+            let cos = -c.normal.dot(d);
+            if cos > 0.0 {
+                *h += flux * cos * f * c.area * w;
+            }
+        }
+    }
     engine_and_nodes(design, burn / dt, propellant, &mut b);
     let before = th.state.clone();
     let (heat, node_heat, capacity) = (&b.heat, &b.node_heat, &b.node_capacity);
@@ -594,6 +512,7 @@ pub fn coast_step(
     let span = if change > 0.0 { (STEP_CHANGE_K * dt / change).min(MAX_SKIP) } else { MAX_SKIP };
     th.hold = (!last).then_some((sun_body, span));
     th.hold_power = burn / dt;
+    th.hold_air = air_key;
     th.epoch = epoch;
     th.step = lattice_step(design, &th.state);
     th.burns.retain(|b| b.1.is_none_or(|end| end.seconds_since(epoch) > 0.0));
