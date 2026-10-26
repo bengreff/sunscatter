@@ -6,17 +6,28 @@
     roughness: 0.95,
     icon_color: (0.8, 0.8, 0.78),
     // Surface zones (crisp-surfaces.md), baked into zones.png by
-    // `asset-tool zones` from the LROC colour map (cluster centres in
-    // CIELAB, 2026-10-25). The far side's highlands are brighter than the
-    // near side's, hence two highland zones.
+    // `asset-tool zones`. `source`: the zone's colour in the LROC colour map
+    // (cluster centres in CIELAB, 2026-10-25), which classifies and tints;
+    // the map is normalised and stretched, not reflectance. `albedo`: what
+    // is drawn, LINEAR reflectance for roughly 645, 555 and 470 nm: the
+    // LROC WAC normal albedo at 643 nm (Sato et al. 2014, JGR Planets 119,
+    // 1775: maria ~0.06-0.08, highlands ~0.13-0.18, fresh ejecta higher),
+    // with the Moon's red slope (reflectance at 415 nm ~0.6 of that at
+    // 643 nm in the highlands, less steep in the maria) for green and blue.
+    // The far side's highlands are brighter than the near side's, hence two
+    // highland zones.
     zones: Some((
         map: "zones.png",
         tint: 0.5,
         list: [
-            (name: "mare", source: (126, 124, 128), pattern: (scale_m: 1500.0, contrast: 0.08)),
-            (name: "highland", source: (188, 183, 179), pattern: (scale_m: 1000.0, contrast: 0.12)),
-            (name: "bright highland", source: (217, 215, 216), pattern: (scale_m: 1000.0, contrast: 0.1)),
-            (name: "bright ejecta", source: (238, 240, 242), pattern: (scale_m: 600.0, contrast: 0.1)),
+            (name: "mare", source: (126, 124, 128), albedo: Some((0.070, 0.062, 0.054)),
+                pattern: (scale_m: 1500.0, contrast: 0.08)),
+            (name: "highland", source: (188, 183, 179), albedo: Some((0.145, 0.124, 0.102)),
+                pattern: (scale_m: 1000.0, contrast: 0.12)),
+            (name: "bright highland", source: (217, 215, 216), albedo: Some((0.175, 0.150, 0.123)),
+                pattern: (scale_m: 1000.0, contrast: 0.1)),
+            (name: "bright ejecta", source: (238, 240, 242), albedo: Some((0.240, 0.206, 0.170)),
+                pattern: (scale_m: 600.0, contrast: 0.1)),
         ],
     )),
     detail: Some((

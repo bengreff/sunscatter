@@ -149,7 +149,7 @@ fn zones_def() -> ZonesDef {
     ron::from_str(
         r#"(map: "zones.png", tint: 0.4, list: [
             (name: "forest", source: (31, 43, 15), pattern: (scale_m: 800.0, contrast: 0.25)),
-            (name: "desert", source: (185, 156, 117), color: Some((190, 160, 120))),
+            (name: "desert", source: (185, 156, 117), albedo: Some((0.40, 0.30, 0.20))),
             (name: "lake", source: (3, 6, 8), water: true),
         ])"#,
     )
@@ -170,8 +170,8 @@ fn palette_packing() {
     let forest = lin([31, 43, 15]);
     assert_eq!(p.color[1], forest.extend(0.0));
     assert_eq!(p.pattern[1], Vec4::new(800.0, 0.25, 0.0, 0.0));
-    // An explicit draw colour; no pattern by default (contrast 0).
-    assert_eq!(p.color[2], lin([190, 160, 120]).extend(0.0));
+    // A physical albedo is drawn as given (linear); no pattern by default (contrast 0).
+    assert_eq!(p.color[2], Vec4::new(0.40, 0.30, 0.20, 0.0));
     assert_eq!(p.source[2], lin([185, 156, 117]));
     assert_eq!(p.pattern[2].y, 0.0);
     // Water zones: the open-water albedo, flagged.

@@ -84,13 +84,18 @@ pub struct ZonesDef {
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct ZoneDef {
-    #[allow(dead_code)] // For people and asset-tool's report.
+    /// For people, asset-tool's report and the tests.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub name: String,
     /// The zone's colour in the colour map (sRGB), the classifier's centre.
+    /// The map is a display stretch, not reflectance: it classifies, and
+    /// gives the tint ratio, but is not drawn.
     pub source: [u8; 3],
-    /// The colour it is drawn with (sRGB); default: `source`.
+    /// The zone's physical reflectance, linear, for roughly the red, green
+    /// and blue bands (~645, 555, 470 nm), from published measurements
+    /// (cited in visual.ron); without one the source colour is drawn.
     #[serde(default)]
-    pub color: Option<[u8; 3]>,
+    pub albedo: Option<[f32; 3]>,
     /// Classifier constraints (read by `asset-tool`).
     #[serde(default)]
     #[allow(dead_code)]
@@ -237,6 +242,11 @@ mod tests {
             assert!(!z.list.is_empty() && z.list.len() < crate::terrain::zones::MAX_ZONES, "{name}");
             assert!((0.0..=1.0).contains(&z.tint), "{name}");
             assert!(z.list.iter().all(|d| d.pattern.scale_m > 0.0 && (0.0..1.0).contains(&d.pattern.contrast)));
+            // Every land zone has a physical albedo, a reflectance in (0, 1).
+            for d in z.list.iter().filter(|d| !d.water) {
+                let a = d.albedo.unwrap_or_else(|| panic!("{name}: {} has no albedo", d.name));
+                assert!(a.iter().all(|&v| v > 0.0 && v < 1.0), "{name}: {}", d.name);
+            }
         }
         let ocean = super::load("Earth").unwrap().ocean.unwrap();
         assert!(ocean.shallow_albedo.is_some() && ocean.shallow_depth_m.is_some_and(|d| d > 0.0));

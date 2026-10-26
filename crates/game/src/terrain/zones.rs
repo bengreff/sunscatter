@@ -187,9 +187,9 @@ pub fn tinted(color: Vec3, source: Vec3, satellite: Vec3, tint: f32) -> Vec3 {
     color * r.clamp(Vec3::splat(0.5), Vec3::splat(2.0))
 }
 
-/// The shader's palette: per zone index, rgb its drawn colour (linear; water
-/// zones the open-water albedo) and w 1 for water; x, y its pattern's scale
-/// (m) and contrast.
+/// The shader's palette: per zone index, rgb its drawn colour (linear: the
+/// zone's physical albedo, water zones the open-water albedo) and w 1 for
+/// water; x, y its pattern's scale (m) and contrast.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Palette {
     pub color: [Vec4; MAX_ZONES],
@@ -216,9 +216,10 @@ pub fn palette(def: &ZonesDef, ocean: Option<&OceanDef>, fallback: [f32; 3]) -> 
     p.color[0] = Vec3::from_array(fallback).extend(0.0);
     for (k, z) in def.list.iter().enumerate().take(MAX_ZONES - 1) {
         let i = k + 1;
-        let drawn = match (z.water, ocean) {
-            (true, Some(o)) => Vec3::from_array(o.albedo),
-            _ => lin(z.color.unwrap_or(z.source)),
+        let drawn = match (z.water, ocean, z.albedo) {
+            (true, Some(o), _) => Vec3::from_array(o.albedo),
+            (_, _, Some(a)) => Vec3::from_array(a),
+            _ => lin(z.source),
         };
         p.color[i] = drawn.extend(if z.water { 1.0 } else { 0.0 });
         p.pattern[i] = Vec4::new(z.pattern.scale_m, z.pattern.contrast, 0.0, 0.0);
