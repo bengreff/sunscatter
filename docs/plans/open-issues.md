@@ -1,4 +1,4 @@
-# Open issues, 2026-09-27 (updated 2026-10-25 after the crisp-surfaces and flight-menus builds)
+# Open issues, 2026-09-27 (updated 2026-10-26 after the overnight run)
 
 Everything known to be open after the realism-1 build, for the next owner interview. Nothing here is being fixed yet (owner, 2026-09-27). Sources: the owner's play, `docs/reviews/2026-09-26-code-review.md`, `docs/design/aero-thermal.md` (limitations), and the agents' reports.
 
@@ -22,6 +22,18 @@ Defaults taken 2026-09-30 while the owner was away (each reversible, recorded as
 
 Settled 2026-09-28: haze (moot, D073), chute (keep), stability (finned rocket, D074).
 Settled 2026-10-01 (owner): a full craft tearing its mains is kept (D079); nose-first reentry overheating is accepted, heat shield later as a part (D064); SAS on a slope kept (D078); near-circular Ap/Pe plain (D076).
+
+## After the overnight run (2026-10-26, D081–D085)
+
+Each workstream's feature notes say more: `docs/features/{limbo,parts,proximity,scale-performance,solar-system}.md`, `docs/design/aero-thermal.md`, `docs/plans/scale-baseline-2026-10-26.md`.
+
+- **1,000,000× with 50 craft is not reached:** the clock holds back to ~107,000× of real time (honestly shown as "limited: compute"); every frame stays under 16.7 ms. The coast integration dominates (a perturbed LEO step ~5–15 µs; 4.7 ms per limbo craft per frame at 10⁶×). Options: cheaper force evaluation, a higher-order or regularised (Encke/KS) integrator, the fleet running continuously on worker threads instead of 8 ms per frame.
+- **1,000 years (D005) for the moons is not affordable as tables** (~330 MB); the Solar System covers the shipped span (see `solar-system.md` for the options). Moons drift in phase (Oberon up to ~280 km/yr before the refit; the refit to Horizons was in progress at the end of the night). Moons over 5 km not added (the fastest would cost ~12 MB each as tables). Gas giants have no surface or atmosphere model (vessels pass through them).
+- **Parts are a skeleton:** placeholder properties only; the game draws pieces with the test craft's mesh and no game craft has parts, so nothing breaks up in play yet; the load trigger is a pressure ceiling, not a structural solver; overheating judged only in live ticks; built craft cached without eviction; a large piece's design still costs seconds (small pieces 15–20 ms).
+- **Proximity:** coasting craft pass through each other when nothing live is near (a conjunction search on stored trajectories would fix it); landed craft are not bubble members; every member flies full live ticks (keeping members on rails until contact is possible would be cheaper and exactly invariant, but changes the reading of D082: owner's call); no docking or merging; a leader going live inside a frame for a reason other than its engine takes its neighbours one frame late (~1e-9 m, not bit-identical across frame rates).
+- **Limbo:** no solar cycle in thin-air density; no albedo or infrared pressure; a low-thrust burn whose craft isn't settled at ignition snaps its attitude to the burn; the D062 rails floor still blocks rails warp for the active ship coasting below 150 km (owner's call: the live boundary now decides by q).
+- **Aero/heating (D085):** turbulent transition rise ×4.7–5.6 against STS-1's ×3.2; laminar real-gas heating 10–15 % low at 7 km/s; no pressure history along the layer (hemisphere shoulder low); no corner heating on flat faces; Huygens heating 22 % low (Sutton–Graves in N₂–CH₄); Venus CO₂ and Titan CN radiative heating not modelled; CO₂ γ constant; the area rule not built (too costly per bake); no gusts (no winds yet). Tauber–Sutton Earth constants confirmed only through independent implementations.
+- **Map:** with 44 bodies, planets' orbit lines cross the lunar-transfer view at 1.2e9 m (correct, but busy).
 
 ## Surfaces (D073, 2026-10-25)
 
