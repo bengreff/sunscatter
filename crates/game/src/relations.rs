@@ -62,6 +62,39 @@ pub fn orbit_about(world: &World, t: Epoch, anchor: NodeId, r: DVec3, v: DVec3, 
     Some(Orbit { mu, elements: Elements::from_state(r, v, mu), distance: r.length() })
 }
 
+/// Osculating orbit of the state about `body` in that body's equatorial
+/// frame: Z along its spin pole, X along the ICRF X axis (the J2000
+/// equinox) projected onto its equator. Inclination and node are then
+/// about the body's own equator (a lunar orbit's about the Moon's), where
+/// [`orbit_about`]'s are about the ICRF equator (within ~0.2° of Earth's).
+/// A body without a rotation model keeps the ICRF axes.
+pub fn equatorial_orbit(world: &World, t: Epoch, anchor: NodeId, r: DVec3, v: DVec3, body: NodeId) -> Option<Orbit> {
+    let src = world.source(body)?;
+    let k = world.snapshot(t).relative(body, anchor);
+    let (r, v) = (r - k.r, v - k.v);
+    let [x, y, z] = src.physical.as_ref().map_or([DVec3::X, DVec3::Y, DVec3::Z], |p| equator_axes(p.rotation.pole(t)));
+    let to_equator = |a: DVec3| DVec3::new(a.dot(x), a.dot(y), a.dot(z));
+    let (r, v) = (to_equator(r), to_equator(v));
+    Some(Orbit { mu: src.gm, elements: Elements::from_state(r, v, src.gm), distance: r.length() })
+}
+
+/// Axes of the equatorial frame of a body whose pole is `pole` (unit,
+/// inertial): X the ICRF X projected onto the equator (ICRF Y if the pole
+/// lies along X), Z the pole.
+fn equator_axes(pole: DVec3) -> [DVec3; 3] {
+    let project = |a: DVec3| a - pole * a.dot(pole);
+    let x = project(DVec3::X).try_normalize().unwrap_or_else(|| project(DVec3::Y).normalize());
+    [x, pole.cross(x), pole]
+}
+
+/// The angle between two orbits' planes (rad), from states relative to the
+/// same body; `None` if either is radial (no plane).
+pub fn relative_inclination(r1: DVec3, v1: DVec3, r2: DVec3, v2: DVec3) -> Option<f64> {
+    let (h1, h2) = (r1.cross(v1).try_normalize()?, r2.cross(v2).try_normalize()?);
+    // atan2, not acos: well conditioned near 0° and 180°.
+    Some(h1.cross(h2).length().atan2(h1.dot(h2)))
+}
+
 /// A body's osculating orbit about its display [`primary`] (two-body: the
 /// sum of both GMs), or `None` for a body with no primary.
 pub fn body_orbit(eph: &Ephemeris, t: Epoch, node: NodeId) -> Option<(NodeId, Orbit)> {
@@ -277,6 +310,42 @@ mod tests {
         // 100 km above the Moon's surface, expressed relative to Earth.
         let near_moon = w.snapshot(t).relative_r(moon, earth.node) + DVec3::X * 1_837_400.0;
         assert_eq!(nearest_body(&w, t, earth.node, near_moon), Some(moon));
+    }
+
+    #[test]
+    fn equatorial_elements_are_about_the_body_pole() {
+        let w = world();
+        let t = sim::sol::sol_epoch();
+        let moon = w.find("Moon").expect("Moon").clone();
+        let pole = moon.physical.as_ref().expect("physical").rotation.pole(t);
+        // A circular orbit in the Moon's equator, 100 km up.
+        let [x, y, _] = equator_axes(pole);
+        let rad = 1_837_400.0;
+        let speed = (moon.gm / rad).sqrt();
+        let (r, v) = (x * rad, y * speed);
+        let eq = equatorial_orbit(&w, t, moon.node, r, v, moon.node).expect("orbit");
+        assert!(eq.elements.i < 1e-9, "equatorial: {}", eq.elements.i);
+        let icrf = orbit_about(&w, t, moon.node, r, v, moon.node).expect("orbit");
+        assert!(icrf.elements.i > 0.3, "the Moon's equator is tilted to the ICRF's: {}", icrf.elements.i);
+        assert!((eq.elements.a - icrf.elements.a).abs() < 1e-6 * rad, "the shape does not change");
+        // Polar about the Moon.
+        let polar = equatorial_orbit(&w, t, moon.node, r, pole * speed, moon.node).expect("orbit");
+        assert!((polar.elements.i - std::f64::consts::FRAC_PI_2).abs() < 1e-9);
+    }
+
+    #[test]
+    fn relative_inclination_is_the_angle_between_planes() {
+        let (r, v) = (DVec3::X * 7e6, DVec3::Y * 7.5e3);
+        let tilted = DVec3::new(0.0, 0.5f64.sqrt(), 0.5f64.sqrt()) * 7.5e3;
+        // (r2, v2, expected deg)
+        let table = [(r, v, Some(0.0)), (r, tilted, Some(45.0)), (r, -v, Some(180.0)), (r, DVec3::X, None)];
+        for (r2, v2, want) in table {
+            let got = relative_inclination(r, v, r2, v2).map(f64::to_degrees);
+            match (got, want) {
+                (Some(g), Some(w)) => assert!((g - w).abs() < 1e-9, "{g} vs {w}"),
+                _ => assert_eq!(got, want),
+            }
+        }
     }
 
     #[test]

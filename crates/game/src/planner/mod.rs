@@ -194,12 +194,20 @@ pub fn keys(
     mut planner: ResMut<Planner>,
 ) {
     if ctx.allows(crate::commands::Keys::Menus) && keys.just_pressed(KeyCode::KeyN) {
-        planner.open = !planner.open;
         if planner.open {
-            let v = sim.ship();
-            planner.vessel = Some(v.id());
-            planner.draft = draft_from(v.plan(), sim.clock);
+            planner.open = false;
+        } else {
+            planner.open_for(sim.ship(), sim.clock);
         }
+    }
+}
+
+impl Planner {
+    /// Opens the planner on `vessel`'s plan (N, or Orbital ▸ Maneuvers).
+    pub fn open_for(&mut self, vessel: &Vessel, now: Epoch) {
+        self.open = true;
+        self.vessel = Some(vessel.id());
+        self.draft = draft_from(vessel.plan(), now);
     }
 }
 

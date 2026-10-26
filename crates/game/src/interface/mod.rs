@@ -1,15 +1,17 @@
-//! The interface shell: the shared theme, the helper every HUD panel is drawn
-//! with (a movable window whose place is saved), the Esc pause menu, and the
-//! key help overlay. What is laid out where is pure data in [`layout`].
+//! The interface shell: the shared theme, the helper every fixed HUD panel
+//! is drawn with, the task menus, the Esc pause menu, and the key help
+//! overlay. Where everything goes is pure rules in [`layout`] (D080:
+//! designated places, nothing is dragged).
 
 pub mod help;
 pub mod layout;
+pub mod menus;
 pub mod pause;
 pub mod toasts;
 
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
-use layout::{Anchor, InterfaceSettings, PanelId};
+use layout::InterfaceSettings;
 
 /// Panel background, border and text colours: dark, slightly translucent,
 /// one accent (clean sci-fi, function first).
@@ -24,6 +26,8 @@ pub mod theme {
     pub const WARN: Color32 = Color32::from_rgb(255, 120, 100);
     /// Destruction and failures: stronger than a warning.
     pub const ALERT: Color32 = Color32::from_rgb(255, 64, 52);
+    /// Working as it should (a canopy open, safe to deploy).
+    pub const GOOD: Color32 = Color32::from_rgb(120, 205, 145);
 
     pub fn panel_frame() -> Frame {
         Frame::new()
@@ -31,6 +35,11 @@ pub mod theme {
             .stroke(Stroke::new(1.0, BORDER))
             .corner_radius(CornerRadius::same(8))
             .inner_margin(Margin::same(8))
+    }
+
+    /// The menu bar's frame: the panel's, slimmer.
+    pub fn bar_frame() -> Frame {
+        panel_frame().inner_margin(Margin::symmetric(6, 4))
     }
 }
 
@@ -55,69 +64,21 @@ pub fn apply_style(mut contexts: EguiContexts, iface: Res<InterfaceSettings>, mu
     Ok(())
 }
 
-fn align(anchor: Anchor) -> egui::Align2 {
-    match anchor {
-        Anchor::LeftTop => egui::Align2::LEFT_TOP,
-        Anchor::RightTop => egui::Align2::RIGHT_TOP,
-        Anchor::LeftBottom => egui::Align2::LEFT_BOTTOM,
-        Anchor::CenterBottom => egui::Align2::CENTER_BOTTOM,
-    }
-}
-
-/// Draws HUD panel `id` as a movable window without a title bar (drag it by
-/// its background) at its saved place, or its default one; when the player
-/// drags it, the new place is saved. Nothing is drawn if it is hidden.
-pub fn panel<R>(
+/// Draws a HUD panel at its designated place (D080): an egui area with the
+/// panel frame, anchored `offset` from a screen corner or edge (`align`).
+/// It is not dragged, and its area id (`id`) lets the docks keep clear.
+pub fn fixed_panel<R>(
     ctx: &egui::Context,
-    iface: &mut InterfaceSettings,
-    id: PanelId,
+    id: &'static str,
+    align: egui::Align2,
+    offset: [f32; 2],
     add: impl FnOnce(&mut egui::Ui) -> R,
-) -> Option<R> {
-    let saved = iface.panel(id);
-    if !saved.visible {
-        return None;
-    }
-    let screen = ctx.content_rect();
-    let window_id = egui::Id::new(("hud_panel", id, iface.layout_generation));
-    let last_size = ctx.data(|d| d.get_temp::<egui::Vec2>(window_id.with("size")));
-    let mut window =
-        egui::Window::new(id.title()).id(window_id).title_bar(false).resizable(false).frame(theme::panel_frame());
-    window = match saved.pos {
-        Some(p) => {
-            let size = last_size.map_or([0.0, 0.0], |s| [s.x, s.y]);
-            let [x, y] = layout::clamp_to_screen(p, size, [screen.width(), screen.height()]);
-            window.pivot(egui::Align2::LEFT_TOP).default_pos([screen.min.x + x, screen.min.y + y])
-        }
-        None => {
-            let (anchor, [ox, oy]) = id.default_place();
-            let a = align(anchor);
-            let corner = a.pos_in_rect(&screen);
-            let inward = egui::vec2(
-                match a.x() {
-                    egui::Align::Min => ox,
-                    egui::Align::Center => ox,
-                    egui::Align::Max => -ox,
-                },
-                match a.y() {
-                    egui::Align::Min => oy,
-                    egui::Align::Center => oy,
-                    egui::Align::Max => -oy,
-                },
-            );
-            window.pivot(a).default_pos(corner + inward)
-        }
-    };
-    let shown = window.show(ctx, add)?;
-    let rect = shown.response.rect;
-    ctx.data_mut(|d| d.insert_temp(window_id.with("size"), rect.size()));
-    // Saved only while the pointer is down (the player dragging), so egui
-    // keeping windows on a smaller screen does not overwrite the choice.
-    let prev = ctx.data(|d| d.get_temp::<egui::Pos2>(window_id.with("pos")));
-    ctx.data_mut(|d| d.insert_temp(window_id.with("pos"), rect.min));
-    if prev.is_some_and(|p| p != rect.min) && ctx.input(|i| i.pointer.any_down()) {
-        iface.set_pos(id, [rect.min.x - screen.min.x, rect.min.y - screen.min.y]);
-    }
-    shown.inner
+) -> R {
+    egui::Area::new(egui::Id::new(id))
+        .anchor(align, offset)
+        .movable(false)
+        .show(ctx, |ui| theme::panel_frame().show(ui, add).inner)
+        .inner
 }
 
 #[cfg(test)]
@@ -125,18 +86,20 @@ mod tests {
     use super::*;
     use egui::{pos2, vec2, Event, PointerButton, Pos2, RawInput, Rect};
 
-    /// Runs one egui frame drawing the Time panel, with `events`.
-    fn frame(ctx: &egui::Context, iface: &mut InterfaceSettings, events: Vec<Event>) {
+    /// Runs one egui frame drawing the time panel's place, with `events`;
+    /// returns where it is.
+    fn frame(ctx: &egui::Context, events: Vec<Event>) -> Rect {
         let input = RawInput {
             screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1000.0, 800.0))),
             events,
             ..Default::default()
         };
         ctx.begin_pass(input);
-        panel(ctx, iface, PanelId::Time, |ui| {
+        fixed_panel(ctx, layout::TIME_AREA, egui::Align2::LEFT_TOP, [layout::MARGIN; 2], |ui| {
             ui.set_min_size(vec2(120.0, 60.0));
         });
         ctx.end_pass().drop_without_applying_deltas();
+        ctx.memory(|m| m.area_rect(egui::Id::new(layout::TIME_AREA))).expect("drawn")
     }
 
     fn button(pos: Pos2, pressed: bool) -> Event {
@@ -144,25 +107,18 @@ mod tests {
     }
 
     #[test]
-    fn dragging_a_panel_saves_its_place_and_reset_forgets_it() {
+    fn a_fixed_panel_stays_in_its_place_when_dragged() {
         let ctx = egui::Context::default();
-        let mut iface = InterfaceSettings::default();
-        frame(&ctx, &mut iface, vec![]);
-        frame(&ctx, &mut iface, vec![]);
-        assert_eq!(iface.panel(PanelId::Time).pos, None, "not moved yet");
+        frame(&ctx, vec![]);
+        let before = frame(&ctx, vec![]);
+        assert_eq!(before.min, pos2(layout::MARGIN, layout::MARGIN));
         // Grab the panel's background at (40, 40) and drag it by (200, 100).
         let start = pos2(40.0, 40.0);
-        frame(&ctx, &mut iface, vec![Event::PointerMoved(start), button(start, true)]);
+        frame(&ctx, vec![Event::PointerMoved(start), button(start, true)]);
         for k in 1..=10 {
-            let p = start + vec2(20.0, 10.0) * k as f32;
-            frame(&ctx, &mut iface, vec![Event::PointerMoved(p)]);
+            frame(&ctx, vec![Event::PointerMoved(start + vec2(20.0, 10.0) * k as f32)]);
         }
-        let end = start + vec2(200.0, 100.0);
-        frame(&ctx, &mut iface, vec![button(end, false)]);
-        let [x, y] = iface.panel(PanelId::Time).pos.expect("the drag was saved");
-        // Default place is (10, 10) from the top-left corner.
-        assert!((x - 210.0).abs() <= 2.0 && (y - 110.0).abs() <= 2.0, "saved at ({x}, {y})");
-        iface.reset_layout();
-        assert_eq!(iface.panel(PanelId::Time).pos, None);
+        let after = frame(&ctx, vec![button(start + vec2(200.0, 100.0), false)]);
+        assert_eq!(after, before, "designated places: nothing is dragged");
     }
 }

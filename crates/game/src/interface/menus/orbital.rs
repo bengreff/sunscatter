@@ -1,0 +1,233 @@
+//! The Orbital menu (key O, left dock): the orbit in full, the target and
+//! the planned burns. Advanced maneuver tools will come here.
+
+use super::data::{Burn, Elements, FlightData, TargetData};
+use super::{MenuAction, Section, Tone};
+use crate::format::{distance as fmt_dist, duration as fmt_duration, speed as fmt_speed};
+use crate::navball::ApsisReadout;
+
+pub fn sections(d: &FlightData) -> Vec<Section> {
+    vec![summary(d), elements(d), target(&d.target), maneuvers(&d.burns)]
+}
+
+/// Ap and Pe from the predicted trajectory (D076), then the osculating
+/// period, inclination and eccentricity.
+fn summary(d: &FlightData) -> Section {
+    let mut s = Section::summary();
+    if d.landed {
+        s.note(format!("on {}: no orbit", d.body), Tone::Dim);
+        return s;
+    }
+    apsis(&mut s, "APOAPSIS", d.ap.as_ref());
+    apsis(&mut s, "PERIAPSIS", d.pe.as_ref());
+    if let Some(el) = &d.elements {
+        if let Some(p) = el.period {
+            s.row("PERIOD", fmt_duration(p));
+        }
+        s.row("INCLINATION", format!("{:.2}°", el.inclination));
+        s.row("ECCENTRICITY", format!("{:.5}", el.e));
+    }
+    if d.ap.is_none() && d.elements.is_some_and(|e| e.e >= 1.0) {
+        s.note(format!("escaping {}", d.body), Tone::Dim);
+    }
+    s
+}
+
+fn apsis(s: &mut Section, label: &str, a: Option<&ApsisReadout>) {
+    if let Some(a) = a {
+        let value = match &a.other_body {
+            Some(b) => format!("{} · {b}", fmt_dist(a.altitude)),
+            None => fmt_dist(a.altitude),
+        };
+        s.row(label, value);
+        s.row("  IN", fmt_duration(a.in_s));
+    }
+}
+
+fn elements(d: &FlightData) -> Section {
+    let mut s = Section::new("elements", "ELEMENTS · OSCULATING");
+    let Some(Elements { a, lan, argp, true_anomaly, speed, .. }) = d.elements else { return s };
+    s.row("SEMI-MAJOR AXIS", fmt_dist(a));
+    s.row("ASC. NODE", format!("{lan:.2}°"));
+    s.row("ARG. PERIAPSIS", format!("{argp:.2}°"));
+    s.row("TRUE ANOMALY", format!("{true_anomaly:.2}°"));
+    s.row("ORBITAL SPEED", fmt_speed(speed));
+    s.note(format!("two-body, about {}'s equator; Ap and Pe above are the predicted path's", d.body), Tone::Dim);
+    s
+}
+
+/// The target picker (always), then what is known about the target.
+fn target(t: &TargetData) -> Section {
+    let title = t.info.as_ref().map_or("TARGET".to_string(), |i| format!("TARGET · {}", i.name));
+    let mut s = Section::new("target", title);
+    let current = t.choices.iter().find(|c| c.1 == t.current).map_or("none".to_string(), |c| c.0.clone());
+    let options = t.choices.iter().map(|(name, id)| (name.clone(), *id == t.current, MenuAction::SetTarget(*id)));
+    s.items.push(super::Item::Choice { label: "TARGET".into(), current, options: options.collect() });
+    let Some(i) = &t.info else { return s };
+    s.row("DISTANCE", fmt_dist(i.distance));
+    s.row("REL. SPEED", fmt_speed(i.rel_speed));
+    if let Some(ca) = &i.approach {
+        s.row(if ca.over_body { "PASS" } else { "CLOSEST" }, fmt_dist(ca.distance));
+        s.row("  IN", fmt_duration(ca.in_s));
+        s.row("  AT", fmt_speed(ca.speed));
+    }
+    if let Some(x) = i.rel_inclination {
+        s.row("REL. INCLINATION", format!("{x:.2}°"));
+    }
+    s
+}
+
+/// Each planned burn, and the planner (N).
+fn maneuvers(burns: &[Burn]) -> Section {
+    let title = match burns.len() {
+        0 => "MANEUVERS".to_string(),
+        1 => "MANEUVERS · 1 burn".to_string(),
+        n => format!("MANEUVERS · {n} burns"),
+    };
+    let mut s = Section::new("maneuvers", title);
+    if burns.is_empty() {
+        s.note("no burns planned", Tone::Dim);
+    }
+    for (k, b) in burns.iter().enumerate() {
+        let dv = b.dv.map_or("fixed time".to_string(), |dv| format!("Δv {dv:.1} m/s"));
+        s.row(format!("BURN {}", k + 1), dv);
+        s.toned("  IGNITION IN", fmt_duration(b.in_s), if b.in_s < 60.0 { Tone::Warn } else { Tone::Normal });
+        s.row("  DURATION", fmt_duration(b.duration));
+    }
+    s.button("Open the burn planner  (N)", MenuAction::OpenPlanner);
+    s
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::data::{Approach, TargetInfo};
+    use super::super::{find, Item};
+    use super::*;
+    use crate::navball::NavTarget;
+
+    fn orbit() -> FlightData {
+        let ap = ApsisReadout { altitude: 301_200.0, in_s: 725.0, other_body: None };
+        let pe = ApsisReadout { altitude: 280_000.0, in_s: 3_490.0, other_body: None };
+        FlightData {
+            body: "Earth".into(),
+            ap: Some(ap),
+            pe: Some(pe),
+            elements: Some(Elements {
+                a: 6_668_000.0,
+                e: 0.0016,
+                inclination: 28.61,
+                lan: 12.3,
+                argp: 45.0,
+                true_anomaly: 190.0,
+                period: Some(5_420.0),
+                speed: 7_730.0,
+            }),
+            ..FlightData::default()
+        }
+    }
+
+    #[test]
+    fn the_summary_reads_the_apsides_and_the_osculating_shape() {
+        let s = sections(&orbit());
+        let summary = find(&s, "summary").unwrap();
+        assert_eq!(
+            summary.rows(),
+            [
+                ("APOAPSIS", "301.2 km"),
+                ("  IN", "12m 05s"),
+                ("PERIAPSIS", "280.0 km"),
+                ("  IN", "58m 10s"),
+                ("PERIOD", "1h 30m"),
+                ("INCLINATION", "28.61°"),
+                ("ECCENTRICITY", "0.00160")
+            ]
+        );
+        let el = find(&s, "elements").unwrap();
+        assert!(el.title.contains("OSCULATING"), "labelled so");
+        assert_eq!(el.value("SEMI-MAJOR AXIS"), Some("6668.0 km"));
+    }
+
+    #[test]
+    fn on_the_ground_there_is_no_orbit() {
+        let d = FlightData { landed: true, ..orbit() };
+        let s = sections(&d);
+        assert_eq!(find(&s, "summary").unwrap().items, [Item::Note("on Earth: no orbit".into(), Tone::Dim)]);
+    }
+
+    #[test]
+    fn an_escape_has_no_apoapsis_and_says_so() {
+        let mut d = orbit();
+        d.ap = None;
+        d.elements = d.elements.map(|e| Elements { e: 1.2, period: None, ..e });
+        let s = sections(&d);
+        let summary = find(&s, "summary").unwrap();
+        assert_eq!(summary.value("APOAPSIS"), None);
+        assert_eq!(summary.value("PERIOD"), None);
+        assert!(summary.items.contains(&Item::Note("escaping Earth".into(), Tone::Dim)));
+        // An apsis about another body names it.
+        d.pe = Some(ApsisReadout { altitude: 110_000.0, in_s: 2.6e5, other_body: Some("Moon".into()) });
+        assert_eq!(find(&sections(&d), "summary").unwrap().value("PERIAPSIS"), Some("110.0 km · Moon"));
+    }
+
+    #[test]
+    fn the_target_section_has_the_picker_and_with_a_target_its_approach() {
+        let moon = NavTarget::Body(sim::frame::NodeId(10));
+        let choices = vec![("none".to_string(), None), ("Moon".to_string(), Some(moon))];
+        // (target, rows)
+        let none = TargetData { current: None, choices: choices.clone(), info: None };
+        let s = target(&none);
+        assert_eq!(s.title, "TARGET");
+        assert!(s.rows().is_empty(), "no target: only the picker");
+        let Some(Item::Choice { current, options, .. }) = s.items.first() else { panic!("the picker comes first") };
+        assert_eq!(current, "none");
+        assert_eq!(options.iter().filter(|o| o.1).count(), 1, "one selected");
+        assert_eq!(options[1].2, MenuAction::SetTarget(Some(moon)));
+        let info = TargetInfo {
+            name: "Moon".into(),
+            distance: 3.844e8,
+            rel_speed: 1_020.0,
+            approach: Some(Approach { distance: 110_000.0, in_s: 2.6e5, speed: 2_300.0, over_body: true }),
+            rel_inclination: Some(5.14),
+        };
+        let with = TargetData { current: Some(moon), choices, info: Some(info) };
+        let s = target(&with);
+        assert_eq!(s.title, "TARGET · Moon");
+        assert_eq!(
+            s.rows(),
+            [
+                ("DISTANCE", "384.40 Mm"),
+                ("REL. SPEED", "1020.0 m/s"),
+                ("PASS", "110.0 km"),
+                ("  IN", "3d 00h"),
+                ("  AT", "2300.0 m/s"),
+                ("REL. INCLINATION", "5.14°")
+            ]
+        );
+        let mut vessel = with.info.clone().unwrap();
+        vessel.approach = vessel.approach.map(|a| Approach { over_body: false, ..a });
+        vessel.rel_inclination = None;
+        let s = target(&TargetData { info: Some(vessel), ..with });
+        assert!(s.value("CLOSEST").is_some() && s.value("PASS").is_none() && s.value("REL. INCLINATION").is_none());
+    }
+
+    #[test]
+    fn maneuvers_list_each_burn_and_open_the_planner() {
+        let s = maneuvers(&[]);
+        assert_eq!(s.title, "MANEUVERS");
+        assert!(s.items.contains(&Item::Note("no burns planned".into(), Tone::Dim)));
+        let burns =
+            [Burn { dv: Some(3_150.0), in_s: 1_200.0, duration: 330.0 }, Burn { dv: None, in_s: 30.0, duration: 12.0 }];
+        let s = maneuvers(&burns);
+        assert_eq!(s.title, "MANEUVERS · 2 burns");
+        assert_eq!(s.value("BURN 1"), Some("Δv 3150.0 m/s"));
+        assert_eq!(s.value("BURN 2"), Some("fixed time"));
+        let tones: Vec<_> = (s.items.iter())
+            .filter_map(|i| match i {
+                Item::Row(r) if r.label == "  IGNITION IN" => Some(r.tone),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(tones, [Tone::Normal, Tone::Warn], "a burn within a minute warns");
+        assert!(matches!(s.items.last(), Some(Item::Button { action: MenuAction::OpenPlanner, .. })));
+    }
+}

@@ -182,6 +182,8 @@ pub enum Keys {
     Menus,
     /// Debug keys (F2).
     Debug,
+    /// The flight view's task menus (O, L, U, G): also while paused.
+    Hud,
 }
 
 impl InputContext {
@@ -205,6 +207,7 @@ impl InputContext {
             Keys::Flight | Keys::Debug => self == C::Flight,
             Keys::Warp => matches!(self, C::Flight | C::Station),
             Keys::Menus => self != C::TextEntry,
+            Keys::Hud => matches!(self, C::Flight | C::Paused),
         }
     }
 }
@@ -246,18 +249,19 @@ mod tests {
     #[test]
     fn keys_by_context() {
         use InputContext as C;
-        // (context, flight, warp, menus, debug)
+        // (context, flight, warp, menus, debug, hud)
         let table = [
-            (C::Flight, true, true, true, true),
-            (C::Station, false, true, true, false),
-            (C::Paused, false, false, true, false),
-            (C::TextEntry, false, false, false, false),
+            (C::Flight, true, true, true, true, true),
+            (C::Station, false, true, true, false, false),
+            (C::Paused, false, false, true, false, true),
+            (C::TextEntry, false, false, false, false, false),
         ];
-        for (c, flight, warp, menus, debug) in table {
+        for (c, flight, warp, menus, debug, hud) in table {
             assert_eq!(c.allows(Keys::Flight), flight, "{c:?} flight");
             assert_eq!(c.allows(Keys::Warp), warp, "{c:?} warp");
             assert_eq!(c.allows(Keys::Menus), menus, "{c:?} menus");
             assert_eq!(c.allows(Keys::Debug), debug, "{c:?} debug");
+            assert_eq!(c.allows(Keys::Hud), hud, "{c:?} hud");
         }
     }
 }

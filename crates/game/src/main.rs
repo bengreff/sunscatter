@@ -73,7 +73,7 @@ fn main() {
         .add_plugins(GameState)
         // After the settings defaults: replaces them with the saved settings.
         .add_plugins(persist::PersistPlugin)
-        .add_plugins(navball::NavballPlugin)
+        .add_plugins((navball::NavballPlugin, interface::menus::view::MenusPlugin))
         .configure_sets(Update, (Stage::Input, Stage::Simulate, Stage::Camera, Stage::Scene).chain())
         .add_systems(Startup, (scene::setup, terrain::setup, sky::setup_stars, camera::setup).chain())
         .add_systems(
@@ -183,6 +183,7 @@ impl Plugin for GameState {
         app.insert_resource(state::SimState::new())
             .init_resource::<state::Prediction>()
             .init_resource::<landing::LandingPrediction>()
+            .init_resource::<landing::ImpactMarker>()
             .init_resource::<state::SimPause>()
             .init_resource::<camera::CameraRig>()
             .init_resource::<hud::UiState>()

@@ -13,6 +13,8 @@ mod ball;
 mod draw;
 pub mod rules;
 
+pub use draw::AREA;
+
 use crate::state::SimState;
 use crate::tracking::Tracked;
 use crate::trajectory::apsides::Apsides;
@@ -86,10 +88,7 @@ pub struct NavState {
     pub altitude: (&'static str, f64),
     pub vertical_speed: f64,
     /// Angle of attack and sideslip (deg), in an atmosphere only.
-    // Read by the Landing/Reentry menu (the next commit).
-    #[allow(dead_code)]
     pub aoa_sideslip: Option<(f64, f64)>,
-    #[allow(dead_code)]
     pub g_load: f64,
     /// The next apsides (D076), never osculating.
     pub ap: Option<ApsisReadout>,
@@ -103,7 +102,7 @@ pub struct NavState {
 }
 
 /// A target's name, position and velocity relative to `anchor` at `t`.
-fn target_state(
+pub(crate) fn target_state(
     sim: &SimState,
     tracked: &Tracked,
     target: NavTarget,
@@ -247,6 +246,15 @@ pub fn update(sim: Res<SimState>, tracked: Res<Tracked>, aps: Res<Apsides>, mut 
 }
 
 impl Navball {
+    /// Picks the target (Orbital ▸ Target); without one, target mode falls
+    /// back to surface.
+    pub fn set_target(&mut self, t: Option<NavTarget>) {
+        self.target = t;
+        if t.is_none() && self.mode == Mode::Target {
+            self.mode = Mode::Surface;
+        }
+    }
+
     /// The readouts to show: `state` at most every [`READOUT_PERIOD`].
     fn readouts(&mut self, now: f64, state: &NavState) -> &NavState {
         let stale = self.shown.as_ref().is_none_or(|(t, s)| now - t >= READOUT_PERIOD || s.mode != state.mode);

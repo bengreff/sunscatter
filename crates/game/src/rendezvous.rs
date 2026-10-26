@@ -2,7 +2,7 @@
 //! active vessel and the navball's target, a vessel (both stored
 //! trajectories) or a body (its ephemeris: the pass over the Moon after a
 //! transfer burn), from `sim::approach`, refreshed twice a second of real
-//! time. Shown on the map (a marker on each line) and in the HUD.
+//! time. Shown on the map (a marker on each line) and in Orbital ▸ Target.
 
 use crate::camera::CameraRig;
 use crate::format;
@@ -113,7 +113,7 @@ pub fn draw(
 
 /// The distance shown for an approach: to a vessel, centre to centre; over
 /// a body, the height above its equatorial radius.
-fn pass_distance(sim: &SimState, target: Option<NavTarget>, distance: f64) -> f64 {
+pub(crate) fn pass_distance(sim: &SimState, target: Option<NavTarget>, distance: f64) -> f64 {
     match target {
         Some(NavTarget::Body(node)) => {
             let radius = sim.world.source(node).and_then(|s| s.physical.as_ref()).map_or(0.0, |p| p.radius_eq);
@@ -121,18 +121,6 @@ fn pass_distance(sim: &SimState, target: Option<NavTarget>, distance: f64) -> f6
         }
         _ => distance,
     }
-}
-
-/// One line for the HUD: the nearest approach to the target.
-pub fn summary(rv: &Rendezvous, sim: &SimState) -> Option<String> {
-    let ca = rv.approaches.first()?;
-    let over = if matches!(rv.target, Some(NavTarget::Body(_))) { "pass" } else { "closest" };
-    Some(format!(
-        "{over} {} in {} at {}",
-        format::distance(pass_distance(sim, rv.target, ca.distance)),
-        format::duration(ca.t.seconds_since(sim.clock)),
-        format::speed(ca.speed)
-    ))
 }
 
 #[cfg(test)]
@@ -161,13 +149,11 @@ mod tests {
         app.add_systems(Update, update);
         app.update();
         let rv = app.world().resource::<Rendezvous>();
-        let sim = app.world().resource::<SimState>();
         let ca = rv.approaches.first().expect("an approach");
         // The test ships' orbits differ in altitude, inclination and node:
         // the nearest pass is somewhere between touching and opposite sides.
         assert!(ca.distance > 1.0 && ca.distance < 2.0 * 6.9e6, "{}", ca.distance);
         assert!(rv.approaches.windows(2).all(|w| w[0].distance <= w[1].distance), "nearest first");
-        assert!(summary(rv, sim).unwrap().starts_with("closest"));
     }
 
     #[test]
@@ -195,6 +181,5 @@ mod tests {
         assert!(ca.distance > 3.0e8 && ca.distance < 4.2e8, "{}", ca.distance);
         let radius = sim.world.source(moon).unwrap().physical.as_ref().unwrap().radius_eq;
         assert_eq!(pass_distance(sim, rv.target, ca.distance), ca.distance - radius);
-        assert!(summary(rv, sim).unwrap().starts_with("pass"));
     }
 }

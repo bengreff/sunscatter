@@ -3,7 +3,8 @@
 //! everything is saved in `settings.ron`, and each tab can be reset.
 
 use crate::bench::{self, Bench};
-use crate::interface::layout::{self as layout, InterfaceSettings, PanelId};
+use crate::interface::layout::{self as layout, InterfaceSettings};
+use crate::interface::menus::MenuId;
 use crate::persist::ControlsSettings;
 use crate::settings::{AtmosphereQuality, GraphicsSettings, MsaaLevel, Tier};
 use bevy::prelude::*;
@@ -221,13 +222,17 @@ fn controls_tab(ui: &mut egui::Ui, c: &mut ControlsSettings) {
 fn interface_tab(ui: &mut egui::Ui, s: &mut InterfaceSettings) {
     ui.add(egui::Slider::new(&mut s.ui_scale, layout::UI_SCALE_RANGE).text("UI scale"));
     ui.add(egui::Slider::new(&mut s.navball_size, layout::NAVBALL_SIZE_RANGE).text("navball size (px)"));
-    ui.checkbox(&mut s.show_fps, "Frame rate in the Time panel");
+    ui.checkbox(&mut s.show_fps, "Frame rate in the time panel");
     ui.separator();
-    ui.label("Panels (drag any panel by its background to move it):");
-    for id in PanelId::ALL {
-        let mut visible = s.panel(id).visible;
-        if ui.checkbox(&mut visible, id.title()).changed() {
-            s.set_visible(id, visible);
+    ui.label("Menus (the menu bar, or their keys; places are fixed):");
+    for m in MenuId::ALL {
+        let mut open = s.menus.is_open(m);
+        let side = match m.dock() {
+            crate::interface::menus::Dock::Left => "left",
+            crate::interface::menus::Dock::Right => "right",
+        };
+        if ui.checkbox(&mut open, format!("{} ({}, {side} dock)", m.title(), m.key_label())).changed() {
+            s.menus.set_open(m, open);
         }
     }
     ui.separator();
@@ -246,12 +251,11 @@ fn interface_tab(ui: &mut egui::Ui, s: &mut InterfaceSettings) {
     }
     ui.separator();
     ui.horizontal(|ui| {
-        if ui.button("Reset layout").clicked() {
-            s.reset_layout();
+        if ui.button("Collapse all sections").clicked() {
+            s.menus.collapse_all();
         }
         if ui.button("Reset to defaults").clicked() {
-            let generation = s.layout_generation.wrapping_add(1);
-            *s = InterfaceSettings { layout_generation: generation, ..InterfaceSettings::default() };
+            *s = InterfaceSettings::default();
         }
     });
 }

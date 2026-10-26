@@ -1,14 +1,15 @@
-//! Landing aids (playtest-1 §C): the landing panel and the impact marker,
-//! read from `sim::landing` (the vessel's own force model integrated to
-//! the ground with the attitude its controls will hold, the current
-//! throttle and chute).
+//! Landing aids (playtest-1 §C): the landing prediction and the impact
+//! marker, read from `sim::landing` (the vessel's own force model
+//! integrated to the ground with the attitude its controls will hold, the
+//! current throttle and chute). Its numbers are shown in the
+//! Landing/Reentry menu (`interface::menus`), and the marker only while
+//! that menu is open (D080).
 //!
 //! The prediction runs on a background task a few times a second and is
 //! swapped in when complete. The marker is the body-fixed impact point
 //! carried by the body's rotation to the current clock.
 
 use crate::format;
-use crate::interface::theme;
 use crate::map;
 use crate::state::SimState;
 use bevy::prelude::*;
@@ -21,10 +22,6 @@ use sim::time::Epoch;
 use sim::vessel::{Controls, HoldMode, Phase, SpeedReference, Vessel, VesselId};
 use sim::world::World;
 
-/// Below this radar altitude the landing panel shows (m).
-pub const PANEL_BELOW: f64 = 20_000.0;
-/// The panel also shows when the impact is this close (s).
-pub const PANEL_WITHIN: f64 = 900.0;
 /// Braking solutions are computed for impacts this close (s).
 pub const BRAKING_WITHIN: f64 = 1_800.0;
 /// The braking solution stops the lowest contact point this high (m).
@@ -119,7 +116,22 @@ pub fn burn_in(seconds: f64) -> String {
     }
 }
 
-/// The landing panel and the impact marker.
+/// Whether the impact marker is drawn (D080): only while the
+/// Landing/Reentry menu is open, in the flight view, for a vessel still
+/// flying towards a predicted impact.
+pub fn impact_marker_shown(landing_open: bool, station_open: bool, grounded: bool, impact_ahead: bool) -> bool {
+    landing_open && !station_open && !grounded && impact_ahead
+}
+
+/// Whether the impact marker was drawn this frame (the demo checks it).
+#[derive(Resource, Default)]
+pub struct ImpactMarker {
+    pub drawn: bool,
+}
+
+/// The impact marker: the predicted impact point where that ground is now,
+/// in any view, while the Landing/Reentry menu is open.
+#[allow(clippy::too_many_arguments)]
 pub fn draw(
     mut contexts: EguiContexts,
     sim: Res<SimState>,
@@ -127,78 +139,31 @@ pub fn draw(
     rig: Res<crate::camera::CameraRig>,
     station: Res<crate::tracking::TrackingStation>,
     pred: Res<LandingPrediction>,
+    iface: Res<crate::interface::layout::InterfaceSettings>,
+    mut marker: ResMut<ImpactMarker>,
 ) -> Result {
-    if station.open {
-        return Ok(());
-    }
+    marker.drawn = false;
     let ship = sim.ship();
-    if matches!(ship.phase, Phase::Landed { .. } | Phase::Crashed { .. }) {
-        return Ok(());
-    }
+    let grounded = matches!(ship.phase, Phase::Landed { .. } | Phase::Crashed { .. });
     let latest = pred.latest.filter(|l| l.vessel == ship.id());
     let hit = latest.and_then(|l| l.impact).filter(|h| from_now(h.t, sim.clock) > 0.0);
+    let open = iface.menus.is_open(crate::interface::menus::MenuId::Landing);
+    let Some(hit) = hit.filter(|_| impact_marker_shown(open, station.open, grounded, true)) else { return Ok(()) };
     let ctx = contexts.ctx_mut()?;
-    // The impact point, where that ground is now, in any view.
-    if let (Some(hit), Some(view)) = (hit, map::view(&cam)) {
-        let c = hit.ground_at(&sim.world, sim.clock, rig.anchor) - rig.cam_pos;
-        if let Some(s) = view.project(c) {
-            let painter = ctx.layer_painter(egui::LayerId::background());
-            let red = egui::Color32::from_rgb(255, 80, 60);
-            painter.circle_stroke(egui::pos2(s.x, s.y), 7.0, egui::Stroke::new(2.0, red));
-            painter.text(
-                egui::pos2(s.x + 10.0, s.y),
-                egui::Align2::LEFT_CENTER,
-                format!("impact in {}", format::duration(from_now(hit.t, sim.clock))),
-                egui::FontId::monospace(12.0),
-                red,
-            );
-        }
-    }
-    let (anchor, r, v) = ship.state_at(&sim.world, sim.clock);
-    let snap = sim.world.snapshot(sim.clock);
-    let Some(body) = landing::nearest_surface(&sim.world, &snap, anchor, r) else { return Ok(()) };
-    let m = landing::surface_motion(&sim.world, &snap, anchor, body, r, v);
-    let radar = m.height - ship.contact_height();
-    let near_impact = hit.is_some_and(|h| from_now(h.t, sim.clock) < PANEL_WITHIN);
-    if radar > PANEL_BELOW && !near_impact {
-        return Ok(());
-    }
-    let twr = landing::twr(&ship.craft, ship.propellant(), m.pressure, m.gravity);
-    let braking = latest.and_then(|l| l.braking);
-    egui::Window::new("Landing").anchor(egui::Align2::RIGHT_BOTTOM, [-12.0, -12.0]).resizable(false).show(ctx, |ui| {
-        let dim = |t: &str| egui::RichText::new(t).monospace().small().color(theme::DIM);
-        egui::Grid::new("landing_grid").num_columns(2).show(ui, |ui| {
-            let mut row = |label: &str, value: String, warn: bool| {
-                ui.label(dim(label));
-                ui.label(egui::RichText::new(value).monospace().color(if warn { theme::WARN } else { theme::TEXT }));
-                ui.end_row();
-            };
-            row("RADAR ALT", format::distance(radar), false);
-            row("V/S", format!("{:+.1} m/s", m.v_vertical), false);
-            row("H SPEED", format!("{:.1} m/s", m.v_horizontal), false);
-            row("TWR", format!("{twr:.2}"), twr < 1.0);
-            match hit {
-                Some(h) => {
-                    row("IMPACT IN", format::duration(from_now(h.t, sim.clock)), false);
-                    row("IMPACT V/S", format!("{:+.1} m/s", h.v_vertical), false);
-                    row("IMPACT H", format!("{:.1} m/s", h.v_horizontal), false);
-                    row("AT", format!("{:+.3}° {:+.3}°", h.lat.to_degrees(), h.lon.to_degrees()), false);
-                }
-                None => row("IMPACT", "none".into(), false),
-            }
-            match (hit, braking) {
-                (_, Some(b)) => {
-                    let t = from_now(b.t_ignite, sim.clock);
-                    row("BURN IN", burn_in(t), t < 10.0);
-                    row("IGNITE AT", format::distance(b.ignite_height), false);
-                }
-                (Some(h), None) if from_now(h.t, sim.clock) < BRAKING_WITHIN => {
-                    row("BRAKE", "cannot stop".into(), true);
-                }
-                _ => {}
-            }
-        });
-    });
+    let Some(view) = map::view(&cam) else { return Ok(()) };
+    let c = hit.ground_at(&sim.world, sim.clock, rig.anchor) - rig.cam_pos;
+    let Some(s) = view.project(c) else { return Ok(()) };
+    let painter = ctx.layer_painter(egui::LayerId::background());
+    let red = egui::Color32::from_rgb(255, 80, 60);
+    painter.circle_stroke(egui::pos2(s.x, s.y), 7.0, egui::Stroke::new(2.0, red));
+    painter.text(
+        egui::pos2(s.x + 10.0, s.y),
+        egui::Align2::LEFT_CENTER,
+        format!("impact in {}", format::duration(from_now(hit.t, sim.clock))),
+        egui::FontId::monospace(12.0),
+        red,
+    );
+    marker.drawn = true;
     Ok(())
 }
 
@@ -220,6 +185,26 @@ mod tests {
         ];
         for (controls, want) in cases {
             assert_eq!(assumed_attitude(&controls, q), want, "{controls:?}");
+        }
+    }
+
+    #[test]
+    fn the_impact_marker_shows_only_with_the_landing_menu_open() {
+        // (landing open, station open, grounded, impact ahead, shown)
+        let table = [
+            (true, false, false, true, true),
+            (false, false, false, true, false),
+            (true, true, false, true, false),
+            (true, false, true, true, false),
+            (true, false, false, false, false),
+            (false, true, true, false, false),
+        ];
+        for (open, station, grounded, ahead, want) in table {
+            assert_eq!(
+                impact_marker_shown(open, station, grounded, ahead),
+                want,
+                "{open} {station} {grounded} {ahead}"
+            );
         }
     }
 

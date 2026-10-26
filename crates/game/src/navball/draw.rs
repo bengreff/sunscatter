@@ -8,7 +8,7 @@ use super::rules::{self, Mode};
 use super::{ApsisReadout, NavState, Navball};
 use crate::commands::GameCommand;
 use crate::format::{distance as fmt_dist, duration as fmt_duration, speed as fmt_speed};
-use crate::interface::layout::{InterfaceSettings, PanelId};
+use crate::interface::layout::InterfaceSettings;
 use crate::interface::theme;
 use crate::state::{SimState, HOLD_KEYS};
 use crate::tracking::TrackingStation;
@@ -33,7 +33,6 @@ enum Action {
     ToggleLock,
     CycleMode,
     Command(GameCommand),
-    SetTarget(Option<super::NavTarget>),
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -42,9 +41,8 @@ pub fn draw(
     time: Res<Time>,
     sim: Res<SimState>,
     station: Res<TrackingStation>,
-    mut iface: ResMut<InterfaceSettings>,
+    iface: Res<InterfaceSettings>,
     mut nav: ResMut<Navball>,
-    tracked: Res<crate::tracking::Tracked>,
     mut commands: MessageWriter<GameCommand>,
 ) -> Result {
     if station.open {
@@ -56,46 +54,32 @@ pub fn draw(
     let locked = nav.locked;
     let ball = iface.navball_size;
     let mut actions = Vec::new();
-    egui::Area::new(egui::Id::new(AREA)).anchor(Align2::CENTER_BOTTOM, [0.0, -8.0]).show(ctx, |ui| {
-        theme::panel_frame().show(ui, |ui| {
-            ui.spacing_mut().item_spacing = vec2(4.0, 2.0);
-            let has_target = shown.target.is_some();
-            centred_row(ui, egui::Id::new("nav_switch"), |ui| switch(ui, shown.mode, locked, has_target, &mut actions));
-            ui.vertical_centered(|ui| {
-                ui.label(RichText::new(fmt_speed(shown.speed)).monospace().size(20.0).color(theme::TEXT));
-                let about = shown.target.as_ref().filter(|_| shown.mode == Mode::Target).map_or(&shown.body, |t| &t.0);
-                ui.label(
-                    RichText::new(format!("{} · {about}", shown.mode.label())).monospace().small().color(theme::DIM),
-                );
-            });
-            ui.add_space(2.0);
-            ui.horizontal_top(|ui| {
-                fixed_column(ui, SIDE_PX, ball, |ui| readouts(ui, &shown));
-                let (rect, response) = ui.allocate_exact_size(vec2(ball, ball), egui::Sense::click());
-                super::ball::paint_ball(ui.painter(), rect, &state);
-                if response.on_hover_text("Click to change the speed mode").clicked() {
-                    actions.push(Action::CycleMode);
-                }
-                fixed_column(ui, SIDE_PX, ball, |ui| controls(ui, &sim, &shown, ball, &mut actions));
-            });
-            let (line, alert) = crate::hud::state_line(&sim);
-            ui.vertical_centered(|ui| {
-                ui.label(RichText::new(line).monospace().color(if alert { theme::ALERT } else { theme::ACCENT }));
-            });
+    crate::interface::fixed_panel(ctx, AREA, Align2::CENTER_BOTTOM, [0.0, -8.0], |ui| {
+        ui.spacing_mut().item_spacing = vec2(4.0, 2.0);
+        let has_target = shown.target.is_some();
+        centred_row(ui, egui::Id::new("nav_switch"), |ui| switch(ui, shown.mode, locked, has_target, &mut actions));
+        ui.vertical_centered(|ui| {
+            ui.label(RichText::new(fmt_speed(shown.speed)).monospace().size(20.0).color(theme::TEXT));
+            let about = shown.target.as_ref().filter(|_| shown.mode == Mode::Target).map_or(&shown.body, |t| &t.0);
+            ui.label(RichText::new(format!("{} · {about}", shown.mode.label())).monospace().small().color(theme::DIM));
         });
-    });
-    let current = nav.target;
-    crate::interface::panel(ctx, &mut iface, PanelId::Target, |ui| {
-        target_panel(ui, &shown, &sim, &tracked, current, &mut actions);
+        ui.add_space(2.0);
+        ui.horizontal_top(|ui| {
+            fixed_column(ui, SIDE_PX, ball, |ui| readouts(ui, &shown));
+            let (rect, response) = ui.allocate_exact_size(vec2(ball, ball), egui::Sense::click());
+            super::ball::paint_ball(ui.painter(), rect, &state);
+            if response.on_hover_text("Click to change the speed mode").clicked() {
+                actions.push(Action::CycleMode);
+            }
+            fixed_column(ui, SIDE_PX, ball, |ui| controls(ui, &sim, &shown, ball, &mut actions));
+        });
+        let (line, alert) = crate::hud::state_line(&sim);
+        ui.vertical_centered(|ui| {
+            ui.label(RichText::new(line).monospace().color(if alert { theme::ALERT } else { theme::ACCENT }));
+        });
     });
     for action in actions {
         match action {
-            Action::SetTarget(t) => {
-                nav.target = t;
-                if t.is_none() && nav.mode == Mode::Target {
-                    nav.mode = Mode::Surface;
-                }
-            }
             Action::SetMode(mode) => {
                 nav.mode = mode;
                 // Choosing surface/orbit by hand holds it; target always holds.
@@ -279,36 +263,4 @@ fn throttle_bar(ui: &mut egui::Ui, throttle: f64, running: bool, height: f32) ->
     let response = response.on_hover_text("Throttle: click or drag; Shift / Ctrl (Alt: fine), Z full, X cut");
     let y = response.interact_pointer_pos().map(|p| p.y);
     rules::throttle_from_bar(response.is_pointer_button_down_on(), y, rect.top(), rect.bottom())
-}
-
-/// The Target panel: the target picker and, with a target, its distance.
-fn target_panel(
-    ui: &mut egui::Ui,
-    s: &NavState,
-    sim: &SimState,
-    tracked: &crate::tracking::Tracked,
-    current: Option<super::NavTarget>,
-    actions: &mut Vec<Action>,
-) {
-    use super::NavTarget;
-    ui.set_width(SIDE_PX + 30.0);
-    ui.label(RichText::new("TARGET").monospace().small().color(theme::DIM));
-    let name = s.target.as_ref().map_or("none", |(n, _)| n.as_str());
-    egui::ComboBox::from_id_salt("nav_target").selected_text(name).width(SIDE_PX + 20.0).show_ui(ui, |ui| {
-        let mut pick = |ui: &mut egui::Ui, t: Option<NavTarget>, label: String| {
-            if ui.selectable_label(current == t, label).clicked() {
-                actions.push(Action::SetTarget(t));
-            }
-        };
-        pick(ui, None, "none".into());
-        for src in sim.world.surfaces() {
-            pick(ui, Some(NavTarget::Body(src.node)), src.name.clone());
-        }
-        for id in sim.fleet.iter().map(|v| v.id()).filter(|&id| id != sim.ship().id()) {
-            pick(ui, Some(NavTarget::Vessel(id)), tracked.name(id));
-        }
-    });
-    if let Some((_, d)) = &s.target {
-        ui.label(RichText::new(format!("DIST {}", fmt_dist(*d))).monospace());
-    }
 }

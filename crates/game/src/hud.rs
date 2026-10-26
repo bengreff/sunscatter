@@ -1,10 +1,11 @@
-//! HUD panels (egui): Time (date, warp arrows), Flight (readouts), Debug,
-//! drawn as movable windows through [`crate::interface::panel`]; body
-//! picking and the double-click body menu.
+//! The time panel (date, warp arrows, the DEBUG badge), the flight state
+//! line's rule, the craft readouts' formulas the menus use, body picking
+//! and the double-click body menu. The navball cluster is in
+//! [`crate::navball`], the task menus in [`crate::interface::menus`].
 
 use crate::camera::{self, CameraRig, MainCamera};
-use crate::interface::layout::{InterfaceSettings, PanelId};
-use crate::interface::{panel, theme};
+use crate::interface::layout::{self, InterfaceSettings};
+use crate::interface::{fixed_panel, theme};
 use crate::state::{SimState, MAX_PHYSICS_WARP, WARP_LEVELS};
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
@@ -159,18 +160,15 @@ fn warp_label(x: f64) -> String {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
+/// The time panel, top left (fixed, D080): the date, the warp arrows and
+/// status, the frame rate, and a DEBUG badge in debug mode (D064).
 pub fn draw(
     mut contexts: EguiContexts,
     fps: Res<FpsMeter>,
     sim: Res<SimState>,
-    comms: Res<crate::comms::Comms>,
-    rv: Res<crate::rendezvous::Rendezvous>,
     mut commands: MessageWriter<crate::commands::GameCommand>,
-    ui: Res<UiState>,
-    mut iface: ResMut<InterfaceSettings>,
+    iface: Res<InterfaceSettings>,
     station: Res<crate::tracking::TrackingStation>,
-    aps: Res<crate::trajectory::apsides::Apsides>,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
     let (y, mo, d, h, mi, s) = sim.clock.to_calendar();
@@ -182,8 +180,15 @@ pub fn draw(
     }
     let show_fps = iface.show_fps;
     let mut set_warp = None;
-    panel(ctx, &mut iface, PanelId::Time, |ui_| {
-        ui_.monospace(format!("{y}-{mo:02}-{d:02} {h:02}:{mi:02}:{s:04.1} TDB"));
+    let margin = [layout::MARGIN, layout::MARGIN];
+    fixed_panel(ctx, layout::TIME_AREA, egui::Align2::LEFT_TOP, margin, |ui_| {
+        ui_.horizontal(|ui_| {
+            ui_.monospace(format!("{y}-{mo:02}-{d:02} {h:02}:{mi:02}:{s:04.1} TDB"));
+            if sim.ship().debug() {
+                let badge = egui::RichText::new("DEBUG").monospace().small().strong().color(theme::WARN);
+                ui_.label(badge).on_hover_text("Debug mode (D064): infinite propellant, no overheating, unbreakable");
+            }
+        });
         let block = sim.rails_block();
         let floor = match block {
             Some(crate::state::RailsBlock::Floor { floor, .. }) => Some(floor),
@@ -236,51 +241,9 @@ pub fn draw(
     if let Some(i) = set_warp {
         commands.write(crate::commands::GameCommand::SetWarp(i));
     }
-    let sim = &*sim;
-    let (anchor, _, _) = sim.ship().state_at(&sim.world, sim.clock);
-    // Readouts are relative to the dominant body, like the navball's.
-    let dominant = sim.dominant_of(sim.active);
-
-    let mut throttle = None;
-    panel(ctx, &mut iface, PanelId::Flight, |ui_| {
-        throttle = flight_panel(ui_, sim, &aps, Some(dominant));
-        if let Some(line) = crate::rendezvous::summary(&rv, sim) {
-            ui_.label(egui::RichText::new(format!("target: {line}")).monospace().small().color(theme::TEXT));
-        }
-        if sim.ship().crew() == 0 {
-            let link = comms.signal(sim.ship().id()).map_or("no signal: controls do not arrive".to_string(), |s| {
-                format!("controls arrive after {}", crate::format::delay(s.delay))
-            });
-            ui_.label(
-                egui::RichText::new(format!("PROBE, flown from mission control: {link}")).small().color(theme::WARN),
-            );
-        }
-        let home = &comms.data.sites[comms.mission_control].name;
-        ui_.label(
-            egui::RichText::new(format!("{home}: {}", crate::comms::describe(comms.home.as_ref())))
-                .monospace()
-                .small()
-                .color(if comms.home.is_some() { theme::DIM } else { theme::WARN }),
-        );
-    });
-    if let Some(t) = throttle {
-        commands.write(crate::commands::GameCommand::SetThrottle(t));
-    }
-
-    panel(ctx, &mut iface, PanelId::Debug, |ui_| {
-        let anchor_name = &sim.world.eph.node(anchor).name;
-        let frame = match ui.plot_frame {
-            PlotFrame::EarthInertial => "Earth inertial",
-            PlotFrame::EarthMoonRotating => "Earth–Moon rotating",
-        };
-        ui_.monospace(format!("anchor {anchor_name}   plot {frame}"));
-        ui_.monospace(format!("{} fps   {} vessel(s)", fps.text(), sim.fleet.len()));
-    });
-
     Ok(())
 }
 
-/// The Flight panel: phase, altitudes, speeds, apsides, throttle, SAS, chute.
 /// A temperature with its limit: "812 K / 1100 K" (warning shown by the
 /// caller's colour; here the text).
 pub fn temperature(t: f64, limit: f64) -> String {
@@ -310,118 +273,6 @@ pub fn delta_v(isp: f64, mass: f64, propellant: f64) -> f64 {
 /// Thrust-to-weight ratio in local gravity `g` (m/s²); `None` in free space.
 pub fn twr(thrust: f64, mass: f64, g: f64) -> Option<f64> {
     (g > 1e-6).then(|| thrust / (mass * g))
-}
-
-/// Propellant, Δv, TWR and mass of the active vessel, and the debug badge.
-fn craft_rows(ui_: &mut egui::Ui, sim: &SimState, near: Option<sim::frame::NodeId>) {
-    let dim = |t: &str| egui::RichText::new(t).monospace().small().color(theme::DIM);
-    let ship = sim.ship();
-    let props = ship.mass_props();
-    let engine = &ship.craft.engine;
-    let full = ship.craft.initial_propellant.max(1.0);
-    let (anchor, r, _) = ship.state_at(&sim.world, sim.clock);
-    let g = near.and_then(|b| sim.world.source(b)).map_or(0.0, |b| {
-        let d = (r - sim.world.snapshot(sim.clock).relative_r(b.node, anchor)).length();
-        b.gm / (d * d)
-    });
-    egui::Grid::new("craft_grid").num_columns(2).spacing([10.0, 2.0]).show(ui_, |ui_| {
-        let mut row = |label: &str, value: String| {
-            ui_.label(dim(label));
-            ui_.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui_| ui_.monospace(value));
-            ui_.end_row();
-        };
-        let p = ship.propellant();
-        row("PROPELLANT", format!("{:.0} kg {:3.0}%", p, 100.0 * p / full));
-        row("ΔV (VAC)", format!("{:.0} m/s", delta_v(engine.isp_vac, props.mass, p)));
-        row("TWR", twr(engine.thrust_vac, props.mass, g).map_or("—".into(), |t| format!("{t:.2}")));
-        row("MASS", format!("{:.1} t", props.mass / 1e3));
-        let limits = &ship.craft.thermal;
-        // The skin cell closest to its own material's limit (the nozzle's
-        // is its niobium's, D077).
-        let (skin, skin_limit) = ship.skin_nearest_limit();
-        let (node, _) = ship.max_node_temperature();
-        row("SKIN MAX", temperature(skin, skin_limit));
-        row("INTERIOR MAX", temperature(node, limits.internal_max_k));
-        row("SHIP CLOCK", clock_offset(ship.proper_time_offset()));
-    });
-    if ship.debug() {
-        ui_.label(egui::RichText::new("DEBUG MODE").monospace().color(theme::WARN));
-    }
-}
-
-fn flight_panel(
-    ui_: &mut egui::Ui,
-    sim: &SimState,
-    aps: &crate::trajectory::apsides::Apsides,
-    near: Option<sim::frame::NodeId>,
-) -> Option<f64> {
-    let dim = |t: &str| egui::RichText::new(t).monospace().small().color(theme::DIM);
-    let ship = sim.ship();
-    let (anchor, r, v) = ship.state_at(&sim.world, sim.clock);
-    let snap = sim.world.snapshot(sim.clock);
-    if let Some(body) = near.and_then(|b| sim.world.source(b)) {
-        let k = snap.relative(body.node, anchor);
-        let rel = r - k.r;
-        let p = body.physical.as_ref()?;
-        let fixed = p.rotation.to_fixed(sim::frame::Vec3::from_raw(rel), sim.clock);
-        let alt = p.altitude(fixed);
-        let above_ground = p.altitude_above_surface(fixed);
-        let v_orb = v - k.v;
-        let v_srf = v_orb - p.rotation.omega(sim.clock).raw().cross(rel);
-        // The next apsides on the predicted trajectory (D076), named by body
-        // when not about the current one.
-        let list = aps.get(ship.id());
-        let (next_ap, next_pe) = list.map_or((None, None), |a| a.next_after(sim.clock));
-        let apsis = |a: Option<&crate::trajectory::apsides::Apsis>| {
-            a.map_or_else(
-                || "-".to_string(),
-                |a| {
-                    let d = crate::format::distance(a.altitude);
-                    if a.body == body.node {
-                        d
-                    } else {
-                        format!("{d} ({})", sim.world.eph.node(a.body).name)
-                    }
-                },
-            )
-        };
-        let impact = list.and_then(|a| a.impact).filter(|i| i.t.seconds_since(sim.clock) > 0.0);
-        egui::Grid::new("flight_grid").num_columns(2).spacing([10.0, 2.0]).show(ui_, |ui_| {
-            let mut row = |label: &str, value: String| {
-                ui_.label(dim(label));
-                ui_.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui_| ui_.monospace(value));
-                ui_.end_row();
-            };
-            row("BODY", body.name.clone());
-            row("ALT (SEA)", crate::format::distance(alt));
-            row("ALT (TERRAIN)", crate::format::distance(above_ground));
-            row("SURFACE V", format!("{:.1} m/s", v_srf.length()));
-            row("ORBIT V", format!("{:.1} m/s", v_orb.length()));
-            row("Ap", apsis(next_ap));
-            row("Pe", apsis(next_pe));
-            if let Some(i) = impact {
-                row("IMPACT", format!("in {}", crate::format::duration(i.t.seconds_since(sim.clock))));
-            }
-        });
-    }
-    craft_rows(ui_, sim, near);
-    // The throttle: drag or type a value (keys: Shift/Ctrl, Alt for fine).
-    let mut t = sim.controls.throttle * 100.0;
-    let changed = ui_
-        .horizontal(|ui_| {
-            ui_.label(dim("THROTTLE"));
-            let r = ui_.add(egui::Slider::new(&mut t, 0.0..=100.0).suffix(" %").fixed_decimals(1));
-            // Only a change the player made: the slider's own rounding of
-            // the displayed value must not send the throttle back (it
-            // would undo key and script changes every frame).
-            r.changed() && (r.dragged() || r.has_focus() || r.clicked())
-        })
-        .inner;
-    let (anchor, r, v) = ship.state_at(&sim.world, sim.clock);
-    let air = sim::vessel::air_at(&sim.world, &sim.world.snapshot(sim.clock), anchor, r, v);
-    let q = air.map(|a| 0.5 * a.rho * a.wind.length_squared());
-    ui_.monospace(chute_line(&ship.chute, &ship.craft.chute, q));
-    changed.then_some(t / 100.0)
 }
 
 /// The double-click body menu (in flight and in the tracking station).
@@ -480,57 +331,9 @@ pub fn state_line(sim: &SimState) -> (String, bool) {
     state_word(destroyed, landed, crate::scene::engine_on(sim, sim.active), ship.chute.open())
 }
 
-/// The chute's state, and before the command the dynamic pressure against
-/// the first canopy's design opening q (sim::chute, D079): above it the
-/// canopy may tear.
-fn chute_line(state: &sim::chute::ChuteState, spec: &sim::chute::ChuteSpec, q: Option<f64>) -> String {
-    use sim::chute::CanopyState::{Failed, Open, Stowed};
-    let stage = |name: &str, c: &sim::chute::Canopy, age: f64| {
-        format!("{name}{}", if c.reefed(age) { " (reefed)" } else { "" })
-    };
-    let torn = match (state.drogue, state.main) {
-        (_, Failed) => " (MAIN TORN)",
-        (Failed, _) => " (DROGUE TORN)",
-        _ => "",
-    };
-    let now = match (spec.drogue.as_ref(), state.drogue, state.main) {
-        _ if !state.armed => {
-            let first = spec.drogue.as_ref().unwrap_or(&spec.main);
-            let q = q.map_or("-".to_string(), |q| format!("{:.1}", q / 1e3));
-            return format!("chute stowed, q {q} / {:.1} kPa", first.deploy_max_q / 1e3);
-        }
-        (_, _, Open { age, .. }) => stage("MAIN", &spec.main, age),
-        (Some(d), Open { age, .. }, _) => stage("DROGUE", d, age),
-        (_, _, Stowed) => format!("ARMED, main at {}", crate::format::distance(spec.main_height)),
-        _ => "gone".to_string(),
-    };
-    format!("chute {now}{torn}")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn the_chute_line_shows_the_stage_and_the_opening_q() {
-        use sim::chute::{CanopyState, ChuteState};
-        let spec = sim::craft::test_craft().params().chute;
-        let stowed = ChuteState::default();
-        assert_eq!(chute_line(&stowed, &spec, Some(3_210.0)), "chute stowed, q 3.2 / 5.5 kPa");
-        let drogue = ChuteState { armed: true, drogue: CanopyState::Open { age: 1.0, diameter: 1.0 }, ..stowed };
-        assert_eq!(chute_line(&drogue, &spec, None), "chute DROGUE (reefed)");
-        let main = ChuteState {
-            drogue: CanopyState::Released,
-            main: CanopyState::Open { age: 20.0, diameter: 9.0 },
-            ..drogue
-        };
-        assert_eq!(chute_line(&main, &spec, None), "chute MAIN");
-        let torn = ChuteState { main: CanopyState::Failed, ..main };
-        assert_eq!(chute_line(&torn, &spec, None), "chute gone (MAIN TORN)");
-        let waiting = ChuteState { drogue: CanopyState::Failed, main: CanopyState::Stowed, ..main };
-        assert!(chute_line(&waiting, &spec, None).starts_with("chute ARMED, main at 3"));
-        assert!(chute_line(&waiting, &spec, None).ends_with("(DROGUE TORN)"));
-    }
 
     #[test]
     fn the_state_line_is_powered_only_with_the_engine_running() {

@@ -1,5 +1,5 @@
-//! Messages: one queue of short toasts on the right edge (saves, loads,
-//! errors), replacing ad-hoc labels. The queue is pure data.
+//! Messages: one queue of short toasts, centred under the menu bar (saves,
+//! loads, errors), replacing ad-hoc labels. The queue is pure data.
 
 use super::theme;
 use bevy::prelude::*;
@@ -52,7 +52,9 @@ pub fn draw(mut contexts: EguiContexts, time: Res<Time>, mut toasts: ResMut<Toas
     if live.is_empty() {
         return Ok(());
     }
-    egui::Area::new("toasts".into()).anchor(egui::Align2::RIGHT_TOP, [-10.0, 90.0]).show(ctx, |ui| {
+    let bar = ctx.memory(|m| m.area_rect(egui::Id::new(super::layout::BAR_AREA)));
+    let top = super::layout::toasts_top(bar);
+    egui::Area::new("toasts".into()).anchor(egui::Align2::CENTER_TOP, [0.0, top]).show(ctx, |ui| {
         for t in &live {
             theme::panel_frame().show(ui, |ui| {
                 let color = if t.error { theme::WARN } else { theme::TEXT };

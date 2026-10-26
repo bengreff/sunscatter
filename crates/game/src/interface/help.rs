@@ -26,6 +26,16 @@ pub const KEYS: &[(&str, &[(&str, &str)])] = &[
             ("R R", "reset to the pad (press twice)"),
         ],
     ),
+    (
+        "Menus",
+        &[
+            ("O", "Orbital: the orbit, the target, maneuvers"),
+            ("L", "Landing / Reentry: impact, braking, entry, parachute (shows the impact marker)"),
+            ("U", "Utilities: propellant, thermal, comms"),
+            ("G", "Staging: the stage stack"),
+            ("N", "burn planner"),
+        ],
+    ),
     ("Time", &[(". / ,", "warp up / down"), ("/", "warp 1x (rails warp needs throttle 0)"), ("Esc", "pause menu")]),
     (
         "Camera",
