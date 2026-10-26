@@ -80,7 +80,9 @@ impl VesselApsides {
         (ahead().find(|a| a.is_apo), ahead().find(|a| !a.is_apo))
     }
 
-    /// Seconds from `now` to the next apoapsis and periapsis.
+    /// Seconds from `now` to the next apoapsis and periapsis (the readouts
+    /// take them from [`Self::next_after`] with the altitudes).
+    #[cfg(test)]
     pub fn times_to_next(&self, now: Epoch) -> (Option<f64>, Option<f64>) {
         let (ap, pe) = self.next_after(now);
         (ap.map(|a| a.t.seconds_since(now)), pe.map(|a| a.t.seconds_since(now)))

@@ -1,36 +1,39 @@
-//! Painting the navball with egui: a movable panel (bottom centre by
-//! default) holding the ball (an egui mesh shaded per vertex from the pure
-//! projection in [`rules`]) with the mode, altitude and speed above it and
-//! the readouts beside it, plus the Target panel. Hidden in the tracking
-//! station.
+//! The navball cluster (D080), always on, at a fixed place bottom centre:
+//! the speed under its `ORBIT | SURFACE | TARGET` switch, the altitude,
+//! V/S, Ap and Pe left of the ball, SAS with its hold modes and the
+//! throttle bar right of it, and the flight state under it. Everything
+//! else is in the task menus. Hidden in the tracking station.
 
-use super::rules::{self, Ship};
-use super::{nav_state, NavState, NavTarget, Navball};
+use super::rules::{self, Mode};
+use super::{ApsisReadout, NavState, Navball};
+use crate::commands::GameCommand;
 use crate::format::{distance as fmt_dist, duration as fmt_duration, speed as fmt_speed};
 use crate::interface::layout::{InterfaceSettings, PanelId};
-use crate::state::SimState;
-use crate::tracking::{Tracked, TrackingStation};
+use crate::interface::theme;
+use crate::state::{SimState, HOLD_KEYS};
+use crate::tracking::TrackingStation;
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
-use egui::{vec2, Align2, Color32, FontId, Pos2, Rect, Shape, Stroke};
-use glam::DVec3;
-use std::f64::consts::{FRAC_PI_2, TAU};
+use egui::{vec2, Align2, Color32, RichText, Stroke};
+use sim::vessel::HoldMode;
 
-const COLUMN_PX: f32 = 150.0;
-const DIM: Color32 = Color32::from_rgb(130, 150, 170);
-const BRIGHT: Color32 = Color32::from_rgb(225, 235, 245);
-const ACCENT: Color32 = Color32::from_rgb(255, 170, 40);
-const PROGRADE: Color32 = Color32::from_rgb(235, 220, 40);
-const NORMAL: Color32 = Color32::from_rgb(205, 90, 235);
-const RADIAL: Color32 = Color32::from_rgb(70, 205, 235);
-const TARGET: Color32 = Color32::from_rgb(245, 95, 165);
-const MANEUVER: Color32 = Color32::from_rgb(70, 140, 255);
+/// Width of the readouts left of the ball and of the controls right of it.
+const SIDE_PX: f32 = 150.0;
+/// Width of the hold-mode buttons.
+const HOLD_PX: f32 = 92.0;
+/// The throttle bar's width.
+const BAR_PX: f32 = 14.0;
 
-/// A user action from the panel, applied after drawing.
+/// The cluster's egui area (the docks keep clear of its rect).
+pub const AREA: &str = "navball_cluster";
+
+/// A user action on the cluster, applied after drawing.
 enum Action {
-    CycleMode,
+    SetMode(Mode),
     ToggleLock,
-    SetTarget(Option<NavTarget>),
+    CycleMode,
+    Command(GameCommand),
+    SetTarget(Option<super::NavTarget>),
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -38,135 +41,244 @@ pub fn draw(
     mut contexts: EguiContexts,
     time: Res<Time>,
     sim: Res<SimState>,
-    tracked: Res<Tracked>,
     station: Res<TrackingStation>,
     mut iface: ResMut<InterfaceSettings>,
     mut nav: ResMut<Navball>,
-    aps: Res<crate::trajectory::apsides::Apsides>,
+    tracked: Res<crate::tracking::Tracked>,
+    mut commands: MessageWriter<GameCommand>,
 ) -> Result {
     if station.open {
         return Ok(());
     }
     let ctx = contexts.ctx_mut()?;
-    let Some(state) = nav_state(&sim, &tracked, &aps, &mut nav) else { return Ok(()) };
+    let Some(state) = nav.now.clone() else { return Ok(()) };
     let shown = nav.readouts(time.elapsed_secs_f64(), &state).clone();
-    let (locked, current_target) = (nav.locked, nav.target);
+    let locked = nav.locked;
     let ball = iface.navball_size;
     let mut actions = Vec::new();
-    crate::interface::panel(ctx, &mut iface, PanelId::Navball, |ui| {
-        // Three fixed-width columns, so the ball sits in the panel's centre.
-        let height = ball + 70.0;
-        let column = |ui: &mut egui::Ui, width: f32, add: &mut dyn FnMut(&mut egui::Ui)| {
-            ui.allocate_ui_with_layout(vec2(width, height), egui::Layout::top_down(egui::Align::Min), |ui| {
-                ui.set_width(width);
-                add(ui);
+    egui::Area::new(egui::Id::new(AREA)).anchor(Align2::CENTER_BOTTOM, [0.0, -8.0]).show(ctx, |ui| {
+        theme::panel_frame().show(ui, |ui| {
+            ui.spacing_mut().item_spacing = vec2(4.0, 2.0);
+            let has_target = shown.target.is_some();
+            centred_row(ui, egui::Id::new("nav_switch"), |ui| switch(ui, shown.mode, locked, has_target, &mut actions));
+            ui.vertical_centered(|ui| {
+                ui.label(RichText::new(fmt_speed(shown.speed)).monospace().size(20.0).color(theme::TEXT));
+                let about = shown.target.as_ref().filter(|_| shown.mode == Mode::Target).map_or(&shown.body, |t| &t.0);
+                ui.label(
+                    RichText::new(format!("{} · {about}", shown.mode.label())).monospace().small().color(theme::DIM),
+                );
             });
-        };
-        ui.horizontal_top(|ui| {
-            column(ui, COLUMN_PX, &mut |ui| attitude_column(ui, &shown));
-            column(ui, ball + 8.0, &mut |ui| {
-                ui.vertical_centered(|ui| {
-                    ui.horizontal(|ui| {
-                        // Centre the two buttons over the ball.
-                        ui.add_space((ball - 110.0).max(0.0) * 0.5);
-                        let mode = egui::RichText::new(shown.mode.label()).monospace().color(ACCENT);
-                        if ui.add(egui::Button::new(mode)).on_hover_text("Speed mode (click to cycle)").clicked() {
-                            actions.push(Action::CycleMode);
-                        }
-                        let lock = if locked { "LOCK" } else { "AUTO" };
-                        let hint = "AUTO: surface below 36 km, orbit above";
-                        if ui
-                            .add(egui::Button::new(egui::RichText::new(lock).monospace().small()))
-                            .on_hover_text(hint)
-                            .clicked()
-                        {
-                            actions.push(Action::ToggleLock);
-                        }
-                    });
-                    let (alt_label, alt) = shown.altitude;
-                    ui.label(egui::RichText::new(format!("{alt_label} {}", fmt_dist(alt))).monospace().color(BRIGHT));
-                    ui.label(egui::RichText::new(fmt_speed(shown.speed)).monospace().size(17.0).color(BRIGHT));
-                    let (rect, response) = ui.allocate_exact_size(vec2(ball, ball), egui::Sense::click());
-                    paint_ball(ui.painter(), rect, &state);
-                    if response.clicked() {
-                        actions.push(Action::CycleMode);
-                    }
-                });
+            ui.add_space(2.0);
+            ui.horizontal_top(|ui| {
+                fixed_column(ui, SIDE_PX, ball, |ui| readouts(ui, &shown));
+                let (rect, response) = ui.allocate_exact_size(vec2(ball, ball), egui::Sense::click());
+                super::ball::paint_ball(ui.painter(), rect, &state);
+                if response.on_hover_text("Click to change the speed mode").clicked() {
+                    actions.push(Action::CycleMode);
+                }
+                fixed_column(ui, SIDE_PX, ball, |ui| controls(ui, &sim, &shown, ball, &mut actions));
             });
-            column(ui, COLUMN_PX, &mut |ui| orbit_column(ui, &shown, &sim));
+            let (line, alert) = crate::hud::state_line(&sim);
+            ui.vertical_centered(|ui| {
+                ui.label(RichText::new(line).monospace().color(if alert { theme::ALERT } else { theme::ACCENT }));
+            });
         });
     });
+    let current = nav.target;
     crate::interface::panel(ctx, &mut iface, PanelId::Target, |ui| {
-        target_panel(ui, &shown, &sim, &tracked, current_target, &mut actions);
+        target_panel(ui, &shown, &sim, &tracked, current, &mut actions);
     });
     for action in actions {
         match action {
-            Action::CycleMode => {
-                nav.mode = nav.mode.next(nav.target.is_some());
+            Action::SetTarget(t) => {
+                nav.target = t;
+                if t.is_none() && nav.mode == Mode::Target {
+                    nav.mode = Mode::Surface;
+                }
+            }
+            Action::SetMode(mode) => {
+                nav.mode = mode;
                 // Choosing surface/orbit by hand holds it; target always holds.
                 nav.locked = true;
             }
             Action::ToggleLock => nav.locked = !nav.locked,
-            Action::SetTarget(t) => {
-                nav.target = t;
-                if t.is_none() && nav.mode == rules::Mode::Target {
-                    nav.mode = rules::Mode::Surface;
-                }
+            Action::CycleMode => {
+                nav.mode = nav.mode.next(nav.target.is_some());
+                nav.locked = true;
+            }
+            Action::Command(c) => {
+                commands.write(c);
             }
         }
     }
     Ok(())
 }
 
-/// Rows of right-aligned monospace values with dim labels.
-fn readout_grid(ui: &mut egui::Ui, id: &str, rows: &[(&str, String)]) {
-    egui::Grid::new(id).num_columns(2).spacing([8.0, 3.0]).show(ui, |ui| {
+/// A row centred in the available width, from its width last frame (egui
+/// lays out left to right; the first frame is left-aligned).
+fn centred_row(ui: &mut egui::Ui, id: egui::Id, add: impl FnOnce(&mut egui::Ui)) {
+    let width = ui.ctx().data(|d| d.get_temp::<f32>(id)).unwrap_or(0.0);
+    let pad = ((ui.available_width() - width) * 0.5).max(0.0);
+    ui.horizontal(|ui| {
+        ui.add_space(pad);
+        let start = ui.cursor().min.x;
+        add(ui);
+        let used = ui.min_rect().max.x - start;
+        ui.ctx().data_mut(|d| d.insert_temp(id, used));
+    });
+}
+
+/// A column of fixed width and height.
+fn fixed_column(ui: &mut egui::Ui, width: f32, height: f32, add: impl FnOnce(&mut egui::Ui)) {
+    ui.allocate_ui_with_layout(vec2(width, height), egui::Layout::top_down(egui::Align::Min), |ui| {
+        ui.set_width(width);
+        ui.set_min_height(height);
+        add(ui);
+    });
+}
+
+/// The speed mode switch, `ORBIT | SURFACE | TARGET`, and AUTO/LOCK.
+fn switch(ui: &mut egui::Ui, mode: Mode, locked: bool, has_target: bool, actions: &mut Vec<Action>) {
+    ui.spacing_mut().item_spacing.x = 2.0;
+    for m in [Mode::Orbit, Mode::Surface, Mode::Target] {
+        let text = RichText::new(m.label()).monospace().small();
+        let button = egui::Button::new(text).selected(m == mode);
+        let r = ui.add_enabled(rules::mode_available(m, has_target), button);
+        let hint = match m {
+            Mode::Orbit => "Speed and markers relative to the body's centre",
+            Mode::Surface => "Speed and markers relative to the rotating surface",
+            Mode::Target => "Speed and markers relative to the target (pick one in Orbital ▸ Target)",
+        };
+        if r.on_hover_text(hint).clicked() && m != mode {
+            actions.push(Action::SetMode(m));
+        }
+    }
+    ui.add_space(6.0);
+    let lock = RichText::new(if locked { "LOCK" } else { "AUTO" }).monospace().small().color(theme::DIM);
+    let r = ui.add(egui::Button::new(lock).frame(false));
+    if r.on_hover_text("AUTO: surface below 36 km, orbit above").clicked() {
+        actions.push(Action::ToggleLock);
+    }
+}
+
+/// Altitude, V/S, Ap and Pe with the time to each (D076).
+fn readouts(ui: &mut egui::Ui, s: &NavState) {
+    let (alt_label, alt) = s.altitude;
+    let apsis = |name: &str, a: &Option<ApsisReadout>| match a {
+        Some(a) => [
+            (a.other_body.as_ref().map_or(name.to_string(), |b| format!("{name} {b}")), fmt_dist(a.altitude)),
+            ("  in".to_string(), fmt_duration(a.in_s)),
+        ],
+        None => [(name.to_string(), "—".to_string()), ("  in".to_string(), "—".to_string())],
+    };
+    let mut rows =
+        vec![(alt_label.to_string(), fmt_dist(alt)), ("V/S".into(), format!("{:+.1} m/s", s.vertical_speed))];
+    rows.extend(apsis("Ap", &s.ap));
+    rows.extend(apsis("Pe", &s.pe));
+    ui.add_space(10.0);
+    egui::Grid::new("nav_readouts").num_columns(2).spacing([8.0, 3.0]).min_col_width(40.0).show(ui, |ui| {
         for (label, value) in rows {
-            ui.label(egui::RichText::new(*label).monospace().small().color(DIM));
+            ui.label(RichText::new(label).monospace().small().color(theme::DIM));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.label(egui::RichText::new(value).monospace().color(BRIGHT));
+                ui.label(RichText::new(value).monospace().color(theme::TEXT));
             });
             ui.end_row();
         }
     });
 }
 
-fn attitude_column(ui: &mut egui::Ui, s: &NavState) {
-    ui.add_space(22.0);
-    {
-        let (aoa, slip) = match s.aoa_sideslip {
-            Some((a, b)) => (format!("{a:+.1}°"), format!("{b:+.1}°")),
-            None => ("—".into(), "—".into()),
-        };
-        readout_grid(
-            ui,
-            "nav_attitude",
-            &[
-                ("HDG", format!("{:05.1}°", s.angles.heading)),
-                ("PITCH", format!("{:+.1}°", s.angles.pitch)),
-                ("ROLL", format!("{:+.1}°", s.angles.roll)),
-                ("AoA", aoa),
-                ("SLIP", slip),
-                ("V/S", format!("{:+.1} m/s", s.vertical_speed)),
-                ("G", format!("{:.2} g", s.g_load)),
-            ],
-        );
+/// SAS, the hold modes with their keys, and the throttle bar.
+fn controls(ui: &mut egui::Ui, sim: &SimState, s: &NavState, height: f32, actions: &mut Vec<Action>) {
+    let c = sim.controls;
+    ui.horizontal_top(|ui| {
+        ui.vertical(|ui| {
+            ui.spacing_mut().item_spacing.y = 2.0;
+            let sas = hold_button(ui, if c.sas { "SAS ON" } else { "SAS OFF" }, "T", c.sas, true);
+            // The hold stated in full, with prograde's speed reference (D075).
+            if sas.on_hover_text(format!("SAS: {}", rules::sas_label(&c, &s.body))).clicked() {
+                actions.push(Action::Command(GameCommand::SetSas(!c.sas)));
+            }
+            let has_burn = s.maneuver.is_some();
+            for (key, mode) in HOLD_KEYS {
+                let active = c.sas && c.hold == mode;
+                let enabled = active || rules::hold_available(mode, s.target.is_some(), has_burn);
+                let r = hold_button(ui, short(mode), key_label(key), active, enabled);
+                if r.on_hover_text(mode.label()).clicked() {
+                    actions.push(Action::Command(GameCommand::SetHold(mode)));
+                }
+            }
+        });
+        ui.add_space(6.0);
+        ui.vertical_centered(|ui| {
+            ui.spacing_mut().item_spacing.y = 2.0;
+            ui.label(RichText::new("THR").monospace().small().color(theme::DIM));
+            let running = sim.ship().engine_running(&c);
+            if let Some(t) = throttle_bar(ui, c.throttle, running, (height - 36.0).max(40.0)) {
+                actions.push(Action::Command(GameCommand::SetThrottle(t)));
+            }
+            ui.label(RichText::new(format!("{:.0}%", c.throttle * 100.0)).monospace().small().color(theme::TEXT));
+        });
+    });
+}
+
+/// A hold button: the mode on the left, its key dim on the right, lit
+/// when active.
+fn hold_button(ui: &mut egui::Ui, name: &str, key: &str, lit: bool, enabled: bool) -> egui::Response {
+    let colour = if lit { theme::TEXT } else { theme::DIM };
+    let atoms = (
+        RichText::new(name).monospace().small().color(colour),
+        egui::Atom::grow(),
+        RichText::new(key).monospace().small().color(theme::DIM),
+    );
+    ui.add_enabled(enabled, egui::Button::new(atoms).selected(lit).min_size(vec2(HOLD_PX, 0.0)))
+}
+
+/// The short name on a hold button.
+fn short(mode: HoldMode) -> &'static str {
+    match mode {
+        HoldMode::Stability => "STAB",
+        HoldMode::Prograde => "PRO",
+        HoldMode::Retrograde => "RETRO",
+        HoldMode::Target => "TGT",
+        HoldMode::AntiTarget => "ANTI",
+        HoldMode::Maneuver => "MNV",
     }
 }
 
-fn orbit_column(ui: &mut egui::Ui, s: &NavState, sim: &SimState) {
-    ui.add_space(22.0);
-    let t = |x: Option<f64>| x.map_or_else(|| "—".to_string(), fmt_duration);
-    let c = sim.controls;
-    let rows = [
-        ("REF", s.body.clone()),
-        ("Ap in", t(s.time_to_ap)),
-        ("Pe in", t(s.time_to_pe)),
-        ("Burn in", t(s.maneuver.map(|m| m.1))),
-        ("SAS", rules::sas_label(&c, &s.body)),
-        ("THR", format!("{:.0}%", c.throttle * 100.0)),
-    ];
-    readout_grid(ui, "nav_orbit", &rows);
+/// The key a hold mode is on, as shown on its button.
+fn key_label(key: KeyCode) -> &'static str {
+    match key {
+        KeyCode::Digit1 => "1",
+        KeyCode::Digit2 => "2",
+        KeyCode::Digit3 => "3",
+        KeyCode::Digit4 => "4",
+        KeyCode::Digit5 => "5",
+        KeyCode::Digit6 => "6",
+        _ => "",
+    }
+}
+
+/// The vertical throttle bar: filled from the bottom, ticks at quarters;
+/// a click or a drag on it sets the throttle ([`rules::throttle_from_bar`]).
+fn throttle_bar(ui: &mut egui::Ui, throttle: f64, running: bool, height: f32) -> Option<f64> {
+    let (rect, response) = ui.allocate_exact_size(vec2(BAR_PX, height), egui::Sense::click_and_drag());
+    let painter = ui.painter();
+    painter.rect_filled(rect, 3.0, Color32::from_black_alpha(140));
+    let top = rect.bottom() - rect.height() * throttle.clamp(0.0, 1.0) as f32;
+    let fill = egui::Rect::from_min_max(egui::pos2(rect.left(), top), rect.max);
+    let colour = if running { theme::ACCENT } else { theme::DIM.gamma_multiply(0.6) };
+    painter.rect_filled(fill, 3.0, colour);
+    for k in 1..4 {
+        let y = rect.bottom() - rect.height() * k as f32 / 4.0;
+        painter.line_segment(
+            [egui::pos2(rect.left(), y), egui::pos2(rect.left() + 4.0, y)],
+            Stroke::new(1.0, theme::BORDER),
+        );
+    }
+    painter.rect_stroke(rect, 3.0, Stroke::new(1.0, theme::BORDER), egui::StrokeKind::Inside);
+    let response = response.on_hover_text("Throttle: click or drag; Shift / Ctrl (Alt: fine), Z full, X cut");
+    let y = response.interact_pointer_pos().map(|p| p.y);
+    rules::throttle_from_bar(response.is_pointer_button_down_on(), y, rect.top(), rect.bottom())
 }
 
 /// The Target panel: the target picker and, with a target, its distance.
@@ -174,14 +286,15 @@ fn target_panel(
     ui: &mut egui::Ui,
     s: &NavState,
     sim: &SimState,
-    tracked: &Tracked,
-    current: Option<NavTarget>,
+    tracked: &crate::tracking::Tracked,
+    current: Option<super::NavTarget>,
     actions: &mut Vec<Action>,
 ) {
-    ui.set_width(COLUMN_PX + 30.0);
-    ui.label(egui::RichText::new("TARGET").monospace().small().color(DIM));
+    use super::NavTarget;
+    ui.set_width(SIDE_PX + 30.0);
+    ui.label(RichText::new("TARGET").monospace().small().color(theme::DIM));
     let name = s.target.as_ref().map_or("none", |(n, _)| n.as_str());
-    egui::ComboBox::from_id_salt("nav_target").selected_text(name).width(COLUMN_PX + 20.0).show_ui(ui, |ui| {
+    egui::ComboBox::from_id_salt("nav_target").selected_text(name).width(SIDE_PX + 20.0).show_ui(ui, |ui| {
         let mut pick = |ui: &mut egui::Ui, t: Option<NavTarget>, label: String| {
             if ui.selectable_label(current == t, label).clicked() {
                 actions.push(Action::SetTarget(t));
@@ -196,223 +309,6 @@ fn target_panel(
         }
     });
     if let Some((_, d)) = &s.target {
-        readout_grid(ui, "nav_target_rows", &[("DIST", fmt_dist(*d))]);
-    }
-}
-
-fn paint_ball(painter: &egui::Painter, rect: Rect, s: &NavState) {
-    // Whole pixels, so the rim stroke and the disc's edge cannot drift apart.
-    let centre = rect.center().round();
-    let radius = (rect.width() * 0.5 - 2.0).round();
-    let at = |x: f64, y: f64| centre + vec2(x as f32, -y as f32) * radius;
-    // Shaded disc: rings of vertices, colour and limb darkening per vertex.
-    const RINGS: usize = 24;
-    const SEGS: usize = 72;
-    let mut mesh = egui::Mesh::default();
-    let vertex = |mesh: &mut egui::Mesh, x: f64, y: f64| {
-        let d = rules::ball_unproject(&s.ship, x, y);
-        let z = (1.0 - x * x - y * y).max(0.0).sqrt() as f32;
-        let shade = 0.5 + 0.5 * z;
-        let [r, g, b] = rules::ball_colour(d.dot(s.local.up)).map(|c| (c * shade) as u8);
-        mesh.colored_vertex(at(x, y), Color32::from_rgb(r, g, b));
-    };
-    vertex(&mut mesh, 0.0, 0.0);
-    for i in 1..=RINGS {
-        // Denser rings towards the rim, where the ball curves away.
-        let rho = (i as f64 / RINGS as f64 * FRAC_PI_2).sin();
-        for j in 0..SEGS {
-            let a = j as f64 / SEGS as f64 * TAU;
-            vertex(&mut mesh, rho * a.cos(), rho * a.sin());
-        }
-    }
-    let idx = |i: usize, j: usize| if i == 0 { 0 } else { (1 + (i - 1) * SEGS + j % SEGS) as u32 };
-    for i in 0..RINGS {
-        for j in 0..SEGS {
-            if i == 0 {
-                mesh.add_triangle(0, idx(1, j), idx(1, j + 1));
-            } else {
-                mesh.add_triangle(idx(i, j), idx(i + 1, j), idx(i + 1, j + 1));
-                mesh.add_triangle(idx(i, j), idx(i + 1, j + 1), idx(i, j + 1));
-            }
-        }
-    }
-    painter.add(Shape::mesh(mesh));
-    paint_grid(painter, &at, s);
-    painter.circle_stroke(centre, radius, Stroke::new(2.0, Color32::from_rgb(60, 70, 80)));
-    paint_markers(painter, &at, radius, s);
-    // Fixed ship reticle.
-    let w = [(-0.42, 0.0), (-0.16, 0.0), (-0.08, -0.1), (0.0, 0.0), (0.08, -0.1), (0.16, 0.0), (0.42, 0.0)];
-    let pts: Vec<Pos2> = w.iter().map(|&(x, y)| at(x, y)).collect();
-    painter.add(Shape::line(pts.clone(), Stroke::new(4.0, Color32::from_black_alpha(160))));
-    painter.add(Shape::line(pts, Stroke::new(2.0, ACCENT)));
-    painter.circle_filled(centre, 2.0, ACCENT);
-}
-
-/// Draws a curve on the ball, only where it faces the viewer.
-fn curve(
-    painter: &egui::Painter,
-    at: &impl Fn(f64, f64) -> Pos2,
-    ship: &Ship,
-    dirs: impl Iterator<Item = DVec3>,
-    stroke: Stroke,
-) {
-    let mut run = Vec::new();
-    for d in dirs {
-        let (x, y, z) = rules::ball_project(ship, d);
-        if rules::faces_viewer(z) {
-            run.push(at(x, y));
-        } else if run.len() > 1 {
-            painter.add(Shape::line(std::mem::take(&mut run), stroke));
-        } else {
-            run.clear();
-        }
-    }
-    if run.len() > 1 {
-        painter.add(Shape::line(run, stroke));
-    }
-}
-
-fn paint_grid(painter: &egui::Painter, at: &impl Fn(f64, f64) -> Pos2, s: &NavState) {
-    let deg = |x: f64| x.to_radians();
-    let faint = Stroke::new(1.0, Color32::from_white_alpha(45));
-    let major = Stroke::new(1.0, Color32::from_white_alpha(90));
-    for el in (-80..=80).step_by(10).filter(|&e| e != 0) {
-        let stroke = if el % 30 == 0 { major } else { faint };
-        curve(painter, at, &s.ship, (0..=120).map(|k| s.local.direction(deg(el as f64), deg(k as f64 * 3.0))), stroke);
-    }
-    for az in (0..360).step_by(30) {
-        let stroke = if az % 90 == 0 { major } else { faint };
-        curve(painter, at, &s.ship, (-29..=29).map(|k| s.local.direction(deg(k as f64 * 3.0), deg(az as f64))), stroke);
-    }
-    curve(
-        painter,
-        at,
-        &s.ship,
-        (0..=180).map(|k| s.local.direction(0.0, deg(k as f64 * 2.0))),
-        Stroke::new(2.0, BRIGHT),
-    );
-    // Heading labels along the horizon, pitch labels along the heading meridian.
-    let label = |d: DVec3, text: String, colour: Color32| {
-        let (x, y, z) = rules::ball_project(&s.ship, d);
-        if z > 0.25 {
-            painter.text(at(x, y), Align2::CENTER_CENTER, text, FontId::monospace(10.0), colour);
-        }
-    };
-    for az in (0..360).step_by(30) {
-        let text = match az {
-            0 => "N".to_string(),
-            90 => "E".to_string(),
-            180 => "S".to_string(),
-            270 => "W".to_string(),
-            _ => (az / 10).to_string(),
-        };
-        label(s.local.direction(deg(4.0), deg(az as f64)), text, BRIGHT);
-    }
-    let hdg = deg(s.angles.heading);
-    for el in [-60, -30, 30, 60] {
-        label(s.local.direction(deg(el as f64), hdg + deg(8.0)), el.to_string(), Color32::from_white_alpha(170));
-    }
-}
-
-#[derive(Clone, Copy)]
-enum Glyph {
-    Prograde,
-    Retrograde,
-    Normal,
-    Antinormal,
-    RadialOut,
-    RadialIn,
-    Target,
-    AntiTarget,
-    /// The next planned burn's direction.
-    Maneuver,
-}
-
-fn paint_markers(painter: &egui::Painter, at: &impl Fn(f64, f64) -> Pos2, radius: f32, s: &NavState) {
-    let m = &s.markers;
-    let list = [
-        (m.prograde, Glyph::Prograde, Glyph::Retrograde),
-        (m.normal, Glyph::Normal, Glyph::Antinormal),
-        (m.radial_out, Glyph::RadialOut, Glyph::RadialIn),
-        (m.target, Glyph::Target, Glyph::AntiTarget),
-    ];
-    let size = radius * 0.085;
-    if let Some((d, _)) = s.maneuver {
-        let (x, y, z) = rules::ball_project(&s.ship, d);
-        if rules::faces_viewer(z) {
-            glyph_shapes(painter, at(x, y), size, Glyph::Maneuver, Stroke::new(4.0, Color32::from_black_alpha(150)));
-            glyph_shapes(painter, at(x, y), size, Glyph::Maneuver, Stroke::new(1.8, MANEUVER));
-        }
-    }
-    for (dir, pos_glyph, neg_glyph) in list {
-        let Some(d) = dir else { continue };
-        for (d, glyph) in [(d, pos_glyph), (-d, neg_glyph)] {
-            let (x, y, z) = rules::ball_project(&s.ship, d);
-            if z > 0.0 {
-                // A dark outline first, so the glyph reads on sky and ground.
-                glyph_shapes(painter, at(x, y), size, glyph, Stroke::new(4.0, Color32::from_black_alpha(150)));
-                let colour = match glyph {
-                    Glyph::Prograde | Glyph::Retrograde => PROGRADE,
-                    Glyph::Normal | Glyph::Antinormal => NORMAL,
-                    Glyph::RadialOut | Glyph::RadialIn => RADIAL,
-                    Glyph::Target | Glyph::AntiTarget => TARGET,
-                    Glyph::Maneuver => MANEUVER,
-                };
-                glyph_shapes(painter, at(x, y), size, glyph, Stroke::new(1.8, colour));
-            }
-        }
-    }
-}
-
-fn glyph_shapes(painter: &egui::Painter, p: Pos2, s: f32, glyph: Glyph, stroke: Stroke) {
-    let seg = |a: (f32, f32), b: (f32, f32)| {
-        painter.line_segment([p + vec2(a.0, a.1) * s, p + vec2(b.0, b.1) * s], stroke);
-    };
-    let ring = |r: f32| painter.circle_stroke(p, r * s, stroke);
-    match glyph {
-        Glyph::Prograde => {
-            ring(0.7);
-            seg((-0.7, 0.0), (-1.4, 0.0));
-            seg((0.7, 0.0), (1.4, 0.0));
-            seg((0.0, -0.7), (0.0, -1.4));
-        }
-        Glyph::Retrograde => {
-            ring(0.7);
-            seg((-0.5, -0.5), (0.5, 0.5));
-            seg((-0.5, 0.5), (0.5, -0.5));
-            seg((0.0, 0.7), (0.0, 1.4));
-        }
-        Glyph::Normal | Glyph::Antinormal => {
-            let sign = if matches!(glyph, Glyph::Normal) { 1.0 } else { -1.0 };
-            let tri = [(0.0, -sign), (0.9, 0.6 * sign), (-0.9, 0.6 * sign), (0.0, -sign)];
-            let pts: Vec<Pos2> = tri.iter().map(|&(x, y)| p + vec2(x, y) * s).collect();
-            painter.add(Shape::line(pts, stroke));
-            if sign < 0.0 {
-                painter.circle_filled(p, 0.2 * s, stroke.color);
-            }
-        }
-        Glyph::RadialOut | Glyph::RadialIn => {
-            ring(0.6);
-            let (a, b) = if matches!(glyph, Glyph::RadialOut) { (0.6, 1.2) } else { (0.15, 0.45) };
-            let k = std::f32::consts::FRAC_1_SQRT_2;
-            for (dx, dy) in [(k, k), (-k, k), (k, -k), (-k, -k)] {
-                seg((dx * a, dy * a), (dx * b, dy * b));
-            }
-        }
-        Glyph::Target => {
-            ring(0.8);
-            painter.circle_filled(p, 0.2 * s, stroke.color);
-        }
-        Glyph::AntiTarget => {
-            seg((-0.7, -0.7), (0.7, 0.7));
-            seg((-0.7, 0.7), (0.7, -0.7));
-        }
-        Glyph::Maneuver => {
-            // A ring with three ticks pointing in.
-            ring(1.0);
-            seg((0.0, -1.0), (0.0, -0.5));
-            seg((-0.87, 0.5), (-0.43, 0.25));
-            seg((0.87, 0.5), (0.43, 0.25));
-        }
+        ui.label(RichText::new(format!("DIST {}", fmt_dist(*d))).monospace());
     }
 }

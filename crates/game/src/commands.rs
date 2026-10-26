@@ -42,8 +42,10 @@ pub enum GameCommand {
     SetPlan { vessel: VesselId, plan: FlightPlan },
     /// The active vessel's attitude hold (D075); turns SAS on.
     SetHold(HoldMode),
-    /// The active vessel's throttle, 0–1 (the flight panel's slider).
+    /// The active vessel's throttle, 0–1 (the navball's throttle bar).
     SetThrottle(f64),
+    /// SAS on or off (the navball's SAS button; T toggles it directly).
+    SetSas(bool),
     /// Activate the active vessel's next stage (Space, the Staging menu).
     NextStage,
 }
@@ -134,6 +136,7 @@ pub fn apply(
                 sim.controls.sas = true;
             }
             GameCommand::SetThrottle(t) => sim.controls.throttle = t.clamp(0.0, 1.0),
+            GameCommand::SetSas(on) => sim.controls.sas = *on,
             GameCommand::NextStage => {
                 let mut controls = sim.controls;
                 let done = crate::staging::activate_next(

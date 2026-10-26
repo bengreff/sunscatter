@@ -22,6 +22,8 @@ pub mod theme {
     pub const TEXT: Color32 = Color32::from_rgb(225, 235, 245);
     pub const ACCENT: Color32 = Color32::from_rgb(255, 170, 40);
     pub const WARN: Color32 = Color32::from_rgb(255, 120, 100);
+    /// Destruction and failures: stronger than a warning.
+    pub const ALERT: Color32 = Color32::from_rgb(255, 64, 52);
 
     pub fn panel_frame() -> Frame {
         Frame::new()

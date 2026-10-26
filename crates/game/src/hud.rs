@@ -359,16 +359,6 @@ fn flight_panel(
     let ship = sim.ship();
     let (anchor, r, v) = ship.state_at(&sim.world, sim.clock);
     let snap = sim.world.snapshot(sim.clock);
-    // A wreck still moving shows its cause at once (it becomes `Crashed`
-    // only when it comes to rest).
-    let phase = match (&ship.phase, ship.destruction()) {
-        (_, Some(cause)) => format!("{} (R R to reset)", cause.describe()),
-        (Phase::Landed { .. }, None) => "LANDED".to_string(),
-        (Phase::Powered { .. }, None) => live_word(ship.engine_running(&sim.controls), ship.chute.open()).to_string(),
-        (Phase::Coasting { .. }, None) => "COASTING".to_string(),
-        (Phase::Crashed { cause, .. }, None) => format!("{} (R R to reset)", cause.describe()),
-    };
-    ui_.label(egui::RichText::new(phase).monospace().color(theme::ACCENT));
     if let Some(body) = near.and_then(|b| sim.world.source(b)) {
         let k = snap.relative(body.node, anchor);
         let rel = r - k.r;
@@ -464,15 +454,30 @@ pub fn draw_body_menu(
     Ok(())
 }
 
-/// What a live (integrated every tick) vessel is doing: only a running
-/// engine is "powered"; a craft under its chute, or gliding or falling with
-/// the engine off, is not.
-fn live_word(engine: bool, chute: bool) -> &'static str {
-    match (engine, chute) {
-        (true, _) => "POWERED",
-        (false, true) => "ON PARACHUTE",
-        (false, false) => "FLIGHT (engine off)",
+/// The flight state under the navball, and whether it is an alert: a
+/// wreck's cause (at once, while it still moves), LANDED, POWERED (only a
+/// running engine: live, or a planned burn on rails), ON PARACHUTE, or
+/// FLIGHT (gliding, falling or coasting with the engine off).
+pub fn state_word(destroyed: Option<String>, landed: bool, engine: bool, chute: bool) -> (String, bool) {
+    match (destroyed, landed, engine, chute) {
+        (Some(cause), ..) => (format!("{cause} (R R to reset)"), true),
+        (None, true, ..) => ("LANDED".into(), false),
+        (None, false, true, _) => ("POWERED".into(), false),
+        (None, false, false, true) => ("ON PARACHUTE".into(), false),
+        (None, false, false, false) => ("FLIGHT".into(), false),
     }
+}
+
+/// [`state_word`] for the active vessel.
+pub fn state_line(sim: &SimState) -> (String, bool) {
+    let ship = sim.ship();
+    let destroyed = match (&ship.phase, ship.destruction()) {
+        (_, Some(cause)) => Some(cause.describe()),
+        (Phase::Crashed { cause, .. }, None) => Some(cause.describe()),
+        _ => None,
+    };
+    let landed = matches!(ship.phase, Phase::Landed { .. });
+    state_word(destroyed, landed, crate::scene::engine_on(sim, sim.active), ship.chute.open())
 }
 
 /// The chute's state, and before the command the dynamic pressure against
@@ -528,11 +533,21 @@ mod tests {
     }
 
     #[test]
-    fn live_flight_is_powered_only_with_the_engine_running() {
-        assert_eq!(live_word(true, false), "POWERED");
-        assert_eq!(live_word(true, true), "POWERED");
-        assert_eq!(live_word(false, true), "ON PARACHUTE");
-        assert_eq!(live_word(false, false), "FLIGHT (engine off)");
+    fn the_state_line_is_powered_only_with_the_engine_running() {
+        let wreck = || Some("CRASHED at 40 m/s".to_string());
+        // (destroyed, landed, engine, chute, expected, alert)
+        let table = [
+            (None, false, true, false, "POWERED", false),
+            (None, false, true, true, "POWERED", false),
+            (None, false, false, true, "ON PARACHUTE", false),
+            (None, false, false, false, "FLIGHT", false),
+            (None, true, false, false, "LANDED", false),
+            (wreck(), false, false, true, "CRASHED at 40 m/s (R R to reset)", true),
+            (wreck(), true, false, false, "CRASHED at 40 m/s (R R to reset)", true),
+        ];
+        for (destroyed, landed, engine, chute, want, alert) in table {
+            assert_eq!(state_word(destroyed, landed, engine, chute), (want.to_string(), alert));
+        }
     }
 
     #[test]

@@ -246,6 +246,33 @@ pub fn sas_label(controls: &sim::vessel::Controls, body: &str) -> String {
     }
 }
 
+/// The throttle (0–1) a press on the vertical throttle bar sets, from the
+/// pointer's height between the bar's `top` and `bottom` (screen y grows
+/// down). Only while the player presses the bar (a click or a drag):
+/// drawing it never sends a value, so it cannot undo the keys or a script
+/// (the old slider's gate).
+pub fn throttle_from_bar(pressed: bool, pointer_y: Option<f32>, top: f32, bottom: f32) -> Option<f64> {
+    let y = pointer_y.filter(|_| pressed && bottom > top)?;
+    Some(f64::from(((bottom - y) / (bottom - top)).clamp(0.0, 1.0)))
+}
+
+/// Whether a speed mode can be picked: target mode needs a target.
+pub fn mode_available(mode: Mode, has_target: bool) -> bool {
+    mode != Mode::Target || has_target
+}
+
+/// Whether a hold mode can be picked from the cluster: the target modes
+/// need a target and the maneuver hold a planned burn (the keys still pick
+/// them; the hold then keeps the attitude).
+pub fn hold_available(mode: sim::vessel::HoldMode, has_target: bool, has_burn: bool) -> bool {
+    use sim::vessel::HoldMode;
+    match mode {
+        HoldMode::Target | HoldMode::AntiTarget => has_target,
+        HoldMode::Maneuver => has_burn,
+        HoldMode::Stability | HoldMode::Prograde | HoldMode::Retrograde => true,
+    }
+}
+
 #[cfg(test)]
 #[path = "rules_tests.rs"]
 mod tests;

@@ -253,3 +253,45 @@ fn sas_label_table() {
     }
     assert_eq!(speed_reference(Mode::Surface), SpeedReference::Surface);
 }
+
+#[test]
+fn the_throttle_bar_sends_only_while_pressed() {
+    // A bar from y = 100 (full) to y = 200 (closed).
+    // (pressed, pointer y, expected)
+    let table = [
+        (false, Some(150.0), None),
+        (true, None, None),
+        (true, Some(200.0), Some(0.0)),
+        (true, Some(100.0), Some(1.0)),
+        (true, Some(150.0), Some(0.5)),
+        (true, Some(175.0), Some(0.25)),
+        (true, Some(40.0), Some(1.0)),
+        (true, Some(260.0), Some(0.0)),
+    ];
+    for (pressed, y, want) in table {
+        assert_eq!(throttle_from_bar(pressed, y, 100.0, 200.0), want, "{pressed} {y:?}");
+    }
+    assert_eq!(throttle_from_bar(true, Some(100.0), 100.0, 100.0), None, "a bar with no height");
+}
+
+#[test]
+fn modes_and_holds_need_what_they_point_at() {
+    use sim::vessel::HoldMode;
+    assert!(mode_available(Mode::Orbit, false) && mode_available(Mode::Surface, false));
+    assert!(!mode_available(Mode::Target, false) && mode_available(Mode::Target, true));
+    // (mode, target, burn, available)
+    let table = [
+        (HoldMode::Stability, false, false, true),
+        (HoldMode::Prograde, false, false, true),
+        (HoldMode::Retrograde, false, false, true),
+        (HoldMode::Target, false, true, false),
+        (HoldMode::Target, true, false, true),
+        (HoldMode::AntiTarget, false, false, false),
+        (HoldMode::AntiTarget, true, false, true),
+        (HoldMode::Maneuver, true, false, false),
+        (HoldMode::Maneuver, false, true, true),
+    ];
+    for (mode, target, burn, want) in table {
+        assert_eq!(hold_available(mode, target, burn), want, "{mode:?} {target} {burn}");
+    }
+}

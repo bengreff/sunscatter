@@ -2,10 +2,14 @@
 //! horizon and heading of the reference body's local frame, rotated by the
 //! ship's attitude, with velocity/orbit/target markers and flight readouts.
 //!
-//! The rules (markers, mode switch, angles, ball projection) are pure
-//! functions in [`rules`]; this module gathers state from the sim and
-//! [`draw`] paints it with egui (the ball is an egui mesh, no extra camera).
+//! The rules (markers, mode switch, angles, ball projection, the throttle
+//! bar) are pure functions in [`rules`]; this module gathers state from the
+//! sim once a frame ([`update`]), [`draw`] lays out the cluster (D080: the
+//! speed and its switch, altitude, V/S, Ap and Pe, SAS and its hold modes,
+//! the throttle, the flight state) and [`ball`] paints the ball (an egui
+//! mesh, no extra camera).
 
+mod ball;
 mod draw;
 pub mod rules;
 
@@ -30,6 +34,7 @@ impl Plugin for NavballPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<Navball>()
             .add_systems(Update, feed_hold.before(crate::state::advance))
+            .add_systems(Update, update.after(crate::trajectory::apsides::update))
             .add_systems(bevy_egui::EguiPrimaryContextPass, draw::draw.after(crate::hud::draw));
     }
 }
@@ -49,8 +54,21 @@ pub struct Navball {
     /// Holds the surface/orbit mode instead of switching at 36 km.
     pub locked: bool,
     pub target: Option<NavTarget>,
+    /// The state this frame (`update`), for the cluster and the menus.
+    pub now: Option<NavState>,
     /// Readouts as last shown, and when (app seconds).
     shown: Option<(f64, NavState)>,
+}
+
+/// The next apoapsis or periapsis on the predicted trajectory (D076).
+#[derive(Clone, Debug, PartialEq)]
+pub struct ApsisReadout {
+    /// Above the body's reference ellipsoid under it (m).
+    pub altitude: f64,
+    /// Seconds from now.
+    pub in_s: f64,
+    /// Its body's name when it is not the reference body.
+    pub other_body: Option<String>,
 }
 
 /// Everything the navball draws, for one instant.
@@ -68,10 +86,14 @@ pub struct NavState {
     pub altitude: (&'static str, f64),
     pub vertical_speed: f64,
     /// Angle of attack and sideslip (deg), in an atmosphere only.
+    // Read by the Landing/Reentry menu (the next commit).
+    #[allow(dead_code)]
     pub aoa_sideslip: Option<(f64, f64)>,
+    #[allow(dead_code)]
     pub g_load: f64,
-    pub time_to_ap: Option<f64>,
-    pub time_to_pe: Option<f64>,
+    /// The next apsides (D076), never osculating.
+    pub ap: Option<ApsisReadout>,
+    pub pe: Option<ApsisReadout>,
     pub body: String,
     /// Target name and distance (m).
     pub target: Option<(String, f64)>,
@@ -183,7 +205,14 @@ pub fn nav_state(sim: &SimState, tracked: &Tracked, aps: &Apsides, nav: &mut Nav
     let in_atmosphere = p.atmosphere.as_ref().is_some_and(|a| alt < a.top);
     let grounded = matches!(vessel.phase, Phase::Landed { .. } | Phase::Crashed { .. });
     // The next apsides on the predicted trajectory (D076).
-    let (time_to_ap, time_to_pe) = aps.get(vessel.id()).map_or((None, None), |a| a.times_to_next(t));
+    let (next_ap, next_pe) = aps.get(vessel.id()).map_or((None, None), |a| a.next_after(t));
+    let readout = |a: Option<&crate::trajectory::apsides::Apsis>| {
+        a.map(|a| ApsisReadout {
+            altitude: a.altitude,
+            in_s: a.t.seconds_since(t),
+            other_body: (a.body != body).then(|| sim.world.eph.node(a.body).name.clone()),
+        })
+    };
     Some(NavState {
         mode: nav.mode,
         ship,
@@ -199,8 +228,8 @@ pub fn nav_state(sim: &SimState, tracked: &Tracked, aps: &Apsides, nav: &mut Nav
         vertical_speed: rules::vertical_speed(rel, v_srf),
         aoa_sideslip: if in_atmosphere { rules::aoa_sideslip(&ship, v_srf) } else { None },
         g_load: rules::g_load(proper_accel(&sim.world, t, vessel, sim.controls.throttle)),
-        time_to_ap,
-        time_to_pe,
+        ap: readout(next_ap),
+        pe: readout(next_pe),
         body: src.name.clone(),
         target: target.map(|(name, tr, _)| (name, (tr - r).length())),
         maneuver: vessel.plan().burns.iter().find(|b| b.t_start.seconds_since(t) > 0.0).map(|b| {
@@ -208,6 +237,13 @@ pub fn nav_state(sim: &SimState, tracked: &Tracked, aps: &Apsides, nav: &mut Nav
             (b.law.direction.direction(&snap, anchor, r, v), b.t_start.seconds_since(t))
         }),
     })
+}
+
+/// Refreshes [`Navball::now`] (and the auto mode) after the simulation
+/// step and the apsides.
+pub fn update(sim: Res<SimState>, tracked: Res<Tracked>, aps: Res<Apsides>, mut nav: ResMut<Navball>) {
+    let nav = &mut *nav;
+    nav.now = nav_state(&sim, &tracked, &aps, nav);
 }
 
 impl Navball {
