@@ -286,3 +286,46 @@ fn relative_position_of_members_10_km_apart() {
         assert!(err < most, "{name}: {err} m");
     }
 }
+
+/// A hit faster than the impact limit (8 m/s at any point, D066) destroys
+/// both one-part craft; in debug mode (D064) neither breaks.
+#[test]
+fn a_collision_past_the_impact_limit_destroys_the_craft() {
+    let w = world();
+    for debug in [false, true] {
+        let mut fleet = scene(&w, 12.0, 12.0);
+        for v in fleet.iter_mut().take(2) {
+            v.set_debug(&w, debug);
+        }
+        run(&w, &mut fleet, &controls(true), 1.0 / 60.0, 2.0, &mut |_| {});
+        for v in fleet.iter().take(2) {
+            match (debug, v.destruction()) {
+                (false, Some(Destruction::Impact { speed, .. })) => assert!(speed > 8.0, "{speed} m/s"),
+                (true, None) => {}
+                (_, d) => panic!("debug {debug}: {:?} {d:?}", v.id()),
+            }
+        }
+        assert_eq!(fleet[2].destruction(), None);
+    }
+}
+
+/// A craft of parts hit too fast loses the parts that were hit (D066 per
+/// point, D032): the breakup names them, and the bubble stops at that
+/// tick for the split.
+#[test]
+fn a_craft_of_parts_hit_too_fast_loses_the_part() {
+    let w = world();
+    let (earth, r, v, along) = leo(&w);
+    let craft = crate::craft::registry::craft_of(&crate::craft::stress::id(8));
+    let hull = proximity::hull_of(&crate::craft::stress::id(8));
+    let gap = 2.0 * hull.radius + 0.5;
+    let a = Vessel::coasting(&w, VesselId(1), t0(), earth, r, v, &craft);
+    let b = Vessel::coasting(&w, VesselId(2), t0(), earth, r + along * gap, v - along * 12.0, &craft);
+    let c = Vessel::coasting(&w, VesselId(3), t0(), earth, r - along * 2_000.0, v, test_craft());
+    let mut fleet = vec![a, b, c];
+    run(&w, &mut fleet, &controls(true), 1.0 / 60.0, 3.0, &mut |_| {});
+    for v in fleet.iter().take(2) {
+        let b = v.breakup.as_ref().unwrap_or_else(|| panic!("{:?} broke up", v.id()));
+        assert!(!b.destroyed.is_empty() && b.destroyed.iter().all(|d| matches!(d.1, Destruction::Impact { .. })));
+    }
+}
