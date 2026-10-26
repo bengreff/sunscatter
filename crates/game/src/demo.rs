@@ -42,6 +42,8 @@ pub(crate) enum Step {
     Coast,
     Circularize,
     Orbit,
+    /// Earth from low orbit, looking down past the ship: land and water crisp (D073).
+    OrbitDown,
     Map,
     /// A planned trans-lunar burn: the predicted line through it (map view).
     Plan,
@@ -191,16 +193,6 @@ fn view_sunlit(rig: &mut CameraRig, sim: &SimState, body: sim::frame::NodeId, an
     rig.distance = distance;
 }
 
-fn horizontal(r: DVec3, v: DVec3) -> DVec3 {
-    let up = r.normalize();
-    let h = v - up * v.dot(up);
-    if h.length() > 1.0 {
-        h.normalize()
-    } else {
-        DVec3::Z.cross(up).normalize()
-    }
-}
-
 /// Runs the capture sub-state; returns true while it is busy.
 fn run_capture(
     demo: &mut Demo,
@@ -340,7 +332,7 @@ pub fn run(
             let up = r.normalize();
             // A slow turn: the test craft lifts off at a thrust-to-weight of 1.3.
             let pitch = (1.4 * (alt / 200_000.0).clamp(0.0, 1.0).sqrt()).min(1.35);
-            point(&mut sim, up * pitch.cos() + horizontal(r, v) * pitch.sin());
+            point(&mut sim, up * pitch.cos() + crate::demo_checks::horizontal(r, v) * pitch.sin());
             // At 10 km, look north along the Florida coast from above and
             // behind the ship: the view where the ground showed hard-edged
             // dark patches (land against sky-reflecting ocean).
@@ -378,7 +370,7 @@ pub fn run(
             }
         }
         Step::Circularize => {
-            let (up, h) = (r.normalize(), horizontal(r, v));
+            let (up, h) = (r.normalize(), crate::demo_checks::horizontal(r, v));
             let v_circ = (earth.gm / r.length()).sqrt();
             sim.controls.throttle = ((v_circ - v.dot(h)) / 60.0).clamp(0.05, 1.0);
             point(&mut sim, h + up * (-v.dot(up) / 100.0).clamp(-0.2, 0.5));
@@ -414,9 +406,19 @@ pub fn run(
                 bench.start("orbit", *settings);
                 demo.benching = true;
             } else {
+                (rig.distance, rig.pitch) = (60.0, 1.2);
+                demo.next(Step::OrbitDown);
+            }
+        }
+        Step::OrbitDown => {
+            if !demo.shot_taken {
+                demo.shot_taken = true;
+                iface.menus.show_only(None, &[]);
+                demo.capture("orbit_down");
+            } else {
+                iface.menus.show_only(Some(MenuId::Orbital), &["elements"]);
                 ui.plot_frame = PlotFrame::EarthInertial;
-                rig.distance = 2.5e7;
-                rig.pitch = 0.9;
+                (rig.distance, rig.pitch) = (2.5e7, 0.9);
                 demo.next(Step::Map);
             }
         }

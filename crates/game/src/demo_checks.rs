@@ -9,6 +9,7 @@ use crate::interface::menus::MenuId;
 use crate::state::SimState;
 use crate::terrain::Terrain;
 use bevy::prelude::*;
+use glam::DVec3;
 
 /// In the demo, a shader that fails to compile fails the run (they were only
 /// logged: a reserved word once silently removed all terrain), and so does
@@ -118,4 +119,15 @@ pub fn log_fps(
         alt / 1e3,
         terrain.drawn
     );
+}
+
+/// The horizontal direction of `v` at `r` (any horizontal if `v` is vertical).
+pub fn horizontal(r: DVec3, v: DVec3) -> DVec3 {
+    let up = r.normalize();
+    let h = v - up * v.dot(up);
+    if h.length() > 1.0 {
+        h.normalize()
+    } else {
+        DVec3::Z.cross(up).normalize()
+    }
 }
