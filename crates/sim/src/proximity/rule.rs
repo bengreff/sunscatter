@@ -46,6 +46,11 @@ pub struct BubbleState {
     /// position keeps its precision whatever the anchor's distance (rule 3).
     #[serde(default)]
     pub lo: glam::DVec3,
+    /// Held where it is while a craft of its bubble waits for its breakup
+    /// to be split (`sim::vessel::bubble`): `Vessel::advance` returns at
+    /// once.
+    #[serde(default)]
+    pub waiting: bool,
 }
 
 impl BubbleState {

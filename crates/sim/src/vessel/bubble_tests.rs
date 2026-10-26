@@ -41,12 +41,12 @@ fn scene(w: &World, gap: f64, closing: f64) -> Vec<Vessel> {
 
 /// C burns at its least throttle (while `burning`); everyone holds its
 /// attitude (the game's passive controls).
-fn controls(burning: bool) -> impl Fn(usize) -> Controls {
+fn controls(burning: bool) -> impl Fn(usize) -> Controls + Sync {
     move |i| Controls { sas: true, throttle: if i == 2 && burning { 0.1 } else { 0.0 }, ..Default::default() }
 }
 
 /// One frame of the game: the bubble first, then every vessel.
-fn frame(w: &World, fleet: &mut [Vessel], ctl: &dyn Fn(usize) -> Controls, target: Epoch) {
+fn frame(w: &World, fleet: &mut [Vessel], ctl: ControlsOf, target: Epoch) {
     advance(w, fleet, ctl, target);
     for (i, v) in fleet.iter_mut().enumerate() {
         v.advance(w, target, &ctl(i), COAST_BUDGET);
@@ -55,14 +55,7 @@ fn frame(w: &World, fleet: &mut [Vessel], ctl: &dyn Fn(usize) -> Controls, targe
 
 /// Frames of `dt` from the fleet's time for `span` s; calls `each` after
 /// every frame.
-fn run(
-    w: &World,
-    fleet: &mut [Vessel],
-    ctl: &dyn Fn(usize) -> Controls,
-    dt: f64,
-    span: f64,
-    each: &mut dyn FnMut(&[Vessel]),
-) {
+fn run(w: &World, fleet: &mut [Vessel], ctl: ControlsOf, dt: f64, span: f64, each: &mut dyn FnMut(&[Vessel])) {
     let start = fleet[0].time;
     let frames = (span / dt).round() as usize;
     for k in 1..=frames {
@@ -328,4 +321,137 @@ fn a_craft_of_parts_hit_too_fast_loses_the_part() {
         let b = v.breakup.as_ref().unwrap_or_else(|| panic!("{:?} broke up", v.id()));
         assert!(!b.destroyed.is_empty() && b.destroyed.iter().all(|d| matches!(d.1, Destruction::Impact { .. })));
     }
+}
+
+/// The review's scenario: M sits near a leader L in low orbit (Earth its
+/// anchor); N, anchored on the Moon, drifts into M at 2 m/s; X, a craft
+/// with a lower id, burns in lunar orbit. Bubbles are separate: X's
+/// (alone, flown by the fleet) never sets L's frame, nobody is
+/// re-anchored, and M and N touch through the frame tree.
+#[test]
+fn far_apart_leaders_make_separate_bubbles_and_anchors_meet_through_the_frame_tree() {
+    let w = world();
+    let (earth, r, v, along) = leo(&w);
+    let moon = w.find("Moon").unwrap();
+    let craft = test_craft();
+    let k = w.snapshot(t0()).relative(moon.node, earth);
+    let (rm, vm) =
+        Elements { a: 1_837_400.0, e: 0.001, i: 0.3, raan: 0.2, argp: 0.0, mean_anomaly: 1.0 }.to_state(moon.gm);
+    let x = Vessel::coasting(&w, VesselId(1), t0(), moon.node, rm, vm, craft);
+    let l = Vessel::coasting(&w, VesselId(2), t0(), earth, r - along * 2_000.0, v, craft);
+    let m = Vessel::coasting(&w, VesselId(3), t0(), earth, r, v, craft);
+    // N: 12 m ahead of M along track, closing at 2 m/s, stored on the Moon.
+    let n = Vessel::coasting(&w, VesselId(4), t0(), moon.node, r + along * 12.0 - k.r, v - along * 2.0 - k.v, craft);
+    assert_eq!(n.state(&w).0, moon.node);
+    let mut fleet = vec![x, l, m, n];
+    let ctl = |i: usize| Controls { sas: true, throttle: if i <= 1 { 0.1 } else { 0.0 }, ..Default::default() };
+    let mut touched = false;
+    let mut bubbles = 0;
+    let start = fleet[0].time;
+    for f in 1..=(12 * 60) {
+        let target = start.add_seconds(f as f64 / 60.0);
+        let out = advance(&w, &mut fleet, &ctl, target);
+        bubbles = bubbles.max(out.bubbles.len());
+        assert!(out.bubbles.iter().all(|b| !b.vessels.contains(&0)), "X is not in L's bubble");
+        for (i, v) in fleet.iter_mut().enumerate() {
+            v.advance(&w, target, &ctl(i), COAST_BUDGET);
+        }
+        touched |= fleet[2].bubble.since_contact == Some(0);
+    }
+    assert_eq!(bubbles, 1, "one bubble: L, M and N");
+    let anchors: Vec<NodeId> = fleet.iter().map(|v| v.state(&w).0).collect();
+    assert_eq!(anchors, vec![moon.node, earth, earth, moon.node], "nobody re-anchored");
+    assert!(fleet[2].in_bubble() && fleet[3].in_bubble() && !fleet[0].in_bubble());
+    assert!(touched, "M and N touched");
+    let (rm, vm) = state_about(&w, &fleet[2], fleet[2].time, earth);
+    let (rn, vn) = state_about(&w, &fleet[3], fleet[3].time, earth);
+    let line = (rn - rm).normalize();
+    eprintln!("M and N {:.2} m apart, separating at {:.3} m/s", (rn - rm).length(), (vn - vm).dot(line));
+    assert!((vn - vm).dot(line) > 0.1, "they bounced apart");
+}
+
+/// Two bubbles far apart (one in low orbit, one in lunar orbit, each a
+/// leader and a neighbour) advance on their own threads exactly as each
+/// alone.
+#[test]
+fn separate_bubbles_advance_as_each_alone() {
+    let w = world();
+    let (earth, r, v, along) = leo(&w);
+    let moon = w.find("Moon").unwrap();
+    let (rm, vm) =
+        Elements { a: 1_837_400.0, e: 0.001, i: 0.3, raan: 0.2, argp: 0.0, mean_anomaly: 1.0 }.to_state(moon.gm);
+    let along_m = (vm - rm * (vm.dot(rm) / rm.length_squared())).normalize();
+    let craft = test_craft();
+    let make =
+        |id: u64, node: NodeId, at: DVec3, vel: DVec3| Vessel::coasting(&w, VesselId(id), t0(), node, at, vel, craft);
+    let earth_pair = || vec![make(1, earth, r, v), make(2, earth, r + along * 3_000.0, v - along * 0.2)];
+    let moon_pair = || vec![make(3, moon.node, rm, vm), make(4, moon.node, rm + along_m * 3_000.0, vm)];
+    let burn = |first: usize| {
+        move |i: usize| Controls { sas: true, throttle: if i == first { 0.1 } else { 0.0 }, ..Default::default() }
+    };
+    let mut both: Vec<Vessel> = earth_pair().into_iter().chain(moon_pair()).collect();
+    let both_ctl =
+        |i: usize| Controls { sas: true, throttle: if i == 0 || i == 2 { 0.1 } else { 0.0 }, ..Default::default() };
+    let mut out = Advance::default();
+    run(&w, &mut both, &both_ctl, 1.0 / 30.0, 4.0, &mut |_| {});
+    out.bubbles.clear();
+    let (mut e, mut m) = (earth_pair(), moon_pair());
+    run(&w, &mut e, &burn(0), 1.0 / 30.0, 4.0, &mut |_| {});
+    run(&w, &mut m, &burn(0), 1.0 / 30.0, 4.0, &mut |_| {});
+    assert!(both.iter().all(|v| v.in_bubble()));
+    assert_eq!(both, e.into_iter().chain(m).collect::<Vec<_>>());
+    let target = both[0].time.add_seconds(0.1);
+    assert_eq!(advance(&w, &mut both, &both_ctl, target).bubbles.len(), 2);
+}
+
+/// A breakup in contact: the bubble waits at the breakup's epoch until the
+/// split is applied (none of its craft moves), so frames of 1/60 s and of
+/// 1/7 s give the same bits through the collision, the split and after.
+#[test]
+fn a_breakup_in_contact_waits_for_the_split_whatever_the_frames() {
+    let w = world();
+    let (earth, r, v, along) = leo(&w);
+    let id = crate::craft::stress::id(8);
+    let craft = crate::craft::registry::craft_of(&id);
+    let gap = 2.0 * proximity::hull_of(&id).radius + 0.5;
+    let scene = || {
+        vec![
+            Vessel::coasting(&w, VesselId(1), t0(), earth, r, v, &craft),
+            Vessel::coasting(&w, VesselId(2), t0(), earth, r + along * gap, v - along * 12.0, &craft),
+            Vessel::coasting(&w, VesselId(3), t0(), earth, r - along * 2_000.0, v, test_craft()),
+        ]
+    };
+    let ctl = controls(true);
+    let fly = |dt: f64| {
+        let mut fleet = scene();
+        let mut ids = crate::vessel::VesselIds::default();
+        while !ids.issued(VesselId(3)) {
+            ids.allocate();
+        }
+        let (start, mut split_at) = (t0(), Vec::new());
+        for k in 1..=(3.0 / dt).round() as usize {
+            frame(&w, &mut fleet, &ctl, start.add_seconds(dt * k as f64));
+            // As the game does: split what broke (here at once).
+            for i in 0..fleet.len() {
+                let Some(plan) = fleet[i].plan_breakup() else { continue };
+                // Every craft of the bubble waited at the breakup's epoch.
+                let epoch = fleet[i].breakup().expect("broke").epoch;
+                assert!(
+                    fleet.iter().take(3).all(|v| v.time == epoch),
+                    "{:?}",
+                    fleet.iter().map(|v| v.time).collect::<Vec<_>>()
+                );
+                split_at.push(epoch);
+                let pieces = fleet[i].split(&w, &plan, &plan.crafts(), &mut ids);
+                fleet.extend(pieces);
+            }
+        }
+        (fleet, split_at)
+    };
+    let (fine, fine_at) = fly(1.0 / 60.0);
+    let (coarse, coarse_at) = fly(1.0 / 7.0);
+    assert!(!fine_at.is_empty(), "they broke up");
+    assert!(fine.len() > 3, "pieces flew off");
+    assert_eq!(fine_at, coarse_at);
+    assert_eq!(fine, coarse);
 }

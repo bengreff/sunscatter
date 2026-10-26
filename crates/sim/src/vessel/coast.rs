@@ -128,8 +128,9 @@ impl Vessel {
         let controls = if self.destroyed.is_some() { &cut } else { controls };
         let live_at_start = matches!(self.phase, Phase::Powered { .. });
         loop {
-            // Broken up: nothing moves until the split is applied.
-            if self.breakup.is_some() {
+            // Broken up, or in a bubble waiting for a split (D082): nothing
+            // moves until the split is applied.
+            if self.breakup.is_some() || self.bubble.waiting {
                 return (self.time, budget.spent);
             }
             let before = (self.time, std::mem::discriminant(&self.phase));
