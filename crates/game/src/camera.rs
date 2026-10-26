@@ -88,7 +88,9 @@ impl Default for CameraRig {
 #[derive(Component)]
 pub struct MainCamera;
 
-/// Fixed exposure: sunlit surfaces read well; night sides are dark.
+/// Exposure at 1 AU from the Sun: sunlit surfaces read well; night sides
+/// are dark. Elsewhere it follows the starlight at the camera (D087,
+/// `lighting::exposure_ev100`).
 pub const EV100: f32 = 14.5;
 
 pub fn setup(mut commands: Commands, demo: Option<ResMut<crate::demo::Demo>>, mut images: ResMut<Assets<Image>>) {

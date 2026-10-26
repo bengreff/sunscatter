@@ -91,6 +91,10 @@ pub struct GraphicsSettings {
     /// multiple of the physical air density along the view ray (1 =
     /// physical). Not part of the tiers.
     pub haze: f32,
+    /// Exposure follows the starlight at the camera (D087): a day side far
+    /// from the Sun reads like Earth's. Off: the fixed exposure of 1 AU.
+    /// Not part of the tiers.
+    pub starlight_exposure: bool,
 }
 
 impl GraphicsSettings {
@@ -112,6 +116,7 @@ impl GraphicsSettings {
             earthshine: false,
             sky_light: false,
             haze: 1.0,
+            starlight_exposure: true,
         };
         match tier {
             Tier::Minimal => GraphicsSettings {
@@ -171,9 +176,9 @@ impl GraphicsSettings {
     }
 
     /// Tier `tier` with this settings' choices that are not part of the
-    /// tiers (haze) kept.
+    /// tiers (haze, exposure) kept.
     pub fn with_preset(&self, tier: Tier) -> Self {
-        GraphicsSettings { haze: self.haze, ..Self::preset(tier) }
+        GraphicsSettings { haze: self.haze, starlight_exposure: self.starlight_exposure, ..Self::preset(tier) }
     }
 
     fn with_tier(self, tier: Tier) -> Self {
@@ -184,7 +189,9 @@ impl GraphicsSettings {
     pub fn matching_tier(&self) -> Option<Tier> {
         Tier::ALL.into_iter().find(|&t| {
             let p = Self::preset(t);
-            GraphicsSettings { tier: None, haze: self.haze, ..p } == GraphicsSettings { tier: None, ..*self }
+            let own =
+                GraphicsSettings { tier: None, haze: self.haze, starlight_exposure: self.starlight_exposure, ..p };
+            own == GraphicsSettings { tier: None, ..*self }
         })
     }
 }
@@ -243,6 +250,10 @@ mod tests {
         let hazy = GraphicsSettings { haze: 0.5, ..GraphicsSettings::preset(Tier::Low) };
         assert_eq!(hazy.matching_tier(), Some(Tier::Low), "haze is not part of the tiers");
         assert_eq!(hazy.with_preset(Tier::High).haze, 0.5);
+        let fixed = GraphicsSettings { starlight_exposure: false, ..GraphicsSettings::preset(Tier::Medium) };
+        assert_eq!(fixed.matching_tier(), Some(Tier::Medium), "the exposure rule is not part of the tiers");
+        assert!(!fixed.with_preset(Tier::Minimal).starlight_exposure);
+        assert!(GraphicsSettings::preset(Tier::Minimal).starlight_exposure, "on by default (D087)");
         let custom = GraphicsSettings { bloom: false, ..GraphicsSettings::preset(Tier::Ultra) };
         assert_eq!(custom.matching_tier(), None);
     }

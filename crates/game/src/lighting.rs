@@ -118,6 +118,44 @@ pub fn object_light(at: DVec3, star: DVec3, star_r: f64, lm: f64, bodies: &[Sphe
     (visible, shine)
 }
 
+/// The astronomical unit (m, IAU 2012): where the base exposure applies.
+pub const AU: f64 = 1.495_978_707e11;
+
+/// How far the exposure may follow the starlight (stops from the base):
+/// down to ~128 AU (past Sedna's perihelion), up to 0.25 AU.
+const EXPOSURE_STOPS: (f64, f64) = (-14.0, 4.0);
+
+/// The camera's exposure (EV100) under D087: the base exposure set for
+/// the starlight at 1 AU, shifted by the stops between the stellar flux at
+/// the camera (`e_cam`, inverse square, no eclipses: it is the light where
+/// the photographer is, never the scene's luminance) and the flux at 1 AU
+/// (`e_ref`). `follow` false: the fixed base exposure (D055).
+pub fn exposure_ev100(base: f32, e_cam: f64, e_ref: f64, follow: bool) -> f32 {
+    let stops = (e_cam / e_ref).log2();
+    if !follow || stops.is_nan() {
+        return base;
+    }
+    base + stops.clamp(EXPOSURE_STOPS.0, EXPOSURE_STOPS.1) as f32
+}
+
+/// Sets the camera's exposure from the starlight at the camera (D087).
+pub fn update_exposure(
+    sim: Res<SimState>,
+    rig: Res<CameraRig>,
+    defs: Res<BodyDefs>,
+    settings: Res<GraphicsSettings>,
+    mut cams: Query<&mut bevy::camera::Exposure, With<crate::camera::MainCamera>>,
+) {
+    let Some((star, lm)) = defs.light_source else { return };
+    let d = (sim.world.snapshot(sim.clock).relative_r(star, rig.anchor) - rig.cam_pos).length();
+    let ev100 = exposure_ev100(crate::camera::EV100, flux(lm, d), flux(lm, AU), settings.starlight_exposure);
+    for mut e in &mut cams {
+        if (e.ev100 - ev100).abs() > 1e-4 {
+            e.ev100 = ev100;
+        }
+    }
+}
+
 /// Fills each terrain body's lighting uniforms from [`body_light`].
 pub fn update_terrain(
     sim: Res<SimState>,
@@ -163,7 +201,6 @@ pub fn update_terrain(
 mod tests {
     use super::*;
 
-    const AU: f64 = 1.495_978_707e11;
     const SUN_R: f64 = 6.957e8;
     const EARTH_R: f64 = 6.371e6;
 
@@ -227,6 +264,39 @@ mod tests {
         let moved: Vec<Sphere> = bodies.iter().map(|b| Sphere { centre: b.centre + shift, ..*b }).collect();
         let (_, moved_shine) = body_light(0, &moved, sun + shift, lm).shine.expect("moonshine");
         assert!((moved_shine - moonshine).abs() < 1e-9 * moonshine);
+    }
+
+    #[test]
+    fn exposure_follows_the_starlight_at_the_camera() {
+        let sun = luminous_power(3.828e26, 93.0);
+        let e_ref = flux(sun, AU);
+        let base = 14.5;
+        // (case, camera distance from the Sun in AU, follow, expected EV100)
+        let cases = [
+            ("Earth: unchanged", 1.0, true, 14.5),
+            ("near Earth's orbit: within a hundredth of a stop", 1.0067, true, 14.48),
+            ("Jupiter at 5.2 AU: 1/27 of the light, 4.76 stops more", 5.2, true, 14.5 - 4.757),
+            ("Saturn at 9.5 AU: ~1 % of the light", 9.5, true, 14.5 - 6.496),
+            ("Neptune at 30 AU", 30.0, true, 14.5 - 9.814),
+            ("Mercury at 0.387 AU: 2.7 stops less", 0.387, true, 14.5 + 2.740),
+            ("past 128 AU: the darkest exposure", 500.0, true, 14.5 - 14.0),
+            ("grazing the Sun: the brightest", 0.01, true, 14.5 + 4.0),
+            ("off: fixed at Saturn", 9.5, false, 14.5),
+        ];
+        for (case, au, follow, want) in cases {
+            let ev = exposure_ev100(base, flux(sun, au * AU), e_ref, follow);
+            assert!((f64::from(ev) - want).abs() < 0.01, "{case}: {ev}");
+        }
+        // A day side keeps its brightness on screen (lux x 2^-EV), whatever
+        // the distance; a night side stays as many stops below it.
+        let screen = |au: f64| {
+            let e = flux(sun, au * AU);
+            e * 2f64.powf(-f64::from(exposure_ev100(base, e, e_ref, true)))
+        };
+        assert!((screen(9.5) / screen(1.0) - 1.0).abs() < 1e-5);
+        // The camera's flux is a distance, never the scene: no light, no change.
+        assert_eq!(exposure_ev100(base, 0.0, e_ref, true), base - 14.0);
+        assert_eq!(exposure_ev100(base, f64::NAN, e_ref, true), base);
     }
 
     #[test]

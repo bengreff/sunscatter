@@ -146,6 +146,7 @@ fn main() {
                 scene::update_ships,
                 (scene::update_flames, scene::update_canopies).after(scene::update_ships),
                 (terrain::update, lighting::update_terrain).chain(),
+                lighting::update_exposure,
                 terrain::update_textures,
                 sky::update_stars,
                 sky::update_ambient,

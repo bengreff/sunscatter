@@ -162,6 +162,7 @@ fn graphics_tab(ui_: &mut egui::Ui, ui: &mut SettingsUi, settings: &mut Graphics
         }
     });
     ui_.add(egui::Slider::new(&mut s.haze, 0.0..=2.0).text("haze (1 = physical)"));
+    ui_.checkbox(&mut s.starlight_exposure, "Exposure follows the starlight (off: fixed, as at Earth)");
     ui_.checkbox(&mut s.ocean_glint, "Ocean sun glint");
     ui_.add(egui::Slider::new(&mut s.star_magnitude, 0.0..=8.0).text("faintest star (mag, 0 = none)"));
     ui_.checkbox(&mut s.bloom, "Bloom");
