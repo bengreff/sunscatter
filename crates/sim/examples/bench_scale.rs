@@ -6,7 +6,7 @@
 //! `cargo run -p sim --release --example bench_scale [craft] [fleet] [parts=1,50,300,1000] [fleets=1,10,50] [runs=3]`
 //!
 //! No section named: both. Each timing is the median of `runs` runs.
-//! `profile=<bake|design|build|live|contact|lattice|fleet>,<parts>` repeats
+//! `profile=<bake|design|build|live|contact|lattice|fleet|settled>,<parts>` repeats
 //! one measurement for about 30 s, for a sampling profiler (`sample <pid>`).
 use glam::DVec3;
 use sim::aero::{aero_forces, bake, BakeOptions, Flow};
@@ -270,13 +270,16 @@ fn coast(w: &World, craft: &Craft, runs: usize) -> Coast {
             if !hold {
                 tumble(&mut v, w);
             }
-            v.extend_coast(w, t0().add_seconds(secs + 7_200.0), usize::MAX);
+            // One second first: the coast restarts on the pointing the
+            // controls give (perturbed coasts); then integrated ahead.
             let controls = Controls { sas: hold, ..Default::default() };
+            v.advance(w, t0().add_seconds(1.0), &controls, usize::MAX);
+            v.extend_coast(w, t0().add_seconds(secs + 7_200.0), usize::MAX);
             timed(|| v.advance(w, t0().add_seconds(secs), &controls, usize::MAX)).1
         })
     };
-    let tumbling = lattice(false, 86_400.0) * 1e3 / (86_400.0 / LATTICE);
-    Coast { step, first, tenth, tumbling, holding: lattice(true, 1e6) }
+    let tumbling = lattice(false, 86_401.0) * 1e3 / (86_400.0 / LATTICE);
+    Coast { step, first, tenth, tumbling, holding: lattice(true, 1e6 + 1.0) }
 }
 
 /// Everything measured for one part count.
@@ -403,13 +406,14 @@ fn print_rows(rows: &[Row]) {
     }
 }
 
-/// A fleet of `size` (1, 10 or 50): vessels, their controls, a label.
-/// Limbo stand-ins (10 when size ≥ 10): tumbling with SAS off, so their
-/// thermal lattice solves at every point; half 300-part craft, two on
-/// lunar transfers. Quiet craft hold attitude with SAS on (the game's
-/// passive controls): test craft and 300-part craft in LEO, four on lunar
-/// transfers, one test craft on the pad. Vessel 0 (300 parts, LEO) is active.
-fn fleet(w: &World, size: usize, big: &Craft) -> (Vec<Vessel>, Vec<Controls>) {
+/// A fleet of `size` (1, 10 or 50): vessels and their controls. Limbo
+/// stand-ins (10 when size ≥ 10): tumbling with SAS off (torque-free);
+/// half 300-part craft, two on lunar transfers. Quiet craft hold attitude
+/// with SAS on (the game's passive controls): test craft and 300-part craft
+/// in LEO, four on lunar transfers, one test craft on the pad. Vessel 0
+/// (300 parts, LEO) is active. `high`: 20,000 km circular orbits instead of
+/// the lunar transfers (nothing re-enters while a fleet settles).
+fn fleet(w: &World, size: usize, big: &Craft, high: bool) -> (Vec<Vessel>, Vec<Controls>) {
     let small = test_craft();
     let (mut ships, mut controls) = (Vec::new(), Vec::new());
     for k in 0..size {
@@ -418,9 +422,16 @@ fn fleet(w: &World, size: usize, big: &Craft) -> (Vec<Vessel>, Vec<Controls>) {
         let craft = if size == 1 { big } else { craft };
         let id = k as u64 + 1;
         let leo = |c: &Craft| orbiting(w, c, id, 300e3 + 5e3 * (k % 40) as f64, 0.1 + 0.02 * k as f64, 0.37 * k as f64);
+        let far = |c: &Craft| {
+            if high {
+                orbiting(w, c, id, 20_000e3, 0.5, k as f64)
+            } else {
+                transfer(w, c, id, k as f64)
+            }
+        };
         let mut v = match k {
-            8 | 9 if limbo => transfer(w, craft, id, k as f64),
-            45..=48 => transfer(w, [small, big][k % 2], id, k as f64),
+            8 | 9 if limbo => far(craft),
+            45..=48 => far([small, big][k % 2]),
             49 => Vessel::landed_at(w, VesselId(id), "Earth", PAD.0, PAD.1, t0(), small),
             _ => leo(craft),
         };
@@ -441,8 +452,10 @@ fn stopped(v: &Vessel) -> bool {
 /// What a run of the frame loop measured.
 #[derive(Default)]
 struct Frames {
-    /// Mean and worst frame (ms, advance plus look-ahead), look-ahead (ms).
+    /// Mean and worst frame (ms, advance plus look-ahead), the mean over
+    /// the frames at the full warp (not capped), look-ahead (ms).
     mean: f64,
+    full: f64,
     worst: f64,
     ahead: f64,
     /// Frames held back by the budgets, frames at physics warp because a
@@ -529,10 +542,14 @@ fn frame_loop(
             }
         });
         f.mean += (ms + look) / frames as f64;
+        if !live {
+            f.full += ms + look;
+        }
         f.ahead += look / frames as f64;
         f.worst = f.worst.max(ms + look);
     }
     f.reached = clock.seconds_since(start) / (frames as f64 / 60.0);
+    f.full /= (frames - f.capped).max(1) as f64;
     f
 }
 
@@ -542,22 +559,32 @@ fn fleets(w: &World, sizes: &[usize]) {
     println!(
         "\n300-part craft for the fleets: built in {ms:.0} ms, design in {bake_ms:.0} ms (shared by every vessel)"
     );
-    println!("\n| fleet | warp | frame, in turn: mean (worst) | look-ahead | compute-limited | at 4× (a vessel live) | warp reached | slowest advance (vessel, phase) | {POOL} threads: mean (worst) | warp reached | fleet KB |");
+    println!("\n| fleet | warp | frame, in turn: mean at full warp, all (worst) | look-ahead | compute-limited | at 4× (a vessel live) | warp reached | slowest advance (vessel, phase) | {POOL} threads: mean at full warp, all (worst) | warp reached | fleet KB |");
     println!("|---|---|---|---|---|---|---|---|---|---|---|");
-    for &size in sizes {
-        let (mut ships, controls) = fleet(w, size, &big.craft);
+    // Fresh from launch (uniform 290 K), then settled for 30 days first.
+    for (size, settled) in sizes.iter().flat_map(|&n| [(n, false), (n, true)]) {
+        let (mut ships, controls) = fleet(w, size, &big.craft, settled);
+        let ((), settle_ms) = timed(|| {
+            for (v, c) in ships.iter_mut().zip(&controls).filter(|_| settled) {
+                v.advance(w, t0().add_seconds(30.0 * 86_400.0), c, usize::MAX);
+            }
+        });
         for v in &mut ships {
-            v.extend_coast(w, t0().add_seconds(LOOKAHEAD), usize::MAX);
+            let t = v.time.add_seconds(LOOKAHEAD);
+            v.extend_coast(w, t, usize::MAX);
         }
         let kb: usize = ships.iter().map(|v| vessel_bytes(v).0).sum();
-        for (warp, frames) in [(1.0, 600), (1e3, 600), (1e6, 240)] {
+        let label = if settled { format!("{size} settled ({:.0} s)", settle_ms / 1e3) } else { size.to_string() };
+        let warps: &[(f64, usize)] =
+            if settled { &[(1e3, 600), (1e6, 240)] } else { &[(1.0, 600), (1e3, 600), (1e6, 240)] };
+        for &(warp, frames) in warps {
             let serial = frame_loop(w, &mut ships.clone(), &controls, warp, frames, 1);
             let pool = frame_loop(w, &mut ships.clone(), &controls, warp, frames, POOL);
             let (a, b) = (serial, pool);
             println!(
-                "| {size} | {warp:.0}× | {:.2} ms ({:.1}) | {:.2} ms | {}/{frames} | {} | {:.0}× | {:.1} ms (#{}, {}) | {:.2} ms ({:.1}) | {:.0}× | {:.0} |",
-                a.mean, a.worst, a.ahead, a.limited, a.capped, a.reached, a.slowest.0, a.slowest.1, a.slowest.2,
-                b.mean, b.worst, b.reached, kb as f64 / 1024.0
+                "| {label} | {warp:.0}× | {:.2}, {:.2} ms ({:.1}) | {:.2} ms | {}/{frames} | {} | {:.0}× | {:.1} ms (#{}, {}) | {:.2}, {:.2} ms ({:.1}) | {:.0}× | {:.0} |",
+                a.full, a.mean, a.worst, a.ahead, a.limited, a.capped, a.reached, a.slowest.0, a.slowest.1, a.slowest.2,
+                b.full, b.mean, b.worst, b.reached, kb as f64 / 1024.0
             );
         }
     }
@@ -578,10 +605,17 @@ fn profile(w: &World, what: &str, n: usize) {
             ("contact", Some(c)) => drop(live_tick(w, c, 3, 2.0)),
             ("lattice", Some(c)) => drop(coast(w, c, 1)),
             ("fleet", Some(c)) => {
-                let (mut ships, controls) = fleet(w, n, c);
+                let (mut ships, controls) = fleet(w, n, c, false);
                 frame_loop(w, &mut ships, &controls, 1e6, 240, 1);
             }
-            _ => panic!("profile=<bake|design|build|live|contact|lattice|fleet>,<parts>"),
+            ("settled", Some(c)) => {
+                let (mut ships, controls) = fleet(w, n, c, true);
+                for (v, c) in ships.iter_mut().zip(&controls) {
+                    v.advance(w, t0().add_seconds(30.0 * 86_400.0), c, usize::MAX);
+                }
+                frame_loop(w, &mut ships, &controls, 1e6, 2_400, 1);
+            }
+            _ => panic!("profile=<bake|design|build|live|contact|lattice|fleet|settled>,<parts>"),
         }
         runs += 1;
     }
