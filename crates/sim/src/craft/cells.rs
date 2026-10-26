@@ -20,7 +20,7 @@ use super::file::{Primitive, Shape, Skin};
 use super::mesh::{edge_key, Surface};
 use crate::math;
 use glam::DVec3;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BinaryHeap, HashMap};
 
 /// How to build cells.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -103,6 +103,25 @@ pub struct Cells {
     pub tri_cell: Vec<u32>,
     /// Feet first (in primitive order), then hull points (in cell order).
     pub contacts: Vec<ContactPoint>,
+}
+
+/// A group's split error and index, ordered worst first: the larger error,
+/// then the lower index.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct Worst(f64, usize);
+
+impl Eq for Worst {}
+
+impl PartialOrd for Worst {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for Worst {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.0.total_cmp(&other.0).then(other.1.cmp(&self.1))
+    }
 }
 
 /// Per-triangle centroid, normal and area.
@@ -201,16 +220,18 @@ pub fn build_cells(s: &Surface, primitives: &[Primitive], default_skin: &Skin, o
         groups[p as usize].push(t as u32);
     }
     groups.retain(|g| !g.is_empty());
-    let mut errors: Vec<f64> = groups.iter().map(|g| tris.error(g, opts.curvature_weight)).collect();
+    // The worst group first (the lowest index among equals): a heap, not a
+    // scan of every group per split (O(target²) on large craft).
+    let mut queue: BinaryHeap<Worst> =
+        groups.iter().enumerate().map(|(i, g)| Worst(tris.error(g, opts.curvature_weight), i)).collect();
     while groups.len() < opts.target {
-        let (worst, &e) =
-            errors.iter().enumerate().fold((0, &f64::MIN), |best, cur| if cur.1 > best.1 { cur } else { best });
+        let Some(Worst(e, worst)) = queue.pop() else { break };
         if e < 0.0 {
             break;
         }
         let rest = tris.split(&mut groups[worst]);
-        errors[worst] = tris.error(&groups[worst], opts.curvature_weight);
-        errors.push(tris.error(&rest, opts.curvature_weight));
+        queue.push(Worst(tris.error(&groups[worst], opts.curvature_weight), worst));
+        queue.push(Worst(tris.error(&rest, opts.curvature_weight), groups.len()));
         groups.push(rest);
     }
     let mut tri_cell = vec![0u32; s.triangles.len()];

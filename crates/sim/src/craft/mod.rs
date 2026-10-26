@@ -4,6 +4,7 @@
 //! `data/craft/<craft>/craft.ron` (numbers) and `geometry.ron` (shape). This
 //! module owns everything derived from those files at load.
 
+pub mod broad;
 pub mod cells;
 pub mod design;
 pub mod engine;

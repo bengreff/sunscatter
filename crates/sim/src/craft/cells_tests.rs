@@ -189,3 +189,36 @@ fn build_time() {
         c.contacts.len()
     );
 }
+
+/// The split queue (a heap) picks the same group as the scan it replaced
+/// (the largest error, the lowest index among equals): the same cells on
+/// a stress craft whose target splits thousands of times.
+#[test]
+fn the_split_queue_matches_the_full_scan() {
+    let l = crate::craft::stress::layout(40);
+    let s = union_surface(&l.geometry.primitives, &Resolution::default());
+    let opts = CellOptions { target: 1500, ..CellOptions::default() };
+    let tris = Tris::of(&s);
+    let mut groups: Vec<Vec<u32>> = vec![Vec::new(); s.patches.len()];
+    for (t, &p) in s.tri_patch.iter().enumerate() {
+        groups[p as usize].push(t as u32);
+    }
+    groups.retain(|g| !g.is_empty());
+    let mut errors: Vec<f64> = groups.iter().map(|g| tris.error(g, opts.curvature_weight)).collect();
+    while groups.len() < opts.target {
+        let (worst, &e) =
+            errors.iter().enumerate().fold((0, &f64::MIN), |best, cur| if cur.1 > best.1 { cur } else { best });
+        if e < 0.0 {
+            break;
+        }
+        let rest = tris.split(&mut groups[worst]);
+        errors[worst] = tris.error(&groups[worst], opts.curvature_weight);
+        errors.push(tris.error(&rest, opts.curvature_weight));
+        groups.push(rest);
+    }
+    let cells = build_cells(&s, &l.geometry.primitives, &l.geometry.skin, &opts);
+    assert_eq!(cells.cells.len(), groups.len());
+    for (i, g) in groups.iter().enumerate() {
+        assert!(g.iter().all(|&t| cells.tri_cell[t as usize] == i as u32), "group {i}");
+    }
+}

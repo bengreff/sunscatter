@@ -300,18 +300,19 @@ const INSIDE_PROBE: f64 = 1e-4;
 
 /// The outer surface of the primitives' union: every primitive tessellated,
 /// then triangles whose outer side lies inside another primitive removed
-/// (overlaps and coincident faces between touching primitives).
+/// (overlaps and coincident faces between touching primitives; the other
+/// primitives found through [`super::broad::Broad`]).
 pub fn union_surface(primitives: &[Primitive], res: &Resolution) -> Surface {
     let mut s = Surface::default();
     for (i, p) in primitives.iter().enumerate() {
         tessellate(&mut s, i as u32, &p.shape, res);
     }
+    let broad = super::broad::Broad::new(primitives.iter().map(|p| &p.shape));
     let keep: Vec<bool> = (0..s.triangles.len())
         .map(|t| {
             let (c, n, _) = s.triangle(t);
             let own = s.patches[s.tri_patch[t] as usize].primitive as usize;
-            let probe = c + n * INSIDE_PROBE;
-            !primitives.iter().enumerate().any(|(j, p)| j != own && contains(&p.shape, probe))
+            !broad.any_contains(c + n * INSIDE_PROBE, Some(own))
         })
         .collect();
     let mut k = keep.iter();
@@ -468,6 +469,31 @@ mod tests {
         };
         let s2 = union_surface(&[prim(0.0, 3.0), inner], &Resolution::default());
         assert!((s2.area() / exact - 1.0).abs() < 0.01, "area {} vs {exact}", s2.area());
+    }
+
+    /// The union through the broad phase removes exactly the triangles the
+    /// scan of every primitive did.
+    #[test]
+    fn the_union_matches_the_full_scan() {
+        let prims = crate::craft::stress::layout(60).geometry.primitives;
+        let fast = union_surface(&prims, &Resolution::default());
+        let mut s = Surface::default();
+        for (i, p) in prims.iter().enumerate() {
+            tessellate(&mut s, i as u32, &p.shape, &Resolution::default());
+        }
+        let keep: Vec<bool> = (0..s.triangles.len())
+            .map(|t| {
+                let (c, n, _) = s.triangle(t);
+                let own = s.patches[s.tri_patch[t] as usize].primitive as usize;
+                !prims.iter().enumerate().any(|(j, p)| j != own && contains(&p.shape, c + n * INSIDE_PROBE))
+            })
+            .collect();
+        let mut k = keep.iter();
+        s.triangles.retain(|_| *k.next().unwrap());
+        let mut k = keep.iter();
+        s.tri_patch.retain(|_| *k.next().unwrap());
+        assert!(s.triangles.len() < keep.len());
+        assert_eq!(fast, s);
     }
 
     #[test]

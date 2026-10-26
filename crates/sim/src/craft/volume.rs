@@ -11,7 +11,6 @@
 //! ([`VolumeGrid::propellant`]).
 
 use super::file::{Primitive, Tank};
-use super::mesh::contains;
 use glam::DVec3;
 use std::collections::BTreeMap;
 
@@ -63,6 +62,7 @@ impl VolumeGrid {
             let radial = (p - tank.base - dir * a).length();
             (a >= 0.0 && a <= height && radial <= tank.radius).then_some(a)
         };
+        let broad = super::broad::Broad::new(primitives.iter().map(|p| &p.shape));
         let mut nodes = Vec::new();
         let mut cubes = Vec::new();
         let mut index = BTreeMap::new();
@@ -74,7 +74,7 @@ impl VolumeGrid {
                     for s in 0..SAMPLES * SAMPLES * SAMPLES {
                         let (a, b, c) = (s % SAMPLES, (s / SAMPLES) % SAMPLES, s / (SAMPLES * SAMPLES));
                         let p = corner + DVec3::new(a as f64 + 0.5, b as f64 + 0.5, c as f64 + 0.5) * step;
-                        if primitives.iter().any(|q| contains(&q.shape, p)) {
+                        if broad.any_contains(p, None) {
                             count += 1;
                             sum += p;
                             if let Some(h) = in_tank(p) {
