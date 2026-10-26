@@ -129,8 +129,9 @@ pub fn extend_to_line_end(world: &World, seg: &mut Segment, settings: &OrbitSett
         if seg.finished() || budget == 0 || seg.samples.len() >= MAX_LINE_SAMPLES {
             return;
         }
-        // Small chunks: an orbit can take under 100 steps, and rescanning is cheap.
-        let chunk = budget.min(32);
+        // Small chunks: with DOP853 a low orbit takes ~16 steps, and the
+        // rule only rescans the new points.
+        let chunk = budget.min(4);
         seg.extend(world, chunk);
         budget -= chunk;
     }
