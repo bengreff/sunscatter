@@ -370,9 +370,8 @@ impl<'a> AeroTick<'a> {
             temperature,
             speed,
             gas: self.gas,
-            // The craft's surface roughness (placeholder: smooth until the
-            // craft data carries it).
-            roughness: 0.0,
+            // The craft's surface roughness (craft data, `AeroFile`).
+            roughness: self.design.roughness,
         }
     }
 

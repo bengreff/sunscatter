@@ -42,6 +42,8 @@ pub struct CraftDesign {
     pub cells: Vec<Cell>,
     /// Subsonic drag coefficient (craft data).
     pub cd0: f64,
+    /// The skin's roughness height (m, craft data: `AeroFile::roughness`).
+    pub roughness: f64,
     /// The hypersonic continuum drag area Cd·A (m²) averaged over the bake's
     /// flow directions: the attitude-independent drag of coasts and
     /// predictions (a vessel flown live uses the full aerodynamics).
@@ -136,6 +138,7 @@ impl CraftDesign {
             skin_max,
             cells: cells.clone(),
             cd0,
+            roughness: craft.spec.aero.roughness,
             mean_drag_area,
             surfaces,
             parts: craft.parts.clone(),

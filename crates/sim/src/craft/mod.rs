@@ -276,6 +276,7 @@ mod tests {
             (("dir: (0.0, 0.0, 1.0)", "dir: (0.0, 0.0, 0.0)"), ("", ""), CRAFT_FILE, "mount.dir"),
             (("crew: 3,", "crew: 3, wings: 2,"), ("", ""), CRAFT_FILE, "wings"),
             (("cd0: 0.45", "cd0: 0.0"), ("", ""), CRAFT_FILE, "aero.cd0"),
+            (("cd0: 0.45", "cd0: 0.45, roughness: -1e-3"), ("", ""), CRAFT_FILE, "aero.roughness"),
             (("node_size: 1.0", "node_size: 0.0"), ("", ""), CRAFT_FILE, "node_size"),
             (
                 ("nozzle_heat_fraction: 2.2e-3", "nozzle_heat_fraction: 1.5"),

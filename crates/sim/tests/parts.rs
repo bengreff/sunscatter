@@ -380,3 +380,25 @@ fn a_coast_split_is_the_same_in_frames_and_in_one_jump() {
     assert_eq!(fa, fb);
     assert!(fa.iter().all(|v| v.time == end));
 }
+
+/// A craft's skin roughness (`AeroFile::roughness`, D085) reaches the live
+/// tick's flow; craft files without it are smooth.
+#[test]
+fn a_crafts_roughness_reaches_the_flow() {
+    use sim::craft::registry::register;
+    use sim::vessel::{air_at, AeroTick};
+    let w = world();
+    let mut def = stress::layout(12).def();
+    def.spec.aero.roughness = 0.74e-3;
+    let id = CraftId("rough-12".into());
+    register(&id, def);
+    let rough = craft_of(&id);
+    assert_eq!(rough.design().roughness, 0.74e-3);
+    assert_eq!(sim::craft::test_craft().design().roughness, 0.0);
+    let earth = w.find("Earth").unwrap();
+    let r = DVec3::X * (earth.physical.as_ref().unwrap().radius_eq + 10e3);
+    let v = DVec3::Y * 300.0;
+    let air = air_at(&w, &w.snapshot(t0()), earth.node, r, v).expect("air at 10 km");
+    let tick = AeroTick::new(rough.design(), &air, rough.mass.dry_com, None).expect("wind");
+    assert_eq!(tick.flow(glam::DQuat::IDENTITY).roughness, 0.74e-3);
+}

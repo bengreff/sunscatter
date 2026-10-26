@@ -112,6 +112,11 @@ impl RcsFile {
 pub struct AeroFile {
     /// Subsonic drag coefficient on the projected area (blunt bodies ≈ 0.8).
     pub cd0: f64,
+    /// The skin's roughness height (m, peak to valley; zero: smooth), for
+    /// roughness-induced transition (D085, `aero::boundary`). A placeholder
+    /// for the whole craft until parts carry their surfaces' finish.
+    #[serde(default)]
+    pub roughness: f64,
 }
 
 /// Temperature limits (D065): a skin cell or an interior node above its
@@ -379,6 +384,9 @@ pub fn validate_craft(c: &CraftFile) -> Result<(), String> {
         return Err(format!("engine.nozzle_heat_fraction must be in [0, 1), got {}", e.nozzle_heat_fraction));
     }
     positive("aero.cd0", c.aero.cd0)?;
+    if !(c.aero.roughness.is_finite() && c.aero.roughness >= 0.0) {
+        return Err(format!("aero.roughness must be non-negative, got {}", c.aero.roughness));
+    }
     positive("impact.max_speed", c.impact.max_speed)?;
     for (what, sp) in [("contact.foot", &c.contact.foot), ("contact.hull", &c.contact.hull)] {
         positive(&format!("{what}.stiffness"), sp.stiffness)?;
