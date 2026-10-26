@@ -50,11 +50,45 @@ fn piece(id: &CraftId, runs: usize) -> (f64, f64, usize, usize) {
     (build, design, c.cells.cells.len(), c.design().nodes())
 }
 
+/// Where a craft's build goes (ms): union surface, cells, the parts' own
+/// shells (mass), and the design's bake, volume grid and the rest.
+fn stages(id: &CraftId) {
+    use sim::craft::{cells, mesh, MassModel};
+    let def = definition(id).unwrap();
+    let opts = cell_options(id, &def);
+    let res = Resolution::default();
+    let g = &def.geometry;
+    let (surface, union) = timed(|| mesh::union_surface(&g.primitives, &res));
+    let (cells, cells_ms) = timed(|| cells::build_cells(&surface, &g.primitives, &g.skin, &opts));
+    let ((), shells) = timed(|| {
+        for p in &def.parts {
+            let own: Vec<_> = p.primitives.iter().map(|&q| g.primitives[q as usize].clone()).collect();
+            std::hint::black_box(MassModel::shell(&mesh::union_surface(&own, &res), &own, &g.skin, p.dry_mass));
+        }
+    });
+    let (bake, bake_ms) = timed(|| sim::aero::bake(&surface, &cells, &sim::aero::BakeOptions::default()));
+    let c = Craft::from_def(id.clone(), def.clone(), &res, &opts);
+    let (_, design_ms) = timed(|| sim::craft::CraftDesign::new(&c));
+    std::hint::black_box(bake);
+    println!(
+        "{}: {} triangles, {} cells: union {union:.0} ms, cells {cells_ms:.0} ms, shells {shells:.0} ms; bake {bake_ms:.0} ms of the design's {design_ms:.0} ms",
+        id.0,
+        surface.triangles.len(),
+        cells.cells.len()
+    );
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let value = |key: &str| args.iter().find_map(|a| a.strip_prefix(key).map(str::to_owned));
     let n: usize = value("parts=").map_or(300, |s| s.parse().unwrap());
     let runs: usize = value("runs=").map_or(3, |s| s.parse().unwrap());
+    if let Some(id) = value("stages=") {
+        for _ in 0..value("repeat=").map_or(1, |s| s.parse().unwrap()) {
+            stages(&CraftId(id.clone()));
+        }
+        return;
+    }
     let w = world();
     let c = craft_of(&stress::id(n));
     let earth = w.find("Earth").unwrap();
