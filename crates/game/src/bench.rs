@@ -52,6 +52,8 @@ pub fn configurations() -> Vec<(String, GraphicsSettings)> {
     v.extend(features.into_iter().map(|(n, s)| (format!("+{n}"), s)));
     v.push(("+earthshine".into(), GraphicsSettings { earthshine: true, ..min }));
     v.push(("+sky light".into(), GraphicsSettings { atmosphere: AtmosphereQuality::Lut, sky_light: true, ..min }));
+    // Minimal draws surface zones (D073): their cost is Minimal without them.
+    v.push(("Minimal −zones".into(), GraphicsSettings { zones: false, ..min }));
     // Each feature taken out of High, where they interact (terrain shading
     // at full resolution, MSAA, atmosphere): what it costs in a real tier.
     let high = GraphicsSettings { tier: None, ..GraphicsSettings::preset(Tier::High) };
