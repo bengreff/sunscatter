@@ -124,7 +124,7 @@ All maps are USGS Astrogeology / NASA PDS products (public domain): `https://asc
 
 ### Gaps
 
-- No global DEM exists for the Galileans, Saturn's mid-size moons (Schenk's stereo/photoclinometry products are not in the USGS archive), Triton or Uranus's moons: their relief is procedural, and only the named craters line up with the photographs. Not modelled: Iapetus's 20 km equatorial ridge, Io's mountains and paterae, Europa's ridges, Miranda's coronae and cliffs, Tethys's Ithaca Chasma.
+- No global DEM exists for the Galileans, Saturn's mid-size moons (Schenk's stereo/photoclinometry products are not in the USGS archive), Triton or Uranus's moons: their relief is procedural, and only the named craters line up with the photographs. Io's 26 named mountains, 9 mensae, 8 plana and 170 paterae are placed from the Gazetteer with typical heights (mountains 0.04 × diameter, 2–17.5 km: Schenk et al. 2001; paterae ~1 km deep: Radebaugh et al. 2001). Not modelled: Iapetus's 20 km equatorial ridge, Io's unnamed mountains, Europa's ridges, Miranda's coronae and cliffs, Tethys's Ithaca Chasma.
 - Sub-pixel craters are a statistical field, not the real small craters; the Moon (not LANDS') does not use them yet.
 - Haumea's shape is the JPL triaxial 1050 × 840 × 537 km (Ortiz et al. 2017 measured 1161 × 852 × 513).
 - Loading: the game loads every body's colour and zone maps at start (about 35 more bodies), and `World::sol` decodes every heightmap (~0.9 s in tests); loading by distance would bound GPU memory.

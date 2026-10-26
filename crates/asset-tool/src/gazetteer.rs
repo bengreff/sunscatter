@@ -72,9 +72,15 @@ pub fn features(records: &[Vec<(String, String)>]) -> Vec<Feature> {
         .collect()
 }
 
-/// The named craters of `target` (e.g. `"CALLISTO"`), downloaded and
-/// unpacked into `data/external/gazetteer/` once.
+/// The named craters of `target` (e.g. `"CALLISTO"`).
 pub fn craters(target: &str) -> Vec<Feature> {
+    named(target, "Crater")
+}
+
+/// The named features of `target` whose type starts with `kind` (e.g.
+/// `"Mons"`, `"Patera"`), downloaded and unpacked into
+/// `data/external/gazetteer/` once.
+pub fn named(target: &str, kind: &str) -> Vec<Feature> {
     let stem = format!("{target}_nomenclature_center_pts");
     let dir = Path::new(EXTERNAL).join("gazetteer");
     std::fs::create_dir_all(&dir).expect("create the gazetteer directory");
@@ -87,7 +93,7 @@ pub fn craters(target: &str) -> Vec<Feature> {
     }
     let bytes = std::fs::read(&dbf).unwrap_or_else(|e| panic!("{}: {e}", dbf.display()));
     let all = features(&parse_dbf(&bytes));
-    all.into_iter().filter(|f| f.kind.starts_with("Crater")).collect()
+    all.into_iter().filter(|f| f.kind.starts_with(kind)).collect()
 }
 
 #[cfg(test)]

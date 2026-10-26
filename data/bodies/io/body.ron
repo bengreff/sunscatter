@@ -27,10 +27,10 @@
         anchor_zone: None,
         relativistic: false,
         solid: true,
-        // Rails warp is disabled below this altitude (m, D062): the highest terrain (7021 m) plus 2 km, rounded up.
-        rails_floor: 10000.0,
-        // Terrain heights (m) above the reference spheroid, 1024×512: procedural relief (no global DEM; no impact craters on Io): the triaxial shape and regional fBm (the mountains are not modelled)
-        // Baked by `asset-tool planets io` (range -6994 .. 7021 m).
+        // Rails warp is disabled below this altitude (m, D062): the highest terrain (20696 m) plus 2 km, rounded up.
+        rails_floor: 23000.0,
+        // Terrain heights (m) above the reference spheroid, 1024×512: procedural relief (no global DEM; no impact craters on Io): the IAU Gazetteer's mountains, mensae, plana and paterae at their positions and diameters with typical heights, the triaxial shape and regional fBm
+        // Baked by `asset-tool planets io` (range -7966 .. 20696 m).
         heightmap: Some("height.png"),
         // Procedural detail below the heightmap (D059): RMS residual map (rms_m = value² / 64)
         // and the fractal's parameters; octave 0 is the map's sample spacing, 14 octaves reach ~1.4 m.

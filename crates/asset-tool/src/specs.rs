@@ -10,7 +10,7 @@
 //! IAU (pck00011) or the body's `body.ron` source.
 
 use crate::planets::{ColorSource, Colors, HeightSource, Heights, Spec};
-use crate::relief::{Craters, Relief};
+use crate::relief::{Craters, Landform, Relief};
 
 const fn mosaic(file: &'static str, bands: [usize; 3]) -> Colors {
     Colors::Mosaic(ColorSource { url: file, file, bands, zero_is_no_data: true })
@@ -31,8 +31,28 @@ const fn relief(
     relief_m: f64,
     seed: u64,
 ) -> Heights {
-    Heights::Procedural(Relief { axes, craters, gazetteer, relief_m, relief_wavelength_m: 400_000.0, seed })
+    Heights::Procedural(Relief {
+        axes,
+        craters,
+        gazetteer,
+        relief_m,
+        relief_wavelength_m: 400_000.0,
+        seed,
+        landforms: &[],
+    })
 }
+
+/// Io's named landforms (Gazetteer positions and diameters; heights are
+/// typical values): mountains 6 km on average and up to 17.5 km high with
+/// flat-topped, block-like forms (Schenk et al. 2001, JGR 106, 33201),
+/// mensae and plana 1-3 km, paterae ~1 km deep, flat-floored (Radebaugh et
+/// al. 2001, JGR 106, 33005).
+const IO_LANDFORMS: &[Landform] = &[
+    Landform { kind: "Mons", height_per_diameter: 0.04, min_m: 2000.0, max_m: 17_500.0, flat: 0.3 },
+    Landform { kind: "Mensa", height_per_diameter: 0.01, min_m: 1000.0, max_m: 3000.0, flat: 0.6 },
+    Landform { kind: "Planum", height_per_diameter: 0.005, min_m: 500.0, max_m: 2000.0, flat: 0.6 },
+    Landform { kind: "Patera", height_per_diameter: -0.02, min_m: 500.0, max_m: 2000.0, flat: 0.7 },
+];
 
 const fn spec(body: &'static str, height: Heights, color: Colors, widths: (usize, usize, usize)) -> Spec {
     Spec { body, height, color, height_scale: 1.0, height_w: widths.0, color_w: widths.1, zones_w: widths.2 }
@@ -164,8 +184,17 @@ pub const SPECS: &[Spec] = &[
     ),
     spec(
         "io",
-        // No impact craters survive Io's resurfacing; regional relief only.
-        relief(Some((1_829_400.0, 1_819_400.0, 1_815_700.0)), None, None, 700.0, 0x10),
+        // No impact craters survive Io's resurfacing: its named mountains,
+        // mensae, plana and paterae, and regional relief.
+        Heights::Procedural(Relief {
+            axes: Some((1_829_400.0, 1_819_400.0, 1_815_700.0)),
+            craters: None,
+            gazetteer: Some("IO"),
+            relief_m: 500.0,
+            relief_wavelength_m: 400_000.0,
+            seed: 0x10,
+            landforms: IO_LANDFORMS,
+        }),
         mosaic("Io_GalileoSSI-Voyager_Global_Mosaic_ClrMerge_1km.tif", RGB),
         (1024, 2048, 2048),
     ),

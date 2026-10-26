@@ -141,7 +141,7 @@ fn surfaces_match_golden_hashes() {
 const GOLDEN: &[(&str, u64)] = &[
     ("Mercury", 0x93a1f0228621cd2b),
     ("Mars", 0x9a96c8e7420f2c0a),
-    ("Io", 0x4459ca49f80b87ba),
+    ("Io", 0xb8196ba6b803372d),
     ("Europa", 0x1345978025925c60),
     ("Ganymede", 0x425cae0733d6a875),
     ("Callisto", 0x78b66183e9bae787),

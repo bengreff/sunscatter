@@ -59,6 +59,61 @@ pub struct Relief {
     /// Longest wavelength of the regional fBm (m).
     pub relief_wavelength_m: f64,
     pub seed: u64,
+    /// Named non-crater landforms placed from the Gazetteer (Io's mountains
+    /// and paterae).
+    pub landforms: &'static [Landform],
+}
+
+/// A kind of named landform drawn with one shape: a flat top (or floor)
+/// out to `flat` of its radius, then a smooth slope to its edge; height
+/// `height_per_diameter × diameter`, its magnitude clamped to
+/// `min_m..=max_m` (negative heights are depressions).
+#[derive(Clone, Copy, Debug)]
+pub struct Landform {
+    /// Gazetteer type prefix (`"Mons"`, `"Patera"`, `"Mensa"`…).
+    pub kind: &'static str,
+    pub height_per_diameter: f64,
+    pub min_m: f64,
+    pub max_m: f64,
+    pub flat: f64,
+}
+
+impl Landform {
+    /// Height (m) of a landform of diameter `d` (m) at `x` radii from its centre.
+    pub fn profile(&self, d: f64, x: f64) -> f64 {
+        if x >= 1.0 {
+            return 0.0;
+        }
+        let hgt =
+            self.height_per_diameter.signum() * (self.height_per_diameter.abs() * d).clamp(self.min_m, self.max_m);
+        let t = ((x - self.flat) / (1.0 - self.flat)).clamp(0.0, 1.0);
+        hgt * (1.0 - t * t * (3.0 - 2.0 * t))
+    }
+}
+
+/// Adds `f(x)` (x: angular distance over `r_ang`, 0..1) to a `w × h` grid
+/// around (`lat`, `lon`) in degrees.
+pub fn stamp_shape(z: &mut [f32], w: usize, h: usize, lat: f64, lon: f64, r_ang: f64, f: impl Fn(f64) -> f64) {
+    let p = unit(lat, lon);
+    let reach = r_ang.to_degrees();
+    let j0 = (((90.0 - lat - reach) / 180.0 * h as f64).floor().max(0.0)) as usize;
+    let j1 = (((90.0 - lat + reach) / 180.0 * h as f64).ceil().max(0.0) as usize).min(h);
+    for j in j0..j1 {
+        let row_lat = 90.0 - (j as f64 + 0.5) * 180.0 / h as f64;
+        let c = row_lat.to_radians().cos();
+        let half = if c * 180.0 < reach + 1.0 { 180.0 } else { (reach / c + 360.0 / w as f64).min(180.0) };
+        let i0 = ((lon - half + 180.0) / 360.0 * w as f64).floor() as i64;
+        let i1 = ((lon + half + 180.0) / 360.0 * w as f64).ceil() as i64;
+        let (i0, i1) = if i1 - i0 >= w as i64 { (0, w as i64 - 1) } else { (i0, i1) };
+        for ii in i0..=i1 {
+            let i = ii.rem_euclid(w as i64) as usize;
+            let q = unit(row_lat, -180.0 + (i as f64 + 0.5) * 360.0 / w as f64);
+            let x = (p[0] * q[0] + p[1] * q[1] + p[2] * q[2]).clamp(-1.0, 1.0).acos() / r_ang;
+            if x < 1.0 {
+                z[j * w + i] += f(x) as f32;
+            }
+        }
+    }
 }
 
 /// A crater on the sphere.
@@ -319,6 +374,15 @@ pub fn generate(r: &Relief, s: crate::planets::Spheroid, w: usize, h: usize) -> 
             *v = (limit * (f64::from(*v) / limit).tanh()) as f32;
         }
     }
+    for lf in r.landforms {
+        let target = r.gazetteer.expect("named landforms need a Gazetteer target");
+        let list: Vec<_> = gazetteer::named(target, lf.kind).into_iter().filter(|f| f.diameter_km > 0.0).collect();
+        println!("  {} named {}", list.len(), lf.kind);
+        for f in list {
+            let d = f.diameter_km * 1000.0;
+            stamp_shape(&mut z, w, h, f.lat, f.lon, 0.5 * d / radius, |x| lf.profile(d, x));
+        }
+    }
     for j in 0..h {
         let lat = 90.0 - (j as f64 + 0.5) * 180.0 / h as f64;
         let reference = s.radius(lat);
@@ -405,6 +469,28 @@ mod tests {
     }
 
     #[test]
+    fn landforms_have_flat_tops_and_clamped_heights() {
+        let mons = Landform { kind: "Mons", height_per_diameter: 0.04, min_m: 2000.0, max_m: 17_000.0, flat: 0.3 };
+        assert_eq!(mons.profile(100_000.0, 0.0), 4000.0);
+        assert_eq!(mons.profile(100_000.0, 0.3), 4000.0);
+        assert_eq!(mons.profile(100_000.0, 1.0), 0.0);
+        assert_eq!(mons.profile(10_000.0, 0.0), 2000.0);
+        assert_eq!(mons.profile(1_000_000.0, 0.0), 17_000.0);
+        let patera = Landform { kind: "Patera", height_per_diameter: -0.02, min_m: 500.0, max_m: 2000.0, flat: 0.7 };
+        assert_eq!(patera.profile(50_000.0, 0.5), -1000.0);
+        assert!(patera.profile(50_000.0, 0.9) > -1000.0 && patera.profile(50_000.0, 0.9) < 0.0);
+        // Stamped where it was placed, nothing beyond its radius.
+        let (w, h) = (360, 180);
+        let mut z = vec![0.0f32; w * h];
+        stamp_shape(&mut z, w, h, 30.5, -99.5, 10f64.to_radians(), |x| mons.profile(100_000.0, x));
+        assert_eq!(z[59 * w + 80], 4000.0);
+        assert_eq!(z[59 * w + 100], 0.0);
+        let mut zp = vec![0.0f32; w * h];
+        stamp_shape(&mut zp, w, h, 89.5, 0.0, 5f64.to_radians(), |_| 1.0);
+        assert!(zp[..w].iter().all(|&v| v == 1.0), "a polar landform covers the whole first row");
+    }
+
+    #[test]
     fn triaxial_shape_heights() {
         let (a, b, c) = (207_800.0f64, 196_700.0f64, 190_600.0f64);
         let eq = (a * b).sqrt();
@@ -422,6 +508,7 @@ mod tests {
             relief_m: 500.0,
             relief_wavelength_m: 400_000.0,
             seed: 3,
+            landforms: &[],
         };
         let s = crate::planets::Spheroid { a: 1_000_000.0, c: 1_000_000.0 };
         let z = generate(&r, s, 512, 256).heights;
