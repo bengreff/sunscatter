@@ -142,7 +142,8 @@ pub fn update_terrain(
             albedo: defs.get(n).map_or(0.3, |d| f64::from(d.albedo)),
         })
         .collect();
-    for (i, (_, handle)) in terrain.materials().enumerate() {
+    let sky = crate::sky::sky_ambient(&sim, &rig, &defs, &settings);
+    for (i, (node, handle)) in terrain.materials().enumerate() {
         let l = body_light(i, &spheres, star, lm);
         let Some(mut mat) = materials.get_mut(handle) else { continue };
         let p = &mut mat.extension.params;
@@ -154,6 +155,7 @@ pub fn update_terrain(
         };
         let tint = l.shine.and_then(|(j, _)| defs.get(nodes[j])).map_or([1.0; 3], |d| d.base_color);
         p.light = Vec4::new(tint[0], tint[1], tint[2], l.sun_scale as f32);
+        p.ambient.x = crate::sky::ambient_share(node, sky);
     }
 }
 

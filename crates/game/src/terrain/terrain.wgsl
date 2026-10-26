@@ -72,6 +72,8 @@ struct TerrainParams {
     zone_color: array<vec4<f32>, 16>,
     // Zone pattern: x scale (m), y contrast.
     zone_pattern: array<vec4<f32>, 16>,
+    // x: this body's share of the global ambient light (sky::ambient_share).
+    ambient: vec4<f32>,
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(100) var<uniform> terrain: TerrainParams;
@@ -483,6 +485,8 @@ fn perturb(n: vec3<f32>, dp1: vec3<f32>, dp2: vec3<f32>, duv1: vec2<f32>, duv2: 
 @fragment
 fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> FragmentOutput {
     var pbr_input = pbr_input_from_standard_material(in, is_front);
+    // The daylight sky stand-in lights only the body whose air the camera is in.
+    pbr_input.diffuse_occlusion *= terrain.ambient.x;
 
     let rel = in.world_position.xyz - terrain.center.xyz;
     let fixed = vec3(dot(terrain.fixed_x.xyz, rel), dot(terrain.fixed_y.xyz, rel), dot(terrain.fixed_z.xyz, rel));

@@ -66,6 +66,10 @@ pub struct TerrainParams {
     pub zone_color: [Vec4; MAX_ZONES],
     /// Zone pattern: x scale (m), y contrast.
     pub zone_pattern: [Vec4; MAX_ZONES],
+    /// x: the share of the global ambient light this body receives
+    /// (`sky::ambient_share`: the daylight sky stand-in lights only the body
+    /// whose air the camera is in).
+    pub ambient: Vec4,
 }
 
 #[derive(Asset, AsBindGroup, Reflect, Debug, Clone, Default)]

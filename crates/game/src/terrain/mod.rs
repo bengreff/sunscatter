@@ -175,6 +175,7 @@ pub fn setup(
             ground: Vec4::new(if ground.is_some() { 1.0 } else { 0.0 }, 0.125, 1.0, 0.0),
             ground_means: ground.as_ref().map_or([Vec4::ONE; 5], |g| g.2),
             shallow,
+            ambient: Vec4::ONE,
             ..default()
         };
         let material = materials.add(ExtendedMaterial {

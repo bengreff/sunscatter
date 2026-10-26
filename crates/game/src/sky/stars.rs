@@ -13,6 +13,7 @@ use bevy::prelude::*;
 use bevy::render::render_resource::{AsBindGroup, ShaderType};
 use bevy::shader::ShaderRef;
 use serde::Deserialize;
+use sim::frame::NodeId;
 
 const SHADER: &str = "embedded://game/sky/stars.wgsl";
 
@@ -177,7 +178,12 @@ pub fn update(
 /// How much daylight sky surrounds the camera (0 = space or night, 1 =
 /// full day at the surface).
 pub(super) fn daylight(sim: &SimState, rig: &CameraRig, defs: &BodyDefs) -> f32 {
-    let Some((sun, _)) = defs.light_source else { return 0.0 };
+    daylight_of(sim, rig, defs).0
+}
+
+/// [`daylight`], and the body whose air it is (none in space).
+pub(super) fn daylight_of(sim: &SimState, rig: &CameraRig, defs: &BodyDefs) -> (f32, Option<NodeId>) {
+    let Some((sun, _)) = defs.light_source else { return (0.0, None) };
     let snap = sim.world.snapshot(sim.clock);
     let sun_pos = snap.relative_r(sun, rig.anchor) - rig.cam_pos;
     defs.defs
@@ -191,7 +197,7 @@ pub(super) fn daylight(sim: &SimState, rig: &CameraRig, defs: &BodyDefs) -> f32 
             let air = (-alt.max(0.0) / thickness).exp();
             let sin_elev = to_cam.normalize().dot(sun_pos.normalize());
             let sun_up = ((sin_elev + 0.1) / 0.15).clamp(0.0, 1.0);
-            Some((air.min(1.0) * sun_up) as f32)
+            Some(((air.min(1.0) * sun_up) as f32, *node))
         })
-        .fold(0.0, f32::max)
+        .fold((0.0, None), |best, (v, n)| if v > best.0 { (v, Some(n)) } else { best })
 }
