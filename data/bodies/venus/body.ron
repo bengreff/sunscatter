@@ -19,15 +19,19 @@
         atmosphere: Some((
             // Skeleton (solar-system.md). 0-65 km: the Venus International Reference
             // Atmosphere (Seiff et al. 1985, Adv. Space Res. 5(11)), temperature and
-            // pressure (bar) as reproduced in Wikipedia's "Atmosphere of Venus",
-            // density from the ideal gas (65.5 kg/m3 at the surface; NASA's fact sheet
-            // gives ~65). Above 65 km: isothermal at 243 K and hydrostatic (H = 5.25 km,
-            // g = 8.87): our assumption, ~3x VIRA's density at 100 km and far above the
-            // real thermosphere's beyond 120 km (VIRA's upper tables, Keating et al. 1985,
-            // not yet transcribed). 96.5 % CO2, 3.5 % N2 (M = 43.45 g/mol); gamma 1.29;
-            // VHS collision diameter of CO2 (Bird 1994); Sutton-Graves for CO2/N2 (the
-            // Mars constant); no radiative heating relation.
-            top: 140000.0, gamma: 1.29, collision_diameter: 5.62e-10, sutton_graves_k: 1.9027e-4,
+            // pressure (bar) as reproduced in Wikipedia's "Atmosphere of Venus", density
+            // from the ideal gas (65.5 kg/m3 at the surface). Above: hydrostatic (g falling
+            // with height) through temperatures from the same article: 230 K at 73 km
+            // (Patzold et al. 2007), 165 K at the mesopause at 95 km, held to 110 km, then
+            // rising to 200 K by 130 km, a day-night mean of the thermosphere (300-400 K
+            // by day, ~100 K at night, Bertaux et al. 2007), constant above; CO2/N2 mean
+            // molar mass throughout (the thermosphere's atomic oxygen is left out). The
+            // table runs up to where the density is negligible (~1e-14 kg/m3), so drag
+            // meets no wall; `top` (live flight, the rails floor) is where the density
+            // falls to ~2e-9 kg/m3, like Earth's 150 km. 96.5 % CO2, 3.5 % N2 (M = 43.45
+            // g/mol); gamma 1.29; VHS collision diameter of CO2 (Bird 1994); Sutton-Graves
+            // for CO2/N2 (the Mars constant); no radiative heating relation.
+            top: 150000.0, gamma: 1.29, collision_diameter: 5.62e-10, sutton_graves_k: 1.9027e-4,
             // (altitude m, temperature K, pressure Pa, density kg/m3, mean molar mass kg/mol)
             table: Some([
                 (0.0, 735.150, 9.21000e+06, 6.54695e+01, 0.04345),
@@ -44,28 +48,40 @@
                 (55000.0, 300.150, 5.31400e+04, 9.25207e-01, 0.04345),
                 (60000.0, 263.150, 2.35700e+04, 4.68071e-01, 0.04345),
                 (65000.0, 243.150, 9.76500e+03, 2.09872e-01, 0.04345),
-                (70000.0, 243.150, 3.76454e+03, 8.09082e-02, 0.04345),
-                (75000.0, 243.150, 1.45128e+03, 3.11912e-02, 0.04345),
-                (80000.0, 243.150, 5.59487e+02, 1.20246e-02, 0.04345),
-                (85000.0, 243.150, 2.15689e+02, 4.63565e-03, 0.04345),
-                (90000.0, 243.150, 8.31511e+01, 1.78710e-03, 0.04345),
-                (95000.0, 243.150, 3.20558e+01, 6.88951e-04, 0.04345),
-                (100000.0, 243.150, 1.23579e+01, 2.65600e-04, 0.04345),
-                (105000.0, 243.150, 4.76415e+00, 1.02392e-04, 0.04345),
-                (110000.0, 243.150, 1.83664e+00, 3.94735e-05, 0.04345),
-                (115000.0, 243.150, 7.08050e-01, 1.52176e-05, 0.04345),
-                (120000.0, 243.150, 2.72963e-01, 5.86657e-06, 0.04345),
-                (125000.0, 243.150, 1.05231e-01, 2.26164e-06, 0.04345),
-                (130000.0, 243.150, 4.05678e-02, 8.71892e-07, 0.04345),
-                (135000.0, 243.150, 1.56394e-02, 3.36126e-07, 0.04345),
-                (140000.0, 243.150, 6.02920e-03, 1.29581e-07, 0.04345),
+                (70000.0, 234.931, 3.78256e+03, 8.41397e-02, 0.04345),
+                (75000.0, 224.091, 1.41556e+03, 3.30110e-02, 0.04345),
+                (80000.0, 209.318, 4.98816e+02, 1.24534e-02, 0.04345),
+                (85000.0, 194.545, 1.63147e+02, 4.38241e-03, 0.04345),
+                (90000.0, 179.773, 4.89464e+01, 1.42283e-03, 0.04345),
+                (95000.0, 165.000, 1.32717e+01, 4.20338e-04, 0.04345),
+                (100000.0, 165.000, 3.40470e+00, 1.07833e-04, 0.04345),
+                (105000.0, 165.000, 8.75367e-01, 2.77244e-05, 0.04345),
+                (110000.0, 165.000, 2.25558e-01, 7.14382e-06, 0.04345),
+                (115000.0, 173.750, 6.03029e-02, 1.81372e-06, 0.04345),
+                (120000.0, 182.500, 1.72368e-02, 4.93570e-07, 0.04345),
+                (125000.0, 191.250, 5.23467e-03, 1.43035e-07, 0.04345),
+                (130000.0, 200.000, 1.67988e-03, 4.38940e-08, 0.04345),
+                (135000.0, 200.000, 5.53772e-04, 1.44696e-08, 0.04345),
+                (140000.0, 200.000, 1.82878e-04, 4.77845e-09, 0.04345),
+                (145000.0, 200.000, 6.05018e-05, 1.58086e-09, 0.04345),
+                (150000.0, 200.000, 2.00516e-05, 5.23933e-10, 0.04345),
+                (155000.0, 200.000, 6.65739e-06, 1.73952e-10, 0.04345),
+                (160000.0, 200.000, 2.21426e-06, 5.78568e-11, 0.04345),
+                (165000.0, 200.000, 7.37773e-07, 1.92774e-11, 0.04345),
+                (170000.0, 200.000, 2.46254e-07, 6.43442e-12, 0.04345),
+                (175000.0, 200.000, 8.23399e-08, 2.15147e-12, 0.04345),
+                (180000.0, 200.000, 2.75804e-08, 7.20653e-13, 0.04345),
+                (185000.0, 200.000, 9.25448e-09, 2.41812e-13, 0.04345),
+                (190000.0, 200.000, 3.11074e-09, 8.12810e-14, 0.04345),
+                (195000.0, 200.000, 1.04745e-09, 2.73690e-14, 0.04345),
+                (200000.0, 200.000, 3.53312e-10, 9.23174e-15, 0.04345),
             ]),
         )),
         anchor_zone: None,
         relativistic: false,
         solid: true,
         // Rails warp is disabled below this altitude (m, D062): the top of the atmosphere.
-        rails_floor: 140000.0,
+        rails_floor: 150000.0,
         heightmap: None,
         sea_level: None,
     ),

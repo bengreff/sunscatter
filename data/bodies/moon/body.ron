@@ -9,7 +9,11 @@
         radius_polar: 1737400.0,
         // J2 from GRAIL.
         j2: 2.033e-4,
-        // IAU 2015 mean rotation (no librations).
+        // IAU WGCCRE 2015 rotation (Archinal et al. 2018, as in NAIF pck00011.tpc)
+        // with its periodic terms of at least 0.01 deg (5 of 13: E1 the 18.6-year
+        // nodal term, 3.9 deg in RA, 1.5 deg in Dec, 3.6 deg in W): within 0.007 deg
+        // (pole) and 0.026 deg (W) of the full series over 2030-2080. The quadratic
+        // W term (-1.4e-12 d^2) is left out (0.0001 deg by 2080).
         rotation: (
             ra_deg: 269.9949,
             dec_deg: 66.5392,
@@ -17,6 +21,14 @@
             dec_rate_deg_per_century: 0.0130,
             w0_deg: 38.3213,
             w_rate_deg_per_day: 13.17635815,
+            // (phase deg, rate deg/day, ra, dec, W amplitudes deg): ra += a sin, dec += b cos, W += c sin.
+            librations: [
+                (125.045, -0.0529921, -3.8787, 1.5419, 3.561),
+                (250.089, -0.1059842, -0.1204, 0.0239, 0.1208),
+                (260.008, 13.0120009, 0.07, -0.0278, -0.0642),
+                (357.529, 0.9856003, 0.0, 0.0, 0.0252),
+                (176.625, 13.3407154, -0.0172, 0.0068, 0.0158),
+            ],
         ),
         atmosphere: None,
         anchor_zone: Some((enter: 6.0e7, exit: 7.0e7)),

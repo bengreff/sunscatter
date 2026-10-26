@@ -15,8 +15,25 @@ use crate::time::Epoch;
 use glam::DVec3;
 use std::sync::Arc;
 
+/// Most periodic terms a [`Rotation`] carries.
+pub const MAX_LIBRATIONS: usize = 10;
+
+/// One periodic term of an IAU rotation model, on the angle
+/// `θ = phase + rate · t` (t seconds from J2000): the pole's right
+/// ascension gains `ra · sin θ`, its declination `dec · cos θ`, the prime
+/// meridian `w · sin θ` (rad, rad/s).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Libration {
+    pub phase: f64,
+    pub rate: f64,
+    pub ra: f64,
+    pub dec: f64,
+    pub w: f64,
+}
+
 /// IAU-style rotation model: pole right ascension/declination with linear
-/// precession terms, and prime-meridian angle `W = w0 + w_rate * t`.
+/// precession terms and periodic terms ([`Libration`]), and prime-meridian
+/// angle `W = w0 + w_rate * t` plus its periodic terms.
 ///
 /// Body-fixed → inertial is `Rz(ra + 90°) · Rx(90° − dec) · Rz(W)`.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -31,22 +48,48 @@ pub struct Rotation {
     pub w0: f64,
     /// Rotation rate (rad/s).
     pub w_rate: f64,
+    /// Periodic terms (the first `n_librations`).
+    pub librations: [Libration; MAX_LIBRATIONS],
+    pub n_librations: usize,
 }
 
 impl Rotation {
+    /// No periodic terms.
+    pub const NO_LIBRATIONS: [Libration; MAX_LIBRATIONS] =
+        [Libration { phase: 0.0, rate: 0.0, ra: 0.0, dec: 0.0, w: 0.0 }; MAX_LIBRATIONS];
+
+    fn terms(&self) -> &[Libration] {
+        &self.librations[..self.n_librations]
+    }
+
     pub fn angle(&self, t: Epoch) -> f64 {
         // Split to keep precision over centuries: whole days and the remainder.
         let s = t.whole_seconds();
         let days = s.div_euclid(86_400);
         let rem = (s.rem_euclid(86_400)) as f64 + t.fractional_second();
         let per_day = math::wrap_tau(self.w_rate * 86_400.0 * days as f64);
-        math::wrap_tau(self.w0 + per_day + self.w_rate * rem)
+        if self.n_librations == 0 {
+            return math::wrap_tau(self.w0 + per_day + self.w_rate * rem);
+        }
+        let dt = t.to_seconds_f64();
+        let lib: f64 = self.terms().iter().filter(|l| l.w != 0.0).map(|l| l.w * math::sin(l.phase + l.rate * dt)).sum();
+        math::wrap_tau(self.w0 + per_day + self.w_rate * rem + lib)
     }
 
     /// Pole right ascension and declination at `t`.
     pub fn pole_radec(&self, t: Epoch) -> (f64, f64) {
         let dt = t.to_seconds_f64(); // centuries of drift: f64 seconds are ample here
-        (self.ra + self.ra_rate * dt, self.dec + self.dec_rate * dt)
+        let (mut ra, mut dec) = (self.ra + self.ra_rate * dt, self.dec + self.dec_rate * dt);
+        for l in self.terms() {
+            let th = l.phase + l.rate * dt;
+            if l.ra != 0.0 {
+                ra += l.ra * math::sin(th);
+            }
+            if l.dec != 0.0 {
+                dec += l.dec * math::cos(th);
+            }
+        }
+        (ra, dec)
     }
 
     /// Unit pole vector at `t` (inertial axes).
@@ -56,9 +99,28 @@ impl Rotation {
         DVec3::new(cos_dec * math::cos(ra), cos_dec * math::sin(ra), math::sin(dec))
     }
 
-    /// Angular velocity vector (inertial axes).
+    /// Angular velocity vector (inertial axes): the spin about the pole,
+    /// and with periodic terms also their rates (the spin's `Ẇ` and the
+    /// pole's motion, `α̇` about ICRF Z and `−δ̇` about the node line).
+    /// Without them, the spin alone (the linear pole drift, ~1e-12 rad/s,
+    /// is left out).
     pub fn omega(&self, t: Epoch) -> Vec3<Inertial> {
-        Vec3::from_raw(self.pole(t) * self.w_rate)
+        let pole = self.pole(t);
+        if self.n_librations == 0 {
+            return Vec3::from_raw(pole * self.w_rate);
+        }
+        let dt = t.to_seconds_f64();
+        let (mut w_dot, mut ra_dot, mut dec_dot) = (self.w_rate, self.ra_rate, self.dec_rate);
+        for l in self.terms() {
+            let th = l.phase + l.rate * dt;
+            let (s, c) = (math::sin(th), math::cos(th));
+            w_dot += l.w * l.rate * c;
+            ra_dot += l.ra * l.rate * c;
+            dec_dot -= l.dec * l.rate * s;
+        }
+        let (ra, _) = self.pole_radec(t);
+        let node = DVec3::new(-math::sin(ra), math::cos(ra), 0.0);
+        Vec3::from_raw(DVec3::Z * ra_dot - node * dec_dot + pole * w_dot)
     }
 
     pub fn to_inertial(&self, v: Vec3<BodyFixed>, t: Epoch) -> Vec3<Inertial> {
@@ -224,6 +286,25 @@ mod tests {
         let b = spin_only.to_inertial(p, t.add_seconds(sidereal));
         assert!((a - b).length() < 1e-3, "{}", (a - b).length());
         assert!((sidereal - 86_164.09).abs() < 0.1);
+    }
+
+    /// The angular velocity is the rotation's derivative: a body-fixed
+    /// point moves at `ω × r` (the Moon, with its periodic terms).
+    #[test]
+    fn omega_is_the_rate_of_the_rotation() {
+        let m = moon();
+        assert!(m.rotation.n_librations > 0);
+        let p: Vec3<BodyFixed> = Vec3::new(1.2e6, -0.8e6, 0.9e6);
+        for k in 0..5 {
+            let t = Epoch::from_calendar(2030 + 10 * k, 3, 1, 0, 0, 0.0);
+            let h = 10.0;
+            let ahead = m.rotation.to_inertial(p, t.add_seconds(h)).raw();
+            let behind = m.rotation.to_inertial(p, t.add_seconds(-h)).raw();
+            let numeric = (ahead - behind) / (2.0 * h);
+            let r = m.rotation.to_inertial(p, t).raw();
+            let analytic = m.rotation.omega(t).raw().cross(r);
+            assert!((numeric - analytic).length() < 1e-6 * analytic.length(), "{numeric} vs {analytic}");
+        }
     }
 
     #[test]

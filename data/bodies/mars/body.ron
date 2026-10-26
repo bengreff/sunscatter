@@ -7,25 +7,33 @@
         radius_eq: 3396190.0,
         radius_polar: 3376200.0,
         j2: 0.00196045,
-        // IAU pole with its periodic terms linearised about 2055: within 0.00021 deg of the full series over 2030-2080; prime meridian without its periodic terms
+        // IAU series with its periodic terms of at least 0.01 deg (3 of 26): within 0.00021 deg (pole) and 0.00027 deg (W) of the full series over 2030-2080
         rotation: (
-            ra_deg: 317.6811111,
-            dec_deg: 52.88632798,
-            ra_rate_deg_per_century: -0.1086145131,
-            dec_rate_deg_per_century: -0.06151591328,
+            ra_deg: 317.269202,
+            dec_deg: 54.432516,
+            ra_rate_deg_per_century: -0.10927547,
+            dec_rate_deg_per_century: -0.05827105,
             w0_deg: 176.049863,
             w_rate_deg_per_day: 350.891982443,
+            // (phase deg, rate deg/day, ra, dec, W amplitudes deg): ra += a sin, dec += b cos, W += c sin.
+            librations: [
+                (166.325722, 1.3805927447e-05, 0.0, 1.591274, 0.0),
+                (95.391654, 1.3805927447e-05, 0.0, 0.0, 0.584542),
+                (79.398797, 1.3805927447e-05, 0.419057, 0.0, 0.0),
+            ],
         ),
         atmosphere: Some((
             // Skeleton (solar-system.md). 0-40 km: NASA Glenn Research Center's Mars
             // model (T = -31 - 0.000998 h below 7 km, -23.4 - 0.00222 h above, deg C;
             // p = 0.699 exp(-0.00009 h) kPa; rho = p / (0.1921 (T + 273.1))), a fit to
-            // Mars Global Surveyor data. Above 40 km: isothermal at its 40 km temperature
-            // and hydrostatic (H = RT/(Mg) = 8.32 km with g = 3.711): our assumption,
-            // within a few times of aerobraking densities near 100 km; the real upper
-            // atmosphere varies tenfold with season and dust. CO2 (M = 43.34 g/mol, 95 %),
-            // gamma 1.29; VHS collision diameter of CO2 (Bird 1994); Sutton-Graves and
-            // Tauber-Sutton for Mars.
+            // Mars Global Surveyor data. Above 40 km: hydrostatic at the 40 km temperature
+            // (161 K, g falling with height): our assumption, within a few times of
+            // aerobraking densities near 100-120 km (the real upper atmosphere varies
+            // tenfold with season and dust). The table runs up to where the density is
+            // negligible (~1e-14 kg/m3), so drag meets no wall; `top` (live flight, the
+            // rails floor) is where it falls to ~2e-9 kg/m3, like Earth's 150 km. CO2
+            // (M = 43.34 g/mol, 95 %), gamma 1.29; VHS collision diameter of CO2 (Bird
+            // 1994); Sutton-Graves and Tauber-Sutton for Mars.
             top: 150000.0, gamma: 1.29, collision_diameter: 5.62e-10, sutton_graves_k: 1.9027e-4,
             radiative_heating: Some(Mars),
             // (altitude m, temperature K, pressure Pa, density kg/m3, mean molar mass kg/mol)
@@ -51,17 +59,29 @@
                 (36000.0, 169.830, 2.73756e+01, 8.39362e-04, 0.04334),
                 (38000.0, 165.390, 2.28660e+01, 7.19921e-04, 0.04334),
                 (40000.0, 160.950, 1.90993e+01, 6.17922e-04, 0.04334),
-                (50000.0, 160.950, 5.74189e+00, 1.85960e-04, 0.04334),
-                (60000.0, 160.950, 1.72621e+00, 5.59058e-05, 0.04334),
-                (70000.0, 160.950, 5.18956e-01, 1.68072e-05, 0.04334),
-                (80000.0, 160.950, 1.56016e-01, 5.05280e-06, 0.04334),
-                (90000.0, 160.950, 4.69036e-02, 1.51904e-06, 0.04334),
-                (100000.0, 160.950, 1.41008e-02, 4.56676e-07, 0.04334),
-                (110000.0, 160.950, 4.23918e-03, 1.37292e-07, 0.04334),
-                (120000.0, 160.950, 1.27444e-03, 4.12747e-08, 0.04334),
-                (130000.0, 160.950, 3.83140e-04, 1.24086e-08, 0.04334),
-                (140000.0, 160.950, 1.15185e-04, 3.73043e-09, 0.04334),
-                (150000.0, 160.950, 3.46285e-05, 1.12149e-09, 0.04334),
+                (50000.0, 160.950, 5.89273e+00, 1.90845e-04, 0.04334),
+                (60000.0, 160.950, 1.83053e+00, 5.92845e-05, 0.04334),
+                (70000.0, 160.950, 5.72497e-01, 1.85412e-05, 0.04334),
+                (80000.0, 160.950, 1.80252e-01, 5.83772e-06, 0.04334),
+                (90000.0, 160.950, 5.71308e-02, 1.85027e-06, 0.04334),
+                (100000.0, 160.950, 1.82273e-02, 5.90317e-07, 0.04334),
+                (110000.0, 160.950, 5.85340e-03, 1.89571e-07, 0.04334),
+                (120000.0, 160.950, 1.89193e-03, 6.12731e-08, 0.04334),
+                (130000.0, 160.950, 6.15448e-04, 1.99322e-08, 0.04334),
+                (140000.0, 160.950, 2.01484e-04, 6.52536e-09, 0.04334),
+                (150000.0, 160.950, 6.63789e-05, 2.14978e-09, 0.04334),
+                (160000.0, 160.950, 2.20057e-05, 7.12689e-10, 0.04334),
+                (170000.0, 160.950, 7.34069e-06, 2.37739e-10, 0.04334),
+                (180000.0, 160.950, 2.46382e-06, 7.97944e-11, 0.04334),
+                (190000.0, 160.950, 8.32013e-07, 2.69460e-11, 0.04334),
+                (200000.0, 160.950, 2.82669e-07, 9.15466e-12, 0.04334),
+                (210000.0, 160.950, 9.66122e-08, 3.12893e-12, 0.04334),
+                (220000.0, 160.950, 3.32177e-08, 1.07580e-12, 0.04334),
+                (230000.0, 160.950, 1.14886e-08, 3.72076e-13, 0.04334),
+                (240000.0, 160.950, 3.99676e-09, 1.29441e-13, 0.04334),
+                (250000.0, 160.950, 1.39852e-09, 4.52930e-14, 0.04334),
+                (260000.0, 160.950, 4.92183e-10, 1.59401e-14, 0.04334),
+                (270000.0, 160.950, 1.74207e-10, 5.64194e-15, 0.04334),
             ]),
         )),
         anchor_zone: None,

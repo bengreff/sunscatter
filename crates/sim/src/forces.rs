@@ -168,12 +168,22 @@ impl ForceContext<'_> {
                 u += s.gm / dist;
             }
             if let Some(p) = &s.physical {
-                // J2 where it can matter: its pull, at most 3 |J2| GM R² / d⁴,
-                // against a hundredth of the cutoff (a far planet's J2 is
-                // ~1e-20 m/s²; with a zero cutoff, always).
-                let j2_bound = 3.0 * p.j2.abs() * s.gm * p.radius_eq * p.radius_eq;
-                if p.j2 != 0.0 && j2_bound >= crate::world::FAINT_ERROR_FRACTION * self.world.cutoff * d2 * d2 {
-                    a += j2_accel(d, s.gm, p.j2, p.radius_eq, p.rotation.pole(snap.t));
+                // J2 where it can matter relative to the anchor, as the cut
+                // rule does for pulls: the anchor's own always; another body's
+                // where its J2 field's change over the anchor-vessel segment,
+                // at most 60 |J2| GM R² ρ / d⁵ (ρ = |r|, d the least distance
+                // from the segment), reaches a hundredth of the cutoff.
+                // Otherwise vessel and anchor feel the same J2 pull, and
+                // leaving it out of both is the bound's error (the Moon's J2
+                // at LEO: ~1e-19 m/s²). With a zero cutoff, always.
+                if p.j2 != 0.0 {
+                    let rho = r.length();
+                    let d_min = dist.max(r_s.length()) - rho;
+                    let strength = 60.0 * p.j2.abs() * s.gm * p.radius_eq * p.radius_eq * rho;
+                    let threshold = crate::world::FAINT_ERROR_FRACTION * self.world.cutoff;
+                    if s.node == self.anchor || d_min <= 0.0 || strength >= threshold * d_min.powi(5) {
+                        a += j2_accel(d, s.gm, p.j2, p.radius_eq, p.rotation.pole(snap.t));
+                    }
                 }
                 if let (Some(atm), Some(drag)) = (&p.atmosphere, self.drag) {
                     // Cheap spherical bound before the exact ellipsoid altitude.

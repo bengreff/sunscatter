@@ -185,14 +185,37 @@ pub fn generate_sol_with(
     years: f64,
     bodies_dir: &Path,
 ) -> (Ephemeris, Vec<NodeReport>) {
+    let (planets, mut report) = generate_planets(cfg, initial, catalog);
+    let (eph, r) = generate_systems(&Arc::new(planets), catalog, systems, years, bodies_dir);
+    report.extend(r);
+    (eph, report)
+}
+
+/// The planetary integration alone (planets, the Moon, dwarf planets).
+pub fn generate_planets(
+    cfg: &GenConfig,
+    initial: &InitialConditions,
+    catalog: &Catalog,
+) -> (Ephemeris, Vec<NodeReport>) {
     let bodies = initial.to_bodies();
-    let (planets, mut report) = crate::gen::generate(&bodies, &tree(&bodies, catalog), cfg);
-    let planets = Arc::new(planets);
-    let mut eph = (*planets).clone();
+    crate::gen::generate(&bodies, &tree(&bodies, catalog), cfg)
+}
+
+/// Every moon system of the catalog under the planetary ephemeris
+/// `planets`, grafted under its barycenter node.
+pub fn generate_systems(
+    planets: &Arc<Ephemeris>,
+    catalog: &Catalog,
+    systems: &SystemsInitial,
+    years: f64,
+    bodies_dir: &Path,
+) -> (Ephemeris, Vec<NodeReport>) {
+    let mut eph = (**planets).clone();
+    let mut report = Vec::new();
     for spec in &catalog.systems {
         let init = systems.systems.iter().find(|s| s.barycenter == spec.barycenter).expect("system initial states");
         let primary = primary_physical(spec, bodies_dir);
-        let (members, r, label) = systems::generate_system(spec, init, &planets, &primary, years);
+        let (members, r, label) = systems::generate_system(spec, init, planets, &primary, years);
         eph = systems::graft(&eph, &spec.barycenter, members, &label);
         report.extend(r);
     }

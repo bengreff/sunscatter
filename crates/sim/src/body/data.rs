@@ -7,7 +7,7 @@
 //! constants (`x * DEG`, `x * DEG / CENTURY`, `x * DEG / 86_400`), so the
 //! resulting f64 values are bit-identical (tested below).
 
-use super::{Atmosphere, BodyPhysical, Rotation};
+use super::{Atmosphere, BodyPhysical, Libration, Rotation};
 use crate::math;
 use crate::terrain::{Detail, DetailParams};
 use crate::world::AnchorZone;
@@ -102,18 +102,33 @@ struct RotationFile {
     dec_rate_deg_per_century: f64,
     w0_deg: f64,
     w_rate_deg_per_day: f64,
+    /// Periodic terms, each (phase deg, rate deg/day, ra amplitude deg, dec
+    /// amplitude deg, W amplitude deg) on `θ = phase + rate · d` (d days
+    /// from J2000): ra += a sin θ, dec += b cos θ, W += c sin θ.
+    #[serde(default)]
+    librations: Vec<(f64, f64, f64, f64, f64)>,
 }
 
 impl RotationFile {
-    fn to_rotation(&self) -> Rotation {
-        Rotation {
+    fn to_rotation(&self) -> Result<Rotation, String> {
+        if self.librations.len() > super::MAX_LIBRATIONS {
+            return Err(format!("at most {} periodic rotation terms", super::MAX_LIBRATIONS));
+        }
+        let mut librations = Rotation::NO_LIBRATIONS;
+        for (l, &(phase, rate, ra, dec, w)) in librations.iter_mut().zip(&self.librations) {
+            *l =
+                Libration { phase: phase * DEG, rate: rate * DEG / 86_400.0, ra: ra * DEG, dec: dec * DEG, w: w * DEG };
+        }
+        Ok(Rotation {
             ra: self.ra_deg * DEG,
             dec: self.dec_deg * DEG,
             ra_rate: self.ra_rate_deg_per_century * DEG / CENTURY,
             dec_rate: self.dec_rate_deg_per_century * DEG / CENTURY,
             w0: self.w0_deg * DEG,
             w_rate: self.w_rate_deg_per_day * DEG / 86_400.0,
-        }
+            librations,
+            n_librations: self.librations.len(),
+        })
     }
 }
 
@@ -136,7 +151,7 @@ pub fn parse_body(text: &str, dir: &Path) -> Result<BodyDef, DataError> {
             radius_eq: p.radius_eq,
             radius_polar: p.radius_polar,
             j2: p.j2,
-            rotation: p.rotation.to_rotation(),
+            rotation: p.rotation.to_rotation().map_err(err)?,
             atmosphere: p.atmosphere,
             solid: p.solid,
             sea_level: p.sea_level,
@@ -223,6 +238,8 @@ mod tests {
                     dec_rate: -0.557 * DEG / CENTURY,
                     w0: 190.147 * DEG,
                     w_rate: 360.985_623_5 * DEG / 86_400.0,
+                    librations: Rotation::NO_LIBRATIONS,
+                    n_librations: 0,
                 },
                 None, // replaced by the US 1976 table (tested in `body::atmosphere`)
                 true,
@@ -239,6 +256,8 @@ mod tests {
                     dec_rate: 0.0130 * DEG / CENTURY,
                     w0: 38.3213 * DEG,
                     w_rate: 13.176_358_15 * DEG / 86_400.0,
+                    librations: Rotation::NO_LIBRATIONS,
+                    n_librations: 0,
                 },
                 None,
                 true,
@@ -255,6 +274,8 @@ mod tests {
                     dec_rate: 0.0,
                     w0: 84.176 * DEG,
                     w_rate: 14.1844 * DEG / 86_400.0,
+                    librations: Rotation::NO_LIBRATIONS,
+                    n_librations: 0,
                 },
                 None,
                 false,
@@ -295,7 +316,11 @@ mod tests {
             assert_eq!(bits(&def.physical), bits(&legacy(name)), "{name}");
             let floor = def.physical.rails_floor;
             let atmosphere = def.physical.atmosphere.clone();
-            assert_eq!(def.physical, BodyPhysical { rails_floor: floor, atmosphere, ..legacy(name) }, "{name}");
+            // The Moon's file now also carries the IAU periodic terms (below).
+            let r = def.physical.rotation;
+            let rotation = Rotation { librations: r.librations, n_librations: r.n_librations, ..legacy(name).rotation };
+            let expected = BodyPhysical { rails_floor: floor, atmosphere, rotation, ..legacy(name) };
+            assert_eq!(def.physical, expected, "{name}");
         }
         let earth = load_default("earth");
         assert_eq!(earth.anchor_zone, Some(AnchorZone { enter: 1.4e9, exit: 1.6e9 }));
@@ -326,28 +351,108 @@ mod tests {
         assert_eq!(def.physical.rotation.dec, 20.0 * DEG);
     }
 
-    /// Venus, Mars and Titan carry their sourced surface values, and density
-    /// falls monotonically through each layer's join to the top (D084).
+    /// Venus, Mars and Titan carry their sourced surface values; density falls
+    /// monotonically to where it is negligible at the table's end (no wall
+    /// where drag stops: under 1e-13 kg/m³, q under 1e-5 Pa at 10 km/s);
+    /// `top` (live flight) sits where it is ~1e-9 kg/m³ like Earth's 150 km,
+    /// with the rails floor there (D062).
     #[test]
-    fn the_new_atmospheres_load_with_their_surface_values() {
-        // (body, surface pressure Pa, surface density kg/m³, a join height m)
-        for (name, p0, rho0, join) in
-            [("venus", 92.1e5, 65.5, 65_000.0), ("mars", 699.0, 0.0150, 40_000.0), ("titan", 1.467e5, 5.17, 1e5)]
-        {
+    fn the_new_atmospheres_load_with_their_surface_values_and_fade_out() {
+        // (body, surface pressure Pa, surface density kg/m³)
+        for (name, p0, rho0) in [("venus", 92.1e5, 65.5), ("mars", 699.0, 0.0150), ("titan", 1.467e5, 5.17)] {
             let def = load_default(name);
             let atm = def.physical.atmosphere.as_ref().unwrap_or_else(|| panic!("{name} has air"));
+            let table = atm.table.as_ref().unwrap_or_else(|| panic!("{name} has a table"));
             assert!((atm.pressure(0.0) / p0 - 1.0).abs() < 0.01, "{name}: {}", atm.pressure(0.0));
             assert!((atm.density(0.0) / rho0 - 1.0).abs() < 0.01, "{name}: {}", atm.density(0.0));
+            let rows = table.rows();
+            assert!(rows.windows(2).all(|w| w[1].3 < w[0].3), "{name}: density falls row by row");
+            let last = rows.last().unwrap();
+            assert!(last.3 < 1e-13, "{name}: {} kg/m³ where the table (and drag) ends", last.3);
+            let at_top = table.density(atm.top);
+            assert!((1e-10..1e-8).contains(&at_top), "{name}: {at_top} kg/m³ at the top");
             assert_eq!(def.physical.rails_floor, atm.top, "{name}: rails floor at the top (D062)");
-            let mut last = f64::INFINITY;
-            for k in 0..=200 {
-                let h = atm.top * k as f64 / 200.0 * 0.999;
-                let rho = atm.density(h);
-                assert!(rho > 0.0 && rho < last, "{name} at {h} m: {rho}");
-                last = rho;
+        }
+    }
+
+    /// The Moon's and Triton's rotation against the full IAU WGCCRE 2015
+    /// series (Archinal et al. 2018, every periodic term), over 2030-2080:
+    /// the files carry the terms of at least 0.01 deg.
+    #[test]
+    fn periodic_rotation_terms_follow_the_iau_series() {
+        fn sind(x: f64) -> f64 {
+            (x * DEG).sin()
+        }
+        fn cosd(x: f64) -> f64 {
+            (x * DEG).cos()
+        }
+        let moon = |d: f64| {
+            let t = d / 36_525.0;
+            let e = [
+                125.045 - 0.0529921 * d,
+                250.089 - 0.1059842 * d,
+                260.008 + 13.0120009 * d,
+                176.625 + 13.3407154 * d,
+                357.529 + 0.9856003 * d,
+                311.589 + 26.4057084 * d,
+                134.963 + 13.0649930 * d,
+                276.617 + 0.3287146 * d,
+                34.226 + 1.7484877 * d,
+                15.134 - 0.1589763 * d,
+                119.743 + 0.0036096 * d,
+                239.961 + 0.1643573 * d,
+                25.053 + 12.9590088 * d,
+            ];
+            let ra = 269.9949 + 0.0031 * t - 3.8787 * sind(e[0]) - 0.1204 * sind(e[1]) + 0.0700 * sind(e[2])
+                - 0.0172 * sind(e[3])
+                + 0.0072 * sind(e[5])
+                - 0.0052 * sind(e[9])
+                + 0.0043 * sind(e[12]);
+            let dec = 66.5392 + 0.0130 * t + 1.5419 * cosd(e[0]) + 0.0239 * cosd(e[1]) - 0.0278 * cosd(e[2])
+                + 0.0068 * cosd(e[3])
+                - 0.0029 * cosd(e[5])
+                + 0.0009 * cosd(e[6])
+                + 0.0008 * cosd(e[9])
+                - 0.0009 * cosd(e[12]);
+            let w = 38.3213 + 13.17635815 * d - 1.4e-12 * d * d + 3.5610 * sind(e[0]) + 0.1208 * sind(e[1])
+                - 0.0642 * sind(e[2])
+                + 0.0158 * sind(e[3])
+                + 0.0252 * sind(e[4])
+                - 0.0066 * sind(e[5])
+                - 0.0047 * sind(e[6])
+                - 0.0046 * sind(e[7])
+                + 0.0028 * sind(e[8])
+                + 0.0052 * sind(e[9])
+                + 0.0040 * sind(e[10])
+                + 0.0019 * sind(e[11])
+                - 0.0044 * sind(e[12]);
+            (ra, dec, Some(w))
+        };
+        let triton = |d: f64| {
+            let n7 = 177.85 + 52.316 * d / 36_525.0;
+            let ra_k = [-32.35, -6.28, -2.08, -0.74, -0.28, -0.11, -0.07, -0.02, -0.01];
+            let dec_k = [22.55, 2.10, 0.55, 0.16, 0.05, 0.02, 0.01];
+            let ra = 299.36 + ra_k.iter().enumerate().map(|(k, a)| a * sind((k + 1) as f64 * n7)).sum::<f64>();
+            let dec = 41.17 + dec_k.iter().enumerate().map(|(k, a)| a * cosd((k + 1) as f64 * n7)).sum::<f64>();
+            (ra, dec, None)
+        };
+        type Series = dyn Fn(f64) -> (f64, f64, Option<f64>);
+        let cases: [(&str, &Series, f64, f64); 2] = [("moon", &moon, 0.01, 0.03), ("triton", &triton, 0.001, 0.0)];
+        for (name, iau, pole_tol, w_tol) in cases {
+            let rot = load_default(name).physical.rotation;
+            assert!(rot.n_librations > 0, "{name} carries periodic terms");
+            for year in [2030, 2041, 2055, 2068, 2080] {
+                let t = crate::time::Epoch::from_calendar(year, 6, 1, 0, 0, 0.0);
+                let d = t.to_seconds_f64() / 86_400.0;
+                let (ra, dec, w) = iau(d);
+                let unit = |ra: f64, dec: f64| glam::DVec3::new(cosd(dec) * cosd(ra), cosd(dec) * sind(ra), sind(dec));
+                let angle = rot.pole(t).dot(unit(ra, dec)).clamp(-1.0, 1.0).acos() / DEG;
+                assert!(angle < pole_tol, "{name} {year}: pole {angle} deg off the IAU series");
+                if let Some(w) = w {
+                    let dw = math::wrap_pi(rot.angle(t) - math::wrap_tau(w * DEG)) / DEG;
+                    assert!(dw.abs() < w_tol, "{name} {year}: W {dw} deg off");
+                }
             }
-            let (below, above) = (atm.density(join - 1.0), atm.density(join + 1.0));
-            assert!((below / above - 1.0).abs() < 1e-3, "{name}: continuous at {join} m");
         }
     }
 

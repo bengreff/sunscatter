@@ -9,14 +9,18 @@
         radius_eq: 788900.0,
         radius_polar: 788900.0,
         j2: 0.0,
-        // IAU pole with its periodic terms linearised about 2055: within 0.015 deg of the full series over 2030-2080; prime meridian without its periodic terms
+        // IAU series with its periodic terms of at least 0.01 deg (1 of 15): within 1.5e-06 deg (pole) and 0 deg (W) of the full series over 2030-2080
         rotation: (
-            ra_deg: 257.2802446,
-            dec_deg: -14.78618866,
-            ra_rate_deg_per_century: -0.1871118563,
-            dec_rate_deg_per_century: -0.320697877,
+            ra_deg: 257.43,
+            dec_deg: -15.1,
+            ra_rate_deg_per_century: 0.0,
+            dec_rate_deg_per_century: 0.0,
             w0_deg: 77.74,
             w_rate_deg_per_day: -41.3514316,
+            // (phase deg, rate deg/day, ra, dec, W amplitudes deg): ra += a sin, dec += b cos, W += c sin.
+            librations: [
+                (340.82, -0.00206214921287, 0.29, 0.28, 0.08),
+            ],
         ),
         atmosphere: None,
         anchor_zone: None,

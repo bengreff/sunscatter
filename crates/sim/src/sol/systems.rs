@@ -120,7 +120,19 @@ pub struct SystemInitial {
 }
 
 impl SystemSpec {
-    /// The members as integration bodies (GM in SI) from their initial states.
+    /// The members' GMs (SI) in a system of total GM `barycenter_gm` (the
+    /// barycenter node's, which moved it in the planetary integration): the
+    /// moons' from the catalog, the primary's the rest. So a closed system's
+    /// stand-in pulls exactly as its members do from afar (the primary
+    /// takes up rings and unmodelled moons: Saturn's rings, Namaka).
+    pub fn member_gms(&self, barycenter_gm: f64) -> Vec<f64> {
+        let moons: Vec<f64> = self.members[1..].iter().map(|m| m.gm * 1e9).collect();
+        let primary = barycenter_gm - moons.iter().sum::<f64>();
+        std::iter::once(primary).chain(moons).collect()
+    }
+
+    /// The members as integration bodies (GM in SI) from their initial
+    /// states (which carry the GMs, [`Self::member_gms`]).
     pub fn bodies(&self, initial: &SystemInitial) -> Vec<InitialBody> {
         self.members
             .iter()
@@ -132,7 +144,7 @@ impl SystemSpec {
                     .unwrap_or_else(|| panic!("no state for {}", m.name));
                 InitialBody {
                     name: m.name.clone(),
-                    gm: m.gm * 1e9,
+                    gm: rec.gm,
                     r: DVec3::from_array(rec.r),
                     v: DVec3::from_array(rec.v),
                 }
@@ -214,6 +226,34 @@ impl SystemSpec {
             self.perturbers.join(",")
         )
     }
+}
+
+/// The members' states relative to the barycenter at whole days `days`
+/// after the planetary ephemeris' start (each a whole number of steps),
+/// integrated as [`generate_system`] does but without fitting tables.
+pub fn integrate_samples(
+    spec: &SystemSpec,
+    bodies: &[InitialBody],
+    planets: &Arc<Ephemeris>,
+    primary: &BodyPhysical,
+    days: &[i64],
+) -> Vec<Vec<(DVec3, DVec3)>> {
+    let last = days.iter().copied().max().unwrap_or(0);
+    let cfg = spec.config(planets, primary, (last + 1) as f64 / 365.25);
+    let mut sys = crate::gen::NBody::new(cfg.start, bodies, cfg.extras.clone());
+    let mut out = Vec::with_capacity(days.len());
+    let mut done = 0i64;
+    for &d in days {
+        let target = d * 86_400;
+        assert_eq!(target % spec.step, 0, "{}: day {d} is not a whole number of steps", spec.barycenter);
+        assert!(target >= done, "days must increase");
+        while done < target {
+            crate::integrate::yoshida8_step(&mut sys, spec.step as f64);
+            done += spec.step;
+        }
+        out.push(sys.kinematics().into_iter().map(|(r, v, _)| (r, v)).collect());
+    }
+    out
 }
 
 /// Generates one moon system: its member nodes (parents index into the

@@ -170,7 +170,16 @@ fn a_moon_system_in_its_barycenter_frame_matches_one_full_integration() {
         j4: -1.0e-4,
         j6: 1.0e-5,
         radius: 6.4e6,
-        rotation: sim::body::Rotation { ra: 0.3, dec: 1.2, ra_rate: 1e-12, dec_rate: 0.0, w0: 0.0, w_rate: 7e-5 },
+        rotation: sim::body::Rotation {
+            ra: 0.3,
+            dec: 1.2,
+            ra_rate: 1e-12,
+            dec_rate: 0.0,
+            w0: 0.0,
+            w_rate: 7e-5,
+            librations: sim::body::Rotation::NO_LIBRATIONS,
+            n_librations: 0,
+        },
     };
     let mut full_cfg = cfg.clone();
     full_cfg.extras.oblate = vec![oblate(1)];
