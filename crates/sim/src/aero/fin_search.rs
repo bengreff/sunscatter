@@ -5,6 +5,7 @@ use super::bake::CellGeometry;
 use super::slender::Fin;
 use crate::craft::{Cells, Surface};
 use glam::DVec3;
+use std::collections::HashMap;
 
 /// The fins: cells whose opposite face (anti-parallel, straight through
 /// the part along −n, on the same primitive) is closer than `thin`,
@@ -14,26 +15,55 @@ use glam::DVec3;
 /// [`FIN_THICKNESS`] × √planform).
 pub(super) fn find_fins(surface: &Surface, cells: &Cells, geometry: &[CellGeometry], thin: f64) -> Vec<Fin> {
     let mut by_primitive: Vec<(u32, Vec<u32>, f64)> = Vec::new();
-    // A fin's opposite face is its own primitive's: each cell is cast only
-    // against those triangles (O(cells × triangles per primitive)).
-    let primitives = cells.cells.iter().map(|c| c.primitive as usize + 1).max().unwrap_or(0);
-    let mut own: Vec<Vec<u32>> = vec![Vec::new(); primitives];
-    for (t, &cell) in cells.tri_cell.iter().enumerate() {
-        own[cells.cells[cell as usize].primitive as usize].push(t as u32);
+    // Only a hit closer than `thin` counts, and it lies in the bounding box
+    // of the cast segment: the triangles are bucketed on a grid of `thin`
+    // cubes by their bounding boxes, and each cell is cast only against
+    // its own primitive's triangles (a fin's opposite face) in the cubes
+    // that box overlaps. Any hit within `thin` is among them: the same fins
+    // as casting against every triangle.
+    let size = thin.max(1e-9);
+    let key = |p: DVec3| ((p.x / size).floor() as i64, (p.y / size).floor() as i64, (p.z / size).floor() as i64);
+    let corners = |t: &[u32; 3]| t.map(|k| surface.positions[k as usize]);
+    let mut grid: HashMap<(i64, i64, i64), Vec<u32>> = HashMap::new();
+    for (t, tri) in surface.triangles.iter().enumerate() {
+        let [a, b, c] = corners(tri);
+        let (k0, k1) = (key(a.min(b).min(c)), key(a.max(b).max(c)));
+        for x in k0.0..=k1.0 {
+            for y in k0.1..=k1.1 {
+                for z in k0.2..=k1.2 {
+                    grid.entry((x, y, z)).or_default().push(t as u32);
+                }
+            }
+        }
     }
+    let mut stamp = vec![u32::MAX; surface.triangles.len()];
     for (i, g) in geometry.iter().enumerate() {
         let n = g.normal;
+        let primitive = cells.cells[i].primitive;
+        let end = g.centroid - n * thin;
+        let (k0, k1) = (key(g.centroid.min(end)), key(g.centroid.max(end)));
         let mut nearest = f64::INFINITY;
-        for &t in &own[cells.cells[i].primitive as usize] {
-            let tri = &surface.triangles[t as usize];
-            let [a, b, c] = tri.map(|k| surface.positions[k as usize]);
-            let tn = (b - a).cross(c - a);
-            if tn.dot(n) >= -0.9 * tn.length() {
-                continue;
-            }
-            if let Some(t) = ray_triangle(g.centroid, -n, a, b, c) {
-                if t > 1e-6 {
-                    nearest = nearest.min(t);
+        for x in k0.0..=k1.0 {
+            for y in k0.1..=k1.1 {
+                for z in k0.2..=k1.2 {
+                    let Some(bucket) = grid.get(&(x, y, z)) else { continue };
+                    for &t in bucket {
+                        let (tu, i32) = (t as usize, i as u32);
+                        if stamp[tu] == i32 || cells.cells[cells.tri_cell[tu] as usize].primitive != primitive {
+                            continue;
+                        }
+                        stamp[tu] = i32;
+                        let [a, b, c] = corners(&surface.triangles[tu]);
+                        let tn = (b - a).cross(c - a);
+                        if tn.dot(n) >= -0.9 * tn.length() {
+                            continue;
+                        }
+                        if let Some(t) = ray_triangle(g.centroid, -n, a, b, c) {
+                            if t > 1e-6 {
+                                nearest = nearest.min(t);
+                            }
+                        }
+                    }
                 }
             }
         }

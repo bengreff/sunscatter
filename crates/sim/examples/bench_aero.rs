@@ -16,6 +16,8 @@ fn main() {
         let mut sizes = vec![50, 300];
         sizes.extend(args.iter().skip(1).filter_map(|a| a.parse::<usize>().ok()));
         per_cell("test craft", &test_craft().surface, &test_craft().cells);
+        let one = sim::craft::stress::stress_craft(1);
+        per_cell("stress craft, 1 part", &one.craft.surface, &one.craft.cells);
         for n in sizes {
             let s = sim::craft::stress::stress_craft(n);
             per_cell(&format!("stress craft, {n} parts"), &s.craft.surface, &s.craft.cells);
@@ -182,7 +184,14 @@ fn per_cell(name: &str, surface: &sim::craft::Surface, cells: &sim::craft::Cells
     let clock = Instant::now();
     let b = bake(surface, cells, &BakeOptions::default());
     let bake_ms = clock.elapsed().as_secs_f64() * 1e3;
-    println!("{name}: {} triangles, {n} cells, {} fins; bake {bake_ms:.0} ms", surface.triangles.len(), b.fins.len());
+    let clock = Instant::now();
+    bake(surface, cells, &BakeOptions { level: 2, ..BakeOptions::default() });
+    let coarse_ms = clock.elapsed().as_secs_f64() * 1e3;
+    let tris = surface.triangles.len();
+    println!(
+        "{name}: {tris} triangles, {n} cells, {} fins; bake {bake_ms:.0} ms (162 directions: {coarse_ms:.0} ms)",
+        b.fins.len()
+    );
     let wall = vec![900.0; n];
     let mut heat = vec![0.0; n];
     let mut scratch = vec![0.0; n];
