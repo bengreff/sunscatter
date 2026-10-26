@@ -372,6 +372,21 @@ mod tests {
         assert!(s.open.is_empty() && s.is_expanded(MenuId::Landing, "reentry"));
     }
 
+    /// Before the first snapshot (and in any degenerate state) no value
+    /// reads NaN or infinity.
+    #[test]
+    fn no_menu_shows_nan_or_infinity_before_the_first_snapshot() {
+        let d = FlightData::default();
+        for m in MenuId::ALL {
+            for s in m.sections(&d) {
+                for (label, value) in s.rows() {
+                    let bad = |t: &str| t.contains("NaN") || t.contains("inf") || t.contains('∞');
+                    assert!(!bad(value) && !bad(label), "{m:?} {}: {label} = {value}", s.id);
+                }
+            }
+        }
+    }
+
     #[test]
     fn empty_sections_are_not_drawn() {
         // A craft with nothing in an atmosphere and no impact: Landing has

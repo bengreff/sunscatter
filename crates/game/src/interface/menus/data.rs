@@ -43,9 +43,8 @@ pub struct FlightData {
     pub braking: Option<Brake>,
     /// In an atmosphere now.
     pub air: Option<AirData>,
-    /// Outside one, with the next periapsis inside one: its altitude and
-    /// the atmosphere's top (m).
-    pub entry: Option<(f64, f64)>,
+    /// Outside one, the predicted path's way into an atmosphere.
+    pub entry: Option<Entry>,
     pub g_load: f64,
     /// Heading, pitch, roll (deg).
     pub attitude: Option<[f64; 3]>,
@@ -141,6 +140,31 @@ pub enum Brake {
     CannotStop,
 }
 
+/// Where the predicted path enters an atmosphere, seen from outside it.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Entry {
+    /// The atmosphere's top above the reference ellipsoid: the entry
+    /// interface (m).
+    pub top: f64,
+    /// Seconds to it, where the stored trajectory marks the entry.
+    pub in_s: Option<f64>,
+    /// The next periapsis, when it lies inside the atmosphere (m).
+    pub periapsis: Option<f64>,
+}
+
+/// The entry ahead, from what is known (a pure rule): the predicted path's
+/// marked entry (seconds to it, the atmosphere's top), a periapsis inside
+/// an atmosphere (its altitude, the top), or an impact on a body with one
+/// (its top). The marked entry's atmosphere wins; `None` if none applies.
+pub fn entry_ahead(
+    marked: Option<(f64, f64)>,
+    periapsis: Option<(f64, f64)>,
+    impact_top: Option<f64>,
+) -> Option<Entry> {
+    let top = marked.map(|m| m.1).or(periapsis.map(|p| p.1)).or(impact_top)?;
+    Some(Entry { top, in_s: marked.map(|m| m.0), periapsis: periapsis.map(|p| p.0) })
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct AirData {
     /// Dynamic pressure (Pa).
@@ -210,6 +234,8 @@ pub struct Diagnostics {
 /// What the snapshot is gathered from.
 pub struct Sources<'a> {
     pub sim: &'a SimState,
+    /// The active vessel's predicted segment while it flies live.
+    pub pred: &'a crate::state::Prediction,
     pub nav: Option<&'a NavState>,
     pub target: Option<NavTarget>,
     pub aps: &'a Apsides,
@@ -227,6 +253,7 @@ pub struct Sources<'a> {
 pub fn update(
     time: Res<Time>,
     sim: Res<SimState>,
+    pred: Res<crate::state::Prediction>,
     nav: Res<crate::navball::Navball>,
     aps: Res<Apsides>,
     landing: Res<crate::landing::LandingPrediction>,
@@ -246,6 +273,7 @@ pub fn update(
     *last = now;
     let sources = Sources {
         sim: &sim,
+        pred: &pred,
         nav: nav.now.as_ref(),
         target: nav.target,
         aps: &aps,
@@ -399,7 +427,12 @@ fn landing(s: &Sources) -> FlightData {
         _ => None,
     };
     let air = sim::vessel::air_at(&sim.world, &snap, anchor, r, v).filter(|_| !grounded);
-    let entry = air.is_none().then(|| entry(sim, s.aps)).flatten();
+    let atmosphere_top = |body| sim.world.source(body)?.physical.as_ref()?.atmosphere.as_ref().map(|a| a.top);
+    let entry = air.is_none().then(|| {
+        let impact_top = hit.and_then(|h| atmosphere_top(h.body));
+        entry_ahead(marked_entry(s), periapsis_inside(sim, s.aps), impact_top)
+    });
+    let entry = entry.flatten().filter(|_| !grounded);
     let spec = &ship.craft.chute;
     let chute = ChuteData {
         commanded: sim.controls.chute,
@@ -424,11 +457,25 @@ fn landing(s: &Sources) -> FlightData {
 
 /// The next periapsis, if it is inside an atmosphere: its altitude and the
 /// atmosphere's top.
-fn entry(sim: &SimState, aps: &Apsides) -> Option<(f64, f64)> {
+fn periapsis_inside(sim: &SimState, aps: &Apsides) -> Option<(f64, f64)> {
     let (_, pe) = aps.get(sim.ship().id())?.next_after(sim.clock);
     let pe = pe?;
     let top = sim.world.source(pe.body)?.physical.as_ref()?.atmosphere.as_ref()?.top;
     (pe.altitude < top).then_some((pe.altitude, top))
+}
+
+/// The first atmosphere entry ahead on the predicted path, as the stored
+/// segments mark it (`Segment::entry`): seconds to it and the atmosphere's
+/// top.
+fn marked_entry(s: &Sources) -> Option<(f64, f64)> {
+    let sim = s.sim;
+    let segments = crate::trajectory::apsides::vessel_segments(sim, s.pred, sim.active);
+    segments.iter().find_map(|seg| {
+        let (t, body) = seg.entry?;
+        let in_s = seg.t0.add_seconds(t).seconds_since(sim.clock);
+        let top = sim.world.source(body)?.physical.as_ref()?.atmosphere.as_ref()?.top;
+        (in_s > 0.0).then_some((in_s, top))
+    })
 }
 
 fn craft(sim: &SimState, body: sim::frame::NodeId) -> CraftData {
@@ -514,6 +561,7 @@ mod tests {
     use super::*;
 
     struct Fixture {
+        pred: crate::state::Prediction,
         aps: Apsides,
         rv: Rendezvous,
         comms: Comms,
@@ -522,6 +570,7 @@ mod tests {
 
     fn fixture() -> Fixture {
         Fixture {
+            pred: crate::state::Prediction::default(),
             aps: Apsides::default(),
             rv: Rendezvous::default(),
             comms: Comms::load(),
@@ -532,6 +581,7 @@ mod tests {
     fn sources<'a>(sim: &'a SimState, f: &'a Fixture) -> Sources<'a> {
         Sources {
             sim,
+            pred: &f.pred,
             nav: None,
             target: None,
             aps: &f.aps,
@@ -564,6 +614,56 @@ mod tests {
         assert_eq!(d.target.choices.first().map(|c| c.0.as_str()), Some("none"));
         assert!(d.target.choices.iter().any(|c| c.0 == "Moon"));
         assert_eq!(d.diagnostics.vessels, 1);
+    }
+
+    #[test]
+    fn the_entry_comes_from_the_marked_entry_a_periapsis_or_an_impact() {
+        // (marked, periapsis inside, impact top, expected)
+        let e = |top, in_s, periapsis| Some(Entry { top, in_s, periapsis });
+        let table = [
+            (None, None, None, None),
+            (Some((312.0, 100e3)), None, Some(100e3), e(100e3, Some(312.0), None)),
+            (None, Some((45e3, 100e3)), None, e(100e3, None, Some(45e3))),
+            (None, None, Some(100e3), e(100e3, None, None)),
+            (Some((60.0, 100e3)), Some((45e3, 90e3)), None, e(100e3, Some(60.0), Some(45e3))),
+        ];
+        for (marked, pe, impact, want) in table {
+            assert_eq!(entry_ahead(marked, pe, impact), want, "{marked:?} {pe:?} {impact:?}");
+        }
+    }
+
+    /// A deorbit: the stored coast marks where it enters the atmosphere, so
+    /// Reentry has the entry interface and the time to it before any
+    /// periapsis or impact is known.
+    #[test]
+    fn a_deorbit_coast_shows_the_time_to_entry() {
+        let mut sim = SimState::new();
+        let earth = sim.world.find("Earth").unwrap().clone();
+        let re = earth.physical.as_ref().unwrap().radius_eq;
+        let (rp, ra) = (re + 50e3, re + 300e3);
+        let el = sim::kepler::Elements {
+            a: 0.5 * (rp + ra),
+            e: (ra - rp) / (ra + rp),
+            i: 0.5,
+            raan: 0.0,
+            argp: 0.0,
+            mean_anomaly: std::f64::consts::PI,
+        };
+        let (r, v) = el.to_state(earth.gm);
+        let id = sim.vessel_ids.allocate();
+        let mut ship =
+            sim::vessel::Vessel::coasting(&sim.world, id, sim.clock, earth.node, r, v, sim::craft::test_craft());
+        ship.extend_coast(&sim.world, sim.clock.add_seconds(3_000.0), 200_000);
+        sim.fleet.push(ship);
+        sim.active = 1;
+        let f = fixture();
+        let d = gather(&sources(&sim, &f));
+        let entry = d.entry.expect("the coast enters the atmosphere");
+        let top = earth.physical.as_ref().unwrap().atmosphere.as_ref().unwrap().top;
+        assert_eq!(entry.top, top);
+        let t = entry.in_s.expect("marked on the stored coast");
+        assert!(t > 600.0 && t < 2_800.0, "half an orbit from apoapsis, before perigee: {t}");
+        assert!(d.air.is_none());
     }
 
     #[test]

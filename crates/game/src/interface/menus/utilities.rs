@@ -15,7 +15,8 @@ pub fn sections(d: &FlightData) -> Vec<Section> {
 fn summary(d: &FlightData) -> Section {
     let mut s = Section::summary();
     let c = &d.craft;
-    let fraction = c.propellant / c.full;
+    // Before the first snapshot `full` is 0: no division by it.
+    let fraction = if c.full > 0.0 { c.propellant / c.full } else { 0.0 };
     let tone = if c.debug {
         Tone::Normal
     } else if c.propellant <= 0.0 {

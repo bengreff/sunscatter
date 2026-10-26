@@ -247,7 +247,7 @@ pub fn draw(
 /// A temperature with its limit: "812 K / 1100 K" (warning shown by the
 /// caller's colour; here the text).
 pub fn temperature(t: f64, limit: f64) -> String {
-    let mark = if t >= 0.9 * limit { " !" } else { "" };
+    let mark = if limit > 0.0 && t >= 0.9 * limit { " !" } else { "" };
     format!("{t:.0} K / {limit:.0} K{mark}")
 }
 

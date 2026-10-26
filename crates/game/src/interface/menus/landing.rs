@@ -71,9 +71,14 @@ fn reentry(d: &FlightData) -> Section {
                 s.row("SIDESLIP", format!("{slip:+.1}°"));
             }
         }
-        (None, Some((pe, top))) => {
-            s.row("PERIAPSIS", fmt_dist(pe));
-            s.row("  ATMOSPHERE TOP", fmt_dist(top));
+        (None, Some(e)) => {
+            s.row("ENTRY INTERFACE", fmt_dist(e.top));
+            if let Some(t) = e.in_s {
+                s.row("  IN", fmt_duration(t));
+            }
+            if let Some(pe) = e.periapsis {
+                s.row("PERIAPSIS", fmt_dist(pe));
+            }
         }
         (None, None) => return s,
     }
@@ -84,7 +89,9 @@ fn reentry(d: &FlightData) -> Section {
 
 /// How a temperature against its limit reads.
 pub fn heat_tone(t: f64, limit: f64) -> Tone {
-    if t >= limit {
+    if limit <= 0.0 {
+        Tone::Normal
+    } else if t >= limit {
         Tone::Alert
     } else if t >= 0.9 * limit {
         Tone::Warn
@@ -122,7 +129,7 @@ fn parachute(d: &FlightData) -> Section {
     }
     let q_text = q.map_or("—".to_string(), |q| format!("{:.1}", q / 1e3));
     s.row("q / DESIGN q", format!("{q_text} / {:.1} kPa", design_q / 1e3));
-    if !commanded {
+    if !commanded && !d.landed {
         match opening(q, design_q) {
             Opening::NoAir => s.note("no air: deploy after entry (P or Space)", Tone::Dim),
             Opening::Safe => s.note("safe to deploy (P or Space)", Tone::Good),
@@ -144,7 +151,7 @@ fn attitude(d: &FlightData) -> Section {
 
 #[cfg(test)]
 mod tests {
-    use super::super::data::{AirData, ImpactData, Surface};
+    use super::super::data::{AirData, Entry, ImpactData, Surface};
     use super::super::{find, Item};
     use super::*;
 
@@ -216,10 +223,15 @@ mod tests {
         let mut d = FlightData::default();
         d.craft.skin = (1_000.0, 1_100.0);
         assert!(!ids(&d).contains(&"reentry"), "in orbit above the air");
-        d.entry = Some((45_000.0, 100_000.0));
+        d.entry = Some(Entry { top: 100_000.0, in_s: None, periapsis: Some(45_000.0) });
         let s = shown(&d);
         let r = find(&s, "reentry").unwrap();
-        assert_eq!(r.value("PERIAPSIS"), Some("45.0 km"));
+        assert_eq!(r.rows()[..2], [("ENTRY INTERFACE", "100.0 km"), ("PERIAPSIS", "45.0 km")]);
+        // A deorbit ending on the ground: no periapsis, the marked entry.
+        d.entry = Some(Entry { top: 100_000.0, in_s: Some(312.0), periapsis: None });
+        let s = shown(&d);
+        let r = find(&s, "reentry").unwrap();
+        assert_eq!(r.rows()[..2], [("ENTRY INTERFACE", "100.0 km"), ("  IN", "5m 12s")]);
         assert_eq!(r.tone("SKIN MAX"), Some(Tone::Warn), "within 10 % of the limit");
         d.air = Some(AirData { q: 12_340.0, mach: 6.2, aoa_slip: Some((3.0, -0.4)) });
         d.g_load = 2.5;
@@ -237,6 +249,7 @@ mod tests {
         );
         assert_eq!(heat_tone(1_200.0, 1_100.0), Tone::Alert);
         assert_eq!(heat_tone(500.0, 1_100.0), Tone::Normal);
+        assert_eq!(heat_tone(0.0, 0.0), Tone::Normal, "no limit known yet");
     }
 
     #[test]
