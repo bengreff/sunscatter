@@ -1,10 +1,34 @@
 // Titan's visuals (read by crates/game; physical data is in body.ron).
-// base_color: an approximate visual colour (no colour map yet); albedo: Bond albedo 0.27 (Li et al. 2011, Cassini).
+// base_color: an approximate visual colour (of the haze, as seen from outside); albedo: Bond albedo 0.27 (Li et al. 2011, Cassini).
 (
     base_color: (0.85, 0.62, 0.32),
     albedo: 0.27,
     roughness: 0.95,
     icon_color: (0.97, 0.78, 0.52),
+    // The surface (agent SKY; docs/features/solar-visuals.md#venus-and-titan-surfaces): zones from the Cassini
+    // ISS 938 nm global mosaic (USGS, 4 km), k-means centres of its grey levels. Albedo: the plains take the
+    // Huygens DISR surface reflectance (~0.1-0.2, red slope: Tomasko et al. 2005, Nature 438, 765), the dune
+    // fields and the bright terrains (Xanadu) that times their brightness ratio in the mosaic^0.5 (0.72, 1.20).
+    color_map: Some("color.jpg"),
+    zones: Some((
+        map: "zones.png",
+        tint: 0.2,
+        list: [
+            (name: "dune fields", source: (64, 64, 64), albedo: Some((0.108, 0.086, 0.058)),
+                pattern: (scale_m: 3000.0, contrast: 0.15)),
+            (name: "plains", source: (123, 123, 123), albedo: Some((0.150, 0.120, 0.080)),
+                pattern: (scale_m: 1500.0, contrast: 0.1)),
+            (name: "bright terrains", source: (178, 178, 178), albedo: Some((0.180, 0.144, 0.096)),
+                pattern: (scale_m: 1000.0, contrast: 0.12)),
+        ],
+    )),
+    detail: Some((
+        scale_m: 25.0,
+        strength: 0.55,
+        fade_m: None,
+        // Water-ice cobbles and dark organic sand (Huygens' landing site).
+        rock_color: (0.14, 0.12, 0.09),
+    )),
     // The sky (D052, Hillaire) at 680, 550, 440 nm; sources: docs/features/solar-visuals.md#titan (agent SKY).
     // - Rayleigh: N2 cross-sections 1.94, 4.60, 11.5 e-31 m2 (air's, Bucholtz 1995, x 1.02 for N2's
     //   refractivity and King factor) x the surface number density 1.135e26 m-3 (146.7 kPa, 93.65 K:

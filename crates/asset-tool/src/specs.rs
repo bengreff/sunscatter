@@ -438,4 +438,32 @@ pub const SPECS: &[Spec] = &[
         Colors::Procedural([188, 187, 187]),
         (512, 512, 512),
     ),
+    // Under thick air (agent SKY, docs/features/solar-visuals.md#venus-and-titan-surfaces).
+    spec(
+        "venus",
+        // Magellan altimetry and stereo, global topography v2 (USGS, 4641 m): metres above a 6,051 km sphere.
+        Heights::Dem(HeightSource {
+            url: "Venus_Magellan_Topography_Global_4641m_v02.tif",
+            file: "Venus_Magellan_Topography_Global_4641m_v02.tif",
+            scale: 1.0,
+            offset: 0.0,
+            valid: (-30000.0, 30000.0),
+            sphere_m: 6_051_000.0,
+            raw: None,
+        }),
+        // Magellan SAR, C3-MDIR global mosaic (USGS, 2025 m): radar backscatter, which only
+        // classifies (rough tesserae and flows bright, smooth plains dark); the drawn colour is the zones'.
+        mosaic("Venus_Magellan_C3-MDIR_Global_Mosaic_2025m.tif", GREY),
+        // 9.3 km per height sample.
+        (4096, 2048, 2048),
+    ),
+    spec(
+        "titan",
+        // No public-domain global DEM (Corlies et al. 2017's map is a journal supplement): relief from
+        // its statistics; Gazetteer craters, shallow (Neish et al. 2013, Icarus 223, 82), few random ones.
+        relief(None, Some(Craters { fresh: 0.0, ..icy(1.0e-4, 3.0, 800.0, 0.0) }), Some("TITAN"), 300.0, 0x717a),
+        // Cassini ISS 938 nm global mosaic (USGS, 4 km): the surface through the haze's window.
+        mosaic("Titan_ISS_P19658_Mosaic_Global_4km.tif", GREY),
+        (2048, 2048, 2048),
+    ),
 ];

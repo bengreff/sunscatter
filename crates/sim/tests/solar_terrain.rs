@@ -30,8 +30,10 @@ fn base(p: &BodyPhysical, lat: f64, lon: f64) -> f64 {
 
 /// Bodies whose maps this test pins (the solid bodies with a heightmap,
 /// besides Earth and the Moon, which `terrain.rs` covers).
-const BODIES: [&str; 35] = [
+const BODIES: [&str; 37] = [
     "Mercury",
+    "Venus",
+    "Titan",
     "Mars",
     "Io",
     "Europa",
@@ -140,6 +142,8 @@ fn surfaces_match_golden_hashes() {
 // test) when a body's maps or terrain parameters change on purpose.
 const GOLDEN: &[(&str, u64)] = &[
     ("Mercury", 0x93a1f0228621cd2b),
+    ("Venus", 0xb1930e228f811eb8),
+    ("Titan", 0x22da9dd8aa11f878),
     ("Mars", 0x9a96c8e7420f2c0a),
     ("Io", 0xb8196ba6b803372d),
     ("Europa", 0x1345978025925c60),
@@ -183,11 +187,13 @@ const GOLDEN: &[(&str, u64)] = &[
 fn landmarks_sit_at_their_measured_heights() {
     let w = world();
     // (body, feature, lat, lon east, lowest, highest) in metres.
-    let table: [(&str, &str, f64, f64, f64, f64); 4] = [
+    let table: [(&str, &str, f64, f64, f64, f64); 5] = [
         ("Mars", "Olympus Mons summit", 17.34, -133.03, 22_000.0, 23_500.0),
         ("Mars", "Hellas Planitia, deepest floor", -32.84, 62.22, -8_000.0, -7_000.0),
         ("Mercury", "Rachmaninoff basin floor", 27.64, 57.0, -6_500.0, -5_000.0),
         ("Mercury", "Caloris Planitia", 30.0, 162.0, -2_500.0, 0.0),
+        // Magellan: ~11 km above the 6,051 km sphere, 10.2 km above body.ron's 6,051.8 km; smoothed at 9.3 km.
+        ("Venus", "Maxwell Montes summit", 65.2, 3.3, 8_500.0, 11_000.0),
     ];
     for (name, feature, lat, lon, lo, hi) in table {
         let p = body(&w, name);

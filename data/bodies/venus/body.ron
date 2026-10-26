@@ -84,7 +84,22 @@
         solid: true,
         // Rails warp is disabled below this altitude (m, D062): the top of the atmosphere.
         rails_floor: 150000.0,
-        heightmap: None,
+        // Terrain heights (m) above the reference spheroid, 4096×2048: Magellan altimetry and stereo, global topography v2 (USGS, 4641 m; 8 % gaps filled smoothly), via asset-tool planets
+        // Baked by `asset-tool planets venus` (range -3686 .. 10736 m).
+        heightmap: Some("height.png"),
+        // Procedural detail below the heightmap (D059): RMS residual map (rms_m = value² / 64)
+        // and the fractal's parameters; octave 0 is the map's sample spacing, 13 octaves reach ~2.3 m.
+        roughness: Some("roughness.png"),
+        terrain_detail: Some((
+            octaves: 13,
+            wavelength: 9283.3,
+            lacunarity: 2.0,
+            gain: 0.5,
+            amplitude: 0.5,
+            // Ridged octaves as on Mars: tesserae and mountain belts (few craters: the thick air stops small impactors).
+            ridge_threshold: 300.0,
+            craters: None,
+        )),
         sea_level: None,
     ),
 )
