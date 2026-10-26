@@ -24,9 +24,21 @@ pub struct VolumeNode {
     pub centre: DVec3,
     /// m³.
     pub volume: f64,
-    /// Heights along the tank (from its base, m) of the node's samples
-    /// inside the tank.
+    /// Heights along their tank (from its base, m) of the node's samples
+    /// inside a tank.
     pub tank: Vec<f64>,
+    /// The tank of each of those samples (an index into the grid's tanks).
+    pub tank_of: Vec<u32>,
+    /// Inside samples per part (part, count), by part (craft of parts; a
+    /// sample belongs to the part of the first primitive holding it).
+    pub parts: Vec<(u32, u32)>,
+}
+
+impl VolumeNode {
+    /// The part holding most of the node (the lowest on ties).
+    pub fn part(&self) -> u32 {
+        self.parts.iter().fold((0, 0), |best, &(p, n)| if n > best.1 { (p, n) } else { best }).0
+    }
 }
 
 /// The interior grid of a craft.
@@ -43,24 +55,43 @@ pub struct VolumeGrid {
     index: BTreeMap<[i32; 3], u32>,
     /// Volume of one sample (m³).
     pub sample_volume: f64,
-    /// Tank height (m) and the samples inside it.
-    tank_height: f64,
-    tank_samples: usize,
+    /// Per tank: height (m), capacity (kg) and the samples inside it.
+    tank_height: Vec<f64>,
+    tank_capacity: Vec<f64>,
+    tank_samples: Vec<usize>,
 }
 
 impl VolumeGrid {
-    /// The grid of cubes of edge `size` over the primitives' solids.
+    /// The grid of cubes of edge `size` over the primitives' solids, with
+    /// one tank (one part).
     pub fn new(primitives: &[Primitive], bounds: (DVec3, DVec3), tank: &Tank, size: f64) -> Self {
+        let owner = vec![0; primitives.len()];
+        Self::with_parts(primitives, &owner, bounds, &[(*tank, 1.0)], size)
+    }
+
+    /// The grid over a craft of parts: `owner` gives each primitive's part,
+    /// `tanks` (region, capacity) the tanks (a sample in several is in the
+    /// first).
+    pub fn with_parts(
+        primitives: &[Primitive],
+        owner: &[u32],
+        bounds: (DVec3, DVec3),
+        tanks: &[(Tank, f64)],
+        size: f64,
+    ) -> Self {
         let (lo, hi) = bounds;
         let n = ((hi - lo) / size).ceil().max(DVec3::ONE);
         let (nx, ny, nz) = (n.x as i32, n.y as i32, n.z as i32);
         let step = size / SAMPLES as f64;
         let sample_volume = step * step * step;
-        let (dir, height) = (tank.axis.normalize(), tank.axis.length());
+        let shapes: Vec<(DVec3, f64, f64)> =
+            tanks.iter().map(|(t, _)| (t.axis.normalize(), t.axis.length(), t.radius)).collect();
         let in_tank = |p: DVec3| {
-            let a = (p - tank.base).dot(dir);
-            let radial = (p - tank.base - dir * a).length();
-            (a >= 0.0 && a <= height && radial <= tank.radius).then_some(a)
+            tanks.iter().zip(&shapes).enumerate().find_map(|(k, ((tank, _), &(dir, height, radius)))| {
+                let a = (p - tank.base).dot(dir);
+                let radial = (p - tank.base - dir * a).length();
+                (a >= 0.0 && a <= height && radial <= radius).then_some((k as u32, a))
+            })
         };
         let broad = super::broad::Broad::new(primitives.iter().map(|p| &p.shape));
         let mut nodes = Vec::new();
@@ -70,15 +101,23 @@ impl VolumeGrid {
             for j in 0..ny {
                 for i in 0..nx {
                     let corner = lo + DVec3::new(i as f64, j as f64, k as f64) * size;
-                    let (mut count, mut sum, mut tank_heights) = (0usize, DVec3::ZERO, Vec::new());
+                    let (mut count, mut sum, mut tank_heights, mut tank_of) =
+                        (0usize, DVec3::ZERO, Vec::new(), Vec::new());
+                    let mut parts: Vec<(u32, u32)> = Vec::new();
                     for s in 0..SAMPLES * SAMPLES * SAMPLES {
                         let (a, b, c) = (s % SAMPLES, (s / SAMPLES) % SAMPLES, s / (SAMPLES * SAMPLES));
                         let p = corner + DVec3::new(a as f64 + 0.5, b as f64 + 0.5, c as f64 + 0.5) * step;
-                        if broad.any_contains(p, None) {
+                        if let Some(q) = broad.first_containing(p) {
                             count += 1;
                             sum += p;
-                            if let Some(h) = in_tank(p) {
+                            if let Some((t, h)) = in_tank(p) {
                                 tank_heights.push(h);
+                                tank_of.push(t);
+                            }
+                            let part = owner[q as usize];
+                            match parts.binary_search_by_key(&part, |x| x.0) {
+                                Ok(at) => parts[at].1 += 1,
+                                Err(at) => parts.insert(at, (part, 1)),
                             }
                         }
                     }
@@ -89,10 +128,20 @@ impl VolumeGrid {
                             centre: sum / count as f64,
                             volume: count as f64 * sample_volume,
                             tank: tank_heights,
+                            tank_of,
+                            parts,
                         });
                     }
                 }
             }
+        }
+        if nodes.is_empty() {
+            // Nothing as thick as a sample spacing (a piece of thin parts):
+            // one node at the bounds' centre, filled by no sample.
+            let centre = (lo + hi) * 0.5;
+            nodes.push(VolumeNode { centre, volume: sample_volume, tank: vec![], tank_of: vec![], parts: vec![] });
+            let c = ((centre - lo) / size).floor();
+            index.insert([c.x as i32, c.y as i32, c.z as i32], 0);
         }
         let per_cube = (SAMPLES * SAMPLES * SAMPLES) as f64;
         let mut links = Vec::new();
@@ -104,8 +153,21 @@ impl VolumeGrid {
                 }
             }
         }
-        let tank_samples = nodes.iter().map(|n| n.tank.len()).sum();
-        VolumeGrid { size, origin: lo, nodes, links, index, sample_volume, tank_height: height, tank_samples }
+        let mut tank_samples = vec![0; tanks.len()];
+        for t in nodes.iter().flat_map(|n| &n.tank_of) {
+            tank_samples[*t as usize] += 1;
+        }
+        VolumeGrid {
+            size,
+            origin: lo,
+            nodes,
+            links,
+            index,
+            sample_volume,
+            tank_height: shapes.iter().map(|s| s.1).collect(),
+            tank_capacity: tanks.iter().map(|t| t.1).collect(),
+            tank_samples,
+        }
     }
 
     /// Total interior volume (m³).
@@ -128,31 +190,57 @@ impl VolumeGrid {
         })
     }
 
-    /// Propellant per node (kg) for `mass` kg filling the tank from its
-    /// base to the level `fill` × height: each tank sample below the level
-    /// holds an equal share (the sample straddling it a partial one).
+    /// Propellant per node (kg) for `mass` kg filling the tanks from their
+    /// bases to the level `fill` × height (every tank at the same fill,
+    /// holding its share of `mass` by capacity): each tank sample below
+    /// the level holds an equal share of its tank's (the sample straddling
+    /// it a partial one).
     pub fn propellant(&self, mass: f64, fill: f64, out: &mut [f64]) {
         out.fill(0.0);
-        if mass <= 0.0 || self.tank_samples == 0 {
+        if mass <= 0.0 || self.tank_samples.iter().sum::<usize>() == 0 {
             return;
         }
-        let level = self.tank_height * fill.clamp(0.0, 1.0);
+        if self.tank_height.len() == 1 {
+            self.share(mass, fill, None, out);
+            return;
+        }
+        let capacity: f64 = self.tank_capacity.iter().sum();
+        let mut each = vec![0.0; out.len()];
+        for k in (0..self.tank_height.len()).filter(|&k| self.tank_samples[k] > 0) {
+            self.share(mass * self.tank_capacity[k] / capacity, fill, Some(k as u32), &mut each);
+            for (o, e) in out.iter_mut().zip(&each) {
+                *o += e;
+            }
+        }
+    }
+
+    /// `mass` in tank `tank` (`None`: the only one) filled to `fill`,
+    /// shared out over its samples into `out`.
+    fn share(&self, mass: f64, fill: f64, tank: Option<u32>, out: &mut [f64]) {
+        out.fill(0.0);
+        let level = self.tank_height[tank.unwrap_or(0) as usize] * fill.clamp(0.0, 1.0);
         let step = self.size / SAMPLES as f64;
         let weight = |h: f64| ((level - h) / step + 0.5).clamp(0.0, 1.0);
-        let total: f64 = self.nodes.iter().flat_map(|n| n.tank.iter()).map(|&h| weight(h)).sum();
+        let heights = |n| heights(n, tank);
+        let total: f64 = self.nodes.iter().flat_map(heights).map(weight).sum();
         if total <= 0.0 {
             // Below the lowest sample: all in the node holding it.
             let lowest = (0..self.nodes.len())
-                .filter(|&i| !self.nodes[i].tank.is_empty())
-                .map(|i| (self.nodes[i].tank.iter().fold(f64::MAX, |m, &h| m.min(h)), i))
+                .filter(|&i| heights(&self.nodes[i]).next().is_some())
+                .map(|i| (heights(&self.nodes[i]).fold(f64::MAX, f64::min), i))
                 .fold((f64::MAX, 0), |b, x| if x.0 < b.0 { x } else { b });
             out[lowest.1] = mass;
             return;
         }
         for (o, n) in out.iter_mut().zip(&self.nodes) {
-            *o = mass * n.tank.iter().map(|&h| weight(h)).sum::<f64>() / total;
+            *o = mass * heights(n).map(weight).sum::<f64>() / total;
         }
     }
+}
+
+/// The heights of a node's samples in tank `tank` (`None`: every tank).
+fn heights(n: &VolumeNode, tank: Option<u32>) -> impl Iterator<Item = f64> + '_ {
+    n.tank.iter().zip(&n.tank_of).filter(move |(_, &k)| tank.is_none_or(|t| t == k)).map(|(&h, _)| h)
 }
 
 #[cfg(test)]
@@ -224,5 +312,40 @@ mod tests {
         assert_eq!(g.node_at(DVec3::new(50.0, 0.0, 0.0)), None);
         let far = g.nearest(DVec3::new(0.0, 0.0, 50.0));
         assert!(g.nodes[far as usize].centre.z > 1.5, "the nose end");
+    }
+
+    /// Two tanks filled together: each holds its share by capacity, from
+    /// its own base; the samples carry their tank and part.
+    #[test]
+    fn two_tanks_fill_together_by_capacity() {
+        let prim = |base: DVec3, h: f64| Primitive {
+            name: String::new(),
+            shape: crate::craft::Shape::Cylinder { base, axis: DVec3::Z * h, radius: 1.0 },
+            foot: false,
+            skin: None,
+            nozzle: false,
+        };
+        let prims = [prim(DVec3::ZERO, 4.0), prim(DVec3::new(3.0, 0.0, 0.0), 2.0)];
+        let tanks = [
+            (Tank { base: DVec3::ZERO, axis: DVec3::Z * 4.0, radius: 1.0 }, 3_000.0),
+            (Tank { base: DVec3::new(3.0, 0.0, 0.0), axis: DVec3::Z * 2.0, radius: 1.0 }, 1_000.0),
+        ];
+        let bounds = (DVec3::new(-1.0, -1.0, 0.0), DVec3::new(4.0, 1.0, 4.0));
+        let g = VolumeGrid::with_parts(&prims, &[0, 1], bounds, &tanks, 0.5);
+        for n in &g.nodes {
+            assert!(n.parts.len() == 1 && n.tank_of.iter().all(|&t| t == n.parts[0].0), "{:?}", n.parts);
+        }
+        let mut out = vec![0.0; g.nodes.len()];
+        for fill in [1.0, 0.5, 0.25] {
+            g.propellant(2_000.0 * fill * 2.0, fill, &mut out);
+            let in_tank =
+                |t: u32| -> f64 { g.nodes.iter().zip(&out).filter(|(n, _)| n.parts[0].0 == t).map(|x| x.1).sum() };
+            let total = 4_000.0 * fill;
+            assert!((in_tank(0) - 0.75 * total).abs() < 1e-9 && (in_tank(1) - 0.25 * total).abs() < 1e-9, "{fill}");
+            for (n, m) in g.nodes.iter().zip(&out) {
+                let height = if n.parts[0].0 == 0 { 4.0 } else { 2.0 };
+                assert!(*m == 0.0 || n.centre.z < height * fill + 0.5, "{fill}: {} holds {m}", n.centre);
+            }
+        }
     }
 }

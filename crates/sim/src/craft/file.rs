@@ -459,8 +459,19 @@ fn validate_shape(what: &str, s: &Shape) -> Result<(), String> {
     Ok(())
 }
 
-/// Checks `geometry.ron`'s values.
+/// Checks `geometry.ron`'s values (a craft file: one part, at most one
+/// nozzle).
 pub fn validate_geometry(g: &GeometryFile) -> Result<(), String> {
+    validate_shapes(g)?;
+    if g.primitives.iter().filter(|p| p.nozzle).count() > 1 {
+        return Err("at most one primitive may be the nozzle".into());
+    }
+    Ok(())
+}
+
+/// Checks a geometry's skin, tank and primitives (a craft of parts checks
+/// its nozzles per part, [`super::CraftDef::validate`]).
+pub fn validate_shapes(g: &GeometryFile) -> Result<(), String> {
     validate_skin("skin", &g.skin)?;
     finite_vec("tank.base", g.tank.base)?;
     nonzero_vec("tank.axis", g.tank.axis)?;
@@ -474,9 +485,6 @@ pub fn validate_geometry(g: &GeometryFile) -> Result<(), String> {
         if let Some(s) = &p.skin {
             validate_skin(&format!("{what}.skin"), s)?;
         }
-    }
-    if g.primitives.iter().filter(|p| p.nozzle).count() > 1 {
-        return Err("at most one primitive may be the nozzle".into());
     }
     Ok(())
 }

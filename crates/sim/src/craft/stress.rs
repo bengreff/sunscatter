@@ -23,29 +23,30 @@
 //! 8 core tanks, 12 boosters of 6 tanks, 160 small parts, ≈ 30 m tall; 1000:
 //! 18 core tanks, 24 boosters of 14 tanks, 532 small parts, ≈ 62 m.
 //!
-//! Each [`StressPart`] names its primitives, the part it hangs from (a tree
-//! rooted at part 0) and **placeholder properties** (allowed by the owner "to
-//! confirm high timewarp behavior equivalence"): dry mass and centre,
-//! propellant capacity, heat capacity and temperature limit, thrust and Isp,
-//! power produced and used. Stand-ins, not data; the pipeline (one part per
-//! ship, D060) does not read them. The craft file aggregates them: summed dry
-//! mass and capacity; one engine of the summed thrust (lift-off ratio
-//! [`LIFTOFF_TWR`]), the Isp of the summed flow, the core bell's heat share;
-//! one tank, the core's tank section (holding the boosters' propellant too).
-//! Each primitive's skin carries [`SKIN_SHARE`] of its part's dry mass over
-//! the part's surface (the shell mass model then puts the mass about where
-//! the parts are) and the part's limit. A stress vessel cannot be reloaded
-//! from a save: its design is not under `data/craft` ([`super::design_of`]).
+//! Each part is a [`Part`] of the part layer ([`super::parts`]): its
+//! primitives, the part it hangs from (a tree rooted at part 0) and
+//! **placeholder properties** (allowed by the owner "to confirm high
+//! timewarp behavior equivalence"): dry mass, a tank (its cylinder, capacity
+//! from its volume), an engine (thrust sized for the lift-off ratio
+//! [`LIFTOFF_TWR`], every bell its engine's nozzle), the interior's specific
+//! heat and temperature limit, power produced, used and stored, control
+//! (the pod and avionics rings), crew (the pod), and a load limit
+//! ([`LOAD_FACTOR`] times its weight; a leg [`LEG_LOAD`] times the craft's).
+//! The pod (else the root) carries the thrusters and the parachutes. Each
+//! primitive's skin carries [`SKIN_SHARE`] of its part's dry mass over the
+//! part's surface and the part's limit. The craft's aggregates (dry mass,
+//! propellant, the combined engine, crew) come from the parts. A stress
+//! vessel reloads from a save: its craft id `stress-<n>` names the layout
+//! ([`super::registry`]).
 
-use super::file::{CraftFile, GeometryFile, Primitive, Shape, Skin, Tank};
+use super::file::{CraftFile, EngineFile, GeometryFile, Mount, Primitive, RcsFile, Shape, Skin, Tank};
 use super::mesh::{analytic_area, analytic_volume};
+use super::parts::{aggregate, CraftDef, Part, PartPower, PartTank};
 use super::{CellOptions, Craft, CraftId, Resolution};
 use crate::math;
 use crate::vessel::G0;
 use glam::DVec3;
 
-/// Cells per part of [`cell_options`] (the test craft: 512 on 17 primitives).
-pub const CELLS_PER_PART: usize = 16;
 /// Share of a part's dry mass carried by its skin (the test craft's ≈ 30 %).
 pub const SKIN_SHARE: f64 = 0.3;
 /// Lift-off thrust-to-weight ratio the engines are sized for.
@@ -76,6 +77,13 @@ const TANK_FILL: f64 = 0.9;
 const TANK_DRY_FRACTION: f64 = 0.08;
 /// The test craft's wet mass (kg): springs and RCS scale from it.
 const REFERENCE_MASS: f64 = 20_000.0;
+/// A part's load limit in its own weights (a structural load factor).
+pub const LOAD_FACTOR: f64 = 30.0;
+/// A leg's load limit in the craft's wet weights.
+pub const LEG_LOAD: f64 = 2.0;
+/// Every engine's share of its jet power heating its bell (the test
+/// craft's, D077).
+const NOZZLE_HEAT: f64 = 2.2e-3;
 
 /// What a stress part is. Shapes: tanks, decouplers and avionics rings are
 /// cylinders; an engine a chamber (cylinder) and a bell (frustum); the pod a
@@ -101,79 +109,44 @@ pub enum StressKind {
 }
 
 /// Placeholder per kind: specific heat of the dry mass (J/(kg·K)),
-/// temperature limit (K), power produced and used (W).
-fn kind_data(kind: StressKind) -> (f64, f64, f64, f64) {
+/// temperature limit (K), power produced and used (W), battery (J).
+fn kind_data(kind: StressKind) -> (f64, f64, f64, f64, f64) {
     match kind {
-        StressKind::Tank | StressKind::Decoupler | StressKind::Leg | StressKind::Strut => (900.0, 1100.0, 0.0, 0.0),
-        StressKind::Engine => (500.0, 1640.0, 0.0, 50.0),
-        StressKind::Pod => (900.0, 1100.0, 0.0, 300.0),
-        StressKind::Nose => (900.0, 1400.0, 0.0, 0.0),
-        StressKind::Avionics => (900.0, 1100.0, 0.0, 150.0),
-        StressKind::Fin => (900.0, 1300.0, 0.0, 0.0),
-        StressKind::Panel => (700.0, 900.0, 150.0, 0.0),
-        StressKind::Rcs => (900.0, 1100.0, 0.0, 20.0),
-        StressKind::Battery => (1000.0, 600.0, 0.0, 5.0),
-        StressKind::Antenna => (900.0, 1100.0, 0.0, 20.0),
+        StressKind::Tank | StressKind::Decoupler | StressKind::Leg | StressKind::Strut => (900., 1100., 0., 0., 0.),
+        StressKind::Engine => (500.0, 1640.0, 0.0, 50.0, 0.0),
+        StressKind::Pod => (900.0, 1100.0, 0.0, 300.0, 1.0e7),
+        StressKind::Nose => (900.0, 1400.0, 0.0, 0.0, 0.0),
+        StressKind::Avionics => (900.0, 1100.0, 0.0, 150.0, 3.6e6),
+        StressKind::Fin => (900.0, 1300.0, 0.0, 0.0, 0.0),
+        StressKind::Panel => (700.0, 900.0, 150.0, 0.0, 0.0),
+        StressKind::Rcs => (900.0, 1100.0, 0.0, 20.0, 0.0),
+        StressKind::Battery => (1000.0, 600.0, 0.0, 5.0, 3.6e6),
+        StressKind::Antenna => (900.0, 1100.0, 0.0, 20.0, 0.0),
     }
 }
 
-/// An engine's placeholder performance.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct StressEngine {
-    /// Vacuum thrust (N).
-    pub thrust_vac: f64,
-    /// Specific impulse in vacuum and at sea level (s).
-    pub isp_vac: f64,
-    pub isp_sl: f64,
-}
-
-/// One part of a stress craft: what it owns and its placeholder properties.
-#[derive(Clone, Debug, PartialEq)]
-pub struct StressPart {
-    pub kind: StressKind,
-    pub name: String,
-    /// Indices of the geometry's primitives it owns (each primitive belongs
-    /// to exactly one part).
-    pub primitives: Vec<u32>,
-    /// The part it is attached to; `None` for the root (part 0).
-    pub parent: Option<u32>,
-    /// kg.
-    pub dry_mass: f64,
-    /// Centre of its dry mass (its primitives' volume centroid, body axes).
-    pub com: DVec3,
-    /// kg.
-    pub propellant_capacity: f64,
-    /// Heat capacity of the dry mass (J/K).
-    pub heat_capacity: f64,
-    /// Temperature limit (K); also its primitives' skin limit.
-    pub max_temperature: f64,
-    pub engine: Option<StressEngine>,
-    /// Electrical power produced and used (W, placeholders).
-    pub power_produced: f64,
-    pub power_consumed: f64,
-}
-
-/// A laid-out stress craft: the two craft files and the parts.
+/// A laid-out stress craft: the two craft files, the parts and each
+/// part's kind.
 #[derive(Clone, Debug, PartialEq)]
 pub struct StressLayout {
     pub spec: CraftFile,
     pub geometry: GeometryFile,
-    pub parts: Vec<StressPart>,
+    pub parts: Vec<Part>,
+    pub kinds: Vec<StressKind>,
 }
 
-/// A built stress craft: the craft (surface, cells, mass model; its design
-/// is baked on first use) and its parts.
+/// A built stress craft: the craft (surface, cells, mass model, parts; its
+/// design is baked on first use) and each part's kind.
 #[derive(Clone, Debug)]
 pub struct StressCraft {
     pub craft: Craft,
-    pub parts: Vec<StressPart>,
+    pub kinds: Vec<StressKind>,
 }
 
-/// The cell options of stress craft: [`CELLS_PER_PART`] per part, at least
-/// the default 512. (The default target alone gives a large craft one cell
-/// per face: a whole tank side as one cell, its normals cancelling.)
+/// The cell options of stress craft: every craft of parts' (so a design
+/// rebuilt from its id after a load is the same bits).
 pub fn cell_options(parts: usize) -> CellOptions {
-    CellOptions { target: CellOptions::default().target.max(CELLS_PER_PART * parts), ..CellOptions::default() }
+    CellOptions::for_parts(parts)
 }
 
 /// A stress craft of `parts` parts built with the default resolution and
@@ -182,34 +155,38 @@ pub fn stress_craft(parts: usize) -> StressCraft {
     layout(parts).build(&Resolution::default(), &cell_options(parts))
 }
 
+/// The craft id of the stress craft of `parts` parts.
+pub fn id(parts: usize) -> CraftId {
+    CraftId(format!("stress-{parts}"))
+}
+
 impl StressLayout {
+    /// The craft's definition (files and parts).
+    pub fn def(&self) -> CraftDef {
+        CraftDef { spec: self.spec.clone(), geometry: self.geometry.clone(), parts: self.parts.clone() }
+    }
+
     /// Builds the craft (surface, cells, mass model) through the craft
-    /// pipeline ([`Craft::build`]). Panics if the files are invalid (a bug
-    /// here).
+    /// pipeline ([`Craft::from_def`]). Panics if the definition is invalid
+    /// (a bug here).
     pub fn build(self, res: &Resolution, opts: &CellOptions) -> StressCraft {
-        let errors = super::file::validate_craft(&self.spec).and(super::file::validate_geometry(&self.geometry));
-        if let Err(e) = errors {
+        let def = self.def();
+        if let Err(e) = super::file::validate_shapes(&def.geometry).and(def.validate()) {
             panic!("stress craft of {} parts: {e}", self.parts.len());
         }
-        let id = CraftId(format!("stress-{}", self.parts.len()));
-        StressCraft { craft: Craft::build(id, self.spec, self.geometry, res, opts), parts: self.parts }
+        StressCraft { craft: Craft::from_def(id(self.parts.len()), def, res, opts), kinds: self.kinds }
     }
 }
 
-/// The part owning each of `primitives` primitives.
-pub fn part_of_primitive(parts: &[StressPart], primitives: usize) -> Vec<u32> {
-    let mut owner = vec![u32::MAX; primitives];
-    for (i, p) in parts.iter().enumerate() {
-        for &q in &p.primitives {
-            owner[q as usize] = i as u32;
-        }
-    }
-    owner
-}
-
-/// The parts' dry centre of mass (body axes).
-pub fn dry_com(parts: &[StressPart]) -> DVec3 {
-    let (m, moment) = parts.iter().fold((0.0, DVec3::ZERO), |(m, s), p| (m + p.dry_mass, s + p.com * p.dry_mass));
+/// The parts' dry centre of mass with each part's mass at its primitives'
+/// volume centroid (body axes): against the shells' (`Craft::mass`).
+pub fn volume_com(def: &CraftDef) -> DVec3 {
+    let (m, moment) = def.parts.iter().fold((0.0, DVec3::ZERO), |(m, s), p| {
+        let shapes = p.primitives.iter().map(|&q| &def.geometry.primitives[q as usize].shape);
+        let (v, c) =
+            shapes.fold((0.0, DVec3::ZERO), |(v, c), x| (v + analytic_volume(x), c + centroid(x) * analytic_volume(x)));
+        (m + p.dry_mass, s + c / v * p.dry_mass)
+    });
     moment / m
 }
 
@@ -350,17 +327,15 @@ type Piece = (&'static str, Shape, bool, bool);
 #[derive(Default)]
 struct Builder {
     prims: Vec<Primitive>,
-    parts: Vec<StressPart>,
+    parts: Vec<Part>,
+    kinds: Vec<StressKind>,
 }
 
 impl Builder {
     fn add(&mut self, kind: StressKind, name: String, parent: Option<u32>, mass: (f64, f64), pieces: &[Piece]) -> u32 {
         let (dry_mass, capacity) = mass;
-        let (c, max_k, produced, consumed) = kind_data(kind);
+        let (c, max_k, produced, consumed, battery) = kind_data(kind);
         let area: f64 = pieces.iter().map(|p| analytic_area(&p.1)).sum();
-        let (volume, moment) = (pieces.iter()).fold((0.0, DVec3::ZERO), |(v, m), p| {
-            (v + analytic_volume(&p.1), m + centroid(&p.1) * analytic_volume(&p.1))
-        });
         let areal_mass = SKIN_SHARE * dry_mass / area;
         let first = self.prims.len() as u32;
         for &(suffix, shape, foot, nozzle) in pieces {
@@ -375,20 +350,33 @@ impl Builder {
             let name = if suffix.is_empty() { name.clone() } else { format!("{name} {suffix}") };
             self.prims.push(Primitive { name, shape, foot, skin: Some(skin), nozzle });
         }
-        self.parts.push(StressPart {
-            kind,
+        // A tank is its one cylinder.
+        let tank = match (capacity > 0.0, pieces) {
+            (true, [(_, Shape::Cylinder { base, axis, radius }, ..)]) => {
+                Some(PartTank { capacity, region: Tank { base: *base, axis: *axis, radius: *radius } })
+            }
+            _ => None,
+        };
+        let control = matches!(kind, StressKind::Pod | StressKind::Avionics);
+        self.parts.push(Part {
+            id: self.parts.len() as u32,
             name,
             primitives: (first..self.prims.len() as u32).collect(),
             parent,
             dry_mass,
-            com: moment / volume,
-            propellant_capacity: capacity,
-            heat_capacity: dry_mass * c,
-            max_temperature: max_k,
+            tank,
             engine: None,
-            power_produced: produced,
-            power_consumed: consumed,
+            rcs: None,
+            chute: false,
+            interior_specific_heat: Some(c),
+            // The pod's interior holds the crew: the craft's limit.
+            node_max_k: (kind != StressKind::Pod).then_some(max_k),
+            power: PartPower { produced, consumed, battery },
+            control,
+            crew: if kind == StressKind::Pod { 3 } else { 0 },
+            max_load: LOAD_FACTOR * dry_mass * G0,
         });
+        self.kinds.push(kind);
         (self.parts.len() - 1) as u32
     }
 
@@ -404,16 +392,24 @@ impl Builder {
         self.add(StressKind::Tank, name, parent, (TANK_DRY_FRACTION * capacity, capacity), &[("", shape, false, false)])
     }
 
-    /// An engine under `c`: a chamber and a bell of size `scale`, its dry
-    /// mass, a thrust weight (scaled by [`finish`]) and Isp pair. The core
-    /// engine's bell is the geometry's nozzle.
+    /// An engine under `c`: a chamber and a bell of size `scale` (its
+    /// nozzle), its dry mass, a thrust weight (scaled by [`finish`]) and
+    /// Isp pair; it thrusts along +Z from the chamber's base.
     fn engine(&mut self, name: String, parent: u32, c: DVec3, (scale, dry): (f64, f64), w: f64, isp: (f64, f64)) {
         let chamber = Shape::Cylinder { base: c - DVec3::Z * 0.5, axis: DVec3::Z * 0.5, radius: 0.5 * scale };
         let (h, r0, r1) = (1.3 * scale, 1.1 * scale, 0.45 * scale);
         let bell = Shape::Frustum { base: c - DVec3::Z * (0.5 + h), axis: DVec3::Z * h, r_base: r0, r_top: r1 };
-        let pieces = [("chamber", chamber, false, false), ("bell", bell, false, c.x == 0.0 && c.y == 0.0)];
+        let pieces = [("chamber", chamber, false, false), ("bell", bell, false, true)];
         let i = self.add(StressKind::Engine, name, Some(parent), (dry, 0.0), &pieces);
-        self.parts[i as usize].engine = Some(StressEngine { thrust_vac: w, isp_vac: isp.0, isp_sl: isp.1 });
+        self.parts[i as usize].engine = Some(EngineFile {
+            thrust_vac: w,
+            isp_vac: isp.0,
+            isp_sl: isp.1,
+            min_throttle: 0.1,
+            gimbal_deg: 5.0,
+            mount: Mount { pos: c - DVec3::Z * 0.5, dir: DVec3::Z },
+            nozzle_heat_fraction: NOZZLE_HEAT,
+        });
     }
 }
 
@@ -643,37 +639,36 @@ fn small_parts(b: &mut Builder, p: &Plan, stack: &[(f64, f64, u32)], outer: &[Bo
 /// RCS scale with the mass.
 fn finish(n: usize, mut b: Builder, p: &Plan, tank_top: f64) -> StressLayout {
     let dry: f64 = b.parts.iter().map(|q| q.dry_mass).sum();
-    let capacity: f64 = b.parts.iter().map(|q| q.propellant_capacity).sum();
+    let capacity: f64 = b.parts.iter().filter_map(|q| q.tank).map(|t| t.capacity).sum();
     let weights: f64 = b.parts.iter().filter_map(|q| q.engine).map(|e| e.thrust_vac).sum();
-    let mut core_share = 0.0;
     for q in b.parts.iter_mut() {
         if let Some(e) = q.engine.as_mut() {
-            if q.com.x == 0.0 && q.com.y == 0.0 {
-                core_share = e.thrust_vac / weights;
-            }
             e.thrust_vac *= LIFTOFF_TWR * (dry + capacity) * G0 / weights;
         }
     }
-    let engines: Vec<StressEngine> = b.parts.iter().filter_map(|q| q.engine).collect();
-    let flow = |isp: fn(&StressEngine) -> f64| engines.iter().map(|e| e.thrust_vac / isp(e)).sum::<f64>();
-    let thrust: f64 = engines.iter().map(|e| e.thrust_vac).sum();
-    // No engine part (one part): a 1 kN stand-in (a craft file has an engine).
-    let (thrust, isp_vac, isp_sl) = if engines.is_empty() {
-        (1000.0, 300.0, 265.0)
-    } else {
-        (thrust, thrust / flow(|e| e.isp_vac), thrust / flow(|e| e.isp_sl))
-    };
     let s = ((dry + capacity) / REFERENCE_MASS).max(1.0);
     let top = core_height(p.core_tanks) + p.avionics as f64 * H_AVIONICS + if p.head >= 3 { H_POD } else { 0.0 };
-    let (crew, heat, rcs, fore, chute) =
-        (if p.head >= 3 { 3 } else { 0 }, 2.2e-3 * core_share, 445.0 * s, top.max(1.5), top + 0.5);
+    // The pod (else the root) carries the thrusters and the parachutes; the
+    // legs hold the craft.
+    let command = if p.head >= 3 { b.kinds.iter().position(|&k| k == StressKind::Pod).unwrap_or(0) } else { 0 };
+    let rcs = RcsFile { thrust: 445.0 * s, isp: 290.0, fore_z: top.max(1.5), aft_z: 0.5, radius: R_CORE };
+    b.parts[command].rcs = Some(rcs);
+    b.parts[command].chute = true;
+    for (q, k) in b.parts.iter_mut().zip(&b.kinds) {
+        if *k == StressKind::Leg {
+            q.max_load = LEG_LOAD * (dry + capacity) * G0;
+        }
+    }
+    let chute = top + 0.5;
     let (foot_k, foot_c, hull_k, hull_c) = (4.0e5 * s, 2.5e4 * s, 2.0e6 * s, 1.0e5 * s);
+    // The aggregates (dry mass, propellant, engine, crew) come from the
+    // parts ([`aggregate`]); the file's are stand-ins.
     let text = format!(
-        "(name: \"Stress craft ({n} parts)\", crew: {crew}, dry_mass: {dry:?},
-        propellant: (mass: {capacity:?}, capacity: {capacity:?}),
-        engine: (thrust_vac: {thrust:?}, isp_vac: {isp_vac:?}, isp_sl: {isp_sl:?}, min_throttle: 0.1, gimbal_deg: 5.0,
-            mount: (pos: (0.0, 0.0, -0.5), dir: (0.0, 0.0, 1.0)), nozzle_heat_fraction: {heat:?}),
-        attitude_control: (rcs: (thrust: {rcs:?}, isp: 290.0, fore_z: {fore:?}, aft_z: 0.5, radius: {R_CORE:?})),
+        "(name: \"Stress craft ({n} parts)\", crew: 0, dry_mass: 1.0,
+        propellant: (mass: 1.0, capacity: 1.0),
+        engine: (thrust_vac: 1000.0, isp_vac: 300.0, isp_sl: 265.0, min_throttle: 0.1, gimbal_deg: 5.0,
+            mount: (pos: (0.0, 0.0, -0.5), dir: (0.0, 0.0, 1.0)), nozzle_heat_fraction: 0.0),
+        attitude_control: (rcs: (thrust: {:?}, isp: 290.0, fore_z: {:?}, aft_z: 0.5, radius: {R_CORE:?})),
         chute: (mount: (0.0, 0.0, {chute:?}), main_height: 3350.0,
             drogue: Some((cd_area: 21.18, diameter: 5.03, fill_constant: 10.0,
                 reefing: [(cd_fraction: 0.57, until: 10.0)], deploy_max_q: 5.5e3, max_load: 212.7e3)),
@@ -686,11 +681,18 @@ fn finish(n: usize, mut b: Builder, p: &Plan, tank_top: f64) -> StressLayout {
         impact: (max_speed: 8.0),
         contact: (foot: (stiffness: {foot_k:?}, damping: {foot_c:?}, stroke: 0.35, friction: 0.8),
             hull: (stiffness: {hull_k:?}, damping: {hull_c:?}, friction: 0.5), stick_speed: 0.05),
-        antenna: (gain_dbi: 20.0, power_w: 20.0))"
+        antenna: (gain_dbi: 20.0, power_w: 20.0))",
+        rcs.thrust, rcs.fore_z
     );
-    let spec: CraftFile = ron::from_str(&text).unwrap_or_else(|e| panic!("stress craft file: {e}"));
+    let mut spec: CraftFile = ron::from_str(&text).unwrap_or_else(|e| panic!("stress craft file: {e}"));
+    if let Err(e) = super::file::validate_craft(&spec) {
+        panic!("stress craft file: {e}");
+    }
+    aggregate(&mut spec, &b.parts);
+    // The core's tank section (where a one-tank model would put it).
     let tank = Tank { base: DVec3::ZERO, axis: DVec3::Z * tank_top, radius: R_CORE - 0.1 };
-    StressLayout { spec, geometry: GeometryFile { skin: aluminium(), tank, primitives: b.prims }, parts: b.parts }
+    let geometry = GeometryFile { skin: aluminium(), tank, primitives: b.prims };
+    StressLayout { spec, geometry, parts: b.parts, kinds: b.kinds }
 }
 
 #[cfg(test)]

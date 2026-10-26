@@ -356,7 +356,7 @@ fn craft_row(w: &World, n: usize, runs: usize) -> Row {
         contacts: (feet, c.cells.contacts.len() - feet),
         fins: d.bake.fins.len(),
         size: (hi.z - lo.z, (hi - lo).truncate().max_element()),
-        shell_offset: (c.mass.dry_com - stress::dry_com(&s.parts)).length(),
+        shell_offset: (c.mass.dry_com - stress::volume_com(&c.def())).length(),
         times: [union, build, bake_ms, volume, design_ms, drag],
         memory: [kb(design_bytes(d)), kb(craft_bytes(c)), kb(vessel), kb(save)],
         live,

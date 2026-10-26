@@ -40,6 +40,19 @@ impl Default for CellOptions {
     }
 }
 
+/// Cells per part of a craft of parts ([`CellOptions::for_parts`]; the
+/// test craft: 512 on 17 primitives).
+pub const CELLS_PER_PART: usize = 16;
+
+impl CellOptions {
+    /// A craft of `parts` parts: [`CELLS_PER_PART`] per part, at least the
+    /// default. (The default target alone gives a large craft one cell per
+    /// face: a whole tank side as one cell, its normals cancelling.)
+    pub fn for_parts(parts: usize) -> Self {
+        CellOptions { target: CellOptions::default().target.max(CELLS_PER_PART * parts), ..CellOptions::default() }
+    }
+}
+
 /// A thermal link to a neighbouring cell.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Neighbour {
