@@ -121,7 +121,12 @@ pub struct AeroBake {
     /// Effective nose radius per direction (m).
     pub nose_radius: Vec<f64>,
     pub cells: usize,
-    /// Reference length for the Knudsen number: the bounding-sphere diameter (m).
+    /// Reference length for the Knudsen number (m): the maximum body
+    /// diameter, as Wilmoth's bridging was fitted (Kn = λ/D_b; Wilmoth,
+    /// Mitcheltree & Moss, AIAA 97-2510, nomenclature), generalised as the
+    /// diameter of the disc of the craft's largest projected area over the
+    /// grid's directions (a capsule's heat-shield diameter; a slender
+    /// body's broadside silhouette).
     pub length: f64,
     /// The craft's extent along each grid direction (m).
     pub extent: Vec<f64>,
@@ -195,6 +200,7 @@ pub fn bake(surface: &Surface, cells: &Cells, opts: &BakeOptions) -> AeroBake {
     let mut proj = vec![DVec3::ZERO; surface.positions.len()];
     let mut won = vec![0u32; nc];
     let mut f = vec![0.0; nc];
+    let mut max_area: f64 = 0.0;
     for &d in &grid.dirs {
         let (u, v, _) = basis(d);
         // The raster spans the craft's projection (square pixels), so a
@@ -255,9 +261,11 @@ pub fn bake(surface: &Surface, cells: &Cells, opts: &BakeOptions) -> AeroBake {
         // From the quantised exposure, as the run time sees it.
         let fq = |i: usize| f64::from(exposure[exposure.len() - nc + i]) / 255.0;
         let area = direction_sums(&geometry, d, fq).area;
+        max_area = f64::max(max_area, area);
         nose_radius.push(nose(&geometry, d, fq, area));
     }
-    AeroBake { grid, geometry, exposure, nose_radius, cells: nc, length: 2.0 * radius, extent, wave, sections, fins }
+    let length = if max_area > 0.0 { 2.0 * (max_area / crate::math::PI).sqrt() } else { 2.0 * radius };
+    AeroBake { grid, geometry, exposure, nose_radius, cells: nc, length, extent, wave, sections, fins }
 }
 
 /// The fins: cells whose opposite face (anti-parallel, straight through

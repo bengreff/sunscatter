@@ -13,13 +13,21 @@
 //!   Tauber & Sutton, "Stagnation-Point Radiative Heating Relations for
 //!   Earth and Mars Entries", J. Spacecraft and Rockets 28(1), 1991:
 //!   q̇ = C·Rn^a·ρ^b·f(V) (W/cm², Rn m, ρ kg/m³, V m/s). Earth: C =
-//!   4.736e4, b = 1.22, a = 1.072e6·V^−1.88·ρ^−0.325 (at most 1), f(V)
-//!   tabulated 9–16 km/s (fitted for ρ 6.7e-5–6.3e-4, Rn 0.3–3 m); Mars
-//!   (97 % CO₂): C = 2.35e4, a = 0.526, b = 1.19, f(V) 6–9 km/s. Stated
-//!   accuracy ±20–30 % in range (equilibrium, no radiative cooling). The
-//!   Mars constants match West & Brandis (above; fitted 6.5–9 km/s, ρ
-//!   1e-4–1e-3, Rn 1–23 m); the Earth constants and both f(V) tables are
-//!   from memory and unchecked (the 1991 paper is not on NTRS).
+//!   4.736e4, b = 1.22, a = 1.072e6·V^−1.88·ρ^−0.325, at most 1 for Rn ≤
+//!   1 m, 0.6 to 2 m, 0.5 beyond; f(V) tabulated 9–16 km/s (fitted for ρ
+//!   6.66e-5–6.31e-4, Rn 0.3–3 m, 54–72 km); Mars (97 % CO₂): C =
+//!   2.35e4, a = 0.526, b = 1.19, f(V) 6–9 km/s. Stated accuracy ±20–30 %
+//!   in range (equilibrium, no radiative cooling; NTRS 19910048758, the
+//!   abstract). The paper itself is not public: the Mars constants are
+//!   checked against West & Brandis (above; fitted 6.5–9 km/s, ρ 1e-4–1e-3,
+//!   Rn 1–23 m) and its f(V) against Lu & Saikia's plot (IntechOpen 2020,
+//!   fig. 1, all 17 points within 0.2); the validity ranges against Dec &
+//!   Braun (NTRS 20060004824, eq. 2); the Earth C, b, f(V) table and the
+//!   cap on a only against independent open-source implementations (AMAT,
+//!   citing Brandis & Johnston 2014, for C, b and the whole-km f(V);
+//!   polmes/aether and mitchwall85/physics_utils for all 19 f(V) points;
+//!   traj_calc, physics_utils and Flight-Heating for the cap), all
+//!   agreeing.
 //!   Added to the convective flux and spread over the cells the same way.
 //! * **Distribution:** each cell receives q̇·g, g = f·sin^1.5 θ (a Lees-type
 //!   falloff from the stagnation point with the local incidence; f the
@@ -133,7 +141,14 @@ pub fn tauber_sutton(model: TauberSutton, rho: f64, nose_radius: f64, speed: f64
     let pow = |x: f64, e: f64| crate::math::exp(e * crate::math::ln(x));
     let (c, a, b, f) = match model {
         TauberSutton::Earth => {
-            let a = (1.072e6 * pow(speed, -1.88) * pow(rho, -0.325)).min(1.0);
+            let cap = if nose_radius <= 1.0 {
+                1.0
+            } else if nose_radius <= 2.0 {
+                0.6
+            } else {
+                0.5
+            };
+            let a = (1.072e6 * pow(speed, -1.88) * pow(rho, -0.325)).min(cap);
             (4.736e4, a, 1.22, velocity_function(&EARTH_F, speed))
         }
         TauberSutton::Mars => (2.35e4, 0.526, 1.19, velocity_function(&MARS_F, speed)),

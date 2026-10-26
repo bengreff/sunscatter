@@ -76,10 +76,13 @@ pub struct Flow {
 }
 
 /// Wilmoth's rarefied bridging weight: C = C_cont + (C_fm − C_cont)·b with
-/// b = sin²[π(3/8 + ⅛·log₁₀ Kn)] for 10⁻³ < Kn < 10, 0 below, 1 above.
-/// Wilmoth, Mitcheltree & Moss, "Low-Density Aerodynamics of the Stardust
-/// Sample Return Capsule", J. Spacecraft and Rockets 36(3), 1999 (AIAA
-/// 97-2510); the same form is ESA DRAMA's.
+/// b = sin²[π(3/8 + ⅛·log₁₀ Kn)] for 10⁻³ < Kn < 10, 0 below, 1 above, Kn
+/// on the maximum body diameter ([`AeroBake::length`]). Wilmoth,
+/// Mitcheltree & Moss, "Low-Density Aerodynamics of the Stardust Sample
+/// Return Capsule", AIAA 97-2510 (NTRS 20040105522; J. Spacecraft and
+/// Rockets 36(3), 1999): eqs. 1–2 with a₁ = 3/8, a₂ = ⅛ (p. 5), fitted to
+/// DSMC on C_A and applied to C_N and C_m; the same constants in
+/// Mitcheltree et al., AIAA 97-3658 (NTRS 20040105628, eqs. 2–3).
 pub fn bridge(knudsen: f64) -> f64 {
     if knudsen.is_nan() || knudsen <= 1e-3 {
         0.0

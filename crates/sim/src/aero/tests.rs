@@ -138,7 +138,8 @@ fn symmetric_shapes_have_no_side_force_at_zero_incidence() {
                 let (force, moment) = aero_forces(b, &flow(d, mach, kn), 0.8);
                 let side = (force - d * force.dot(d)).length();
                 assert!(side < tol * force.length(), "{name} {d} M {mach} Kn {kn}: {force}");
-                assert!(moment.length() < tol * force.length() * b.length, "{name} {d} M {mach}: {moment}");
+                let size = b.sections.length();
+                assert!(moment.length() < tol * force.length() * size, "{name} {d} M {mach}: {moment}");
             }
         }
     }
@@ -305,6 +306,19 @@ fn the_bell_shadows_the_base_when_flying_base_first() {
 }
 
 #[test]
+fn the_knudsen_length_is_the_maximum_body_diameter() {
+    // Wilmoth's Kn = λ/D_b (AIAA 97-2510): a sphere's diameter, a capsule's
+    // heat-shield diameter (2·√(4.7² − 4.2²) = 4.22 m), the slender test
+    // craft's broadside silhouette (14.5 m long, 3 m skirt).
+    assert!((sphere().length / 2.0 - 1.0).abs() < 0.01, "{}", sphere().length);
+    let shield = 2.0 * (4.7f64 * 4.7 - 4.2 * 4.2).sqrt();
+    assert!((capsule().length / shield - 1.0).abs() < 0.02, "{}", capsule().length);
+    let craft = craft_bake().length;
+    println!("test craft: D_b {craft:.2} m");
+    assert!(craft > 4.0 && craft < 8.0, "{craft}");
+}
+
+#[test]
 fn the_bake_is_deterministic() {
     let cap = |axis: DVec3| Shape::SphereCap { center: DVec3::ZERO, axis, radius: 1.0, height: 1.0 };
     let (s, c) = shape(&[cap(DVec3::Z), cap(-DVec3::Z)]);
@@ -314,7 +328,9 @@ fn the_bake_is_deterministic() {
 }
 
 /// Golden hash of the unit-sphere bake (identical on every platform).
-const SPHERE_BAKE_HASH: u64 = 0xde29_bb9d_88a7_bf34;
+/// 2026-10-26: the Knudsen length became the maximum body diameter (was
+/// the bounding-sphere diameter).
+const SPHERE_BAKE_HASH: u64 = 0xc55f_affc_0544_a528;
 
 /// A thin flat plate, `l` long along X, 2 m wide, 4 mm thick.
 fn plate(l: f64) -> AeroBake {

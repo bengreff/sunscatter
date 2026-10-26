@@ -309,6 +309,17 @@ fn tauber_sutton_velocity_function_and_range() {
         assert!((unit(v) / (scale(v) * f) - 1.0).abs() < 1e-12, "{v}");
     }
     assert_eq!(unit(8_900.0), 0.0);
+    // The nose-radius exponent's cap: 1 to Rn 1 m, 0.6 to 2 m, 0.5 beyond
+    // (as implemented in traj_calc, physics_utils, Flight-Heating). At 10
+    // km/s and ρ 1e-5 the uncapped a is 1.072e6·V^−1.88·ρ^−0.325 = 1.37.
+    let a = 1.072e6 * math::exp(-1.88 * math::ln(10_000.0)) * math::exp(-0.325 * math::ln(1e-5));
+    assert!((a - 1.37).abs() < 0.01, "{a}");
+    let at = |r: f64| tauber_sutton(TauberSutton::Earth, 1e-5, r, 10_000.0);
+    let rn = |r: f64| at(r) / at(1.0);
+    for (r, cap) in [(0.5, 1.0), (1.5, 0.6), (2.5, 0.5)] {
+        let want = math::exp(a.min(cap) * math::ln(r));
+        assert!((rn(r) / want - 1.0).abs() < 1e-12, "Rn {r}: {} vs {want}", rn(r));
+    }
     assert_eq!(tauber_sutton(TauberSutton::Mars, 1e-4, 1.0, 5_900.0), 0.0);
     // Mars at 7 km/s, ρ 1e-4, Rn 1 m: 2.35e4 · 1e-4^1.19 · 8.1 W/cm².
     let mars = tauber_sutton(TauberSutton::Mars, 1e-4, 1.0, 7_000.0) / 1e4;
