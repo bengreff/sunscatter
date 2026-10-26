@@ -25,13 +25,34 @@
 //!   falloff from the stagnation point with the local incidence; f the
 //!   cell's exposure), and at least [`LEEWARD_FRACTION`] of q̇ (leeward and
 //!   shadowed cells, base flow heating).
+//! * **Over the whole body** ([`cell_heat_flow`], D085): each cell's own
+//!   boundary layer (`aero::boundary`: the tangent-wedge edge state,
+//!   laminar and turbulent, transition by Re_θ, the skin's temperature)
+//!   gives its laminar and turbulent acreage heating by Colburn's
+//!   analogy. Laminar, a cell takes the smaller of its own plate value
+//!   and the larger of the blunt-nose law q̇_stag·(1 − T_w/T₀)·f·sin θ
+//!   (the cosine of the body angle from the stagnation point: "a
+//!   theoretical basis to the sonic point, reasonable to about 70°",
+//!   Tauber, NASA TP-2914, 1989, fig. 5) and a plate along the flow at its
+//!   run length (at most q̇_stag): a nose takes its stagnation law, flanks
+//!   far downstream their own boundary layer, surfaces along the flow a
+//!   plate's; turbulent, never less than
+//!   laminar; across transition (1−γ)·laminar + γ·turbulent; at least
+//!   [`LEEWARD_FRACTION`] of the stagnation flux (leeward and separated
+//!   cells). Hot walls: the stagnation flux × (1 − T_w/T₀) (T₀ the total
+//!   temperature), the layers' (T_aw − T_w): negative (cooling) above the
+//!   recovery temperature. Rarefied: bridged by Wilmoth's function in the
+//!   Knudsen number on the nose radius to the free-molecular energy flux
+//!   ½ρV³·f·sin θ (full accommodation; C_H = 1, Tauber fig. 8), the
+//!   stagnation flux capped at it (Sutton–Graves passes it at Kn ≳ 1).
 //! * **Sunlight:** a flux vector S (W/m², the direction light travels, body
 //!   axes); a cell facing it absorbs ε·|S|·cos·A, shadowed by the craft
 //!   itself through the same exposure bake (parallel light is a flow
 //!   direction). The absorptivity is the emissivity (grey skin) until the
 //!   craft data carries a solar absorptivity.
 
-use crate::aero::AeroBake;
+use crate::aero::boundary::Stream;
+use crate::aero::{self, friction, AeroBake, Flow};
 use crate::craft::Cell;
 use glam::DVec3;
 
@@ -164,9 +185,14 @@ pub fn cell_heat(bake: &AeroBake, cells: &[Cell], input: &HeatInput, scratch: &m
             *o += input.q_stag * heating_shape(-c.normal.dot(d), f) * c.area;
         }
     }
-    let flux = input.sun.length();
+    sunlight(bake, cells, input.sun, scratch, out);
+}
+
+/// Sunlight absorbed by each cell (W), added to `out`.
+fn sunlight(bake: &AeroBake, cells: &[Cell], sun: DVec3, scratch: &mut [f64], out: &mut [f64]) {
+    let flux = sun.length();
     if flux > 0.0 {
-        let l = input.sun / flux;
+        let l = sun / flux;
         bake.exposure_at(l, scratch);
         for ((o, c), &f) in out.iter_mut().zip(cells).zip(scratch.iter()) {
             let cos = -c.normal.dot(l);
@@ -176,3 +202,113 @@ pub fn cell_heat(bake: &AeroBake, cells: &[Cell], input: &HeatInput, scratch: &m
         }
     }
 }
+
+/// The air side of [`cell_heat_flow`].
+#[derive(Clone, Copy, Debug)]
+pub struct FlowHeat<'a> {
+    /// The free stream in body axes, as for the forces (its airspeed sets
+    /// the density and the gas constant: R = V²/(γ·M²·T)).
+    pub flow: &'a Flow,
+    /// Sutton–Graves constant of the air (cold-wall stagnation heating).
+    pub sutton_graves_k: f64,
+    /// Shock-layer radiation, where the atmosphere has it.
+    pub radiative: Option<TauberSutton>,
+    /// Each cell's skin temperature (K).
+    pub wall: &'a [f64],
+}
+
+/// Earth air's specific gas constant (J/(kg·K)), for a flow without an
+/// airspeed.
+const EARTH_AIR_R: f64 = aero::air::GAS_CONSTANT / aero::air::EARTH_AIR_MOLAR_MASS;
+
+/// Power absorbed by each cell (W) into `out` from the air over the whole
+/// body (`air`, if any; see the module notes) and the sunlight `sun` (W/m²,
+/// body axes); `scratch` is a per-cell buffer.
+pub fn cell_heat_flow(
+    bake: &AeroBake,
+    cells: &[Cell],
+    air: Option<&FlowHeat>,
+    sun: DVec3,
+    scratch: &mut [f64],
+    out: &mut [f64],
+) {
+    out.fill(0.0);
+    if let Some(air) = air {
+        convective(bake, cells, air, scratch, out);
+    }
+    sunlight(bake, cells, sun, scratch, out);
+}
+
+/// The smaller and the larger in magnitude (the signs agree but where the
+/// wall is near the recovery temperature, where both are small).
+fn least(a: f64, b: f64) -> f64 {
+    if a.abs() <= b.abs() {
+        a
+    } else {
+        b
+    }
+}
+fn most(a: f64, b: f64) -> f64 {
+    if a.abs() >= b.abs() {
+        a
+    } else {
+        b
+    }
+}
+
+/// The air's heat into each cell (W), added to `out` (`cont` a per-cell
+/// buffer).
+fn convective(bake: &AeroBake, cells: &[Cell], air: &FlowHeat, cont: &mut [f64], out: &mut [f64]) {
+    let flow = air.flow;
+    if flow.q <= 0.0 || flow.dir.length_squared() == 0.0 || flow.temperature <= 0.0 {
+        return;
+    }
+    let d = flow.dir.normalize();
+    let (g, t, m) = (flow.gamma, flow.temperature, flow.mach);
+    let r_gas = if flow.speed > 0.0 && m > 0.0 { flow.speed * flow.speed / (g * m * m * t) } else { EARTH_AIR_R };
+    let v = if flow.speed > 0.0 { flow.speed } else { m * (g * r_gas * t).sqrt() };
+    let rho = 2.0 * flow.q / (v * v);
+    let cp = g * r_gas / (g - 1.0);
+    let t0 = t * (1.0 + 0.5 * (g - 1.0) * m * m);
+    let rn = bake.nose_radius_at(d);
+    // The continuum stagnation flux never exceeds the free-molecular
+    // energy flux (C_H ≤ 1; Sutton–Graves passes it at Kn ≳ 1).
+    let q_fm = 0.5 * rho * v * v * v;
+    let q_conv = sutton_graves(air.sutton_graves_k, rho, rn, v).min(q_fm);
+    let q_rad = air.radiative.map_or(0.0, |model| tauber_sutton(model, rho, rn, v));
+    let b = if rn > 0.0 { aero::bridge(flow.knudsen * bake.length / rn) } else { 1.0 };
+    let scale = rho * v * cp;
+    let exposure = bake.exposure_weights(d);
+    // The attached cells' continuum heating (NaN: separated).
+    cont.fill(f64::NAN);
+    let stream = Stream::of(flow);
+    friction::layers(
+        &bake.geometry,
+        d,
+        &stream,
+        |i| exposure.at(i),
+        Some(air.wall),
+        true,
+        |i, s, layer| {
+            let hot = 1.0 - air.wall[i] / t0;
+            let nose = q_conv * hot * exposure.at(i) * s.max(0.0);
+            let aligned = least(scale * layer.heat_aligned, q_conv * hot);
+            let lam = least(scale * layer.heat_laminar, most(nose, aligned));
+            let turb = most(scale * layer.heat_turbulent, lam);
+            let gamma = layer.intermittency;
+            cont[i] = (1.0 - gamma) * lam + gamma * turb;
+        },
+    );
+    for (i, (o, c)) in out.iter_mut().zip(cells).enumerate() {
+        let hot = 1.0 - air.wall[i] / t0;
+        let floor = LEEWARD_FRACTION * q_conv * hot;
+        let q = if cont[i].is_nan() { floor } else { most(cont[i], floor) };
+        let lit = exposure.at(i) * (-c.normal.dot(d)).max(0.0);
+        let rarefied = q_fm * hot * lit;
+        *o += ((1.0 - b) * q + b * rarefied + q_rad * lit) * c.area;
+    }
+}
+
+#[cfg(test)]
+#[path = "heating_tests.rs"]
+mod tests;

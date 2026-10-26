@@ -57,11 +57,13 @@ pub const COLBURN: f64 = 1.244_8;
 /// Reynolds number of a smooth flat plate at Re_x 5·10⁵ (0.664·√Re_x).
 pub const RE_THETA_LOW: f64 = 469.5;
 /// Transition onset at hypersonic speeds: Re_θ/M_e. Tauber (NASA TP-2914,
-/// eq. 51) gives 150–350 depending on roughness; STS-1 to 4 flight values at
-/// onset were 200–400 (his fig. 11). 380 reproduces STS-1's transition
-/// front on the windward centreline at 52.9, 47.5 and 44.2 km with this
-/// edge model (`tests/aero_boundary.rs`).
-pub const RE_THETA_PER_MACH: f64 = 380.0;
+/// eq. 51, after Amirkabirian's Shuttle correlation) gives 150–350
+/// depending on the roughness height over the momentum thickness; the
+/// smooth end, 350, puts STS-1's transition front on the windward
+/// centreline where it was measured at 52.9, 47.5 and 44.2 km with this
+/// edge model (`tests/aero_boundary.rs`; STS-1 to 4 values at onset
+/// were 200–400, his fig. 11).
+pub const RE_THETA_PER_MACH: f64 = 350.0;
 /// Dhawan & Narasimha's intermittency constant.
 const DN: f64 = 0.412;
 /// ξ at the end of transition (γ = 0.99): √(ln 100 / 0.412).
@@ -159,6 +161,9 @@ pub struct Layer {
     pub heat_turbulent: f64,
     /// Momentum-thickness Reynolds number at the cell's centre (laminar).
     pub re_theta: f64,
+    /// Laminar heat flux of a plate along the flow at the same run lengths
+    /// and wall (per unit ρ∞·V·c_p, K). Zero unless asked for.
+    pub heat_aligned: f64,
 }
 
 impl Edge {
@@ -221,6 +226,23 @@ impl Edge {
         0.5 * COLBURN * self.rho * self.u * cf * (self.recovery(LAMINAR_RECOVERY, t_inf) - tw)
     }
 
+    /// Turbulent skin-friction coefficient (on the edge's ½ρ_e·u_e²) at run
+    /// length `x` (m, from the leading edge), wall at `tw` (K).
+    pub fn turbulent_cf(&self, x: f64, tw: f64, t_inf: f64) -> f64 {
+        let (inv_fc, frx) = self.van_driest(tw, t_inf);
+        cf_turbulent(frx * self.re_per_m * x) * inv_fc
+    }
+
+    /// Turbulent heat flux per unit ρ∞·V·c_p (K) at run length `x` (m),
+    /// wall at `tw` (K), whether or not the layer has turned turbulent there.
+    pub fn turbulent_heat(&self, x: f64, tw: f64, t_inf: f64) -> f64 {
+        if self.re_per_m <= 0.0 || x <= 0.0 {
+            return 0.0;
+        }
+        let cf = self.turbulent_cf(x, tw, t_inf);
+        0.5 * COLBURN * self.rho * self.u * cf * (self.recovery(TURBULENT_RECOVERY, t_inf) - tw)
+    }
+
     /// The layer over run lengths `a..b` (m, 0 ≤ a ≤ b; centre x =
     /// (a+b)/2), wall at `wall` (K; `None`: adiabatic). With `heat`, the
     /// heat fluxes too.
@@ -242,8 +264,7 @@ impl Edge {
         let (mut cf_turb, mut t_turb) = (0.0, 0.0);
         if gamma > 0.0 {
             t_turb = wall.unwrap_or_else(|| self.recovery(TURBULENT_RECOVERY, t_inf));
-            let (inv_fc, frx) = self.van_driest(t_turb, t_inf);
-            cf_turb = cf_turbulent(frx * self.re_per_m * x) * inv_fc;
+            cf_turb = self.turbulent_cf(x, t_turb, t_inf);
         }
         let mut layer = Layer {
             shear: ((1.0 - gamma) * cf_lam + gamma * cf_turb) * self.rho * self.u * self.u,
@@ -345,7 +366,7 @@ mod tests {
         assert!((at(2.0 * onset).intermittency - 0.99).abs() < 1e-3);
         // The laminar Re_θ there is the criterion.
         assert!((at(onset).re_theta / RE_THETA_LOW - 1.0).abs() < 1e-9);
-        // At edge Mach 3: Re_θ/M_e = 380.
+        // At edge Mach 3: Re_θ/M_e = 350.
         let e = Stream::new(1e7, 3.0, 1.4, T, 0.0).edge(0.0, 0.0);
         let c = e.reference(e.recovery(LAMINAR_RECOVERY, T));
         let theta = 0.664 * (c * e.re_per_m * e.onset(c)).sqrt();

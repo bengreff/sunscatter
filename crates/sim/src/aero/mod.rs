@@ -182,4 +182,4 @@ pub fn aero_forces_wall(bake: &AeroBake, flow: &Flow, cd0: f64, wall: Option<&[f
 #[cfg(test)]
 mod lift_tests;
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;

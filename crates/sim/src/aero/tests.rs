@@ -15,7 +15,7 @@ const SKIN: Skin = Skin {
     coupling: None,
 };
 
-pub(super) fn shape(shapes: &[Shape]) -> (Surface, Cells) {
+pub(crate) fn shape(shapes: &[Shape]) -> (Surface, Cells) {
     let prims: Vec<Primitive> = shapes
         .iter()
         .enumerate()
@@ -408,9 +408,9 @@ fn compressible_turbulent_friction_falls_like_van_driest() {
     }
     assert!(p(5.0) < p(3.0) && p(3.0) < p(2.0));
     assert!((p(0.0) / boundary::cf_turbulent(1e7) - 1.0).abs() < 1e-12);
-    // The layer at M 2, Re_x 10⁷ is fully turbulent (Re_θ ≫ 380·M_e) and
+    // The layer at M 2, Re_x 10⁷ is fully turbulent (Re_θ ≫ 350·M_e) and
     // takes that coefficient; at M 5 Re_θ 1,600 is still laminar (onset at
-    // 380·5 = 1,900).
+    // 350·5 = 1,750).
     let layer = |m: f64| stream(1e7, m).edge(0.0, 0.0).layer(1.0, 1.0, None, 216.65, false);
     assert!((layer(2.0).shear / p(2.0) - 1.0).abs() < 1e-12 && layer(2.0).intermittency == 1.0);
     assert_eq!(layer(5.0).intermittency, 0.0);

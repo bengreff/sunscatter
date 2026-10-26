@@ -31,7 +31,8 @@ pub fn spans(cells: &[CellGeometry], d: DVec3) -> (Vec<(f64, f64)>, f64) {
 /// The boundary layer of every attached cell for flow direction `d`
 /// (unit): `each(i, s, layer)` with s = sin θ = −n·d, for exposures
 /// `exposure(i)` and wall temperatures `wall` (K per cell; `None`:
-/// adiabatic); `heat` asks for the heat fluxes too.
+/// adiabatic); `heat` asks for the heat fluxes too (with `wall`, also the
+/// laminar heating of a plate along the flow at each cell's run lengths).
 pub fn layers(
     cells: &[CellGeometry],
     d: DVec3,
@@ -45,6 +46,7 @@ pub fn layers(
         return;
     }
     let (span, front) = spans(cells, d);
+    let aligned = stream.edge(0.0, 0.0);
     for (i, (c, &(x, h))) in cells.iter().zip(&span).enumerate() {
         let nd = c.normal.dot(d);
         if nd > SEPARATED {
@@ -53,7 +55,11 @@ pub fn layers(
         let s = -nd;
         let f = if s > 0.0 { exposure(i) } else { 0.0 };
         let x = x - front;
-        let layer = stream.edge(s, f).layer((x - h).max(0.0), x + h, wall.map(|w| w[i]), stream.temperature, heat);
+        let (a, b, tw) = ((x - h).max(0.0), x + h, wall.map(|w| w[i]));
+        let mut layer = stream.edge(s, f).layer(a, b, tw, stream.temperature, heat);
+        if let (true, Some(tw)) = (heat, tw) {
+            layer.heat_aligned = aligned.laminar_heat(a, b, tw, stream.temperature);
+        }
         each(i, s, &layer);
     }
 }
