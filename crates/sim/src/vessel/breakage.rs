@@ -8,7 +8,8 @@
 //! * **Impact** (D066, judged per contact point): the part of the point
 //!   that hit too fast is destroyed.
 //! * **Load**: a part whose cells carry more than its `max_load` is **torn
-//!   off** its parent, intact, with what hangs from it. Its load is the
+//!   off** its parent, intact, with what hangs from it (a root part has
+//!   none, and stays). Its load is the
 //!   Newtonian pressure of the tick's flow on its exposed cells
 //!   (q·Cp,max·e·A·cos²θ, the most the flow pushes on them) plus the ground's
 //!   normal force at its contact points (the same spring-dampers as the
@@ -60,10 +61,13 @@ impl Vessel {
                 hot(design.node_part[j], Overheat::Node(j as u32), t, &mut b);
             }
         }
+        // A root part (no parent: the craft's, or a piece's) has nothing to
+        // be torn from: it stays.
         let loads = self.part_loads(world, flow, contact);
         for (p, &load) in loads.iter().enumerate() {
             let p = p as u32;
-            if load > design.parts[p as usize].max_load && !b.destroyed.iter().any(|d| d.0 == p) {
+            let part = &design.parts[p as usize];
+            if part.parent.is_some() && load > part.max_load && !b.destroyed.iter().any(|d| d.0 == p) {
                 b.torn.push((p, load));
             }
         }

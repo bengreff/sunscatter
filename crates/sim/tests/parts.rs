@@ -253,6 +253,63 @@ fn an_overloaded_part_tears_off_with_what_hangs_from_it() {
     assert!(a.breakup().is_none() && pieces.iter().all(|p| p.destruction().is_none()));
 }
 
+/// The pieces torn off above, still overloaded in the next ticks: a
+/// piece's root part has no parent to be torn from, so it never counts as
+/// torn (review of 2026-10-26, PARTS 2: it gave a one-piece plan, the split
+/// did nothing, and the vessel stopped again every tick). Every breakup
+/// that follows has at least two pieces.
+#[test]
+fn a_pieces_root_is_never_torn() {
+    let w = world();
+    let c = craft(40);
+    let earth = w.find("Earth").unwrap();
+    let r = DVec3::X * (earth.physical.as_ref().unwrap().radius_eq + 10e3);
+    let spin = earth.physical.as_ref().unwrap().rotation.omega(t0()).raw().cross(r);
+    let probe = Vessel::coasting(&w, VesselId(1), t0(), earth.node, r, spin, &c);
+    let side = probe.attitude.q * DVec3::X;
+    let mut fleet = vec![Vessel::coasting(&w, VesselId(1), t0(), earth.node, r, spin + side * 400.0, &c)];
+    let mut ids = VesselIds::default();
+    let (mut splits, mut end) = (0, t0());
+    for _ in 0..20 {
+        end = end.add_seconds(0.25);
+        for k in 0..fleet.len() {
+            fleet[k].advance(&w, end, &Controls::default(), usize::MAX);
+            let Some(b) = fleet[k].breakup().cloned() else { continue };
+            let d = fleet[k].craft.design().clone();
+            for &(p, _) in &b.torn {
+                assert!(d.parts[p as usize].parent.is_some(), "the root {} torn", d.parts[p as usize].name);
+            }
+            let plan = fleet[k].plan_breakup().unwrap();
+            assert!(plan.pieces.len() >= 2, "a breakup of one piece: {:?}", b);
+            let pieces = fleet[k].split(&w, &plan, &plan.crafts(), &mut ids);
+            splits += 1;
+            fleet.extend(pieces);
+        }
+    }
+    assert!(splits >= 2 && fleet.len() > 2, "{splits} splits, {} vessels", fleet.len());
+}
+
+/// A 12-part craft dropped onto the pad at 10 m/s (its impact limit is
+/// 8 m/s): a foot hits too fast and its leg is destroyed (D066 per point);
+/// the craft is not.
+#[test]
+fn a_hard_landing_breaks_a_leg_not_the_craft() {
+    let w = world();
+    let c = craft(12);
+    let pad = Vessel::landed_at(&w, VesselId(1), "Earth", 28.6082, -80.66, t0(), &c);
+    let (anchor, r, v) = pad.state(&w);
+    let up = r.normalize();
+    let mut a = Vessel::coasting(&w, VesselId(1), t0(), anchor, r + up * 1.0, v - up * 10.0, &c);
+    a.advance(&w, t0().add_seconds(1.0), &Controls::default(), usize::MAX);
+    let b = a.breakup().expect("an impact broke a part").clone();
+    let d = a.craft.design().clone();
+    let (part, cause) = b.destroyed[0];
+    assert!(d.parts[part as usize].name.starts_with("leg"), "{}", d.parts[part as usize].name);
+    let Destruction::Impact { speed, .. } = cause else { panic!("{cause:?}") };
+    assert!(speed > 8.0);
+    assert!(a.destruction().is_none());
+}
+
 /// A 12-part craft dropped onto the pad at 10 m/s (its impact limit is
 /// 8 m/s): a foot hits too fast and its leg is destroyed (D066 per point);
 /// the craft is not.

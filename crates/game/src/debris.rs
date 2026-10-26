@@ -42,6 +42,14 @@ pub fn next_breakup(fleet: &[Vessel]) -> Option<usize> {
         .map(|(_, i)| i)
 }
 
+/// The toast of vessel `id`'s breakup by `plan` that made `new` vessels
+/// (the pieces but the first, which stays the vessel): none when nothing
+/// came off.
+pub fn breakup_toast(id: VesselId, plan: &SplitPlan, new: usize) -> Option<String> {
+    let wrecks = plan.destroyed.iter().filter(|d| d.is_some()).count();
+    (new > 0).then(|| format!("Vessel {id} broke up: {} pieces ({wrecks} wrecks)", new + 1))
+}
+
 /// Applies a built breakup, starts building the next, deletes debris.
 pub fn update(
     time: Res<Time>,
@@ -60,8 +68,9 @@ pub fn update(
             let at = sim.index_of(id).filter(|&i| sim.fleet[i].breakup().is_some_and(|b| b.epoch == epoch));
             if let Some(i) = at {
                 let pieces = sim.fleet[i].split(&sim.world, &plan, &crafts, &mut sim.vessel_ids);
-                let wrecks = pieces.iter().filter(|p| p.destruction().is_some()).count();
-                toasts.push(now, format!("Vessel {id} broke up: {} pieces ({wrecks} wrecks)", pieces.len()), true);
+                if let Some(text) = breakup_toast(id, &plan, pieces.len()) {
+                    toasts.push(now, text, true);
+                }
                 sim.fleet.extend(pieces);
             }
         }
@@ -100,5 +109,19 @@ mod tests {
         assert!(sim.fleet[0].controllable());
         assert_eq!(sim::vessel::debris::debris(&sim.world, sim.clock, &sim.fleet, 0), Vec::<usize>::new());
         assert_eq!(test_craft().parts.len(), 1);
+    }
+
+    #[test]
+    fn a_breakup_toast_counts_every_piece_and_never_none() {
+        let id = |p: u32| sim::craft::CraftId::piece("stress-40", &[p]);
+        let wreck = Some(sim::vessel::Destruction::Impact { speed: 9.0, point: 0 });
+        let one = SplitPlan { pieces: vec![vec![0, 1]], ids: vec![id(0)], destroyed: vec![None] };
+        assert_eq!(breakup_toast(VesselId(3), &one, 0), None, "nothing came off");
+        let three = SplitPlan {
+            pieces: vec![vec![0], vec![1], vec![2]],
+            ids: vec![id(0), id(1), id(2)],
+            destroyed: vec![None, None, wreck],
+        };
+        assert_eq!(breakup_toast(VesselId(3), &three, 2).as_deref(), Some("Vessel #3 broke up: 3 pieces (1 wrecks)"));
     }
 }
