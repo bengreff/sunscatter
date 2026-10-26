@@ -1,6 +1,6 @@
 # The Solar System (D084)
 
-**Status:** *playable* for motion and physical data (every body is on its real orbit, deterministic, tested against JPL); *skeleton* for looks (one base colour per body, no maps) and for the atmospheres of Venus, Mars and Titan (sourced near the surface, assumed above). Built 2026-10-26 (overnight run, SOL workstream).
+**Status:** *playable* for motion and physical data (every body is on its real orbit, deterministic, tested against JPL); looks and terrain: see [solar-visuals.md](solar-visuals.md) (2026-10-26: maps, zones and physical terrain for the solid bodies, measured where a global DEM exists and procedural otherwise; the giants' colour maps; atmospheres) and for the atmospheres of Venus, Mars and Titan (sourced near the surface, assumed above). Built 2026-10-26 (overnight run, SOL workstream).
 
 **Scope (D084, the D014 rule, largest first):** the 8 planets; the dwarf planets Ceres, Pluto, Eris, Haumea, Makemake, Gonggong, Quaoar, Sedna, Orcus; every moon over 100 km mean radius: Io, Europa, Ganymede, Callisto; Mimas, Enceladus, Tethys, Dione, Rhea, Titan, Hyperion, Iapetus, Phoebe; Miranda, Ariel, Umbriel, Titania, Oberon; Triton, Proteus, Nereid; Charon; Dysnomia, Hi'iaka, Vanth. 44 bodies (was 11). Moons over 5 km: not done (see [Open](#open)).
 
@@ -37,7 +37,7 @@ Radii and rotation for every body from the IAU WGCCRE 2015 report via NAIF's `pc
 
 ### Visual data (`visual.ron`)
 
-Base colour (an approximate visual colour), Bond albedo where published (otherwise the geometric albedo, marked) and a brightened icon colour, for every new body. The game draws them through the terrain system as smooth ellipsoids (Mercury–Neptune were not drawn in 3D before). No maps, no atmospheres in the renderer.
+*Superseded for the solid bodies by [solar-visuals.md](solar-visuals.md) (maps, zones, terrain); the base colour and albedo below remain the far-away dot and the fallback.* Base colour (an approximate visual colour), Bond albedo where published (otherwise the geometric albedo, marked) and a brightened icon colour, for every new body. The game draws them through the terrain system as smooth ellipsoids (Mercury–Neptune were not drawn in 3D before). No maps, no atmospheres in the renderer.
 
 ## Accuracy against JPL (golden tests)
 
