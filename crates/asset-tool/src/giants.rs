@@ -158,10 +158,8 @@ fn zonal(name: &str) -> (usize, usize, Vec<[f32; 3]>) {
 pub fn read_fits(path: &Path) -> (usize, usize, Vec<f32>) {
     let raw = std::fs::read(path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
     let (w, h, start) = fits_header(&raw).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
-    let data = raw[start..start + 4 * w * h]
-        .chunks_exact(4)
-        .map(|b| f32::from_be_bytes([b[0], b[1], b[2], b[3]]))
-        .collect();
+    let data =
+        raw[start..start + 4 * w * h].chunks_exact(4).map(|b| f32::from_be_bytes([b[0], b[1], b[2], b[3]])).collect();
     (w, h, data)
 }
 
@@ -197,7 +195,8 @@ fn fits_header(raw: &[u8]) -> Result<(usize, usize, usize), String> {
 pub fn row_medians(data: &[f32], w: usize, h: usize, min_cover: f64) -> Vec<Option<f32>> {
     (0..h)
         .map(|j| {
-            let mut v: Vec<f32> = data[j * w..(j + 1) * w].iter().copied().filter(|x| x.is_finite() && *x > 0.0).collect();
+            let mut v: Vec<f32> =
+                data[j * w..(j + 1) * w].iter().copied().filter(|x| x.is_finite() && *x > 0.0).collect();
             if (v.len() as f64) < min_cover * w as f64 {
                 return None;
             }
@@ -225,7 +224,8 @@ pub fn clean_profile(rows: &[Option<f32>], edge_deg: f64, spike_deg: f64, spike:
             if near_gap(j) {
                 return None;
             }
-            let mut around: Vec<f32> = rows[j.saturating_sub(half)..=(j + half).min(n - 1)].iter().flatten().copied().collect();
+            let mut around: Vec<f32> =
+                rows[j.saturating_sub(half)..=(j + half).min(n - 1)].iter().flatten().copied().collect();
             around.sort_by(f32::total_cmp);
             let m = around[around.len() / 2];
             ((v - m).abs() <= spike * m).then_some(v)
@@ -371,7 +371,14 @@ mod tests {
     #[test]
     fn fits_header_finds_the_image() {
         let mut raw = Vec::new();
-        for card in ["SIMPLE  =                    T", "BITPIX  =                  -32 / bits", "NAXIS   =                    2", "NAXIS1  =                    3", "NAXIS2  =                    2", "END"] {
+        for card in [
+            "SIMPLE  =                    T",
+            "BITPIX  =                  -32 / bits",
+            "NAXIS   =                    2",
+            "NAXIS1  =                    3",
+            "NAXIS2  =                    2",
+            "END",
+        ] {
             raw.extend(format!("{card:<80}").bytes());
         }
         raw.resize(2880, b' ');
