@@ -1,6 +1,6 @@
 # Feature: scale performance (D081)
 
-**Status:** *playable* in the sim and the game's frame loop, measured headless (the game window and the offscreen demo were not run by this workstream: see [Verify](#verify-in-the-offscreen-demo)). Built 2026-10-26 (overnight run, PERF workstream; the coast integration, §6, COAST), from BENCH's [scale baseline](../plans/scale-baseline-2026-10-26.md). Decisions: D081 (50 craft of ~300 parts to 1,000,000×; live physics for 1–3, limbo for 10+), D028 (60 fps on the M2 Pro), D022, D025, D026, D029, D062; rules 2 and 4.
+**Status:** *playable* in the sim and the game's frame loop, measured headless (the game window and the offscreen demo were not run by this workstream: see [Verify](#verify-in-the-offscreen-demo)). Built 2026-10-26 (overnight run, PERF workstream; the coast integration, §6, COAST; the coast thermal lattice, §7, THERMAL), from BENCH's [scale baseline](../plans/scale-baseline-2026-10-26.md). Decisions: D081 (50 craft of ~300 parts to 1,000,000×; live physics for 1–3, limbo for 10+), D028 (60 fps on the M2 Pro), D022, D025, D026, D029, D062; rules 2 and 4.
 
 The owner (2026-10-26): "maximally stable with dozens of crafts flying each with hundreds of parts", "up to 1 million timewarp".
 
@@ -15,6 +15,7 @@ The owner (2026-10-26): "maximally stable with dozens of crafts flying each with
 | 866feee | **The long run** (`examples/long_run.rs`), the live-stop tests (`tests/frame_live_stop.rs`), the frame's span ramped (`fleet::frame_span`), this note | below |
 | f6ec8bc | **The perturbed coast step, bit for bit** (COAST): starlight, the air search and the event searches no longer evaluate what they discard | perturbed LEO step 14.0 → 9.4 µs, bare 6.2 → 5.6 µs; five coasts' samples hash the same |
 | fd22069 | **Coasts integrate with DOP853** (COAST): 8th order, 10 cm and 10 µm/s per step, steps of at most 3 h | LEO: 3× fewer force evaluations, 53 → 10 m from the converged orbit after a day; a craft's integration per 1,000,000× frame 3.4–3.7 → 0.7–0.8 ms |
+| 93d50b4 | **The coast thermal solve's heat inputs in one pass** (THERMAL, §7): every sample's exposure first, then each cell's samples summed in one pass; exposure without a division per cell; the nodes' capacities kept between solves. The same bits | a 300-part craft's lattice per 1,000,000× frame 18.3 → 12.5 ms; the 50-craft fleet 244,000× → 309,000× per wall second |
 
 ### 1. The thermal solve
 
@@ -101,7 +102,7 @@ Invariance:
 | warp reached per wall second | 120,000× | 183,000× |
 | 1,000×: frame mean, warp reached per wall second | 0.48 ms, 34,300× | 0.26 ms, 62,200× |
 
-The fleet does not reach 1,000,000×, and integration no longer bounds it. The 20 craft of 300 parts spend ~18 ms per 1,000,000× frame each in their coast thermal lattice, against 0.8 ms integrating. The fleet's heaviest vessels run at 1.0–3.3 µs per budget unit, against ~0.6 µs for the rest, so their solves cost more than `solve_units` estimates. One vessel is advanced by one thread at a time, so a vessel of 18–40 ms per frame holds the clock to 8 ms of its work.
+The fleet does not reach 1,000,000×, and integration no longer bounds it. The 20 craft of 300 parts spend ~18 ms per 1,000,000× frame each in their coast thermal lattice, against 0.8 ms integrating. (§7 brought that to 6–15 ms.) The fleet's heaviest vessels run at 1.0–3.3 µs per budget unit, against ~0.6 µs for the rest, so their solves cost more than `solve_units` estimates. One vessel is advanced by one thread at a time, so a vessel of 18–40 ms per frame holds the clock to 8 ms of its work.
 
 Tried and dropped, and not tried:
 - Restructuring `starlight`'s loops (members on demand, skipping a non-shading system at once): the same bits and no measurable gain. Its remaining self time (16 % of a perturbed DOP853 step) is the occlusion tests and `eclipse_factor`'s trigonometry on the night side.
@@ -109,6 +110,56 @@ Tried and dropped, and not tried:
 - Not tried: Encke's method. Its reference orbit per anchor needs a Kepler solve per stage and an Encke dense output.
 - Steps are now bounded by the dense output as much as by the integrator. At ~390 s LEO steps the quintic Hermite between samples is good to ~1 m at mid-step (25 µm at the old 65 s steps). That is below the propagation error (10 m a day, 53 before), and it nearly cancels between close craft. Longer steps would need DOP853's 7th-order continuous extension (3 more evaluations a step) or a stored mid-step sample.
 - A dip into live air shorter than one step is still found only at step ends, and steps are now ~6× longer.
+
+
+### 7. The coast thermal lattice (THERMAL)
+
+**Why a 300-part craft's lattice cost 18 ms per 1,000,000× frame** (`bench_integrator` `BENCH_FLEET=1`: settled 30 days at 300 km, then 60 frames; 18.3 ms, integration 0.7 ms). Its lattice solved at almost every 600 s point (1,693 of 1,728 in 12 days), with 3–4 sweeps each. The skip never engaged because of the thin air:
+- A craft with a known attitude (limbo) takes the air as 12 samples of its osculating orbit (~3.8 W/m² at 300 km). The osculating elements carry J2's short-period terms, so the samples' mean flux and anisotropy move by 1–4 % between lattice points, and the skip asks for 1 % (`SUN_SAME`).
+- A coast without a pointing (SAS on, the fleet's quiet craft) takes one air sample at the point: ±11 % around an orbit of e = 0.001, its direction turning in body axes. At 470 km, 64 % of the points solve.
+- A fast tumbler takes the flux at the point over an icosahedron, with the same swing.
+
+Each solve (`sample` profile) was 40 % network sweeps, 46 % heat inputs (the sunlight and 12 air samples, each a pass over the 4,503 cells with the exposure interpolated per cell: three divisions per cell) and 8 % the nodes' capacities (the tanks' volume grid).
+
+**What was built** (93d50b4, the same bits):
+- `thermal::coast_heat` computes every sample's exposure first, then sums each cell's samples in one pass, in the order and with the operations of `cell_heat_flow` and `free_molecular_heat`.
+- `AeroBake::exposure_at` looks up each weighted byte `w·e/255` in a table of 256 values made per direction, instead of dividing per cell.
+- `VesselThermal` keeps the nodes' capacities of the last coast solve for its design and propellant. The cache is not saved and compares equal, like `DesignSlot`.
+
+Tests: `coast_heat` equals the per-sample calls bit for bit (one sun; orbit samples with one in shadow; 12 air samples), and `exposure_at` equals the division per cell over 40 directions. Twelve days of four coasts (stress and test craft, still and held prograde, 250–300 km), solved at every lattice point, end at the same bits as before, and the sim's tests pass unchanged (goldens included). The accuracy is therefore unchanged: 1–2 mK against the converged solve at 600 s steps (`bench_thermal`).
+
+| Release, M2 Pro, machine quiet (load ~5); single craft: median of 3 | Before | After |
+|---|---|---|
+| 300-part craft, thermal lattice per 1,000,000× frame (`BENCH_FLEET=1`) | 18.3 ms | **12.5 ms** |
+| 300-part craft, a lattice point over a day at 400 km, settled (`bench_thermal`): tumbling / held prograde | 826 / 735 µs | **489 / 533 µs** |
+| Test craft, the same | 84 / 117 µs | 81 / 115 µs |
+| **50-craft fleet at 1,000,000×** (`fleet_frames`, 7 threads), warp reached per wall second | 242,000–247,000× (4 runs) | **306,000–311,000×** (3 runs) |
+| Fleet's work per 1,000,000× frame, summed over vessels | 342 ms | 268 ms |
+
+Per vessel per 1,000,000× frame (calibration chunks of `fleet_frames`, integration included):
+- 300-part tumblers at 300–330 km: 21–24 → 13–14 ms.
+- 300-part craft under SAS at 300–320 km: 19–20.5 → 14–15 ms.
+- 300-part craft under SAS at 450–495 km: 7–11 → 6–10 ms.
+- Test craft: 1.7–3.1 ms (unchanged).
+
+Budget units now read 0.45–0.59 µs per unit on the 300-part craft (0.55–0.76 before) and 0.41–0.57 on the test craft. `solve_units` had underestimated the heat inputs (the divisions), and the craft now agree. A lattice point that evaluates its sunlight and air and is then skipped still counts 1 unit for 4–10 µs (measured: one sun and one air sample, and 13 samples). That is negligible beside the solves (~0.4 ms each).
+
+**Tried and measured, not adopted** (against the same coasts solved at every lattice point, settled days 10–12):
+- *Weighing the air's change against the sunlight* (1 % of the larger flux), so the noisy air no longer blocks the skip. A 300-part craft's lattice fell 18.3 → 5.8 ms per frame (3.2×), but the skip's lag showed:
+
+  | Craft | Worst error, before | Worst error, after |
+  |---|---|---|
+  | Still stress craft | 7.6 mK | 112 mK |
+  | Still test craft | 8 mK | 182 mK |
+  | Held stress craft | 1.3 K | 2.1 K |
+  | Test craft held prograde at 250 km | 44 mK | **4.4 K** |
+
+  At 250 km its cold cells facing the air are warmed mostly by the air (~1.6 K per W/m² at 150 K).
+- *The same with `STEP_CHANGE_K` 0.1* (from 0.5): the still stress craft erred 15 mK with 1.5× fewer solves (1,102 of 1,728 in 12 days), but the test craft held at 250 km still erred 2.1 K. The air must be compared on its own scale.
+- *An air floor of 10 W/m²* (1 % of the larger of the air and 10 W/m²): only 1.35× fewer solves (1,693 → 1,259), at 28 mK on the still craft and 2.0 K worst (mean 224 mK, 90 before) on the held one.
+- *`COAST_CONVERGED` 3e-5* (from 1e-5): 6 % (12.5 → 11.8 ms), with the error per 600 s step 1–1.7 → 2.6–4.7 mK. The bits change for little.
+- The existing skip already errs up to 1.3 K against solving every point (the held stress craft). Part of that is the every-point reference following the air samples' noise on cold cells.
+- The sweeps run at ~10 ns per unknown, probably bound by the latency along the trees' chains (two divisions per unknown per sweep, each waiting on the last). Cutting that (reciprocals, reordering) changes bits.
 
 ## Measured
 
@@ -153,7 +204,11 @@ The lead runs (one game at a time; the window is not needed):
 ## What remains
 
 - **Decouple the simulation from the frame:** advance the fleet continuously on worker threads (the render reading the last completed state), so every core works all the time and one heavy vessel no longer bounds the warp to 8 ms of its own work per frame.
-- **The coast thermal lattice of 300-part craft** now bounds the fleet at 1,000,000× (~18 ms per craft per frame against 0.8 ms of integration, COAST's measurement above). The options are a reduced-order model (see Choices) or splitting one vessel's lattice across threads, together with budget units that track those solves.
+- **The coast thermal lattice of 300-part craft** still bounds the fleet at 1,000,000×: 6–15 ms per craft per frame after §7, against 0.7 ms of integration. Their solves run at nearly every lattice point because the thin air's input is noisy (§7). Next steps, in order:
+  - Make the air's input as smooth as the sunlight's, so the existing skip engages (up to ~3× on craft in thin air, as when the air was ignored in §7). Average it over the orbit for coasts without a pointing too (the attitude is constant there), and take the samples' semi-major axis from the energy with J2's potential, so they no longer move with the short-period terms.
+  - Then measure the skip itself against solving every point. It errs up to 1.3 K on a held 300-part craft, so its error control (`STEP_CHANGE_K`, a long backward-Euler step's lag) may need tightening as it engages more often.
+  - A warm start from the last solve's rate (it must be saved), or a direct factorisation, for the sweeps.
+  - Splitting one vessel's lattice across threads: a 300-part craft at 13–15 ms per frame exceeds a vessel's 8 ms per frame.
 - **The coast integration** (COAST, §6) is 0.5–0.8 ms per craft per 1,000,000× frame, 4–5× less than before. Next steps:
   - Interpolate the bodies within a step (estimated 15–20 %).
   - Compute the pole once per evaluation instead of in both J2 and the air (~5 %).
