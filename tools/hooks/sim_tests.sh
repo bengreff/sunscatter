@@ -9,7 +9,7 @@ input=$(cat)
 cwd=$(printf '%s' "$input" | jq -r '.cwd // empty')
 root=$(git -C "${cwd:-${CLAUDE_PROJECT_DIR:-.}}" rev-parse --show-toplevel 2>/dev/null) || exit 0
 [ -f "$root/crates/sim/Cargo.toml" ] || exit 0
-if ! out=$(cd "$root" && cargo test -p sim -q 2>&1); then
+if ! out=$(cd "$root" && cargo test -p sim -q --no-fail-fast 2>&1); then
   {
     echo "cargo test -p sim failed (in $root):"
     echo "$out" | grep -E "^error|FAILED|panicked at|^  left|^ right|^[^ ].*: " | head -n 40

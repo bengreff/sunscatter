@@ -37,8 +37,11 @@ jobs:
         run: tools/check_decision_refs.sh
       - name: Clippy (sim, ephem-tool, asset-tool, mcp)
         run: cargo clippy -p sim -p ephem-tool -p asset-tool -p mcp --all-targets --locked -- -D warnings
+      # Tests run even when a lint failed, and every test binary runs
+      # (2026-10-26: a failing clippy step hid a changed golden for hours).
       - name: Tests (sim, asset-tool, mcp)
-        run: cargo test -p sim -p asset-tool -p mcp --locked
+        if: ${{ !cancelled() }}
+        run: cargo test -p sim -p asset-tool -p mcp --locked --no-fail-fast
 
   # The Bevy app. Slow when the cache is cold; runs in parallel with `sim`.
   game:
@@ -60,6 +63,7 @@ jobs:
       - name: Clippy (game)
         run: cargo clippy -p game --all-targets --locked -- -D warnings
       - name: Tests (game)
-        run: cargo test -p game --locked
+        if: ${{ !cancelled() }}
+        run: cargo test -p game --locked --no-fail-fast
       - name: Build game
         run: cargo build -p game --locked
