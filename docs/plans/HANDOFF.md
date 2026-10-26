@@ -2,18 +2,18 @@
 
 A SessionStart hook loads this file automatically after `/clear` or at startup. It is kept current by `/handoff`.
 
-*Updated 2026-10-01 (night), after the playtest-1 polish run (Director goals 1–4 and the chute physics).*
+*Updated 2026-10-25, while two agents build the owner's 2026-10-25 feedback.*
 
 ## Your first job
 
-1. **The owner plays the directed playtest:** `docs/plans/playtest-2026-10-01.md` (one command into the low-orbit save `docs/plans/playtest-2026-10-01-orbit.ron`, four tries with what to judge). Record the feedback in the interview format (`docs/plans/interview-2026-09-28.md`) and turn it into decisions and fixes.
-2. Retake screenshot 4 (parachute) of the playtest doc in the demo when an owner-approved run happens: it predates D079 (agents do not run the demo).
+1. **In progress (2026-10-25):** the owner flew the playtest save and asked for crisp surfaces and a task-menu HUD ([record](interview-2026-10-25.md); D073 revised, D080). Two agents build it in parallel: `docs/features/crisp-surfaces.md` (zones baked from the real data, sharpened procedurally; Minimal's atmosphere raymarched from outside) and `docs/features/flight-menus.md` (navball essentials, Orbital / Landing / Utilities / Staging menus in fixed docks). The lead verifies both with offscreen demo screenshots, then hands the game to the owner.
+2. The four playtest questions of `docs/plans/playtest-2026-10-01.md` (RCS turns, apsides, bell heat, chutes) are still unanswered.
 
 ## Read, in this order
 
 1. `CLAUDE.md`, `docs/vision.md`, `docs/process.md`.
-2. `docs/plans/interview-2026-09-28.md`: the owner's **number-one rule** (an accurate flight simulator; graphics bare and functional, D073).
-3. `docs/decisions.md` D073–D079 (D077–D079 are defaults taken while the owner was away, each reversible: engine heat to the nozzle bell, attitude only from RCS and gimbal, the parachute sequence).
+2. `docs/plans/interview-2026-09-28.md`: the owner's **number-one rule** (an accurate flight simulator; graphics simple and crisp, D073), and `interview-2026-10-25.md`.
+3. `docs/decisions.md` D073–D080 (D077–D079 are defaults taken while the owner was away, each reversible: engine heat to the nozzle bell, attitude only from RCS and gimbal, the parachute sequence).
 4. `docs/features/playtest-1.md`, `docs/plans/playtest-2026-10-01.md`, `docs/plans/open-issues.md`.
 5. `docs/architecture.md` (newest owner: `sim::chute`).
 
