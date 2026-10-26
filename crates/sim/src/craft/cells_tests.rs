@@ -7,7 +7,8 @@ use std::collections::VecDeque;
 fn craft_cells(target: usize) -> (Surface, Cells) {
     let g = &test_craft().geometry;
     let s = union_surface(&g.primitives, &Resolution::default());
-    let cells = build_cells(&s, &g.primitives, &g.skin, &CellOptions { target, ..CellOptions::default() });
+    let opts = CellOptions { target, cell_area: f64::INFINITY, ..CellOptions::default() };
+    let cells = build_cells(&s, &g.primitives, &g.skin, &opts);
     (s, cells)
 }
 
@@ -18,6 +19,33 @@ fn cell_count_respects_the_target() {
         assert!(c.cells.len() <= target, "{} cells for target {target}", c.cells.len());
         assert!(c.cells.len() == target, "{} cells for target {target}: the target is reachable", c.cells.len());
     }
+}
+
+/// Cells by area: the test craft keeps its 512 (0.26 m² each); a large
+/// craft gets its area over [`CELL_AREA`] (a 300-part stress craft built
+/// with the default options, as a craft file would be: not one cell per
+/// face), a craft of parts at least [`CELLS_PER_PART`] per part.
+#[test]
+fn cells_follow_the_area() {
+    let (s, c) = craft_cells(512);
+    let g = &test_craft().geometry;
+    let default = build_cells(&s, &g.primitives, &g.skin, &CellOptions::default());
+    assert_eq!(default, c);
+    let l = crate::craft::stress::layout(300);
+    let s = union_surface(&l.geometry.primitives, &Resolution::default());
+    let big = build_cells(&s, &l.geometry.primitives, &l.geometry.skin, &CellOptions::default());
+    assert_eq!(big.cells.len(), libm::ceil(s.area() / CELL_AREA) as usize);
+    let l = crate::craft::stress::layout(1);
+    let s = union_surface(&l.geometry.primitives, &Resolution::default());
+    let one = build_cells(&s, &l.geometry.primitives, &l.geometry.skin, &CellOptions::for_parts(1));
+    assert_eq!(one.cells.len(), libm::ceil(s.area() / CELL_AREA) as usize);
+    let tiny = build_cells(
+        &s,
+        &l.geometry.primitives,
+        &l.geometry.skin,
+        &CellOptions { cell_area: 1e3, ..CellOptions::for_parts(1) },
+    );
+    assert_eq!(tiny.cells.len(), CELLS_PER_PART);
 }
 
 #[test]

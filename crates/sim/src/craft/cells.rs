@@ -4,7 +4,8 @@
 //! Cells are built top-down from the union surface ([`super::mesh`]): each
 //! smooth face starts as one cell, and the cell with the largest error is
 //! split in two (along its longest extent, at equal area) until the target
-//! count is reached. The error is `area × (1 + γ·spread)`, where `spread`
+//! count is reached (at least the surface's area over
+//! [`CellOptions::cell_area`]). The error is `area × (1 + γ·spread)`, where `spread`
 //! is the angular spread of the cell's normals, so cells end up smaller
 //! where the surface curves tightly (nose, feet, struts) and larger on flat
 //! or gently curved faces. Cells never span two faces, so edges between
@@ -25,9 +26,13 @@ use std::collections::{BTreeMap, BinaryHeap, HashMap};
 /// How to build cells.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CellOptions {
-    /// Highest number of cells (at least one per face). Q1 of realism-1: 512
-    /// until the aero and heating budget is measured.
+    /// Number of cells (at least one per face, and at least the surface's
+    /// area over `cell_area`). Q1 of realism-1: 512 for the test craft.
     pub target: usize,
+    /// Largest mean cell area (m²): a large craft gets cells by area, not a
+    /// fixed count (scale baseline problem 1: 512 on a 300-part craft is
+    /// one cell per face).
+    pub cell_area: f64,
     /// Weight γ of the normal spread (rad) in the split error.
     pub curvature_weight: f64,
     /// Farthest a joint between primitives is bridged (m).
@@ -36,20 +41,24 @@ pub struct CellOptions {
 
 impl Default for CellOptions {
     fn default() -> Self {
-        CellOptions { target: 512, curvature_weight: 4.0, joint_reach: 0.3 }
+        CellOptions { target: 512, cell_area: CELL_AREA, curvature_weight: 4.0, joint_reach: 0.3 }
     }
 }
 
-/// Cells per part of a craft of parts ([`CellOptions::for_parts`]; the
-/// test craft: 512 on 17 primitives).
-pub const CELLS_PER_PART: usize = 16;
+/// Largest mean cell area (m²): the test craft's 512 cells on its 136 m²
+/// are 0.26 m² each, so it keeps them.
+pub const CELL_AREA: f64 = 0.3;
+/// Fewest cells per part of a craft of parts ([`CellOptions::for_parts`]):
+/// a small piece of debris keeps a few.
+pub const CELLS_PER_PART: usize = 4;
 
 impl CellOptions {
-    /// A craft of `parts` parts: [`CELLS_PER_PART`] per part, at least the
-    /// default. (The default target alone gives a large craft one cell per
-    /// face: a whole tank side as one cell, its normals cancelling.)
+    /// A craft of `parts` parts (a stress craft, a piece of a craft): cells
+    /// by area ([`CELL_AREA`]), at least [`CELLS_PER_PART`] per part. A
+    /// 300-part stress craft (1,351 m²) has 4,503; a one-part piece of
+    /// debris (a panel, 0.5 m²) a few.
     pub fn for_parts(parts: usize) -> Self {
-        CellOptions { target: CellOptions::default().target.max(CELLS_PER_PART * parts), ..CellOptions::default() }
+        CellOptions { target: CELLS_PER_PART * parts, ..CellOptions::default() }
     }
 }
 
@@ -237,7 +246,9 @@ pub fn build_cells(s: &Surface, primitives: &[Primitive], default_skin: &Skin, o
     // scan of every group per split (O(target²) on large craft).
     let mut queue: BinaryHeap<Worst> =
         groups.iter().enumerate().map(|(i, g)| Worst(tris.error(g, opts.curvature_weight), i)).collect();
-    while groups.len() < opts.target {
+    let by_area = libm::ceil(s.area() / opts.cell_area);
+    let target = if by_area < opts.target as f64 { opts.target } else { by_area as usize };
+    while groups.len() < target {
         let Some(Worst(e, worst)) = queue.pop() else { break };
         if e < 0.0 {
             break;

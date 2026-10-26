@@ -276,40 +276,43 @@ impl Shares {
 /// `from` (the craft it came from): each cell and node takes the nearest
 /// one of its own part (by part id), else the nearest of all.
 pub fn carry_temperatures(from: &CraftDesign, state: &ThermalState, to: &CraftDesign) -> ThermalState {
-    let id_of = |d: &CraftDesign, p: u32| d.parts[p as usize].id;
-    let nearest = |points: &mut dyn Iterator<Item = (usize, DVec3)>, at: DVec3| {
-        points.fold(None, |best: Option<(f64, usize)>, (i, p)| {
-            let d = (p - at).length_squared();
+    // The old cells and nodes of each part id.
+    let by_id = |tags: &[u32]| {
+        let mut map: std::collections::BTreeMap<u32, Vec<usize>> = Default::default();
+        for (j, &p) in tags.iter().enumerate() {
+            map.entry(from.parts[p as usize].id).or_default().push(j);
+        }
+        map
+    };
+    let (cells, nodes) = (by_id(&from.cell_part), by_id(&from.node_part));
+    let nearest = |candidates: &mut dyn Iterator<Item = usize>, at: DVec3, pos: &dyn Fn(usize) -> DVec3| {
+        candidates.fold(None, |best: Option<(f64, usize)>, j| {
+            let d = (pos(j) - at).length_squared();
             if best.is_none_or(|(b, _)| d < b) {
-                Some((d, i))
+                Some((d, j))
             } else {
                 best
             }
         })
     };
+    let pick = |own: Option<&Vec<usize>>, all: usize, at: DVec3, pos: &dyn Fn(usize) -> DVec3| {
+        own.and_then(|c| nearest(&mut c.iter().copied(), at, pos))
+            .or_else(|| nearest(&mut (0..all), at, pos))
+            .expect("a craft has cells and a node")
+            .1
+    };
+    let cell_at = |j: usize| from.cells[j].centroid;
     let skin = (0..to.cells.len())
         .map(|i| {
-            let (id, at) = (id_of(to, to.cell_part[i]), to.cells[i].centroid);
-            let mut own = (0..from.cells.len())
-                .filter(|&j| id_of(from, from.cell_part[j]) == id)
-                .map(|j| (j, from.cells[j].centroid));
-            let j = nearest(&mut own, at)
-                .or_else(|| nearest(&mut from.cells.iter().map(|c| c.centroid).enumerate(), at))
-                .expect("a craft has cells")
-                .1;
-            state.skin[j]
+            let own = cells.get(&to.parts[to.cell_part[i] as usize].id);
+            state.skin[pick(own, from.cells.len(), to.cells[i].centroid, &cell_at)]
         })
         .collect();
-    let (old, new) = (&from.volume.nodes, &to.volume.nodes);
-    let nodes = (0..new.len())
+    let node_at = |j: usize| from.volume.nodes[j].centre;
+    let nodes = (0..to.volume.nodes.len())
         .map(|i| {
-            let (id, at) = (id_of(to, to.node_part[i]), new[i].centre);
-            let mut own = (0..old.len()).filter(|&j| id_of(from, from.node_part[j]) == id).map(|j| (j, old[j].centre));
-            let j = nearest(&mut own, at)
-                .or_else(|| nearest(&mut old.iter().map(|n| n.centre).enumerate(), at))
-                .expect("a craft has a node")
-                .1;
-            state.nodes[j]
+            let own = nodes.get(&to.parts[to.node_part[i] as usize].id);
+            state.nodes[pick(own, from.volume.nodes.len(), to.volume.nodes[i].centre, &node_at)]
         })
         .collect();
     ThermalState { skin, nodes }

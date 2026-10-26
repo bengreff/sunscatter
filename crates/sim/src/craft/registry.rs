@@ -94,14 +94,18 @@ pub fn definition(id: &CraftId) -> Result<CraftDef, String> {
     }
 }
 
-/// How a definition's cells are built: one part (a craft file) the
-/// default, a craft of parts by its part count ([`CellOptions::for_parts`]).
-pub fn cell_options(def: &CraftDef) -> CellOptions {
-    match def.parts.len() {
-        1 if def.parts[0].primitives.len() == def.geometry.primitives.len() && def.parts[0].id == 0 => {
-            CellOptions::default()
-        }
-        n => CellOptions::for_parts(n),
+/// How the cells of craft `id` (definition `def`) are built: a craft file
+/// the default (as [`super::parse_craft`]), anything made of parts (a
+/// stress craft, a piece, a registered craft) by area and part count
+/// ([`CellOptions::for_parts`]).
+pub fn cell_options(id: &CraftId, def: &CraftDef) -> CellOptions {
+    let file = id.parts().is_none()
+        && !id.0.starts_with("stress-")
+        && !registered().lock().expect("craft registry").contains_key(&id.0);
+    if file {
+        CellOptions::default()
+    } else {
+        CellOptions::for_parts(def.parts.len())
     }
 }
 
@@ -120,7 +124,7 @@ pub fn craft_of(id: &CraftId) -> Arc<Craft> {
         c.clone()
     } else {
         let def = definition(id).unwrap_or_else(|e| panic!("{e}"));
-        let opts = cell_options(&def);
+        let opts = cell_options(id, &def);
         Craft::from_def(id.clone(), def, &Resolution::default(), &opts)
     };
     cache.lock().expect("craft cache").entry(id.0.clone()).or_insert_with(|| Arc::new(built)).clone()
@@ -181,7 +185,7 @@ mod tests {
         assert!(Arc::ptr_eq(&again, &craft_of(&built.id)), "built once");
         let id = CraftId::piece("stress-12", &[4, 5, 6]);
         let def = built.def().subset(&[4, 5, 6]);
-        let piece = Craft::from_def(id.clone(), def.clone(), &Resolution::default(), &cell_options(&def));
+        let piece = Craft::from_def(id.clone(), def.clone(), &Resolution::default(), &cell_options(&id, &def));
         assert_eq!(**craft_of(&id).design(), **piece.design());
         assert_eq!(*super::super::design_of(&id), **piece.design());
     }
