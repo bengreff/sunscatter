@@ -2,6 +2,8 @@
 
 The owner, leaving for the day: "launch an agent or two on something (like building the solar system) while I am gone. Similar visual style to earth, accounting for lighting and terrain and atmosphere." Decisions: D073 (crisp, simple surfaces), D084 (the bodies), D086 (map budget ~150 MB, default), D087 (exposure by the starlight at the camera, default), D047/D059 (terrain is physical, procedural detail in `sim`), D052/D055 (atmospheres, lighting).
 
+The owner, later the same day: "make sure they are building an engine that will be applicable with any planet and any number of light sources without any bugs." So every visual feature is generic and data-driven (D048): no code matches on a body's name or assumes Sol (one star, rings only on Saturn, clouds only on Venus); every lit object takes the light of every relevant star at its own position, with that star's eclipses and colour, and planetshine from every relevant body (D055); where an engine limit forces a bounded set of lights, a deterministic, tested rule picks it (the brightest few by flux, the rest as ambient); multi-star and multi-occluder cases have table tests and a synthetic binary-star test world.
+
 Two agents, separate files. Status words: *design / skeleton / playable / polished*.
 
 ## TOUR (first, shared): see any body
