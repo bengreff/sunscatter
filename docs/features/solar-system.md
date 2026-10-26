@@ -27,7 +27,7 @@ The pieces are pure functions of the committed inputs; `ephem-tool sol` regenera
 | `sol-2030-initial.ron`, `sol-2030-systems-initial.ron` | 4.5, 10 kB | initial states (DE440, Horizons) |
 | `horizons-reference.ron`, `de440-reference.ron` | 46, 12 kB | reference states for the golden tests |
 
-**1,000 years (D005) is not affordable this way:** the moon tables cost what their orbits do (about 250 bytes per orbit for an inner moon at any tolerance: Chebyshev convergence is factorial, so tolerance barely matters, and quantization is bounded by the anchors' smoothness, see below). 1,000 years would be ~330 MB of moons. Options for the lead: a much shorter window for fast inner moons, a semi-analytic or frequency-fitted model (secular rates plus a few hundred periodic terms per moon, expanded to tables at load), or a looser D042 for moons with entropy coding. The planets would fit (~50 MB at today's settings, ~12 MB with free segments if C¹ fits make those safe).
+**1,000 years (D005) is not affordable this way** (see [The 1,000-year problem](#the-1000-year-problem-for-the-owner)).
 
 ### Physical data (`data/bodies/<body>/body.ron`)
 
@@ -81,10 +81,28 @@ Golden LEO coast hash 0x52e3680dc0baea81 (the faint bodies and far J2 terms now 
 - `sim::gen::nbody`: zonal terms against the potential; `sim::ephem::io`: packed tables round-trip; `sim::ephem`: lazy snapshots equal eager ones; `sim::world`: clusters (roles, opening, point-mass error under 1e-14 m/s²).
 - Updated for the new data: the golden LEO coast hash; the gravity-source tests (dwarf planets massless in the cut-versus-full test, Ceres sitting just under the cutoff there; 5 m for the closed systems' quadrupoles; the Pluto flyby's error ratio 2e-3); the playtest save re-stamped to the new ephemeris id.
 
+## The 1,000-year problem (for the owner)
+
+D005 asks for about 1,000 years; the shipped window is 2030–2080. Nothing here is decided.
+
+**Why it does not scale.** A moon's table costs what its orbits do: about 250 bytes per orbit for an inner moon, nearly whatever the tolerance (Chebyshev convergence is factorial, so 100 m → 1 km saves ~15 %; quantization is bounded by the anchors' smoothness). Measured for 50 years: planets 2.6 MB, dwarf planets 0.15 MB, moons 16.6 MB. Scaled to 1,000 years: **planets ~52 MB, moons ~330 MB** (Mimas alone 2.3 MB per 50 years). Generation is 5 minutes for 50 years, so ~1.7 hours for 1,000 (one thread; the systems are independent, so ~25 minutes on 10 cores).
+
+**Options:**
+
+| | What | Size shipped | Accuracy / consistency | Cost and risk |
+|---|---|---|---|---|
+| A | Tables for the first N decades, rails + drift beyond | today's 19 MB for N = 5 | beyond N, moons are off our integration by their rails residual: 2 km (Phoebe) to ~4,000 km (Iapetus); a vessel near Io would feel a fictitious ~7e-4 m/s² (400 km at Io's frequency): low orbits around moons stop being trustworthy after year N | cheap; planets could stay tables (52 MB) or go rails (residuals 30 km–4,000,000 km, far over D042's 1 km) |
+| B | Moon tables generated on demand per decade, deterministically, from shipped checkpoints | ~1 MB of checkpoints (each system's exact integrator state, compensated sums included, at every decade boundary) + the planets | identical to one 1,000-year integration (resuming from an exact state equals a single pass, as coasts do); bit-exact on both OSes (golden-tested per decade) | ~1–2 minutes of background CPU per decade (Saturn's 10 years at 240 s steps), cached on disk (~33 MB per decade); at 1,000,000× a decade passes in 5 real minutes, so generation must run ahead; the planets' 1,000 years still need ~52 MB or the same treatment |
+| C | A frequency-fitted model per moon (secular rates + a few hundred periodic terms from our integration, NAFF-style), expanded to tables at load | a few MB | km-level against our integration, so the same (smaller) fictitious-force issue as A | research work: fitting resonant systems (Io–Europa–Ganymede, Titan–Hyperion) to D042's 100 m is not routine |
+| D | Ship all 1,000 years of tables | ~385 MB (or a separate download) | exact | far over D046's ~60 MB; every regeneration adds that much to git history unless kept out of the repository |
+| E | A looser D042 for moons (1 km), with entropy coding | ~250 MB | 1 km | saves little (see above) |
+
+**Notes for deciding:** B keeps every rule (one integration, pure function of time, consistent forces) at the price of a background job and a disk cache; A and C trade consistency near moons for size; D only trades size. The planets alone (52 MB) are already near D046's total; with C¹ (velocity-continuous) fits they could take the moons' free segments and quantization (~4× smaller), or the checkpoint scheme of B.
+
 ## Open
 
 - Moons over 5 km (about 80 more): the fastest (Metis 7 h, Naiad 7 h) would cost ~12 MB each as 100 m tables and need 60 s steps. Needs a decision: rails or tables at a looser tolerance for small moons, or test particles.
 - Upper atmospheres of Venus, Mars, Titan (above). Gas giants: no surface or atmosphere model (vessels pass through).
 - Initial states fitted to Horizons over the window (removes the linear drifts).
 - C¹ table fits (anchor zones for moons and planets beyond Earth; free segments for planets).
-- 1,000 years (above).
+- 1,000 years: [the options above](#the-1000-year-problem-for-the-owner), for the owner.
