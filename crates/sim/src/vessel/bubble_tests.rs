@@ -246,7 +246,10 @@ fn relative_position_of_members_10_km_apart() {
     let (r_1au, v_1au) = deep(earth.node);
     let (r_30au, v_30au) = deep(neptune.node);
     let cases = [
-        ("low orbit", earth.node, r_leo, v_leo, 1e-6),
+        // Low orbit: the coasting pair's dense output (one 8th-order step
+        // spans t = 43–259 s) is good to ~3 cm, and to ~3e-5 m in their
+        // separation, where the two craft's errors nearly cancel.
+        ("low orbit", earth.node, r_leo, v_leo, 1e-4),
         ("1 AU", root, r_1au, v_1au, 1e-4),
         ("30 AU", root, r_30au, v_30au, 1e-3),
     ];

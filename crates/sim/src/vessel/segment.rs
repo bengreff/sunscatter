@@ -27,7 +27,7 @@ use super::limbo::Limbo;
 use crate::ephem::{Snapshot, SnapshotCache};
 use crate::forces::{ActiveSources, DragModel, ForceContext};
 use crate::frame::NodeId;
-use crate::integrate::{hermite5, Dopri5, Dynamics, NonFinite, StepSample, StepState, Tolerance};
+use crate::integrate::{hermite5, Dop853, Dopri5, Dynamics, NonFinite, StepSample, StepState, Tolerance};
 use crate::math::{Compensated, CompensatedScalar};
 use crate::time::Epoch;
 use crate::world::World;
@@ -35,9 +35,16 @@ use glam::DVec3;
 
 mod events;
 
-/// Integration tolerance for coasts (position ~1 cm absolute, 1e-11 relative).
+/// Integration tolerance for coasts and low-thrust burns, per step of
+/// [`Dop853`] (position 10 cm and velocity 10 µm/s absolute, 1e-10
+/// relative; steps of at most 3 h): over a day in LEO ~10 m from the
+/// converged orbit, against 53 m for the 1 cm per step of the former
+/// 5th-order integrator, in a third of the force evaluations. The 3 h cap bounds the error from the ephemeris
+/// acceleration's kinks at Chebyshev segment boundaries on heliocentric
+/// arcs (14 m over a year, 56 m before). `examples/bench_integrator`,
+/// `docs/features/scale-performance.md`.
 pub fn coast_tolerance() -> Tolerance {
-    Tolerance { abs_r: 1e-2, abs_v: 1e-5, rel: 1e-11, h_min: 1e-4, h_max: 6.0 * 3600.0 }
+    Tolerance { abs_r: 1e-1, abs_v: 1e-5, rel: 1e-10, h_min: 1e-4, h_max: 3.0 * 3600.0 }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -299,6 +306,10 @@ impl Segment {
     /// past it), the segment ends, or `max_steps` steps were taken. Returns
     /// the number of steps taken. Where it stops never changes the steps.
     pub fn extend_until(&mut self, world: &World, until: f64, max_steps: usize) -> usize {
+        // Coasts and low-thrust burns take the 8th-order method's long steps;
+        // a burn flown by ticks takes one short step per tick, where the
+        // 5th order's six evaluations a step are cheaper.
+        let coast = Dop853::new(coast_tolerance());
         let integ = Dopri5::new(coast_tolerance());
         let snaps = SnapshotCache::new(&world.eph);
         for taken in 0..max_steps {
@@ -343,7 +354,7 @@ impl Segment {
                         thrust: DVec3::ZERO,
                         limbo: self.limbo.as_deref(),
                     };
-                    integ.step(&f, &mut self.state, self.horizon)
+                    coast.step(&f, &mut self.state, self.horizon)
                 }
             };
             let Ok(sample) = step else {

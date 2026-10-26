@@ -31,9 +31,10 @@ use glam::{DMat3, DVec3};
 
 /// Budget units ([`Vessel::advance`]) are about a microsecond of work each
 /// on the reference Mac (D028), so a budget bounds a frame's time whatever
-/// the craft. One coast integration step: a perturbed step in low orbit
-/// takes 10–14 µs with the full Solar System (bare 6–10 µs).
-pub const STEP_UNITS: usize = 10;
+/// the craft. One coast integration step (8th order, 12 force
+/// evaluations): a perturbed step in low orbit takes ~18 µs with the full
+/// Solar System (bare ~11 µs), and covers ~6 minutes there.
+pub const STEP_UNITS: usize = 15;
 /// Units of a systems lattice step (the sunlight with eclipses at the
 /// vessel, then the systems).
 pub const SYSTEMS_UNITS: usize = 5;

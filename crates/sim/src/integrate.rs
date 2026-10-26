@@ -5,6 +5,8 @@
 //! * [`Dopri5`]: adaptive Dormand–Prince 5(4) for vessels, with compensated
 //!   summation. Its full state is a plain value ([`StepState`]), so integrating
 //!   in chunks is bit-identical to integrating in one go.
+//! * [`Dop853`]: adaptive Dormand–Prince 8(5,3), the same state and calls as
+//!   [`Dopri5`], far fewer steps at the coasts' tolerance.
 //! * [`hermite5`]: quintic Hermite interpolation between accepted steps (using
 //!   position, velocity and acceleration at both ends). Coast segments store only
 //!   step endpoints; this is the "dense output" the game evaluates.
@@ -12,6 +14,9 @@
 use crate::math::{Compensated, CompensatedScalar};
 use glam::DVec3;
 use serde::{Deserialize, Serialize};
+
+mod dop853;
+pub use dop853::Dop853;
 
 // ---------------------------------------------------------------------------
 // Symplectic composition (bodies)
