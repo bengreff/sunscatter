@@ -29,7 +29,9 @@
             // a few 1e-10. The table runs up to where the density is negligible
             // (~1e-14 kg/m3); `top` (live flight, rails floor) where it falls to ~2e-9 kg/m3. N2:
             // gamma 1.4, VHS collision diameter 4.17e-10 m (Bird 1994); Sutton-Graves for
-            // 95 % N2, 5 % CH4 by their mixing rule (TR R-376 eq. 44; aero::gas).
+            // the stratosphere and above, where entry heating peaks: 98.5 % N2, 1.5 % CH4
+            // (methane's 1.48 % there, Niemann et al. 2005), by their mixing rule (TR R-376
+            // eq. 44; thermal::heating::sutton_graves_mixture; 95.1/4.9 would give 1.7246e-4).
             top: 950000.0, gamma: 1.4, collision_diameter: 4.17e-10, sutton_graves_k: 1.7400e-4,
             gas: Nitrogen,
             // (altitude m, temperature K, pressure Pa, density kg/m3, mean molar mass kg/mol)

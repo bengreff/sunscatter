@@ -41,8 +41,10 @@ pub const DEFAULT_SWEEPS: usize = 128;
 
 /// Sweeps stop when the largest change is below this × the hottest temperature.
 pub const CONVERGED: f64 = 1e-13;
-/// The same for coast steps (minutes to a day long): ~0.03 mK. Their
-/// inputs are orbit averages, far coarser.
+/// The same for coast steps (minutes to a day long): a sweep's change
+/// below ~3 mK at 300 K; the result then lies within ~1–3 mK of the
+/// converged one at 10-minute steps and ~30 mK at day-long ones (measured,
+/// review of 2026-10-26). Their inputs are orbit averages, far coarser.
 pub const COAST_CONVERGED: f64 = 1e-5;
 /// How the interior is divided and joined (built per craft design).
 #[derive(Clone, Debug, PartialEq)]
