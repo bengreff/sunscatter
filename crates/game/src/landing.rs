@@ -153,16 +153,22 @@ pub fn draw(
     let Some(view) = map::view(&cam) else { return Ok(()) };
     let c = hit.ground_at(&sim.world, sim.clock, rig.anchor) - rig.cam_pos;
     let Some(s) = view.project(c) else { return Ok(()) };
+    // Not through the HUD's translucent panels: hidden where it falls
+    // behind the navball cluster, a dock or a top panel.
+    let hud = crate::interface::hud_rects(ctx);
+    let at = egui::pos2(s.x, s.y);
+    if crate::interface::layout::covered(egui::Rect::from_center_size(at, egui::vec2(18.0, 18.0)), &hud) {
+        return Ok(());
+    }
     let painter = ctx.layer_painter(egui::LayerId::background());
     let red = egui::Color32::from_rgb(255, 80, 60);
-    painter.circle_stroke(egui::pos2(s.x, s.y), 7.0, egui::Stroke::new(2.0, red));
-    painter.text(
-        egui::pos2(s.x + 10.0, s.y),
-        egui::Align2::LEFT_CENTER,
-        format!("impact in {}", format::duration(from_now(hit.t, sim.clock))),
-        egui::FontId::monospace(12.0),
-        red,
-    );
+    painter.circle_stroke(at, 7.0, egui::Stroke::new(2.0, red));
+    let text = format!("impact in {}", format::duration(from_now(hit.t, sim.clock)));
+    let label = painter.layout_no_wrap(text, egui::FontId::monospace(12.0), red);
+    let label_rect = egui::Rect::from_min_size(egui::pos2(s.x + 10.0, s.y - label.size().y * 0.5), label.size());
+    if !crate::interface::layout::covered(label_rect, &hud) {
+        painter.galley(label_rect.min, label, red);
+    }
     marker.drawn = true;
     Ok(())
 }

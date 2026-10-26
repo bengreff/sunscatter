@@ -66,6 +66,23 @@ pub fn apply_style(mut contexts: EguiContexts, iface: Res<InterfaceSettings>, mu
     Ok(())
 }
 
+/// Where the HUD's panels were drawn last frame (the navball cluster, the
+/// docks with menus in them, the time panel, the menu bar), for marks that
+/// must not show through them.
+pub fn hud_rects(ctx: &egui::Context) -> Vec<egui::Rect> {
+    let ids = [
+        egui::Id::new(crate::navball::AREA),
+        menus::render::dock_area(menus::Dock::Left),
+        menus::render::dock_area(menus::Dock::Right),
+        egui::Id::new(layout::TIME_AREA),
+        egui::Id::new(layout::BAR_AREA),
+    ];
+    ctx.memory(|m| {
+        let shown = |id: egui::Id| m.areas().visible_last_frame(&egui::LayerId::new(egui::Order::Middle, id));
+        ids.into_iter().filter(|id| shown(*id)).filter_map(|id| m.area_rect(id)).collect()
+    })
+}
+
 /// Draws a HUD panel at its designated place (D080): an egui area with the
 /// panel frame, anchored `offset` from a screen corner or edge (`align`).
 /// It is not dragged, and its area id (`id`) lets the docks keep clear.

@@ -146,6 +146,13 @@ pub fn stack(heights: &[f32], max_height: f32) -> Stack {
     Stack { tops, height: y, scrolls: y > max_height }
 }
 
+/// Whether a mark at `r` falls behind any of the HUD's panels (`hud`, as
+/// last drawn): such a mark is not drawn, so it does not show through
+/// their translucent backgrounds.
+pub fn covered(r: Rect, hud: &[Rect]) -> bool {
+    hud.iter().any(|h| h.intersects(r))
+}
+
 /// The top of the toasts: centred under the menu bar.
 pub fn toasts_top(bar: Option<Rect>) -> f32 {
     bar.map_or(MARGIN + 40.0, |b| b.max.y + GAP)
@@ -201,6 +208,27 @@ mod tests {
         }
         // Without the cluster drawn (the tracking station), to the bottom.
         assert_eq!(dock_place(Dock::Left, rect(0.0, 0.0, 900.0, 800.0), top, None).max_height, 706.0);
+    }
+
+    #[test]
+    fn marks_behind_a_panel_are_hidden() {
+        let cluster = rect(405.0, 542.0, 875.0, 792.0);
+        let dock = rect(10.0, 84.0, 310.0, 500.0);
+        let hud = [cluster, dock];
+        let mark = |x: f32, y: f32| Rect::from_center_size(pos2(x, y), bevy_egui::egui::vec2(18.0, 18.0));
+        // (mark, covered)
+        let table = [
+            (mark(640.0, 600.0), true),               // behind the speed digits
+            (mark(200.0, 300.0), true),               // behind the left dock
+            (mark(640.0, 300.0), false),              // open sky
+            (mark(400.0, 600.0), true),               // half over the cluster's edge
+            (mark(390.0, 600.0), false),              // just clear of it
+            (rect(330.0, 590.0, 450.0, 604.0), true), // a label reaching into it
+        ];
+        for (r, want) in table {
+            assert_eq!(covered(r, &hud), want, "{r:?}");
+        }
+        assert!(!covered(mark(640.0, 600.0), &[]), "no panels drawn: nothing hidden");
     }
 
     #[test]
