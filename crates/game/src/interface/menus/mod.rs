@@ -283,6 +283,19 @@ impl MenuSettings {
         self.expanded.clear();
     }
 
+    /// Opens only `menu` (or none) with `sections` expanded (the demo's
+    /// views).
+    pub fn show_only(&mut self, menu: Option<MenuId>, sections: &[&str]) {
+        for m in MenuId::ALL {
+            self.set_open(m, Some(m) == menu);
+        }
+        for (m, s) in menu.iter().flat_map(|m| sections.iter().map(move |s| (*m, *s))) {
+            if !self.is_expanded(m, s) {
+                self.toggle_section(m, s);
+            }
+        }
+    }
+
     /// The open menus of `dock`, top to bottom (menu order).
     pub fn in_dock(&self, dock: Dock) -> Vec<MenuId> {
         MenuId::ALL.into_iter().filter(|m| m.dock() == dock && self.is_open(*m)).collect()
@@ -352,6 +365,11 @@ mod tests {
         s.toggle_section(MenuId::Orbital, "target");
         s.collapse_all();
         assert!(!s.is_expanded(MenuId::Orbital, "target"));
+        s.show_only(Some(MenuId::Landing), &["reentry", "reentry"]);
+        assert_eq!(s.open, BTreeSet::from([MenuId::Landing]));
+        assert!(s.is_expanded(MenuId::Landing, "reentry"), "expanded once, not toggled back");
+        s.show_only(None, &[]);
+        assert!(s.open.is_empty() && s.is_expanded(MenuId::Landing, "reentry"));
     }
 
     #[test]

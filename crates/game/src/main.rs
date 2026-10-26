@@ -116,7 +116,7 @@ fn main() {
                 comms::update,
                 rendezvous::update,
                 map::update,
-                demo::check_map_view,
+                demo_checks::check_map_view,
                 demo_checks::log_fps,
             )
                 .chain()
@@ -169,7 +169,7 @@ fn main() {
                 .after(hud::draw),
         );
     if demo_mode {
-        app.add_plugins(demo_checks::PipelineGuardPlugin);
+        app.add_plugins(demo_checks::DemoChecksPlugin);
     }
     app.run();
 }

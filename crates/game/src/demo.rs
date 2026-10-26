@@ -6,11 +6,16 @@
 //! end, to judge visuals, and as a reproducible showcase.
 //!
 //! The script drives the same controls a player would, except that it holds
-//! attitude directly (magic attitude hold) like the scenario test.
+//! attitude directly (magic attitude hold) like the scenario test. It opens
+//! the task menus a view needs before its shot (D080): Orbital in orbit,
+//! Landing/Reentry from the deorbit to the ground; `demo_checks` checks
+//! that the impact marker is hidden whenever Landing is closed.
 
 use crate::bench::{self, Bench};
 use crate::camera::{self, CameraRig, Focus};
 use crate::hud::{PlotFrame, UiState};
+use crate::interface::layout::InterfaceSettings;
+use crate::interface::menus::MenuId;
 use crate::settings::{GraphicsSettings, Tier};
 use crate::state::{SimPause, SimState};
 use crate::terrain::Terrain;
@@ -27,7 +32,7 @@ const ZOOM_FAR: f64 = 2.0e7;
 const ZOOM_FRAMES: u32 = 40;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Step {
+pub(crate) enum Step {
     Pad,
     /// Opt-in (`SUNSCATTER_DEMO_ZOOM=1`, or a tier name): zoom out from 50 m to 20,000 km
     /// over the pad and back, at High, a screenshot every frame (the owner's
@@ -58,32 +63,6 @@ enum Step {
     Menu,
 }
 
-/// Checks, in code, what the map-view rule (D054) must show at each view,
-/// and panics (failing the run) if it doesn't.
-pub fn check_map_view(
-    demo: Option<Res<Demo>>,
-    sim: Res<SimState>,
-    map: Res<crate::map::MapView>,
-    station: Res<crate::tracking::TrackingStation>,
-) {
-    use crate::map_view::ObjectId;
-    let Some(demo) = demo else { return };
-    let ship = map.in_map(ObjectId::Vessel(sim.ship().id()));
-    let body = |name: &str| sim.world.find(name).map(|s| map.in_map(ObjectId::Body(s.node)));
-    match demo.step {
-        Step::Pad => assert!(!ship, "demo Pad: the ship must not be in map view"),
-        Step::Map if demo.shot_taken => {
-            assert!(ship, "demo Map: the ship must be in map view");
-            assert_eq!(body("Earth"), Some(false), "demo Map: Earth is drawn at full size");
-        }
-        Step::Tracking if station.open && demo.timer > 1.0 => {
-            assert_eq!(body("Moon"), Some(true), "demo tracking station: the Moon's orbit must show");
-            assert!(ship, "demo tracking station: the active vessel is pinned");
-        }
-        _ => {}
-    }
-}
-
 /// Capturing one view in every tier.
 struct Capture {
     view: &'static str,
@@ -102,16 +81,18 @@ pub struct Demo {
     /// egui draws into the same image, so the HUD is included.
     pub offscreen: Option<Handle<Image>>,
     dir: std::path::PathBuf,
-    step: Step,
-    timer: f64,
+    pub(crate) step: Step,
+    pub(crate) timer: f64,
     shots: u32,
-    shot_taken: bool,
+    pub(crate) shot_taken: bool,
     /// The camera yaw before the low ascent view looked back over land.
     land_view: Option<f64>,
     /// The settings screen's shot was taken (the Menu step).
     menu_shot: bool,
     /// The top-down pad view was captured.
     pad_top_done: bool,
+    /// The deorbit view (Landing open, the impact marker on) was captured.
+    deorbit_done: bool,
     zoom_sweep: bool,
     perf: PerfSample,
     capture: Option<Capture>,
@@ -150,6 +131,7 @@ impl Demo {
             land_view: None,
             menu_shot: false,
             pad_top_done: false,
+            deorbit_done: false,
             zoom_sweep: std::env::var_os("SUNSCATTER_DEMO_ZOOM").is_some(),
             perf: PerfSample::default(),
             capture: None,
@@ -267,6 +249,8 @@ pub fn run(
     mut menu: ResMut<crate::interface::pause::PauseMenu>,
     mut settings_ui: ResMut<crate::settings_ui::SettingsUi>,
     mut exit: MessageWriter<AppExit>,
+    mut iface: ResMut<InterfaceSettings>,
+    marker: Res<crate::landing::ImpactMarker>,
 ) {
     let Some(mut demo) = demo else { return };
     let dt = time.delta_secs_f64();
@@ -410,6 +394,7 @@ pub fn run(
         Step::Orbit => {
             if !demo.shot_taken {
                 demo.shot_taken = true;
+                iface.menus.show_only(Some(MenuId::Orbital), &["elements"]);
                 demo.capture("orbit_day");
                 // A playtest start in low orbit, out of debug mode.
                 let mut fleet = sim.fleet.clone();
@@ -564,6 +549,9 @@ pub fn run(
                     demo.next(Step::Perf(level + 1));
                 } else {
                     sim.fleet.truncate(1);
+                    // Landing stays closed through the burn: the impact
+                    // marker must not show (demo_checks).
+                    iface.menus.show_only(None, &[]);
                     *settings = settings.with_preset(demo.flying_tier);
                     rig.distance = 60.0;
                     sim.warp = 3;
@@ -580,7 +568,25 @@ pub fn run(
                 demo.next(Step::Fall);
             }
         }
+        Step::Fall if !demo.deorbit_done => {
+            // Landing/Reentry open, the clock held, Earth in view from afar
+            // until the impact marker is drawn (at most 6 s), then every tier.
+            iface.menus.show_only(Some(MenuId::Landing), &["braking", "reentry", "parachute"]);
+            pause.0 = true;
+            (rig.distance, rig.pitch) = (1.2e7, 0.8);
+            if marker.drawn || demo.timer > 6.0 {
+                if !marker.drawn {
+                    warn!("demo deorbit: no impact marker drawn with Landing open");
+                }
+                demo.deorbit_done = true;
+                demo.capture("deorbit");
+                pause.0 = false;
+            }
+        }
         Step::Fall => {
+            if rig.distance > 1e6 {
+                (rig.distance, rig.pitch) = (60.0, 0.12);
+            }
             // Drag coasts are stored segments too, so rails warp is valid in
             // the atmosphere; slow down only to watch the parachute.
             sim.warp = if alt > 100_000.0 {
