@@ -49,7 +49,7 @@ fn cone() -> &'static AeroBake {
     })
 }
 
-pub(super) fn craft_bake() -> &'static AeroBake {
+pub(crate) fn craft_bake() -> &'static AeroBake {
     static B: OnceLock<AeroBake> = OnceLock::new();
     B.get_or_init(|| bake(&test_craft().surface, &test_craft().cells, &BakeOptions::default()))
 }

@@ -293,3 +293,28 @@ fn a_sharp_cone_heats_like_tauber_s_cone() {
     // and the baked relief add ±10 %.
     assert!(n > 20 && (mean - 1.0).abs() < 0.12 && worst < 0.25, "{n} {mean} {worst}");
 }
+
+#[test]
+fn the_test_craft_s_nose_takes_the_stagnation_flux_and_its_lee_a_little() {
+    // Nose first at 65 km, 6 km/s, cold wall (300 K): the cells facing the
+    // flow (the nose cap, the fins' tops) take the stagnation flux at the
+    // nose radius (+0.5 %: λ/Rn 1.3e-3 there, Wilmoth's bridge begins), the
+    // aft-facing half at least the 3 % floor.
+    let c = crate::craft::test_craft();
+    let (cells, b) = (&c.cells.cells, crate::aero::tests::craft_bake());
+    let flow = earth_flow(65e3, 6000.0, -DVec3::Z, b.length);
+    let q0 = sutton_graves(SUTTON_GRAVES_EARTH, 2.0 * flow.q / (6000.0 * 6000.0), b.nose_radius_at(flow.dir), 6000.0)
+        * (1.0 - 300.0 / (flow.temperature * (1.0 + 0.2 * flow.mach * flow.mach)));
+    let wall = vec![300.0; cells.len()];
+    let air = FlowHeat { flow: &flow, sutton_graves_k: SUTTON_GRAVES_EARTH, radiative: None, wall: &wall };
+    let (mut out, mut scratch) = (vec![0.0; cells.len()], vec![0.0; cells.len()]);
+    cell_heat_flow(b, cells, Some(&air), DVec3::ZERO, &mut scratch, &mut out);
+    let flux: Vec<f64> = out.iter().zip(cells).map(|(h, c)| h / c.area).collect();
+    let max = flux.iter().fold(0.0f64, |m, &f| m.max(f));
+    assert!(max > 0.9 * q0 && max <= q0 * 1.01, "{max} vs {q0}");
+    for (cell, f) in cells.iter().zip(&flux) {
+        if cell.normal.z < -0.1 {
+            assert!(*f >= LEEWARD_FRACTION * q0 * (1.0 - 1e-9), "{f}");
+        }
+    }
+}

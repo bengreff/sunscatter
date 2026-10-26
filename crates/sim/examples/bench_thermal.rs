@@ -17,7 +17,7 @@ use glam::DVec3;
 use sim::craft::{stress, test_craft, CraftDesign};
 use sim::ephem::Ephemeris;
 use sim::kepler::Elements;
-use sim::thermal::{cell_heat, HeatInput, ThermalState, COAST_CONVERGED, CONVERGED, DEFAULT_SWEEPS, STEFAN_BOLTZMANN};
+use sim::thermal::{cell_heat_flow, ThermalState, COAST_CONVERGED, CONVERGED, DEFAULT_SWEEPS, STEFAN_BOLTZMANN};
 use sim::vessel::{quat_z_to, Attitude, Controls, HoldMode, Vessel, VesselId, LATTICE, TICK};
 use sim::world::World;
 use std::sync::Arc;
@@ -36,8 +36,14 @@ impl Case {
         let d = &self.design;
         let n = d.cells.len();
         let (mut heat, mut scratch) = (vec![0.0; n], vec![0.0; n]);
-        let input = HeatInput { flow_dir: -DVec3::Z, q_stag, sun };
-        cell_heat(&d.bake, &d.cells, &input, &mut scratch, &mut heat);
+        cell_heat_flow(&d.bake, &d.cells, None, sun, &mut scratch, &mut heat);
+        // The stagnation flux spread nose-first as f·sin^1.5 θ, at least 3 %
+        // (the heating's distribution before D085; a fixed load for timing).
+        d.bake.exposure_at(-DVec3::Z, &mut scratch);
+        for ((h, c), &f) in heat.iter_mut().zip(&d.cells).zip(&scratch) {
+            let s = c.normal.z.max(0.0);
+            *h += q_stag * (f * s * s.sqrt()).max(0.03) * c.area;
+        }
         heat
     }
 

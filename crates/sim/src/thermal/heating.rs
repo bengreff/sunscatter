@@ -1,5 +1,7 @@
-//! Heat into the skin cells: convective stagnation heating spread over the
-//! exposed cells, and sunlight (realism-1 §5b).
+//! Heat into the skin cells: the air's over the whole body, and sunlight
+//! (realism-1 §5b, D085). Until 2026-10-26 the stagnation flux was spread
+//! over the cells as f·sin^1.5 θ (a Lees-type falloff), at least 3 %; the
+//! boundary layer of every cell replaces it.
 //!
 //! * **Stagnation flux:** Sutton & Graves, "A General Stagnation-Point
 //!   Convective Heating Equation for Arbitrary Gas Mixtures", NASA TR R-376
@@ -28,11 +30,7 @@
 //!   polmes/aether and mitchwall85/physics_utils for all 19 f(V) points;
 //!   traj_calc, physics_utils and Flight-Heating for the cap), all
 //!   agreeing.
-//!   Added to the convective flux and spread over the cells the same way.
-//! * **Distribution:** each cell receives q̇·g, g = f·sin^1.5 θ (a Lees-type
-//!   falloff from the stagnation point with the local incidence; f the
-//!   cell's exposure), and at least [`LEEWARD_FRACTION`] of q̇ (leeward and
-//!   shadowed cells, base flow heating).
+//!   Added to the exposed cells as q̇·f·sin θ.
 //! * **Over the whole body** ([`cell_heat_flow`], D085): each cell's own
 //!   boundary layer (`aero::boundary`: the tangent-wedge edge state,
 //!   laminar and turbulent, transition by Re_θ, the skin's temperature)
@@ -174,38 +172,6 @@ pub fn sutton_graves(k: f64, rho: f64, nose_radius: f64, speed: f64) -> f64 {
         return 0.0;
     }
     k * (rho / nose_radius).sqrt() * speed * speed * speed
-}
-
-/// Fraction of the stagnation flux a cell receives: exposure × sin^1.5 θ,
-/// at least [`LEEWARD_FRACTION`].
-pub fn heating_shape(sin_theta: f64, exposure: f64) -> f64 {
-    let s = sin_theta.max(0.0);
-    (exposure * s * s.sqrt()).max(LEEWARD_FRACTION)
-}
-
-/// Inputs of [`cell_heat`] (body axes).
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct HeatInput {
-    /// Direction the air moves relative to the craft (unit).
-    pub flow_dir: DVec3,
-    /// Stagnation convective flux (W/m²), e.g. [`sutton_graves`].
-    pub q_stag: f64,
-    /// Sunlight flux vector (W/m², along the light); zero in shadow.
-    pub sun: DVec3,
-}
-
-/// Power absorbed by each cell (W) into `out`; `scratch` is a per-cell
-/// buffer (exposures).
-pub fn cell_heat(bake: &AeroBake, cells: &[Cell], input: &HeatInput, scratch: &mut [f64], out: &mut [f64]) {
-    out.fill(0.0);
-    if input.q_stag > 0.0 && input.flow_dir.length_squared() > 0.0 {
-        let d = input.flow_dir.normalize();
-        bake.exposure_at(d, scratch);
-        for ((o, c), &f) in out.iter_mut().zip(cells).zip(scratch.iter()) {
-            *o += input.q_stag * heating_shape(-c.normal.dot(d), f) * c.area;
-        }
-    }
-    sunlight(bake, cells, input.sun, scratch, out);
 }
 
 /// Sunlight absorbed by each cell (W), added to `out`.

@@ -17,7 +17,8 @@ use sim::craft::{cells, mesh, test_craft, CellOptions, Craft, Resolution};
 use sim::ephem::Ephemeris;
 use sim::kepler::Elements;
 use sim::sol;
-use sim::thermal::{cell_heat, HeatInput, ThermalState, COAST_CONVERGED, DEFAULT_SWEEPS};
+use sim::thermal::heating::SUTTON_GRAVES_EARTH;
+use sim::thermal::{cell_heat_flow, FlowHeat, ThermalState, COAST_CONVERGED, DEFAULT_SWEEPS};
 use sim::time::Epoch;
 use sim::vessel::{quat_z_to, Attitude, Controls, Phase, Vessel, VesselId, LATTICE, TICK};
 use sim::world::World;
@@ -211,8 +212,13 @@ fn pieces(d: &CraftDesign, propellant: f64, n: usize) -> [f64; 4] {
     let trans = per(&mut || sink += aero_forces(&d.bake, &flow(1.2), 0.45).0);
     let (c, m) = (d.cells.len(), d.nodes());
     let (mut heat, mut scratch) = (vec![0.0; c], vec![0.0; c]);
-    let input = HeatInput { flow_dir: dir, q_stag: 1e6, sun: DVec3::new(1361.0, 0.0, 0.0) };
-    let heating = per(&mut || cell_heat(&d.bake, &d.cells, &input, &mut scratch, &mut heat));
+    // Whole-body heating at the hypersonic flow's conditions (D085), the
+    // skin at 900 K.
+    let wall = vec![900.0; c];
+    let hot = flow(12.0);
+    let air = FlowHeat { flow: &hot, sutton_graves_k: SUTTON_GRAVES_EARTH, radiative: None, wall: &wall };
+    let sun = DVec3::new(1361.0, 0.0, 0.0);
+    let heating = per(&mut || cell_heat_flow(&d.bake, &d.cells, Some(&air), sun, &mut scratch, &mut heat));
     let mut cap = vec![0.0; m];
     d.node_capacity(propellant, &mut cap);
     let mut state = ThermalState::uniform(c, m, 290.0);
@@ -250,8 +256,7 @@ fn coast(w: &World, craft: &Craft, runs: usize) -> Coast {
     let d = craft.design();
     let (c, m) = (d.cells.len(), d.nodes());
     let (mut heat, mut scratch) = (vec![0.0; c], vec![0.0; c]);
-    let input = HeatInput { flow_dir: DVec3::ZERO, q_stag: 0.0, sun: DVec3::new(1361.0, 0.0, 0.0) };
-    cell_heat(&d.bake, &d.cells, &input, &mut scratch, &mut heat);
+    cell_heat_flow(&d.bake, &d.cells, None, DVec3::new(1361.0, 0.0, 0.0), &mut scratch, &mut heat);
     let mut cap = vec![0.0; m];
     d.node_capacity(craft.spec.propellant.capacity, &mut cap);
     let node_heat = vec![0.0; m];

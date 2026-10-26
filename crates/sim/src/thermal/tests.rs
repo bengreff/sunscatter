@@ -1,4 +1,4 @@
-use super::heating::{LEEWARD_FRACTION, SUTTON_GRAVES_EARTH, SUTTON_GRAVES_MARS};
+use super::heating::{SUTTON_GRAVES_EARTH, SUTTON_GRAVES_MARS};
 use super::*;
 use crate::aero::{bake, AeroBake, BakeOptions};
 use crate::craft::test_craft;
@@ -104,8 +104,16 @@ fn large_steps_are_stable() {
     let b = craft_bake();
     let mut heat = vec![0.0; cells.len()];
     let mut scratch = vec![0.0; cells.len()];
-    let input = HeatInput { flow_dir: -DVec3::Z, q_stag: 3.0e5, sun: DVec3::new(-1361.0, 0.0, 0.0) };
-    cell_heat(b, cells, &input, &mut scratch, &mut heat);
+    // A stagnation flux of 3e5 W/m² falling off as sin^1.5 θ (at least 3 %
+    // of it), and sunlight from the side.
+    b.exposure_at(-DVec3::Z, &mut scratch);
+    for ((h, c), &f) in heat.iter_mut().zip(cells).zip(&scratch) {
+        let s = c.normal.z.max(0.0);
+        *h = 3.0e5 * (f * s * s.sqrt()).max(0.03) * c.area;
+    }
+    let mut sun = vec![0.0; cells.len()];
+    cell_heat_flow(b, cells, None, DVec3::new(-1361.0, 0.0, 0.0), &mut scratch, &mut sun);
+    heat.iter_mut().zip(&sun).for_each(|(h, s)| *h += s);
     // Upper bound: every cell at its own radiative equilibrium under the
     // largest flux any cell receives.
     let peak = heat.iter().zip(cells).map(|(h, c)| h / c.area).fold(0.0, f64::max);
@@ -138,27 +146,6 @@ fn large_steps_are_stable() {
 }
 
 #[test]
-fn stagnation_cells_get_the_full_flux_and_leeward_cells_a_little() {
-    let cells = &test_craft().cells.cells;
-    let b = craft_bake();
-    let mut heat = vec![0.0; cells.len()];
-    let mut scratch = vec![0.0; cells.len()];
-    let q = 1.0e6;
-    cell_heat(b, cells, &HeatInput { flow_dir: -DVec3::Z, q_stag: q, sun: DVec3::ZERO }, &mut scratch, &mut heat);
-    let flux: Vec<f64> = heat.iter().zip(cells).map(|(h, c)| h / c.area).collect();
-    let max = flux.iter().fold(0.0f64, |m, &f| m.max(f));
-    // The nose's four cells around the tip tilt 15° (sin^1.5 θ = 0.949).
-    assert!(max > 0.94 * q && max <= q * (1.0 + 1e-12), "{max}");
-    for (i, c) in cells.iter().enumerate() {
-        // The whole back half (normals facing aft) gets the leeward fraction.
-        if c.normal.z < -0.1 {
-            assert!((flux[i] / q - LEEWARD_FRACTION).abs() < 1e-12, "cell {i}: {}", flux[i]);
-        }
-        assert!(flux[i] >= LEEWARD_FRACTION * q * (1.0 - 1e-12));
-    }
-}
-
-#[test]
 fn sunlight_is_absorbed_on_the_lit_silhouette() {
     let cells = &test_craft().cells.cells;
     let b = craft_bake();
@@ -166,13 +153,7 @@ fn sunlight_is_absorbed_on_the_lit_silhouette() {
     let mut scratch = vec![0.0; cells.len()];
     // Light travelling −Z (onto the nose); the bell is hidden behind the body.
     let s = 1361.0;
-    cell_heat(
-        b,
-        cells,
-        &HeatInput { flow_dir: DVec3::Z, q_stag: 0.0, sun: DVec3::new(0.0, 0.0, -s) },
-        &mut scratch,
-        &mut heat,
-    );
+    cell_heat_flow(b, cells, None, DVec3::new(0.0, 0.0, -s), &mut scratch, &mut heat);
     let total: f64 = heat.iter().sum();
     let want = 0.8 * s * b.sums_at(-DVec3::Z).area;
     assert!((total / want - 1.0).abs() < 0.01, "{total} vs {want}");
@@ -242,8 +223,7 @@ fn coast_steps_converge_in_few_sweeps_where_chains_of_rings_used_to_crawl() {
     let cells = &test_craft().cells.cells;
     let mut heat = vec![0.0; cells.len()];
     let mut scratch = vec![0.0; cells.len()];
-    let input = HeatInput { flow_dir: DVec3::ZERO, q_stag: 0.0, sun: DVec3::new(1361.0, 0.0, 0.0) };
-    cell_heat(craft_bake(), cells, &input, &mut scratch, &mut heat);
+    cell_heat_flow(craft_bake(), cells, None, DVec3::new(1361.0, 0.0, 0.0), &mut scratch, &mut heat);
     let node_heat = vec![0.0; net.nodes()];
     let mut s = ThermalState::uniform(cells.len(), net.nodes(), 290.0);
     for k in 0..10 {
@@ -325,8 +305,7 @@ fn the_node_network_is_stable_at_large_steps_and_fast_at_ticks() {
     let cells = &test_craft().cells.cells;
     let mut heat = vec![0.0; cells.len()];
     let mut scratch = vec![0.0; cells.len()];
-    let input = HeatInput { flow_dir: DVec3::ZERO, q_stag: 0.0, sun: DVec3::new(-1361.0, 0.0, 0.0) };
-    cell_heat(craft_bake(), cells, &input, &mut scratch, &mut heat);
+    cell_heat_flow(craft_bake(), cells, None, DVec3::new(-1361.0, 0.0, 0.0), &mut scratch, &mut heat);
     let mut node_heat = vec![0.0; net.nodes()];
     node_heat[d.engine_node as usize] = 1.0e3;
     let mut s = ThermalState::uniform(cells.len(), net.nodes(), 290.0);

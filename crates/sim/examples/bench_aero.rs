@@ -7,7 +7,8 @@
 use glam::DVec3;
 use sim::aero::{aero_forces, bake, BakeOptions, Flow};
 use sim::craft::test_craft;
-use sim::thermal::{cell_heat, HeatInput, ThermalState};
+use sim::thermal::heating::SUTTON_GRAVES_EARTH;
+use sim::thermal::{cell_heat_flow, FlowHeat, ThermalState};
 use std::time::Instant;
 
 fn main() {
@@ -68,8 +69,8 @@ fn main() {
         };
         let (f, m) = aero_forces(&b, &flow, 0.8);
         sink += f + m;
-        let input = HeatInput { flow_dir: dir, q_stag: 1e6, sun: DVec3::new(1361.0, 0.0, 0.0) };
-        cell_heat(&b, &c.cells.cells, &input, &mut exposure, &mut heat);
+        let air = FlowHeat { flow: &flow, sutton_graves_k: SUTTON_GRAVES_EARTH, radiative: None, wall: &state.skin };
+        cell_heat_flow(&b, &c.cells.cells, Some(&air), DVec3::new(1361.0, 0.0, 0.0), &mut exposure, &mut heat);
         net.step(&mut state, &heat, &node_heat, &cap, 3.0, 0.02, sim::thermal::DEFAULT_SWEEPS);
     }
     let us = clock.elapsed().as_secs_f64() * 1e6 / n as f64;
@@ -95,8 +96,22 @@ fn main() {
         };
         sink += aero_forces(&b, &flow, 0.8).0;
     });
-    let input = HeatInput { flow_dir: dir, q_stag: 1e6, sun: DVec3::new(1361.0, 0.0, 0.0) };
-    time("cell_heat (flow + sun)", &mut || cell_heat(&b, &c.cells.cells, &input, &mut exposure, &mut heat));
+    let flow = Flow {
+        dir,
+        q: 20e3,
+        mach: 12.0,
+        knudsen: 1e-4,
+        gamma: 1.4,
+        reynolds_per_m: 1e6,
+        temperature: 230.0,
+        speed: 3600.0,
+    };
+    let wall = state.skin.clone();
+    let air = FlowHeat { flow: &flow, sutton_graves_k: SUTTON_GRAVES_EARTH, radiative: None, wall: &wall };
+    let sun = DVec3::new(1361.0, 0.0, 0.0);
+    time("cell_heat_flow (flow + sun)", &mut || {
+        cell_heat_flow(&b, &c.cells.cells, Some(&air), sun, &mut exposure, &mut heat)
+    });
     let mut sweeps = 0;
     time("thermal step (20 ms)", &mut || {
         sweeps = net.step(&mut state, &heat, &node_heat, &cap, 3.0, 0.02, sim::thermal::DEFAULT_SWEEPS)
@@ -234,12 +249,11 @@ fn per_cell(name: &str, surface: &sim::craft::Surface, cells: &sim::craft::Cells
             sim::thermal::cell_heat_flow(&b, &cells.cells, Some(&air), DVec3::X * 1361.0, &mut scratch, &mut heat);
             sink += heat[0];
         });
-        let old_heat = HeatInput { flow_dir: d, q_stag: 1e5, sun: DVec3::X * 1361.0 };
-        let old = time(&mut || cell_heat(&b, &cells.cells, &old_heat, &mut scratch, &mut heat));
+
         let ns = |us: f64| us * 1e3 / n as f64;
         println!(
             "  {what}: aero_forces {adiabatic:.0} µs ({:.0} ns/cell), with skin temperatures {walled:.0} µs ({:.0}), \
-             of it friction {friction:.0} µs ({:.0}); cell_heat_flow {heating:.0} µs ({:.0}; the old cell_heat {old:.0} µs)",
+             of it friction {friction:.0} µs ({:.0}); cell_heat_flow {heating:.0} µs ({:.0})",
             ns(adiabatic),
             ns(walled),
             ns(friction),
