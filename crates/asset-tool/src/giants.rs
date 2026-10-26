@@ -158,8 +158,7 @@ fn zonal(name: &str) -> (usize, usize, Vec<[f32; 3]>) {
 pub fn read_fits(path: &Path) -> (usize, usize, Vec<f32>) {
     let raw = std::fs::read(path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
     let (w, h, start) = fits_header(&raw).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
-    let data =
-        raw[start..start + 4 * w * h].chunks_exact(4).map(|b| f32::from_be_bytes([b[0], b[1], b[2], b[3]])).collect();
+    let data = raw[start..start + 4 * w * h].as_chunks::<4>().0.iter().map(|b| f32::from_be_bytes(*b)).collect();
     (w, h, data)
 }
 
