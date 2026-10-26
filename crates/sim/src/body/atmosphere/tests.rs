@@ -105,6 +105,7 @@ fn bodies_without_a_table_keep_the_exponential_model() {
         collision_diameter: EARTH_AIR_COLLISION_DIAMETER,
         sutton_graves_k: 1.7415e-4,
         radiative_heating: None,
+        gas: Default::default(),
         table: None,
     };
     let s = atm.profile(7_200.0, 9.80665);

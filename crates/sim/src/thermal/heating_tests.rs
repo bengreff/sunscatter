@@ -23,6 +23,7 @@ fn earth_flow(altitude: f64, v: f64, dir: DVec3, length: f64) -> Flow {
         reynolds_per_m: a.rho * v / air::sutherland_viscosity(a.temperature),
         temperature: a.temperature,
         speed: v,
+        gas: Default::default(),
     }
 }
 
@@ -81,9 +82,10 @@ fn hypersonic_wedge_heating_is_tauber_s() {
     // V^3.37·(0.9 − h_w/H), ±15 % against his reference-enthalpy solutions.
     // Ours (perfect gas, Sutherland, Van Driest II with White's law; his:
     // Blasius and Schultz-Grunow at the reference enthalpy, equilibrium
-    // air) within 20 % laminar, 30 % turbulent to 5 km/s; at 7 km/s
-    // dissociation raises his reference state's ρ*·μ* and ours runs 25–35 %
-    // below his turbulent value (a perfect-gas limitation).
+    // air) within 20 % laminar, 30 % turbulent at 3.5 km/s; from 4.5 km/s
+    // the turbulent layer takes his relation where it is the larger (the
+    // perfect gas ran 25–35 % under it at 7 km/s: dissociation raises the
+    // real reference state's ρ*·μ*).
     let (x, tw) = (5.0, 1000.0);
     for (h, v) in [(40e3, 3500.0), (55e3, 5000.0), (60e3, 7000.0), (50e3, 7000.0)] {
         for deg in [10.0f64, 20.0, 40.0] {
@@ -114,7 +116,9 @@ fn hypersonic_wedge_heating_is_tauber_s() {
                 turb / 1e4,
                 tauber_turb / 1e4
             );
-            let turb_tolerance = if v > 6000.0 { 0.4 } else { 0.3 };
+            // Above 4.5 km/s the turbulent heating is at least Tauber's
+            // relation itself (real-gas reference state).
+            let turb_tolerance = if v > 4500.0 { 0.01 } else { 0.3 };
             assert!((lam / tauber_lam - 1.0).abs() < 0.2, "laminar {h} {v} {deg}: {lam} vs {tauber_lam}");
             assert!(
                 (turb / tauber_turb - 1.0).abs() < turb_tolerance,

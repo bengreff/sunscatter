@@ -61,6 +61,10 @@ pub struct Atmosphere {
     /// this atmosphere (`thermal::tauber_sutton`).
     #[serde(default)]
     pub radiative_heating: Option<crate::thermal::TauberSutton>,
+    /// The gas (viscosity, Prandtl number, equilibrium shock density ratio:
+    /// `aero::gas`); Earth air if not given.
+    #[serde(default)]
+    pub gas: crate::aero::gas::Gas,
     /// The tabulated profile; the exponential model without it.
     #[serde(default)]
     pub table: Option<AtmosphereTable>,

@@ -61,7 +61,7 @@ pub fn knudsen(mean_free_path: f64, length: f64) -> f64 {
 /// before nitrogen goes; it grows ~5 % per 8 km of altitude, which is left
 /// out (Cp,max ≈ 2 − ρ₁/ρ₂ moves by under 0.5 %). 6 at 2 km/s is the
 /// perfect-gas strong-shock limit, joining the table at 2.4 km/s.
-const SHOCK_DENSITY_RATIO: [(f64, f64); 17] = [
+pub(super) const SHOCK_DENSITY_RATIO: [(f64, f64); 17] = [
     (2_000.0, 6.0),
     (2_438.4, 7.208),
     (3_048.0, 9.196),
@@ -84,16 +84,7 @@ const SHOCK_DENSITY_RATIO: [(f64, f64); 17] = [
 /// Equilibrium-air normal-shock density ratio at `speed` (m/s): the
 /// table, linear between entries, 6 below 2 km/s, the last value above.
 pub fn shock_density_ratio(speed: f64) -> f64 {
-    let t = &SHOCK_DENSITY_RATIO;
-    if speed <= t[0].0 {
-        return t[0].1;
-    }
-    let k = t.partition_point(|e| e.0 <= speed);
-    if k >= t.len() {
-        return t[t.len() - 1].1;
-    }
-    let (a, b) = (t[k - 1], t[k]);
-    a.1 + (b.1 - a.1) * (speed - a.0) / (b.0 - a.0)
+    super::gas::Gas::Air.shock_density_ratio(speed)
 }
 
 /// The effective ratio of specific heats for the stagnation pressure at
@@ -101,8 +92,7 @@ pub fn shock_density_ratio(speed: f64) -> f64 {
 /// equilibrium air's at `speed`, ε = ρ₁/ρ₂, γ_eff = (1+ε)/(1−ε), never
 /// above the gas's own `gamma` (a perfect gas below ~2 km/s).
 pub fn real_gas_gamma(gamma: f64, speed: f64) -> f64 {
-    let eps = 1.0 / shock_density_ratio(speed);
-    ((1.0 + eps) / (1.0 - eps)).min(gamma)
+    super::gas::Gas::Air.real_gas_gamma(gamma, speed)
 }
 
 /// Stagnation pressure coefficient behind a normal shock (Rayleigh pitot

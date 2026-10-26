@@ -41,6 +41,7 @@ pub mod boundary;
 pub mod crossflow;
 mod fin_search;
 pub mod friction;
+pub mod gas;
 pub mod geodesic;
 pub mod relief;
 pub mod slender;
@@ -77,6 +78,8 @@ pub struct Flow {
     /// Airspeed (m/s), for the real-gas stagnation pressure; zero: a
     /// perfect gas.
     pub speed: f64,
+    /// The gas (viscosity, Prandtl number, shock density ratio).
+    pub gas: gas::Gas,
 }
 
 /// Wilmoth's rarefied bridging weight: C = C_cont + (C_fm − C_cont)·b with
@@ -118,7 +121,7 @@ fn pressure(bake: &AeroBake, s: &DirSums, d: DVec3, flow: &Flow, cd0: f64) -> (D
     let (mach, gamma) = (flow.mach, flow.gamma);
     let newtonian = |cp: f64| (s.newton * cp, s.newton_moment * cp);
     // Newtonian with the equilibrium-air stagnation pressure at entry speeds.
-    let g_eff = air::real_gas_gamma(gamma, flow.speed);
+    let g_eff = flow.gas.real_gas_gamma(gamma, flow.speed);
     if mach >= HYPERSONIC_MACH {
         return newtonian(air::cp_max(g_eff, mach));
     }

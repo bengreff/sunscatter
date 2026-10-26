@@ -63,6 +63,7 @@ fn centreline(p: &Point) -> (sim::aero::boundary::Edge, f64, f64) {
         reynolds_per_m: a.rho * p.speed / air::sutherland_viscosity(a.temperature),
         temperature: a.temperature,
         speed: p.speed,
+        gas: Default::default(),
     };
     let s = p.alpha.to_radians().sin();
     (Stream::of(&flow).edge(s, 1.0), a.rho * p.speed * CP, a.temperature)

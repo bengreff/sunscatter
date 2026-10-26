@@ -41,12 +41,18 @@
 //!   eq. 52: the form that fitted Zoby & Graves' flight and tunnel data
 //!   best): q̇ = St·ρ_e·u_e·c_p·(T_aw − T_w), T_aw = T_e·(1 + r·(γ−1)/2·M_e²),
 //!   r = √Pr laminar, ∛Pr turbulent. Negative when the wall is hotter than
-//!   the recovery temperature (the air cools it).
+//!   the recovery temperature (the air cools it). In air at entry speeds
+//!   the turbulent heating is at least Tauber's real-gas closed form
+//!   ([`Edge::tauber_turbulent`]): with a perfect gas the reference state
+//!   is far too hot once air dissociates.
+//! * **The gas** ([`super::gas`]): viscosity, Prandtl number and recovery
+//!   factors of the atmosphere's gas (air, CO₂, N₂).
 //!
 //! Per unit free stream: shear per unit q∞, heat flux per unit ρ∞·V·c_p
 //! (kelvin), so friction needs no airspeed or gas constant.
 
 use super::air;
+use super::gas::{Gas, Properties};
 use crate::math;
 
 /// Prandtl number of air.
@@ -87,6 +93,10 @@ pub const SLENDER_ONSET: [(f64, f64); 11] = [
     (14.0, 2.2e7),
     (14.7, 3.2e7),
 ];
+/// Tauber's real-gas turbulent heating of air is weighted in between these
+/// airspeeds (m/s; his relation holds above 3,962).
+const TAUBER_FROM: f64 = 3_500.0;
+const TAUBER_FULL: f64 = 4_500.0;
 /// Dhawan & Narasimha's intermittency constant.
 const DN: f64 = 0.412;
 /// ξ at the end of transition (γ = 0.99): √(ln 100 / 0.412).
@@ -107,6 +117,13 @@ pub struct Stream {
     kt: f64,
     /// (γ/2)·M²·Cp,max: p_e/p∞ = 1 + this·f·s².
     kp: f64,
+    /// The gas (viscosity, Prandtl number).
+    props: &'static Properties,
+    gas: Gas,
+    /// Airspeed (m/s) and density (kg/m³), for the real-gas turbulent
+    /// heating of air ([`Edge::tauber_turbulent`]); zero: none.
+    speed: f64,
+    rho: f64,
 }
 
 impl Stream {
@@ -115,21 +132,43 @@ impl Stream {
     /// `cp_max` (zero: no impact pressure).
     pub fn new(re_per_m: f64, mach: f64, gamma: f64, temperature: f64, cp_max: f64) -> Self {
         let m2 = mach * mach;
+        let props = Gas::Air.properties();
         Stream {
             mach,
             gamma,
             temperature,
             re_per_m,
-            mu: air::sutherland_viscosity(temperature),
+            mu: props.viscosity(temperature),
             kt: 0.5 * (gamma - 1.0) * m2,
             kp: 0.5 * gamma * m2 * cp_max,
+            props,
+            gas: Gas::Air,
+            speed: 0.0,
+            rho: 0.0,
         }
+    }
+
+    /// The same stream in `gas` (Earth air in [`Self::new`]).
+    pub fn with_gas(mut self, gas: Gas) -> Self {
+        self.props = gas.properties();
+        self.gas = gas;
+        self.mu = self.props.viscosity(self.temperature);
+        self
+    }
+
+    /// With the airspeed (m/s) and density (kg/m³) of the free stream.
+    pub fn with_speed(mut self, speed: f64, rho: f64) -> Self {
+        (self.speed, self.rho) = (speed, rho);
+        self
     }
 
     /// From an aerodynamic flow (Cp,max as the pressure model's).
     pub fn of(flow: &super::Flow) -> Self {
-        let cp = air::cp_max(air::real_gas_gamma(flow.gamma, flow.speed), flow.mach);
+        let cp = air::cp_max(flow.gas.real_gas_gamma(flow.gamma, flow.speed), flow.mach);
+        let rho = if flow.speed > 0.0 { 2.0 * flow.q / (flow.speed * flow.speed) } else { 0.0 };
         Stream::new(flow.reynolds_per_m, flow.mach, flow.gamma, flow.temperature, cp)
+            .with_gas(flow.gas)
+            .with_speed(flow.speed, rho)
     }
 
     /// The edge state of a cell at incidence `s` = sin θ (positive
@@ -141,7 +180,7 @@ impl Stream {
         let rho = (1.0 + impact) / tr;
         let u = (1.0 - s2).sqrt();
         let temperature = self.temperature * tr;
-        let mu = air::sutherland_viscosity(temperature);
+        let mu = self.props.viscosity(temperature);
         Edge {
             temperature,
             rho,
@@ -150,6 +189,12 @@ impl Stream {
             re_per_m: self.re_per_m * rho * u * self.mu / mu,
             mu,
             heating: self.kt * u * u,
+            props: self.props,
+            real: (self.gas == Gas::Air && self.speed > 0.0 && self.mach > 0.0 && s > 0.0).then(|| {
+                let r_gas = self.speed * self.speed / (self.gamma * self.mach * self.mach * self.temperature);
+                let cp = self.gamma * r_gas / (self.gamma - 1.0);
+                RealGas { rho: self.rho, speed: self.speed, cp, h_inf: cp * self.temperature, s: s.min(1.0) }
+            }),
         }
     }
 }
@@ -169,6 +214,23 @@ pub struct Edge {
     pub mu: f64,
     /// u_e²/(2·c_p·T∞) = (γ−1)/2·M²·(u_e/V)²: T_aw = T_e + r·T∞·this.
     heating: f64,
+    /// The gas.
+    props: &'static Properties,
+    /// Air's free stream on a windward cell, for the real-gas turbulent
+    /// heating ([`Self::tauber_turbulent`]).
+    real: Option<RealGas>,
+}
+
+/// What Tauber's real-gas turbulent relation needs of a windward cell.
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct RealGas {
+    /// Free-stream density (kg/m³), airspeed (m/s), c_p and enthalpy.
+    rho: f64,
+    speed: f64,
+    cp: f64,
+    h_inf: f64,
+    /// sin θ of the cell (the wedge angle's sine).
+    s: f64,
 }
 
 /// The layer on one cell (per unit free stream).
@@ -199,14 +261,14 @@ impl Edge {
     pub fn reference(&self, tw: f64) -> f64 {
         let te = self.temperature;
         let t_star = te * (1.0 + 0.032 * self.mach * self.mach + 0.58 * (tw / te - 1.0)).max(0.05);
-        te / t_star * air::sutherland_viscosity(t_star) / self.mu
+        te / t_star * self.props.viscosity(t_star) / self.mu
     }
 
     /// Van Driest II for a wall at `tw` (K): (1/F_c, F_Rx), c_f =
     /// c_f,inc(F_Rx·Re_x)/F_c.
     pub fn van_driest(&self, tw: f64, t_inf: f64) -> (f64, f64) {
         let te = self.temperature;
-        let m = TURBULENT_RECOVERY * t_inf * self.heating / te;
+        let m = self.props.turbulent_recovery * t_inf * self.heating / te;
         let w = tw / te;
         let fc = if m < 1e-12 {
             let h = 0.5 * (w.sqrt() + 1.0);
@@ -218,7 +280,7 @@ impl Edge {
             let s = asin_sum(((2.0 * a2 - b) / den).clamp(-1.0, 1.0), (b / den).clamp(-1.0, 1.0));
             m / (s * s)
         };
-        (1.0 / fc, self.mu / air::sutherland_viscosity(tw) / fc)
+        (1.0 / fc, self.mu / self.props.viscosity(tw) / fc)
     }
 
     /// Transition onset run length (m) for reference factor `c_star`, by the
@@ -266,7 +328,7 @@ impl Edge {
             return 0.0;
         }
         let cf = self.laminar_mean(self.reference(tw), a, b);
-        0.5 * COLBURN * self.rho * self.u * cf * (self.recovery(LAMINAR_RECOVERY, t_inf) - tw)
+        0.5 * self.props.colburn * self.rho * self.u * cf * (self.recovery(self.props.laminar_recovery, t_inf) - tw)
     }
 
     /// Turbulent skin-friction coefficient (on the edge's ½ρ_e·u_e²) at run
@@ -283,7 +345,39 @@ impl Edge {
             return 0.0;
         }
         let cf = self.turbulent_cf(x, tw, t_inf);
-        0.5 * COLBURN * self.rho * self.u * cf * (self.recovery(TURBULENT_RECOVERY, t_inf) - tw)
+        let ours = 0.5
+            * self.props.colburn
+            * self.rho
+            * self.u
+            * cf
+            * (self.recovery(self.props.turbulent_recovery, t_inf) - tw);
+        ours.max(self.tauber_turbulent(x, tw))
+    }
+
+    /// Turbulent heating of air at entry speeds with real-gas properties
+    /// (per unit ρ∞·V·c_p, K): Tauber's closed form of the reference-
+    /// enthalpy method for an inclined plate above 3,962 m/s, fitted to
+    /// equilibrium-air properties (Moeckel & Weston, Hansen) from 1 to
+    /// 11 km/s and 3 to 60 km, ±15 % (NASA TP-2914, eq. 56b): q̇ =
+    /// 2.45e-5·(ρ sin²δ cos^2.62 δ)^0.8·x^−0.2·V^3.7·(0.9 − h_w/H) W/m², x
+    /// the turbulent run (m). Weighted in from nothing at 3.5 km/s to full
+    /// at 4.5 km/s; zero for other gases, leeward cells and without the free
+    /// stream's speed. The layer takes the larger of it and the perfect-gas
+    /// value, which runs 25–35 % under it at 7 km/s (the perfect gas's
+    /// reference temperature is far too high once air dissociates).
+    pub fn tauber_turbulent(&self, x: f64, tw: f64) -> f64 {
+        let Some(r) = self.real else { return 0.0 };
+        let w = ((r.speed - TAUBER_FROM) / (TAUBER_FULL - TAUBER_FROM)).clamp(0.0, 1.0);
+        if w == 0.0 || x <= 0.0 {
+            return 0.0;
+        }
+        let pow = |v: f64, e: f64| if v > 0.0 { math::exp(e * math::ln(v)) } else { 0.0 };
+        let c2 = (1.0 - r.s * r.s).max(0.0);
+        // cos^2.62 δ = (cos² δ)^1.31.
+        let base = r.rho * r.s * r.s * pow(c2, 1.31);
+        let big_h = r.h_inf + 0.5 * r.speed * r.speed;
+        let q = 2.45e-5 * pow(base, 0.8) * pow(x, -0.2) * pow(r.speed, 3.7) * (0.9 - r.cp * tw / big_h);
+        w * q / (r.rho * r.speed * r.cp)
     }
 
     /// The layer over run lengths `a..b` (m, 0 ≤ a ≤ b; centre x =
@@ -302,7 +396,7 @@ impl Edge {
         if self.re_per_m <= 0.0 || x <= 0.0 {
             return Layer::default();
         }
-        let t_lam = wall.unwrap_or_else(|| self.recovery(LAMINAR_RECOVERY, t_inf));
+        let t_lam = wall.unwrap_or_else(|| self.recovery(self.props.laminar_recovery, t_inf));
         let c = self.reference(t_lam);
         let cf_lam = self.laminar_mean(c, a, b);
         // The first of the two criteria (the slender-cone one in the body's
@@ -321,7 +415,7 @@ impl Edge {
         };
         let (mut cf_turb, mut t_turb) = (0.0, 0.0);
         if gamma > 0.0 {
-            t_turb = wall.unwrap_or_else(|| self.recovery(TURBULENT_RECOVERY, t_inf));
+            t_turb = wall.unwrap_or_else(|| self.recovery(self.props.turbulent_recovery, t_inf));
             cf_turb = self.turbulent_cf(turbulent_x, t_turb, t_inf);
         }
         let mut layer = Layer {
@@ -331,10 +425,11 @@ impl Edge {
             ..Layer::default()
         };
         if heat {
-            let flux = 0.5 * COLBURN * self.rho * self.u;
-            layer.heat_laminar = flux * cf_lam * (self.recovery(LAMINAR_RECOVERY, t_inf) - t_lam);
+            let flux = 0.5 * self.props.colburn * self.rho * self.u;
+            layer.heat_laminar = flux * cf_lam * (self.recovery(self.props.laminar_recovery, t_inf) - t_lam);
             if gamma > 0.0 {
-                layer.heat_turbulent = flux * cf_turb * (self.recovery(TURBULENT_RECOVERY, t_inf) - t_turb);
+                let ours = flux * cf_turb * (self.recovery(self.props.turbulent_recovery, t_inf) - t_turb);
+                layer.heat_turbulent = ours.max(self.tauber_turbulent(turbulent_x, t_turb));
             }
         }
         layer

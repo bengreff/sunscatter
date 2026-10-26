@@ -66,6 +66,7 @@ fn main() {
             reynolds_per_m: 1e6,
             temperature: 230.0,
             speed: 3600.0,
+            gas: Default::default(),
         };
         let (f, m) = aero_forces(&b, &flow, 0.8);
         sink += f + m;
@@ -93,6 +94,7 @@ fn main() {
             reynolds_per_m: 1e6,
             temperature: 230.0,
             speed: 3600.0,
+            gas: Default::default(),
         };
         sink += aero_forces(&b, &flow, 0.8).0;
     });
@@ -105,6 +107,7 @@ fn main() {
         reynolds_per_m: 1e6,
         temperature: 230.0,
         speed: 3600.0,
+        gas: Default::default(),
     };
     let wall = state.skin.clone();
     let air = FlowHeat { flow: &flow, sutton_graves_k: SUTTON_GRAVES_EARTH, radiative: None, wall: &wall };
@@ -190,6 +193,7 @@ fn earth_flow(altitude: f64, v: f64, dir: DVec3, length: f64) -> Flow {
         reynolds_per_m: a.rho * v / sim::aero::air::sutherland_viscosity(a.temperature),
         temperature: a.temperature,
         speed: v,
+        gas: Default::default(),
     }
 }
 

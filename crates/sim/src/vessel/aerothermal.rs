@@ -234,6 +234,8 @@ pub struct Air {
     /// Static temperature (K).
     pub temperature: f64,
     pub gamma: f64,
+    /// The gas (viscosity, Prandtl number, shock density ratio).
+    pub gas: aero::gas::Gas,
     pub sutton_graves_k: f64,
     pub radiative_heating: Option<thermal::TauberSutton>,
 }
@@ -267,6 +269,7 @@ pub fn air_at(world: &World, snap: &Snapshot, anchor: NodeId, r: DVec3, v: DVec3
             mean_free_path: state.mean_free_path,
             temperature: state.temperature,
             gamma: atm.gamma,
+            gas: atm.gas,
             sutton_graves_k: atm.sutton_graves_k,
             radiative_heating: atm.radiative_heating,
         });
@@ -298,6 +301,7 @@ pub struct AeroTick<'a> {
     reynolds_per_m: f64,
     temperature: f64,
     speed: f64,
+    gas: aero::gas::Gas,
     /// Centre of mass (body axes).
     com: DVec3,
     /// Parachute: Cd·A (m²) and mount (body axes), if deployed.
@@ -327,9 +331,10 @@ impl<'a> AeroTick<'a> {
             mach: speed / air.speed_of_sound,
             knudsen: aero::air::knudsen(air.mean_free_path, design.bake.length),
             gamma: air.gamma,
-            reynolds_per_m: air.rho * speed / aero::air::sutherland_viscosity(air.temperature),
+            reynolds_per_m: air.rho * speed / air.gas.viscosity(air.temperature),
             temperature: air.temperature,
             speed,
+            gas: air.gas,
             com,
             chute,
             layer: None,
@@ -364,6 +369,7 @@ impl<'a> AeroTick<'a> {
             reynolds_per_m,
             temperature,
             speed,
+            gas: self.gas,
         }
     }
 

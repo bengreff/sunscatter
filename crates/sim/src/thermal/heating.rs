@@ -165,6 +165,46 @@ pub fn tauber_sutton(model: TauberSutton, rho: f64, nose_radius: f64, speed: f64
 /// Heating of leeward and shadowed cells as a fraction of the stagnation flux.
 pub const LEEWARD_FRACTION: f64 = 0.03;
 
+/// A species of Sutton & Graves' mixing rule ([`sutton_graves_mixture`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Species {
+    N2,
+    CO2,
+    CH4,
+    Ar,
+}
+
+impl Species {
+    /// Sutton & Graves' constant K (kg/(s·m^1.5·atm^0.5), NASA TR R-376,
+    /// Table II) and the molar mass (kg/mol).
+    fn constants(self) -> (f64, f64) {
+        match self {
+            Species::N2 => (0.1112, 0.028_013_4),
+            Species::CO2 => (0.1210, 0.044_009_5),
+            Species::CH4 => (0.0807, 0.016_043),
+            Species::Ar => (0.1495, 0.039_948),
+        }
+    }
+}
+
+/// Sutton & Graves' constant (SI, as [`sutton_graves`]) of a gas mixture
+/// given as (species, mole fraction): their mixing rule 1/K² = Σ cᵢ/Kᵢ²
+/// over mass fractions cᵢ (TR R-376, eq. 44), converted with the
+/// stagnation pressure ρV² (atm) and enthalpy V²/2: k = K/(2√101325).
+/// Mars (95.3 % CO₂, 2.7 % N₂, 1.6 % Ar) 1.9024e-4, Venus (96.5 % CO₂,
+/// 3.5 % N₂) 1.8967e-4, Titan's upper atmosphere (98.5 % N₂, 1.5 % CH₄)
+/// 1.7400e-4.
+pub fn sutton_graves_mixture(mixture: &[(Species, f64)]) -> f64 {
+    let mass: f64 = mixture.iter().map(|&(s, x)| x * s.constants().1).sum();
+    let inv: f64 = (mixture.iter())
+        .map(|&(s, x)| {
+            let (k, m) = s.constants();
+            x * m / mass / (k * k)
+        })
+        .sum();
+    1.0 / inv.sqrt() / (2.0 * 101_325f64.sqrt())
+}
+
 /// Stagnation-point convective heat flux (W/m²) at density `rho` (kg/m³),
 /// nose radius `nose_radius` (m) and airspeed `speed` (m/s).
 pub fn sutton_graves(k: f64, rho: f64, nose_radius: f64, speed: f64) -> f64 {
