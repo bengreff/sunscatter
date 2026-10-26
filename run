@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# Run the game.
+#
+#   ./run           the game (release build)
+#   ./run dev       faster rebuilds while iterating (Bevy dynamic linking; never for releases)
+#   ./run play      the 2026-10-01 low-orbit playtest save (in its own home dir; press F9 at the pad)
+#
+# Environment variables still apply, e.g. `SUNSCATTER_TIER=low ./run` (see CLAUDE.md).
+set -euo pipefail
+cd "$(dirname "$0")"
+
+mode=${1:-}
+case "$mode" in
+  "" | --) features=() ;;
+  dev) features=(--features dev); shift ;;
+  play)
+    shift
+    home=${TMPDIR:-/tmp}/sunscatter-play
+    mkdir -p "$home/saves"
+    cp docs/plans/playtest-2026-10-01-orbit.ron "$home/saves/quicksave.ron"
+    export SUNSCATTER_HOME=$home
+    echo "Playtest save ready: press F9 at the pad (saves and settings in $home)."
+    features=()
+    ;;
+  -h | --help | help) sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+  *) echo "unknown mode '$mode' (try ./run help)" >&2; exit 2 ;;
+esac
+[ "${1:-}" = "--" ] && shift
+exec cargo run -p game --release ${features[@]+"${features[@]}"} -- "$@"
