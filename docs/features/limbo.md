@@ -86,7 +86,7 @@ Code: `sim::vessel::pointing` (attitude laws, the regime rule), `sim::vessel::li
 | 20-day 2 N spiral from 1,000 km | 778.2 m/s (rocket eq.) | Edelbaum 776.3 m/s |
 | Hand-over from a decaying 165 km orbit | live at 140.8 km, q 0.100 Pa; energy loss 0.7 J/(kg·s) live, 0.7 in the coast at the boundary | — |
 | Anchor invariance (drag, light, 1 N), Earth vs Earth–Moon barycentre | 3.4 mm in 6 h | rule 1 |
-| Cost at 1,000,000× (release, one thread) | per vessel per frame: LEO drag 5.8 ms, low thrust 4.0 ms, high orbit 1.1 ms; ten craft 41 ms serially, never compute-limited; a perturbed LEO step 14 µs (bare 10 µs) | the game advances vessels in parallel |
+| Cost at 1,000,000× (release, one thread, after 30 days to settle) | per vessel per frame: LEO drag at 250–370 km 7.3 ms (integration 3.8, lattices 3.0), low thrust 3.8 ms, high orbit 1.1 ms, mean 4.7 ms; ten craft 47 ms serially, never compute-limited, 1,000,000× reached; a perturbed LEO step 14–16 µs (bare 10–11 µs with the full Solar System); 1,000×: 3 µs | the game advances vessels in parallel (`ComputeTaskPool`) |
 
 **Not done / limits:**
 - The coast thermal lattice takes the thin air's free-molecular heating ½ρv³ (bridged in Kn) on the cells facing it, orbit-averaged like the sunlight (12 samples; tested: 49.5 W/m² at 200 km = ½ρv³); the continuum heating of the transitional regime just above the boundary is not modelled (the bridge lowers the flux towards it).
