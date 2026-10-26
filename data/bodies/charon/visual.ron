@@ -15,6 +15,9 @@
         list: [
             (name: "dark terrain", source: (61, 61, 61), albedo: Some((0.093, 0.091, 0.087)),
                 pattern: (scale_m: 1500.0, contrast: 0.1)),
+            // Mordor Macula: Charon's dark red north polar cap of tholins (Grundy et al. 2016, Nature 539, 65).
+            (name: "Mordor Macula", source: (50, 50, 50), albedo: Some((0.180, 0.120, 0.085)), min_abs_lat: Some(55.0),
+                pattern: (scale_m: 1500.0, contrast: 0.08)),
             (name: "plains", source: (115, 115, 115), albedo: Some((0.177, 0.173, 0.166)),
                 pattern: (scale_m: 1000.0, contrast: 0.1)),
             (name: "bright plains", source: (145, 145, 145), albedo: Some((0.228, 0.223, 0.214)),
