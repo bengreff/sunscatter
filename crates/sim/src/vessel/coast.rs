@@ -29,9 +29,26 @@ use crate::time::Epoch;
 use crate::world::World;
 use glam::{DMat3, DVec3};
 
-/// Budget units of one coast thermal solve (~200 µs against ~7 µs per
-/// integration step; [`Vessel::advance`]).
-pub const THERMAL_SOLVE_UNITS: usize = 30;
+/// Budget units ([`Vessel::advance`]) are about a microsecond of work each
+/// on the reference Mac (D028), so a budget bounds a frame's time whatever
+/// the craft. One coast integration step: a perturbed step in low orbit
+/// takes 10–14 µs with the full Solar System (bare 6–10 µs).
+pub const STEP_UNITS: usize = 10;
+/// Units of a systems lattice step (the sunlight with eclipses at the
+/// vessel, then the systems).
+pub const SYSTEMS_UNITS: usize = 5;
+/// Units of a coast thermal lattice point that is passed or skipped.
+pub const POINT_UNITS: usize = 1;
+
+/// Units of a coast thermal solve of `design` with `samples` heat-input
+/// samples (sunlight and air directions averaged): the network's solve,
+/// ~10 sweeps of ~12 ns per unknown (`examples/bench_thermal`), and each
+/// sample's heating of every cell, ~3 ns. A 300-part stress craft held
+/// prograde (24 samples, 6,042 unknowns): ~1,150; the test craft ~120.
+pub fn solve_units(design: &crate::craft::CraftDesign, samples: usize) -> usize {
+    let cells = design.cells.len();
+    10 + (cells + design.nodes()) / 8 + cells * samples.max(1) / 300
+}
 
 /// What a coasting advance did.
 pub(super) struct Coasted {
@@ -45,8 +62,24 @@ pub(super) struct Coasted {
 pub(super) struct Budget {
     /// Coast integration steps.
     pub steps: usize,
-    /// Coast thermal work units.
+    /// Units for the lattices (thermal and systems).
     pub thermal: usize,
+    /// Units spent so far (integration and lattices).
+    pub spent: usize,
+}
+
+impl Budget {
+    /// A budget of `units` for the integration (in steps of [`STEP_UNITS`],
+    /// at least one) and as many for the lattices.
+    pub fn new(units: usize) -> Self {
+        Budget { steps: (units / STEP_UNITS).max(1), thermal: units, spent: 0 }
+    }
+
+    /// Charges `units` of lattice work.
+    fn charge(&mut self, units: usize) {
+        self.thermal = self.thermal.saturating_sub(units);
+        self.spent = self.spent.saturating_add(units);
+    }
 }
 
 impl Vessel {
@@ -133,7 +166,9 @@ impl Vessel {
             self.attitude = trajectory.refly(world, self.attitude, control);
             self.control = control;
         }
-        budget.steps -= trajectory.extend(world, &self.plan, target, budget.steps);
+        let steps = trajectory.extend(world, &self.plan, target, budget.steps);
+        budget.steps -= steps;
+        budget.spent += steps * STEP_UNITS;
         let computed = trajectory.computed_until();
         let at_end = target.seconds_since(computed) >= 0.0;
         let mut reach = if at_end { computed } else { target };
@@ -182,11 +217,12 @@ impl Vessel {
                 t = e;
                 let (anchor, r, _) = trajectory.eval(e).expect("the lattice epoch is in the trajectory");
                 self.systems.step(&Vessel::systems_env(world, e, (anchor, r), self.attitude.q, propellant_at(e)));
-                budget.thermal = budget.thermal.saturating_sub(1);
+                budget.charge(SYSTEMS_UNITS);
                 continue;
             }
             if fly.still(&self.attitude, &self.control, t, e) && self.thermal.passes(e) {
                 self.thermal.pass(e);
+                budget.charge(POINT_UNITS);
                 continue;
             }
             settled = fly.attitude(&mut self.attitude, &mut self.control, (t, e), &inertia_at, stop_settled);
@@ -199,8 +235,9 @@ impl Vessel {
             let known = pointing.filter(|p| p.is_known());
             let mut suns = super::coast_heat::coast_suns(world, e, state, known, &self.attitude);
             suns.air = super::coast_heat::coast_air(world, e, state, known, &self.attitude, design.bake.length);
+            let units = solve_units(&design, suns.suns.len() + suns.air.len());
             let solved = aerothermal::coast_step(&design, &mut self.thermal, &suns, propellant_at(e), e, false);
-            budget.thermal = budget.thermal.saturating_sub(if solved { THERMAL_SOLVE_UNITS } else { 1 });
+            budget.charge(if solved { units } else { POINT_UNITS });
         }
         if let Some(s) = settled {
             reach = if s > self.time { s } else { self.time };
