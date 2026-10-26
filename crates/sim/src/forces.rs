@@ -133,10 +133,18 @@ impl ForceContext<'_> {
         let mut a = -anchor_kin.a + self.thrust;
         let mut u = 0.0;
         let mut active = self.active.0.iter().peekable();
+        // A far moon system pulls as one mass at its barycenter (D023
+        // clusters, `World::open_clusters`): its members do not count, or
+        // near it its stand-in does not.
+        let open = self.world.open_clusters(snap, self.anchor, r);
         for (i, s) in self.world.sources.iter().enumerate() {
+            let is_active = active.next_if_eq(&&i).is_some();
+            if !self.world.counts(i, open) {
+                continue;
+            }
             // Positions only, except where a velocity is needed (drag, 1PN).
             let r_s = snap.relative_r(s.node, self.anchor);
-            if active.next_if_eq(&&i).is_none() {
+            if !is_active {
                 // Cut: it pulls the vessel as it pulls the anchor, which
                 // cancels its share of the anchor's acceleration (rule 1).
                 if s.node != self.anchor {
