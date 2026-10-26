@@ -2,12 +2,12 @@
 
 A SessionStart hook loads this file automatically after `/clear` or at startup. It is kept current by `/handoff`.
 
-*Updated 2026-10-25 (night), after the crisp-surfaces and flight-menus builds.*
+*Updated 2026-10-26 (night), at the start of an overnight run.*
 
 ## Your first job
 
-1. **The owner plays the new build** (the 2026-10-01 orbit save, `docs/plans/playtest-2026-10-01.md` for the command) and judges the 2026-10-25 changes ([record](interview-2026-10-25.md); D073 revised, D080): crisp zones and the raymarched sky (`docs/features/crisp-surfaces.md`), the navball cluster and task menus (`docs/features/flight-menus.md`). Record the answers as before.
-2. Open with the owner: Earth from low orbit is crisp but low-contrast under the physical haze (`docs/plans/open-issues.md`, Surfaces): keep physical, lower the default, or verify Bevy's in-scatter first. The four 2026-10-01 playtest questions (RCS turns, apsides, bell heat, chutes) are still unanswered.
+1. **Overnight run in progress (2026-10-26):** the owner answered ten questions ([record](interview-2026-10-26.md); D081–D085) and went to bed. The plan and its phases: [overnight-2026-10-26.md](overnight-2026-10-26.md) (SOL, BENCH, LIMBO, then PARTS, PERF, AERO, then PROXIMITY). Check which workstreams are done (`git log`), continue the plan, verify with offscreen demos, review, then the Windows run and a morning report.
+2. The owner liked the 2026-10-25 builds ("Looks great"). Still open with them: Earth's haze from low orbit (`open-issues.md`), the four 2026-10-01 playtest questions.
 
 ## Read, in this order
 

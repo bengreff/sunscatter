@@ -349,6 +349,25 @@ A craft declares its reaction-control thrusters (thrust, Isp, fore and aft ring 
 - The detailed ship-systems view (an abstracted schematic of the ship, no planets) is still a separate screen, built once ships have systems; Utilities is its brief summary.
 - GUI style: clean sci-fi, function first.
 
+**D081: Scale: 50 craft of ~300 parts to 1,000,000×; live physics for a few, "limbo" for many.** *Decided, 2026-10-26 (owner).*
+- The target: 50 craft of ~300 parts each in one game, at every warp up to 1,000,000×.
+- **Live physics** (fixed ticks, contact, full aero) is needed for 1–3 craft at a time, at low warp.
+- **Limbo:** 10 or more craft at once on rails under continuous forces: low thrust, upper-atmosphere drag, radiation pressure. Their internal systems (thermal, propellant, power, consumables) evolve on fixed time lattices. Nothing a limbo craft does may change with the warp rate: chunked equals single pass (rule 4), tested.
+- Craft creation stays with the owner. A synthetic stress-craft generator, with placeholder part properties, exists only for benchmarks and tests.
+- Live craft cap the warp: rails warp is refused while any craft is in live physics, with the reason shown.
+
+**D082: Craft within 10 km share live physics and collide.** *Decided, 2026-10-26 (owner).*
+Craft within 10 km of a controllable craft in live physics fly live with it in a shared local frame, and craft collide with each other (rigid-body contact). Docking ports come later.
+
+**D083: Debris is a full vessel until it is dead, uncontrollable and 10 km from every controllable craft.** *Decided, 2026-10-26 (owner).*
+A piece that breaks off becomes a vessel with its own trajectory, aerodynamics and heating. It is deleted only if it is totally uncontrollable and dead **and** 10 km or more from every controllable craft; until then it is fully simulated.
+
+**D084: The Solar System follows the D014 rule, largest bodies first.** *Decided, 2026-10-26 (owner).*
+First every planet, dwarf planet and moon over 100 km radius, through the motion-model pipeline (rails or tables by measured residual). Each gets its physical data: GM, radii, rotation, J2, and an atmosphere where real (Venus, Mars, Titan). Moons over 5 km follow.
+
+**D085: Aerodynamics: full-body cells with boundary-layer turbulence, fast enough for breakups.** *Decided, 2026-10-26 (owner).*
+Close the D070 gaps listed in `docs/design/aero-thermal.md`. Model laminar–turbulent transition and its effect on friction and heating over the whole body. Stay fast enough for 1–2 large craft live, or many small pieces after a breakup.
+
 ## Open questions
 
 1. What kind of organization the player leads (D027).
