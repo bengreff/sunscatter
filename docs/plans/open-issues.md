@@ -1,4 +1,4 @@
-# Open issues, 2026-09-27 (updated 2026-09-30 after playtest-1)
+# Open issues, 2026-09-27 (updated 2026-10-25 after the crisp-surfaces and flight-menus builds)
 
 Everything known to be open after the realism-1 build, for the next owner interview. Nothing here is being fixed yet (owner, 2026-09-27). Sources: the owner's play, `docs/reviews/2026-09-26-code-review.md`, `docs/design/aero-thermal.md` (limitations), and the agents' reports.
 
@@ -22,6 +22,15 @@ Defaults taken 2026-09-30 while the owner was away (each reversible, recorded as
 
 Settled 2026-09-28: haze (moot, D073), chute (keep), stability (finned rocket, D074).
 Settled 2026-10-01 (owner): a full craft tearing its mains is kept (D079); nose-first reentry overheating is accepted, heat shield later as a part (D064); SAS on a slope kept (D078); near-circular Ap/Pe plain (D076).
+
+## Surfaces (D073, 2026-10-25)
+
+- **Earth from low orbit is still low-contrast under blue haze**, though coasts and zones are now crisp (demo `orbit_down`, 300 km, looking down ~70°, a winter afternoon with the Sun ~60° from the zenith). Measured: sea linear (0.044, 0.080, 0.165), forest land barely brighter; the in-scatter is ~1.5–2× a single-scattering Rayleigh estimate (multiple scattering accounts for part). Not tuned by eye. To decide with the owner: physical haze (default 1) or a lower default; or verify Bevy's in-scatter at this geometry against an independent calculation first.
+- **Zone albedos** (`visual.ron`, cited per zone) were chosen inside published ranges; the Gao 2005 and Tsvetsinskaya 2002 tables were paywalled and quoted from memory: verify them.
+- **The Moon close up** (4 km, low Sun) looks like grey clouds with straight seams between terrain chunks, in every tier (older than the zones). Likely causes (read from code, not verified): geomorphing moves positions but not normals; the mesh undersamples the procedural relief; the detail uv wraps every 6.4 km on the Moon. Real lunar terrain needs craters at every scale: a sim-side terrain feature (D047, D059).
+- The coast at the pad is only as good as the 4–5 km maps: the Atlantic is ~0.6 km east of LC-39A and is not seen from the pad (a launch-site patch was declined 2026-09-28).
+- Zone edges show small "beads" where a third zone has a single texel; coastlines seen from under ~100 m may show 2–5 m steps (f32 texture coordinates).
+- Frame cost of the zones not measured yet (`bench` row "Minimal −zones").
 
 ## Physics and model gaps
 

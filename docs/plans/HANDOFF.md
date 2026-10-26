@@ -2,12 +2,12 @@
 
 A SessionStart hook loads this file automatically after `/clear` or at startup. It is kept current by `/handoff`.
 
-*Updated 2026-10-25, while two agents build the owner's 2026-10-25 feedback.*
+*Updated 2026-10-25 (night), after the crisp-surfaces and flight-menus builds.*
 
 ## Your first job
 
-1. **In progress (2026-10-25):** the owner flew the playtest save and asked for crisp surfaces and a task-menu HUD ([record](interview-2026-10-25.md); D073 revised, D080). Two agents build it in parallel: `docs/features/crisp-surfaces.md` (zones baked from the real data, sharpened procedurally; Minimal's atmosphere raymarched from outside) and `docs/features/flight-menus.md` (navball essentials, Orbital / Landing / Utilities / Staging menus in fixed docks). The lead verifies both with offscreen demo screenshots, then hands the game to the owner.
-2. The four playtest questions of `docs/plans/playtest-2026-10-01.md` (RCS turns, apsides, bell heat, chutes) are still unanswered.
+1. **The owner plays the new build** (the 2026-10-01 orbit save, `docs/plans/playtest-2026-10-01.md` for the command) and judges the 2026-10-25 changes ([record](interview-2026-10-25.md); D073 revised, D080): crisp zones and the raymarched sky (`docs/features/crisp-surfaces.md`), the navball cluster and task menus (`docs/features/flight-menus.md`). Record the answers as before.
+2. Open with the owner: Earth from low orbit is crisp but low-contrast under the physical haze (`docs/plans/open-issues.md`, Surfaces): keep physical, lower the default, or verify Bevy's in-scatter first. The four 2026-10-01 playtest questions (RCS turns, apsides, bell heat, chutes) are still unanswered.
 
 ## Read, in this order
 
@@ -19,8 +19,11 @@ A SessionStart hook loads this file automatically after `/clear` or at startup. 
 
 ## State
 
-- playtest-1 is built, verified by a full offscreen demo, and polished: sourced chute (two Apollo drogues, four reefed Apollo mains, tearing on overload, D079), bell cooling after cutoff (coast thermal lattice from the skin time constant), SP-3093 shock density ratio, aero constants checked (Tauber–Sutton Earth still unchecked: skipped, lunar return only).
-- Last commits `fb285e1` (chutes), `b63b84f` (playtest save carries the current craft, with a test), `8097a9c` (playtest doc). CI green on the two pushes before; the chute pushes were running at handoff (check `gh run list --limit 3`).
+- **2026-10-25 builds** (two agents in parallel, lead verified with offscreen demos):
+  - Crisp surfaces (D073): `asset-tool zones` classifies each body's maps into `zones.png` (Earth 12 zones, Moon 4); the terrain shader draws them crisp at every distance (one domain warp for zones and coast, coast thresholded per pixel, zone edges from 4 texels, per-zone pattern, sourced albedos); Minimal's sky is raymarched from outside the atmosphere (`atmosphere::raymarch`); the sky-light stand-in lights only the body whose air the camera is in; a stronger near-ground pattern.
+  - Flight menus (D080): navball cluster (switch, speed, alt, V/S, Ap/Pe, SAS and holds, throttle bar, state line), menu bar, Orbital / Landing-Reentry / Utilities / Staging in two docks, impact marker only with Landing open (and never through the HUD), Space = next stage (locked on the ground).
+  - Demo: new `orbit_down` view; the demo checks the marker rule. A full run passed with every tier (62 shots, no errors) before the last fixes.
+- An independent review (2026-10-25) found 5 issues; all fixed (sampler limit, Reentry before entry, planner draft, NaN, Space on the pad).
 - Tree clean apart from untracked `archive/v0.1/` files that are not ours (leave them).
 
 ## Open for the owner
