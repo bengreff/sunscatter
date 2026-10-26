@@ -1,5 +1,5 @@
 // Pluto's visuals (read by crates/game; physical data is in body.ron).
-// base_color: an approximate visual colour ; albedo: Bond albedo ~0.72 (Buratti et al. 2017).
+// base_color: an approximate visual colour (drawn without maps); albedo: Bond albedo ~0.72 (Buratti et al. 2017).
 (
     base_color: (0.80, 0.72, 0.62),
     albedo: 0.72,

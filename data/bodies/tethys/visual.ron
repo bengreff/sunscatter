@@ -1,5 +1,5 @@
 // Tethys's visuals (read by crates/game; physical data is in body.ron).
-// base_color: an approximate visual colour ; albedo: Bond albedo ~0.67 (Howett et al. 2010).
+// base_color: an approximate visual colour (drawn without maps); albedo: Bond albedo ~0.67 (Howett et al. 2010).
 (
     base_color: (0.85, 0.85, 0.84),
     albedo: 0.67,

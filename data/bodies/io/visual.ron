@@ -1,5 +1,5 @@
 // Io's visuals (read by crates/game; physical data is in body.ron).
-// base_color: an approximate visual colour ; albedo: geometric albedo (JPL Horizons) standing in for the Bond albedo.
+// base_color: an approximate visual colour (drawn without maps); albedo: geometric albedo (JPL Horizons) standing in for the Bond albedo.
 (
     base_color: (0.90, 0.84, 0.47),
     albedo: 0.63,

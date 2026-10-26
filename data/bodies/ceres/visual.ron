@@ -1,5 +1,5 @@
 // Ceres's visuals (read by crates/game; physical data is in body.ron).
-// base_color: an approximate visual colour ; albedo: Bond albedo ~0.03 (Li et al. 2016, Dawn).
+// base_color: an approximate visual colour (drawn without maps); albedo: Bond albedo ~0.03 (Li et al. 2016, Dawn).
 (
     base_color: (0.36, 0.36, 0.35),
     albedo: 0.03,

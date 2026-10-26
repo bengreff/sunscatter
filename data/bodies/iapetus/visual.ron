@@ -1,5 +1,5 @@
 // Iapetus's visuals (read by crates/game; physical data is in body.ron).
-// base_color: an approximate visual colour ; albedo: two-toned (0.05-0.5); a middle value.
+// base_color: an approximate visual colour (drawn without maps); albedo: two-toned (0.05-0.5); a middle value.
 (
     base_color: (0.60, 0.57, 0.53),
     albedo: 0.2,

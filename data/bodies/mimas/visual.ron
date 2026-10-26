@@ -1,5 +1,5 @@
 // Mimas's visuals (read by crates/game; physical data is in body.ron).
-// base_color: an approximate visual colour ; albedo: geometric ~0.6 (Verbiscer et al. 2007), standing in for the Bond albedo.
+// base_color: an approximate visual colour (drawn without maps); albedo: geometric ~0.6 (Verbiscer et al. 2007), standing in for the Bond albedo.
 (
     base_color: (0.78, 0.78, 0.77),
     albedo: 0.6,
