@@ -8,6 +8,7 @@
 use glam::DVec3;
 use sim::aero::air::{self, G0};
 use sim::aero::boundary::{Stream, LAMINAR_RECOVERY};
+use sim::aero::gas::Gas;
 use sim::aero::Flow;
 use sim::thermal::STEFAN_BOLTZMANN;
 
@@ -60,7 +61,7 @@ fn centreline(p: &Point) -> (sim::aero::boundary::Edge, f64, f64) {
         mach: p.speed / a.speed_of_sound(1.4),
         knudsen: 0.0,
         gamma: 1.4,
-        reynolds_per_m: a.rho * p.speed / air::sutherland_viscosity(a.temperature),
+        reynolds_per_m: a.rho * p.speed / Gas::Air.viscosity(a.temperature),
         temperature: a.temperature,
         speed: p.speed,
         gas: Default::default(),
@@ -191,7 +192,7 @@ fn a_shaded_cell_gets_its_share_of_the_real_gas_heating() {
         mach: speed / a.speed_of_sound(1.4),
         knudsen: 0.0,
         gamma: 1.4,
-        reynolds_per_m: a.rho * speed / air::sutherland_viscosity(a.temperature),
+        reynolds_per_m: a.rho * speed / Gas::Air.viscosity(a.temperature),
         temperature: a.temperature,
         speed,
         gas: Default::default(),

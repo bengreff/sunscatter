@@ -190,7 +190,9 @@ impl Stream {
     /// windward) with exposure `f` (0..1).
     pub fn edge(&self, s: f64, f: f64) -> Edge {
         let s2 = (s * s).min(1.0);
-        let tr = 1.0 + self.kt * s2;
+        // Compressed on the windward side only: the lee keeps the free
+        // stream's temperature (and density).
+        let tr = 1.0 + self.kt * if s > 0.0 { s2 } else { 0.0 };
         let impact = if s > 0.0 { self.kp * f * s2 } else { 0.0 };
         let rho = (1.0 + impact) / tr;
         let u = (1.0 - s2).sqrt();
@@ -494,14 +496,24 @@ fn asin_sum(a: f64, b: f64) -> f64 {
 }
 
 /// White's incompressible turbulent skin-friction coefficient
-/// 0.455/ln²(0.06·Re_x) (eq. 6-78) at Re_x `re`.
+/// 0.455/ln²(0.06·Re_x) (eq. 6-78) at Re_x `re`. Below
+/// [`RE_TURBULENT_MIN`] no turbulent layer exists (it needs Re_θ of a few
+/// hundred, Re_x ~1e5) and the fit runs to its singularity at 1/0.06: the
+/// layer is laminar there, Blasius' local 0.664/√Re_x (a tripped layer at
+/// its leading edge).
 pub fn cf_turbulent(re: f64) -> f64 {
     if re <= 0.0 {
         return 0.0;
     }
+    if re < RE_TURBULENT_MIN {
+        return 0.664 / re.sqrt();
+    }
     let l = math::ln(0.06 * re);
     0.455 / (l * l)
 }
+
+/// The Re_x below which [`cf_turbulent`] is laminar.
+pub const RE_TURBULENT_MIN: f64 = 1e3;
 
 #[cfg(test)]
 mod tests {
@@ -536,11 +548,47 @@ mod tests {
     }
 
     #[test]
+    fn the_lee_is_not_compressed() {
+        // A leeward cell (s < 0) keeps the free stream's temperature and
+        // density, its edge speed the free stream's along it: its friction
+        // is a plate's at V cos θ, not a hot, thin layer's (review of
+        // 2026-10-26, AERO 5a: it took the windward compression).
+        let s = Stream::new(1e6, 8.0, 1.4, T, 1.84);
+        let lee = s.edge(-0.5, 1.0);
+        let u = 0.75f64.sqrt();
+        assert_eq!((lee.temperature, lee.rho, lee.u), (T, 1.0, u));
+        assert!((lee.re_per_m / (1e6 * u) - 1.0).abs() < 1e-12 && (lee.mach - 8.0 * u).abs() < 1e-12);
+        // Its friction: the plate along the flow's at u_e = V cos θ.
+        let (along, lee) = (s.edge(0.0, 1.0).layer(1.0, 1.0, None, T, false), lee.layer(1.0, 1.0, None, T, false));
+        assert!(lee.shear > 0.5 * along.shear && lee.shear < along.shear, "{} {}", lee.shear, along.shear);
+        // The windward side at the same angle is compressed.
+        assert!(s.edge(0.5, 0.0).temperature > 2.0 * T);
+    }
+
+    #[test]
+    fn white_s_turbulent_friction_is_laminar_below_its_range() {
+        // The fit 0.455/ln²(0.06 Re) is singular at Re = 1/0.06 ≈ 16.7 and
+        // meaningless below: there (and up to 1e3) the layer is laminar.
+        for re in [1.0, 10.0, 1.0 / 0.06, 20.0, 100.0, 999.0] {
+            let cf = cf_turbulent(re);
+            assert!(cf.is_finite() && (cf * re.sqrt() / 0.664 - 1.0).abs() < 1e-12, "{re}: {cf}");
+        }
+        // Above, White's (unchanged): 0.00257 at 1e7, falling with Re.
+        assert!((cf_turbulent(1e7) - 0.455 / math::ln(6e5).powi(2)).abs() < 1e-15);
+        let mut last = f64::INFINITY;
+        for k in 3..10 {
+            let cf = cf_turbulent(10f64.powi(k));
+            assert!(cf < last, "{k}");
+            last = cf;
+        }
+    }
+
+    #[test]
     fn the_wall_temperature_changes_the_reference_state() {
         // Eckert/White at M_e 0 (T* = T_e(1 + 0.58(T_w/T_e − 1))): a wall
         // at 2·T_e gives T* = 1.58·T_e and C* = (1/1.58)·μ(1.58·T_e)/μ(T_e).
         let e = Stream::new(1e6, 0.0, 1.4, T, 0.0).edge(0.0, 0.0);
-        let want = air::sutherland_viscosity(1.58 * T) / air::sutherland_viscosity(T) / 1.58;
+        let want = Gas::Air.viscosity(1.58 * T) / Gas::Air.viscosity(T) / 1.58;
         assert!((e.reference(2.0 * T) / want - 1.0).abs() < 1e-12);
         assert!((e.reference(T) - 1.0).abs() < 1e-15);
         // Hot walls lower the friction, cold walls raise it (laminar and

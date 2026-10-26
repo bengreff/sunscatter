@@ -162,9 +162,10 @@ mod tests {
         // At 273 K each gas's μ₀ (White, Table 1-2); air exactly the US 1976 law.
         assert!((Gas::CarbonDioxide.viscosity(273.0) / 1.370e-5 - 1.0).abs() < 1e-6);
         assert!((Gas::Nitrogen.viscosity(273.0) / 1.663e-5 - 1.0).abs() < 1e-6);
-        for t in [100.0, 288.15, 2000.0] {
-            assert_eq!(Gas::Air.viscosity(t), air::sutherland_viscosity(t));
-        }
+        // Air: Sutherland's law with the US 1976 constants, Table I:
+        // 1.7894e-5 at sea level, 1.4216e-5 at 216.65 K.
+        assert!((Gas::Air.viscosity(288.15) / 1.7894e-5 - 1.0).abs() < 1e-4);
+        assert!((Gas::Air.viscosity(216.65) / 1.4216e-5 - 1.0).abs() < 1e-4);
         // The factors follow the Prandtl numbers.
         for g in [Gas::Air, Gas::CarbonDioxide, Gas::Nitrogen] {
             let p = g.properties();

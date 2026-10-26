@@ -193,7 +193,7 @@ fn earth_flow(altitude: f64, v: f64, dir: DVec3, length: f64) -> Flow {
         mach: v / a.speed_of_sound(1.4),
         knudsen: a.mean_free_path / length,
         gamma: 1.4,
-        reynolds_per_m: a.rho * v / sim::aero::air::sutherland_viscosity(a.temperature),
+        reynolds_per_m: a.rho * v / sim::aero::gas::Gas::Air.viscosity(a.temperature),
         temperature: a.temperature,
         speed: v,
         gas: Default::default(),
