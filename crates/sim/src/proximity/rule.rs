@@ -41,6 +41,11 @@ pub struct BubbleState {
     /// Ticks since its last contact with another craft (`None`: none
     /// while a member).
     pub since_contact: Option<u32>,
+    /// The low part of a member's live position (m): its ticks carry the
+    /// position's rounding (compensated summation), so two members' relative
+    /// position keeps its precision whatever the anchor's distance (rule 3).
+    #[serde(default)]
+    pub lo: glam::DVec3,
 }
 
 impl BubbleState {
@@ -80,7 +85,7 @@ mod tests {
     use super::*;
 
     fn cand(flying: bool, leader: bool, member: bool, since_contact: Option<u32>) -> Candidate {
-        Candidate { flying, leader, state: BubbleState { member, since_contact } }
+        Candidate { flying, leader, state: BubbleState { member, since_contact, ..Default::default() } }
     }
 
     /// One leader (index 0, live and controllable) and one other craft at

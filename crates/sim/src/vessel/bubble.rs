@@ -227,7 +227,7 @@ fn epoch(
         let c = controls(i);
         match (v.bubble.member, member[k]) {
             (false, true) => {
-                v.bubble = BubbleState { member: true, since_contact: None };
+                v.bubble = BubbleState { member: true, ..Default::default() };
                 v.join(world, anchor);
             }
             (true, false) => {
@@ -404,12 +404,12 @@ fn together(
     let friction: Vec<(f64, f64)> =
         idx.iter().map(|&i| (shared[i].craft.contact.hull.friction, shared[i].craft.contact.stick_speed)).collect();
     // Member m as a contact body, relative to `origin` (the first member's
-    // centre of mass: metres, not orbit radii).
-    let body = |m: usize, subs: &[Substeps], origin: DVec3| {
+    // centre of mass with its low part: metres, not orbit radii).
+    let body = |m: usize, subs: &[Substeps], origin: (DVec3, DVec3)| {
         let (s, p) = (&subs[m], &starts[m].props);
         Body {
             hull: hulls[m],
-            r: s.r - origin,
+            r: (s.r - origin.0) + (s.lo() - origin.1),
             v: s.v,
             q: s.att.q,
             omega: s.att.omega,
@@ -421,7 +421,7 @@ fn together(
     let mut ok = true;
     // The points that can touch this tick, pair by pair (a, b ascending).
     let mut near: Vec<(usize, usize, Near)> = Vec::new();
-    let mut origin = subs[0].r;
+    let mut origin = (subs[0].r, subs[0].lo());
     for a in 0..n {
         for b in a + 1..n {
             let (ba, bb) = (body(a, &subs, origin), body(b, &subs, origin));
@@ -432,7 +432,7 @@ fn together(
         }
     }
     'substeps: for k in 0..contact::SUBSTEPS {
-        origin = subs[0].r;
+        origin = (subs[0].r, subs[0].lo());
         let mut kicks = vec![(DVec3::ZERO, DVec3::ZERO); n];
         for (a, b, near) in &near {
             let (a, b) = (*a, *b);

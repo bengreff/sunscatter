@@ -223,3 +223,66 @@ fn members_return_to_coasts_when_the_leader_does() {
     assert_eq!(out, Advance::default(), "no bubble without a leader");
     assert_eq!(fleet, before, "the bubble pass touched nothing");
 }
+
+/// Relative position precision of two members 10 km apart (B drifting
+/// sideways at 0.3 m/s): their separation flown live in the bubble (each
+/// relative to the shared anchor, rule 3) against the same two craft
+/// coasting (compensated integration; the bias between live ticks and
+/// coasts is common to both craft and cancels in the difference). A
+/// position relative to the anchor is rounded to its distance: Earth's in
+/// low orbit (|r| ≈ 7e6 m, ulp 1e-9 m), the barycentre's between the
+/// planets at 1 AU (1.5e11 m, 3e-5 m) and at 30 AU (4.5e12 m, 1e-3 m).
+/// Members carry each tick's rounding (the low part, compensated
+/// summation), so it does not accumulate: without it, 60 s at 30 AU put
+/// 0.42 m into the separation (a steady 7 mm/s from the same rounding
+/// every tick).
+#[test]
+fn relative_position_of_members_10_km_apart() {
+    let w = world();
+    let earth = w.find("Earth").unwrap();
+    let neptune = w.find("Neptune").unwrap();
+    let (r_leo, v_leo) =
+        Elements { a: 6_778_137.0, e: 0.0005, i: 0.9, raan: 1.0, argp: 0.5, mean_anomaly: 0.0 }.to_state(earth.gm);
+    let root = w.eph.root();
+    let snap = w.snapshot(t0());
+    // 0.1 AU ahead of a planet on its orbit, moving with it.
+    let deep = |planet: NodeId| {
+        let k = snap.relative(planet, root);
+        (k.r + k.v.normalize() * 1.496e10, k.v)
+    };
+    let (r_1au, v_1au) = deep(earth.node);
+    let (r_30au, v_30au) = deep(neptune.node);
+    let cases = [
+        ("low orbit", earth.node, r_leo, v_leo, 1e-6),
+        ("1 AU", root, r_1au, v_1au, 1e-4),
+        ("30 AU", root, r_30au, v_30au, 1e-3),
+    ];
+    for (name, anchor, r, v, most) in cases {
+        let along = (v - r * (v.dot(r) / r.length_squared())).normalize();
+        let side = along.cross(r).normalize();
+        let craft = test_craft();
+        let make = |id: u64, at: DVec3, dv: DVec3| Vessel::coasting(&w, VesselId(id), t0(), anchor, at, v + dv, craft);
+        let ctl = |i: usize| Controls { sas: true, throttle: if i == 2 { 0.1 } else { 0.0 }, ..Default::default() };
+        let pair = || vec![make(1, r, DVec3::ZERO), make(2, r + along * 10_000.0, side * 0.3)];
+        let mut bubble = pair();
+        bubble.push(make(3, r + along * 5_000.0 + side * 1_000.0, DVec3::ZERO));
+        let mut coast = pair();
+        let passive = |_: usize| Controls { sas: true, ..Default::default() };
+        run(&w, &mut bubble, &ctl, 0.5, 60.0, &mut |_| {});
+        run(&w, &mut coast, &passive, 0.5, 60.0, &mut |_| {});
+        assert!(bubble[0].in_bubble() && bubble[1].in_bubble(), "{name}: members");
+        let t = bubble[0].time;
+        // Live: the positions' low parts (members carry them) added.
+        let sep = |f: &[Vessel], live: bool| {
+            let (ka, ra, _) = if live { f[0].state(&w) } else { f[0].state_at(&w, t) };
+            let (kb, rb, _) = if live { f[1].state(&w) } else { f[1].state_at(&w, t) };
+            assert_eq!(ka, kb, "{name}: one anchor");
+            (rb - ra) + (f[1].bubble.lo - f[0].bubble.lo)
+        };
+        let (live, rails) = (sep(&bubble, true), sep(&coast, false));
+        let err = (live - rails).length();
+        eprintln!("{name}: |r| {:.2e} m, separation {:.3} m, live vs coast {:.3e} m", r.length(), live.length(), err);
+        assert!((live.length() - 10_000.0).abs() < 50.0, "{name}: {}", live.length());
+        assert!(err < most, "{name}: {err} m");
+    }
+}

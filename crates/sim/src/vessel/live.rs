@@ -36,6 +36,7 @@ use crate::craft::{CraftDesign, EngineOutput, MassProps};
 use crate::forces::{altitude_above, ambient_pressure, ActiveSources, DragModel, ForceContext};
 use crate::frame::NodeId;
 use crate::integrate::{Dopri5, Dynamics, Tolerance};
+use crate::math::Compensated;
 use crate::rigid;
 use crate::time::Epoch;
 use crate::world::World;
@@ -68,6 +69,10 @@ pub(super) struct TickStart<'d> {
     pub(super) anchor: NodeId,
     pub(super) r: DVec3,
     pub(super) v: DVec3,
+    /// The low part of the position a bubble's member carries between
+    /// ticks (compensated summation, rule 3), and whether it does.
+    lo: DVec3,
+    compensate: bool,
     /// The tick's length (s; [`TICK`] but for a tick that aligns a vessel
     /// with a bubble's lattice) and its end.
     pub(super) dt: f64,
@@ -104,6 +109,8 @@ impl TickStart<'_> {
 /// Where a tick took the vessel.
 pub(super) struct TickEnd {
     pub(super) r: DVec3,
+    /// The position's low part (zero unless compensated).
+    pub(super) lo: DVec3,
     pub(super) v: DVec3,
     /// On the ground during the last substep.
     pub(super) touching: bool,
@@ -122,6 +129,8 @@ pub(super) struct Substeps<'a> {
     active: ActiveSources,
     h: f64,
     pub(super) r: DVec3,
+    /// The compensated position of a bubble's member (`r` its value).
+    r_c: Option<Compensated>,
     pub(super) v: DVec3,
     pub(super) att: Attitude,
     touching: bool,
@@ -143,6 +152,7 @@ impl<'a> Substeps<'a> {
             active,
             h: start.dt / contact::SUBSTEPS as f64,
             r: start.r,
+            r_c: start.compensate.then_some(Compensated { sum: start.r, comp: start.lo }),
             v: start.v,
             att: vessel.attitude,
             touching: false,
@@ -156,6 +166,11 @@ impl<'a> Substeps<'a> {
     /// The substep's length (s).
     pub(super) fn h(&self) -> f64 {
         self.h
+    }
+
+    /// The position's low part (zero unless compensated).
+    pub(super) fn lo(&self) -> DVec3 {
+        self.r_c.map_or(DVec3::ZERO, |c| low_part(&c))
     }
 
     /// Substep `k`, with `kick`, a contact force and torque about the
@@ -194,7 +209,13 @@ impl<'a> Substeps<'a> {
             v += force * (h / props.mass);
             att.omega += att.q * (props.inertia.inverse() * (att.q.inverse() * tau)) * h;
         }
-        let r = r + v * h;
+        let r = match &mut self.r_c {
+            Some(c) => {
+                c.add(v * h);
+                c.value()
+            }
+            None => r + v * h,
+        };
         let att = rigid::tick(&att, &props.inertia, torque, h);
         (self.r, self.v, self.att) = (r, v, att);
         // An impact: the point past its free travel is still closing
@@ -217,7 +238,8 @@ impl<'a> Substeps<'a> {
     /// Where the substeps took the vessel, its attitude (before SAS's
     /// bookkeeping) and the impact, if one destroyed the craft or a part.
     pub(super) fn end(self) -> (TickEnd, Attitude, Option<contact::Impact>) {
-        (TickEnd { r: self.r, v: self.v, touching: self.touching, delta: self.delta }, self.att, self.impact)
+        let lo = self.lo();
+        (TickEnd { r: self.r, lo, v: self.v, touching: self.touching, delta: self.delta }, self.att, self.impact)
     }
 }
 
@@ -256,17 +278,19 @@ impl Vessel {
     }
 
     /// Integrates one tick of `dt` with a constant acceleration `thrust`
-    /// (thrust and lift) and `drag` (adaptive substeps, exact end). Returns
-    /// the state and the tick's proper-time increment; `None` if the
-    /// integration fails (non-finite state or force).
+    /// (thrust and lift) and `drag` (adaptive substeps, exact end), from a
+    /// position with low part `lo` (zero but for a bubble's members).
+    /// Returns the position, its low part, the velocity and the tick's
+    /// proper-time increment; `None` if the integration fails (non-finite
+    /// state or force).
     fn integrate_tick(
         &self,
         world: &World,
         (anchor, r, v): (NodeId, DVec3, DVec3),
-        thrust: DVec3,
-        drag: DragModel,
+        lo: DVec3,
+        (thrust, drag): (DVec3, DragModel),
         dt: f64,
-    ) -> Option<(DVec3, DVec3, f64)> {
+    ) -> Option<(DVec3, DVec3, DVec3, f64)> {
         let snap = world.snapshot(self.time);
         let active = ActiveSources::select(world, &snap, anchor, r);
         let f = TickForces {
@@ -275,10 +299,11 @@ impl Vessel {
         };
         let integ = Dopri5::new(Tolerance { h_max: dt, ..coast_tolerance() });
         let mut st = integ.start(&f, 0.0, r, v, dt);
+        st.r.comp += lo;
         while st.t < dt {
             integ.step(&f, &mut st, dt).ok()?;
         }
-        Some((st.r.value(), st.v.value(), st.x.value()))
+        Some((st.r.value(), low_part(&st.r), st.v.value(), st.x.value()))
     }
 
     /// The surface nearest the centre of mass at `r` (anchor-relative) at
@@ -416,10 +441,13 @@ impl Vessel {
         let before = (self.attitude, self.control);
         let aim = self.aim(world, &snap, (anchor, r, v), controls);
         let cmd = attitude::command(&self.attitude, &props.inertia, &mut self.control, controls, &act, &aim, dt);
+        let compensate = self.bubble.member;
         Some(TickStart {
             anchor,
             r,
             v,
+            lo: if compensate { self.bubble.lo } else { DVec3::ZERO },
+            compensate,
             dt,
             until,
             engine_on,
@@ -449,12 +477,14 @@ impl Vessel {
             let next = rigid::tick_with(&self.attitude, &s.props.inertia, torque, s.dt);
             let att = attitude::finish(next, &mut self.control, &s.cmd, s.aero.is_none());
             let thrust = att.q * s.cmd.thrust_dir * (s.out.thrust / s.props.mass) + s.lift;
-            let Some((r1, v1, delta)) = self.integrate_tick(world, (s.anchor, s.r, s.v), thrust, s.drag, s.dt) else {
+            let state = (s.anchor, s.r, s.v);
+            let Some((r1, lo, v1, delta)) = self.integrate_tick(world, state, s.lo, (thrust, s.drag), s.dt) else {
                 (self.attitude, self.control) = s.before;
                 return None;
             };
             self.attitude = att;
-            return Some(TickEnd { r: r1, v: v1, touching: false, delta });
+            let lo = if s.compensate { lo } else { DVec3::ZERO };
+            return Some(TickEnd { r: r1, lo, v: v1, touching: false, delta });
         };
         let mut sub = Substeps::new(self, world, s);
         let ok = (0..contact::SUBSTEPS).all(|k| sub.step(k, None).is_ok());
@@ -491,7 +521,7 @@ impl Vessel {
             sun_body,
             ..
         } = s;
-        let TickEnd { r: r1, v: v1, touching, delta } = end;
+        let TickEnd { r: r1, lo, v: v1, touching, delta } = end;
         let engine = self.craft.engine;
         let engine_heat = engine.heat(out.thrust, out.mdot);
         let mdot = out.mdot + cmd.rcs.dot(self.craft.rcs_flow);
@@ -503,6 +533,9 @@ impl Vessel {
         self.time = until;
         self.clock.add(self.time, delta);
         self.phase = Phase::Powered { anchor, r: r1, v: v1 };
+        if self.bubble.member {
+            self.bubble.lo = lo;
+        }
         self.tick_accel = Some((v1 - v) / dt);
         let flow = aero.as_ref().map(|a| a.flow(att0));
         self.check_limits(world, flow.as_ref(), contact_body.map(|b| (anchor, b)));
@@ -589,6 +622,12 @@ impl Vessel {
         self.sync_landed_attitude(world);
         true
     }
+}
+
+/// The low part of a compensated sum: what its value leaves out.
+fn low_part(c: &Compensated) -> DVec3 {
+    let hi = c.value();
+    (c.sum - hi) + c.comp
 }
 
 /// Whether a landed pose has been checked since the vessel was built or
