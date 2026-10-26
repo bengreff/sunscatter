@@ -63,3 +63,18 @@ From the owner's answers ([record](interview-2026-10-26.md)); decisions D081–D
 - No branches or worktrees. Commit only your own paths with `git commit -m … -- <paths>`, then push. Keep the crate compiling: write new modules completely before wiring them in. Errors in a file you do not own are someone else's work in progress: keep working, recheck in a few minutes.
 - Agents never run the game or the demo; the lead runs offscreen demos, one at a time.
 - `cargo test -p sim` after every change to `sim`; every commit passes fmt (`cargo fmt -p <crate>`), clippy and tests.
+
+## Status at the end of the night (2026-10-26, lead)
+
+| Workstream | Status | Feature notes | Headline |
+|---|---|---|---|
+| SOL | playable | `docs/features/solar-system.md` | 44 bodies (planets, 9 dwarf planets, 26 moons over 100 km), sourced physical data, moon systems integrated in their barycenters and fitted to JPL (worst 50-year error: Io 24 km, Oberon 54 km, Mimas 390 km, Triton 500 km, Proteus 320 km unfitted); atmospheres for Venus, Mars, Titan; 19.4 MB ephemeris. 1,000 years not affordable as tables (~385 MB): options written up, not decided. |
+| BENCH | done | `docs/plans/scale-baseline-2026-10-26.md` | `sim::craft::stress` (1–1,000 parts, placeholders), `bench_scale`; the baseline and its hot spots fed PERF, PARTS, AERO. |
+| LIMBO (+LIMBO2) | playable (sim) | `docs/features/limbo.md` | Perturbed coasts: thin-air drag at the held attitude, radiation pressure, low thrust, boil-off; live boundary by q / heating / density; `sim::systems` lattice; every result the same bits at 1×, 1,000×, 1,000,000× (tested); drag decay 127.5 m/day at 400 km vs King-Hele 127.8; SRP within 0.2 %; Edelbaum within 0.3 %. Review fixes: reference body decided in the sim, regime epochs frame-independent, refly idempotent. |
+| AERO | playable | `docs/design/aero-thermal.md` | Boundary-layer transition and turbulent friction/heating over the whole body (STS-1 transition onset matched), crossflow vs Mach (Jorgensen), body–fin interference, base drag vs Mach, gas per atmosphere (Mars Pathfinder peak heating 120.5 vs 120 W/cm²), real-gas turbulent heating, roughness transition; bake 5.6 s → 0.2 s at 300 parts, live tick 2.2 → 1.0 ms. |
+| PARTS | skeleton | `docs/features/parts.md` | Part layer with placeholder properties, registry, split (momentum exact), breakage, the D083 debris rule in the game; craft build fixes (cells by area, thin tubes, broad phases). Nothing breaks up in play yet: no game craft has parts. |
+| PERF | playable | `docs/features/scale-performance.md` | Block Gauss–Seidel thermal solve (sweeps 22–24 → 9–10), cost-based budgets, `game::fleet` on the compute pool: 50 craft at 10⁶× now ~8.7 ms a frame, the clock honestly held to ~107,000× real time; 2 simulated years with 50 craft stable, save/load bit for bit. |
+| PROXIMITY | playable (sim), wired, not seen | `docs/features/proximity.md` | Bubbles of craft within 10 km of a live controllable leader, each with its own frame and lattice; craft-to-craft contact with momentum exact; 1.26 ms a tick for two 300-part craft touching; warp shows "limited: near Vessel N". |
+| COAST | playable | `docs/features/scale-performance.md` §6 | Coasts integrate with DOP853 (steps ≤ 3 h): LEO-day error 53 → 9.9 m against a tight reference at a third of the evaluations; integration per 10⁶× frame ~3.5 → ~0.75 ms per craft; 50 craft at 10⁶×: ~120,000× → 183,000× of real time. The 300-part craft's coast thermal lattice (~18 ms per craft per frame) now bounds the clock. |
+
+Two independent reviews ran (LIMBO+SOL; PARTS+PROXIMITY+PERF+AERO); every verified finding was fixed or is listed in `open-issues.md`.

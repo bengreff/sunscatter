@@ -37,6 +37,10 @@ ssh backhouse "schtasks /create /tn SunscatterDemo /tr C:\Users\Ben\run_demo.cmd
 ssh backhouse "schtasks /delete /tn SunscatterDemo /f"
 ```
 
+## Results, 2026-10-26 (commit e6476d3, end of the overnight run)
+
+Plain SSH (session 0, frame times 3–4× worse than the console), offscreen, no bench: `cargo test -p sim --no-fail-fast` all 25 binaries pass (the bit-exact goldens agree with macOS); the full demo ran through (67 shots, no errors, the impact-marker check ran). Perf, 11 vessels: 1× 160 fps (worst 16.4 ms), 1,000× 163 fps (988× reached), 1,000,000× 52 fps (worst 63 ms, 934,875× reached, compute-limited 7/207 frames). The same run on the reference Mac: 204 / 212 / 119 fps, 961,921× reached at 10⁶×.
+
 ## Results, 2026-09-26 (commit 2134bd8)
 
 - `cargo test -p sim`: 72 tests pass, including the bit-exact golden tests (determinism macOS = Windows).
