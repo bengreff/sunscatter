@@ -223,6 +223,28 @@ fn sunlight(bake: &AeroBake, cells: &[Cell], sun: DVec3, scratch: &mut [f64], ou
     }
 }
 
+/// Free-molecular heating by air arriving along `dir` (unit, body axes)
+/// with energy flux `flux` (W/m² facing it, ½ρV³ at full accommodation):
+/// each exposed cell takes `weight`·flux·cos θ·f·A (f its exposure, the
+/// craft shading itself), added to `out` (`scratch` a per-cell buffer).
+/// The rarefied end of [`cell_heat_flow`], for coasts in thin air.
+pub fn free_molecular_heat(
+    bake: &AeroBake,
+    cells: &[Cell],
+    (dir, flux): (DVec3, f64),
+    weight: f64,
+    scratch: &mut [f64],
+    out: &mut [f64],
+) {
+    bake.exposure_at(dir, scratch);
+    for ((h, c), &f) in out.iter_mut().zip(cells).zip(scratch.iter()) {
+        let cos = -c.normal.dot(dir);
+        if cos > 0.0 {
+            *h += flux * cos * f * c.area * weight;
+        }
+    }
+}
+
 /// The air side of [`cell_heat_flow`].
 #[derive(Clone, Copy, Debug)]
 pub struct FlowHeat<'a> {

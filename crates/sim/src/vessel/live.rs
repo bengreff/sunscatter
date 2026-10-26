@@ -203,7 +203,8 @@ impl Vessel {
             }
             let chute_area = self.chute.cd_area(&self.craft.chute);
             let chute = (chute_area > 0.0).then_some((chute_area, self.craft.chute.mount));
-            let aero = air.as_ref().and_then(|a| AeroTick::new(&design, a, props.com, chute));
+            let aero = (air.as_ref().and_then(|a| AeroTick::new(&design, a, props.com, chute)))
+                .map(|t| t.with_layer(self.attitude.q, &self.thermal.state.skin));
             let (cd_area, lift) =
                 aero.as_ref().map_or((0.0, DVec3::ZERO), |a| a.drag_and_lift(self.attitude.q, props.mass));
             let drag = DragModel { cd_area, mass: props.mass };

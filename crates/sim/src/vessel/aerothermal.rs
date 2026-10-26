@@ -9,10 +9,15 @@
 //! depends on the attitude); the force is split into its drag along the
 //! flow, kept velocity-dependent inside the translation's integrator as a
 //! drag area, and the rest (lift), held constant over the tick. The
-//! parachute adds its drag area along the flow, pulling at its mount.
-//! Heating: Sutton–Graves at the direction's nose radius, spread by
-//! [`thermal::cell_heat`] with the sunlight (eclipses by body spheres,
-//! [`crate::light`]); one implicit thermal step per tick.
+//! parachute adds its drag area along the flow, pulling at its mount. The
+//! skin's boundary layer (D085, [`aero::friction::FlowLayer`]) is computed
+//! once per tick at its start attitude and skin temperatures
+//! ([`AeroTick::with_layer`]) and reused by every force evaluation (the
+//! friction) and the heating: over the whole body by
+//! [`thermal::cell_heat_layer`] (the stagnation point by Sutton–Graves and
+//! Tauber–Sutton, the acreage by each cell's laminar or turbulent layer),
+//! with the sunlight (eclipses by body spheres, [`crate::light`]); one
+//! implicit thermal step per tick.
 //!
 //! **Coasts** (above every atmosphere): the temperatures step on a
 //! lattice from the vessel's thermal epoch (sunlight and radiation only),
@@ -40,7 +45,7 @@ use crate::aero::{self, Flow};
 use crate::craft::CraftDesign;
 use crate::ephem::Snapshot;
 use crate::frame::{NodeId, Vec3};
-use crate::thermal::{self, HeatInput, ThermalState, COAST_CONVERGED, DEFAULT_SWEEPS};
+use crate::thermal::{self, ThermalState, COAST_CONVERGED, DEFAULT_SWEEPS};
 use crate::time::Epoch;
 use crate::world::World;
 use glam::{DQuat, DVec3};
@@ -297,6 +302,9 @@ pub struct AeroTick<'a> {
     com: DVec3,
     /// Parachute: Cd·A (m²) and mount (body axes), if deployed.
     chute: Option<(f64, DVec3)>,
+    /// The skin's boundary layer at the tick's start ([`Self::with_layer`]),
+    /// reused by the tick's force evaluations and its heating.
+    layer: Option<aero::friction::FlowLayer>,
 }
 
 impl<'a> AeroTick<'a> {
@@ -318,7 +326,23 @@ impl<'a> AeroTick<'a> {
             speed,
             com,
             chute,
+            layer: None,
         })
+    }
+
+    /// With the skin's boundary layer at attitude `q` (the tick's start) and
+    /// the skin's temperatures `wall` (K, per cell): computed once, it gives
+    /// every force evaluation of the tick its friction (at the skin's
+    /// temperatures) and the tick's heating its acreage terms.
+    pub fn with_layer(mut self, q: DQuat, wall: &[f64]) -> Self {
+        let flow = self.flow(q.normalize());
+        self.layer = Some(aero::friction::FlowLayer::new(&self.design.bake, &flow, Some(wall), true));
+        self
+    }
+
+    /// The tick's boundary layer, if computed ([`Self::with_layer`]).
+    pub fn layer(&self) -> Option<&aero::friction::FlowLayer> {
+        self.layer.as_ref()
     }
 
     /// The flow in body axes for attitude `q` (body → inertial).
@@ -342,7 +366,10 @@ impl<'a> AeroTick<'a> {
     fn hull_and_torque(&self, q: DQuat) -> (DVec3, DVec3, Flow) {
         let q = q.normalize();
         let flow = self.flow(q);
-        let (f, m) = aero::aero_forces(&self.design.bake, &flow, self.design.cd0);
+        let (f, m) = match &self.layer {
+            Some(layer) => aero::aero_forces_layer(&self.design.bake, &flow, self.design.cd0, layer),
+            None => aero::aero_forces(&self.design.bake, &flow, self.design.cd0),
+        };
         let mut torque = m - self.com.cross(f);
         if let Some((cd_area, mount)) = self.chute {
             torque += (mount - self.com).cross(flow.dir * (self.q * cd_area));
@@ -366,15 +393,6 @@ impl<'a> AeroTick<'a> {
         let chute = self.chute.map_or(0.0, |c| c.0);
         ((along / self.q).max(0.0) + chute, q.normalize() * lift / mass)
     }
-}
-
-/// Stagnation heat flux (W/m²) in `air` at nose radius `rn`: convective
-/// (Sutton–Graves) plus shock-layer radiation (Tauber–Sutton, where the
-/// atmosphere has it).
-pub fn stagnation_flux(air: &Air, rn: f64) -> f64 {
-    let v = air.wind.length();
-    let convective = thermal::sutton_graves(air.sutton_graves_k, air.rho, rn, v);
-    convective + air.radiative_heating.map_or(0.0, |m| thermal::tauber_sutton(m, air.rho, rn, v))
 }
 
 /// Scratch buffers of the heat inputs.
@@ -418,15 +436,26 @@ pub fn live_step(
     propellant: f64,
     dt: f64,
 ) {
-    let mut input = HeatInput { flow_dir: DVec3::ZERO, q_stag: 0.0, sun: sun_body };
-    if let Some((aero_tick, air)) = tick {
-        let flow = aero_tick.flow(q.normalize());
-        let rn = design.bake.nose_radius_at(flow.dir);
-        input.flow_dir = flow.dir;
-        input.q_stag = stagnation_flux(air, rn);
-    }
     let mut b = Buffers::new(design);
-    thermal::cell_heat(&design.bake, &design.cells, &input, &mut b.scratch, &mut b.heat);
+    let (bake, cells) = (&design.bake, &design.cells);
+    match tick {
+        Some((aero_tick, air)) => {
+            let flow = aero_tick.flow(q.normalize());
+            let heat = thermal::FlowHeat {
+                flow: &flow,
+                sutton_graves_k: air.sutton_graves_k,
+                radiative: air.radiative_heating,
+                wall: &th.state.skin,
+            };
+            match aero_tick.layer() {
+                Some(layer) => {
+                    thermal::cell_heat_layer(bake, cells, &heat, layer, sun_body, &mut b.scratch, &mut b.heat)
+                }
+                None => thermal::cell_heat_flow(bake, cells, Some(&heat), sun_body, &mut b.scratch, &mut b.heat),
+            }
+        }
+        None => thermal::cell_heat_flow(bake, cells, None, sun_body, &mut b.scratch, &mut b.heat),
+    }
     engine_and_nodes(design, engine_heat, propellant, &mut b);
     design.network.step(&mut th.state, &b.heat, &b.node_heat, &b.node_capacity, SINK_K, dt, DEFAULT_SWEEPS);
     th.restart(th.epoch.add_seconds(dt));
@@ -473,8 +502,7 @@ pub fn coast_step(
     }
     let mut b = Buffers::new(design);
     let heat_of = |sun: DVec3, scratch: &mut [f64], out: &mut [f64]| {
-        let input = HeatInput { flow_dir: DVec3::ZERO, q_stag: 0.0, sun };
-        thermal::cell_heat(&design.bake, &design.cells, &input, scratch, out);
+        thermal::cell_heat_flow(&design.bake, &design.cells, None, sun, scratch, out);
     };
     if let [one] = suns {
         heat_of(*one, &mut b.scratch, &mut b.heat);
@@ -489,17 +517,10 @@ pub fn coast_step(
         }
     }
     // Free-molecular heating on the cells facing the air, shaded by the
-    // craft itself (the bake's exposure for each flow direction), averaged
-    // over the samples.
+    // craft itself, averaged over the samples.
     let w = 1.0 / sun.air.len().max(1) as f64;
-    for &(d, flux) in &sun.air {
-        design.bake.exposure_at(d, &mut b.scratch);
-        for ((h, c), &f) in b.heat.iter_mut().zip(&design.cells).zip(b.scratch.iter()) {
-            let cos = -c.normal.dot(d);
-            if cos > 0.0 {
-                *h += flux * cos * f * c.area * w;
-            }
-        }
+    for &air in &sun.air {
+        thermal::free_molecular_heat(&design.bake, &design.cells, air, w, &mut b.scratch, &mut b.heat);
     }
     engine_and_nodes(design, burn / dt, propellant, &mut b);
     let before = th.state.clone();
