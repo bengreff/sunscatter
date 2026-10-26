@@ -187,6 +187,9 @@ fn per_cell(name: &str, surface: &sim::craft::Surface, cells: &sim::craft::Cells
     let clock = Instant::now();
     bake(surface, cells, &BakeOptions { level: 2, ..BakeOptions::default() });
     let coarse_ms = clock.elapsed().as_secs_f64() * 1e3;
+    let clock = Instant::now();
+    bake(surface, cells, &BakeOptions { level: 2, raster: 32 });
+    println!("  (162 directions, 32 × 32 pixels: {:.1} ms)", clock.elapsed().as_secs_f64() * 1e3);
     let tris = surface.triangles.len();
     println!(
         "{name}: {tris} triangles, {n} cells, {} fins; bake {bake_ms:.0} ms (162 directions: {coarse_ms:.0} ms)",
