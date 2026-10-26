@@ -228,7 +228,9 @@ fn coast_steps_converge_in_few_sweeps_where_chains_of_rings_used_to_crawl() {
     let mut s = ThermalState::uniform(cells.len(), net.nodes(), 290.0);
     for k in 0..10 {
         let sweeps = net.step_to(&mut s, &heat, &node_heat, &cap, 2.725, 600.0, DEFAULT_SWEEPS, COAST_CONVERGED);
-        assert!(sweeps <= 12, "step {k}: {sweeps} sweeps");
+        // 12–14 since the legs are half-tubes along their length (two
+        // coupled chains each, `craft::cells::TUBE_COHERENCE`), not rings.
+        assert!(sweeps <= 14, "step {k}: {sweeps} sweeps");
     }
     // And to the solution: against the same step converged to 1e-14, within
     // a few millikelvin.

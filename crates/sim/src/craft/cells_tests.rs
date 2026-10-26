@@ -185,7 +185,7 @@ fn cells_match_golden_hash() {
     assert_eq!(hash, CELLS_GOLDEN, "cells changed (or differ on this platform)");
 }
 
-const CELLS_GOLDEN: u64 = 0xc0153423964cc021;
+const CELLS_GOLDEN: u64 = 0x08b0_181e_cdce_2a8d;
 
 #[test]
 fn render_mesh_indexes_its_vertices() {
@@ -249,4 +249,27 @@ fn the_split_queue_matches_the_full_scan() {
     for (i, g) in groups.iter().enumerate() {
         assert!(g.iter().all(|&t| cells.tri_cell[t as usize] == i as u32), "group {i}");
     }
+}
+
+/// Scale baseline problem 2: no cell is a tube whose normals cancel (a
+/// thin strut split along its length gave rings, coherence ~0): the test
+/// craft's legs and a stress craft's struts and antennas are split across
+/// their circumference into half-tubes.
+#[test]
+fn no_cell_is_a_tube() {
+    let coherence = |s: &Surface, c: &Cells| {
+        let mut sums = vec![(DVec3::ZERO, 0.0); c.cells.len()];
+        for t in 0..s.triangles.len() {
+            let (_, n, a) = s.triangle(t);
+            let x = &mut sums[c.tri_cell[t] as usize];
+            *x = (x.0 + n * a, x.1 + a);
+        }
+        sums.iter().map(|(v, a)| v.length() / a).fold(f64::MAX, f64::min)
+    };
+    let (s, c) = craft_cells(512);
+    assert!(coherence(&s, &c) > TUBE_COHERENCE, "test craft: {}", coherence(&s, &c));
+    let l = crate::craft::stress::layout(40);
+    let s = union_surface(&l.geometry.primitives, &Resolution::default());
+    let c = build_cells(&s, &l.geometry.primitives, &l.geometry.skin, &CellOptions::for_parts(40));
+    assert!(coherence(&s, &c) > TUBE_COHERENCE, "stress craft: {}", coherence(&s, &c));
 }

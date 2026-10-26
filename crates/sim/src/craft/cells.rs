@@ -3,9 +3,9 @@
 //!
 //! Cells are built top-down from the union surface ([`super::mesh`]): each
 //! smooth face starts as one cell, and the cell with the largest error is
-//! split in two (along its longest extent, at equal area) until the target
-//! count is reached (at least the surface's area over
-//! [`CellOptions::cell_area`]). The error is `area × (1 + γ·spread)`, where `spread`
+//! split in two (along its longest extent, at equal area; a tube across
+//! its circumference) until the target count is reached (at least the
+//! surface's area over [`CellOptions::cell_area`]). The error is `area × (1 + γ·spread)`, where `spread`
 //! is the angular spread of the cell's normals, so cells end up smaller
 //! where the surface curves tightly (nose, feet, struts) and larger on flat
 //! or gently curved faces. Cells never span two faces, so edges between
@@ -146,6 +146,13 @@ impl Ord for Worst {
     }
 }
 
+/// A group whose normals sum to less than this share of its area is a
+/// tube, split across its circumference (a half-tube's coherence is
+/// 2/π ≈ 0.64).
+pub const TUBE_COHERENCE: f64 = 0.5;
+/// Added to a tube's split error, so tubes are split first.
+const TUBE_FIRST: f64 = 1e9;
+
 /// Per-triangle centroid, normal and area.
 struct Tris {
     c: Vec<DVec3>,
@@ -173,13 +180,23 @@ impl Tris {
             (a + self.a[t as usize], v + self.n[t as usize] * self.a[t as usize])
         });
         let spread = (2.0 * (1.0 - (vector.length() / area).min(1.0))).sqrt();
-        area * (1.0 + gamma * spread)
+        // A tube is split before any other group (its normal means nothing).
+        let tube = if vector.length() < TUBE_COHERENCE * area { TUBE_FIRST } else { 0.0 };
+        area * (1.0 + gamma * spread) + tube
     }
 
-    /// Splits a group at equal area across its longest extent.
+    /// Splits a group at equal area across its longest extent; a tube
+    /// (its normals nearly cancel, coherence below [`TUBE_COHERENCE`])
+    /// across its circumference instead: by the normals' widest component,
+    /// into half-tubes (a thin strut split along its length would give
+    /// rings whose normals cancel: scale baseline problem 2).
     fn split(&self, group: &mut Vec<u32>) -> Vec<u32> {
+        let (area, vector) = group.iter().fold((0.0, DVec3::ZERO), |(a, v), &t| {
+            (a + self.a[t as usize], v + self.n[t as usize] * self.a[t as usize])
+        });
+        let key = if vector.length() < TUBE_COHERENCE * area { &self.n } else { &self.c };
         let (lo, hi) = group.iter().fold((DVec3::splat(f64::MAX), DVec3::splat(f64::MIN)), |(lo, hi), &t| {
-            (lo.min(self.c[t as usize]), hi.max(self.c[t as usize]))
+            (lo.min(key[t as usize]), hi.max(key[t as usize]))
         });
         let ext = hi - lo;
         let axis = if ext.x >= ext.y && ext.x >= ext.z {
@@ -189,7 +206,7 @@ impl Tris {
         } else {
             2
         };
-        group.sort_by(|&p, &q| self.c[p as usize][axis].total_cmp(&self.c[q as usize][axis]).then(p.cmp(&q)));
+        group.sort_by(|&p, &q| key[p as usize][axis].total_cmp(&key[q as usize][axis]).then(p.cmp(&q)));
         let half = group.iter().map(|&t| self.a[t as usize]).sum::<f64>() / 2.0;
         let mut acc = 0.0;
         let mut k = 0;
