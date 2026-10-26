@@ -36,6 +36,7 @@
 
 pub mod air;
 pub mod bake;
+pub mod base;
 pub mod boundary;
 pub mod crossflow;
 pub mod friction;
@@ -101,8 +102,17 @@ fn lift_weight(mach: f64) -> f64 {
     ((HYPERSONIC_MACH - mach) / (HYPERSONIC_MACH - LIFT_FULL_MACH)).clamp(0.0, 1.0)
 }
 
-/// Continuum pressure force and moment per unit q (friction apart).
+/// Continuum pressure force and moment per unit q (friction apart), the
+/// bases' suction at the flow's Mach number included ([`base`]).
 fn continuum(bake: &AeroBake, s: &DirSums, d: DVec3, flow: &Flow, cd0: f64) -> (DVec3, DVec3) {
+    let (f, m) = pressure(bake, s, d, flow, cd0);
+    let cb = base::correction(flow.mach);
+    (f + s.base * cb, m + s.base_moment * cb)
+}
+
+/// The pressure model by regime (bases at the subsonic Cd₀'s suction,
+/// fading with it into Newtonian).
+fn pressure(bake: &AeroBake, s: &DirSums, d: DVec3, flow: &Flow, cd0: f64) -> (DVec3, DVec3) {
     let (mach, gamma) = (flow.mach, flow.gamma);
     let newtonian = |cp: f64| (s.newton * cp, s.newton_moment * cp);
     // Newtonian with the equilibrium-air stagnation pressure at entry speeds.

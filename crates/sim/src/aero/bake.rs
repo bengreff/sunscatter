@@ -57,6 +57,12 @@ pub struct DirSums {
     pub area_moment: DVec3,
     /// Effective nose radius for stagnation heating (m).
     pub nose_radius: f64,
+    /// Over the bases, the cells turned downstream more steeply than 45°
+    /// (separated; [`super::base`]): Σ A·n (m², its component along the
+    /// flow the projected base area) and its moment Σ c × A·n (m³): a
+    /// uniform base suction pulls along them.
+    pub base: DVec3,
+    pub base_moment: DVec3,
 }
 
 /// What the aerodynamics needs of a cell (body axes).
@@ -365,6 +371,10 @@ pub fn direction_sums(cells: &[CellGeometry], d: DVec3, f: impl Fn(usize) -> f64
     let mut s = DirSums::default();
     for (i, c) in cells.iter().enumerate() {
         let sin = -c.normal.dot(d);
+        if -sin > super::friction::SEPARATED {
+            s.base += c.normal * c.area;
+            s.base_moment += c.centroid.cross(c.normal * c.area);
+        }
         if sin <= 0.0 {
             continue;
         }

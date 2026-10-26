@@ -433,6 +433,39 @@ fn compressible_turbulent_friction_falls_like_van_driest() {
 }
 
 #[test]
+fn a_blunt_base_carries_the_published_base_pressure() {
+    // A cylinder (radius 0.5 m, 6 m) nose first: its base disc (0.785 m²)
+    // takes −C_pb(M)·q·A over the pressure model, which holds the subsonic
+    // 0.12 in Cd₀ and fades it into Newtonian (no base suction) by M 5.
+    let (s, c) =
+        shape(&[Shape::Cylinder { base: DVec3::new(0.0, 0.0, -3.0), axis: DVec3::new(0.0, 0.0, 6.0), radius: 0.5 }]);
+    let b = bake(&s, &c, &BakeOptions { level: 2, raster: 32 });
+    let d = -DVec3::Z;
+    let sums = b.sums_at(d);
+    let disc = math::PI * 0.25;
+    // The disc's cells: a polygon, 0.5 % short of the circle.
+    assert!((sums.base.dot(d) / disc - 1.0).abs() < 0.01, "{}", sums.base);
+    assert!(sums.base.truncate().length() < 1e-9 && sums.base_moment.length() < 1e-9);
+    let disc = sums.base.dot(d);
+    for mach in [0.3, 0.9, 1.0, 2.0, 3.0, 5.0, 8.0] {
+        let f = flow(d, mach, 1e-5);
+        let added = (continuum(&b, &sums, d, &f, 0.8).0 - pressure(&b, &sums, d, &f, 0.8).0).dot(d) / disc;
+        // Subsonic Cd₀ (0.8, form and base) holds the 0.12.
+        let total = added + base::SUBSONIC * base::subsonic_share(mach);
+        println!("M {mach}: base C_D {total:.3} (−C_pb {:.3})", base::pressure(mach));
+        assert!((total - base::pressure(mach)).abs() < 1e-9, "M {mach}: {total}");
+    }
+    // Along the base's normal, not the flow: at incidence it adds no
+    // normal force.
+    let tilted = DVec3::new(0.1, 0.0, -1.0).normalize();
+    let (st, f) = (b.sums_at(tilted), flow(tilted, 2.0, 1e-5));
+    let added = continuum(&b, &st, tilted, &f, 0.8).0 - pressure(&b, &st, tilted, &f, 0.8).0;
+    assert!(added.truncate().length() < 1e-9 * added.length(), "{added}");
+    // The transonic peak above both ends.
+    assert!(base::pressure(1.05) > 1.5 * base::pressure(0.6) && base::pressure(1.05) > 4.0 * base::pressure(5.0));
+}
+
+#[test]
 fn friction_acts_along_the_flow_and_not_on_the_base() {
     // A cylinder along the flow: friction on its side only (its upstream
     // face has no flow along it, the downstream face is separated).
