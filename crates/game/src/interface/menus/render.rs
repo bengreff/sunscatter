@@ -44,6 +44,9 @@ pub fn header_id(menu: MenuId, section: &str) -> egui::Id {
 pub fn menu(ui: &mut egui::Ui, menu: MenuId, sections: &[Section], settings: &MenuSettings) -> MenuInput {
     let mut input = MenuInput::default();
     ui.spacing_mut().item_spacing = vec2(6.0, 2.0);
+    // A section's items sit just inside its header's text (egui's default
+    // indent is 18 px, a lot in a 300 px dock).
+    ui.spacing_mut().indent = 10.0;
     ui.horizontal(|ui| {
         ui.label(RichText::new(menu.title()).monospace().strong().color(theme::ACCENT));
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
