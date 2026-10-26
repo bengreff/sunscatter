@@ -191,6 +191,9 @@ impl Vessel {
             self.thermal_to_now(world);
         }
         let (anchor, r, v) = self.state(world);
+        // Every piece gets its own phase below: drop the stored trajectory
+        // first, so the pieces' copies are light.
+        self.phase = Phase::Powered { anchor, r, v };
         let old = self.craft.design().clone();
         let props = self.mass_props();
         let capacity = self.craft.mass.capacity;
