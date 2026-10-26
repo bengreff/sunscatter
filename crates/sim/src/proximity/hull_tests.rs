@@ -52,12 +52,11 @@ fn signed_distance_is_the_distance_to_each_solid() {
 fn sample_points_cover_the_union_surface() {
     let craft = test_craft();
     let hull = Hull::new(&craft.def());
-    for i in 0..hull.shapes.len() {
-        for p in hull.points_of(i) {
-            let d = signed_distance(&hull.shapes[i], p.pos).0;
-            assert!(d.abs() < 1e-9, "primitive {i}: a point {d} m off its surface");
-            assert!(!hull.grid.any_contains(&hull.shapes, p.pos + p.normal * PROBE, Some(i)));
-        }
+    for p in &hull.points {
+        let i = p.primitive as usize;
+        let d = signed_distance(&hull.shapes[i], p.pos).0;
+        assert!(d.abs() < 1e-9, "primitive {i}: a point {d} m off its surface");
+        assert!(!hull.grid.any_contains(&hull.shapes, p.pos + p.normal * PROBE, Some(i)));
     }
     let s = &craft.surface;
     let mut worst: f64 = 0.0;
@@ -103,8 +102,8 @@ fn penetration_leaves_through_the_outer_surface() {
     }
 }
 
-/// The stress craft's hulls: points scale with the surface, and each
-/// primitive's points sit inside its sphere.
+/// The stress craft's hulls: points scale with the surface, and the tree
+/// holds every point once, each node's sphere holding its points.
 #[test]
 fn stress_craft_hulls() {
     for n in [1, 50, 300] {
@@ -115,9 +114,22 @@ fn stress_craft_hulls() {
         eprintln!("stress-{n}: {} primitives, {} points, built in {ms:.0} ms", hull.shapes.len(), hull.points.len());
         assert_eq!(hull.part.len(), hull.shapes.len());
         assert!(hull.part.iter().all(|&p| (p as usize) < def.parts.len()));
-        for i in 0..hull.shapes.len() {
-            let (c, r) = hull.spheres[i];
-            assert!(hull.points_of(i).iter().all(|p| (p.pos - c).length() <= r));
+        let mut seen = vec![0u32; hull.points.len()];
+        let mut stack = vec![(0usize, None::<(DVec3, f64)>)];
+        while let Some((k, parent)) = stack.pop() {
+            let node = hull.tree[k];
+            if node.count == 0 {
+                stack.push((node.first as usize, Some((node.center, node.radius))));
+                stack.push((node.first as usize + 1, Some((node.center, node.radius))));
+            } else {
+                for j in node.first..node.first + node.count {
+                    seen[j as usize] += 1;
+                    let p = hull.points[j as usize].pos;
+                    assert!((p - node.center).length() <= node.radius);
+                    assert!(parent.is_some_and(|(c, r)| (p - c).length() <= r) || k == 0);
+                }
+            }
         }
+        assert!(seen.iter().all(|&s| s == 1), "every point in one leaf");
     }
 }

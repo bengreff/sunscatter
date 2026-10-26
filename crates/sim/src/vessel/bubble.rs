@@ -46,7 +46,7 @@ use super::live::{Substeps, TickStart};
 use super::{attitude, Controls, Destruction, Phase, Vessel, TICK};
 use crate::contact;
 use crate::frame::NodeId;
-use crate::proximity::{self, Body, BubbleState, Candidate, Hull, BUBBLE};
+use crate::proximity::{self, Body, BubbleState, Candidate, Hull, Near, BUBBLE};
 use crate::time::Epoch;
 use crate::world::World;
 use glam::DVec3;
@@ -357,6 +357,18 @@ fn tick(
     members.iter().all(|&i| fleet[i].time == next && fleet[i].breakup.is_none())
 }
 
+/// Speed change a member may gain within a tick beyond its start (m/s:
+/// 50 m/s² of thrust), and the slack added to the tick's motion (m).
+const TICK_DV: f64 = 1.0;
+const TICK_SLACK: f64 = 0.01;
+
+/// How far a point of either body can move relative to the other in a
+/// tick (m): the relative speed, the rims' turning, and [`TICK_DV`].
+fn tick_margin(a: &Body, b: &Body) -> f64 {
+    let rim = |x: &Body| x.omega.length() * (x.hull.radius + (x.hull.center - x.com).length());
+    ((b.v - a.v).length() + rim(a) + rim(b) + TICK_DV) * TICK + TICK_SLACK
+}
+
 /// A member's ticks since its last craft contact after a tick.
 fn after_tick(since: Option<u32>, touched: bool) -> Option<u32> {
     if touched {
@@ -391,44 +403,54 @@ fn together(
     let mut subs: Vec<Substeps> = idx.iter().zip(&starts).map(|(&i, s)| Substeps::new(&shared[i], world, s)).collect();
     let friction: Vec<(f64, f64)> =
         idx.iter().map(|&i| (shared[i].craft.contact.hull.friction, shared[i].craft.contact.stick_speed)).collect();
+    // Member m as a contact body, relative to `origin` (the first member's
+    // centre of mass: metres, not orbit radii).
+    let body = |m: usize, subs: &[Substeps], origin: DVec3| {
+        let (s, p) = (&subs[m], &starts[m].props);
+        Body {
+            hull: hulls[m],
+            r: s.r - origin,
+            v: s.v,
+            q: s.att.q,
+            omega: s.att.omega,
+            com: p.com,
+            mass: p.mass,
+            inertia: p.inertia,
+        }
+    };
     let mut ok = true;
-    'substeps: for k in 0..contact::SUBSTEPS {
-        let origin = subs[0].r;
-        let body = |m: usize, subs: &[Substeps]| {
-            let (s, p) = (&subs[m], &starts[m].props);
-            Body {
-                hull: hulls[m],
-                r: s.r - origin,
-                v: s.v,
-                q: s.att.q,
-                omega: s.att.omega,
-                com: p.com,
-                mass: p.mass,
-                inertia: p.inertia,
+    // The points that can touch this tick, pair by pair (a, b ascending).
+    let mut near: Vec<(usize, usize, Near)> = Vec::new();
+    let mut origin = subs[0].r;
+    for a in 0..n {
+        for b in a + 1..n {
+            let (ba, bb) = (body(a, &subs, origin), body(b, &subs, origin));
+            let margin = tick_margin(&ba, &bb);
+            if proximity::sphere_gap(&ba, &bb) < margin {
+                near.push((a, b, proximity::near_points(&ba, &bb, margin)));
             }
-        };
+        }
+    }
+    'substeps: for k in 0..contact::SUBSTEPS {
+        origin = subs[0].r;
         let mut kicks = vec![(DVec3::ZERO, DVec3::ZERO); n];
-        for a in 0..n {
-            for b in a + 1..n {
-                let (ba, bb) = (body(a, &subs), body(b, &subs));
-                if proximity::sphere_gap(&ba, &bb) > 0.0 {
-                    continue;
-                }
-                let mu = (friction[a].0 * friction[b].0).sqrt();
-                let stick = friction[a].1.max(friction[b].1);
-                let f = proximity::pair_forces(&ba, &bb, mu, stick, subs[a].h());
-                if f.count == 0 {
-                    continue;
-                }
-                kicks[a].0 += f.force;
-                kicks[a].1 += f.torque_a;
-                kicks[b].0 -= f.force;
-                kicks[b].1 += f.torque_b;
-                (touched[a], touched[b]) = (true, true);
-                if let Some(im) = f.impact {
-                    hits[a].push((im.part_a, im.speed));
-                    hits[b].push((im.part_b, im.speed));
-                }
+        for (a, b, near) in &near {
+            let (a, b) = (*a, *b);
+            let (ba, bb) = (body(a, &subs, origin), body(b, &subs, origin));
+            let mu = (friction[a].0 * friction[b].0).sqrt();
+            let stick = friction[a].1.max(friction[b].1);
+            let f = proximity::pair_forces_near(&ba, &bb, near, mu, stick, subs[a].h());
+            if f.count == 0 {
+                continue;
+            }
+            kicks[a].0 += f.force;
+            kicks[a].1 += f.torque_a;
+            kicks[b].0 -= f.force;
+            kicks[b].1 += f.torque_b;
+            (touched[a], touched[b]) = (true, true);
+            if let Some(im) = f.impact {
+                hits[a].push((im.part_a, im.speed));
+                hits[b].push((im.part_b, im.speed));
             }
         }
         for (m, sub) in subs.iter_mut().enumerate() {

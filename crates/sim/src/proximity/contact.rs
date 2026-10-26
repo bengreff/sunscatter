@@ -4,9 +4,12 @@
 //! **Where they touch** ([`touches`]): every sample point of one craft's
 //! hull inside the other's solid ([`Hull::penetration`]), both ways (A's
 //! points in B, then B's in A), so a corner of either craft is caught.
-//! Broad phase: the hulls' bounding spheres; mid phase: each primitive's
-//! points' sphere against the other hull's primitive boxes; only the points
-//! of primitives that may touch are tested.
+//! Broad phase: the hulls' bounding spheres; mid phase: the tree of the
+//! points' bounding spheres against the other hull's primitive boxes, a
+//! leaf's sphere against the primitives' solids; then each point. A
+//! bubble finds the points within a tick's relative motion of the other
+//! craft once a tick ([`near_points`]) and tests only those in its
+//! substeps ([`pair_forces_near`]).
 //!
 //! **The force** at each touching point, along the other solid's normal:
 //! a spring-damper `(k·depth + c·closing)⁺` with `k = MODULUS × the
@@ -28,7 +31,8 @@
 //! d × F_B = 0`). Positions are relative to a local origin both bodies
 //! share (the bubble's leader, `sim::vessel::bubble`), so they are metres,
 //! not orbit radii (rule 3). Points are visited in a fixed order (A's
-//! primitives and points, then B's), so the sums are deterministic.
+//! tree, then B's, depth first, left before right), so the sums are
+//! deterministic.
 
 use super::hull::Hull;
 use crate::contact::friction_force;
@@ -92,39 +96,87 @@ pub struct Touch {
     pub part_b: u32,
 }
 
-/// The sample points of `a` inside `b` and of `b` inside `a`, in that
-/// order (see the module).
-pub fn touches(a: &Body, b: &Body) -> Vec<Touch> {
-    let mut out = Vec::new();
-    if sphere_gap(a, b) > 0.0 {
+/// The sample points of each craft that may touch the other: those within
+/// `margin` (m) of the other's solid at this pose (indices into each
+/// hull's points, in the tree's order). While the two move less than
+/// `margin` relative to each other (over a tick), no other point can
+/// touch: the bubble finds them once a tick and tests only them in its
+/// substeps.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Near {
+    pub a: Vec<u32>,
+    pub b: Vec<u32>,
+}
+
+/// `p` of `from` (body axes) relative to A's centre of mass, and in
+/// `into`'s body axes; `offset` is `from`'s centre of mass relative to A's
+/// and `into_offset` `into`'s.
+fn place(from: &Body, into: &Body, offset: DVec3, into_offset: DVec3, p: DVec3) -> (DVec3, DVec3) {
+    let x = from.q * (p - from.com) + offset;
+    (x, into.q.inverse() * (x - into_offset) + into.com)
+}
+
+/// [`Near`] at this pose (see there).
+pub fn near_points(a: &Body, b: &Body, margin: f64) -> Near {
+    let mut out = Near::default();
+    if sphere_gap(a, b) > margin {
         return out;
     }
     let d = b.r - a.r;
-    // `x` relative to A's centre of mass: the point of `from` (body axes)
-    // and where it is in `into`'s body axes.
-    let mut one_way = |from: &Body, into: &Body, offset: DVec3, on_a: bool| {
-        let into_inv = into.q.inverse();
-        for i in 0..from.hull.shapes.len() {
-            let (c, radius) = from.hull.spheres[i];
-            let x = from.q * (c - from.com) + offset;
-            let into_offset = if on_a { d } else { DVec3::ZERO };
-            if !into.hull.near_sphere(into_inv * (x - into_offset) + into.com, radius) {
+    let one_way = |from: &Body, into: &Body, offset: DVec3, into_offset: DVec3, list: &mut Vec<u32>| {
+        let mut stack = vec![0usize];
+        while let Some(k) = stack.pop() {
+            let Some(node) = from.hull.tree.get(k) else { continue };
+            let c = place(from, into, offset, into_offset, node.center).1;
+            let reach = node.radius + margin;
+            if node.count == 0 {
+                if into.hull.near_sphere(c, reach) {
+                    // The left child is popped first: points in the tree's order.
+                    stack.push(node.first as usize + 1);
+                    stack.push(node.first as usize);
+                }
                 continue;
             }
-            for p in from.hull.points_of(i) {
-                let x = from.q * (p.pos - from.com) + offset;
-                let local = into_inv * (x - into_offset) + into.com;
-                if let Some((depth, n, j)) = into.hull.penetration(local) {
-                    let (own, other) = (from.hull.part[i], into.hull.part[j as usize]);
-                    let (part_a, part_b) = if on_a { (own, other) } else { (other, own) };
-                    out.push(Touch { at: x, n: into.q * n, depth, area: p.area, on_a, part_a, part_b });
+            if !into.hull.solid_near(c, reach) {
+                continue;
+            }
+            for i in node.first..node.first + node.count {
+                let at = place(from, into, offset, into_offset, from.hull.points[i as usize].pos).1;
+                if into.hull.solid_near(at, margin) {
+                    list.push(i);
                 }
             }
         }
     };
-    one_way(a, b, DVec3::ZERO, true);
-    one_way(b, a, d, false);
+    one_way(a, b, DVec3::ZERO, d, &mut out.a);
+    one_way(b, a, d, DVec3::ZERO, &mut out.b);
     out
+}
+
+/// The points of `near` inside the other craft: A's in B, then B's in A.
+pub fn touches_near(a: &Body, b: &Body, near: &Near) -> Vec<Touch> {
+    let d = b.r - a.r;
+    let mut out = Vec::new();
+    let mut one_way = |from: &Body, into: &Body, offset: DVec3, into_offset: DVec3, list: &[u32], on_a: bool| {
+        for &i in list {
+            let p = &from.hull.points[i as usize];
+            let (x, at) = place(from, into, offset, into_offset, p.pos);
+            if let Some((depth, n, j)) = into.hull.penetration(at) {
+                let (own, other) = (from.hull.part[p.primitive as usize], into.hull.part[j as usize]);
+                let (part_a, part_b) = if on_a { (own, other) } else { (other, own) };
+                out.push(Touch { at: x, n: into.q * n, depth, area: p.area, on_a, part_a, part_b });
+            }
+        }
+    };
+    one_way(a, b, DVec3::ZERO, d, &near.a, true);
+    one_way(b, a, d, DVec3::ZERO, &near.b, false);
+    out
+}
+
+/// Every sample point of `a` inside `b` and of `b` inside `a`, in that
+/// order (see the module).
+pub fn touches(a: &Body, b: &Body) -> Vec<Touch> {
+    touches_near(a, b, &near_points(a, b, 0.0))
 }
 
 /// The fastest closing touch of a substep: speed (m/s) along the normal
@@ -161,7 +213,16 @@ fn effective_mass(a: &Body, b: &Body, la: DVec3, lb: DVec3, dir: DVec3) -> f64 {
 /// The contact forces between `a` and `b` for a substep of `dt` (s), with
 /// friction coefficient `mu` and stick speed `stick` (m/s).
 pub fn pair_forces(a: &Body, b: &Body, mu: f64, stick: f64, dt: f64) -> PairForces {
-    let touching = touches(a, b);
+    forces_of(a, b, &touches(a, b), mu, stick, dt)
+}
+
+/// [`pair_forces`] testing only the points of `near` ([`near_points`]).
+pub fn pair_forces_near(a: &Body, b: &Body, near: &Near, mu: f64, stick: f64, dt: f64) -> PairForces {
+    forces_of(a, b, &touches_near(a, b, near), mu, stick, dt)
+}
+
+/// The forces of the points `touching` (see the module).
+fn forces_of(a: &Body, b: &Body, touching: &[Touch], mu: f64, stick: f64, dt: f64) -> PairForces {
     let mut out = PairForces::default();
     if touching.is_empty() {
         return out;
@@ -174,7 +235,7 @@ pub fn pair_forces(a: &Body, b: &Body, mu: f64, stick: f64, dt: f64) -> PairForc
     let total = stiffness * scale;
     let damping = 2.0 * DAMPING_RATIO * (total * m_red).sqrt();
     let count = touching.len() as f64;
-    for t in &touching {
+    for t in touching {
         let (la, lb) = (t.at, t.at - d);
         let va = a.v + a.omega.cross(la);
         let vb = b.v + b.omega.cross(lb);

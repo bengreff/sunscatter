@@ -16,7 +16,7 @@ pub mod contact;
 pub mod hull;
 pub mod rule;
 
-pub use contact::{pair_forces, sphere_gap, Body, PairForces, PairImpact};
+pub use contact::{near_points, pair_forces, pair_forces_near, sphere_gap, Body, Near, PairForces, PairImpact};
 pub use hull::Hull;
 pub use rule::{members, BubbleRule, BubbleState, Candidate, BUBBLE};
 

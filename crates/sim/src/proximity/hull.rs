@@ -24,7 +24,9 @@
 //!
 //! Queries go through a bucket grid of the primitives' bounding boxes
 //! (like `craft::broad`, which answers only "inside any"), in ascending
-//! primitive order, so every answer is deterministic.
+//! primitive order, so every answer is deterministic. The points sit in a
+//! tree of bounding spheres (median splits, 16 per leaf), so a contact
+//! test visits only the points near the other craft's primitives.
 
 use crate::craft::broad::bounds;
 use crate::craft::mesh::basis;
@@ -176,6 +178,22 @@ pub struct HullPoint {
     pub normal: DVec3,
     /// The surface area it stands for (m²).
     pub area: f64,
+    /// Its primitive.
+    pub primitive: u32,
+}
+
+/// Points per leaf of the points' bounding-sphere tree.
+const LEAF: usize = 16;
+
+/// A node of the points' bounding-sphere tree: a sphere holding its points,
+/// and either a leaf's points (`points[first..first + count]`) or, with
+/// `count` zero, two children at `first` and `first + 1`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Node {
+    pub center: DVec3,
+    pub radius: f64,
+    pub first: u32,
+    pub count: u32,
 }
 
 /// A craft's collision hull (body axes).
@@ -184,12 +202,10 @@ pub struct Hull {
     pub shapes: Vec<Shape>,
     /// The part owning each primitive.
     pub part: Vec<u32>,
-    /// The sample points, grouped by primitive: primitive i's are
-    /// `points[start[i]..start[i + 1]]`.
+    /// The sample points, in the order of the tree's leaves.
     pub points: Vec<HullPoint>,
-    pub start: Vec<u32>,
-    /// Each primitive's points' bounding sphere (centre, radius).
-    pub spheres: Vec<(DVec3, f64)>,
+    /// The points' bounding-sphere tree (root first; empty without points).
+    pub tree: Vec<Node>,
     /// A sphere holding the whole solid (centre, radius).
     pub center: DVec3,
     pub radius: f64,
@@ -208,20 +224,19 @@ impl Hull {
     pub fn of_shapes(shapes: Vec<Shape>, part: Vec<u32>) -> Self {
         let grid = Grid::new(&shapes);
         let mut points = Vec::new();
-        let mut start = vec![0u32];
-        let mut spheres = Vec::with_capacity(shapes.len());
         for (i, s) in shapes.iter().enumerate() {
-            let first = points.len();
-            for p in sample(s) {
+            for mut p in sample(s) {
                 if !grid.any_contains(&shapes, p.pos + p.normal * PROBE, Some(i)) {
+                    p.primitive = i as u32;
                     points.push(p);
                 }
             }
-            start.push(points.len() as u32);
-            let (lo, hi) = bounds(s);
-            let c = (lo + hi) * 0.5;
-            let r = points[first..].iter().map(|p| (p.pos - c).length()).fold(0.0, f64::max);
-            spheres.push((c, r + PROBE));
+        }
+        let mut tree = Vec::new();
+        if !points.is_empty() {
+            tree.push(Node { center: DVec3::ZERO, radius: 0.0, first: 0, count: 0 });
+            let n = points.len();
+            build_tree(&mut points, 0, n, &mut tree, 0);
         }
         let (lo, hi) = shapes
             .iter()
@@ -230,18 +245,19 @@ impl Hull {
         let center = if shapes.is_empty() { DVec3::ZERO } else { (lo + hi) * 0.5 };
         let radius = shapes.iter().map(bounds).map(|(a, b)| (a - center).length().max((b - center).length()));
         let radius = radius.fold(0.0, f64::max);
-        Hull { shapes, part, points, start, spheres, center, radius, grid }
-    }
-
-    /// The sample points of primitive `i`.
-    pub fn points_of(&self, i: usize) -> &[HullPoint] {
-        &self.points[self.start[i] as usize..self.start[i + 1] as usize]
+        Hull { shapes, part, points, tree, center, radius, grid }
     }
 
     /// Whether any primitive's bounding box comes within `radius` of `c`
     /// (body axes): a sphere that cannot touch the solid is skipped.
     pub fn near_sphere(&self, c: DVec3, radius: f64) -> bool {
-        self.grid.near_sphere(c, radius)
+        self.grid.near_sphere(c, radius, |_| true)
+    }
+
+    /// Whether any primitive's solid comes within `radius` of `c` (body
+    /// axes): the exact test, for small spheres (the tree's leaves).
+    pub fn solid_near(&self, c: DVec3, radius: f64) -> bool {
+        self.grid.near_sphere(c, radius, |i| signed_distance(&self.shapes[i as usize], c).0 < radius)
     }
 
     /// Where `p` (body axes) is inside the solid: the depth (m, positive),
@@ -321,9 +337,41 @@ pub fn exits(shape: &Shape, p: DVec3) -> Vec<(f64, DVec3, DVec3)> {
     out
 }
 
-/// A sample point of a surface with its area share.
+/// Builds the tree's node `me` over `points[lo..hi]`: a leaf, or the
+/// points sorted along the longest extent of their box and split at the
+/// median (a stable sort: deterministic).
+fn build_tree(points: &mut [HullPoint], lo: usize, hi: usize, tree: &mut Vec<Node>, me: usize) {
+    let (a, b) = points[lo..hi]
+        .iter()
+        .fold((DVec3::splat(f64::MAX), DVec3::splat(f64::MIN)), |(a, b), p| (a.min(p.pos), b.max(p.pos)));
+    let center = (a + b) * 0.5;
+    let radius = points[lo..hi].iter().map(|p| (p.pos - center).length()).fold(0.0, f64::max) + PROBE;
+    if hi - lo <= LEAF {
+        tree[me] = Node { center, radius, first: lo as u32, count: (hi - lo) as u32 };
+        return;
+    }
+    let ext = b - a;
+    let axis = if ext.x >= ext.y && ext.x >= ext.z {
+        0
+    } else if ext.y >= ext.z {
+        1
+    } else {
+        2
+    };
+    points[lo..hi].sort_by(|p, q| p.pos[axis].total_cmp(&q.pos[axis]));
+    let mid = (lo + hi) / 2;
+    let left = tree.len();
+    tree.push(Node { center, radius, first: 0, count: 0 });
+    tree.push(Node { center, radius, first: 0, count: 0 });
+    tree[me] = Node { center, radius, first: left as u32, count: 0 };
+    build_tree(points, lo, mid, tree, left);
+    build_tree(points, mid, hi, tree, left + 1);
+}
+
+/// A sample point of a surface with its area share (its primitive is set
+/// when it is kept).
 fn point(pos: DVec3, normal: DVec3, area: f64) -> HullPoint {
-    HullPoint { pos, normal, area }
+    HullPoint { pos, normal, area, primitive: u32::MAX }
 }
 
 /// Points on a ring of `radius` about `c` in the plane (u, v), at least
@@ -517,8 +565,9 @@ impl Grid {
         })
     }
 
-    /// Whether any box comes within `radius` of `c`.
-    fn near_sphere(&self, c: DVec3, radius: f64) -> bool {
+    /// Whether any box comes within `radius` of `c` and its primitive
+    /// passes `also`.
+    fn near_sphere(&self, c: DVec3, radius: f64, also: impl Fn(u32) -> bool) -> bool {
         let (a, b) = (c - DVec3::splat(radius), c + DVec3::splat(radius));
         if self.boxes.is_empty() || b.cmplt(self.lo).any() {
             return false;
@@ -531,7 +580,7 @@ impl Grid {
             }
             for &i in &self.items[self.start[bucket] as usize..self.start[bucket + 1] as usize] {
                 let (lo, hi) = self.boxes[i as usize];
-                if (c.clamp(lo, hi) - c).length_squared() <= r2 {
+                if (c.clamp(lo, hi) - c).length_squared() <= r2 && also(i) {
                     hit = true;
                     return;
                 }

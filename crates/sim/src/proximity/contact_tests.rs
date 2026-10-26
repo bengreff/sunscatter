@@ -213,3 +213,26 @@ fn a_craft_pressed_against_another_rests_without_jitter() {
     assert!(hi - lo < 1e-5, "the depth jitters: {lo}..{hi}");
     assert!(fastest < 1e-4, "relative motion {fastest}");
 }
+
+/// The points found within a margin at one pose are all that can touch
+/// while the craft move less than the margin: the forces from them equal
+/// the full search's at poses up to the margin away.
+#[test]
+fn near_points_find_every_touch_within_their_margin() {
+    let h = hull();
+    let (a, b0) = nose_to_nose(0.02, 0.0);
+    let margin = 0.05;
+    let near = near_points(&body(&h, &a), &body(&h, &b0), margin);
+    assert!(!near.a.is_empty() && !near.b.is_empty() && near.a.len() < 200, "{} {}", near.a.len(), near.b.len());
+    for step in 0..=8 {
+        // B moved up to 4 cm closer and turned by up to 10 mrad.
+        let mut b = b0;
+        b.r.z -= 0.005 * step as f64;
+        let half = 0.000_625 * step as f64;
+        b.att.q = b0.att.q * DQuat::from_xyzw(crate::math::sin(half), 0.0, 0.0, crate::math::cos(half));
+        let full = pair_forces(&body(&h, &a), &body(&h, &b), 0.5, 0.05, 0.002);
+        let cached = pair_forces_near(&body(&h, &a), &body(&h, &b), &near, 0.5, 0.05, 0.002);
+        assert_eq!(full, cached, "step {step}");
+        assert_eq!(full.count > 0, step >= 5, "step {step}: {} touching", full.count);
+    }
+}
