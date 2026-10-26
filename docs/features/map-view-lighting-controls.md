@@ -186,7 +186,7 @@ F3/F5/F6/F7/F9 stay as shortcuts; F3 opens Settings → Graphics.
 Decided look: **clean sci-fi, but function first.**
 - Vital information is always visible; density is fine in menus.
 - Time-warp arrows sit at the top of the screen.
-- The flight view contains only flight controls. Ship systems will get a separate ship-management view (a schematic, with no planets drawn) once ships exist (D057).
+- The flight view is the navball plus task menus (D080). Ship systems will get a separate ship-management view (a schematic, with no planets drawn) once ships exist; the Utilities menu is its brief summary.
 
 The following fix what is rough now:
 - **One style.** A shared egui theme module holds colours, fonts, spacing and window frames. Panels are dark and slightly translucent, with an accent colour for the active vessel, and nothing is left at egui's default look.

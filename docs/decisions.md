@@ -251,11 +251,6 @@ It lists tracked vessels (and later asteroids), lets you focus and switch to a v
 
 ---
 
-**D057: The flight view holds only flight controls; ship systems get their own view.** *Direction, 2026-09-26.*
-- The flight view shows vital flight information: time and warp, the navball, trajectory data, and the flight state.
-- Ship systems (power, propellant, thermal, crew and so on) go in a separate ship-management view: an abstracted schematic of the ship with no planets drawn. It will be built once ships have systems.
-- GUI style: clean sci-fi, function first; dense menus are fine.
-
 **D058: Visuals are made minimal and stable before anything else; what does not work is simplified, not debugged.** *Decided, 2026-09-26.*
 - If a visual feature misbehaves, replace it with something simpler that works instead of spending sessions debugging it.
 - The next chunk starts by fixing the visual bugs the owner still sees (haze, blur, flashing, dark horizon, navball flicker), under this rule.
@@ -315,9 +310,12 @@ Simplified is fine, as long as it models, semi-accurately: lift; rocket flight a
 **D072: The 3D view renders at a scale of the window's resolution, 1× logical pixels by default.** *Decided, 2026-09-27 (owner).*
 A render-scale setting: by default the 3D scene renders at logical resolution (on Retina, a quarter of the physical pixels) and is scaled up; the UI stays at native resolution. "Native" is selectable.
 
-**D073: Graphics are bare and functional; only the minimal tier is developed.** *Decided, 2026-09-28 (owner). Replaces D071.*
-- The owner's number-one rule: a 100% accurate spaceflight simulator; graphics do not matter at this phase. Cartoon looks are welcome as long as the physics is realistic.
-- The minimal tier is the default and the only one developed: a blue sky at sea level, stars, sunlight from the Sun's direction, shadows, and a very simple ground texture for depth perception. The higher tiers stay in the code and are not worked on.
+**D073: Graphics are simple, crisp and functional; only the minimal tier is developed.** *Decided, 2026-09-28 (owner); revised 2026-10-25 (owner).*
+- The owner's number-one rule: a 100% accurate spaceflight simulator. Cartoon looks are welcome as long as the physics is realistic.
+- Minimal means simple, never blurry: "sharp, crisp, clear surfaces, recognisably water or land or earth, just not necessarily needlessly complex" (2026-10-25).
+- Surfaces come from real data (satellite colour, elevation, the sea mask), sharpened by procedural algorithms: coastlines and zone edges stay crisp at every distance. Each zone (ocean, ice, forest, desert…) is drawn as one consistent procedural texture, not as a magnified photograph. Details: [crisp-surfaces.md](features/crisp-surfaces.md).
+- The sky is physical, from the atmosphere and the light: Bevy's scattering model (D052), raymarched from outside an atmosphere so the ground stays clear from orbit. Stars, sunlight from the Sun's direction, shadows.
+- The minimal tier is the default and the only one developed. The higher tiers stay in the code and are not worked on.
 - The minimal tier runs full screen at the display's frame rate on the reference Mac.
 
 **D074: The test craft is a finned rocket, stable nose-first.** *Decided, 2026-09-28 (owner).*
@@ -342,6 +340,14 @@ A craft declares its reaction-control thrusters (thrust, Isp, fore and aft ring 
 - **Overload fails physically:** a canopy whose drag exceeds its breaking load tears and is lost. A command above `deploy_max_q` is not refused, because no real system refuses one: the pilot fires the mortar, and the canopy holds or not. Real canopies hold somewhat above their design load (Apollo's mains passed ultimate tests at 1.39× the design limit, TN D-7437; a CPAS main took 40,000 lb above its limit undamaged, NTRS 20110011562; CPAS is certified at 110 % q for 3 s, NTRS 20190026520) and fail beyond it (an Apollo gore split at 20,000 to 23,000 lb while disreefing). So the breaking load is the design limit × 1.39, and `deploy_max_q` is the design opening q, shown on the HUD.
 - **Simplified, known:** the load is q·Cd·A as the canopy fills, without the added-mass overshoot (Knacke's Cx). A cluster shares it evenly (Apollo's lead canopy took ~1.9× the mean).
 - The test craft carries two Apollo drogues (5.5 kPa design q) and four Apollo mains (3.27 kPa), sized for its 5 t landing mass. At a full 20 t the mains tear. Owner, 2026-10-01: keep it, it is what the physics gives (like not reaching orbit without debug mode). A propellant dump is a fine real feature for later.
+
+**D080: The flight view is the navball plus task menus in fixed docks.** *Decided, 2026-10-25 (owner). Replaces D057.*
+- "Designated, elegant locations for menus; completely cut unnecessary information." Always on screen: time and warp, the navball cluster, and a menu bar. Nothing else unless the player opens it.
+- **Navball cluster:** the essentials only: speed with the orbit/surface/target switch, altitude, Ap and Pe, SAS and its hold modes, throttle, the flight state.
+- **Task menus**, each opened from the menu bar or its key, each in a fixed dock: **Orbital** (advanced orbital data, the target, later maneuvers), **Landing/Reentry** (impact, braking, entry and parachute; the impact marker is drawn only while it is open), **Utilities** (a brief status of propellant, thermal, power, life support, comms), **Staging**. New tasks add a menu (docking gets a Docking menu).
+- Menus are hierarchical: a short summary on top, sections that expand to everything there is to know. Details: [flight-menus.md](features/flight-menus.md).
+- The detailed ship-systems view (an abstracted schematic of the ship, no planets) is still a separate screen, built once ships have systems; Utilities is its brief summary.
+- GUI style: clean sci-fi, function first.
 
 ## Open questions
 

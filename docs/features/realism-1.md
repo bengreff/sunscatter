@@ -176,7 +176,7 @@ Replaces the kinematic `max_ang_accel` attitude: Euler's equations with the iner
 
 - The ship is drawn from `geometry.ron` (simple lit mesh, no plume beyond a small emissive cone scaled by throttle).
 - Flight panel: propellant (kg and %), Δv remaining (rocket equation, current Isp), TWR, mass, max skin temperature and internal temperature with limits, crew count, DEBUG badge when debug mode is on.
-- The ship-systems view (D057) is not built yet.
+- The ship-systems view (D080) is not built yet.
 
 ---
 
