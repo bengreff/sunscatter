@@ -36,14 +36,23 @@
 //!
 //! `check` prints spot heights (Everest, Challenger Deep, LC-39A, Tycho) from the
 //! committed files.
+//!
+//! `planets [body…]` bakes the other solid bodies (all of them without names):
+//! heights, colour, roughness and zones from USGS/PDS global maps, or
+//! procedural relief where no DEM exists (see [`planets`], [`specs`], [`relief`]).
 
 mod bodies;
 mod color;
+mod gazetteer;
 mod giants;
+mod global;
 mod grid;
+mod planets;
+mod relief;
 mod resample;
 mod roughness;
 mod source;
+mod specs;
 mod stars;
 mod water;
 mod zones;
@@ -89,6 +98,10 @@ fn main() {
             bodies::check();
         }
         Some("giants") => giants::run(&args[1..]),
+        Some("planets") => {
+            let names: Vec<String> = args[1..].iter().take_while(|a| !a.starts_with("--")).cloned().collect();
+            planets::run(&names, opts);
+        }
         Some("check") => bodies::check(),
         Some("inspect") => {
             let t = source::read_tiff(Path::new(args.get(1).expect("inspect needs a file")));

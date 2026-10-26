@@ -1,8 +1,33 @@
 // Iapetus's visuals (read by crates/game; physical data is in body.ron).
-// base_color: an approximate visual colour (no colour map yet); albedo: two-toned (0.05-0.5); a middle value.
+// base_color: an approximate visual colour ; albedo: two-toned (0.05-0.5); a middle value.
 (
     base_color: (0.60, 0.57, 0.53),
     albedo: 0.2,
     roughness: 0.95,
     icon_color: (0.76, 0.73, 0.70),
+    // Zones (crisp-surfaces.md) from k-means centres of the Cassini-Voyager mosaic (783 m, USGS) in CIELAB.
+    // `albedo`: linear reflectance (~645, 555, 470 nm): Cassini Regio 0.02-0.05, reddish (Squyres et al. 1984,
+    // Icarus 59, 426; Blackburn et al. 2011, Icarus 212, 329), the trailing hemisphere 0.4-0.6, near neutral.
+    color_map: Some("color.jpg"),
+    zones: Some((
+        map: "zones.png",
+        tint: 0.3,
+        list: [
+            (name: "Cassini Regio", source: (67, 67, 67), albedo: Some((0.050, 0.040, 0.030)),
+                pattern: (scale_m: 1500.0, contrast: 0.1)),
+            (name: "dark transition", source: (95, 95, 95), albedo: Some((0.130, 0.120, 0.100)),
+                pattern: (scale_m: 1000.0, contrast: 0.1)),
+            (name: "bright terrain", source: (132, 132, 132), albedo: Some((0.420, 0.410, 0.390)),
+                pattern: (scale_m: 1000.0, contrast: 0.1)),
+            (name: "bright polar terrain", source: (183, 183, 183), albedo: Some((0.600, 0.590, 0.570)),
+                pattern: (scale_m: 1000.0, contrast: 0.08)),
+        ],
+    )),
+    detail: Some((
+        scale_m: 25.0,
+        strength: 0.55,
+        // Airless: keep detail out to 40 km (as the Moon).
+        fade_m: Some(40000.0),
+        rock_color: (0.30, 0.30, 0.29),
+    )),
 )

@@ -1,8 +1,31 @@
 // Mimas's visuals (read by crates/game; physical data is in body.ron).
-// base_color: an approximate visual colour (no colour map yet); albedo: geometric ~0.6 (Verbiscer et al. 2007), standing in for the Bond albedo.
+// base_color: an approximate visual colour ; albedo: geometric ~0.6 (Verbiscer et al. 2007), standing in for the Bond albedo.
 (
     base_color: (0.78, 0.78, 0.77),
     albedo: 0.6,
     roughness: 0.95,
     icon_color: (0.91, 0.91, 0.90),
+    // Zones (crisp-surfaces.md) from k-means centres of the colour map (Cassini ISS basemap, DLR) in CIELAB;
+    // `albedo`: linear reflectance (~645, 555, 470 nm): the body's mean albedo 0.6 (geometric ~0.6 standing in for Bond, Verbiscer et al. 2007) times
+    // the zone's brightness ratio in the map^0.5 (mosaics are display-stretched), coloured by B-V 0.70, V-R 0.37.
+    color_map: Some("color.jpg"),
+    zones: Some((
+        map: "zones.png",
+        tint: 0.3,
+        list: [
+            (name: "dark terrain", source: (76, 76, 76), albedo: Some((0.391, 0.386, 0.370)),
+                pattern: (scale_m: 1500.0, contrast: 0.1)),
+            (name: "plains", source: (114, 114, 114), albedo: Some((0.596, 0.589, 0.564)),
+                pattern: (scale_m: 1000.0, contrast: 0.1)),
+            (name: "bright terrain", source: (159, 159, 159), albedo: Some((0.861, 0.850, 0.814)),
+                pattern: (scale_m: 600.0, contrast: 0.1)),
+        ],
+    )),
+    detail: Some((
+        scale_m: 25.0,
+        strength: 0.55,
+        // Airless: keep detail out to 40 km (as the Moon).
+        fade_m: Some(40000.0),
+        rock_color: (0.30, 0.30, 0.29),
+    )),
 )

@@ -1,8 +1,28 @@
 // Makemake's visuals (read by crates/game; physical data is in body.ron).
-// base_color: an approximate visual colour (no colour map yet); albedo: geometric 0.82 (Ortiz et al. 2012).
+// base_color: an approximate visual colour (drawn without maps); albedo: geometric 0.82 (Ortiz et al. 2012).
 (
     base_color: (0.86, 0.67, 0.52),
     albedo: 0.82,
     roughness: 0.95,
     icon_color: (0.98, 0.82, 0.69),
+    // Procedural surface (no global map exists; docs/features/solar-visuals.md): relief and colour
+    // baked by `asset-tool planets` from measured statistics. Zone albedo: linear reflectance at
+    // ~645, 555, 470 nm from the geometric albedo 0.82 (Ortiz et al. 2012, Nature 491, 566); B-V 0.83, V-R 0.50 (MBOSS);
+    // colour indices converted with the Sun's B-V 0.653, V-R 0.356. Fresh ejecta: 1.6x (assumed).
+    color_map: Some("color.jpg"),
+    zones: Some((
+        map: "zones.png",
+        tint: 0.0,
+        list: [
+            (name: "terrain", source: (188, 177, 164), albedo: Some((0.936, 0.820, 0.697)),
+                pattern: (scale_m: 1000.0, contrast: 0.12)),
+        ],
+    )),
+    detail: Some((
+        scale_m: 25.0,
+        strength: 0.55,
+        // Airless: keep detail out to 40 km (as the Moon).
+        fade_m: Some(40000.0),
+        rock_color: (0.749, 0.656, 0.557),
+    )),
 )

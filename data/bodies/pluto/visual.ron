@@ -1,8 +1,36 @@
 // Pluto's visuals (read by crates/game; physical data is in body.ron).
-// base_color: an approximate visual colour (no colour map yet); albedo: Bond albedo ~0.72 (Buratti et al. 2017).
+// base_color: an approximate visual colour ; albedo: Bond albedo ~0.72 (Buratti et al. 2017).
 (
     base_color: (0.80, 0.72, 0.62),
     albedo: 0.72,
     roughness: 0.95,
     icon_color: (0.93, 0.86, 0.78),
+    // Zones (crisp-surfaces.md) from k-means centres of the New Horizons LORRI/MVIC mosaic (USGS, 300 m) in CIELAB.
+    // `albedo`: linear reflectance (~645, 555, 470 nm): normal reflectance from ~0.1 (Cthulhu) to ~1 (Sputnik
+    // Planitia N2 ice) (Buratti et al. 2017, Icarus 287, 207), coloured by the MVIC colours: dark tholin-rich
+    // terrain red, the volatile ices near neutral (Olkin et al. 2017, AJ 154, 258).
+    color_map: Some("color.jpg"),
+    zones: Some((
+        map: "zones.png",
+        tint: 0.3,
+        list: [
+            (name: "Cthulhu tholins", source: (24, 24, 24), albedo: Some((0.110, 0.075, 0.050)),
+                pattern: (scale_m: 1500.0, contrast: 0.08)),
+            (name: "dark red terrain", source: (64, 64, 64), albedo: Some((0.300, 0.220, 0.150)),
+                pattern: (scale_m: 1500.0, contrast: 0.1)),
+            (name: "tan uplands", source: (91, 91, 91), albedo: Some((0.550, 0.450, 0.350)),
+                pattern: (scale_m: 1000.0, contrast: 0.1)),
+            (name: "bright plains", source: (126, 126, 126), albedo: Some((0.800, 0.740, 0.660)),
+                pattern: (scale_m: 1500.0, contrast: 0.06)),
+            (name: "nitrogen ice", source: (158, 158, 158), albedo: Some((0.950, 0.920, 0.860)),
+                pattern: (scale_m: 2000.0, contrast: 0.05)),
+        ],
+    )),
+    detail: Some((
+        scale_m: 25.0,
+        strength: 0.55,
+        // Airless: keep detail out to 40 km (as the Moon).
+        fade_m: Some(40000.0),
+        rock_color: (0.30, 0.30, 0.29),
+    )),
 )

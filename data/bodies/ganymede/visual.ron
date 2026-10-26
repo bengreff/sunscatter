@@ -1,8 +1,33 @@
 // Ganymede's visuals (read by crates/game; physical data is in body.ron).
-// base_color: an approximate visual colour (no colour map yet); albedo: geometric albedo (JPL Horizons) standing in for the Bond albedo.
+// base_color: an approximate visual colour ; albedo: geometric albedo (JPL Horizons) standing in for the Bond albedo.
 (
     base_color: (0.62, 0.58, 0.53),
     albedo: 0.43,
     roughness: 0.95,
     icon_color: (0.78, 0.74, 0.70),
+    // Zones (crisp-surfaces.md) from k-means centres of the colour map (Voyager-Galileo SSI colour mosaic 1.4 km, USGS) in CIELAB;
+    // `albedo`: linear reflectance (~645, 555, 470 nm): the body's mean albedo 0.43 (geometric, JPL) times
+    // the zone's brightness ratio in the map^0.6 (mosaics are display-stretched), the map's colour.
+    color_map: Some("color.jpg"),
+    zones: Some((
+        map: "zones.png",
+        tint: 0.3,
+        list: [
+            (name: "dark terrain", source: (88, 82, 69), albedo: Some((0.324, 0.281, 0.195)),
+                pattern: (scale_m: 1500.0, contrast: 0.1)),
+            (name: "mixed terrain", source: (111, 106, 95), albedo: Some((0.429, 0.387, 0.306)),
+                pattern: (scale_m: 1000.0, contrast: 0.1)),
+            (name: "grooved terrain", source: (135, 132, 122), albedo: Some((0.543, 0.512, 0.431)),
+                pattern: (scale_m: 1000.0, contrast: 0.1)),
+            (name: "bright ejecta and frost", source: (169, 167, 158), albedo: Some((0.722, 0.700, 0.623)),
+                pattern: (scale_m: 600.0, contrast: 0.1)),
+        ],
+    )),
+    detail: Some((
+        scale_m: 25.0,
+        strength: 0.55,
+        // Airless: keep detail out to 40 km (as the Moon).
+        fade_m: Some(40000.0),
+        rock_color: (0.30, 0.30, 0.29),
+    )),
 )

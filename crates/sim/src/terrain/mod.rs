@@ -34,14 +34,18 @@ use std::sync::{Arc, Mutex, OnceLock};
 /// Offset between stored `u16` values and heights in metres.
 pub const HEIGHT_OFFSET: i32 = 32_768;
 
-/// An equirectangular grid of heights (m), row 0 north, column 0 at −180°.
-#[derive(Clone, PartialEq, Eq)]
+/// An equirectangular grid of heights, row 0 north, column 0 at −180°:
+/// stored values times [`Heightmap::scale`] metres (1 m per unit unless the
+/// body's relief exceeds the 16-bit range, e.g. Haumea's elongated shape).
+#[derive(Clone, PartialEq)]
 pub struct Heightmap {
     width: usize,
     height: usize,
     data: Vec<i16>,
     /// Sums of the first (north) and last (south) rows, for the pole blend.
     pole_sums: [i64; 2],
+    /// Metres per stored unit.
+    scale: f64,
 }
 
 impl fmt::Debug for Heightmap {
@@ -58,7 +62,20 @@ impl Heightmap {
         assert_eq!(data.len(), width * height, "heightmap size");
         let row_sum = |j: usize| data[j * width..(j + 1) * width].iter().map(|&h| i64::from(h)).sum();
         let pole_sums = [row_sum(0), row_sum(height - 1)];
-        Heightmap { width, height, data, pole_sums }
+        Heightmap { width, height, data, pole_sums, scale: 1.0 }
+    }
+
+    /// The same grid read at `scale` metres per stored unit (`height_scale`
+    /// in `body.ron`).
+    pub fn with_scale(mut self, scale: f64) -> Self {
+        assert!(scale > 0.0 && scale.is_finite(), "height scale must be positive");
+        self.scale = scale;
+        self
+    }
+
+    /// Metres per stored unit.
+    pub fn scale(&self) -> f64 {
+        self.scale
     }
 
     pub fn width(&self) -> usize {
@@ -69,12 +86,12 @@ impl Heightmap {
         self.height
     }
 
-    /// Row-major heights (m).
+    /// Row-major stored values (heights in units of [`Self::scale`] metres).
     pub fn data(&self) -> &[i16] {
         &self.data
     }
 
-    /// Height at pixel `(column, row)` (m).
+    /// Stored value at pixel `(column, row)` (units of [`Self::scale`] metres).
     pub fn pixel(&self, column: usize, row: usize) -> i16 {
         self.data[row * self.width + column]
     }
@@ -149,9 +166,9 @@ impl Heightmap {
         let (pole, dist) = if v < 0.0 { (0, v + 0.5) } else { (1, h - 0.5 - v) };
         if dist < 0.5 {
             let mean = self.pole_sums[pole] as f64 / w;
-            return mean + (sum - mean) * smoothstep(dist / 0.5);
+            return (mean + (sum - mean) * smoothstep(dist / 0.5)) * self.scale;
         }
-        sum
+        sum * self.scale
     }
 
     /// Height (m) in the direction of a body-fixed vector (any length > 0).
@@ -252,6 +269,17 @@ mod tests {
             assert!((m.sample(90.0 * DEG, lon) - mean(0)).abs() < 1e-9);
             assert!((m.sample(-90.0 * DEG, lon) - mean(31)).abs() < 1e-9);
         }
+    }
+
+    #[test]
+    fn height_scale_multiplies_every_sample() {
+        let m = synthetic(64);
+        let scaled = m.clone().with_scale(4.0);
+        assert_eq!(scaled.scale(), 4.0);
+        for (lat, lon) in [(0.3, 1.2), (-1.1, -2.9), (90.0 * DEG, 0.4), (-89.9 * DEG, 3.0), (0.0, math::PI)] {
+            assert_eq!(scaled.sample(lat, lon), 4.0 * m.sample(lat, lon));
+        }
+        assert_eq!(scaled.data(), m.data());
     }
 
     #[test]

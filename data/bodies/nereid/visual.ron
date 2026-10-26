@@ -1,8 +1,30 @@
 // Nereid's visuals (read by crates/game; physical data is in body.ron).
-// base_color: an approximate visual colour (no colour map yet); albedo: geometric albedo (JPL Horizons) standing in for the Bond albedo.
+// base_color: an approximate visual colour (drawn without maps); albedo: geometric albedo (JPL Horizons) standing in for the Bond albedo.
 (
     base_color: (0.45, 0.44, 0.43),
     albedo: 0.2,
     roughness: 0.95,
     icon_color: (0.63, 0.62, 0.62),
+    // Procedural surface (no global map exists; docs/features/solar-visuals.md): relief and colour
+    // baked by `asset-tool planets` from measured statistics. Zone albedo: linear reflectance at
+    // ~645, 555, 470 nm from the geometric albedo 0.155 (Thomas et al. 1991); neutral grey;
+    // colour indices converted with the Sun's B-V 0.653, V-R 0.356. Fresh ejecta: 1.6x (assumed).
+    color_map: Some("color.jpg"),
+    zones: Some((
+        map: "zones.png",
+        tint: 0.0,
+        list: [
+            (name: "terrain", source: (188, 187, 187), albedo: Some((0.156, 0.155, 0.155)),
+                pattern: (scale_m: 1000.0, contrast: 0.12)),
+            (name: "fresh ejecta", source: (232, 230, 230), albedo: Some((0.249, 0.248, 0.249)),
+                pattern: (scale_m: 600.0, contrast: 0.08)),
+        ],
+    )),
+    detail: Some((
+        scale_m: 25.0,
+        strength: 0.55,
+        // Airless: keep detail out to 40 km (as the Moon).
+        fade_m: Some(40000.0),
+        rock_color: (0.124, 0.124, 0.124),
+    )),
 )

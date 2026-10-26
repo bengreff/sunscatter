@@ -1,8 +1,40 @@
 // Io's visuals (read by crates/game; physical data is in body.ron).
-// base_color: an approximate visual colour (no colour map yet); albedo: geometric albedo (JPL Horizons) standing in for the Bond albedo.
+// base_color: an approximate visual colour ; albedo: geometric albedo (JPL Horizons) standing in for the Bond albedo.
 (
     base_color: (0.90, 0.84, 0.47),
     albedo: 0.63,
     roughness: 0.95,
     icon_color: (1.00, 0.96, 0.65),
+    // Zones (crisp-surfaces.md) from k-means centres of the Galileo SSI-Voyager colour mosaic (USGS, 1 km) in CIELAB,
+    // plus dark lava (paterae floors). `albedo`: linear reflectance (~645, 555, 470 nm) with Io's steep red slope:
+    // plains 0.55-0.66 at 555 nm, SO2-rich white plains brighter and flatter, red Pele-type deposits, paterae ~0.06
+    // (Geissler et al. 1999, Icarus 140, 265; McEwen et al. 1998); the mean matches the geometric albedo 0.63.
+    color_map: Some("color.jpg"),
+    zones: Some((
+        map: "zones.png",
+        tint: 0.3,
+        list: [
+            (name: "dark lava", source: (40, 40, 35), albedo: Some((0.060, 0.058, 0.050)),
+                pattern: (scale_m: 600.0, contrast: 0.1)),
+            (name: "brown polar plains", source: (117, 97, 69), albedo: Some((0.420, 0.300, 0.180)),
+                pattern: (scale_m: 1500.0, contrast: 0.1)),
+            (name: "yellow plains", source: (147, 122, 76), albedo: Some((0.700, 0.550, 0.300)),
+                pattern: (scale_m: 1500.0, contrast: 0.08)),
+            (name: "pale plains", source: (159, 140, 106), albedo: Some((0.740, 0.630, 0.450)),
+                pattern: (scale_m: 1500.0, contrast: 0.08)),
+            (name: "red deposits", source: (182, 135, 82), albedo: Some((0.800, 0.500, 0.280)),
+                pattern: (scale_m: 1000.0, contrast: 0.08)),
+            (name: "bright yellow plains", source: (175, 150, 97), albedo: Some((0.800, 0.660, 0.400)),
+                pattern: (scale_m: 1500.0, contrast: 0.08)),
+            (name: "SO2 frost", source: (191, 170, 140), albedo: Some((0.850, 0.800, 0.680)),
+                pattern: (scale_m: 1000.0, contrast: 0.06)),
+        ],
+    )),
+    detail: Some((
+        scale_m: 25.0,
+        strength: 0.55,
+        // Airless: keep detail out to 40 km (as the Moon).
+        fade_m: Some(40000.0),
+        rock_color: (0.30, 0.30, 0.29),
+    )),
 )

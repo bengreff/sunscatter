@@ -1,8 +1,30 @@
 // Gonggong's visuals (read by crates/game; physical data is in body.ron).
-// base_color: an approximate visual colour (no colour map yet); albedo: geometric 0.14 (Kiss et al. 2019).
+// base_color: an approximate visual colour (drawn without maps); albedo: geometric 0.14 (Kiss et al. 2019).
 (
     base_color: (0.72, 0.42, 0.32),
     albedo: 0.14,
     roughness: 0.95,
     icon_color: (0.86, 0.61, 0.52),
+    // Procedural surface (no global map exists; docs/features/solar-visuals.md): relief and colour
+    // baked by `asset-tool planets` from measured statistics. Zone albedo: linear reflectance at
+    // ~645, 555, 470 nm from the geometric albedo 0.14 (Kiss et al. 2019, Icarus 334, 3); very red, V-R 0.86 (Boehnhardt et al. 2014);
+    // colour indices converted with the Sun's B-V 0.653, V-R 0.356. Fresh ejecta: 1.6x (assumed).
+    color_map: Some("color.jpg"),
+    zones: Some((
+        map: "zones.png",
+        tint: 0.0,
+        list: [
+            (name: "terrain", source: (188, 152, 112), albedo: Some((0.223, 0.140, 0.072)),
+                pattern: (scale_m: 1000.0, contrast: 0.12)),
+            (name: "fresh ejecta", source: (232, 188, 139), albedo: Some((0.356, 0.224, 0.115)),
+                pattern: (scale_m: 600.0, contrast: 0.08)),
+        ],
+    )),
+    detail: Some((
+        scale_m: 25.0,
+        strength: 0.55,
+        // Airless: keep detail out to 40 km (as the Moon).
+        fade_m: Some(40000.0),
+        rock_color: (0.178, 0.112, 0.057),
+    )),
 )

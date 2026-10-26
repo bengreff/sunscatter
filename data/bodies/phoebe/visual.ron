@@ -1,8 +1,30 @@
 // Phoebe's visuals (read by crates/game; physical data is in body.ron).
-// base_color: an approximate visual colour (no colour map yet); albedo: geometric ~0.06 (Simonelli et al. 1999).
+// base_color: an approximate visual colour (drawn without maps); albedo: geometric ~0.06 (Simonelli et al. 1999).
 (
     base_color: (0.30, 0.29, 0.28),
     albedo: 0.06,
     roughness: 0.95,
     icon_color: (0.51, 0.50, 0.49),
+    // Procedural surface (no global map exists; docs/features/solar-visuals.md): relief and colour
+    // baked by `asset-tool planets` from measured statistics. Zone albedo: linear reflectance at
+    // ~645, 555, 470 nm from the geometric albedo 0.081 (Simonelli et al. 1999, Icarus 138, 249); neutral (B-V 0.63);
+    // colour indices converted with the Sun's B-V 0.653, V-R 0.356. Fresh ejecta: 1.6x (assumed).
+    color_map: Some("color.jpg"),
+    zones: Some((
+        map: "zones.png",
+        tint: 0.0,
+        list: [
+            (name: "terrain", source: (185, 186, 188), albedo: Some((0.080, 0.081, 0.083)),
+                pattern: (scale_m: 1000.0, contrast: 0.12)),
+            (name: "fresh ejecta", source: (228, 229, 232), albedo: Some((0.128, 0.130, 0.132)),
+                pattern: (scale_m: 600.0, contrast: 0.08)),
+        ],
+    )),
+    detail: Some((
+        scale_m: 25.0,
+        strength: 0.55,
+        // Airless: keep detail out to 40 km (as the Moon).
+        fade_m: Some(40000.0),
+        rock_color: (0.064, 0.065, 0.066),
+    )),
 )

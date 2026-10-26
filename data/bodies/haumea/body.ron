@@ -20,9 +20,24 @@
         anchor_zone: None,
         relativistic: false,
         solid: true,
-        // Rails warp is disabled below this altitude (m, D062): no terrain yet, so the margin above the ellipsoid.
-        rails_floor: 2000.0,
-        heightmap: None,
+        // Rails warp is disabled below this altitude (m, D062): the highest terrain (111552 m) plus 2 km, rounded up.
+        rails_floor: 114000.0,
+        // Terrain heights (m) above the reference spheroid, 1024×512: procedural relief (no global DEM): triaxial shape, craters from the measured density, regional fBm
+        // Baked by `asset-tool planets haumea` (range -100692 .. 111552 m).
+        heightmap: Some("height.png"),
+        // Metres per stored unit: the relief exceeds the 16-bit range at 1 m.
+        height_scale: 4.0,
+        // Procedural detail below the heightmap (D059): RMS residual map (rms_m = value² / 64)
+        // and the fractal's parameters; octave 0 is the map's sample spacing, 13 octaves reach ~1.4 m.
+        roughness: Some("roughness.png"),
+        terrain_detail: Some((
+            octaves: 13,
+            wavelength: 5762.5,
+            lacunarity: 2.0,
+            gain: 0.5,
+            amplitude: 0.5,
+            ridge_threshold: 300.0,
+        )),
         sea_level: None,
     ),
 )

@@ -1,5 +1,5 @@
 // Mars's visuals (read by crates/game; physical data is in body.ron).
-// base_color: an approximate visual colour (no colour map yet); albedo: Bond albedo, NASA Planetary Fact Sheet (NSSDCA).
+// base_color: an approximate visual colour ; albedo: Bond albedo, NASA Planetary Fact Sheet (NSSDCA).
 (
     base_color: (0.76, 0.45, 0.30),
     albedo: 0.25,
@@ -28,5 +28,36 @@
         mie_asymmetry_rgb: Some((0.73, 0.75, 0.78)),
         // Mean surface reflectance (Bond albedo 0.25) with Mars's red slope.
         ground_albedo: (0.27, 0.16, 0.09),
+    )),
+    // Surface zones (crisp-surfaces.md) from k-means centres of the Viking colour mosaic (USGS, 925 m) in CIELAB.
+    // `albedo`: linear reflectance at ~645, 555, 470 nm: dark regions ~0.10/0.075/0.055 and bright dusty
+    // regions ~0.33/0.17/0.085 (telescopic and Pathfinder spectra: Mustard and Bell 1994, GRL 21, 353; Bell et al.
+    // 2000, JGR 105, 1721), matching TES Lambert albedos 0.1-0.3 (Christensen et al. 2001); polar ice: the dusty
+    // residual caps, 0.4-0.6 (Kieffer 1979; seasonal CO2 frost is brighter).
+    color_map: Some("color.jpg"),
+    zones: Some((
+        map: "zones.png",
+        tint: 0.3,
+        list: [
+            (name: "dark sand", source: (59, 53, 68), albedo: Some((0.100, 0.075, 0.055)),
+                pattern: (scale_m: 1500.0, contrast: 0.1)),
+            (name: "dusky ground", source: (92, 66, 68), albedo: Some((0.170, 0.100, 0.065)),
+                pattern: (scale_m: 1000.0, contrast: 0.1)),
+            (name: "ochre plains", source: (118, 77, 69), albedo: Some((0.240, 0.130, 0.075)),
+                pattern: (scale_m: 1000.0, contrast: 0.1)),
+            (name: "bright dust", source: (144, 90, 76), albedo: Some((0.290, 0.155, 0.080)),
+                pattern: (scale_m: 1500.0, contrast: 0.08)),
+            (name: "brightest dust", source: (173, 99, 69), albedo: Some((0.330, 0.170, 0.085)),
+                pattern: (scale_m: 2000.0, contrast: 0.06)),
+            (name: "polar ice", source: (232, 230, 236), albedo: Some((0.550, 0.520, 0.480)), min_abs_lat: Some(55.0),
+                pattern: (scale_m: 1500.0, contrast: 0.06)),
+        ],
+    )),
+    detail: Some((
+        scale_m: 25.0,
+        strength: 0.55,
+        // Keep detail out to 40 km (as the Moon): the thin air barely hides it.
+        fade_m: Some(40000.0),
+        rock_color: (0.16, 0.10, 0.07),
     )),
 )

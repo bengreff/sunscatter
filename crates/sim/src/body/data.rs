@@ -32,6 +32,9 @@ pub struct BodyDef {
     pub relativistic: bool,
     /// Resolved path of the heightmap (16-bit PNG), if the body has one.
     pub heightmap: Option<PathBuf>,
+    /// Metres per stored heightmap unit (1 unless the relief exceeds
+    /// ±32,767 m, e.g. Haumea's elongated shape on its spheroid).
+    pub height_scale: f64,
     /// Resolved path of the roughness map (8-bit PNG, D059), if any.
     pub roughness: Option<PathBuf>,
     /// Procedural detail parameters (D059); detail needs the roughness map too.
@@ -77,6 +80,9 @@ struct PhysicalFile {
     /// Path relative to the body's directory.
     #[serde(default)]
     heightmap: Option<String>,
+    /// Metres per stored heightmap unit (default 1).
+    #[serde(default = "unit_scale")]
+    height_scale: f64,
     #[serde(default)]
     sea_level: Option<f64>,
     /// Path relative to the body's directory.
@@ -132,6 +138,10 @@ impl RotationFile {
     }
 }
 
+fn unit_scale() -> f64 {
+    1.0
+}
+
 /// Parses a body file's text. `dir` resolves the heightmap path and labels errors.
 pub fn parse_body(text: &str, dir: &Path) -> Result<BodyDef, DataError> {
     let err = |message: String| DataError { path: dir.join(BODY_FILE), message };
@@ -144,6 +154,9 @@ pub fn parse_body(text: &str, dir: &Path) -> Result<BodyDef, DataError> {
         if !(a.rho0 > 0.0 && a.scale_height > 0.0) {
             return Err(err("an atmosphere without a table needs rho0 and scale_height".into()));
         }
+    }
+    if !(p.height_scale > 0.0 && p.height_scale.is_finite()) {
+        return Err(err("height_scale must be positive".into()));
     }
     Ok(BodyDef {
         physical: BodyPhysical {
@@ -163,6 +176,7 @@ pub fn parse_body(text: &str, dir: &Path) -> Result<BodyDef, DataError> {
         anchor_zone: p.anchor_zone,
         relativistic: p.relativistic,
         heightmap: p.heightmap.map(|h| dir.join(h)),
+        height_scale: p.height_scale,
         roughness: p.roughness.map(|r| dir.join(r)),
         terrain_detail: p.terrain_detail,
     })
@@ -179,6 +193,11 @@ impl BodyDef {
             if path.exists() {
                 let map =
                     crate::terrain::load_shared(path).map_err(|message| DataError { path: path.clone(), message })?;
+                let map = if self.height_scale == 1.0 {
+                    map
+                } else {
+                    std::sync::Arc::new(map.as_ref().clone().with_scale(self.height_scale))
+                };
                 self.physical.terrain = Some(map);
             } else {
                 eprintln!("warning: {} not found; {} uses its smooth ellipsoid", path.display(), self.physical.name);

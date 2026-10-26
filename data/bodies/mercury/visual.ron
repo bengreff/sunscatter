@@ -1,8 +1,35 @@
 // Mercury's visuals (read by crates/game; physical data is in body.ron).
-// base_color: an approximate visual colour (no colour map yet); albedo: Bond albedo, NASA Planetary Fact Sheet (NSSDCA).
+// base_color: an approximate visual colour ; albedo: Bond albedo, NASA Planetary Fact Sheet (NSSDCA).
 (
     base_color: (0.55, 0.52, 0.50),
     albedo: 0.088,
     roughness: 0.95,
     icon_color: (0.72, 0.69, 0.68),
+    // Zones (crisp-surfaces.md) from k-means centres of the colour map (MESSENGER MDIS 3-colour basemap, USGS 665 m) in CIELAB;
+    // `albedo`: linear reflectance (~645, 555, 470 nm): the body's mean albedo 0.12 (normal albedo ~0.12 at 560 nm, Denevi and Robinson 2008, Icarus 197, 239) times
+    // the zone's brightness ratio in the map^0.5 (mosaics are display-stretched), coloured by B-V 0.93, V-R 0.52.
+    color_map: Some("color.jpg"),
+    zones: Some((
+        map: "zones.png",
+        tint: 0.3,
+        list: [
+            (name: "low-reflectance material", source: (48, 51, 55), albedo: Some((0.068, 0.058, 0.045)),
+                pattern: (scale_m: 1500.0, contrast: 0.1)),
+            (name: "intercrater plains", source: (77, 79, 81), albedo: Some((0.105, 0.090, 0.070)),
+                pattern: (scale_m: 1000.0, contrast: 0.1)),
+            (name: "plains", source: (104, 106, 107), albedo: Some((0.142, 0.122, 0.095)),
+                pattern: (scale_m: 1000.0, contrast: 0.1)),
+            (name: "bright plains", source: (139, 137, 133), albedo: Some((0.188, 0.162, 0.125)),
+                pattern: (scale_m: 1000.0, contrast: 0.1)),
+            (name: "fresh ejecta", source: (186, 183, 178), albedo: Some((0.259, 0.223, 0.173)),
+                pattern: (scale_m: 600.0, contrast: 0.1)),
+        ],
+    )),
+    detail: Some((
+        scale_m: 25.0,
+        strength: 0.55,
+        // Airless: keep detail out to 40 km (as the Moon).
+        fade_m: Some(40000.0),
+        rock_color: (0.30, 0.30, 0.29),
+    )),
 )

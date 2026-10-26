@@ -1,8 +1,30 @@
 // Orcus's visuals (read by crates/game; physical data is in body.ron).
-// base_color: an approximate visual colour (no colour map yet); albedo: geometric ~0.23 (Fornasier et al. 2013).
+// base_color: an approximate visual colour (drawn without maps); albedo: geometric ~0.23 (Fornasier et al. 2013).
 (
     base_color: (0.56, 0.56, 0.56),
     albedo: 0.23,
     roughness: 0.95,
     icon_color: (0.73, 0.73, 0.73),
+    // Procedural surface (no global map exists; docs/features/solar-visuals.md): relief and colour
+    // baked by `asset-tool planets` from measured statistics. Zone albedo: linear reflectance at
+    // ~645, 555, 470 nm from the geometric albedo 0.23 (Fornasier et al. 2013); neutral, B-V 0.68, V-R 0.37 (MBOSS);
+    // colour indices converted with the Sun's B-V 0.653, V-R 0.356. Fresh ejecta: 1.6x (assumed).
+    color_map: Some("color.jpg"),
+    zones: Some((
+        map: "zones.png",
+        tint: 0.0,
+        list: [
+            (name: "terrain", source: (188, 186, 184), albedo: Some((0.233, 0.230, 0.224)),
+                pattern: (scale_m: 1000.0, contrast: 0.12)),
+            (name: "fresh ejecta", source: (232, 229, 227), albedo: Some((0.373, 0.368, 0.359)),
+                pattern: (scale_m: 600.0, contrast: 0.08)),
+        ],
+    )),
+    detail: Some((
+        scale_m: 25.0,
+        strength: 0.55,
+        // Airless: keep detail out to 40 km (as the Moon).
+        fade_m: Some(40000.0),
+        rock_color: (0.186, 0.184, 0.179),
+    )),
 )

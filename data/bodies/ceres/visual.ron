@@ -1,8 +1,33 @@
 // Ceres's visuals (read by crates/game; physical data is in body.ron).
-// base_color: an approximate visual colour (no colour map yet); albedo: Bond albedo ~0.03 (Li et al. 2016, Dawn).
+// base_color: an approximate visual colour ; albedo: Bond albedo ~0.03 (Li et al. 2016, Dawn).
 (
     base_color: (0.36, 0.36, 0.35),
     albedo: 0.03,
     roughness: 0.95,
     icon_color: (0.56, 0.56, 0.55),
+    // Zones (crisp-surfaces.md) from k-means centres of the Dawn FC clear-filter mosaic (DLR, 400 m) in CIELAB.
+    // `albedo`: linear reflectance (~645, 555, 470 nm): normal albedo 0.09 with a 0.07-0.11 range and the
+    // Occator faculae up to ~0.3 (Li et al. 2016, ApJL 817, L22; Schroeder et al. 2017); nearly neutral (B-V 0.72).
+    color_map: Some("color.jpg"),
+    zones: Some((
+        map: "zones.png",
+        tint: 0.3,
+        list: [
+            (name: "dark terrain", source: (67, 67, 67), albedo: Some((0.072, 0.070, 0.066)),
+                pattern: (scale_m: 1500.0, contrast: 0.1)),
+            (name: "cratered terrain", source: (122, 122, 122), albedo: Some((0.088, 0.086, 0.081)),
+                pattern: (scale_m: 1000.0, contrast: 0.1)),
+            (name: "bright terrain", source: (152, 152, 152), albedo: Some((0.104, 0.102, 0.096)),
+                pattern: (scale_m: 1000.0, contrast: 0.1)),
+            (name: "faculae", source: (235, 235, 235), albedo: Some((0.310, 0.300, 0.290)),
+                pattern: (scale_m: 400.0, contrast: 0.05)),
+        ],
+    )),
+    detail: Some((
+        scale_m: 25.0,
+        strength: 0.55,
+        // Airless: keep detail out to 40 km (as the Moon).
+        fade_m: Some(40000.0),
+        rock_color: (0.30, 0.30, 0.29),
+    )),
 )

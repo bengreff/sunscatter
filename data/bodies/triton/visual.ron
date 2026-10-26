@@ -1,8 +1,34 @@
 // Triton's visuals (read by crates/game; physical data is in body.ron).
-// base_color: an approximate visual colour (no colour map yet); albedo: geometric albedo (JPL Horizons) standing in for the Bond albedo.
+// base_color: an approximate visual colour ; albedo: geometric albedo (JPL Horizons) standing in for the Bond albedo.
 (
     base_color: (0.86, 0.80, 0.78),
     albedo: 0.7,
     roughness: 0.95,
     icon_color: (0.98, 0.93, 0.91),
+    // Zones (crisp-surfaces.md) from k-means centres of the Voyager 2 colour mosaic with global fill (LPI/USGS,
+    // 600 m; unseen areas are a smooth fill) in CIELAB. `albedo`: linear reflectance (~645, 555, 470 nm): geometric
+    // albedo 0.72 overall (Hillier et al. 1990, Science 250, 419), the pinkish south polar cap brightest, the
+    // dark maculae ~0.45 (Smith et al. 1989, Science 246, 1422).
+    color_map: Some("color.jpg"),
+    zones: Some((
+        map: "zones.png",
+        tint: 0.3,
+        list: [
+            (name: "cantaloupe terrain", source: (106, 108, 72), albedo: Some((0.660, 0.620, 0.550)),
+                pattern: (scale_m: 1500.0, contrast: 0.1)),
+            (name: "dark maculae", source: (114, 116, 105), albedo: Some((0.450, 0.430, 0.400)),
+                pattern: (scale_m: 1000.0, contrast: 0.1)),
+            (name: "bright plains", source: (157, 162, 143), albedo: Some((0.800, 0.770, 0.720)),
+                pattern: (scale_m: 1500.0, contrast: 0.06)),
+            (name: "south polar cap", source: (184, 190, 164), albedo: Some((0.920, 0.850, 0.800)),
+                pattern: (scale_m: 2000.0, contrast: 0.05)),
+        ],
+    )),
+    detail: Some((
+        scale_m: 25.0,
+        strength: 0.55,
+        // Airless: keep detail out to 40 km (as the Moon).
+        fade_m: Some(40000.0),
+        rock_color: (0.30, 0.30, 0.29),
+    )),
 )

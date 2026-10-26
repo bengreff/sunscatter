@@ -1,8 +1,33 @@
 // Europa's visuals (read by crates/game; physical data is in body.ron).
-// base_color: an approximate visual colour (no colour map yet); albedo: geometric albedo (JPL Horizons) standing in for the Bond albedo.
+// base_color: an approximate visual colour ; albedo: geometric albedo (JPL Horizons) standing in for the Bond albedo.
 (
     base_color: (0.86, 0.81, 0.73),
     albedo: 0.67,
     roughness: 0.95,
     icon_color: (0.98, 0.94, 0.87),
+    // Zones (crisp-surfaces.md) from k-means centres of the colour map (Voyager-Galileo SSI mosaic 500 m, USGS) in CIELAB;
+    // `albedo`: linear reflectance (~645, 555, 470 nm): the body's mean albedo 0.67 (geometric, JPL) times
+    // the zone's brightness ratio in the map^0.5 (mosaics are display-stretched), coloured by B-V 0.87, V-R 0.45.
+    color_map: Some("color.jpg"),
+    zones: Some((
+        map: "zones.png",
+        tint: 0.3,
+        list: [
+            (name: "lineae and chaos", source: (115, 115, 115), albedo: Some((0.544, 0.499, 0.409)),
+                pattern: (scale_m: 1500.0, contrast: 0.1)),
+            (name: "ridged plains", source: (139, 139, 139), albedo: Some((0.671, 0.616, 0.504)),
+                pattern: (scale_m: 1000.0, contrast: 0.1)),
+            (name: "bright plains", source: (160, 160, 160), albedo: Some((0.780, 0.716, 0.586)),
+                pattern: (scale_m: 1000.0, contrast: 0.1)),
+            (name: "bright ejecta", source: (179, 179, 179), albedo: Some((0.888, 0.814, 0.667)),
+                pattern: (scale_m: 600.0, contrast: 0.1)),
+        ],
+    )),
+    detail: Some((
+        scale_m: 25.0,
+        strength: 0.55,
+        // Airless: keep detail out to 40 km (as the Moon).
+        fade_m: Some(40000.0),
+        rock_color: (0.30, 0.30, 0.29),
+    )),
 )

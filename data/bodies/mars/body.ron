@@ -90,7 +90,20 @@
         solid: true,
         // Rails warp is disabled below this altitude (m, D062): the top of the atmosphere.
         rails_floor: 150000.0,
-        heightmap: None,
+        // Terrain heights (m) above the reference spheroid, 5760×2880: MOLA MEGDR radius, 32 ppd (Smith et al. 2001; PDS Geosciences), via asset-tool planets
+        // Baked by `asset-tool planets mars` (range -7615 .. 22881 m).
+        heightmap: Some("height.png"),
+        // Procedural detail below the heightmap (D059): RMS residual map (rms_m = value² / 64)
+        // and the fractal's parameters; octave 0 is the map's sample spacing, 12 octaves reach ~1.8 m.
+        roughness: Some("roughness.png"),
+        terrain_detail: Some((
+            octaves: 12,
+            wavelength: 3704.7,
+            lacunarity: 2.0,
+            gain: 0.5,
+            amplitude: 0.5,
+            ridge_threshold: 300.0,
+        )),
         sea_level: None,
     ),
 )

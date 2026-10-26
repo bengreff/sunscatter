@@ -1,8 +1,33 @@
 // Tethys's visuals (read by crates/game; physical data is in body.ron).
-// base_color: an approximate visual colour (no colour map yet); albedo: Bond albedo ~0.67 (Howett et al. 2010).
+// base_color: an approximate visual colour ; albedo: Bond albedo ~0.67 (Howett et al. 2010).
 (
     base_color: (0.85, 0.85, 0.84),
     albedo: 0.67,
     roughness: 0.95,
     icon_color: (0.97, 0.97, 0.96),
+    // Zones (crisp-surfaces.md) from k-means centres of the colour map (Cassini mosaic 293 m, USGS) in CIELAB;
+    // `albedo`: linear reflectance (~645, 555, 470 nm): the body's mean albedo 0.67 (Bond, Howett et al. 2010) times
+    // the zone's brightness ratio in the map^0.5 (mosaics are display-stretched), coloured by B-V 0.73, V-R 0.38.
+    color_map: Some("color.jpg"),
+    zones: Some((
+        map: "zones.png",
+        tint: 0.3,
+        list: [
+            (name: "dark terrain", source: (74, 74, 74), albedo: Some((0.414, 0.405, 0.377)),
+                pattern: (scale_m: 1500.0, contrast: 0.1)),
+            (name: "cratered plains", source: (107, 107, 107), albedo: Some((0.602, 0.589, 0.548)),
+                pattern: (scale_m: 1000.0, contrast: 0.1)),
+            (name: "bright plains", source: (131, 131, 131), albedo: Some((0.749, 0.733, 0.682)),
+                pattern: (scale_m: 1000.0, contrast: 0.1)),
+            (name: "bright ejecta", source: (165, 165, 165), albedo: Some((0.950, 0.943, 0.878)),
+                pattern: (scale_m: 600.0, contrast: 0.1)),
+        ],
+    )),
+    detail: Some((
+        scale_m: 25.0,
+        strength: 0.55,
+        // Airless: keep detail out to 40 km (as the Moon).
+        fade_m: Some(40000.0),
+        rock_color: (0.30, 0.30, 0.29),
+    )),
 )

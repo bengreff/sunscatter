@@ -1,8 +1,30 @@
 // Miranda's visuals (read by crates/game; physical data is in body.ron).
-// base_color: an approximate visual colour (no colour map yet); albedo: geometric albedo (JPL Horizons) standing in for the Bond albedo.
+// base_color: an approximate visual colour (drawn without maps); albedo: geometric albedo (JPL Horizons) standing in for the Bond albedo.
 (
     base_color: (0.62, 0.62, 0.62),
     albedo: 0.27,
     roughness: 0.95,
     icon_color: (0.78, 0.78, 0.78),
+    // Procedural surface (no global map exists; docs/features/solar-visuals.md): relief and colour
+    // baked by `asset-tool planets` from measured statistics. Zone albedo: linear reflectance at
+    // ~645, 555, 470 nm from the geometric albedo 0.32 (Karkoschka 2001, Icarus 151, 51); neutral grey;
+    // colour indices converted with the Sun's B-V 0.653, V-R 0.356. Fresh ejecta: 1.6x (assumed).
+    color_map: Some("color.jpg"),
+    zones: Some((
+        map: "zones.png",
+        tint: 0.0,
+        list: [
+            (name: "terrain", source: (188, 187, 186), albedo: Some((0.321, 0.320, 0.315)),
+                pattern: (scale_m: 1000.0, contrast: 0.12)),
+            (name: "fresh ejecta", source: (232, 230, 229), albedo: Some((0.514, 0.512, 0.504)),
+                pattern: (scale_m: 600.0, contrast: 0.08)),
+        ],
+    )),
+    detail: Some((
+        scale_m: 25.0,
+        strength: 0.55,
+        // Airless: keep detail out to 40 km (as the Moon).
+        fade_m: Some(40000.0),
+        rock_color: (0.257, 0.256, 0.252),
+    )),
 )

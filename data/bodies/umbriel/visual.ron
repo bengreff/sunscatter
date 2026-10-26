@@ -1,8 +1,30 @@
 // Umbriel's visuals (read by crates/game; physical data is in body.ron).
-// base_color: an approximate visual colour (no colour map yet); albedo: geometric albedo (JPL Horizons) standing in for the Bond albedo.
+// base_color: an approximate visual colour (drawn without maps); albedo: geometric albedo (JPL Horizons) standing in for the Bond albedo.
 (
     base_color: (0.42, 0.42, 0.42),
     albedo: 0.18,
     roughness: 0.95,
     icon_color: (0.61, 0.61, 0.61),
+    // Procedural surface (no global map exists; docs/features/solar-visuals.md): relief and colour
+    // baked by `asset-tool planets` from measured statistics. Zone albedo: linear reflectance at
+    // ~645, 555, 470 nm from the geometric albedo 0.21 (Karkoschka 2001); neutral grey;
+    // colour indices converted with the Sun's B-V 0.653, V-R 0.356. Fresh ejecta: 1.6x (assumed).
+    color_map: Some("color.jpg"),
+    zones: Some((
+        map: "zones.png",
+        tint: 0.0,
+        list: [
+            (name: "terrain", source: (188, 187, 185), albedo: Some((0.211, 0.210, 0.205)),
+                pattern: (scale_m: 1000.0, contrast: 0.12)),
+            (name: "fresh ejecta", source: (232, 230, 228), albedo: Some((0.337, 0.336, 0.328)),
+                pattern: (scale_m: 600.0, contrast: 0.08)),
+        ],
+    )),
+    detail: Some((
+        scale_m: 25.0,
+        strength: 0.55,
+        // Airless: keep detail out to 40 km (as the Moon).
+        fade_m: Some(40000.0),
+        rock_color: (0.169, 0.168, 0.164),
+    )),
 )

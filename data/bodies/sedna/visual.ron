@@ -1,8 +1,30 @@
 // Sedna's visuals (read by crates/game; physical data is in body.ron).
-// base_color: an approximate visual colour (no colour map yet); albedo: geometric ~0.32 (Pál et al. 2012).
+// base_color: an approximate visual colour (drawn without maps); albedo: geometric ~0.32 (Pál et al. 2012).
 (
     base_color: (0.72, 0.33, 0.24),
     albedo: 0.32,
     roughness: 0.95,
     icon_color: (0.86, 0.53, 0.45),
+    // Procedural surface (no global map exists; docs/features/solar-visuals.md): relief and colour
+    // baked by `asset-tool planets` from measured statistics. Zone albedo: linear reflectance at
+    // ~645, 555, 470 nm from the geometric albedo 0.32 (Pal et al. 2012); very red, B-V 1.24, V-R 0.78 (MBOSS);
+    // colour indices converted with the Sun's B-V 0.653, V-R 0.356. Fresh ejecta: 1.6x (assumed).
+    color_map: Some("color.jpg"),
+    zones: Some((
+        map: "zones.png",
+        tint: 0.0,
+        list: [
+            (name: "terrain", source: (188, 157, 123), albedo: Some((0.473, 0.320, 0.186)),
+                pattern: (scale_m: 1000.0, contrast: 0.12)),
+            (name: "fresh ejecta", source: (232, 194, 153), albedo: Some((0.757, 0.512, 0.298)),
+                pattern: (scale_m: 600.0, contrast: 0.08)),
+        ],
+    )),
+    detail: Some((
+        scale_m: 25.0,
+        strength: 0.55,
+        // Airless: keep detail out to 40 km (as the Moon).
+        fade_m: Some(40000.0),
+        rock_color: (0.378, 0.256, 0.149),
+    )),
 )

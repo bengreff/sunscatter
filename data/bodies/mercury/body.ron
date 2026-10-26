@@ -24,9 +24,22 @@
         anchor_zone: None,
         relativistic: false,
         solid: true,
-        // Rails warp is disabled below this altitude (m, D062): no terrain yet, so the margin above the ellipsoid.
-        rails_floor: 2000.0,
-        heightmap: None,
+        // Rails warp is disabled below this altitude (m, D062): the highest terrain (4303 m) plus 2 km, rounded up.
+        rails_floor: 7000.0,
+        // Terrain heights (m) above the reference spheroid, 4096×2048: MESSENGER MDIS stereo DEM v2 (Becker et al. 2016; USGS, 665 m), via asset-tool planets
+        // Baked by `asset-tool planets mercury` (range -6013 .. 4303 m).
+        heightmap: Some("height.png"),
+        // Procedural detail below the heightmap (D059): RMS residual map (rms_m = value² / 64)
+        // and the fractal's parameters; octave 0 is the map's sample spacing, 12 octaves reach ~1.8 m.
+        roughness: Some("roughness.png"),
+        terrain_detail: Some((
+            octaves: 12,
+            wavelength: 3743.7,
+            lacunarity: 2.0,
+            gain: 0.5,
+            amplitude: 0.5,
+            ridge_threshold: 300.0,
+        )),
         sea_level: None,
     ),
 )

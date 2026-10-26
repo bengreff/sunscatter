@@ -22,22 +22,22 @@ const EARTH_COLOR_W: usize = 8192;
 const EARTH_WATER_W: usize = 8192;
 const MOON_HEIGHT_W: usize = 4096;
 const MOON_COLOR_W: usize = 8192;
-const JPEG_QUALITY: u8 = 90;
+pub(crate) const JPEG_QUALITY: u8 = 90;
 const MOON_RADIUS_M: f64 = 1_737_400.0;
 
-fn out_dir(body: &str) -> PathBuf {
+pub(crate) fn out_dir(body: &str) -> PathBuf {
     let dir = Path::new("data/bodies").join(body);
     std::fs::create_dir_all(&dir).expect("create data/bodies/<body>");
     dir
 }
 
-fn preview_path(name: &str) -> PathBuf {
+pub(crate) fn preview_path(name: &str) -> PathBuf {
     let dir = Path::new(EXTERNAL).join("previews");
     std::fs::create_dir_all(&dir).expect("create previews dir");
     dir.join(name)
 }
 
-fn report_size(path: &Path, w: usize, h: usize) {
+pub(crate) fn report_size(path: &Path, w: usize, h: usize) {
     let bytes = std::fs::metadata(path).expect("stat output").len();
     println!("  wrote {} ({w}×{h}, {:.1} MB)", path.display(), bytes as f64 / 1e6);
 }
@@ -117,7 +117,7 @@ pub struct Opts {
 }
 
 impl Opts {
-    fn wants(&self, m: Map) -> bool {
+    pub(crate) fn wants(&self, m: Map) -> bool {
         self.only.is_none_or(|o| o == m)
     }
 }

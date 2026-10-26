@@ -1,8 +1,33 @@
 // Charon's visuals (read by crates/game; physical data is in body.ron).
-// base_color: an approximate visual colour (no colour map yet); albedo: Bond albedo ~0.2 (Buratti et al. 2017).
+// base_color: an approximate visual colour ; albedo: Bond albedo ~0.2 (Buratti et al. 2017).
 (
     base_color: (0.60, 0.60, 0.59),
     albedo: 0.2,
     roughness: 0.95,
     icon_color: (0.76, 0.76, 0.75),
+    // Zones (crisp-surfaces.md) from k-means centres of the colour map (New Horizons LORRI/MVIC mosaic 300 m, USGS) in CIELAB;
+    // `albedo`: linear reflectance (~645, 555, 470 nm): the body's mean albedo 0.2 (Bond, Buratti et al. 2017) times
+    // the zone's brightness ratio in the map^0.5 (mosaics are display-stretched), coloured by B-V 0.70, V-R 0.38.
+    color_map: Some("color.jpg"),
+    zones: Some((
+        map: "zones.png",
+        tint: 0.3,
+        list: [
+            (name: "dark terrain", source: (61, 61, 61), albedo: Some((0.093, 0.091, 0.087)),
+                pattern: (scale_m: 1500.0, contrast: 0.1)),
+            (name: "plains", source: (115, 115, 115), albedo: Some((0.177, 0.173, 0.166)),
+                pattern: (scale_m: 1000.0, contrast: 0.1)),
+            (name: "bright plains", source: (145, 145, 145), albedo: Some((0.228, 0.223, 0.214)),
+                pattern: (scale_m: 1000.0, contrast: 0.1)),
+            (name: "bright ejecta", source: (192, 192, 192), albedo: Some((0.310, 0.303, 0.290)),
+                pattern: (scale_m: 600.0, contrast: 0.1)),
+        ],
+    )),
+    detail: Some((
+        scale_m: 25.0,
+        strength: 0.55,
+        // Airless: keep detail out to 40 km (as the Moon).
+        fade_m: Some(40000.0),
+        rock_color: (0.30, 0.30, 0.29),
+    )),
 )

@@ -1,8 +1,30 @@
 // Titania's visuals (read by crates/game; physical data is in body.ron).
-// base_color: an approximate visual colour (no colour map yet); albedo: geometric albedo (JPL Horizons) standing in for the Bond albedo.
+// base_color: an approximate visual colour (drawn without maps); albedo: geometric albedo (JPL Horizons) standing in for the Bond albedo.
 (
     base_color: (0.58, 0.56, 0.55),
     albedo: 0.27,
     roughness: 0.95,
     icon_color: (0.74, 0.73, 0.72),
+    // Procedural surface (no global map exists; docs/features/solar-visuals.md): relief and colour
+    // baked by `asset-tool planets` from measured statistics. Zone albedo: linear reflectance at
+    // ~645, 555, 470 nm from the geometric albedo 0.35 (Karkoschka 2001); slightly red;
+    // colour indices converted with the Sun's B-V 0.653, V-R 0.356. Fresh ejecta: 1.6x (assumed).
+    color_map: Some("color.jpg"),
+    zones: Some((
+        map: "zones.png",
+        tint: 0.0,
+        list: [
+            (name: "terrain", source: (188, 186, 182), albedo: Some((0.358, 0.350, 0.335)),
+                pattern: (scale_m: 1000.0, contrast: 0.12)),
+            (name: "fresh ejecta", source: (232, 229, 224), albedo: Some((0.573, 0.560, 0.536)),
+                pattern: (scale_m: 600.0, contrast: 0.08)),
+        ],
+    )),
+    detail: Some((
+        scale_m: 25.0,
+        strength: 0.55,
+        // Airless: keep detail out to 40 km (as the Moon).
+        fade_m: Some(40000.0),
+        rock_color: (0.286, 0.280, 0.268),
+    )),
 )

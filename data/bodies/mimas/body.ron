@@ -27,9 +27,22 @@
         anchor_zone: None,
         relativistic: false,
         solid: true,
-        // Rails warp is disabled below this altitude (m, D062): no terrain yet, so the margin above the ellipsoid.
-        rails_floor: 2000.0,
-        heightmap: None,
+        // Rails warp is disabled below this altitude (m, D062): the highest terrain (9041 m) plus 2 km, rounded up.
+        rails_floor: 12000.0,
+        // Terrain heights (m) above the reference spheroid, 1024×512: procedural relief (no global DEM): IAU Gazetteer craters at their positions, a crater population from the measured density, triaxial shape, regional fBm
+        // Baked by `asset-tool planets mimas` (range -15596 .. 9041 m).
+        heightmap: Some("height.png"),
+        // Procedural detail below the heightmap (D059): RMS residual map (rms_m = value² / 64)
+        // and the fractal's parameters; octave 0 is the map's sample spacing, 10 octaves reach ~2.4 m.
+        roughness: Some("roughness.png"),
+        terrain_detail: Some((
+            octaves: 10,
+            wavelength: 1240.5,
+            lacunarity: 2.0,
+            gain: 0.5,
+            amplitude: 0.5,
+            ridge_threshold: 300.0,
+        )),
         sea_level: None,
     ),
 )
