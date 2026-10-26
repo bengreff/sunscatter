@@ -42,6 +42,11 @@ pub struct Source {
     pub anchor_zone: Option<AnchorZone>,
     /// What the source is in the cluster tree.
     pub role: Role,
+    /// For a faint source outside every moon system (a dwarf planet, a far
+    /// system's stand-in: under `ephem::FAINT_GM_FRACTION` of the system's
+    /// GM): the least distance from the star it keeps over the ephemeris
+    /// window (m). See [`World::counts_in`].
+    pub faint_min_distance: Option<f64>,
 }
 
 /// A source's part in [`Cluster`]s.
@@ -70,6 +75,13 @@ pub struct Cluster {
     /// The largest of those apoapsis distances (m): every member stays
     /// within this of the barycenter.
     pub extent: f64,
+    /// One past the last member's source index, when the members' sources
+    /// are contiguous (the gravity loop then skips a closed system at once).
+    pub members_end: Option<usize>,
+    /// The least distance of its barycenter from the star over the window
+    /// (m; 0 without a star): a vessel `d` from the star is at least
+    /// `q − d` from it, which closes far systems without evaluating them.
+    pub star_distance: f64,
 }
 
 /// Which clusters are open for one evaluation (bit `c` for cluster `c`).
@@ -86,6 +98,18 @@ impl OpenClusters {
 /// the cutoff.
 pub const CLUSTER_ERROR_FRACTION: f64 = 0.01;
 
+/// A faint source is left out where its pull on both the vessel and the
+/// anchor is surely under this fraction of the cutoff ([`World::counts_in`]).
+pub const FAINT_ERROR_FRACTION: f64 = 0.01;
+
+/// What one gravity evaluation at a point includes ([`World::gravity_view`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct GravityView {
+    pub open: OpenClusters,
+    /// The larger of the vessel's and the anchor's distances from the star (m).
+    pub star_reach: f64,
+}
+
 #[derive(Clone, Debug)]
 pub struct World {
     pub eph: Arc<Ephemeris>,
@@ -101,6 +125,9 @@ pub struct World {
     pub anchor_order: Vec<usize>,
     /// Moon systems that count as one mass from afar (at most 64).
     pub clusters: Vec<Cluster>,
+    /// The star (the first source with a luminosity) faint sources are
+    /// measured from.
+    pub star: Option<usize>,
 }
 
 impl World {
@@ -142,6 +169,7 @@ impl World {
                 relativistic,
                 anchor_zone,
                 role,
+                faint_min_distance: None,
             });
         }
         let clusters = cluster_nodes(&eph);
@@ -149,7 +177,18 @@ impl World {
         let mut cluster_list = Vec::with_capacity(clusters.len());
         for (c, &node) in clusters.iter().enumerate() {
             let (quadrupole, extent) = quadrupole(&eph, node);
-            cluster_list.push(Cluster { node, stand_in: sources.len(), quadrupole, extent });
+            let members: Vec<usize> = (0..sources.len()).filter(|&i| sources[i].role == Role::Member(c)).collect();
+            let contiguous = members.windows(2).all(|w| w[1] == w[0] + 1);
+            let members_end = members.last().filter(|_| contiguous).map(|&m| m + 1);
+            let star_distance = 0.0; // set below, once the star is known
+            cluster_list.push(Cluster {
+                node,
+                stand_in: sources.len(),
+                quadrupole,
+                extent,
+                members_end,
+                star_distance,
+            });
             let n = eph.node(node);
             sources.push(Source {
                 node,
@@ -159,7 +198,23 @@ impl World {
                 relativistic: false,
                 anchor_zone: None,
                 role: Role::StandIn(c),
+                faint_min_distance: None,
             });
+        }
+        let star = sources.iter().position(|s| s.physical.as_ref().is_some_and(|p| p.luminosity > 0.0));
+        if let Some(star) = star {
+            let (star_node, total) = (sources[star].node, eph.nodes()[0].gm);
+            for cl in &mut cluster_list {
+                cl.star_distance = min_distance(&eph, cl.node, star_node);
+            }
+            for s in sources.iter_mut().filter(|s| !matches!(s.role, Role::Member(_))) {
+                if s.gm < crate::ephem::FAINT_GM_FRACTION * total {
+                    s.faint_min_distance = match s.role {
+                        Role::StandIn(c) => Some(cluster_list[c].star_distance),
+                        _ => Some(min_distance(&eph, s.node, star_node)),
+                    };
+                }
+            }
         }
         debug_assert!(eph.nodes().iter().any(|n| n.kind == NodeKind::Barycenter));
         let mut anchor_order: Vec<usize> = (0..sources.len()).filter(|&i| sources[i].anchor_zone.is_some()).collect();
@@ -167,7 +222,144 @@ impl World {
             let zone = |i: usize| sources[i].anchor_zone.map_or(f64::INFINITY, |z| z.enter);
             zone(a).total_cmp(&zone(b))
         });
-        Ok(World { eph, sources, cutoff: 1e-12, anchor_order, clusters: cluster_list })
+        Ok(World { eph, sources, cutoff: 1e-12, anchor_order, clusters: cluster_list, star })
+    }
+
+    /// What a gravity evaluation for a vessel at `r` (relative to `anchor`)
+    /// includes: the open clusters, and how far from the star the vessel and
+    /// the anchor are (for the faint sources).
+    pub fn gravity_view(&self, snap: &Snapshot, anchor: NodeId, r: DVec3) -> GravityView {
+        let Some(s) = self.star else {
+            return GravityView { open: self.open_clusters_from(snap, anchor, r, 0.0), star_reach: f64::INFINITY };
+        };
+        let at_star = snap.relative_r(self.sources[s].node, anchor);
+        let d_star = (r - at_star).length();
+        GravityView { open: self.open_clusters_from(snap, anchor, r, d_star), star_reach: d_star.max(at_star.length()) }
+    }
+
+    /// The indices of the sources that take part in the gravity
+    /// ([`Self::counts_in`]), in order; a closed moon system is skipped at
+    /// once.
+    pub fn counted<'a>(&'a self, view: &'a GravityView) -> impl Iterator<Item = usize> + 'a {
+        let mut i = 0;
+        std::iter::from_fn(move || {
+            while i < self.sources.len() {
+                let k = i;
+                i += 1;
+                if let Role::Member(c) = self.sources[k].role {
+                    if !view.open.contains(c) {
+                        if let Some(end) = self.clusters[c].members_end {
+                            i = end;
+                        }
+                        continue;
+                    }
+                }
+                if self.counts_in(k, view) {
+                    return Some(k);
+                }
+            }
+            None
+        })
+    }
+
+    /// Whether source `i` could have a tidal acceleration of at least the
+    /// cutoff at the vessel (`r`, relative to `anchor`): false only where a
+    /// bound proves it cannot, so the gravity's active set
+    /// (`forces::ActiveSources`) is the one the exact test over every
+    /// source would give, without evaluating far moons: a moon of a closed
+    /// system (`2 GM ρ / d³`, with `ρ = |r|` and `d` the least distance
+    /// from the anchor-vessel segment to the system), or a faint source left
+    /// out of the gravity ([`Self::counts_in`]; its pull is far below the
+    /// cutoff, so it would be cut anyway).
+    pub fn may_be_active(&self, snap: &Snapshot, anchor: NodeId, r: DVec3, i: usize, view: &GravityView) -> bool {
+        let s = &self.sources[i];
+        match s.role {
+            Role::Member(c) if !view.open.contains(c) => {
+                self.cluster_may_matter(snap, anchor, r, view, &self.clusters[c], s.gm)
+            }
+            Role::Member(_) => true,
+            _ => s.faint_min_distance.is_none() || self.counts_in(i, view),
+        }
+    }
+
+    /// The indices, in order, of the sources [`Self::may_be_active`] does
+    /// not rule out, a closed moon system skipped at once where the bound
+    /// with its whole GM rules out every member (never the anchor's own).
+    pub fn may_be_active_all<'a>(
+        &'a self,
+        snap: &'a Snapshot,
+        anchor: NodeId,
+        r: DVec3,
+        view: &'a GravityView,
+    ) -> impl Iterator<Item = usize> + 'a {
+        let anchor_cluster = self.source(anchor).and_then(|s| match s.role {
+            Role::Member(c) => Some(c),
+            _ => None,
+        });
+        let mut i = 0;
+        std::iter::from_fn(move || {
+            while i < self.sources.len() {
+                let k = i;
+                i += 1;
+                if let Role::Member(c) = self.sources[k].role {
+                    let cl = &self.clusters[c];
+                    let first = cl.members_end.is_some_and(|_| k == 0 || self.sources[k - 1].role != Role::Member(c));
+                    if first && !view.open.contains(c) && anchor_cluster != Some(c) {
+                        let total = self.sources[cl.stand_in].gm;
+                        if !self.cluster_may_matter(snap, anchor, r, view, cl, total) {
+                            i = cl.members_end.expect("contiguous");
+                            continue;
+                        }
+                    }
+                }
+                if self.sources[k].node == anchor || self.may_be_active(snap, anchor, r, k, view) {
+                    return Some(k);
+                }
+            }
+            None
+        })
+    }
+
+    /// The bound of [`Self::may_be_active`] for a body of GM `gm` in closed
+    /// system `cl`: false where its tidal acceleration surely stays under
+    /// the cutoff.
+    fn cluster_may_matter(
+        &self,
+        snap: &Snapshot,
+        anchor: NodeId,
+        r: DVec3,
+        view: &GravityView,
+        cl: &Cluster,
+        gm: f64,
+    ) -> bool {
+        let rho = r.length();
+        let far = cl.star_distance - view.star_reach;
+        let d_ends = if self.star.is_some() && far > cl.extent + rho {
+            far
+        } else {
+            let b = snap.relative_r(cl.node, anchor);
+            (r - b).length().max(b.length())
+        };
+        let d = d_ends - rho - cl.extent;
+        d <= 0.0 || 2.0 * gm * rho >= self.cutoff * d * d * d
+    }
+
+    /// Whether source `i` takes part in the gravity: [`Self::counts`], and
+    /// a faint source only where its pull on the vessel or the anchor could
+    /// reach [`FAINT_ERROR_FRACTION`] of the cutoff (`GM / (q − R)²`, with
+    /// `q` its least distance from the star and `R` the farther of the two
+    /// from it). Left out, its pull on the anchor (in the anchor's
+    /// ephemeris) is not cancelled: an error under that fraction of the
+    /// cutoff, within D023's budget, and decided without evaluating it.
+    pub fn counts_in(&self, i: usize, view: &GravityView) -> bool {
+        if !self.counts(i, view.open) {
+            return false;
+        }
+        let s = &self.sources[i];
+        s.faint_min_distance.is_none_or(|q| {
+            let gap = q - view.star_reach;
+            gap <= 0.0 || s.gm >= FAINT_ERROR_FRACTION * self.cutoff * gap * gap
+        })
     }
 
     /// The clusters open for a vessel at `r` (relative to `anchor`): those
@@ -175,25 +367,55 @@ impl World {
     /// the barycenter is at least [`CLUSTER_ERROR_FRACTION`] of the cutoff
     /// (all of them with a zero cutoff, the full model).
     pub fn open_clusters(&self, snap: &Snapshot, anchor: NodeId, r: DVec3) -> OpenClusters {
+        self.open_clusters_from(snap, anchor, r, self.star_distance(snap, anchor, r))
+    }
+
+    /// The vessel's distance from the star (0 without one: no bound), for
+    /// [`Self::may_reach`].
+    pub fn star_distance(&self, snap: &Snapshot, anchor: NodeId, r: DVec3) -> f64 {
+        self.star.map_or(0.0, |s| (r - snap.relative_r(self.sources[s].node, anchor)).length())
+    }
+
+    /// [`Self::open_clusters`] with the vessel's distance from the star:
+    /// a system's barycenter keeps at least `q` from the star
+    /// ([`Cluster::star_distance`]), so the vessel is at least `q − d_star`
+    /// from it, which closes it without evaluating it (the exact test
+    /// would close it too).
+    fn open_clusters_from(&self, snap: &Snapshot, anchor: NodeId, r: DVec3, d_star: f64) -> OpenClusters {
         let mut open = 0u64;
+        let threshold = self.cutoff * CLUSTER_ERROR_FRACTION;
         for (c, cl) in self.clusters.iter().enumerate() {
+            let gap = cl.star_distance - d_star;
+            if gap > 0.0 && gap * gap * gap * gap * threshold > 3.0 * cl.quadrupole {
+                continue;
+            }
             let d2 = (r - snap.relative_r(cl.node, anchor)).length_squared();
-            if d2 * d2 * (self.cutoff * CLUSTER_ERROR_FRACTION) <= 3.0 * cl.quadrupole {
+            if d2 * d2 * threshold <= 3.0 * cl.quadrupole {
                 open |= 1 << c;
             }
         }
         OpenClusters(open)
     }
 
-    /// Whether source `i` could be within `reach` of a vessel at `r`
-    /// (relative to `anchor`): false only for a member of a moon system whose
-    /// barycenter is farther than its extent plus `reach`. A cheap first test
-    /// for per-step searches over bodies (contact, nearest surface), which
-    /// then never evaluate the tables of far moons.
-    pub fn may_reach(&self, snap: &Snapshot, anchor: NodeId, r: DVec3, i: usize, reach: f64) -> bool {
-        let Role::Member(c) = self.sources[i].role else { return true };
-        let cl = &self.clusters[c];
-        (r - snap.relative_r(cl.node, anchor)).length() <= cl.extent + reach
+    /// Whether source `src` could be within `reach` of a vessel at `r`
+    /// (relative to `anchor`, `d_star` from the star: [`Self::star_distance`]):
+    /// false for a member of a moon system whose barycenter is farther than
+    /// its extent plus `reach`, or a body or system that keeps farther from
+    /// the star than `d_star + reach` (+ its extent). A cheap first test for
+    /// per-step searches over bodies (contact, nearest surface, air), which
+    /// then never evaluate the tables of far moons and dwarf planets.
+    pub fn may_reach(&self, snap: &Snapshot, anchor: NodeId, r: DVec3, d_star: f64, src: &Source, reach: f64) -> bool {
+        // A body or system keeps `q` from the star: the vessel is at least
+        // `q − d_star` from it.
+        let too_far = |q: Option<f64>, margin: f64| q.is_some_and(|q| q - d_star > margin);
+        match src.role {
+            Role::Member(c) => {
+                let cl = &self.clusters[c];
+                !too_far(self.star.is_some().then_some(cl.star_distance), cl.extent + reach)
+                    && (r - snap.relative_r(cl.node, anchor)).length() <= cl.extent + reach
+            }
+            _ => !too_far(src.faint_min_distance, reach),
+        }
     }
 
     /// Whether source `i` takes part in the gravity with these clusters open.
@@ -227,6 +449,28 @@ impl World {
     pub fn surfaces(&self) -> impl Iterator<Item = &Source> {
         self.sources.iter().filter(|s| s.physical.as_ref().is_some_and(|p| p.solid))
     }
+}
+
+/// The least distance of `node` from `star` over the ephemeris window,
+/// sampled every 5 days, less the largest distance it moves between
+/// samples (so no pass between samples comes closer).
+fn min_distance(eph: &Ephemeris, node: NodeId, star: NodeId) -> f64 {
+    const STEP: f64 = 5.0 * 86_400.0;
+    let span = eph.end.seconds_since(eph.start);
+    let n = (span / STEP).ceil() as usize;
+    let mut least = f64::INFINITY;
+    let mut largest_move: f64 = 0.0;
+    let mut last: Option<DVec3> = None;
+    for k in 0..=n {
+        let t = eph.start.add_seconds((k as f64 * STEP).min(span));
+        let p = eph.relative_r(node, star, t);
+        least = least.min(p.length());
+        if let Some(q) = last {
+            largest_move = largest_move.max((p - q).length());
+        }
+        last = Some(p);
+    }
+    (least - largest_move).max(0.0)
 }
 
 /// Barycenter nodes below the root (moon systems), in node order.
@@ -354,14 +598,16 @@ mod tests {
             let closed = w.open_clusters(&snap, sun, near_jupiter);
             assert!(!closed.contains(c) && !w.counts(i_earth, closed) && w.counts(stand_in, closed));
             // A search near Jupiter can skip Earth and the Moon, never the Sun.
-            assert!(!w.may_reach(&snap, sun, near_jupiter, i_earth, 1e9));
-            assert!(w.may_reach(&snap, sun, near_earth, i_earth, 1e5));
-            let i_sun = w.sources.iter().position(|s| s.name == "Sun").unwrap();
-            assert!(w.may_reach(&snap, sun, near_jupiter, i_sun, 0.0));
+            let d = |r: DVec3| w.star_distance(&snap, sun, r);
+            assert!(!w.may_reach(&snap, sun, near_jupiter, d(near_jupiter), &w.sources[i_earth], 1e9));
+            assert!(w.may_reach(&snap, sun, near_earth, d(near_earth), &w.sources[i_earth], 1e5));
+            assert!(w.may_reach(&snap, sun, near_jupiter, d(near_jupiter), w.find("Sun").unwrap(), 0.0));
             (near_earth, near_jupiter)
         };
-        // Near Jupiter the point mass is the members' pull to far below the
-        // cutoff; with a zero cutoff (the full model) every cluster is open.
+        // Near Jupiter the clustered model is the full one (zero cutoff: every
+        // cluster open, every source in) to within the rules' budgets: each
+        // closed system's quadrupole, each faint body left out and each
+        // far planet's J2 under a hundredth of the cutoff.
         let accel = |w: &World, r: DVec3| {
             let active = ActiveSources((0..w.sources.len()).collect());
             let ctx = ForceContext { world: w, anchor: sun, active: &active, drag: None, thrust: DVec3::ZERO };
@@ -372,7 +618,8 @@ mod tests {
         assert!(w.open_clusters(&w.snapshot(t), sun, near_jupiter).contains(c));
         let full = accel(&w, near_jupiter);
         let err = (clustered - full).length();
-        assert!(err > 0.0 && err < 1e-15, "{err:e}");
+        let budget = 1e-12 * FAINT_ERROR_FRACTION * (w.sources.len() as f64);
+        assert!(err > 0.0 && err < budget, "{err:e} > {budget:e}");
         // Near Earth the Earth-Moon system is open either way; what differs
         // is the far systems' quadrupoles, under the rule's bound.
         let full_near = accel(&w, near_earth);

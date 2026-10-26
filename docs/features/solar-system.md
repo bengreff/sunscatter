@@ -50,15 +50,23 @@ Base colour (an approximate visual colour), Bond albedo where published (otherwi
 
 A moon system far from a vessel pulls it as one point mass at its barycenter (`World::clusters`, a stand-in source per barycenter node): opened where its quadrupole error `3Q/d⁴` could reach a hundredth of the cutoff (Jupiter's within 2.7 AU, the Earth–Moon barycenter's within 1.2e11 m). Decided from the vessel's position, never its anchor (rule 1). With lazy snapshots (`ephem::Snapshot`: the planets eager, nodes inside moon systems on first use) a coast near Earth never evaluates a moon table. `forces.rs` (LIMBO's file) got the minimal change: the source loop skips members of closed clusters and stand-ins of open ones.
 
-**Cost** (`cargo run -p sim --release --example bench_coast`, M2 Pro shared with other agents; "before" is today's code on the previous ephemeris):
+**Cost** (release, M2 Pro shared with other agents; each pair measured alternately from archived trees so the load is the same):
 
-| | before (11 bodies) | after (44 bodies) |
-|---|---|---|
-| LEO coast step | 3.97 µs | 9.25 µs |
-| snapshot + one relative position | 0.48 µs | 0.72 µs |
-| every body placed (a frame of the map) | 0.38 µs | 2.25 µs |
+| | before SOL (077af0c) | with the new bodies (3b2ad2c) | now |
+|---|---|---|---|
+| `bench_coast`: LEO coast step | 3.5 µs | 9.2 µs | 5.3 µs (4.4 µs on the old ephemeris) |
+| every body placed (a frame of the map) | 0.4 µs (11) | 2.3 µs (44) | 2.3 µs (44) |
+| `bench_limbo`: bare coast at 250 km | | 10.0 µs | 5.8 µs |
+| perturbed coast at 250 km | | 15.7 µs | 12.7–13.9 µs |
+| 10 limbo craft at 1,000,000×, per vessel per frame | | 4.3–4.5 ms | 3.8–4.0 ms |
 
-Where the coast's extra 5.3 µs goes: ~2.1 µs in the per-step searches over solid bodies (`vessel::segment::find_contact`, and `live::nearest_surface` in live flight), which now evaluate 36 moon tables a step: measured by making the moons non-solid. `World::may_reach` (a member of a moon system whose barycenter is farther than its extent plus the reach cannot be near) lets those loops skip far systems without evaluating them; the call sites are in LIMBO's files and not changed tonight. The rest (~3 µs) is the 8 dwarf planets (8 more tables per stage time, always touched because the cut rule adds their pull at the anchor) and the cluster test per force evaluation. Cheaper tables for the dwarf planets (low degree: they move slowly) or skipping cut sources whose pull at the anchor is far below the cutoff would recover most of it.
+What got it back (all decided from the vessel's position, the same for every anchor up to the stated budgets; chunked = single pass, invariance tests unchanged):
+- **Per-step searches skip far bodies** (`World::may_reach`): contact, atmosphere entry and ambient pressure test a moon system by its barycenter and extent, and a body or system that keeps farther from the Sun than the vessel by its least distance from the Sun over the window (`Cluster::star_distance`, `Source::faint_min_distance`), so far moons and dwarf planets are never evaluated (was ~2 µs a step).
+- **Faint bodies left out where they cannot matter** (`World::counts_in`): a dwarf planet or a dwarf's system (under 1e-8 of the system's GM) whose pull on the vessel and on the anchor is provably under a hundredth of the cutoff (1e-14 m/s²) is not summed; its uncancelled pull on the anchor is the error, inside D023's budget. Near Earth that is every dwarf but Ceres and Pluto. Faint nodes and moon systems are evaluated lazily by snapshots (the planets, Earth and the Moon eagerly).
+- **The active set without evaluating far moons** (`World::may_be_active`, `may_be_active_all`): a closed system's member is tested only where `2 GM ρ / d³` (ρ the vessel's offset from the anchor, d the least distance from the anchor–vessel segment to the system) could reach the cutoff; the set is the one the exact test over every source gives. (Testing only the sources that count, tried first, left a source counted but cut for part of a step when its cluster closed: 2 km in a year.)
+- **Cheaper loops:** the gravity loop skips a closed system's members at once (`World::counted`), positions relative to the anchor reuse the anchor's walk to the root (`Snapshot::path_to`, bit-identical), clusters far from the Sun close by the bound above without a walk, and a body's J2 is applied only where `3|J2| GM R²/d⁴` reaches a hundredth of the cutoff (Venus's at Earth is ~1e-20 m/s²).
+
+Golden LEO coast hash 0x52e3680dc0baea81 (the faint bodies and far J2 terms now left out).
 
 ## Choices
 

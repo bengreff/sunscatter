@@ -20,9 +20,13 @@ impl Segment {
         a: &Sample,
         b: &Sample,
     ) -> Option<(f64, NodeId)> {
+        // Far moon systems and dwarf planets are skipped without evaluating them.
+        let d_star = snaps.with(self.t0.add_seconds(b.s.t), |snap| world.star_distance(snap, self.anchor, b.s.r));
         let near = |src: &crate::world::Source, reach: f64| {
-            snaps.with(self.t0.add_seconds(b.s.t), |snap| (b.s.r - snap.relative_r(src.node, self.anchor)).length())
-                <= reach
+            snaps.with(self.t0.add_seconds(b.s.t), |snap| {
+                world.may_reach(snap, self.anchor, b.s.r, d_star, src, reach)
+                    && (b.s.r - snap.relative_r(src.node, self.anchor)).length() <= reach
+            })
         };
         for src in world.surfaces() {
             let alt = |t: f64| {
@@ -61,12 +65,16 @@ impl Segment {
         if let Some(limbo) = self.limbo.as_deref() {
             return self.find_live_boundary(world, limbo, a, b);
         }
+        let d_star = snaps.with(self.t0.add_seconds(b.s.t), |snap| world.star_distance(snap, self.anchor, b.s.r));
         for src in &world.sources {
             let Some(p) = src.physical.as_ref() else { continue };
             let Some(atm) = &p.atmosphere else { continue };
-            let d = snaps
-                .with(self.t0.add_seconds(b.s.t), |snap| (b.s.r - snap.relative_r(src.node, self.anchor)).length());
-            if d > p.radius_eq + atm.top + 200_000.0 {
+            let reach = p.radius_eq + atm.top + 200_000.0;
+            let near = snaps.with(self.t0.add_seconds(b.s.t), |snap| {
+                world.may_reach(snap, self.anchor, b.s.r, d_star, src, reach)
+                    && (b.s.r - snap.relative_r(src.node, self.anchor)).length() <= reach
+            });
+            if !near {
                 continue;
             }
             let alt = |t: f64| {

@@ -24,6 +24,11 @@ fn main() {
         fixed_anchor: false,
         proper_time: 0.0,
     };
+    // BENCH_REPS=n runs the coast n-1 more times first (for profilers).
+    let reps: usize = std::env::var("BENCH_REPS").map_or(1, |v| v.parse().expect("a count"));
+    for _ in 1..reps {
+        Segment::new(&w, t0, start).extend(&w, 20_000);
+    }
     let mut seg = Segment::new(&w, t0, start);
     let n = 20_000;
     let clock = std::time::Instant::now();

@@ -44,14 +44,16 @@ pub struct ActiveSources(pub Vec<usize>);
 impl ActiveSources {
     /// The anchor (if it is a source) and every source whose tidal
     /// acceleration at the vessel relative to the anchor,
-    /// `|g_s(vessel) − g_s(anchor)|`, is at least the world cutoff.
+    /// `|g_s(vessel) − g_s(anchor)|`, is at least the world cutoff (sources
+    /// a bound proves below it are not evaluated: `World::may_be_active`).
     pub fn select(world: &World, snap: &Snapshot, anchor: NodeId, r: DVec3) -> Self {
+        let view = world.gravity_view(snap, anchor, r);
         let keep = world
-            .sources
-            .iter()
-            .enumerate()
-            .filter(|(_, s)| s.node == anchor || tidal(s.gm, snap.relative_r(s.node, anchor), r) >= world.cutoff)
-            .map(|(i, _)| i)
+            .may_be_active_all(snap, anchor, r, &view)
+            .filter(|&i| {
+                let s = &world.sources[i];
+                s.node == anchor || tidal(s.gm, snap.relative_r(s.node, anchor), r) >= world.cutoff
+            })
             .collect();
         ActiveSources(keep)
     }
@@ -61,7 +63,9 @@ impl ActiveSources {
     /// are not re-tested). Returns whether the set grew.
     pub fn grow(&mut self, world: &World, snap: &Snapshot, anchor: NodeId, r: DVec3) -> bool {
         let mut grew = false;
-        for (i, s) in world.sources.iter().enumerate() {
+        let view = world.gravity_view(snap, anchor, r);
+        for i in world.may_be_active_all(snap, anchor, r, &view) {
+            let s = &world.sources[i];
             if let Err(pos) = self.0.binary_search(&i) {
                 if s.node == anchor || tidal(s.gm, snap.relative_r(s.node, anchor), r) >= world.cutoff {
                     self.0.insert(pos, i);
@@ -135,15 +139,16 @@ impl ForceContext<'_> {
         let mut active = self.active.0.iter().peekable();
         // A far moon system pulls as one mass at its barycenter (D023
         // clusters, `World::open_clusters`): its members do not count, or
-        // near it its stand-in does not.
-        let open = self.world.open_clusters(snap, self.anchor, r);
-        for (i, s) in self.world.sources.iter().enumerate() {
+        // near it its stand-in does not; a faint body far away does not
+        // count (`World::counts_in`).
+        let view = self.world.gravity_view(snap, self.anchor, r);
+        let path = snap.path_to(self.anchor);
+        for i in self.world.counted(&view) {
+            let s = &self.world.sources[i];
+            while active.next_if(|&&a| a < i).is_some() {}
             let is_active = active.next_if_eq(&&i).is_some();
-            if !self.world.counts(i, open) {
-                continue;
-            }
             // Positions only, except where a velocity is needed (drag, 1PN).
-            let r_s = snap.relative_r(s.node, self.anchor);
+            let r_s = path.relative_r(s.node);
             if !is_active {
                 // Cut: it pulls the vessel as it pulls the anchor, which
                 // cancels its share of the anchor's acceleration (rule 1).
@@ -163,7 +168,11 @@ impl ForceContext<'_> {
                 u += s.gm / dist;
             }
             if let Some(p) = &s.physical {
-                if p.j2 != 0.0 {
+                // J2 where it can matter: its pull, at most 3 |J2| GM R² / d⁴,
+                // against a hundredth of the cutoff (a far planet's J2 is
+                // ~1e-20 m/s²; with a zero cutoff, always).
+                let j2_bound = 3.0 * p.j2.abs() * s.gm * p.radius_eq * p.radius_eq;
+                if p.j2 != 0.0 && j2_bound >= crate::world::FAINT_ERROR_FRACTION * self.world.cutoff * d2 * d2 {
                     a += j2_accel(d, s.gm, p.j2, p.radius_eq, p.rotation.pole(snap.t));
                 }
                 if let (Some(atm), Some(drag)) = (&p.atmosphere, self.drag) {
@@ -211,9 +220,13 @@ pub fn altitude_above(
 /// above the ellipsoid as drag.
 pub fn ambient_pressure(world: &World, snap: &Snapshot, anchor: NodeId, r: DVec3) -> f64 {
     let mut p_total = 0.0;
+    let d_star = world.star_distance(snap, anchor, r);
     for src in &world.sources {
         let Some(p) = src.physical.as_ref() else { continue };
         let Some(atm) = &p.atmosphere else { continue };
+        if !world.may_reach(snap, anchor, r, d_star, src, p.radius_eq + atm.top) {
+            continue;
+        }
         let d = r - snap.relative_r(src.node, anchor);
         if d.length() - p.radius_eq >= atm.top {
             continue;
