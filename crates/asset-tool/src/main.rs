@@ -50,6 +50,7 @@ mod grid;
 mod planets;
 mod relief;
 mod resample;
+mod rings;
 mod roughness;
 mod source;
 mod specs;
@@ -98,6 +99,7 @@ fn main() {
             bodies::check();
         }
         Some("giants") => giants::run(&args[1..]),
+        Some("rings") => rings::run(),
         Some("planets") => {
             let names: Vec<String> = args[1..].iter().take_while(|a| !a.starts_with("--")).cloned().collect();
             planets::run(&names, opts);

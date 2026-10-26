@@ -8,6 +8,24 @@
     // Procedural cloud detail (D073: crisp at any distance, never a magnified photo): representative
     // values, not measurements: the first warp wavelength, its amplitude, the east-west stretch, the tone.
     clouds: Some((scale_m: 1500000.0, warp: 0.2, stretch: 6.0, contrast: 0.08)),
+    // Rings (agent SKY; docs/features/solar-visuals.md#rings): normal optical depth from the Voyager 2
+    // photopolarimeter's occultation of delta Scorpii at 10 km (PDS Rings Node VG_2801; `asset-tool rings`).
+    // Particle albedo by region (edges: NASA's Saturnian Rings Fact Sheet; values representative of
+    // Cuzzi et al. 2009, in Saturn from Cassini-Huygens, ch. 15: A and B ring particles ~0.4-0.6 and red,
+    // the C ring and the Cassini Division darker and greyer).
+    rings: Some((
+        profile: "rings.png",
+        inner_m: 72000000.0,
+        outer_m: 142500000.0,
+        albedo: [
+            (74490000.0, (0.20, 0.18, 0.16)),
+            (92000000.0, (0.25, 0.22, 0.19)),
+            (117580000.0, (0.60, 0.52, 0.40)),
+            (122170000.0, (0.30, 0.27, 0.23)),
+            (136775000.0, (0.55, 0.48, 0.37)),
+            (142500000.0, (0.50, 0.45, 0.38)),
+        ],
+    )),
     albedo: 0.342,
     roughness: 0.95,
     icon_color: (0.98, 0.92, 0.76),

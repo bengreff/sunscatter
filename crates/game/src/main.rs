@@ -27,6 +27,7 @@ mod persist;
 mod planner;
 mod relations;
 mod rendezvous;
+mod rings;
 mod saves;
 mod scene;
 mod settings;
@@ -82,7 +83,7 @@ fn main() {
     app.insert_resource(ClearColor(Color::BLACK))
         .add_plugins(default_plugins(demo_mode, offscreen))
         .add_plugins(EguiPlugin::default())
-        .add_plugins((terrain::TerrainPlugin, sky::SkyPlugin, atmosphere::AtmosphereFixPlugin))
+        .add_plugins((terrain::TerrainPlugin, sky::SkyPlugin, atmosphere::AtmosphereFixPlugin, rings::RingsPlugin))
         .add_plugins(GameState)
         // After the settings defaults: replaces them with the saved settings.
         .add_plugins(persist::PersistPlugin)

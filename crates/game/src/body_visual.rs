@@ -25,6 +25,9 @@ pub struct BodyVisualDef {
     /// Procedural cloud detail on the colour map (giants, D073).
     #[serde(default)]
     pub clouds: Option<CloudsDef>,
+    /// Rings in the equatorial plane (`game::rings`).
+    #[serde(default)]
+    pub rings: Option<RingsDef>,
     #[serde(default)]
     pub atmosphere: Option<AtmosphereDef>,
     /// Self-luminous bodies (stars).
@@ -134,6 +137,20 @@ pub struct CloudsDef {
     pub stretch: f32,
     /// The tone's contrast (brightness ± this).
     pub contrast: f32,
+}
+
+/// Planetary rings: a disc in the equatorial plane drawn from a radial
+/// profile of normal optical depth (`asset-tool rings`).
+#[derive(Clone, Debug, Deserialize)]
+pub struct RingsDef {
+    /// 16-bit PNG one pixel high, τ × 10,000, bin centres evenly from
+    /// `inner_m` to `outer_m` (relative to the body dir).
+    pub profile: String,
+    pub inner_m: f32,
+    pub outer_m: f32,
+    /// The particles' single-scattering albedo (linear R, G, B) by region:
+    /// (outer edge in m, albedo), inner to outer.
+    pub albedo: Vec<(f32, [f32; 3])>,
 }
 
 /// A zone's procedural texture: brightness × (1 + contrast × fBm), with

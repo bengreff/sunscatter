@@ -194,6 +194,7 @@ pub fn setup(
                 ground_normal: ground.as_ref().map(|g| g.1.clone()),
                 zone_map: None,
                 zone_far: None,
+                ring_profile: None,
             },
         });
         let shape = Shape {

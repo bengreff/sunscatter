@@ -80,6 +80,8 @@ pub struct TerrainParams {
     /// rgb: the diffuse fraction for an overhead Sun; w: the Sun's lux at
     /// the camera (set each frame).
     pub haze_diffuse: Vec4,
+    /// Rings (`rings`): x inner, y outer radius (m), z the profile's bins (0: none).
+    pub rings: Vec4,
 }
 
 #[derive(Asset, AsBindGroup, Reflect, Debug, Clone, Default)]
@@ -109,6 +111,10 @@ pub struct TerrainExt {
     /// (`zones::far_image`), sampled with `color_map`'s sampler.
     #[texture(110)]
     pub zone_far: Option<Handle<Image>>,
+    /// The rings' profile (`rings`: rgb albedo, a optical depth per bin),
+    /// read with `textureLoad` for their shadow on the planet.
+    #[texture(111)]
+    pub ring_profile: Option<Handle<Image>>,
 }
 
 impl MaterialExtension for TerrainExt {

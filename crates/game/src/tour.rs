@@ -233,7 +233,10 @@ pub fn aim(
     let snap = sim.world.snapshot(sim.clock);
     let to_sun = snap.relative_r(sun, node).normalize();
     let air_top = defs.get(node).and_then(|d| d.atmosphere.as_ref()).map_or(0.0, |a| f64::from(a.thickness_m));
-    let alt = altitude(view, p.radius_eq, air_top);
+    // A ringed body's disc view frames its rings (3 ring radii).
+    let rings = defs.get(node).and_then(|d| d.rings.as_ref()).map_or(0.0, |r| f64::from(r.outer_m));
+    let framed = if view == View::Disc { p.radius_eq.max(rings) } else { p.radius_eq };
+    let alt = altitude(view, framed, air_top) + framed - p.radius_eq;
     let pose = pose(view, to_sun, p.rotation.pole(sim.clock), p.radius_eq, alt);
     let centre = snap.relative_r(node, rig.anchor);
     let mut cam_pos = centre + pose.offset;
