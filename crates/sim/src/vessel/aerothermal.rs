@@ -210,13 +210,17 @@ impl VesselThermal {
 }
 
 /// The sunlight of a coast step at `t` for a vessel at `(r, v)` relative to
-/// `anchor` (inertial, W/m²): averaged over its osculating orbit when that
-/// is bound, clear of the body and at most [`ORBIT_AVERAGE_PERIOD`] long
+/// `anchor` (inertial, W/m²): averaged over its osculating orbit about the
+/// body it is held about by default ([`super::hold::hold_reference`], the
+/// same for every anchor: rule 1) when that orbit is bound, clear of the
+/// body and at most [`ORBIT_AVERAGE_PERIOD`] long
 /// ([`crate::light::orbit_average_sunlight`]); otherwise the sunlight at
 /// the point, eclipses included ([`crate::light::sunlight`]).
 pub fn coast_sunlight(world: &World, t: Epoch, anchor: NodeId, r: DVec3, v: DVec3) -> DVec3 {
     let snap = world.snapshot(t);
-    crate::light::orbit_average_sunlight(world, &snap, anchor, r, v, ORBIT_AVERAGE_PERIOD)
+    let body = super::hold::hold_reference(world, &snap, anchor, r);
+    let k = if body == anchor { Default::default() } else { snap.relative(body, anchor) };
+    crate::light::orbit_average_sunlight(world, &snap, body, r - k.r, v - k.v, ORBIT_AVERAGE_PERIOD)
         .unwrap_or_else(|| crate::light::sunlight(world, &snap, anchor, r))
 }
 

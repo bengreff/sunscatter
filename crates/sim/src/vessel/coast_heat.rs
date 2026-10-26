@@ -242,10 +242,10 @@ mod tests {
         World::sol(std::sync::Arc::new(Ephemeris::from_bytes(&std::fs::read(path).unwrap()).unwrap()))
     }
 
-    /// A craft held prograde at 200 km: its sunlight and thin air are
-    /// averaged over its orbit about Earth whatever the anchor its state is
-    /// given relative to (rule 1; they followed the anchor, so about the
-    /// Sun or a barycenter there was no average).
+    /// A craft at 200 km: its sunlight (held prograde, or not held in a
+    /// frame) and thin air are averaged over its orbit about Earth whatever
+    /// the anchor its state is given relative to (rule 1; they followed the
+    /// anchor, so about the Sun or a barycenter there was no average).
     #[test]
     fn orbit_averages_do_not_depend_on_the_anchor() {
         let w = sol();
@@ -265,7 +265,14 @@ mod tests {
         let air = coast_air(&w, t, at(earth.node), Some(&p), &att, 10.0);
         assert_eq!(about_earth.suns.len(), ORBIT_SAMPLES);
         assert_eq!(air.len(), ORBIT_SAMPLES / 2);
+        // Not held in a frame: the coast sunlight, averaged about Earth too.
+        let (_, re, ve) = at(earth.node);
+        let mean = coast_sunlight(&w, t, earth.node, re, ve);
+        assert_ne!(mean, crate::light::sunlight(&w, &snap, earth.node, re), "an orbit average");
         for anchor in [w.eph.root(), w.find("Sun").unwrap().node, w.find("Moon").unwrap().node] {
+            let (_, ra, va) = at(anchor);
+            let other = coast_sunlight(&w, t, anchor, ra, va);
+            assert!((other - mean).length() <= 1e-6 * mean.length(), "{other} {mean}");
             let suns = coast_suns(&w, t, at(anchor), Some(&p), &att);
             assert_eq!(suns.suns.len(), ORBIT_SAMPLES);
             for (a, b) in suns.suns.iter().zip(&about_earth.suns) {
