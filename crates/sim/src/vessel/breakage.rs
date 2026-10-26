@@ -116,9 +116,10 @@ impl Vessel {
             let props = self.mass_props();
             let (q, omega) = (self.attitude.q, self.attitude.omega);
             let pose = Pose { r: *r, v: *v, q, omega, com: props.com, mass: props.mass, inertia: props.inertia };
-            for cp in &self.craft.contacts {
-                load[design.cell_part[cp.cell as usize] as usize] +=
-                    contact::normal_load(&ground, &pose, cp, &self.craft.contact);
+            let dt = super::TICK / contact::SUBSTEPS as f64;
+            let normal = contact::normal_loads(&ground, &pose, &self.craft.contacts, &self.craft.contact, dt);
+            for (cp, f) in self.craft.contacts.iter().zip(normal) {
+                load[design.cell_part[cp.cell as usize] as usize] += f;
             }
         }
         load

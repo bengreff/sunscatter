@@ -10,6 +10,40 @@ fn params() -> ContactFile {
 }
 
 #[test]
+fn stable_springs_table() {
+    use ContactKind::{Foot, Hull};
+    let c = params();
+    let dt = 0.002;
+    // (kind, m_eff, count) → (stiffness scale, damping scale)
+    let cases = [
+        (Foot, 10_000.0, 4.0, 1.0, 1.0), // a craft sized for its mass: unchanged
+        (Hull, 2_000.0, 3.0, 1.0, 1.0),
+        // A 250 kg piece with a 20 t craft's springs: damping·dt/m 0.8 per
+        // point, capped to 1 summed over the points; the stiffness is far
+        // below its limit.
+        (Hull, 100.0, 1.0, 1.0, 100.0 / (dt * 1e5)),
+        (Hull, 250.0, 4.0, 1.0, 250.0 / (4.0 * dt * 1e5)),
+        (Foot, 250.0, 4.0, 1.0, 250.0 / (4.0 * dt * 1.6e5)),
+        // A 2 kg sliver: the stiffness too.
+        (Hull, 2.0, 2.0, 2.0 / (2.0 * dt * dt * 2e6), 2.0 / (2.0 * dt * 1e5)),
+    ];
+    for (kind, m_eff, count, ks, cs) in cases {
+        let s = stable_springs(kind, &c, m_eff, count, dt);
+        for (got, want) in [(s.foot, c.foot), (s.hull, c.hull)] {
+            assert!((got.stiffness / (want.stiffness * ks) - 1.0).abs() < 1e-12, "{kind:?} {m_eff} {count}");
+            assert!((got.damping / (want.damping * cs) - 1.0).abs() < 1e-12, "{kind:?} {m_eff} {count}");
+            assert_eq!((got.stroke, got.friction), (want.stroke, want.friction));
+        }
+        // At most the limits, summed over the points.
+        let (k, d) = match kind {
+            Foot => (s.hull.stiffness, s.foot.damping + s.hull.damping),
+            Hull => (s.hull.stiffness, s.hull.damping),
+        };
+        assert!(count * k * dt * dt / m_eff <= 1.0 + 1e-12 && count * d * dt / m_eff <= 1.0 + 1e-12);
+    }
+}
+
+#[test]
 fn normal_force_table() {
     use ContactKind::{Foot, Hull};
     let c = params();

@@ -8,6 +8,9 @@
 //! * a spring-damper along the local terrain normal (normal from finite
 //!   differences of the surface): feet are soft with a stroke, and a foot
 //!   past its stroke adds the stiff hull spring; hull points are stiff;
+//!   both held below the explicit substep's stability limit for the
+//!   point's effective mass ([`stable_springs`]: a light piece of a big
+//!   craft);
 //! * Coulomb friction in the tangent plane, regularised below a stick speed
 //!   and capped so it can at most stop the point in one substep.
 //!
@@ -81,6 +84,30 @@ pub fn normal_force(kind: ContactKind, c: &ContactFile, depth: f64, closing: f64
         ContactKind::Hull => (c.hull.stiffness * depth, c.hull.damping),
     };
     (spring + damping * closing).max(0.0)
+}
+
+/// The springs and dampers of `c` for a point of kind `kind` with
+/// effective mass `m_eff` along its normal (kg), one of `count` touching,
+/// in substeps of `dt` (s): scaled down (stiffness and damping each) so the
+/// explicit substep stays stable whatever the craft's mass, at most
+/// `m_eff/(count·dt²)` of stiffness and `m_eff/(count·dt)` of damping (the
+/// substep's ω·dt and damping·dt/m at most 1 summed over the points: a
+/// light piece of a craft sized for its whole mass would otherwise gain
+/// energy on the ground). Craft whose springs are sized for their mass are
+/// far below it.
+pub fn stable_springs(kind: ContactKind, c: &ContactFile, m_eff: f64, count: f64, dt: f64) -> ContactFile {
+    let (stiffness, damping) = match kind {
+        ContactKind::Foot => (c.foot.stiffness.max(c.hull.stiffness), c.foot.damping + c.hull.damping),
+        ContactKind::Hull => (c.hull.stiffness, c.hull.damping),
+    };
+    let ks = if stiffness > 0.0 { (m_eff / (count * dt * dt * stiffness)).min(1.0) } else { 1.0 };
+    let cs = if damping > 0.0 { (m_eff / (count * dt * damping)).min(1.0) } else { 1.0 };
+    let mut out = *c;
+    for s in [&mut out.foot, &mut out.hull] {
+        s.stiffness *= ks;
+        s.damping *= cs;
+    }
+    out
 }
 
 /// Friction force (N) at a point sliding at `v_t` (in the tangent plane)
@@ -348,11 +375,39 @@ fn touch(ground: &Ground, pose: &Pose, cp: &ContactPoint) -> Option<Touch> {
     Some(Touch { lever, n, depth, v_point, closing })
 }
 
-/// The normal force (N) the ground pushes contact point `cp` of `pose`
-/// with (zero off the ground): the load a part carries there
-/// (`sim::vessel::breakage`).
-pub fn normal_load(ground: &Ground, pose: &Pose, cp: &ContactPoint, c: &ContactFile) -> f64 {
-    touch(ground, pose, cp).map_or(0.0, |t| normal_force(cp.kind, c, t.depth, t.closing))
+/// The points of `points` touching `ground`, each with the normal force
+/// (N) of its springs for a substep of `dt` ([`stable_springs`]).
+fn pressing(
+    ground: &Ground,
+    pose: &Pose,
+    points: &[ContactPoint],
+    c: &ContactFile,
+    dt: f64,
+) -> Vec<(usize, Touch, f64)> {
+    let touching: Vec<(usize, Touch)> =
+        points.iter().enumerate().filter_map(|(i, cp)| touch(ground, pose, cp).map(|t| (i, t))).collect();
+    let count = touching.len() as f64;
+    let inv = pose.inertia.inverse();
+    (touching.into_iter())
+        .map(|(i, t)| {
+            let u = pose.q.inverse() * t.lever.cross(t.n);
+            let m_eff = 1.0 / (1.0 / pose.mass + u.dot(inv * u));
+            let springs = stable_springs(points[i].kind, c, m_eff, count, dt);
+            let f_n = normal_force(points[i].kind, &springs, t.depth, t.closing);
+            (i, t, f_n)
+        })
+        .collect()
+}
+
+/// The normal force (N) the ground pushes each of `points` of `pose` with
+/// (zero off the ground) in a substep of `dt`, as [`forces`]: the load a
+/// part carries there (`sim::vessel::breakage`).
+pub fn normal_loads(ground: &Ground, pose: &Pose, points: &[ContactPoint], c: &ContactFile, dt: f64) -> Vec<f64> {
+    let mut out = vec![0.0; points.len()];
+    for (i, _, f_n) in pressing(ground, pose, points, c, dt) {
+        out[i] = f_n;
+    }
+    out
 }
 
 /// Contact force and torque on `pose` from `points` touching `ground`, for
@@ -374,8 +429,8 @@ pub fn forces(
     }
     let mut out = ContactForces::default();
     let mut touches = Vec::new();
-    for (i, cp) in points.iter().enumerate() {
-        let Some(Touch { lever, n, depth, v_point, closing }) = touch(ground, pose, cp) else { continue };
+    for (i, Touch { lever, n, depth, v_point, closing }, f_n) in pressing(ground, pose, points, c, dt) {
+        let cp = &points[i];
         out.touching = true;
         let (spring, stroke) = match cp.kind {
             ContactKind::Foot => (c.foot, c.foot.stroke),
@@ -384,7 +439,6 @@ pub fn forces(
         if impact(cp.kind, stroke, depth, closing, max_speed) && out.impact.is_none_or(|im| closing > im.speed) {
             out.impact = Some(Impact { point: i as u32, speed: closing });
         }
-        let f_n = normal_force(cp.kind, c, depth, closing);
         touches.push(Pressing { lever, n, f_n, v_t: v_point + n * closing, mu: spring.friction });
     }
     let inv = pose.inertia.inverse();

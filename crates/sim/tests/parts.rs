@@ -310,25 +310,58 @@ fn a_hard_landing_breaks_a_leg_not_the_craft() {
     assert!(a.destruction().is_none());
 }
 
-/// A 12-part craft dropped onto the pad at 10 m/s (its impact limit is
-/// 8 m/s): a foot hits too fast and its leg is destroyed (D066 per point);
-/// the craft is not.
+/// A light piece of a big craft (its ground springs sized for the whole
+/// craft) dropped onto the pad at 10 m/s: the explicit contact substeps
+/// never add energy (relative to the turning ground, with gravity's and the
+/// spin's potential), and it comes to rest (review of 2026-10-26, PARTS 3:
+/// a 250 kg wreck went from 4.7 to 11.0 kJ).
 #[test]
-fn a_hard_landing_breaks_a_leg_not_the_craft() {
+fn a_light_piece_dropped_on_the_pad_loses_energy_and_rests() {
     let w = world();
-    let c = craft(12);
-    let pad = Vessel::landed_at(&w, VesselId(1), "Earth", 28.6082, -80.66, t0(), &c);
+    let c = craft(40);
+    let earth = w.find("Earth").unwrap();
+    let spin = earth.physical.as_ref().unwrap().rotation.omega(t0()).raw();
+    // The single part nearest 250 kg.
+    let part = (0..c.parts.len())
+        .min_by(|&a, &b| (c.parts[a].dry_mass - 250.0).abs().total_cmp(&(c.parts[b].dry_mass - 250.0).abs()));
+    let part = &c.parts[part.unwrap()];
+    let piece = sim::craft::craft_of(&CraftId::piece(stress::id(40).base(), &[part.id]));
+    let pad = Vessel::landed_at(&w, VesselId(1), "Earth", 28.6082, -80.66, t0(), &piece);
     let (anchor, r, v) = pad.state(&w);
+    assert_eq!(anchor, earth.node);
     let up = r.normalize();
-    let mut a = Vessel::coasting(&w, VesselId(1), t0(), anchor, r + up * 1.0, v - up * 10.0, &c);
-    a.advance(&w, t0().add_seconds(1.0), &Controls::default(), usize::MAX);
-    let b = a.breakup().expect("an impact broke a part").clone();
-    let d = a.craft.design().clone();
-    let (part, cause) = b.destroyed[0];
-    assert!(d.parts[part as usize].name.starts_with("leg"), "{}", d.parts[part as usize].name);
-    let Destruction::Impact { speed, .. } = cause else { panic!("{cause:?}") };
-    assert!(speed > 8.0);
-    assert!(a.destruction().is_none());
+    let mut a = Vessel::coasting(&w, VesselId(1), t0(), anchor, r + up * 1.0, v - up * 10.0, &piece);
+    let energy = |a: &Vessel| {
+        let (_, r, v) = a.state(&w);
+        let p = a.mass_props();
+        let k = sim::contact::kinetic_per_mass(
+            p.mass,
+            &p.inertia,
+            a.attitude.q,
+            v - spin.cross(r),
+            a.attitude.omega - spin,
+        );
+        p.mass * (k - earth.gm / r.length() - 0.5 * spin.cross(r).length_squared())
+    };
+    let e0 = energy(&a);
+    let mut most = f64::NEG_INFINITY;
+    let mut t = t0();
+    for _ in 0..1_500 {
+        t = t.add_seconds(0.02);
+        a.advance(&w, t, &Controls::default(), usize::MAX);
+        if !matches!(a.phase, Phase::Powered { .. }) {
+            break;
+        }
+        most = most.max(energy(&a) - e0);
+    }
+    let (_, r, v) = a.state(&w);
+    let (speed, turn) = ((v - spin.cross(r)).length(), (a.attitude.omega - spin).length());
+    println!("{} ({:.0} kg): most energy gained {most:.1} J; {speed:.1e} m/s, {turn:.1e} rad/s", part.name, a.mass());
+    assert!(most < 0.002 * 0.5 * a.mass() * 100.0, "gained {most} J");
+    // At rest: frozen, or (an intact piece on its side, which no stance
+    // holds) still on the ground.
+    let frozen = matches!(a.phase, Phase::Landed { .. } | Phase::Crashed { .. });
+    assert!(frozen || (speed < 1e-3 && turn < 1e-3), "not at rest: {speed} m/s, {turn} rad/s");
 }
 
 /// A craft of parts and the pieces of a split saved and loaded continue as
