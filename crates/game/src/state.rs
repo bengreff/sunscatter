@@ -147,7 +147,13 @@ impl SimState {
             return Some(RailsBlock::Thrust);
         }
         if matches!(ship.phase, Phase::Powered { .. }) {
-            // Flown live: thrusting, in the atmosphere or in contact.
+            // Held live near a live controllable craft (D082), else flown
+            // live: thrusting, in the atmosphere or in contact.
+            if ship.in_bubble() && !ship.leads(&self.world, &self.controls) {
+                if let Some(id) = self.bubble_leader() {
+                    return Some(RailsBlock::Near(id));
+                }
+            }
             return Some(RailsBlock::Live);
         }
         // Every vessel moves at the same warp: one flying live (in an
@@ -160,6 +166,16 @@ impl SimState {
         }
         let (anchor, r, _) = ship.state_at(&self.world, self.clock);
         below_rails_floor(&self.world, self.clock, anchor, r).map(|(body, floor)| RailsBlock::Floor { body, floor })
+    }
+
+    /// The nearest other live controllable craft: what holds the active
+    /// vessel in its bubble (D082).
+    fn bubble_leader(&self) -> Option<VesselId> {
+        let ship = self.ship();
+        let live = |v: &&Vessel| v.id() != ship.id() && matches!(v.phase, Phase::Powered { .. }) && v.controllable();
+        let distance = |v: &Vessel| sim::vessel::debris::separation(&self.world, self.clock, ship, v);
+        let nearest = self.fleet.iter().filter(live).map(|v| (distance(v), v.id()));
+        nearest.min_by(|a, b| a.0.total_cmp(&b.0)).map(|(_, id)| id)
     }
 
     pub fn reset(&mut self) {
@@ -355,6 +371,9 @@ pub fn advance(
     let start = std::time::Instant::now();
     let deadline = start + std::time::Duration::from_secs_f64(crate::fleet::SIM_FRAME_TIME);
     let before = sim.clock;
+    // The 10 km bubble (D082): craft near a live controllable craft fly
+    // live with it, tick for tick; the fleet then moves the rest.
+    sim::vessel::bubble::advance(&sim.world, &mut sim.fleet, &controls, target);
     let adv = crate::fleet::advance_fleet(&sim.world, &mut sim.fleet, &controls, target, Some(deadline));
     let clock = crate::fleet::clock_after(&adv, target);
     sim.compute_limited = clock < target;
@@ -427,6 +446,8 @@ pub enum RailsBlock {
     Live,
     /// Another vessel is flying live (in an atmosphere, or landing).
     OtherLive(VesselId),
+    /// Held live within 10 km of this live controllable craft (D082).
+    Near(VesselId),
     /// Below a body's rails floor (D062): (body, floor altitude in m).
     Floor { body: NodeId, floor: f64 },
 }
@@ -601,5 +622,31 @@ mod tests {
         sim.controls.throttle = 0.0;
         sim.active = sim.fleet.len() - 1;
         assert_eq!(sim.rails_block(), Some(RailsBlock::Live));
+    }
+
+    /// D082: a craft held live in the bubble of a live controllable craft
+    /// names it as the reason rails warp is refused.
+    #[test]
+    fn a_craft_held_in_a_bubble_names_its_leader() {
+        let mut sim = SimState::new();
+        let w = sim.world.clone();
+        let earth = w.find("Earth").unwrap();
+        let r = earth.physical.as_ref().unwrap().radius_eq + 400_000.0;
+        let (pos, vel) = (DVec3::new(r, 0.0, 0.0), DVec3::new(0.0, (earth.gm / r).sqrt(), 0.0));
+        let craft = |sim: &mut SimState, along: f64| {
+            let id = sim.vessel_ids.allocate();
+            Vessel::coasting(&w, id, sim.clock, earth.node, pos + DVec3::Y * along, vel, test_craft())
+        };
+        let (ship, other) = (craft(&mut sim, 0.0), craft(&mut sim, 2_000.0));
+        let other_id = other.id();
+        sim.fleet = vec![ship, other];
+        sim.active = 0;
+        assert_eq!(sim.rails_block(), None, "both coasting");
+        // The other craft burns: a bubble forms around it and holds the
+        // active one live.
+        let burn = |i: usize| Controls { sas: true, throttle: if i == 1 { 0.1 } else { 0.0 }, ..Default::default() };
+        sim::vessel::bubble::advance(&w, &mut sim.fleet, &burn, sim.clock.add_seconds(0.1));
+        assert!(sim.fleet[0].in_bubble() && matches!(sim.fleet[0].phase, Phase::Powered { .. }));
+        assert_eq!(sim.rails_block(), Some(RailsBlock::Near(other_id)));
     }
 }

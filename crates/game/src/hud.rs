@@ -131,6 +131,8 @@ pub enum WarpLimit {
     Live,
     /// Another vessel (id) is flying live.
     OtherLive(u64),
+    /// Held live near a live controllable vessel (id; D082).
+    Near(u64),
 }
 
 /// What the warp indicator shows: the level in effect, whether it is rails
@@ -200,6 +202,9 @@ pub fn draw(
             Some(crate::state::RailsBlock::OtherLive(id)) if limit == Some(WarpLimit::Throttle) => {
                 limit = Some(WarpLimit::OtherLive(id.0));
             }
+            Some(crate::state::RailsBlock::Near(id)) if limit == Some(WarpLimit::Throttle) => {
+                limit = Some(WarpLimit::Near(id.0));
+            }
             _ => {}
         }
         ui_.horizontal(|ui_| {
@@ -226,6 +231,7 @@ pub fn draw(
             Some(WarpLimit::Floor(f)) => format!("  limited: below {}", crate::format::distance(f)),
             Some(WarpLimit::Live) => "  limited: flying live".to_string(),
             Some(WarpLimit::OtherLive(id)) => format!("  limited: Vessel {id} is flying live"),
+            Some(WarpLimit::Near(id)) => format!("  limited: near Vessel {id}"),
             None => String::new(),
         };
         ui_.horizontal(|ui_| {
