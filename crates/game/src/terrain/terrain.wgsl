@@ -74,6 +74,13 @@ struct TerrainParams {
     zone_pattern: array<vec4<f32>, 16>,
     // x: this body's share of the global ambient light (sky::ambient_share).
     ambient: vec4<f32>,
+    // Cloud detail (giants): x first wavelength (m, 0 off), y warp amplitude
+    // (fraction of it), z east-west stretch, w tone contrast.
+    clouds: vec4<f32>,
+    // Under a haze: rgb vertical optical depth, w radius / scale height (0 off);
+    // rgb diffuse fraction (overhead Sun), w the Sun's lux at the camera.
+    haze: vec4<f32>,
+    haze_diffuse: vec4<f32>,
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(100) var<uniform> terrain: TerrainParams;
@@ -548,7 +555,22 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
         }
     } else {
         if terrain.flags.z != 0u {
-            color = textureSampleGrad(color_map, color_sampler, uv, dx, dy).rgb;
+            var uv_c = uv;
+            var tone = 0.0;
+            if terrain.clouds.x > 0.0 {
+                // Cloud tops (D073): the map looked up through a warp that
+                // is stretched east-west like zonal flow, plus a fine tone;
+                // every octave fades by footprint, so band edges stay crisp
+                // and turbulent at any distance.
+                let foot = max(length(dp1), length(dp2));
+                let east = vec3(-dir.y, dir.x, 0.0) / max(length(dir.xy), 1e-4);
+                let q = fixed + east * dot(fixed, east) * (1.0 / terrain.clouds.z - 1.0);
+                let w = zone_warp(q, terrain.clouds.x, foot) * (terrain.clouds.x * terrain.clouds.y / WARP_AMP);
+                let r = terrain.shape.x;
+                uv_c = uv + vec2(w.x / (2.0 * PI * r * max(cos(lat), 0.05)), -w.y / (PI * r));
+                tone = zone_tone(q, terrain.clouds.x * 0.5, foot) * terrain.clouds.w;
+            }
+            color = textureSampleGrad(color_map, color_sampler, uv_c, dx, dy).rgb * (1.0 + tone);
         }
         // The baked coverage sharpened into a coastline.
         if terrain.flags.w != 0u {
@@ -689,6 +711,17 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     let sun_elev = dot(up_here, normalize(terrain.star.xyz - in.world_position.xyz));
     let day = smoothstep(-0.105, 0.052, sun_elev);
     var lit = out.color.rgb * sun * day;
+    // Under a haze (Titan, Venus): the direct beam through the slant
+    // column (spherical-shell air mass), and the light the haze scatters
+    // down, Lambertian (lighting::haze_light).
+    if terrain.haze.w > 0.0 {
+        let mu = max(sun_elev, 0.0);
+        let rh = terrain.haze.w;
+        let airmass = sqrt(rh * rh * mu * mu + 2.0 * rh + 1.0) - rh * mu;
+        lit *= exp(-terrain.haze.rgb * airmass);
+        let e = terrain.haze_diffuse.w * terrain.light.w * eclipse(in.world_position.xyz);
+        lit += color * terrain.haze_diffuse.rgb * e * mu / PI * view.exposure;
+    }
     // Planetshine: a Lambert term from the reflecting body.
     if terrain.shine.w > 0.0 {
         let l = normalize(terrain.shine.xyz - in.world_position.xyz);

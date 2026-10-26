@@ -5,6 +5,9 @@
 (
     base_color: (0.97, 0.88, 0.83),
     color_map: Some("color.jpg"),
+    // Procedural cloud detail (D073: crisp at any distance, never a magnified photo): representative
+    // values, not measurements: the first warp wavelength, its amplitude, the east-west stretch, the tone.
+    clouds: Some((scale_m: 1500000.0, warp: 0.2, stretch: 6.0, contrast: 0.08)),
     albedo: 0.342,
     roughness: 0.95,
     icon_color: (0.98, 0.92, 0.76),

@@ -5,4 +5,25 @@
     albedo: 0.27,
     roughness: 0.95,
     icon_color: (0.97, 0.78, 0.52),
+    // The sky (D052, Hillaire) at 680, 550, 440 nm; sources: docs/features/solar-visuals.md#titan (agent SKY).
+    // - Rayleigh: N2 cross-sections 1.94, 4.60, 11.5 e-31 m2 (air's, Bucholtz 1995, x 1.02 for N2's
+    //   refractivity and King factor) x the surface number density 1.135e26 m-3 (146.7 kPa, 93.65 K:
+    //   body.ron); scale height 21.0 km (RT/Mg at the surface).
+    // - Haze: vertical optical depth 2.9, 3.6, 4.6 (Huygens DISR: 2 to 4.5 between 950 and 450 nm,
+    //   Tomasko et al. 2008, PSS 56, 669; interpolated as a power law), scale height 65 km (above 80 km,
+    //   ibid.); single-scattering albedo 0.95, 0.90, 0.80 (ibid., lower in blue: the orange tholin);
+    //   asymmetry 0.65 (fractal aggregates, ibid.'s phase functions, representative).
+    atmosphere: Some((
+        thickness_m: 600000.0,
+        rayleigh_scattering: (2.20e-5, 5.22e-5, 1.30e-4),
+        rayleigh_scale_height_m: 21000.0,
+        mie_scattering: (4.24e-5, 4.98e-5, 5.66e-5),
+        mie_absorption: (2.2e-6, 5.5e-6, 1.42e-5),
+        mie_scale_height_m: 65000.0,
+        mie_asymmetry: 0.65,
+        // Titan's surface reflectance at 500-900 nm, ~0.1-0.2 with a red slope (DISR).
+        ground_albedo: (0.15, 0.12, 0.08),
+        // Raymarched inside too: the haze broke the aerial-perspective table into coloured rings.
+        raymarch_inside: true,
+    )),
 )

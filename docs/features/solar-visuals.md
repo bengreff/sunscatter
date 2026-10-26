@@ -32,6 +32,34 @@ Bevy's Hillaire model (D052) at 680, 550 and 440 nm. New in the data (`visual.ro
 
 The larger asymmetry in blue concentrates blue light around the Sun (the blue sunset); the dust's blue absorption makes the day sky butterscotch. First tour (2026-10-26, without LANDS' surface maps): the sky from 2 km is a dull tan, the disc from 3 radii is a hazy ochre; the haze looks strong from orbit, to be checked against Viking/MGS images once the surface maps are in.
 
+### Titan
+
+| Quantity | Value (R, G, B) | Source |
+|---|---|---|
+| N₂ Rayleigh | 2.20, 5.22, 13.0 × 10⁻⁵ m⁻¹; scale height 21.0 km | air's cross-sections (Bucholtz 1995, Appl. Opt. 34, 2765) × 1.02 for N₂ × 1.135 × 10²⁶ m⁻³ (146.7 kPa, 93.65 K: body.ron) |
+| Haze optical depth | 2.9, 3.6, 4.6 (vertical) | Huygens DISR: 2 at 950 nm to 4.5 at 450 nm (Tomasko et al. 2008, PSS 56, 669), a power law between |
+| Haze profile | exponential, 65 km | ibid. (above 80 km); the layers below 80 km (linear in their papers) are folded in |
+| Haze single-scattering albedo | 0.95, 0.90, 0.80 | ibid. (lower in blue: the orange tholin), as summarised in the literature, not re-read |
+| Haze asymmetry | 0.65 | representative of their fractal aggregates' phase functions (not a fitted value) |
+| Ground albedo | 0.15, 0.12, 0.08 | DISR surface reflectance ~0.1–0.2, red slope |
+
+Thickness 600 km (the haze reaches ~500 km). From orbit (tour 2026-10-26): an orange-tan fuzzy ball without surface features and a soft, bluish-grey limb, as Cassini's natural-colour views show; the ground is dim orange-brown under a dark orange sky.
+
+### Venus
+
+| Quantity | Value (R, G, B) | Source |
+|---|---|---|
+| CO₂ Rayleigh | 4.44, 10.6, 26.5 × 10⁻⁴ m⁻¹; scale height 8.95 km | Sneep & Ubachs 2005 × 9.07 × 10²⁶ m⁻³ (9.21 MPa, 735 K: body.ron); the height puts VIRA's 3.69 kPa at 70 km (Seiff et al. 1985), so the CO₂ above the clouds is right (15.9 km, RT/Mg at the surface, put 30 times too much there: a blue veil over the disc) |
+| Cloud deck | tent from 34 to 80 km peaking at 57 km, vertical optical depth 30 | the main deck at 47–70 km, τ 25–40 (Pioneer Venus LSAR, Ragent & Blamont 1980) |
+| Cloud asymmetry | 0.75 | sulfuric-acid droplets, r_eff 1.05 µm, n 1.44 (Hansen & Hovenier 1974) |
+| Cloud single-scattering albedo | 0.9979, 0.9973, 0.9967 | from the albedo of a deep layer, A = 1 − 4 √((1 − ω) / (3 (1 − g))), set to the Bond albedo 0.76 coloured by the geometric albedos 0.712, 0.689, 0.664 (Mallama et al. 2017): A = 0.786, 0.761, 0.733 |
+
+From orbit: a pale, featureless disc, slightly bluish-white rather than Venus's pale yellow (to be checked after the scale-height fix); the limb shows ripples where the 24 raymarch samples step through the cloud top. The ground under it is black at D087's exposure: 0.3–0.9 % of the light arrives (the estimate below; Venera's photometers measured a few per cent of the mean insolation), ~7 stops below a sunlit surface, and the exposure follows the starlight above the clouds, not under them. The surface itself (Magellan) is not drawn yet.
+
+### Light under a haze (Titan, Venus)
+
+Bevy's atmosphere does not dim the Sun on our terrain, so Titan's ground first came out in full sunlight under τ ≈ 4 of haze. Bodies with `raymarch_inside: true` now light their ground through it (`lighting::haze_light`, from the same coefficients the sky is drawn with): the direct beam exp(−τ m(μ₀)) with the spherical-shell air mass m for the extinction-weighted scale height, plus the diffuse light the haze sends down, Lambertian, ∝ μ₀. The diffuse fraction is a diffusion estimate, not a radiative-transfer solution: a slab's total transmission 1 / (1 + ¾ (1 − g) τ_s) (Eddington, conservative), damped by exp(−k τ) with k = √(3 (1 − ω)(1 − ω g)), minus the direct beam. Titan: about 3–7 % of the light at the top arrives diffusely, least in blue; Venus well under 1 %. These atmospheres are also raymarched from inside: their aerial-perspective table broke into coloured rings on the ground.
+
 ## Giants (SKY)
 
 `asset-tool giants [jupiter saturn uranus neptune]` (`asset-tool::giants`), inputs in `data/external/giants/`:
@@ -47,7 +75,9 @@ OPAL: Outer Planet Atmospheres Legacy, PI A. Simon (GO 13937), NASA/ESA Hubble, 
 
 **Calibration.** Each map's area mean per channel is the Lambert albedo 1.5 p of the geometric albedo p in Sloan r′, Johnson V and Sloan g′ (Mallama, Krobusek & Pavlov 2017, Icarus 282, 19, table 7): Jupiter 0.575, 0.538, 0.509; Saturn 0.618, 0.499, 0.436; Uranus 0.355, 0.488, 0.559; Neptune 0.307, 0.442, 0.533. Where the brightest 0.5 % would exceed 0.98, the contrast is reduced by a power law (each channel relative to its mean, raised to γ) until they fit: Jupiter γ = 0.76, Saturn 0.59, Uranus and Neptune 1. The longitudes are the map's own (column 0 at −180° in the grid convention); cloud features drift against any rotation system.
 
-**First tour (2026-10-26):** with D087's exposure the giants' day sides read like Earth's. Jupiter: pale cream with pink-tan belts and the Great Red Spot, paler and less saturated than the familiar enhanced images (it is calibrated). Saturn: a pale peach disc with faint bands. Uranus: pale cyan with a whiter north polar region. Neptune: pale blue, close to Uranus (as Irwin et al. 2024, MNRAS 527, 11521, found for the true colours). From low orbit the cloud tops are smooth: no detail below the map's texel yet.
+**First tour (2026-10-26):** with D087's exposure the giants' day sides read like Earth's. Jupiter: pale cream with pink-tan belts and the Great Red Spot, paler and less saturated than the familiar enhanced images (it is calibrated). Saturn: a pale peach disc with faint bands. Uranus: pale cyan with a whiter north polar region. Neptune: pale blue, close to Uranus (as Irwin et al. 2024, MNRAS 527, 11521, found for the true colours). From low orbit the cloud tops were smooth (no detail below the map's texel).
+
+**Cloud detail (D073).** `visual.ron` `clouds`: the colour map is looked up through the zones' domain warp (fBm of the body-fixed position, octaves fading by footprint), here stretched east-west like zonal flow, plus a fine tone, so band edges stay crisp and turbulent and the clouds keep gaining detail closer in (`terrain.wgsl`, the colour-map path). The parameters are representative, not measured: Jupiter first wavelength 1,000 km, amplitude 0.35 of it, stretch 4, tone ±15 %; Saturn 1,500 km, 0.2, 6, ±8 %; Uranus and Neptune 1,000 km, 0.15, 6, ±3 %. From 3 radii Jupiter's belts have wavy, turbulent edges; from low orbit its cloud tops show a faint mottling and Saturn's are still nearly uniform (their zones are bright and the contrast is low).
 
 ## Solid bodies (LANDS)
 

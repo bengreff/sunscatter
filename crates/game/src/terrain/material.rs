@@ -70,6 +70,16 @@ pub struct TerrainParams {
     /// (`sky::ambient_share`: the daylight sky stand-in lights only the body
     /// whose air the camera is in).
     pub ambient: Vec4,
+    /// Cloud detail on a colour map (giants, `CloudsDef`): x the first
+    /// wavelength (m, 0 = off), y the warp's amplitude as a fraction of it,
+    /// z the east-west stretch, w the tone's contrast.
+    pub clouds: Vec4,
+    /// Under a hazy atmosphere (`lighting::HazeLight`): rgb the vertical
+    /// optical depth, w the radius over the scale height (0 = no haze).
+    pub haze: Vec4,
+    /// rgb: the diffuse fraction for an overhead Sun; w: the Sun's lux at
+    /// the camera (set each frame).
+    pub haze_diffuse: Vec4,
 }
 
 #[derive(Asset, AsBindGroup, Reflect, Debug, Clone, Default)]

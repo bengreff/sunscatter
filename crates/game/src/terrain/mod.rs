@@ -157,6 +157,9 @@ pub fn setup(
             .filter(|o| o.shallow_depth_m.is_some() && p.terrain.is_some() && p.sea_level.is_some())
             .and_then(|o| o.shallow_albedo)
             .map_or(Vec4::ZERO, |a| v4(a, 1.0));
+        // Hazy atmospheres light the ground through their haze (Titan, Venus).
+        let haze =
+            def.atmosphere.as_ref().filter(|a| a.raymarch_inside).map(|a| crate::lighting::haze_light(a, p.radius_eq));
         let params = TerrainParams {
             shape: Vec4::new(
                 p.radius_eq as f32,
@@ -176,6 +179,9 @@ pub fn setup(
             ground_means: ground.as_ref().map_or([Vec4::ONE; 5], |g| g.2),
             shallow,
             ambient: Vec4::ONE,
+            clouds: def.clouds.map_or(Vec4::ZERO, |c| Vec4::new(c.scale_m, c.warp, c.stretch.max(1.0), c.contrast)),
+            haze: haze.map_or(Vec4::ZERO, |h| v4(h.tau, h.r_over_h)),
+            haze_diffuse: haze.map_or(Vec4::ZERO, |h| v4(h.diffuse, 0.0)),
             ..default()
         };
         let material = materials.add(ExtendedMaterial {

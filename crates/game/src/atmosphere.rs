@@ -47,7 +47,11 @@ fn drop_stale_atmosphere(
 /// An atmosphere entity belonging to a body, with its atmosphere (the
 /// `Atmosphere` component itself is removed while the atmosphere is off).
 #[derive(Component)]
-pub struct BodyAtmosphere(pub NodeId, pub Atmosphere);
+pub struct BodyAtmosphere(pub NodeId, pub Atmosphere, pub RaymarchInside);
+
+/// Whether an atmosphere is raymarched from inside too (`AtmosphereDef::raymarch_inside`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct RaymarchInside(pub bool);
 
 fn v3(a: [f32; 3]) -> Vec3 {
     Vec3::from_array(a)
@@ -130,7 +134,8 @@ pub fn spawn(
         ground_albedo: v3(def.ground_albedo),
         medium: handle,
     };
-    commands.spawn((BodyAtmosphere(node, atmosphere.clone()), atmosphere, Transform::IDENTITY));
+    let inside = RaymarchInside(def.raymarch_inside);
+    commands.spawn((BodyAtmosphere(node, atmosphere.clone(), inside), atmosphere, Transform::IDENTITY));
 }
 
 /// Atmospheres are drawn only within this many outer radii of their body:
@@ -251,9 +256,11 @@ pub fn sky_light_fade(height_fraction: f64) -> f32 {
 /// thickness; 1 or more: outside). "Raymarched" is adaptive: inside an
 /// atmosphere the lookup tables are accurate and much cheaper (~3 ms at the
 /// pad, 2026-09-26); from outside, their aerial perspective washes the
-/// ground out, so it raymarches there.
-pub fn raymarch(quality: AtmosphereQuality, depth: f64) -> bool {
-    quality == AtmosphereQuality::Raymarched && depth >= 1.0
+/// ground out, so it raymarches there. Hazy atmospheres (Titan's, Venus's:
+/// `inside`) are raymarched inside too: their aerial-perspective table
+/// broke into coloured rings on the ground (2026-10-26).
+pub fn raymarch(quality: AtmosphereQuality, depth: f64, inside: RaymarchInside) -> bool {
+    quality == AtmosphereQuality::Raymarched && (depth >= 1.0 || inside.0)
 }
 
 /// Sky-light cubemap size (px per face): only diffuse and blurry reflections
@@ -282,14 +289,14 @@ pub fn update_sky_light(
     let snap = sim.world.snapshot(sim.clock);
     // How deep the camera is in the nearest atmosphere (fraction of its
     // thickness above the ground; above 1: outside).
-    let depth = atmos
+    let (depth, hazy) = atmos
         .iter()
         .map(|a| {
             let r = (rig.cam_pos - snap.relative_r(a.0, rig.anchor)).length();
             let (lo, hi) = (f64::from(a.1.inner_radius), f64::from(a.1.outer_radius));
-            (r - lo) / (hi - lo)
+            ((r - lo) / (hi - lo), a.2)
         })
-        .fold(f64::INFINITY, f64::min);
+        .fold((f64::INFINITY, RaymarchInside(false)), |a, b| if b.0 < a.0 { b } else { a });
     let inside = settings.atmosphere != AtmosphereQuality::Off && settings.sky_light && depth < 1.0;
     let fade = sky_light_fade(depth);
     for (cam, has, generated, atmo) in &mut cams {
@@ -327,7 +334,7 @@ pub fn update_sky_light(
         // is on (it was tied to it from 2026-09-27, so the tiers without sky
         // light raymarched at the pad too).
         if let Some(mut a) = atmo.filter(|_| settings.atmosphere == AtmosphereQuality::Raymarched) {
-            let want = if raymarch(settings.atmosphere, depth) {
+            let want = if raymarch(settings.atmosphere, depth, hazy) {
                 AtmosphereMode::Raymarched
             } else {
                 AtmosphereMode::LookupTexture
@@ -356,8 +363,11 @@ mod tests {
             (AtmosphereQuality::Off, 3.0, false),
         ];
         for (q, depth, want) in cases {
-            assert_eq!(raymarch(q, depth), want, "{q:?} at {depth}");
+            assert_eq!(raymarch(q, depth, RaymarchInside(false)), want, "{q:?} at {depth}");
         }
+        // A hazy atmosphere (Titan's) is raymarched at the ground too, if raymarching at all.
+        assert!(raymarch(AtmosphereQuality::Raymarched, 0.0, RaymarchInside(true)));
+        assert!(!raymarch(AtmosphereQuality::Lut, 0.0, RaymarchInside(true)));
     }
 
     #[test]

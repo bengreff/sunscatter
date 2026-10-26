@@ -5,4 +5,35 @@
     albedo: 0.76,
     roughness: 0.95,
     icon_color: (1.00, 0.98, 0.83),
+    // The sky (D052, Hillaire) at 680, 550, 440 nm; sources: docs/features/solar-visuals.md#venus (agent SKY).
+    // - Rayleigh: CO2 cross-sections 4.89, 11.6, 29.2 e-31 m2 (Sneep & Ubachs 2005) x the surface number
+    //   density 9.07e26 m-3 (9.21 MPa, 735 K: body.ron); scale height 8.95 km, which puts VIRA's 3.69 kPa
+    //   at 70 km (Seiff et al. 1985, Adv. Space Res. 5(11), 3): the CO2 above the clouds, which is all
+    //   that shows from outside (15.9 km, RT/Mg at the surface, put 30 times too much there: a blue veil).
+    // - The cloud deck: sulfuric-acid droplets from 47 to 70 km (a tent 46 km wide at 57 km), vertical
+    //   optical depth 30 (Pioneer Venus LSAR, Ragent & Blamont 1980: 25-40), asymmetry 0.75 (r_eff 1.05 um,
+    //   n 1.44: Hansen & Hovenier 1974); single-scattering albedo 0.9979, 0.9973, 0.9967, from the albedo
+    //   of a deep layer, A = 1 - 4 sqrt((1 - w) / (3 (1 - g))), matched to the Bond albedo 0.76 coloured
+    //   by the geometric albedos 0.712, 0.689, 0.664 (Mallama et al. 2017): A = 0.786, 0.761, 0.733.
+    atmosphere: Some((
+        thickness_m: 120000.0,
+        rayleigh_scattering: (4.44e-4, 1.056e-3, 2.65e-3),
+        rayleigh_scale_height_m: 8950.0,
+        mie_scattering: (0.0, 0.0, 0.0),
+        mie_absorption: (0.0, 0.0, 0.0),
+        mie_scale_height_m: 10000.0,
+        mie_asymmetry: 0.75,
+        layers: [
+            (
+                scattering: (1.3015e-3, 1.3008e-3, 1.3000e-3),
+                absorption: (2.80e-6, 3.50e-6, 4.37e-6),
+                asymmetry: (0.75, 0.75, 0.75),
+                profile: Tent(center_m: 57000.0, width_m: 46000.0),
+            ),
+        ],
+        // Basaltic plains, dark (Venera 13/14 reflectance ~0.05-0.1).
+        ground_albedo: (0.10, 0.07, 0.05),
+        // Raymarched inside too: the haze broke the aerial-perspective table into coloured rings.
+        raymarch_inside: true,
+    )),
 )

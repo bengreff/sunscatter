@@ -22,6 +22,9 @@ pub struct BodyVisualDef {
     /// Surface zones drawn crisp from any distance (D073, crisp-surfaces.md).
     #[serde(default)]
     pub zones: Option<ZonesDef>,
+    /// Procedural cloud detail on the colour map (giants, D073).
+    #[serde(default)]
+    pub clouds: Option<CloudsDef>,
     #[serde(default)]
     pub atmosphere: Option<AtmosphereDef>,
     /// Self-luminous bodies (stars).
@@ -116,6 +119,23 @@ pub struct ZoneDef {
     pub pattern: PatternDef,
 }
 
+/// Cloud detail for a planet whose colour map is its cloud tops: the map
+/// is looked up through a domain warp (fBm of the body-fixed position,
+/// stretched east-west like zonal flow) and a fine tone is added, each
+/// octave fading by the pixel footprint, so band edges stay crisp and the
+/// clouds keep gaining detail closer in (D073: never a magnified photo).
+#[derive(Clone, Copy, Debug, Deserialize)]
+pub struct CloudsDef {
+    /// The first (longest) wavelength of the warp (m).
+    pub scale_m: f32,
+    /// The warp's amplitude, as a fraction of its wavelength.
+    pub warp: f32,
+    /// How much longer than wide the features are (east-west).
+    pub stretch: f32,
+    /// The tone's contrast (brightness ± this).
+    pub contrast: f32,
+}
+
 /// A zone's procedural texture: brightness × (1 + contrast × fBm), with
 /// octaves from `scale_m` down, each fading out by the pixel footprint.
 #[derive(Clone, Copy, Debug, Deserialize)]
@@ -178,6 +198,10 @@ pub struct AtmosphereDef {
     #[serde(default)]
     pub layers: Vec<LayerDef>,
     pub ground_albedo: [f32; 3],
+    /// Raymarch inside the atmosphere too (hazy atmospheres, whose
+    /// aerial-perspective table breaks up), not only from outside.
+    #[serde(default)]
+    pub raymarch_inside: bool,
 }
 
 /// An aerosol layer: Mie scattering and absorption (m⁻¹ at its densest),

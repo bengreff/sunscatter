@@ -156,6 +156,69 @@ pub fn update_exposure(
     }
 }
 
+/// Sunlight under a hazy atmosphere (Titan's haze, Venus's clouds): the
+/// vertical extinction optical depth per channel (the direct beam is
+/// exp(−τ m(μ₀)) with the spherical-shell air mass m), the diffuse part
+/// reaching the ground for an overhead Sun (a fraction of the light at the
+/// top), and the radius over the extinction-weighted scale height.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct HazeLight {
+    pub tau: [f32; 3],
+    pub diffuse: [f32; 3],
+    pub r_over_h: f32,
+}
+
+/// [`HazeLight`] from an atmosphere's data (one owner of the numbers: the
+/// same coefficients the sky is drawn with). The diffuse part is a
+/// diffusion estimate, not a radiative-transfer solution: the total
+/// transmission of a slab, 1 / (1 + ¾ (1 − g) τ_s) for conservative
+/// scattering (Eddington), damped by exp(−k τ) with the diffusion exponent
+/// k = √(3 (1 − ω)(1 − ω g)) for absorption; minus the direct beam.
+pub fn haze_light(def: &crate::body_visual::AtmosphereDef, radius: f64) -> HazeLight {
+    use crate::body_visual::ProfileDef;
+    // Per channel: scattering and absorption optical depths, the
+    // scattering-weighted asymmetry sum, and the extinction-weighted height.
+    let (mut ts, mut ta, mut gs, mut th) = ([0.0f64; 3], [0.0f64; 3], [0.0f64; 3], [0.0f64; 3]);
+    let mut add = |s: [f32; 3], a: [f32; 3], g: [f32; 3], depth: f64, height: f64| {
+        for c in 0..3 {
+            let (sc, ac) = (f64::from(s[c]) * depth, f64::from(a[c]) * depth);
+            ts[c] += sc;
+            ta[c] += ac;
+            gs[c] += f64::from(g[c]) * sc;
+            th[c] += (sc + ac) * height;
+        }
+    };
+    let h_r = f64::from(def.rayleigh_scale_height_m);
+    add(def.rayleigh_scattering, [0.0; 3], [0.0; 3], h_r, h_r);
+    let h_m = f64::from(def.mie_scale_height_m);
+    let g_m = def.mie_asymmetry_rgb.unwrap_or([def.mie_asymmetry; 3]);
+    add(def.mie_scattering, def.mie_absorption, g_m, h_m, h_m);
+    if let Some(o) = &def.ozone {
+        add([0.0; 3], o.absorption, [0.0; 3], f64::from(o.width_m) / 2.0, f64::from(o.center_m));
+    }
+    for l in &def.layers {
+        let (depth, height) = match l.profile {
+            ProfileDef::Exponential { scale_height_m } => (f64::from(scale_height_m), f64::from(scale_height_m)),
+            ProfileDef::Tent { center_m, width_m } => (f64::from(width_m) / 2.0, f64::from(center_m)),
+        };
+        add(l.scattering, l.absorption, l.asymmetry, depth, height);
+    }
+    let mut out = HazeLight { tau: [0.0; 3], diffuse: [0.0; 3], r_over_h: 0.0 };
+    let (mut tau_sum, mut h_sum) = (0.0, 0.0);
+    for c in 0..3 {
+        let tau = ts[c] + ta[c];
+        let (omega, g) = if tau > 0.0 { (ts[c] / tau, gs[c] / ts[c].max(1e-30)) } else { (1.0, 0.0) };
+        let k = (3.0 * (1.0 - omega) * (1.0 - omega * g)).max(0.0).sqrt();
+        let total = (-k * tau).exp() / (1.0 + 0.75 * (1.0 - g) * ts[c]);
+        out.tau[c] = tau as f32;
+        out.diffuse[c] = (total - (-tau).exp()).clamp(0.0, 1.0) as f32;
+        tau_sum += tau;
+        h_sum += th[c];
+    }
+    out.r_over_h = if h_sum > 0.0 { (radius * tau_sum / h_sum) as f32 } else { 0.0 };
+    out
+}
+
 /// Fills each terrain body's lighting uniforms from [`body_light`].
 pub fn update_terrain(
     sim: Res<SimState>,
@@ -194,6 +257,10 @@ pub fn update_terrain(
         let tint = l.shine.and_then(|(j, _)| defs.get(nodes[j])).map_or([1.0; 3], |d| d.base_color);
         p.light = Vec4::new(tint[0], tint[1], tint[2], l.sun_scale as f32);
         p.ambient.x = crate::sky::ambient_share(node, sky);
+        // Under a haze, the diffuse light scales with the Sun's flux (lux at the camera; `light.w` scales it to the body).
+        if p.haze.w > 0.0 {
+            p.haze_diffuse.w = flux(lm, star.length().max(1.0)) as f32;
+        }
     }
 }
 
@@ -297,6 +364,32 @@ mod tests {
         // The camera's flux is a distance, never the scene: no light, no change.
         assert_eq!(exposure_ev100(base, 0.0, e_ref, true), base - 14.0);
         assert_eq!(exposure_ev100(base, f64::NAN, e_ref, true), base);
+    }
+
+    #[test]
+    fn haze_light_from_the_atmosphere_data() {
+        use crate::body_visual::AtmosphereDef;
+        let load = |name: &str| crate::body_visual::load(name).and_then(|d| d.atmosphere).expect(name);
+        let clear = AtmosphereDef { mie_scattering: [0.0; 3], mie_absorption: [0.0; 3], ..load("Titan") };
+        let none = AtmosphereDef { rayleigh_scattering: [0.0; 3], layers: vec![], ..clear.clone() };
+        // (case, atmosphere, vertical optical depth range, diffuse range at 550 nm)
+        let cases = [
+            ("no air: nothing scattered", none, (0.0, 1e-9), (0.0, 1e-9)),
+            ("Titan's N2 alone (Rayleigh, conservative)", clear, (1.0, 1.3), (0.15, 0.35)),
+            ("Titan with its haze: a few per cent arrive diffusely", load("Titan"), (4.0, 5.5), (0.02, 0.12)),
+            ("Venus under 30 optical depths of cloud: under 1 %", load("Venus"), (35.0, 60.0), (1e-4, 0.01)),
+        ];
+        for (case, def, tau, diffuse) in cases {
+            let h = haze_light(&def, 2.5e6);
+            let (t, d) = (f64::from(h.tau[1]), f64::from(h.diffuse[1]));
+            assert!(t >= tau.0 && t <= tau.1, "{case}: tau {t}");
+            assert!(d >= diffuse.0 && d <= diffuse.1, "{case}: diffuse {d}");
+        }
+        // Blue is the most extinguished under Titan's haze, and the least transmitted.
+        let titan = haze_light(&load("Titan"), 2.575e6);
+        assert!(titan.tau[2] > titan.tau[1] && titan.tau[1] > titan.tau[0]);
+        assert!(titan.diffuse[2] < titan.diffuse[0]);
+        assert!(titan.r_over_h > 10.0 && titan.r_over_h < 200.0, "{}", titan.r_over_h);
     }
 
     #[test]
