@@ -150,6 +150,11 @@ fn inner_width() -> f32 {
     DOCK_WIDTH - f32::from(m.left) - f32::from(m.right) - 2.0
 }
 
+/// The egui area of a dock.
+pub fn dock_area(dock: Dock) -> egui::Id {
+    egui::Id::new(("menu_dock", dock == Dock::Left))
+}
+
 /// Draws a dock's open menus stacked from `place`, scrolling past its
 /// height ([`layout::stack`]); returns what the player did in each.
 pub fn dock(
@@ -159,7 +164,7 @@ pub fn dock(
     menus: &[(MenuId, Vec<Section>)],
     settings: &MenuSettings,
 ) -> Vec<(MenuId, MenuInput)> {
-    let id = egui::Id::new(("menu_dock", dock == Dock::Left));
+    let id = dock_area(dock);
     let heights_id = id.with("heights");
     let last: Vec<f32> = ctx.data(|d| d.get_temp(heights_id)).unwrap_or_default();
     let stack = layout::stack(&last, place.max_height);
@@ -190,22 +195,20 @@ pub fn dock(
     out
 }
 
-/// The menu bar, top centre: each menu's name and key, lit when open;
+/// The menu bar, top centre: each menu's name in normal type with its key
+/// as a small badge, an open menu lit (an amber wash and underline);
 /// returns the menu clicked.
 pub fn bar(ctx: &egui::Context, settings: &MenuSettings) -> Option<MenuId> {
     let mut clicked = None;
     egui::Area::new(egui::Id::new(BAR_AREA)).anchor(Align2::CENTER_TOP, [0.0, layout::MARGIN]).show(ctx, |ui| {
         theme::bar_frame().show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 4.0;
+                ui.spacing_mut().item_spacing.x = 2.0;
                 for m in MenuId::ALL {
                     let open = settings.is_open(m);
-                    let name =
-                        RichText::new(m.short()).monospace().small().color(if open { theme::TEXT } else { theme::DIM });
-                    let key = RichText::new(m.key_label()).monospace().small().color(theme::DIM);
-                    let button = egui::Button::new((name, key)).selected(open).frame_when_inactive(false);
                     let verb = if open { "Close" } else { "Open" };
-                    if ui.add(button).on_hover_text(format!("{verb} {} ({})", m.title(), m.key_label())).clicked() {
+                    let r = bar_item(ui, m, open).on_hover_text(format!("{verb} {} ({})", m.title(), m.key_label()));
+                    if r.clicked() {
                         clicked = Some(m);
                     }
                 }
@@ -213,6 +216,39 @@ pub fn bar(ctx: &egui::Context, settings: &MenuSettings) -> Option<MenuId> {
         });
     });
     clicked
+}
+
+/// The egui id of a menu's item in the bar.
+pub fn bar_item_id(m: MenuId) -> egui::Id {
+    egui::Id::new(("menu_bar_item", m))
+}
+
+/// One item of the bar: `NAME [K]`.
+fn bar_item(ui: &mut egui::Ui, m: MenuId, open: bool) -> egui::Response {
+    const PAD: f32 = 9.0;
+    let name_colour = if open { theme::TEXT } else { theme::MUTED };
+    let name = ui.painter().layout_no_wrap(m.short().to_string(), egui::FontId::monospace(13.0), name_colour);
+    let key = ui.painter().layout_no_wrap(m.key_label().to_string(), egui::FontId::monospace(10.0), theme::DIM);
+    let badge = vec2(key.size().x + 7.0, key.size().y + 3.0);
+    let size = vec2(PAD + name.size().x + 6.0 + badge.x + PAD, 26.0);
+    let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
+    let response = ui.interact(rect, bar_item_id(m), Sense::click());
+    let painter = ui.painter();
+    if open {
+        painter.rect_filled(rect, 4.0, theme::ACCENT.gamma_multiply(0.16));
+        let y = rect.bottom() - 1.5;
+        painter
+            .line_segment([pos2(rect.left() + 5.0, y), pos2(rect.right() - 5.0, y)], Stroke::new(2.0, theme::ACCENT));
+    } else if response.hovered() {
+        painter.rect_filled(rect, 4.0, Color32::from_white_alpha(14));
+    }
+    let name_pos = pos2(rect.left() + PAD, rect.center().y - name.size().y * 0.5);
+    let badge_rect =
+        egui::Rect::from_min_size(pos2(name_pos.x + name.size().x + 6.0, rect.center().y - badge.y * 0.5), badge);
+    painter.galley(name_pos, name, name_colour);
+    painter.rect_stroke(badge_rect, 3.0, Stroke::new(1.0, theme::BORDER), egui::StrokeKind::Inside);
+    painter.galley(badge_rect.center() - key.size() * 0.5, key, theme::DIM);
+    response
 }
 
 #[cfg(test)]
@@ -255,6 +291,32 @@ mod tests {
             modifiers: Default::default(),
         };
         [vec![Event::PointerMoved(at), button(true)], vec![button(false)]]
+    }
+
+    #[test]
+    fn a_click_on_the_bar_names_its_menu() {
+        let ctx = egui::Context::default();
+        let settings = MenuSettings::default();
+        let run = |events: Vec<Event>| {
+            let input = RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1000.0, 800.0))),
+                events,
+                ..Default::default()
+            };
+            ctx.begin_pass(input);
+            let clicked = bar(&ctx, &settings);
+            ctx.end_pass().drop_without_applying_deltas();
+            clicked
+        };
+        // Centred on its own width: settled after a few frames.
+        for _ in 0..4 {
+            run(vec![]);
+        }
+        let item = ctx.read_response(bar_item_id(MenuId::Utilities)).expect("drawn");
+        assert!(item.rect.height() >= 24.0, "readable: {:?}", item.rect);
+        let [press, release] = click(item.rect.center());
+        run(press);
+        assert_eq!(run(release), Some(MenuId::Utilities));
     }
 
     #[test]

@@ -28,6 +28,8 @@ pub mod theme {
     pub const ALERT: Color32 = Color32::from_rgb(255, 64, 52);
     /// Working as it should (a canopy open, safe to deploy).
     pub const GOOD: Color32 = Color32::from_rgb(120, 205, 145);
+    /// Text that is there but not active (a closed menu's name).
+    pub const MUTED: Color32 = Color32::from_rgb(180, 194, 208);
 
     pub fn panel_frame() -> Frame {
         Frame::new()
