@@ -12,7 +12,8 @@ use sim::sol;
 use sim::time::Epoch;
 use sim::vessel::pointing::Rule;
 use sim::vessel::{
-    Controls, EndKind, FlightPlan, HoldMode, Phase, PlannedBurn, SpeedReference, TargetState, Vessel, VesselId,
+    BurnEnd, BurnLaw, Controls, DirectionLaw, EndKind, FlightPlan, HoldMode, Phase, PlannedBurn, SpeedReference,
+    TargetState, Vessel, VesselId,
 };
 use sim::world::World;
 use std::sync::Arc;
@@ -170,4 +171,84 @@ fn the_automatic_reference_does_not_follow_the_anchor() {
     let sun = w.find("Sun").unwrap().node;
     let rule = jump.segment().unwrap().limbo().unwrap().pointing.rule();
     assert!(matches!(rule, Rule::Track(t) if t.auto && t.reference == sun), "{rule:?}");
+}
+
+/// Flies `v` to `end` in frames of `dt` with `budget` units a frame (the
+/// look-ahead as tight), so calls stop wherever the work runs out.
+fn fly_tight(w: &World, v: &mut Vessel, end: Epoch, dt: f64, controls: &Controls, budget: usize) {
+    let mut clock = v.time;
+    while clock < end {
+        let target = clock.add_seconds(dt);
+        let target = if target > end { end } else { target };
+        clock = v.advance(w, target, controls, budget);
+        v.extend_coast(w, clock.add_seconds(6_000.0), budget / 10);
+    }
+}
+
+/// The test craft at 700 km with 2,000 kg of propellant and a 0.5 N burn
+/// at Isp 3,000 s for `days` from 600 s on, along `direction`.
+fn low_thrust(w: &World, direction: DirectionLaw, days: f64) -> Vessel {
+    let earth = w.find("Earth").unwrap();
+    let el = Elements { a: 6_378_137.0 + 700_000.0, e: 0.0005, i: 0.9, raan: 1.0, argp: 0.5, mean_anomaly: 0.0 };
+    let (r, v) = el.to_state(earth.gm);
+    let mut s = Vessel::coasting(w, VesselId(1), t0(), earth.node, r, v, sim::craft::test_craft());
+    s.set_propellant(w, 2_000.0);
+    let law = BurnLaw::from_isp(0.5, 3_000.0, direction);
+    let burn = PlannedBurn { t_start: t0().add_seconds(600.0), law, end: BurnEnd::Duration(days * 86_400.0) };
+    s.set_plan(w, FlightPlan { burns: vec![burn] }).unwrap();
+    s
+}
+
+/// At a low-thrust burn's ignition the burn is flown again from the
+/// vessel's attitude (`Trajectory::refly`); doing it again from the
+/// attitude it returned (a call that ends there, then the next) changes
+/// nothing: the same bits a day later as one call, for a tracking and an
+/// inertial law and every hold mode before it.
+#[test]
+fn reflying_a_low_thrust_burn_at_its_ignition_again_changes_nothing() {
+    let w = world();
+    let earth = w.find("Earth").unwrap().node;
+    let laws = [
+        DirectionLaw::Tracking { reference: earth, axes: DVec3::X },
+        DirectionLaw::Inertial(DVec3::new(0.3, -0.4, 0.5)),
+    ];
+    for law in laws {
+        for hold in HoldMode::ALL {
+            let controls = Controls { sas: true, hold, ..Controls::default() };
+            let mut s = low_thrust(&w, law, 2.0);
+            let ignition = t0().add_seconds(600.0);
+            assert_eq!(s.advance(&w, ignition, &controls, usize::MAX), ignition);
+            let mut once = s.clone();
+            for _ in 0..3 {
+                assert_eq!(s.advance(&w, ignition, &controls, usize::MAX), ignition);
+            }
+            let end = ignition.add_seconds(86_400.0);
+            s.advance(&w, end, &controls, usize::MAX);
+            once.advance(&w, end, &controls, usize::MAX);
+            assert_same(&w, &s, &once, &format!("{law:?} {hold:?}"));
+        }
+    }
+}
+
+/// A month of low thrust in frames whose budgets run out anywhere (one
+/// coast step a frame across the ignition at 1x; a few at 1,000x and
+/// 1,000,000x) gives one call's bits.
+#[test]
+fn a_month_of_low_thrust_with_tight_budgets_is_one_calls() {
+    let w = world();
+    let earth = w.find("Earth").unwrap().node;
+    let controls = Controls { sas: true, hold: HoldMode::Prograde, ..Controls::default() };
+    let s = low_thrust(&w, DirectionLaw::Tracking { reference: earth, axes: DVec3::X }, 30.0);
+    let mut lead = s.clone();
+    lead.advance(&w, t0().add_seconds(540.0), &controls, usize::MAX);
+    let cases =
+        [(&lead, 120.0, 1.0 / 60.0, 10), (&s, 86_400.0, 1_000.0 / 60.0, 30), (&s, 31.0 * 86_400.0, 1e6 / 60.0, 60)];
+    for (start, span, dt, budget) in cases {
+        let end = start.time.add_seconds(span);
+        let mut once = start.clone();
+        assert_eq!(once.advance(&w, end, &controls, usize::MAX), end);
+        let mut framed = start.clone();
+        fly_tight(&w, &mut framed, end, dt, &controls, budget);
+        assert_same(&w, &framed, &once, &format!("frames of {dt} s, {budget} units"));
+    }
 }

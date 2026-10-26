@@ -30,7 +30,7 @@ A budget unit is about **a microsecond of work** on the reference Mac (`sim::ves
 
 Measured (calibration in `fleet_frames`, below): median **1.0–1.2 µs per unit** over the 50-craft fleet; the 300-part craft were 4–8 µs per unit before the `VolumeGrid` fix (the 2.7 ms per solve it cost was not in the estimate).
 
-Found on the way: with budgets that bite, a call could run out of integration steps right after reflying a low-thrust burn at its ignition, end there, and refly it again on the next call from the attitude already snapped onto the law; `Trajectory::refly` is not idempotent (projecting a held attitude again moves the law's roll by a rounding), so the month of low thrust at 1,000,000× drifted 0.16 mm from one jump (the limbo invariance test caught it). `advance` now also stops when the integration budget is spent, so a call never reflies with nothing left; making `refly` idempotent (return early when the attitude is already the pointing's) is left to its owner (`vessel/trajectory.rs` was being edited by another workstream).
+Found on the way: with budgets that bite, a call could run out of integration steps right after reflying a low-thrust burn at its ignition, end there, and refly it again on the next call from the attitude already snapped onto the law; `Trajectory::refly` is not idempotent (projecting a held attitude again moves the law's roll by a rounding), so the month of low thrust at 1,000,000× drifted 0.16 mm from one jump (the limbo invariance test caught it). `advance` now also stops when the integration budget is spent, so a call never reflies with nothing left; `refly` is now idempotent too (it returns early when the attitude is already the burn pointing's at ignition; tested by reflying again at the ignition for every hold mode and both kinds of law, and by a month of low thrust in frames of one to a few coast steps' budget at 1×, 1,000× and 1,000,000×, which also found a budget stop between the systems step and the thermal point of one epoch: no longer possible).
 
 ### 3. Going live inside a frame
 
@@ -95,7 +95,6 @@ The lead runs (one game at a time; the window is not needed):
 
 - **Decouple the simulation from the frame:** advance the fleet continuously on worker threads (the render reading the last completed state), so every core works all the time and one heavy vessel no longer bounds the warp to 8 ms of its own work per frame.
 - **The coast integration** (hot spot 2) is now the larger part of a vessel's work at 1,000,000×; SOL cut the step from 9.2 to 5.3 µs in LEO this night. Larger steps where the perturbation is smooth, the pointing once per step, snapshots shared by the vessels of a frame (BENCH's ideas) remain.
-- **`Trajectory::refly` is not idempotent** for low-thrust burns (see §2): harmless now that a call never ends right after reflying, but its owner should make it so.
 - **Live ticks of 300-part craft** (hot spot 3, AERO's): ~1 ms per tick climbing at M 1.2 after AERO's boundary-layer reuse; three 300-part craft live at 4× are ~10 ms a frame.
 - **Craft design and build per split** (hot spots 4–5): PARTS and AERO cut them during the night; a 300-part split is still far over a frame, and should run off the frame thread.
 - Line ends per frame (1.4 ms for 50 tracked), a reduced-order thermal model, GPU cost of 50 craft: not needed at this scale (see Choices).

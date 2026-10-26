@@ -289,8 +289,11 @@ impl Vessel {
             if e.seconds_since(reach) > 0.0 {
                 break;
             }
-            if budget.thermal == 0 {
-                // Out of budget: the vessel stops at its last lattice point.
+            // Out of budget: the vessel stops at its last lattice point, but
+            // never between the systems step and the thermal point of one
+            // epoch (a vessel at t has every lattice event at t done, as in
+            // one call: a frame ending there would otherwise differ).
+            if budget.thermal == 0 && e.seconds_since(t) > 0.0 {
                 stopped = true;
                 break;
             }

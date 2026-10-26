@@ -264,12 +264,22 @@ impl Trajectory {
     /// followed it. A craft whose maneuver hold has settled turns at the
     /// burn direction's rate (as predicted; followed holds carry the rate
     /// of their last tick). Returns the attitude the burn starts from.
+    /// Idempotent: flying it again from that attitude (and the same
+    /// control) changes nothing, so it may run in every call that starts
+    /// at the ignition.
     pub(super) fn refly(&mut self, world: &World, mut att: Attitude, control: AttitudeControl) -> Attitude {
         let cur = &self.segments[0];
         if let (SegmentKind::Burn(law), Some(l)) = (cur.kind, cur.limbo().filter(|l| l.thrust.is_some())) {
             // A low-thrust burn: held on its law from the actual attitude.
             let s = cur.initial();
             let snap = world.snapshot(cur.t0);
+            // Already held on its law from this attitude (re-flown by an
+            // earlier call at the same ignition, which returned it):
+            // snapping it onto the law again would move the roll by a
+            // rounding, so a call that ends here would change the burn.
+            if l.pointing.attitude(world, &snap, s.anchor, s.r, s.v) == Some(att) {
+                return att;
+            }
             let axis = l.thrust.map_or(DVec3::Z, |t| t.axis);
             let p = pointing::on_law(&law.direction, &att, axis, world, &snap, (s.anchor, s.r, s.v));
             let held = p.attitude(world, &snap, s.anchor, s.r, s.v).unwrap_or(att);
