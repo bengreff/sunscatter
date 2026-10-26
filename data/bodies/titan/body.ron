@@ -28,8 +28,10 @@
             // left out). This gives ~7e-10 kg/m3 at 1,000 km, where Cassini flew through
             // a few 1e-10. The table runs up to where the density is negligible
             // (~1e-14 kg/m3); `top` (live flight, rails floor) where it falls to ~2e-9 kg/m3. N2:
-            // gamma 1.4, VHS collision diameter 4.17e-10 m (Bird 1994); Sutton-Graves for N2.
-            top: 950000.0, gamma: 1.4, collision_diameter: 4.17e-10, sutton_graves_k: 1.7415e-4,
+            // gamma 1.4, VHS collision diameter 4.17e-10 m (Bird 1994); Sutton-Graves for
+            // 95 % N2, 5 % CH4 by their mixing rule (TR R-376 eq. 44; aero::gas).
+            top: 950000.0, gamma: 1.4, collision_diameter: 4.17e-10, sutton_graves_k: 1.7400e-4,
+            gas: Nitrogen,
             // (altitude m, temperature K, pressure Pa, density kg/m3, mean molar mass kg/mol)
             table: Some([
                 (0.0, 93.650, 1.46700e+05, 5.16723e+00, 0.027426),

@@ -30,8 +30,10 @@
             // meets no wall; `top` (live flight, the rails floor) is where the density
             // falls to ~2e-9 kg/m3, like Earth's 150 km. 96.5 % CO2, 3.5 % N2 (M = 43.45
             // g/mol); gamma 1.29; VHS collision diameter of CO2 (Bird 1994); Sutton-Graves
-            // for CO2/N2 (the Mars constant); no radiative heating relation.
-            top: 150000.0, gamma: 1.29, collision_diameter: 5.62e-10, sutton_graves_k: 1.9027e-4,
+            // for 96.5 % CO2, 3.5 % N2 by their mixing rule (TR R-376 eq. 44; aero::gas); no
+            // radiative heating relation.
+            top: 150000.0, gamma: 1.29, collision_diameter: 5.62e-10, sutton_graves_k: 1.8967e-4,
+            gas: CarbonDioxide,
             // (altitude m, temperature K, pressure Pa, density kg/m3, mean molar mass kg/mol)
             table: Some([
                 (0.0, 735.150, 9.21000e+06, 6.54695e+01, 0.04345),

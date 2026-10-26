@@ -35,6 +35,7 @@
             // (M = 43.34 g/mol, 95 %), gamma 1.29; VHS collision diameter of CO2 (Bird
             // 1994); Sutton-Graves and Tauber-Sutton for Mars.
             top: 150000.0, gamma: 1.29, collision_diameter: 5.62e-10, sutton_graves_k: 1.9027e-4,
+            gas: CarbonDioxide,
             radiative_heating: Some(Mars),
             // (altitude m, temperature K, pressure Pa, density kg/m3, mean molar mass kg/mol)
             table: Some([
