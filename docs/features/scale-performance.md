@@ -1,0 +1,102 @@
+# Feature: scale performance (D081)
+
+**Status:** *playable* in the sim and the game's frame loop, measured headless (the game window and the offscreen demo were not run by this workstream: see [Verify](#verify-in-the-offscreen-demo)). Built 2026-10-26 (overnight run, PERF workstream), from BENCH's [scale baseline](../plans/scale-baseline-2026-10-26.md). Decisions: D081 (50 craft of ~300 parts to 1,000,000×; live physics for 1–3, limbo for 10+), D028 (60 fps on the M2 Pro), D022, D025, D026, D029, D062; rules 2 and 4.
+
+The owner (2026-10-26): "maximally stable with dozens of crafts flying each with hundreds of parts", "up to 1 million timewarp".
+
+## What was built
+
+| Commit | What | Before → after (release, M2 Pro, other agents loading the machine: read ±20 %, and see the load notes) |
+|---|---|---|
+| 5a48b8c | **The thermal network solve** (hot spot 1): block Gauss–Seidel over trees of strongly coupled unknowns (`sim::thermal::blocks`), the radiation linearised once per sweep, unknowns renumbered into solve order | 600 s coast solve: test craft 258 → 42–60 µs (22–24 → 9–10 sweeps), 300-part stress craft 2.6–2.9 → 0.74–0.90 ms; error against the converged step 1–9.5 → 1–2.6 mK; 20 ms live step unchanged (4 sweeps) |
+| bc16f5b | **Budgets in units of real cost** (pipeline problem 4) and `Vessel::advance_frame`, which stops where a vessel goes live inside a frame (pipeline problem 5) | a coast thermal solve counted 30 units whatever the craft (0.1–0.8 s frames were never compute-limited); now `solve_units` ≈ its microseconds; a coast ending on a surface flew up to 833,000 live ticks in one 1,000,000× frame, now it stops at the hand-over and the warp is capped |
+| 9acb062 | **`VolumeGrid::propellant`** per tank (a regression from the part layer, found profiling the fleet) | `node_capacity` on the 300-part craft 2,654 → 59 µs, at every coast thermal solve and every live tick; it was 77 % of a 300-part craft's 1,000,000× frame |
+| bd26aa1 | **The fleet's frame** (`crates/game/src/fleet.rs`): every vessel advanced in chunks of work on the compute pool, the one furthest behind first, within the frame's time for the simulation; 7 compute threads instead of 4; the warp achieved shown when compute limits it | below |
+| (this commit) | **The long run** (`examples/long_run.rs`), the live-stop tests (`tests/frame_live_stop.rs`), the frame's span ramped (`fleet::frame_span`), this note | below |
+
+### 1. The thermal solve
+
+Point Gauss–Seidel crawled on the strut and leg **chains of thin rings**: each ring is coupled ~50 times more strongly to its two neighbours than to its capacity, radiation and node (10 % of the test craft's cells at g/(g + diag) > 0.93; 300-part stress craft: 1 %). A 600 s step from 290 K in sunlight took 97 point sweeps (23 over-relaxed at ω 1.6).
+
+`ThermalNetwork::new` joins the **strong links** (g/√(D_u·D_v) ≥ 0.05, D = C/600 s + Σg; a node's capacity is a step input, so its D is its conductances only) into a spanning forest (Kruskal, strongest first, ties by index). Each tree is a **block**: per sweep, one pass from the leaves eliminates it onto its root (the Schur complement of a tree has no fill), one pass back solves it; its other links take their neighbours' latest values (Gauss–Seidel). Each unknown's radiation is linearised at its current temperature: one Newton step per sweep, from above (the tangent of the convex εσA·T⁴ lies below it). This is block Gauss–Seidel on an M-matrix with a regular splitting: it converges at any dt to the same fixed point, conserves energy to the tolerance, keeps every temperature positive. The unknowns are renumbered into solve order once, so a sweep reads its arrays in sequence.
+
+Tried and dropped: over-relaxation on the blocks (block SOR at ω 1.4 needs 40–50 sweeps and diverged at 3,600 s steps; ω 1 converges in 9–10); a strength threshold of 0.1 or 0.2 (more lagged links, more per-update cost); no threshold (the same sweeps, slower updates).
+
+`examples/bench_thermal` (new) times and checks the solve: first and 10th 600 s steps from 290 K, a settled craft under a turning Sun, 20 ms live steps under entry heating, each with its sweeps, its energy residual and its error against the same step converged to 1e-14; then whole coast lattice points of a vessel in LEO (tumbling, held prograde).
+
+### 2. Budgets that bite
+
+A budget unit is about **a microsecond of work** on the reference Mac (`sim::vessel` constants): an integration step `STEP_UNITS` = 10, a systems lattice step 5, a thermal lattice point passed 1, a thermal solve `solve_units(design, samples)` = 10 + (cells + nodes)/8 + cells × samples/300 (the solve's ~10 sweeps at ~12 ns per unknown, the heat inputs ~3 ns per cell per sample). `Vessel::advance` spends up to its budget on the integration and as much on the lattices, and returns when either runs out; the result is the same as without a budget (rule 4).
+
+Measured (calibration in `fleet_frames`, below): median **1.0–1.2 µs per unit** over the 50-craft fleet; the 300-part craft were 4–8 µs per unit before the `VolumeGrid` fix (the 2.7 ms per solve it cost was not in the estimate).
+
+Found on the way: with budgets that bite, a call could run out of integration steps right after reflying a low-thrust burn at its ignition, end there, and refly it again on the next call from the attitude already snapped onto the law; `Trajectory::refly` is not idempotent (projecting a held attitude again moves the law's roll by a rounding), so the month of low thrust at 1,000,000× drifted 0.16 mm from one jump (the limbo invariance test caught it). `advance` now also stops when the integration budget is spent, so a call never reflies with nothing left; making `refly` idempotent (return early when the attitude is already the pointing's) is left to its owner (`vessel/trajectory.rs` was being edited by another workstream).
+
+### 3. Going live inside a frame
+
+`Vessel::advance_frame` (the game's call) stops where a vessel goes live with more than `LIVE_STOP` (1 s) of the frame left: at the live boundary (as before, LIMBO's 026080b), close to a surface (a landing, an impact on the Moon), an engine starting, a landed craft waking. The game holds its clock there and caps the warp next frame (`RailsBlock::OtherLive`, D081), so a rails-warp frame never flies live ticks. `Vessel::advance` keeps flying through (tests and tools that jump far ahead).
+
+### 4. The fleet's frame (game)
+
+`fleet::advance_fleet` replaces one task per vessel per frame:
+- Each vessel advances in **chunks** of `CHUNK_UNITS` (2,000 units ≈ 2 ms) by `advance_frame`; a scheduler (`fleet::Queue`, a pure rule with table tests) hands the next chunk to the **vessel furthest behind** (the clock waits for it), lowest index on ties, on as many tasks as the compute pool has threads (Bevy's persistent pool: no thread is spawned per frame). A vessel that reaches the target, goes live, stops for good or makes no progress is done for the frame.
+- Until the frame's **time for the simulation** (`SIM_FRAME_TIME`, 8 ms) is used: a chunk under way finishes, nothing new starts. The clock is held at the slowest vessel; the HUD then says "limited: compute, N achieved" with the warp actually achieved (simulated over real seconds, smoothed over half a second), and shows the simulation's milliseconds beside the frame rate.
+- A frame asks for at most twice what the clock moved last frame (1.25× while compute limits it; `fleet::frame_span`): vessels that finish first are drawn at their own time, ahead of the clock, and without the cap a compute-limited 1,000,000× frame let them lead it by the whole span (4.6 h, three low orbits); now by at most the clock's progress in the frame where compute first limits it, a quarter of it after. A warp change from 1× to 1,000,000× ramps up over 20 frames (a third of a second).
+- The motion does not depend on the threads or the deadline (vessels are independent, D025; chunked = single pass, rule 4; results kept per vessel index, rule 2): `fleet_tests::deadlines_and_threads_change_the_clock_not_the_motion` flies four vessels for two days in 1,000,000× frames cut to 300 µs and ends at the same bits as one call each.
+- The app's pools (`fleet::task_pools`): IO 1 thread, async compute 2, compute the rest (7 on the 10-core M2 Pro; Bevy's default gave compute 4).
+
+Spikes at 1,000× (many vessels' lattice points in one frame) are cut by the deadline: the work left over waits for the next frame and the clock lags a few frames by seconds of simulated time. Nothing is computed ahead of the clock beyond what the look-ahead already did.
+
+### 5. The long run
+
+`examples/long_run` flies 50 craft (10 limbo: four 0.5 N ion spirals, three held prograde in thin air at 450–500 km, three tumblers at 20,000 km under radiation pressure; 40 quiet: 15 stress craft of 300 parts, 20 test craft, four on eccentric orbits, one on the pad; stress craft from the craft registry, `stress-300`, so they reload) for simulated years in 1,000,000× frames on 7 threads, as the game does, then saves the fleet to RON, reads it back, and flies both on.
+
+## Measured
+
+Release builds on the M2 Pro (Mac14,9), 7 compute threads. **Load:** other agents compiled and benchmarked all night (load averages 25–145 on 10 cores); the numbers below are from the quietest runs (load 23–60) and say so; BENCH's baseline ran at 5–10. Wall times under load read high (up to 5× at load 100); ratios measured in one run (sweeps, units per frame, µs per unit) do not depend on it.
+
+**The 50-craft frame** (`cargo test -p game --release fleet_frames -- --ignored --nocapture`; BENCH's fleet, settled 30 days; each frame as `state::advance`: the fleet within 8 ms, then the look-ahead of the active vessel and one other):
+
+| Warp | Before (BENCH, settled, 4 threads, every vessel to the target) | After (load 23–54) | 
+|---|---|---|
+| 1× | 0.22 ms mean (9.7 worst; fresh fleet) | **0.29 ms** mean (10.9 worst), none over 16.7 ms |
+| 1,000× | 0.70 ms mean (12 worst); fresh fleet 0.87 (25) | **0.91 ms** mean (10.8 worst), none over 16.7 ms; 992× reached (1 frame of 600 held back) |
+| 1,000,000× | **106 ms** mean (165 worst): ~9 fps, never compute-limited, 1,000,000× per frame = ~157,000× of real time | **8.7 ms** mean (16.3 worst), none over 16.7 ms: 60 fps, compute-limited 166/240, 55,800× per 1/60 s frame = 107,000× of real time (at load ~25; the warp shown honestly) |
+
+At 1,000,000× the frame now stays under the 60 fps budget and the warp falls to what the cores can carry, instead of the frame rate falling to ~9 fps at the requested warp. The throughput (simulated seconds per real second) is the same order as before at a far higher machine load; with the machine to itself expect more. What bounds it: the fleet's work over 7 threads × 8 ms a frame (a settled 300-part craft in LEO is ~5 ms of work per 1,000,000× frame after these changes, a test craft 1–2 ms: ~130 ms for the fleet, against 56 ms of thread time), and since one vessel is advanced by one thread at a time, 8 ms of any single vessel's work per frame. The coast integration is the larger part of every vessel's cost now (hot spot 2, SOL's: 9.2 → 5.3 µs a LEO step during the night).
+
+**Units against time** (the same run, µs per budget unit per vessel in 1,000,000× chunks): min 0.52, median 0.76, max 0.99 (before the `VolumeGrid` fix: max 7.6 on the 300-part craft).
+
+**One vessel** (`examples/bench_thermal`, quiet runs): a coast lattice point over a day in LEO, the 300-part stress craft: 1.5–2.0 ms before, 0.8–1.1 ms with the new solve (the `VolumeGrid` cost came in between with the part layer and is gone again); the test craft 190–400 µs → 90–190 µs.
+
+**Game-side costs** with 50 vessels in LEO, all tracked and in map view (`game_side_costs`): line ends of all 50 1.4 ms (7.3 at load ~30), map orbit sizes 0.2 ms, the map-view rule over 94 objects 0.014 ms, `Dominance::new` 0.01 ms. `Dominance::of` is called per path point with a hint (cheap); the map rule's O(n²) is 9,000 pair tests at 94 objects: nothing to fix at 50 craft.
+
+**The long run** (`cargo run -p sim --release --example long_run`, years=2, 7 threads, load 23–60): 731 days in 3,787 frames at 1,000,000× (none capped: no vessel went live), 203 s of wall time. Every month: no NaN or infinity in any vessel; the fleet's state 3.19–3.20 MB of RON throughout (bounded: trajectories keep at most 2 samples behind the frame, systems and burns lists do not grow); the ion spirals climbed from 700–850 km to ~11,300 km in their year of thrust (596 kg of propellant used of 2,000), the thin-air craft at 430–455 km. The save at the end: 3.4 MB of RON, written and read in 0.2 s, equal to the fleet, and the saved and reloaded fleets flown 10 more days at 1,000,000× end at the same bits. Stress craft reload through PARTS's craft registry (`stress-300`).
+
+**Going live** (`tests/frame_live_stop.rs`): the test craft falling onto the Moon from 30 km stops at the hand-over within one 1,000,000× frame (under 1 s of work, instead of flying to the ground in that frame), is then flown to the ground in 4× frames, and ends at the same bits as one jump; an engine starting in a long frame stops there, in a physics-warp frame it flies.
+
+## Choices and what was not built
+
+- **No reduced-order thermal model.** The task allowed one for coasting craft (aggregate cells per part or region, handed over to the full network on going live). After the block solver and the `VolumeGrid` fix, a coast thermal solve of a 300-part craft costs ~1 ms and runs only while the temperatures move (`STEP_CHANGE_K`), and the thermal lattice is a minority of the 1,000,000× frame (the integration dominates, SOL's work). A per-part aggregate would cut the solve ~10× more but merges the sunlit and shaded sides of a part (tens of kelvin on a held craft) and needs a hand-over rule with its own error: not worth it while it is not the bottleneck. If it becomes one: aggregate by part and facing direction, keep the nodes, carry each cell's offset from its aggregate's mean through the coast, and test the hand-over against the full network.
+- **The simulation is not decoupled from the frame.** The fleet gets 8 ms of the 7 threads per frame (and a vessel at most 8 ms of one), and the threads idle while the rest of the frame draws. Running the fleet continuously on worker threads (the render reading the last completed state) would give the simulation every core all the time; it needs the scene and HUD to read a snapshot of the vessels.
+- **Line ends are recomputed every frame** (`trajectory::vessel_line_end`): 1.4 ms for all 50 vessels tracked in map view (7 ms under heavy load). Acceptable at 50 craft; a per-segment prefix sum of the swept angle would make each O(log n).
+- **Drawing 50 craft** costs 50 draw calls with one material each (per-ship light, D055) and one shared mesh: not measured on the GPU here.
+
+## Verify in the offscreen demo
+
+The lead runs (one game at a time; the window is not needed):
+
+1. `SUNSCATTER_DEMO=<dir> SUNSCATTER_DEMO_OFFSCREEN=1 cargo run -p game --release` and read the `demo perf:` lines (11 vessels at 1×, 1,000×, 1,000,000×): every average should be ≥ 60 fps with the worst frame under ~20 ms; at 1,000,000× "compute-limited N/M" may now be non-zero (the clock is held back instead of the frame stretched), and the effective warp is what the machine achieved.
+2. A screenshot of the time panel at 1,000,000× with Show FPS on: "fps, sim X ms" beside the rate, and "limited: compute, Nkx achieved" when the warp is held back.
+3. Optional, the scale case: spawn more vessels (F2 adds 10 test craft per press) and warp to 1,000,000×: the frame rate should stay near 60 with the achieved warp shown.
+4. Watch for vessels drawn ahead of the clock at 1,000,000× while compute-limited (an icon a little ahead on its orbit, by at most a quarter of a frame's progress): expected, see the frame's span above.
+
+## What remains
+
+- **Decouple the simulation from the frame:** advance the fleet continuously on worker threads (the render reading the last completed state), so every core works all the time and one heavy vessel no longer bounds the warp to 8 ms of its own work per frame.
+- **The coast integration** (hot spot 2) is now the larger part of a vessel's work at 1,000,000×; SOL cut the step from 9.2 to 5.3 µs in LEO this night. Larger steps where the perturbation is smooth, the pointing once per step, snapshots shared by the vessels of a frame (BENCH's ideas) remain.
+- **`Trajectory::refly` is not idempotent** for low-thrust burns (see §2): harmless now that a call never ends right after reflying, but its owner should make it so.
+- **Live ticks of 300-part craft** (hot spot 3, AERO's): ~1 ms per tick climbing at M 1.2 after AERO's boundary-layer reuse; three 300-part craft live at 4× are ~10 ms a frame.
+- **Craft design and build per split** (hot spots 4–5): PARTS and AERO cut them during the night; a 300-part split is still far over a frame, and should run off the frame thread.
+- Line ends per frame (1.4 ms for 50 tracked), a reduced-order thermal model, GPU cost of 50 craft: not needed at this scale (see Choices).
+- The thermal solve's next step if needed: a coarse-grid correction per node (aggregation) for the long-wavelength modes the trees leave (9–10 sweeps now), or a warm start from the last step's rate (needs the rate in the save).
