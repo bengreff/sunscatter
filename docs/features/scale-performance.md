@@ -1,6 +1,6 @@
 # Feature: scale performance (D081)
 
-**Status:** *playable* in the sim and the game's frame loop, measured headless (the game window and the offscreen demo were not run by this workstream: see [Verify](#verify-in-the-offscreen-demo)). Built 2026-10-26 (overnight run, PERF workstream), from BENCH's [scale baseline](../plans/scale-baseline-2026-10-26.md). Decisions: D081 (50 craft of ~300 parts to 1,000,000×; live physics for 1–3, limbo for 10+), D028 (60 fps on the M2 Pro), D022, D025, D026, D029, D062; rules 2 and 4.
+**Status:** *playable* in the sim and the game's frame loop, measured headless (the game window and the offscreen demo were not run by this workstream: see [Verify](#verify-in-the-offscreen-demo)). Built 2026-10-26 (overnight run, PERF workstream; the coast integration, §6, COAST), from BENCH's [scale baseline](../plans/scale-baseline-2026-10-26.md). Decisions: D081 (50 craft of ~300 parts to 1,000,000×; live physics for 1–3, limbo for 10+), D028 (60 fps on the M2 Pro), D022, D025, D026, D029, D062; rules 2 and 4.
 
 The owner (2026-10-26): "maximally stable with dozens of crafts flying each with hundreds of parts", "up to 1 million timewarp".
 
@@ -12,7 +12,9 @@ The owner (2026-10-26): "maximally stable with dozens of crafts flying each with
 | bc16f5b | **Budgets in units of real cost** (pipeline problem 4) and `Vessel::advance_frame`, which stops where a vessel goes live inside a frame (pipeline problem 5) | a coast thermal solve counted 30 units whatever the craft (0.1–0.8 s frames were never compute-limited); now `solve_units` ≈ its microseconds; a coast ending on a surface flew up to 833,000 live ticks in one 1,000,000× frame, now it stops at the hand-over and the warp is capped |
 | 9acb062 | **`VolumeGrid::propellant`** per tank (a regression from the part layer, found profiling the fleet) | `node_capacity` on the 300-part craft 2,654 → 59 µs, at every coast thermal solve and every live tick; it was 77 % of a 300-part craft's 1,000,000× frame |
 | bd26aa1 | **The fleet's frame** (`crates/game/src/fleet.rs`): every vessel advanced in chunks of work on the compute pool, the one furthest behind first, within the frame's time for the simulation; 7 compute threads instead of 4; the warp achieved shown when compute limits it | below |
-| (this commit) | **The long run** (`examples/long_run.rs`), the live-stop tests (`tests/frame_live_stop.rs`), the frame's span ramped (`fleet::frame_span`), this note | below |
+| 866feee | **The long run** (`examples/long_run.rs`), the live-stop tests (`tests/frame_live_stop.rs`), the frame's span ramped (`fleet::frame_span`), this note | below |
+| f6ec8bc | **The perturbed coast step, bit for bit** (COAST): starlight, the air search and the event searches no longer evaluate what they discard | perturbed LEO step 14.0 → 9.4 µs, bare 6.2 → 5.6 µs; five coasts' samples hash the same |
+| fd22069 | **Coasts integrate with DOP853** (COAST): 8th order, 10 cm and 10 µm/s per step, steps of at most 3 h | LEO: 3× fewer force evaluations, 53 → 10 m from the converged orbit after a day; a craft's integration per 1,000,000× frame 3.4–3.7 → 0.7–0.8 ms |
 
 ### 1. The thermal solve
 
@@ -50,6 +52,63 @@ Spikes at 1,000× (many vessels' lattice points in one frame) are cut by the dea
 ### 5. The long run
 
 `examples/long_run` flies 50 craft (10 limbo: four 0.5 N ion spirals, three held prograde in thin air at 450–500 km, three tumblers at 20,000 km under radiation pressure; 40 quiet: 15 stress craft of 300 parts, 20 test craft, four on eccentric orbits, one on the pad; stress craft from the craft registry, `stress-300`, so they reload) for simulated years in 1,000,000× frames on 7 threads, as the game does, then saves the fleet to RON, reads it back, and flies both on.
+
+### 6. The coast integration (COAST)
+
+**Where a step's time went** (macOS `sample` of `examples/bench_integrator` `BENCH_PROFILE=<case>`, release with line tables). A perturbed LEO step (`leo_perturbed`: the test craft held prograde at 250 km in thin air, sunlight with eclipses, the full Solar System) cost 14.0 µs for Dopri5's 6 force evaluations: `forces::radiation::starlight` 29 %, `limbo::each_air` 14 %, the live-boundary search 10 %, the ephemeris snapshot at each stage (eager Chebyshev tables) ~10 %, `ForceContext::eval` 22 % (the anchor's kinematics with derivatives, Earth's pole by trigonometry for J2, the walks to each source), the automatic hold reference once per step 4 %. A bare step (6.2 µs): the snapshot 24 %, the anchor's kinematics 13 %, the pole 5 %, the atmosphere-entry search 7.5 % (an allocating snapshot per probe), the per-step source growth 4 %. Integrator overhead, sample storage, the surface table and the drag table were each 1–3 %.
+
+**Bit-for-bit fixes** (f6ec8bc): `starlight` allocated its moon systems' radius table on every call and evaluated the positions of the dwarf planets and of far moon systems' barycentres (lazy Chebyshev tables) at every stage. Now a body or system that keeps farther from the star than the vessel plus its size (`Source::faint_min_distance`, `Cluster::star_distance`) is skipped, because every point between the vessel and the star's disc is within that distance of the star, so it hides nothing. `each_air` evaluated the velocity of every body with air (Venus, Mars) before its distance test, and now evaluates only the position. The entry, contact and live-boundary searches use the segment's snapshot cache, and the live boundary tests the step's end first. Result: perturbed 14.0 → 9.4 µs, bare 6.2 → 5.6 µs. The samples of five coasts (bare and perturbed LEO over a day, GEO 10 days, a lunar transfer, a heliocentric year) hash the same as before.
+
+**The integrator** (fd22069). `bench_integrator` `BENCH_ACCURACY=1` integrates each case against a tight DOP853 reference with the same forces (1 µm per step, steps ≤ 10–600 s). It reports the error at the end and the worst error of the quintic Hermite dense output at step midpoints:
+
+| Case | Dopri5, 1 cm per step (before) | DOP853, 1 cm per step | **DOP853, 10 cm, 10 µm/s, 3 h (adopted)** |
+|---|---|---|---|
+| LEO, a day | 52.6 m, 8,058 evaluations | 0.43 m, 3,588 | **9.9 m, 2,640** |
+| LEO held in thin air, a day | 52.7 m, 8,058 | 1.5 m, 3,588 | **9.9 m, 2,640** |
+| GEO, 10 days | 25.7 m, 7,104 | 0.04 m (dense 0.29), 2,976 | **0.38 m (dense 2.0), 2,184** |
+| Lunar transfer, 6 days | 501 m, 1,518 | 61 m, 936 | **64 m, 1,044** |
+| Heliocentric, a year | 56 m, 8,790 | 114 m, 17,580 (6 h steps) | **14 m, 35,088** |
+
+The answer to "is Dopri5's tolerance tighter than needed": no. Its 1 cm per step left 53 m a day in LEO, because the error is per step and adds up along track. DOP853 at 10× that tolerance is 5× more accurate at a third of the evaluations. 100× drifted 121 m a day, so the adopted tolerance is the loosest that beats the old model everywhere.
+
+On heliocentric arcs the steps sit at the cap. Their error comes from kinks in the ephemeris acceleration at Chebyshev segment boundaries, and it grows with the step: 14 m a year at 3 h, 114 m at 6 h, 446 m at 12 h, 838 m at 24 h. DOP853's large stage coefficients amplify a kink more than Dopri5's do (56 m at 6 h), so the cap is 3 h, not 6. The 4× more evaluations cost 35 ms per simulated year.
+
+Burns flown by ticks keep Dopri5 (one 20 ms step per tick), as does the live translation. A DOP853 step costs 11.0 µs bare and 18.4 µs perturbed (12 evaluations), and covers ~6.5 minutes in LEO (220 steps a day, 1,343 before). `STEP_UNITS` went from 10 to 15.
+
+Invariance:
+- Chunked = single pass, bit for bit (a unit test).
+- Every anchor-invariance test passes with its bound unchanged.
+- One bound was raised: `bubble_tests::relative_position_of_members_10_km_apart`, low orbit, from 1e-6 to 1e-4 m. Its coasting reference pair is inside one 216 s start-up step at 60 s, and the two craft's dense-output errors (~3 cm) nearly cancel to 3.3e-5 m in their separation.
+- `COAST_GOLDEN` changed by design.
+
+**Per craft per 1,000,000× frame** (16,667 s, release, the same build otherwise):
+
+| Craft | Integration before → after | Rest of the frame (attitude, thermal and systems lattices) |
+|---|---|---|
+| Test craft, 300 km (`bench_integrator` `BENCH_FLEET=1`) | 3.72 → 0.70 ms | 2.5 / 2.0 ms |
+| 300-part stress craft, 300 km | 3.44 → 0.80 ms | 17.4 / 17.8 ms |
+| Limbo, thin air at 250 km, held prograde (`bench_limbo`) | 3.57 → 0.75 ms | 2.0 ms |
+| Limbo, 0.5 N ion spiral | 2.51 → 0.51 ms | 1.0 ms |
+| Limbo, tumbler at 20,000 km | 0.53 → 0.10 ms | 0.45 ms |
+
+**The 50-craft fleet** (`fleet_frames`, 7 threads, machine quiet). The "before" build is the HEAD of 11:30 UTC with f6ec8bc and fd22069 reverted:
+
+| | Before | After |
+|---|---|---|
+| 1,000,000×: frame mean (worst) | 6.67 ms (15.0) | 6.59 ms (11.8) |
+| compute-limited frames | 107/240 | 119/240 |
+| warp reached per 1/60 s frame | 48,000× | 72,500× |
+| warp reached per wall second | 120,000× | 183,000× |
+| 1,000×: frame mean, warp reached per wall second | 0.48 ms, 34,300× | 0.26 ms, 62,200× |
+
+The fleet does not reach 1,000,000×, and integration no longer bounds it. The 20 craft of 300 parts spend ~18 ms per 1,000,000× frame each in their coast thermal lattice, against 0.8 ms integrating. The fleet's heaviest vessels run at 1.0–3.3 µs per budget unit, against ~0.6 µs for the rest, so their solves cost more than `solve_units` estimates. One vessel is advanced by one thread at a time, so a vessel of 18–40 ms per frame holds the clock to 8 ms of its work.
+
+Tried and dropped, and not tried:
+- Restructuring `starlight`'s loops (members on demand, skipping a non-shading system at once): the same bits and no measurable gain. Its remaining self time (16 % of a perturbed DOP853 step) is the occlusion tests and `eclipse_factor`'s trigonometry on the night side.
+- Not tried: interpolating the bodies within a step (one Chebyshev evaluation with derivatives at the step's end, Hermite at the 10 inner stages). It is estimated at 15–20 % of a step and changes bits at ~1e-9 m.
+- Not tried: Encke's method. Its reference orbit per anchor needs a Kepler solve per stage and an Encke dense output.
+- Steps are now bounded by the dense output as much as by the integrator. At ~390 s LEO steps the quintic Hermite between samples is good to ~1 m at mid-step (25 µm at the old 65 s steps). That is below the propagation error (10 m a day, 53 before), and it nearly cancels between close craft. Longer steps would need DOP853's 7th-order continuous extension (3 more evaluations a step) or a stored mid-step sample.
+- A dip into live air shorter than one step is still found only at step ends, and steps are now ~6× longer.
 
 ## Measured
 
@@ -94,7 +153,12 @@ The lead runs (one game at a time; the window is not needed):
 ## What remains
 
 - **Decouple the simulation from the frame:** advance the fleet continuously on worker threads (the render reading the last completed state), so every core works all the time and one heavy vessel no longer bounds the warp to 8 ms of its own work per frame.
-- **The coast integration** (hot spot 2) is now the larger part of a vessel's work at 1,000,000×; SOL cut the step from 9.2 to 5.3 µs in LEO this night. Larger steps where the perturbation is smooth, the pointing once per step, snapshots shared by the vessels of a frame (BENCH's ideas) remain.
+- **The coast thermal lattice of 300-part craft** now bounds the fleet at 1,000,000× (~18 ms per craft per frame against 0.8 ms of integration, COAST's measurement above). The options are a reduced-order model (see Choices) or splitting one vessel's lattice across threads, together with budget units that track those solves.
+- **The coast integration** (COAST, §6) is 0.5–0.8 ms per craft per 1,000,000× frame, 4–5× less than before. Next steps:
+  - Interpolate the bodies within a step (estimated 15–20 %).
+  - Compute the pole once per evaluation instead of in both J2 and the air (~5 %).
+  - A DOP853 continuous extension, to allow longer steps without the Hermite dense output's error.
+  - Find live-air dips within a step.
 - **Live ticks of 300-part craft** (hot spot 3, AERO's): ~1 ms per tick climbing at M 1.2 after AERO's boundary-layer reuse; three 300-part craft live at 4× are ~10 ms a frame.
 - **Craft design and build per split** (hot spots 4–5): PARTS and AERO cut them during the night; a 300-part split is still far over a frame, and should run off the frame thread.
 - Line ends per frame (1.4 ms for 50 tracked), a reduced-order thermal model, GPU cost of 50 craft: not needed at this scale (see Choices).
