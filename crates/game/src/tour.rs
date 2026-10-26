@@ -20,6 +20,7 @@ use bevy::app::AppExit;
 use bevy::prelude::*;
 use glam::DVec3;
 use sim::frame::NodeId;
+use sim::time::Epoch;
 
 /// One of the tour's views of a body.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -27,18 +28,104 @@ pub enum View {
     Disc,
     Limb,
     Ground,
+    /// A moon half into its primary's shadow (the eclipse's ingress), seen
+    /// as the disc view (moons only).
+    Eclipse,
+    /// A moon's shadow on its primary: the primary's disc view when the
+    /// shadow's axis falls near the middle of it (moons only).
+    Transit,
 }
 
 impl View {
-    const ALL: [View; 3] = [View::Disc, View::Limb, View::Ground];
+    /// The views shot unless `SUNSCATTER_TOUR_VIEWS` lists others.
+    const DEFAULT: [View; 3] = [View::Disc, View::Limb, View::Ground];
+    const ALL: [View; 5] = [View::Disc, View::Limb, View::Ground, View::Eclipse, View::Transit];
 
     fn name(self) -> &'static str {
         match self {
             View::Disc => "disc",
             View::Limb => "limb",
             View::Ground => "ground",
+            View::Eclipse => "eclipse",
+            View::Transit => "transit",
         }
     }
+
+    /// The views named in `SUNSCATTER_TOUR_VIEWS` (comma-separated), in
+    /// that order; unknown names are skipped.
+    pub fn parse_list(s: &str) -> Vec<View> {
+        parse_list(s).iter().filter_map(|n| View::ALL.into_iter().find(|v| v.name().eq_ignore_ascii_case(n))).collect()
+    }
+
+    /// The pose the view uses (the event views are disc views).
+    fn pose_view(self) -> View {
+        match self {
+            View::Eclipse | View::Transit => View::Disc,
+            v => v,
+        }
+    }
+}
+
+/// Whether two body names match, ignoring case and punctuation ("hiiaka"
+/// is Hi'iaka).
+pub fn same_name(a: &str, b: &str) -> bool {
+    let key = |s: &str| s.chars().filter(|c| c.is_alphanumeric()).flat_map(char::to_lowercase).collect::<String>();
+    key(a) == key(b)
+}
+
+/// `SUNSCATTER_TOUR_DATE`: `YYYY-MM-DD` or `YYYY-MM-DDTHH:MM` (TDB).
+pub fn parse_date(s: &str) -> Option<Epoch> {
+    let (date, time) = s.trim().split_once('T').unwrap_or((s.trim(), "00:00"));
+    let d: Vec<&str> = date.split('-').collect();
+    let t: Vec<&str> = time.split(':').collect();
+    let [y, mo, da] = d[..] else { return None };
+    let [h, mi] = t[..] else { return None };
+    let (y, mo, da, h, mi) = (y.parse().ok()?, mo.parse().ok()?, da.parse().ok()?, h.parse().ok()?, mi.parse().ok()?);
+    ((1..=12).contains(&mo) && (1..=31).contains(&da) && h < 24 && mi < 60)
+        .then(|| Epoch::from_calendar(y, mo, da, h, mi, 0.0))
+}
+
+/// The first time in `(0, span]` (s after the start, sampled every `step`)
+/// at which `f` falls from at least `level` to below it, refined to 1 s by
+/// bisection; `None` if it does not within the span. A start below the
+/// level waits for `f` to rise first (an eclipse already under way).
+pub fn first_fall(span: f64, step: f64, level: f64, f: impl Fn(f64) -> f64) -> Option<f64> {
+    let mut armed = f(0.0) >= level;
+    let mut prev = 0.0;
+    let mut t = step;
+    while t <= span {
+        let above = f(t) >= level;
+        if armed && !above {
+            let (mut lo, mut hi) = (prev, t);
+            while hi - lo > 1.0 {
+                let mid = 0.5 * (lo + hi);
+                if f(mid) >= level {
+                    lo = mid;
+                } else {
+                    hi = mid;
+                }
+            }
+            return Some(hi);
+        }
+        armed |= above;
+        prev = t;
+        t += step;
+    }
+    None
+}
+
+/// How far from the middle of its primary a moon's shadow falls, in the
+/// primary's radii: the distance from the primary's centre (the origin) to
+/// the line from the star through the moon (`moon`, `star` relative to the
+/// primary), beyond the moon; infinite when the primary is not behind the
+/// moon.
+pub fn shadow_offset(moon: DVec3, star: DVec3, primary_r: f64) -> f64 {
+    let axis = (moon - star).normalize();
+    let along = -moon.dot(axis);
+    if along <= 0.0 {
+        return f64::INFINITY;
+    }
+    (moon + axis * along).length() / primary_r
 }
 
 /// The disc view's phase angle (Sun–body–camera, deg): mostly lit, with the
@@ -77,7 +164,7 @@ pub struct Pose {
 /// none).
 pub fn altitude(view: View, radius: f64, air_top: f64) -> f64 {
     match view {
-        View::Disc => (DISC_RADII - 1.0) * radius,
+        View::Disc | View::Eclipse | View::Transit => (DISC_RADII - 1.0) * radius,
         View::Limb => (LIMB_FRACTION * radius).max(LIMB_ABOVE_AIR * air_top),
         View::Ground => GROUND_ALTITUDE_M,
     }
@@ -97,7 +184,7 @@ pub fn pose(view: View, sun: DVec3, pole: DVec3, radius: f64, alt: f64) -> Pose 
     };
     let r = radius + alt;
     match view {
-        View::Disc => {
+        View::Disc | View::Eclipse | View::Transit => {
             let (d, _) = around(DISC_PHASE_DEG);
             let up = (pole - d * pole.dot(d)).try_normalize().unwrap_or(side);
             Pose { offset: d * r, look: -d, up }
@@ -121,36 +208,96 @@ pub fn parse_list(s: &str) -> Vec<String> {
 #[derive(Resource)]
 pub struct Tour {
     bodies: Vec<String>,
+    views: Vec<View>,
+    /// `SUNSCATTER_TOUR_DATE`, applied when the tour starts.
+    date: Option<Epoch>,
+    /// The clock the views start from (the event views search from it).
+    base: Option<Epoch>,
     body: usize,
     view: usize,
     timer: f64,
     started: bool,
-    /// The body and view being shot, for [`aim`].
+    /// The body framed and the view being shot, for [`aim`]; kept through
+    /// the frame that takes the shot (it renders after [`run`] advances).
     current: Option<(NodeId, View)>,
+    /// Whether the current view's clock and framing are set.
+    prepared: bool,
 }
 
 impl Tour {
-    /// From `SUNSCATTER_TOUR`; only with a demo directory to write to.
+    /// From `SUNSCATTER_TOUR` (and `SUNSCATTER_TOUR_VIEWS`,
+    /// `SUNSCATTER_TOUR_DATE`); only with a demo directory to write to.
     pub fn from_env(demo: bool) -> Option<Self> {
         let list = parse_list(&std::env::var("SUNSCATTER_TOUR").ok()?);
-        (demo && !list.is_empty()).then_some(Tour {
+        let views = std::env::var("SUNSCATTER_TOUR_VIEWS").map_or(View::DEFAULT.to_vec(), |v| View::parse_list(&v));
+        let date = std::env::var("SUNSCATTER_TOUR_DATE").ok().and_then(|d| {
+            let e = parse_date(&d);
+            if e.is_none() {
+                error!("tour: SUNSCATTER_TOUR_DATE={d} is not YYYY-MM-DD[THH:MM]");
+            }
+            e
+        });
+        (demo && !list.is_empty() && !views.is_empty()).then_some(Tour {
             bodies: list,
+            views,
+            date,
+            base: None,
             body: 0,
             view: 0,
             timer: 0.0,
             started: false,
             current: None,
+            prepared: false,
         })
     }
 
     fn advance(&mut self) {
         self.timer = 0.0;
+        self.prepared = false;
         self.view += 1;
-        if self.view == View::ALL.len() {
+        if self.view == self.views.len() {
             self.view = 0;
             self.body += 1;
         }
     }
+}
+
+/// How long the event views search ahead (s), and their step: a few orbits
+/// of the slowest moon with eclipses every orbit (Callisto's 16.7 days
+/// seldom eclipse; Iapetus's never mostly), sampled finely enough for
+/// Io's 3-hour transit.
+const EVENT_SPAN_S: f64 = 120.0 * 86_400.0;
+const EVENT_STEP_S: f64 = 600.0;
+
+/// The transit view: the shadow's axis within this many radii of the
+/// primary's centre (Io's passes 0.33 radii off in 2030: the Sun is 3° off
+/// Jupiter's equator).
+const TRANSIT_OFFSET: f64 = 0.6;
+
+/// The clock and the framed body for an event view of `moon`, searched
+/// from `t0`: the eclipse's ingress (half the star's disc hidden by the
+/// primary, seen at the moon's centre) or the shadow transit (the shadow's
+/// axis within [`TRANSIT_OFFSET`] of the primary's centre).
+fn event(sim: &SimState, star: NodeId, moon: NodeId, view: View, t0: Epoch) -> Option<(Epoch, NodeId)> {
+    let primary = crate::relations::primary(&sim.world.eph, moon)?;
+    let r_of = |n: NodeId| sim.world.source(n).and_then(|s| s.physical.as_ref()).map(|p| p.radius_eq);
+    let (r_p, r_star) = (r_of(primary)?, r_of(star)?);
+    let at = |dt: f64| {
+        let snap = sim.world.snapshot(t0.add_seconds(dt));
+        (snap.relative_r(moon, primary), snap.relative_r(star, primary))
+    };
+    let dt = match view {
+        View::Eclipse => first_fall(EVENT_SPAN_S, EVENT_STEP_S, 0.5, |dt| {
+            let (m, s) = at(dt);
+            crate::lighting::eclipse_factor(m, s, r_star, &[(DVec3::ZERO, r_p)])
+        })?,
+        View::Transit => first_fall(EVENT_SPAN_S, EVENT_STEP_S, TRANSIT_OFFSET, |dt| {
+            let (m, s) = at(dt);
+            shadow_offset(m, s, r_p)
+        })?,
+        _ => return None,
+    };
+    Some((t0.add_seconds(dt), if view == View::Transit { primary } else { moon }))
 }
 
 /// Sets the tour up if `SUNSCATTER_TOUR` asks for one (with a demo
@@ -170,7 +317,8 @@ pub fn run(
     time: Res<Time>,
     tour: Option<ResMut<Tour>>,
     mut demo: ResMut<Demo>,
-    sim: Res<SimState>,
+    mut sim: ResMut<SimState>,
+    defs: Res<BodyDefs>,
     mut rig: ResMut<CameraRig>,
     mut settings: ResMut<GraphicsSettings>,
     mut pause: ResMut<SimPause>,
@@ -183,6 +331,10 @@ pub fn run(
         *settings = settings.with_preset(Tier::Minimal);
         // Not a demo step: the demo's per-step checks stay quiet.
         demo.step = Step::Done;
+        if let Some(date) = tour.date {
+            *sim = SimState::starting_at(date);
+        }
+        tour.base = Some(sim.clock);
     }
     pause.0 = true;
     tour.timer += time.delta_secs_f64();
@@ -194,20 +346,41 @@ pub fn run(
         }
         return;
     };
-    let view = View::ALL[tour.view];
-    let found = sim.world.sources.iter().find(|s| s.name.eq_ignore_ascii_case(&name) && s.physical.is_some());
-    let Some(src) = found else {
+    let view = tour.views[tour.view];
+    let found = sim.world.sources.iter().find(|s| same_name(&s.name, &name) && s.physical.is_some());
+    let Some((node, solid)) = found.map(|s| (s.node, s.physical.as_ref().is_some_and(|p| p.solid))) else {
         error!("tour: no body {name}");
-        tour.view = View::ALL.len() - 1;
+        tour.view = tour.views.len() - 1;
         tour.advance();
         return;
     };
-    if view == View::Ground && !src.physical.as_ref().is_some_and(|p| p.solid) {
+    if view == View::Ground && !solid {
         tour.advance();
         return;
     }
-    tour.current = Some((src.node, view));
-    rig.focus = Focus::Body(src.node);
+    if !tour.prepared {
+        // A new view: its clock (the event views search for theirs).
+        let base = tour.base.unwrap_or(sim.clock);
+        let star = defs.light_source.map(|l| l.0);
+        let (clock, framed) = match view {
+            View::Eclipse | View::Transit => match star.and_then(|s| event(&sim, s, node, view, base)) {
+                Some(e) => e,
+                None => {
+                    warn!("tour: no {} of {name} within {} days", view.name(), EVENT_SPAN_S / 86_400.0);
+                    tour.advance();
+                    return;
+                }
+            },
+            _ => (base, node),
+        };
+        if clock != sim.clock {
+            sim.clock = clock;
+        }
+        tour.current = Some((framed, view));
+        tour.prepared = true;
+    }
+    let framed = tour.current.map_or(node, |c| c.0);
+    rig.focus = Focus::Body(framed);
     let settled = tour.timer > SETTLE_MIN && !terrain.busy();
     if settled || tour.timer > SETTLE_MAX {
         if !settled {
@@ -235,6 +408,7 @@ pub fn aim(
     let air_top = defs.get(node).and_then(|d| d.atmosphere.as_ref()).map_or(0.0, |a| f64::from(a.thickness_m));
     // A ringed body's disc view frames its rings (3 ring radii).
     let rings = defs.get(node).and_then(|d| d.rings.as_ref()).map_or(0.0, |r| f64::from(r.outer_m));
+    let view = view.pose_view();
     let framed = if view == View::Disc { p.radius_eq.max(rings) } else { p.radius_eq };
     let alt = altitude(view, framed, air_top) + framed - p.radius_eq;
     let pose = pose(view, to_sun, p.rotation.pole(sim.clock), p.radius_eq, alt);
@@ -282,7 +456,7 @@ mod tests {
             assert!((p.look.length() - 1.0).abs() < 1e-12 && (p.up.length() - 1.0).abs() < 1e-12, "{view:?}");
             let nadir = -p.offset.normalize();
             match view {
-                View::Disc => {
+                View::Disc | View::Eclipse | View::Transit => {
                     assert!(deg(p.look, nadir) < 1e-9, "the disc is centred");
                     assert!((deg(-nadir, sun) - DISC_PHASE_DEG).abs() < 1e-9, "phase angle");
                 }
@@ -310,8 +484,67 @@ mod tests {
     }
 
     #[test]
+    fn dates_and_views_parse() {
+        // (text, expected seconds after 2030-01-01T00:00 TDB, or none)
+        let start = Epoch::from_calendar(2030, 1, 1, 0, 0, 0.0);
+        let cases = [
+            ("2030-01-01", Some(0.0)),
+            ("2030-01-02T06:30", Some(86_400.0 + 6.5 * 3600.0)),
+            ("2030-13-01", None),
+            ("2030-01-01T24:00", None),
+            ("tomorrow", None),
+        ];
+        for (text, want) in cases {
+            assert_eq!(parse_date(text).map(|e| e.seconds_since(start)), want, "{text}");
+        }
+        assert_eq!(View::parse_list("disc, Eclipse,nope,transit"), [View::Disc, View::Eclipse, View::Transit]);
+    }
+
+    #[test]
+    fn the_first_fall_below_a_level_is_found_to_a_second() {
+        // (case, function of t, expected crossing)
+        type Case = (&'static str, fn(f64) -> f64, Option<f64>);
+        let cases: [Case; 4] = [
+            ("a falling line crosses at 1234.5", |t| 1234.5 - t, Some(1234.5)),
+            ("never below", |_| 1.0, None),
+            (
+                "below from the start, then rising and falling again",
+                |t| if (500.0..3000.0).contains(&t) { 1.0 } else { -1.0 },
+                Some(3000.0),
+            ),
+            ("a dip shorter than a step is missed", |t| if (1000.0..1100.0).contains(&t) { -1.0 } else { 1.0 }, None),
+        ];
+        for (case, f, want) in cases {
+            let got = first_fall(10_000.0, 600.0, 0.0, f);
+            match (got, want) {
+                (Some(g), Some(w)) => assert!((g - w).abs() <= 1.0, "{case}: {g}"),
+                (g, w) => assert_eq!(g, w, "{case}"),
+            }
+        }
+    }
+
+    #[test]
+    fn a_shadow_falls_on_the_primary_only_behind_the_moon() {
+        let star = DVec3::new(-1.0e12, 0.0, 0.0);
+        // (case, moon, expected offset in primary radii)
+        let cases = [
+            ("on the axis", DVec3::new(-4.0e8, 0.0, 0.0), 0.0),
+            ("half a radius off", DVec3::new(-4.0e8, 3.5e7, 0.0), 0.5),
+            ("behind the primary", DVec3::new(4.0e8, 0.0, 0.0), f64::INFINITY),
+        ];
+        for (case, moon, want) in cases {
+            let got = shadow_offset(moon, star, 7.0e7);
+            assert!(got == want || (got - want).abs() < 2e-3, "{case}: {got}");
+        }
+    }
+
+    #[test]
     fn the_list_is_comma_separated() {
         assert_eq!(parse_list("Mars, venus,,Titan "), ["Mars", "venus", "Titan"]);
         assert!(parse_list(" ").is_empty());
+        // (typed, body name, matches)
+        for (typed, name, want) in [("hiiaka", "Hi'iaka", true), ("TITAN", "Titan", true), ("io", "Ion", false)] {
+            assert_eq!(same_name(typed, name), want, "{typed}");
+        }
     }
 }

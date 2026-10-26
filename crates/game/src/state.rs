@@ -78,9 +78,14 @@ fn load_world() -> World {
 
 impl SimState {
     pub fn new() -> Self {
-        let world = load_world();
         // Start in daylight over Florida: 2030-01-01 17:00 TDB.
-        let clock = sol::sol_epoch().add_seconds(17.0 * 3600.0);
+        Self::starting_at(sol::sol_epoch().add_seconds(17.0 * 3600.0))
+    }
+
+    /// A new game whose clock starts at `clock` (the body tour's date),
+    /// with the ship on the pad.
+    pub fn starting_at(clock: Epoch) -> Self {
+        let world = load_world();
         let mut vessel_ids = VesselIds::default();
         let ship = Vessel::landed_at(&world, vessel_ids.allocate(), "Earth", PAD_LAT, PAD_LON, clock, test_craft());
         SimState {
