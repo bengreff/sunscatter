@@ -9,6 +9,7 @@ mod atmosphere;
 mod bench;
 mod body_visual;
 mod camera;
+mod clouds;
 mod commands;
 mod comms;
 mod debris;
@@ -83,7 +84,7 @@ fn main() {
     app.insert_resource(ClearColor(Color::BLACK))
         .add_plugins(default_plugins(demo_mode, offscreen))
         .add_plugins(EguiPlugin::default())
-        .add_plugins((terrain::TerrainPlugin, sky::SkyPlugin, atmosphere::AtmosphereFixPlugin, rings::RingsPlugin))
+        .add_plugins(body_plugins())
         .add_plugins(GameState)
         // After the settings defaults: replaces them with the saved settings.
         .add_plugins(persist::PersistPlugin)
@@ -189,6 +190,13 @@ fn main() {
         app.add_plugins(demo_checks::DemoChecksPlugin);
     }
     app.run();
+}
+
+/// The bodies' rendering: terrain, sky, atmospheres, rings, cloud decks.
+fn body_plugins(
+) -> (terrain::TerrainPlugin, sky::SkyPlugin, atmosphere::AtmosphereFixPlugin, rings::RingsPlugin, clouds::CloudsPlugin)
+{
+    (terrain::TerrainPlugin, sky::SkyPlugin, atmosphere::AtmosphereFixPlugin, rings::RingsPlugin, clouds::CloudsPlugin)
 }
 
 /// The game's resources and messages (before the saved settings replace

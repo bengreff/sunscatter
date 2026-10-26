@@ -219,6 +219,18 @@ pub struct AtmosphereDef {
     /// aerial-perspective table breaks up), not only from outside.
     #[serde(default)]
     pub raymarch_inside: bool,
+    /// An opaque cloud deck's top (Venus), drawn from above as a shell
+    /// (`clouds`): the sky above it then has no `layers` (they are the deck).
+    #[serde(default)]
+    pub cloud_top: Option<CloudTopDef>,
+}
+
+/// The top of an opaque cloud deck: a Lambert sphere `altitude_m` above the
+/// mean radius with `albedo` per channel (red, green, blue).
+#[derive(Clone, Copy, Debug, Deserialize)]
+pub struct CloudTopDef {
+    pub altitude_m: f32,
+    pub albedo: [f32; 3],
 }
 
 /// An aerosol layer: Mie scattering and absorption (m⁻¹ at its densest),

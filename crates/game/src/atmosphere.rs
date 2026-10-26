@@ -49,6 +49,16 @@ fn drop_stale_atmosphere(
 #[derive(Component)]
 pub struct BodyAtmosphere(pub NodeId, pub Atmosphere, pub RaymarchInside);
 
+/// The two media of an atmosphere with an opaque cloud deck
+/// (`AtmosphereDef::cloud_top`): above the deck's top only the gas (the
+/// deck is the `clouds` shell there), below it everything.
+#[derive(Component)]
+pub struct DeckMedia {
+    pub above: Handle<ScatteringMedium>,
+    pub full: Handle<ScatteringMedium>,
+    pub top_m: f32,
+}
+
 /// Whether an atmosphere is raymarched from inside too (`AtmosphereDef::raymarch_inside`).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct RaymarchInside(pub bool);
@@ -119,6 +129,12 @@ pub fn medium(def: &AtmosphereDef) -> ScatteringMedium {
     ScatteringMedium::new(256, 256, terms)
 }
 
+/// The medium above an opaque cloud deck: [`medium`] without the layers
+/// (they are the deck, drawn as a shell from above).
+pub fn medium_above_deck(def: &AtmosphereDef) -> ScatteringMedium {
+    medium(&AtmosphereDef { layers: Vec::new(), ..def.clone() })
+}
+
 /// Spawns one atmosphere per body that defines one.
 pub fn spawn(
     commands: &mut Commands,
@@ -132,10 +148,14 @@ pub fn spawn(
         inner_radius: mean_radius as f32,
         outer_radius: mean_radius as f32 + def.thickness_m,
         ground_albedo: v3(def.ground_albedo),
-        medium: handle,
+        medium: handle.clone(),
     };
     let inside = RaymarchInside(def.raymarch_inside);
-    commands.spawn((BodyAtmosphere(node, atmosphere.clone(), inside), atmosphere, Transform::IDENTITY));
+    let mut e = commands.spawn((BodyAtmosphere(node, atmosphere.clone(), inside), atmosphere, Transform::IDENTITY));
+    if let Some(top) = def.cloud_top {
+        let above = media.add(medium_above_deck(def));
+        e.insert(DeckMedia { above, full: handle, top_m: top.altitude_m });
+    }
 }
 
 /// Atmospheres are drawn only within this many outer radii of their body:
@@ -156,7 +176,13 @@ pub fn active(candidates: &[(f64, f64)]) -> Option<usize> {
         .map(|(i, _)| i)
 }
 
-type AtmosphereItem = (Entity, &'static mut BodyAtmosphere, &'static mut Transform, Option<&'static mut Atmosphere>);
+type AtmosphereItem = (
+    Entity,
+    &'static mut BodyAtmosphere,
+    &'static mut Transform,
+    Option<&'static mut Atmosphere>,
+    Option<&'static DeckMedia>,
+);
 
 /// Keeps atmospheres at their bodies' camera-relative centres, with their
 /// ground on the reference ellipsoid below the camera, and draws only the
@@ -176,7 +202,7 @@ pub fn update(
 ) {
     let snap = sim.world.snapshot(sim.clock);
     let mut candidates = Vec::new();
-    for (e, mut a, mut t, live) in &mut atmos {
+    for (e, mut a, mut t, mut live, deck) in &mut atmos {
         let centre = snap.relative_r(a.0, rig.anchor);
         t.translation = (centre - rig.cam_pos).as_vec3();
         candidates.push((e, ((rig.cam_pos - centre).length(), f64::from(a.1.outer_radius))));
@@ -186,8 +212,19 @@ pub fn update(
         if (ground - a.1.inner_radius).abs() > 1.0 {
             let thickness = a.1.outer_radius - a.1.inner_radius;
             (a.1.inner_radius, a.1.outer_radius) = (ground, ground + thickness);
-            if let Some(mut live) = live {
+            if let Some(live) = live.as_mut() {
                 (live.inner_radius, live.outer_radius) = (a.1.inner_radius, a.1.outer_radius);
+            }
+        }
+        if let Some(d) = deck {
+            // Above the deck's top, only the gas above it (the shell is the deck).
+            let above = (rig.cam_pos - centre).length() - p.radius_eq > f64::from(d.top_m);
+            let want = if above { &d.above } else { &d.full };
+            if a.1.medium != *want {
+                a.1.medium = want.clone();
+                if let Some(live) = live.as_mut() {
+                    live.medium = want.clone();
+                }
             }
         }
     }
@@ -196,7 +233,7 @@ pub fn update(
     let want = active(&sizes).filter(|_| on).map(|i| candidates[i].0);
     if *drawn != Some(want) {
         *drawn = Some(want);
-        for (e, a, _, _) in &atmos {
+        for (e, a, _, _, _) in &atmos {
             if Some(e) == want {
                 commands.entity(e).insert(a.1.clone());
             } else {

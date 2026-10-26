@@ -147,8 +147,17 @@ pub fn update_exposure(
     mut cams: Query<&mut bevy::camera::Exposure, With<crate::camera::MainCamera>>,
 ) {
     let Some((star, lm)) = defs.light_source else { return };
-    let d = (sim.world.snapshot(sim.clock).relative_r(star, rig.anchor) - rig.cam_pos).length();
-    let ev100 = exposure_ev100(crate::camera::EV100, flux(lm, d), flux(lm, AU), settings.starlight_exposure);
+    let snap = sim.world.snapshot(sim.clock);
+    let d = (snap.relative_r(star, rig.anchor) - rig.cam_pos).length();
+    // Under a haze, the light that reaches the camera through it.
+    let haze = defs.defs.iter().find_map(|(node, def)| {
+        let a = def.atmosphere.as_ref().filter(|a| a.raymarch_inside)?;
+        let p = sim.world.source(*node)?.physical.as_ref()?;
+        let h = (rig.cam_pos - snap.relative_r(*node, rig.anchor)).length() - p.radius_eq;
+        (h < f64::from(a.thickness_m)).then(|| haze_exposure_share(&haze_above(a, p.radius_eq, h)))
+    });
+    let e_cam = flux(lm, d) * haze.unwrap_or(1.0);
+    let ev100 = exposure_ev100(crate::camera::EV100, e_cam, flux(lm, AU), settings.starlight_exposure);
     for mut e in &mut cams {
         if (e.ev100 - ev100).abs() > 1e-4 {
             e.ev100 = ev100;
@@ -175,11 +184,38 @@ pub struct HazeLight {
 /// scattering (Eddington), damped by exp(−k τ) with the diffusion exponent
 /// k = √(3 (1 − ω)(1 − ω g)) for absorption; minus the direct beam.
 pub fn haze_light(def: &crate::body_visual::AtmosphereDef, radius: f64) -> HazeLight {
+    haze_above(def, radius, 0.0)
+}
+
+/// The fraction of a profile's vertical optical depth above `h` (m).
+fn share_above(profile: crate::body_visual::ProfileDef, h: f64) -> f64 {
+    use crate::body_visual::ProfileDef;
+    match profile {
+        ProfileDef::Exponential { scale_height_m } => (-h.max(0.0) / f64::from(scale_height_m)).exp(),
+        ProfileDef::Tent { center_m, width_m } => {
+            let (c, w) = (f64::from(center_m), f64::from(width_m) / 2.0);
+            let x = ((h - (c - w)) / w).clamp(0.0, 2.0);
+            if x < 1.0 {
+                1.0 - 0.5 * x * x
+            } else {
+                0.5 * (2.0 - x) * (2.0 - x)
+            }
+        }
+    }
+}
+
+/// [`haze_light`] for the column above height `above_m`.
+pub fn haze_above(def: &crate::body_visual::AtmosphereDef, radius: f64, above_m: f64) -> HazeLight {
     use crate::body_visual::ProfileDef;
     // Per channel: scattering and absorption optical depths, the
     // scattering-weighted asymmetry sum, and the extinction-weighted height.
     let (mut ts, mut ta, mut gs, mut th) = ([0.0f64; 3], [0.0f64; 3], [0.0f64; 3], [0.0f64; 3]);
-    let mut add = |s: [f32; 3], a: [f32; 3], g: [f32; 3], depth: f64, height: f64| {
+    let mut add = |s: [f32; 3], a: [f32; 3], g: [f32; 3], profile: ProfileDef| {
+        let (depth, height) = match profile {
+            ProfileDef::Exponential { scale_height_m } => (f64::from(scale_height_m), f64::from(scale_height_m)),
+            ProfileDef::Tent { center_m, width_m } => (f64::from(width_m) / 2.0, f64::from(center_m)),
+        };
+        let depth = depth * share_above(profile, above_m);
         for c in 0..3 {
             let (sc, ac) = (f64::from(s[c]) * depth, f64::from(a[c]) * depth);
             ts[c] += sc;
@@ -188,20 +224,15 @@ pub fn haze_light(def: &crate::body_visual::AtmosphereDef, radius: f64) -> HazeL
             th[c] += (sc + ac) * height;
         }
     };
-    let h_r = f64::from(def.rayleigh_scale_height_m);
-    add(def.rayleigh_scattering, [0.0; 3], [0.0; 3], h_r, h_r);
-    let h_m = f64::from(def.mie_scale_height_m);
-    let g_m = def.mie_asymmetry_rgb.unwrap_or([def.mie_asymmetry; 3]);
-    add(def.mie_scattering, def.mie_absorption, g_m, h_m, h_m);
+    let rayleigh = ProfileDef::Exponential { scale_height_m: def.rayleigh_scale_height_m };
+    add(def.rayleigh_scattering, [0.0; 3], [0.0; 3], rayleigh);
+    let mie = ProfileDef::Exponential { scale_height_m: def.mie_scale_height_m };
+    add(def.mie_scattering, def.mie_absorption, def.mie_asymmetry_rgb.unwrap_or([def.mie_asymmetry; 3]), mie);
     if let Some(o) = &def.ozone {
-        add([0.0; 3], o.absorption, [0.0; 3], f64::from(o.width_m) / 2.0, f64::from(o.center_m));
+        add([0.0; 3], o.absorption, [0.0; 3], ProfileDef::Tent { center_m: o.center_m, width_m: o.width_m });
     }
     for l in &def.layers {
-        let (depth, height) = match l.profile {
-            ProfileDef::Exponential { scale_height_m } => (f64::from(scale_height_m), f64::from(scale_height_m)),
-            ProfileDef::Tent { center_m, width_m } => (f64::from(width_m) / 2.0, f64::from(center_m)),
-        };
-        add(l.scattering, l.absorption, l.asymmetry, depth, height);
+        add(l.scattering, l.absorption, l.asymmetry, l.profile);
     }
     let mut out = HazeLight { tau: [0.0; 3], diffuse: [0.0; 3], r_over_h: 0.0 };
     let (mut tau_sum, mut h_sum) = (0.0, 0.0);
@@ -217,6 +248,16 @@ pub fn haze_light(def: &crate::body_visual::AtmosphereDef, radius: f64) -> HazeL
     }
     out.r_over_h = if h_sum > 0.0 { (radius * tau_sum / h_sum) as f32 } else { 0.0 };
     out
+}
+
+/// The share of the starlight that reaches a camera under a haze, for the
+/// exposure (D087: the flux at the camera): the luminance-weighted (Rec.
+/// 709) direct and diffuse transmission of the column above it, for an
+/// overhead Sun (so a night side stays dark: only the haze, not the Sun's
+/// height, sets it).
+pub fn haze_exposure_share(h: &HazeLight) -> f64 {
+    let w = [0.2126, 0.7152, 0.0722];
+    (0..3).map(|c| w[c] * ((-f64::from(h.tau[c])).exp() + f64::from(h.diffuse[c]))).sum()
 }
 
 /// Fills each terrain body's lighting uniforms from [`body_light`].
@@ -390,6 +431,38 @@ mod tests {
         assert!(titan.tau[2] > titan.tau[1] && titan.tau[1] > titan.tau[0]);
         assert!(titan.diffuse[2] < titan.diffuse[0]);
         assert!(titan.r_over_h > 10.0 && titan.r_over_h < 200.0, "{}", titan.r_over_h);
+    }
+
+    #[test]
+    fn the_exposure_follows_the_light_under_a_haze() {
+        let load = |name: &str| crate::body_visual::load(name).and_then(|d| d.atmosphere).expect(name);
+        let venus = load("Venus");
+        let share = |h: f64| haze_exposure_share(&haze_above(&venus, 6.05e6, h));
+        // (case, height above the mean radius, expected share of the light at the top)
+        let cases = [
+            ("on Venus's ground: about 1 %, 6-7 stops down", 0.0, (0.005, 0.03)),
+            ("at the deck's top (tau ~ 1 of cloud): most of it", 74_000.0, (0.4, 0.9)),
+            ("above the atmosphere: all of it", 2.0e5, (0.999, 1.0)),
+        ];
+        for (case, h, (lo, hi)) in cases {
+            let s = share(h);
+            assert!(s >= lo && s <= hi, "{case}: {s}");
+        }
+        // The light grows monotonically upwards.
+        let mut last = 0.0;
+        for i in 0..=40 {
+            let s = share(f64::from(i) * 3000.0);
+            assert!(s >= last, "at {} km", i * 3);
+            last = s;
+        }
+        // A tent profile's share above a height: all below it, half at its centre, none above.
+        use crate::body_visual::ProfileDef::Tent;
+        let tent = Tent { center_m: 57_000.0, width_m: 46_000.0 };
+        for (h, want) in
+            [(0.0, 1.0), (34_000.0, 1.0), (57_000.0, 0.5), (74_000.0, 0.5 * (6.0f64 / 23.0).powi(2)), (90_000.0, 0.0)]
+        {
+            assert!((share_above(tent, h) - want).abs() < 1e-9, "{h}");
+        }
     }
 
     #[test]
