@@ -48,3 +48,45 @@ OPAL: Outer Planet Atmospheres Legacy, PI A. Simon (GO 13937), NASA/ESA Hubble, 
 **Calibration.** Each map's area mean per channel is the Lambert albedo 1.5 p of the geometric albedo p in Sloan r′, Johnson V and Sloan g′ (Mallama, Krobusek & Pavlov 2017, Icarus 282, 19, table 7): Jupiter 0.575, 0.538, 0.509; Saturn 0.618, 0.499, 0.436; Uranus 0.355, 0.488, 0.559; Neptune 0.307, 0.442, 0.533. Where the brightest 0.5 % would exceed 0.98, the contrast is reduced by a power law (each channel relative to its mean, raised to γ) until they fit: Jupiter γ = 0.76, Saturn 0.59, Uranus and Neptune 1. The longitudes are the map's own (column 0 at −180° in the grid convention); cloud features drift against any rotation system.
 
 **First tour (2026-10-26):** with D087's exposure the giants' day sides read like Earth's. Jupiter: pale cream with pink-tan belts and the Great Red Spot, paler and less saturated than the familiar enhanced images (it is calibrated). Saturn: a pale peach disc with faint bands. Uranus: pale cyan with a whiter north polar region. Neptune: pale blue, close to Uranus (as Irwin et al. 2024, MNRAS 527, 11521, found for the true colours). From low orbit the cloud tops are smooth: no detail below the map's texel yet.
+
+## Solid bodies (LANDS)
+
+**Status:** *playable* data for 35 bodies (maps baked, physical terrain loaded by `sim`, zones drawn by the generic shader), first seen in the tour on 2026-10-26 (below). Bake: `cargo run -p asset-tool --release -- planets [body…]` (`asset-tool::planets`, the per-body table in `asset-tool::specs`; sources are downloaded into `data/external/`). Total committed: **78.9 MB** (D086's ~90 MB for these bodies; every file under 19 MB).
+
+### Method
+
+- **Heights** (`height.png`, 16-bit, 1 m steps; `body.ron` `height_scale` where the relief exceeds ±32.7 km: Haumea 4 m, Quaoar and Hyperion 2 m). A DEM is area-averaged in its own datum (no-data excluded; unmapped areas filled smoothly by push-pull), then converted to radii and to heights above the body's `body.ron` spheroid (geocentric latitude, the formula of `BodyPhysical::ellipsoid_radius`), so landing, collision and drawing use the measured radius (D047). Heights above the spheroid differ from the sources' datums: Olympus Mons is 22.9 km above Mars's IAU spheroid (21.2 km above MOLA's areoid), the Hellas floor −7.6 km (−8.2 km).
+- **Procedural relief** where no global DEM exists (stated in each `body.ron`): the IAU triaxial shape (long axis at longitude 0), the IAU Gazetteer's named craters at their real centres and diameters, a random population `N(>D) = n1 D⁻²` per km² down to three map pixels (largest first; each crater overprints the older surface inside its rim, measured from its mean there), simple bowls of depth 0.2 D, complex craters (flat floor, central peak, depth ∝ D^0.3 above the transition diameter) capped at a relaxed depth, r⁻³ ejecta; crater relief soft-limited to 1.5 depth caps (the ejecta's infill of saturated surfaces is not modelled), plus regional fBm. Densities: near empirical saturation (`n1` 0.1–0.3) on Callisto, Rhea, Tethys, Mimas, Iapetus, Oberon, Umbriel, Phoebe, Hyperion, Proteus; 0.03 Ganymede, Miranda, Titania; 0.01 Ariel and the TNOs (assumed); 2–3·10⁻⁴ Europa and Triton (young surfaces); none on Io. Sources for densities, transition diameters and relaxed depths: Melosh 1989 (*Impact Cratering*, ch. 6, 7, 10), Pike 1977, Schenk 2002 (Nature 417, 419), Zahnle et al. 2003 (Icarus 163, 263), Kirchoff & Schenk 2010 (Icarus 206, 485), Thomas et al. 2007 (Nature 448, 50, Hyperion).
+- **Sub-sample detail** (D059): `roughness.png` baked from each heightmap, `terrain_detail` octaves from the map spacing down to ~2 m.
+- **Zones** (D073): k-means centres of each colour map in CIELAB (or chosen classes), classified by the existing `asset-tool zones`; every zone's `albedo` is a linear reflectance at ~645/555/470 nm, cited in its `visual.ron`. Convention: the area mean is the body's measured mean albedo (Bond where published, else geometric; Ceres and Mercury normal albedo, like the Moon's zones), the zone's brightness ratio in the (display-stretched) mosaic compressed by a power 0.5–0.7, the colour from measured B−V and V−R (converted with the Sun's 0.653 and 0.356) or from the map where it is true colour (Ganymede); Mars, Io, Iapetus, Ceres, Pluto and Triton have per-zone values from the literature. SKY's giants use the Lambert albedo 1.5 p instead (open: one convention for both).
+- **Bodies without any global map** (Uranus's moons, Proteus, Nereid, the TNOs and their moons): the colour map is the measured colour, lighter (×1.6, assumed) around a small fraction of fresh craters; one or two zones (terrain, fresh ejecta).
+
+### Bodies
+
+| Body | Heights (px, spacing) | Colour / zones (px) | MB | Sources |
+|---|---|---|---|---|
+| Mars | 5760 (3.7 km) | 4096 / 4096, 6 zones incl. polar ice (≥ 55°) | 20.9 | MOLA MEGDR radius 32 ppd (Smith et al. 2001), [PDS Geosciences](https://pds-geosciences.wustl.edu/missions/mgs/megdr.html); Viking colour mosaic 925 m, USGS |
+| Mercury | 4096 (3.7 km) | 4096 / 4096, 5 | 15.9 | MESSENGER MDIS DEM v2 665 m (Becker et al. 2016); MDIS MD3 colour basemap 665 m (enhanced; classification only) |
+| Ceres | 2048 (1.5 km) | 2048 / 2048, 4 incl. faculae | 3.9 | Dawn FC HAMO DTM 60 ppd (Preusker et al. 2016, DLR); Dawn FC mosaic 20 ppd |
+| Pluto | 4096 (1.8 km) | 2048 / 2048, 5 | 6.7 | New Horizons DEM and mosaic 300 m (Schenk et al. 2018); 54 % unmapped, filled |
+| Charon | 2048 (1.9 km) | 2048 / 2048, 4 | 2.0 | as Pluto; 54 % unmapped |
+| Enceladus | 720 (2.2 km) | 2048 / 2048, 3 | 1.5 | Cassini ISS shape model (Bland et al. 2020); Cassini mosaic 110 m |
+| Ganymede, Callisto | 2048 (8.1, 7.4 km), procedural | 2048 / 2048, 4 | 2.8, 3.4 | Voyager–Galileo SSI mosaics 1–1.4 km |
+| Io, Europa | 1024 (11, 10 km), procedural | 2048 / 2048, 7 and 4 | 1.2 each | Galileo SSI–Voyager mosaics (Io colour merge 1 km, Europa 500 m) |
+| Mimas, Tethys, Dione, Rhea, Iapetus | 1024 (1.2–4.7 km), procedural | 2048 / 1024–2048, 3–4 | 1.4–2.0 | Cassini (DLR basemap for Mimas; USGS Cassini–Voyager mosaics 154–783 m) |
+| Triton | 1024 (8.3 km), procedural | 2048 / 2048, 4 | 0.8 | Voyager 2 colour mosaic with global fill 600 m (LPI/USGS) |
+| Hyperion, Phoebe, Proteus, Nereid, Miranda, Ariel, Umbriel, Titania, Oberon | 512–1024, procedural | procedural | 0.2–0.8 | albedos: Thomas et al. 2007, Simonelli et al. 1999, Karkoschka 2001/2003 |
+| Eris, Haumea, Makemake, Gonggong, Quaoar, Sedna, Orcus, Dysnomia, Hi'iaka, Vanth | 512–1024, procedural | procedural | 0.1–0.5 | albedos and colours: Sicardy 2011, Ortiz 2012/2017, Kiss 2019, Braga-Ribas 2013, Pál 2012, Fornasier 2013, Brown & Butler 2018, MBOSS (Hainaut et al. 2012) |
+
+All maps are USGS Astrogeology / NASA PDS products (public domain): `https://asc-pds-services.s3.us-west-2.amazonaws.com/mosaic/<file>` (file names in `asset-tool::specs`); named craters from the IAU Gazetteer of Planetary Nomenclature GIS downloads (`https://asc-planetarynames-data.s3.us-west-2.amazonaws.com/<TARGET>_nomenclature_center_pts.zip`, public domain).
+
+### Checks and tests
+
+`sim/tests/solar_terrain.rs`: landmarks (Olympus Mons, Hellas, Rachmaninoff, Caloris), every heightmap loads with its detail, rails floors follow D062, per-body golden hashes of the sampled surface (2,000 directions, base + detail: macOS and Windows must agree). `asset-tool`: datum conversion, GeoTIFF georeferencing (degrees or metres, central meridian, extra columns), masked resampling and gap filling, crater profiles and population statistics, the dBASE reader, and every shipped body's maps (equirectangular, zone indices within their lists, land albedos in (0, 1)).
+
+### Gaps
+
+- No global DEM exists for the Galileans, Saturn's mid-size moons (Schenk's stereo/photoclinometry products are not in the USGS archive), Triton or Uranus's moons: their relief is procedural, and only the named craters line up with the photographs. Not modelled: Iapetus's 20 km equatorial ridge, Io's mountains and paterae, Europa's ridges, Miranda's coronae and cliffs, Tethys's Ithaca Chasma.
+- Crater-like sub-pixel detail: the D059 noise is fBm/ridged, not craters; close up, cratered bodies look rough rather than cratered below the map's resolution.
+- Haumea's shape is the JPL triaxial 1050 × 840 × 537 km (Ortiz et al. 2017 measured 1161 × 852 × 513).
+- Loading: the game loads every body's colour and zone maps at start (about 35 more bodies), and `World::sol` decodes every heightmap (~0.9 s in tests); loading by distance would bound GPU memory.
