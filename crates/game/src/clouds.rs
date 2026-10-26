@@ -6,7 +6,7 @@
 //! ripples at the limb, where each step crossed the cloud top. Below the
 //! top the shell is hidden and the full atmosphere is drawn.
 
-use crate::body_visual::CloudTopDef;
+use crate::body_visual::{AtmosphereDef, CloudTopDef};
 use crate::camera::CameraRig;
 use crate::scene::BodyDefs;
 use crate::state::SimState;
@@ -25,10 +25,14 @@ const SHADER: &str = "embedded://game/clouds.wgsl";
 pub struct DeckParams {
     /// xyz: the body's centre relative to the camera.
     pub center: Vec4,
-    /// xyz: the star relative to the camera; w: its illuminance at the body (lux).
-    pub star: Vec4,
     /// rgb: the deck's Lambert albedo.
     pub albedo: Vec4,
+    /// The body's light (`lighting::LightUniform`): every drawn star, the
+    /// bodies that can eclipse them, planetshine.
+    pub starlight: crate::lighting::LightUniform,
+    /// Seen from below the deck's top: rgb the sky's radiance there
+    /// (lux/sr, `lighting::haze::under_deck_radiance`), w 1.
+    pub inside: Vec4,
 }
 
 #[derive(Asset, AsBindGroup, Reflect, Debug, Clone)]
@@ -40,6 +44,17 @@ pub struct DeckMaterial {
 impl Material for DeckMaterial {
     fn fragment_shader() -> ShaderRef {
         SHADER.into()
+    }
+
+    fn specialize(
+        _pipeline: &bevy::pbr::MaterialPipeline,
+        descriptor: &mut bevy::render::render_resource::RenderPipelineDescriptor,
+        _layout: &bevy::mesh::MeshVertexBufferLayoutRef,
+        _key: bevy::pbr::MaterialPipelineKey<Self>,
+    ) -> Result<(), bevy::render::render_resource::SpecializedMeshPipelineError> {
+        // Both faces: from below the deck the shell's inside is the sky.
+        descriptor.primitive.cull_mode = None;
+        Ok(())
     }
 }
 
@@ -54,9 +69,10 @@ impl Plugin for CloudsPlugin {
     }
 }
 
-/// A cloud deck's shell: its body and the deck's top.
+/// A cloud deck's shell: its body, the deck's top, and the atmosphere
+/// (the gas below the deck fogs the ground).
 #[derive(Component)]
-pub struct Deck(pub NodeId, pub CloudTopDef);
+pub struct Deck(pub NodeId, pub CloudTopDef, pub AtmosphereDef);
 
 /// Spawns a shell for every body whose atmosphere has a cloud top.
 pub fn setup(
@@ -66,13 +82,14 @@ pub fn setup(
     mut materials: ResMut<Assets<DeckMaterial>>,
 ) {
     for (node, def) in &defs.defs {
-        let Some(top) = def.atmosphere.as_ref().and_then(|a| a.cloud_top) else { continue };
+        let Some(atmosphere) = def.atmosphere.as_ref() else { continue };
+        let Some(top) = atmosphere.cloud_top else { continue };
         let albedo = Vec3::from_array(top.albedo).extend(0.0);
         let material = materials.add(DeckMaterial { params: DeckParams { albedo, ..default() } });
         // 512 x 256 facets: the silhouette is within half a pixel from low orbit.
         let mesh = meshes.add(Sphere::new(1.0).mesh().uv(512, 256));
         commands.spawn((
-            Deck(*node, top),
+            Deck(*node, top, atmosphere.clone()),
             Mesh3d(mesh),
             MeshMaterial3d(material),
             Transform::IDENTITY,
@@ -89,34 +106,60 @@ pub fn shell_drawn(altitude: f64, top: &CloudTopDef) -> bool {
     altitude > f64::from(top.altitude_m)
 }
 
-/// Places each shell camera-relative and lights it.
+/// Places each shell camera-relative and lights it. From above its top
+/// the shell is the deck (a Lambert sphere); from below, it is the sky:
+/// the diffuse light at the camera's height, which also fogs the body's
+/// ground through the gas below the deck (Bevy's atmosphere, without
+/// multiple scattering, drew a black sky there: `atmosphere::update`
+/// leaves it out).
+#[allow(clippy::too_many_arguments)]
 pub fn update(
     sim: Res<SimState>,
     rig: Res<CameraRig>,
-    defs: Res<BodyDefs>,
+    scene: Res<crate::lighting::LightScene>,
+    settings: Res<crate::settings::GraphicsSettings>,
+    terrain: Res<crate::terrain::Terrain>,
     mut decks: Query<(&Deck, &MeshMaterial3d<DeckMaterial>, &mut Transform, &mut Visibility)>,
     mut materials: ResMut<Assets<DeckMaterial>>,
+    mut terrain_materials: ResMut<Assets<crate::terrain::TerrainMaterial>>,
 ) {
-    let Some((star_node, lm)) = defs.light_source else { return };
     let snap = sim.world.snapshot(sim.clock);
-    let star = snap.relative_r(star_node, rig.anchor) - rig.cam_pos;
     for (deck, mat, mut t, mut vis) in &mut decks {
         let Some(p) = sim.world.source(deck.0).and_then(|s| s.physical.as_ref()) else { continue };
         let centre: DVec3 = snap.relative_r(deck.0, rig.anchor) - rig.cam_pos;
-        let drawn = shell_drawn(centre.length() - p.radius_eq, &deck.1);
-        vis.set_if_neq(if drawn { Visibility::Visible } else { Visibility::Hidden });
-        if !drawn {
-            continue;
-        }
+        let altitude = centre.length() - p.radius_eq;
+        let below = !shell_drawn(altitude, &deck.1);
+        vis.set_if_neq(Visibility::Visible);
         *t = Transform {
             translation: centre.as_vec3(),
             rotation: Quat::IDENTITY,
             scale: Vec3::splat((p.radius_eq + f64::from(deck.1.altitude_m)) as f32),
         };
+        let sky = below.then(|| {
+            let up = (-centre).normalize_or(DVec3::Z);
+            let haze = crate::lighting::haze_above(&deck.2, p.radius_eq, altitude.max(0.0));
+            let lights: Vec<([f64; 3], f64)> = scene
+                .stars
+                .iter()
+                .map(|s| (s.tint.map(|c| c * s.lux_at(centre)), up.dot((s.centre - centre).normalize_or_zero())))
+                .collect();
+            crate::lighting::haze::under_deck_radiance(haze.diffuse, &lights)
+        });
+        let inside = sky.map_or(Vec4::ZERO, |l| Vec4::new(l[0] as f32, l[1] as f32, l[2] as f32, 1.0));
         let Some(mut m) = materials.get_mut(&mat.0) else { continue };
-        let e = crate::lighting::flux(lm, (star - centre).length().max(1.0));
         m.params.center = centre.as_vec3().extend(0.0);
-        m.params.star = star.as_vec3().extend(e as f32);
+        m.params.inside = inside;
+        if let Some(light) = scene.body(deck.0) {
+            m.params.starlight = crate::lighting::LightUniform::new(&scene, &light, &[], settings.earthshine);
+        }
+        let ground = terrain.materials().find(|(n, _)| *n == deck.0).and_then(|(_, h)| terrain_materials.get_mut(h));
+        if let Some(mut g) = ground {
+            let a = &deck.2;
+            let sigma = a.rayleigh_scattering;
+            g.extension.params.fog = Vec4::new(sigma[0], sigma[1], sigma[2], a.rayleigh_scale_height_m);
+            let j = sky.map_or([0.0; 3], |l| crate::lighting::haze::fog_source(l, a.ground_albedo));
+            g.extension.params.fog_light = Vec4::new(j[0] as f32, j[1] as f32, j[2] as f32, inside.w);
+        }
     }
 }
 

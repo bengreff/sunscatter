@@ -141,6 +141,10 @@ fn main() {
         )
         .add_systems(
             Update,
+            (lighting::update_scene, lighting::update_lights).chain().after(Stage::Camera).before(Stage::Scene),
+        )
+        .add_systems(
+            Update,
             (
                 scene::update_bodies,
                 atmosphere::update,
@@ -192,11 +196,24 @@ fn main() {
     app.run();
 }
 
-/// The bodies' rendering: terrain, sky, atmospheres, rings, cloud decks.
-fn body_plugins(
-) -> (terrain::TerrainPlugin, sky::SkyPlugin, atmosphere::AtmosphereFixPlugin, rings::RingsPlugin, clouds::CloudsPlugin)
-{
-    (terrain::TerrainPlugin, sky::SkyPlugin, atmosphere::AtmosphereFixPlugin, rings::RingsPlugin, clouds::CloudsPlugin)
+/// The bodies' rendering: lighting, terrain, sky, atmospheres, rings,
+/// cloud decks.
+fn body_plugins() -> (
+    lighting::LightingPlugin,
+    terrain::TerrainPlugin,
+    sky::SkyPlugin,
+    atmosphere::AtmosphereFixPlugin,
+    rings::RingsPlugin,
+    clouds::CloudsPlugin,
+) {
+    (
+        lighting::LightingPlugin,
+        terrain::TerrainPlugin,
+        sky::SkyPlugin,
+        atmosphere::AtmosphereFixPlugin,
+        rings::RingsPlugin,
+        clouds::CloudsPlugin,
+    )
 }
 
 /// The game's resources and messages (before the saved settings replace

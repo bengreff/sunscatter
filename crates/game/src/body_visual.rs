@@ -223,6 +223,12 @@ pub struct AtmosphereDef {
     /// (`clouds`): the sky above it then has no `layers` (they are the deck).
     #[serde(default)]
     pub cloud_top: Option<CloudTopDef>,
+    /// The measured diffuse transmission to the ground for an overhead Sun
+    /// (red, green, blue; a fraction of the flux at the top): calibrates
+    /// `lighting::haze_above`'s diffusion estimate where probes measured it
+    /// (Venus).
+    #[serde(default)]
+    pub ground_diffuse: Option<[f32; 3]>,
 }
 
 /// The top of an opaque cloud deck: a Lambert sphere `altitude_m` above the
@@ -270,6 +276,10 @@ pub struct EmissiveDef {
     pub luminosity_w: f64,
     /// Luminous efficacy of its spectrum (lm/W).
     pub luminous_efficacy: f64,
+    /// Effective temperature (K): its light's colour relative to the
+    /// Sun's (`lighting::color::star_tint`); none: the Sun's (white).
+    #[serde(default)]
+    pub temperature_k: Option<f64>,
 }
 
 /// Directory holding per-body data.

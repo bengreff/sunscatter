@@ -68,26 +68,11 @@ pub struct Starfield {
 }
 
 /// Approximate RGB of a star from its B−V colour index (Ballesteros 2012
-/// temperature, then a blackbody-like colour), normalised to max 1.
+/// temperature, then `lighting::color::blackbody_srgb`), max 1.
 pub fn bv_to_rgb(bv: f32) -> [f32; 3] {
-    let bv = bv.clamp(-0.4, 2.0);
+    let bv = f64::from(bv.clamp(-0.4, 2.0));
     let t = 4600.0 * (1.0 / (0.92 * bv + 1.7) + 1.0 / (0.92 * bv + 0.62));
-    let t = t / 100.0;
-    let r = if t <= 66.0 { 1.0 } else { (1.292_936 * (t - 60.0).powf(-0.133_204_76)).clamp(0.0, 1.0) };
-    let g = if t <= 66.0 {
-        (0.390_081_58 * t.ln() - 0.631_841_4).clamp(0.0, 1.0)
-    } else {
-        (1.129_890_9 * (t - 60.0).powf(-0.075_514_85)).clamp(0.0, 1.0)
-    };
-    let b = if t >= 66.0 {
-        1.0
-    } else if t <= 19.0 {
-        0.0
-    } else {
-        (0.543_206_8 * (t - 10.0).ln() - 1.196_254_1).clamp(0.0, 1.0)
-    };
-    let m = r.max(g).max(b);
-    [r / m, g / m, b / m]
+    crate::lighting::color::blackbody_srgb(t).map(|c| c as f32)
 }
 
 pub fn setup(mut commands: Commands, mut materials: ResMut<Assets<StarMaterial>>) {
@@ -183,7 +168,7 @@ pub(super) fn daylight(sim: &SimState, rig: &CameraRig, defs: &BodyDefs) -> f32 
 
 /// [`daylight`], and the body whose air it is (none in space).
 pub(super) fn daylight_of(sim: &SimState, rig: &CameraRig, defs: &BodyDefs) -> (f32, Option<NodeId>) {
-    let Some((sun, _)) = defs.light_source else { return (0.0, None) };
+    let Some(sun) = crate::lighting::brightest_star(defs, sim, rig.anchor, rig.cam_pos) else { return (0.0, None) };
     let snap = sim.world.snapshot(sim.clock);
     let sun_pos = snap.relative_r(sun, rig.anchor) - rig.cam_pos;
     defs.defs

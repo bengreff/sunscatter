@@ -213,7 +213,7 @@ pub fn apply(
     settings: Res<GraphicsSettings>,
     mut commands: Commands,
     cams: Query<Entity, With<crate::camera::MainCamera>>,
-    mut lights: Query<&mut DirectionalLight, With<crate::scene::SunLight>>,
+    mut lights: Query<(&mut DirectionalLight, &crate::lighting::StarLight)>,
 ) {
     if !settings.is_changed() {
         return;
@@ -233,8 +233,9 @@ pub fn apply(
             e.remove::<Bloom>();
         }
     }
-    for mut l in &mut lights {
-        l.shadow_maps_enabled = s.shadows;
+    // Shadow maps (ships, nearby ground) from the brightest star only.
+    for (mut l, slot) in &mut lights {
+        l.shadow_maps_enabled = s.shadows && slot.0 == 0;
     }
 }
 

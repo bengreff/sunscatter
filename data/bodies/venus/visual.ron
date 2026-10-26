@@ -69,5 +69,12 @@
         // Venus is brighter than Lambert near full phase and darker at large phases; A = 1 is within
         // ~16 % of its V phase curve from 30 to 90 deg (Mallama et al. 2006, Icarus 182, 10).
         cloud_top: Some((altitude_m: 74000.0, albedo: (1.0, 0.973, 0.929))),
+        // The light reaching the ground for an overhead Sun: 90 +- 12 W/m2 of 2601 at the subsolar
+        // point (3.5 %, Moroz et al. 1983, Icarus 53, 509, Venera 11/12); its colour from Venera 11's
+        // surface spectrum (Moroz et al. 1980, Nature 284, 243; plotted in Grandidier et al. 2018,
+        // VEXAG 8003, fig. 1): ~36, 31, ~13 W m-2 um-1 sr-1 at 680, 550, 440 nm at a 37 deg Sun, x pi over
+        // the solar flux on the ground's plane at the top (read from a log plot, +-20 %). Blue is
+        // scattered back by 10-25 optical depths of CO2 and absorbed by the clouds' UV absorber.
+        ground_diffuse: Some((0.049, 0.034, 0.013)),
     )),
 )

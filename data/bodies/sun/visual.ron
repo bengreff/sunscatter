@@ -9,5 +9,7 @@
         // ~126,600 lux at 1 AU above the atmosphere (D055).
         luminosity_w: 3.828e26,
         luminous_efficacy: 93.0,
+        // IAU 2015 nominal effective temperature: the renderer's white.
+        temperature_k: Some(5772.0),
     )),
 )

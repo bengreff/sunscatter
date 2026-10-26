@@ -18,6 +18,7 @@
     pbr_functions::alpha_discard,
     mesh_view_bindings::globals,
 }
+#import sunscatter::light::{Lights, eclipse, MAX_STARS, MAX_SHINES}
 
 #ifdef PREPASS_PIPELINE
 #import bevy_pbr::{
@@ -28,7 +29,13 @@
 #import bevy_pbr::{
     forward_io::{VertexOutput, FragmentOutput},
     pbr_functions::{apply_pbr_lighting, main_pass_post_lighting_processing},
-    mesh_view_bindings::view,
+    pbr_functions,
+    pbr_types,
+    lighting,
+    shadows,
+    mesh_types,
+    mesh_view_types,
+    mesh_view_bindings::{view, lights},
     mesh_functions,
     view_transformations::position_world_to_clip,
 }
@@ -53,14 +60,9 @@ struct TerrainParams {
     flags: vec4<u32>,
     // rgb: base colour without a map.
     base: vec4<f32>,
-    // Lighting (D055): the star (centre, radius), the bodies that can
-    // eclipse it here (centre, radius; w = 0 unused), planetshine
-    // (reflector centre, lux here), and rgb shine colour + w this body's
-    // sunlight relative to the shared light's.
-    star: vec4<f32>,
-    occluders: array<vec4<f32>, 4>,
-    shine: vec4<f32>,
-    light: vec4<f32>,
+    // Lighting (D055, lighting::LightUniform): the drawn stars and their
+    // light here, the bodies that can eclipse them, planetshine.
+    starlight: Lights,
     // Ground textures: x > 0 loaded; y, z fine and coarse tile (detail uv).
     ground: vec4<f32>,
     // Mean linear colour of each ground layer.
@@ -79,11 +81,15 @@ struct TerrainParams {
     // (fraction of it), z east-west stretch, w tone contrast.
     clouds: vec4<f32>,
     // Under a haze: rgb vertical optical depth, w radius / scale height (0 off);
-    // rgb diffuse fraction (overhead Sun), w the Sun's lux at the camera.
+    // rgb diffuse fraction (overhead Sun).
     haze: vec4<f32>,
     haze_diffuse: vec4<f32>,
     // Rings: x inner, y outer radius (m), z the profile's bins (0: none).
     rings: vec4<f32>,
+    // Under an opaque deck: rgb the gas's extinction at the datum (m⁻¹), w
+    // its scale height (m); rgb the sky's radiance (lux/sr), w 1 when on.
+    fog: vec4<f32>,
+    fog_light: vec4<f32>,
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(100) var<uniform> terrain: TerrainParams;
@@ -105,17 +111,17 @@ struct TerrainParams {
 // average the transmission: rings::mip_chain), read with textureLoad.
 @group(#{MATERIAL_BIND_GROUP}) @binding(111) var ring_profile: texture_2d<f32>;
 
-// Sunlight through the rings at `p` (world, camera-relative): exp(−τ/|μ|)
-// where the ray to the star crosses the ring plane (rings::ring_transmission),
-// the profile averaged over `foot` (m, the pixel's footprint): no speckles
-// where the occultation's τ is noisy.
-fn ring_transmission(p: vec3<f32>, foot: f32) -> f32 {
+// Starlight through the rings at `p` (world, camera-relative) from a star
+// at `star`: exp(−τ/|μ|) where the ray to it crosses the ring plane
+// (rings::ring_transmission), the profile averaged over `foot` (m, the
+// pixel's footprint): no speckles where the occultation's τ is noisy.
+fn ring_transmission(p: vec3<f32>, foot: f32, star: vec3<f32>) -> f32 {
     let bins = terrain.rings.z;
     if bins <= 0.0 {
         return 1.0;
     }
     let n = normalize(terrain.fixed_z.xyz);
-    let l = normalize(terrain.star.xyz - p);
+    let l = normalize(star - p);
     let mu = dot(l, n);
     if abs(mu) < 1e-6 {
         return 1.0;
@@ -154,44 +160,6 @@ const GROUND_PATCH_STOPS: f32 = 0.35;
 // at 4 (zones::ground_octave_weight).
 fn ground_octave_weight(period: f32, foot: f32) -> f32 {
     return clamp(period / (4.0 * max(foot, 1e-9)) - 1.0, 0.0, 1.0);
-}
-
-// Area of overlap of two discs (radii r1, r2, centres d apart); mirrors
-// `sim::light::disc_overlap` (tested there).
-fn disc_overlap(r1: f32, r2: f32, d: f32) -> f32 {
-    if d >= r1 + r2 {
-        return 0.0;
-    }
-    if d <= abs(r1 - r2) {
-        let r = min(r1, r2);
-        return PI * r * r;
-    }
-    let a1 = acos(clamp((d * d + r1 * r1 - r2 * r2) / (2.0 * d * r1), -1.0, 1.0));
-    let a2 = acos(clamp((d * d + r2 * r2 - r1 * r1) / (2.0 * d * r2), -1.0, 1.0));
-    return r1 * r1 * (a1 - sin(a1) * cos(a1)) + r2 * r2 * (a2 - sin(a2) * cos(a2));
-}
-
-// Fraction of the star's disc visible from `p` past the occluders (their
-// hidden areas add up); mirrors `sim::light::eclipse_factor`. The
-// separation is atan2(|a × b|, a · b): acos loses ~3e-4 rad in f32 near
-// zero, a third of the Sun's radius seen from Jupiter.
-fn eclipse(p: vec3<f32>) -> f32 {
-    let to_star = terrain.star.xyz - p;
-    let ds = length(to_star);
-    let s_ang = asin(clamp(terrain.star.w / ds, 0.0, 1.0));
-    var hidden = 0.0;
-    for (var i = 0; i < 4; i++) {
-        let o = terrain.occluders[i];
-        let to_c = o.xyz - p;
-        let dc = length(to_c);
-        if o.w <= 0.0 || dc <= o.w || dc >= ds || dot(to_c, to_star) <= 0.0 {
-            continue;
-        }
-        let o_ang = asin(clamp(o.w / dc, 0.0, 1.0));
-        let sep = atan2(length(cross(to_c / dc, to_star / ds)), dot(to_c / dc, to_star / ds));
-        hidden += disc_overlap(s_ang, o_ang, sep);
-    }
-    return clamp(1.0 - hidden / (PI * s_ang * s_ang), 0.0, 1.0);
 }
 
 fn hash2(p: vec2<f32>) -> f32 {
@@ -534,6 +502,161 @@ fn perturb(n: vec3<f32>, dp1: vec3<f32>, dp2: vec3<f32>, duv1: vec2<f32>, duv2: 
     return normalize(t * s * tn.x + b * s * tn.y + n * tn.z);
 }
 
+#ifndef PREPASS_PIPELINE
+// The slot (terrain.starlight.stars) of Bevy's directional light `i`: the star in its
+// direction. Each slot's light shines from the camera's direction to that
+// star (lighting::update_lights), and Bevy orders its lights by entity, so
+// they are matched by direction, not by index.
+fn slot_of_light(i: u32) -> i32 {
+    let l = lights.directional_lights[i].direction_to_light.xyz;
+    var best = 0;
+    var best_dot = -2.0;
+    for (var k = 0; k < MAX_STARS; k++) {
+        let s = terrain.starlight.stars[k];
+        if s.w <= 0.0 {
+            continue;
+        }
+        let d = dot(l, normalize(s.xyz));
+        if d > best_dot {
+            best_dot = d;
+            best = k;
+        }
+    }
+    return best;
+}
+
+// Bevy's lighting input for this fragment, as `apply_pbr_lighting` builds
+// it (base layer; the terrain has no clearcoat or anisotropy), so each
+// directional light's share of its output can be found and rescaled.
+fn lighting_input_of(in: pbr_types::PbrInput) -> lighting::LightingInput {
+    let base = in.material.base_color;
+    let metallic = in.material.metallic;
+    let perceptual_roughness = in.material.perceptual_roughness;
+    let NdotV = max(dot(in.N, in.V), 0.0001);
+    var input: lighting::LightingInput;
+    input.layers[lighting::LAYER_BASE].NdotV = NdotV;
+    input.layers[lighting::LAYER_BASE].N = in.N;
+    input.layers[lighting::LAYER_BASE].R = reflect(-in.V, in.N);
+    input.layers[lighting::LAYER_BASE].perceptual_roughness = perceptual_roughness;
+    input.layers[lighting::LAYER_BASE].roughness = lighting::perceptualRoughnessToRoughness(perceptual_roughness);
+    input.P = in.world_position.xyz;
+    input.V = in.V;
+    input.diffuse_color = pbr_functions::calculate_diffuse_color(base.rgb, metallic, in.material.specular_transmission, in.material.diffuse_transmission);
+    input.metallic = metallic;
+    input.F0_dielectric = pbr_functions::calculate_F0_dielectric(in.material.reflectance);
+    input.F0_metallic = base.rgb;
+    input.F_ab = lighting::F_AB(perceptual_roughness, NdotV);
+    return input;
+}
+
+// Every star at its own flux, eclipses, ring shadow and elevation (D055):
+// `pbr` is Bevy's lighting of this fragment, whose directional lights
+// carry each slotted star's flux at the camera. Each light's share is
+// rescaled by its star's factor here; the rest (the sky light) by the
+// flux-weighted mean of the factors. Then, under a haze, each star's
+// diffuse light; planetshine from each reflector; and the starlight
+// without a slot as ambient.
+fn star_lighting(in: pbr_types::PbrInput, pbr: vec3<f32>, color: vec3<f32>, p: vec3<f32>, n: vec3<f32>) -> vec3<f32> {
+    let foot = length(fwidth(p));
+    let up_here = normalize(p - terrain.center.xyz);
+    var factor: array<vec3<f32>, 4>;
+    var sky_num = vec3(0.0);
+    var sky_den = 0.0;
+    var lit = vec3(0.0);
+    for (var k = 0; k < MAX_STARS; k++) {
+        let s = terrain.starlight.stars[k];
+        let sl = terrain.starlight.star_light[k];
+        factor[k] = vec3(0.0);
+        if s.w <= 0.0 || sl.w <= 0.0 {
+            continue;
+        }
+        let l = normalize(s.xyz - p);
+        let elev = dot(up_here, l);
+        // A point where this star has set gets neither its direct light
+        // nor its share of the sky light: fade through twilight (6° below
+        // to 3° above the local horizon), so night sides stay dark.
+        let seen = eclipse(p, s, terrain.starlight.occluders);
+        var f = vec3(sl.w * seen * ring_transmission(p, foot, s.xyz) * smoothstep(-0.105, 0.052, elev));
+        // Under a haze (Titan, Venus): the direct beam through the slant
+        // column (spherical-shell air mass), and the light the haze
+        // scatters down, Lambertian (lighting::haze_light).
+        if terrain.haze.w > 0.0 {
+            let mu = max(elev, 0.0);
+            let rh = terrain.haze.w;
+            let airmass = sqrt(rh * rh * mu * mu + 2.0 * rh + 1.0) - rh * mu;
+            f *= exp(-terrain.haze.rgb * airmass);
+            lit += color * terrain.haze_diffuse.rgb * sl.rgb * seen * mu / PI * view.exposure;
+        }
+        factor[k] = f;
+        let e_cam = lighting_luminance(sl.rgb) / sl.w;
+        sky_num += f * e_cam;
+        sky_den += e_cam;
+    }
+    // Bevy's directional lights, one by one, as apply_pbr_lighting adds them.
+    var input = lighting_input_of(in);
+    let view_z = dot(vec4(
+        view.view_from_world[0].z,
+        view.view_from_world[1].z,
+        view.view_from_world[2].z,
+        view.view_from_world[3].z
+    ), in.world_position);
+    var direct = vec3(0.0);
+    for (var i = 0u; i < lights.n_directional_lights; i++) {
+        var shadow = 1.0;
+        if (in.flags & mesh_types::MESH_FLAGS_SHADOW_RECEIVER_BIT) != 0u
+                && (lights.directional_lights[i].flags & mesh_view_types::DIRECTIONAL_LIGHT_FLAGS_SHADOWS_ENABLED_BIT) != 0u {
+            shadow = shadows::fetch_directional_shadow(i, in.world_position, in.world_normal, view_z, in.frag_coord.xy);
+        }
+        let c = lighting::directional_light(i, &input, true) * shadow * view.exposure;
+        direct += c;
+        lit += c * factor[slot_of_light(i)];
+    }
+    var sky = vec3(1.0);
+    if sky_den > 0.0 {
+        sky = sky_num / sky_den;
+    }
+    lit += max(pbr - direct, vec3(0.0)) * sky;
+    // Planetshine: a Lambert term from each reflecting body.
+    for (var m = 0; m < MAX_SHINES; m++) {
+        let sh = terrain.starlight.shines[m];
+        if sh.w <= 0.0 {
+            continue;
+        }
+        let l = normalize(sh.xyz - p);
+        lit += color * terrain.starlight.shine_light[m].rgb * max(dot(n, l), 0.0) / PI * view.exposure;
+    }
+    // Starlight without a light slot (a fifth star), sphere-averaged.
+    lit += color * terrain.starlight.ambient.x / PI * view.exposure;
+    return lit;
+}
+
+// Under an opaque deck (Venus): the gas between the camera (the origin)
+// and `p` scatters the sky's light towards the camera, a deep conservative
+// medium whose source is the sky's radiance (lighting::haze::
+// fog_transmittance, mirrored).
+fn deck_fog(lit: vec3<f32>, p: vec3<f32>) -> vec3<f32> {
+    if terrain.fog_light.w <= 0.0 {
+        return lit;
+    }
+    let r = terrain.shape.x;
+    let h = terrain.fog.w;
+    let z1 = length(terrain.center.xyz) - r;
+    let z2 = length(p - terrain.center.xyz) - r;
+    let d = length(p);
+    let dz = z2 - z1;
+    var mean = exp(-0.5 * (z1 + z2) / h);
+    if abs(dz) > 1e-3 * h {
+        mean = h * (exp(-z1 / h) - exp(-z2 / h)) / dz;
+    }
+    let t = exp(-terrain.fog.rgb * d * mean);
+    return lit * t + terrain.fog_light.rgb * view.exposure * (1.0 - t);
+}
+
+fn lighting_luminance(c: vec3<f32>) -> f32 {
+    return dot(c, vec3(0.2126, 0.7152, 0.0722));
+}
+#endif
+
 @fragment
 fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> FragmentOutput {
     var pbr_input = pbr_input_from_standard_material(in, is_front);
@@ -744,37 +867,8 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
 #else
     var out: FragmentOutput;
     out.color = apply_pbr_lighting(pbr_input);
-    // Sunlight at this body's own distance, dimmed where another body
-    // hides the star (D055: never the flux at the camera).
-    let foot = length(fwidth(in.world_position.xyz));
-    let sun = terrain.light.w * eclipse(in.world_position.xyz) * ring_transmission(in.world_position.xyz, foot);
-    // The sky light (Bevy's environment map) is the sky seen from the
-    // camera; a point where the Sun has set has no such sky. Fade all
-    // non-direct light out through twilight (Sun 6° below to 3° above the
-    // local horizon), so night sides stay dark (direct light is already
-    // zero there).
-    let up_here = normalize(in.world_position.xyz - terrain.center.xyz);
-    let sun_elev = dot(up_here, normalize(terrain.star.xyz - in.world_position.xyz));
-    let day = smoothstep(-0.105, 0.052, sun_elev);
-    var lit = out.color.rgb * sun * day;
-    // Under a haze (Titan, Venus): the direct beam through the slant
-    // column (spherical-shell air mass), and the light the haze scatters
-    // down, Lambertian (lighting::haze_light).
-    if terrain.haze.w > 0.0 {
-        let mu = max(sun_elev, 0.0);
-        let rh = terrain.haze.w;
-        let airmass = sqrt(rh * rh * mu * mu + 2.0 * rh + 1.0) - rh * mu;
-        lit *= exp(-terrain.haze.rgb * airmass);
-        let e = terrain.haze_diffuse.w * terrain.light.w * eclipse(in.world_position.xyz);
-        lit += color * terrain.haze_diffuse.rgb * e * mu / PI * view.exposure;
-    }
-    // Planetshine: a Lambert term from the reflecting body.
-    if terrain.shine.w > 0.0 {
-        let l = normalize(terrain.shine.xyz - in.world_position.xyz);
-        let n = normalize(in.world_normal);
-        lit += color * terrain.light.rgb * terrain.shine.w * max(dot(n, l), 0.0) / PI * view.exposure;
-    }
-    out.color = vec4(lit, out.color.a);
+    out.color = vec4(star_lighting(pbr_input, out.color.rgb, color, in.world_position.xyz, normalize(in.world_normal)), out.color.a);
+    out.color = vec4(deck_fog(out.color.rgb, in.world_position.xyz), out.color.a);
     out.color = main_pass_post_lighting_processing(pbr_input, out.color);
 #endif
     return out;

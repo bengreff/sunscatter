@@ -171,8 +171,6 @@ pub fn setup(
             snow: detail.map_or(v4([1.0; 3], def.roughness), |d| v4(d.snow_color, def.roughness)),
             ocean: def.ocean.as_ref().map_or(Vec4::ONE, |o| v4(o.albedo, o.roughness)),
             base: v4(def.base_color, 1.0),
-            // Full sunlight until lighting.rs fills in the real values.
-            light: Vec4::ONE,
             // Tiles of 5 m and 40 m for a 40 m detail scale (they divide the
             // detail uv's 256-unit wrap, so there is no seam).
             ground: Vec4::new(if ground.is_some() { 1.0 } else { 0.0 }, 0.125, 1.0, 0.0),

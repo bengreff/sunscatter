@@ -140,8 +140,24 @@ pub const GROUND_SUN_DEG: f64 = 10.0;
 /// margin above the atmosphere's top (fraction of its thickness).
 pub const LIMB_FRACTION: f64 = 0.015;
 const LIMB_ABOVE_AIR: f64 = 1.05;
-/// The ground view's height above the terrain (m).
+/// The ground view's height above the terrain (m), at most.
 pub const GROUND_ALTITUDE_M: f64 = 2000.0;
+/// The ground view stands within this vertical optical depth (green) of
+/// the ground, so the ground shows through thick air.
+const GROUND_TAU: f64 = 0.05;
+
+/// The ground view's height above the terrain: [`GROUND_ALTITUDE_M`], or
+/// lower where the air at the ground (extinction `extinction_m`, m⁻¹ in
+/// green) would veil the ground from there: Venus's 90 bar of CO₂ (one
+/// optical depth per ~1 km) puts the camera ~50 m up, Titan's haze ~500 m,
+/// Earth stays at 2 km.
+pub fn ground_altitude(extinction_m: f64) -> f64 {
+    if extinction_m > 0.0 {
+        GROUND_ALTITUDE_M.min(GROUND_TAU / extinction_m)
+    } else {
+        GROUND_ALTITUDE_M
+    }
+}
 /// How far below the horizon the view's centre points (deg): the horizon
 /// sits in the upper part of the frame (the vertical half field is 22.5°).
 pub const HORIZON_MARGIN_DEG: f64 = 8.0;
@@ -161,12 +177,12 @@ pub struct Pose {
 
 /// The camera's height above the reference radius for `view` of a body of
 /// equatorial radius `radius` whose atmosphere reaches `air_top` (m, 0 for
-/// none).
-pub fn altitude(view: View, radius: f64, air_top: f64) -> f64 {
+/// none) with extinction `extinction_m` at the ground (m⁻¹, green).
+pub fn altitude(view: View, radius: f64, air_top: f64, extinction_m: f64) -> f64 {
     match view {
         View::Disc | View::Eclipse | View::Transit => (DISC_RADII - 1.0) * radius,
         View::Limb => (LIMB_FRACTION * radius).max(LIMB_ABOVE_AIR * air_top),
-        View::Ground => GROUND_ALTITUDE_M,
+        View::Ground => ground_altitude(extinction_m),
     }
 }
 
@@ -361,7 +377,7 @@ pub fn run(
     if !tour.prepared {
         // A new view: its clock (the event views search for theirs).
         let base = tour.base.unwrap_or(sim.clock);
-        let star = defs.light_source.map(|l| l.0);
+        let star = crate::lighting::brightest_star(&defs, &sim, node, DVec3::ZERO);
         let (clock, framed) = match view {
             View::Eclipse | View::Transit => match star.and_then(|s| event(&sim, s, node, view, base)) {
                 Some(e) => e,
@@ -402,22 +418,25 @@ pub fn aim(
 ) {
     let Some((node, view)) = tour.and_then(|t| t.current) else { return };
     let Some(p) = sim.world.source(node).and_then(|s| s.physical.as_ref()) else { return };
-    let Some(sun) = defs.light_source.map(|l| l.0) else { return };
+    let Some(sun) = crate::lighting::brightest_star(&defs, &sim, node, DVec3::ZERO) else { return };
     let snap = sim.world.snapshot(sim.clock);
     let to_sun = snap.relative_r(sun, node).normalize();
-    let air_top = defs.get(node).and_then(|d| d.atmosphere.as_ref()).map_or(0.0, |a| f64::from(a.thickness_m));
+    let air = defs.get(node).and_then(|d| d.atmosphere.as_ref());
+    let air_top = air.map_or(0.0, |a| f64::from(a.thickness_m));
+    let extinction =
+        air.map_or(0.0, |a| f64::from(a.rayleigh_scattering[1] + a.mie_scattering[1] + a.mie_absorption[1]));
     // A ringed body's disc view frames its rings (3 ring radii).
     let rings = defs.get(node).and_then(|d| d.rings.as_ref()).map_or(0.0, |r| f64::from(r.outer_m));
     let view = view.pose_view();
     let framed = if view == View::Disc { p.radius_eq.max(rings) } else { p.radius_eq };
-    let alt = altitude(view, framed, air_top) + framed - p.radius_eq;
+    let alt = altitude(view, framed, air_top, extinction) + framed - p.radius_eq;
     let pose = pose(view, to_sun, p.rotation.pole(sim.clock), p.radius_eq, alt);
     let centre = snap.relative_r(node, rig.anchor);
     let mut cam_pos = centre + pose.offset;
     if view == View::Ground {
         // Over the terrain, not the sphere.
         let above = camera::clearance(&sim.world, &snap, rig.anchor, cam_pos);
-        cam_pos += pose.up * (GROUND_ALTITUDE_M - above);
+        cam_pos += pose.up * (ground_altitude(extinction) - above);
     }
     rig.cam_pos = cam_pos;
     rig.distance = (cam_pos - centre).length();
@@ -440,17 +459,20 @@ mod tests {
     fn views_are_placed_and_lit_as_specified() {
         let sun = DVec3::new(0.3, -0.8, 0.2).normalize();
         let pole = DVec3::new(0.1, 0.2, 1.0).normalize();
-        // (view, atmosphere top, expected height above the radius)
+        // (view, atmosphere top, extinction at the ground (m-1, green),
+        // expected height above the radius)
         let cases = [
-            (View::Disc, 0.0, 2.0 * R),
-            (View::Limb, 0.0, 0.015 * R),
-            (View::Limb, 1.0e5, 1.05e5),    // Earth-like: just above the air
-            (View::Limb, 6.0e5, 6.3e5),     // Titan-like: well above 1.5 %
-            (View::Ground, 1.0e5, 2_000.0), // over the sphere; `aim` lifts it over terrain
+            (View::Disc, 0.0, 0.0, 2.0 * R),
+            (View::Limb, 0.0, 0.0, 0.015 * R),
+            (View::Limb, 1.0e5, 1.3e-5, 1.05e5),    // Earth-like: just above the air
+            (View::Limb, 6.0e5, 5.2e-5, 6.3e5),     // Titan-like: well above 1.5 %
+            (View::Ground, 1.0e5, 1.3e-5, 2_000.0), // over the sphere; `aim` lifts it over terrain
+            (View::Ground, 6.0e5, 1.07e-4, 0.05 / 1.07e-4), // Titan's N2 and haze: ~470 m
+            (View::Ground, 3.5e5, 1.06e-3, 0.05 / 1.06e-3), // Venus's CO2: ~47 m up, tau 0.05
         ];
-        for (view, air, want) in cases {
-            let alt = altitude(view, R, air);
-            assert!((alt - want).abs() < 1e-6, "{view:?} {air}: {alt}");
+        for (view, air, ext, want) in cases {
+            let alt = altitude(view, R, air, ext);
+            assert!((alt - want).abs() < 1e-6, "{view:?} {air} {ext}: {alt}");
             let p = pose(view, sun, pole, R, alt);
             assert!((p.offset.length() - (R + alt)).abs() < 1e-3, "{view:?}");
             assert!((p.look.length() - 1.0).abs() < 1e-12 && (p.up.length() - 1.0).abs() < 1e-12, "{view:?}");

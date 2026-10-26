@@ -41,18 +41,9 @@ pub struct TerrainParams {
     pub ocean: Vec4,
     pub flags: UVec4,
     pub base: Vec4,
-    /// Lighting (D055, `lighting.rs`). xyz: the star's centre relative to
-    /// the camera, w: its radius (m).
-    pub star: Vec4,
-    /// The bodies that can eclipse the star here (`lighting::occluders`):
-    /// centre, radius (w = 0: unused slot).
-    pub occluders: [Vec4; crate::lighting::MAX_OCCLUDERS],
-    /// Planetshine: the reflecting body's centre, w: illuminance (lux) at
-    /// this body's centre.
-    pub shine: Vec4,
-    /// rgb: planetshine colour; w: this body's sunlight relative to the
-    /// shared light's (flux at the body / flux at the camera).
-    pub light: Vec4,
+    /// Lighting (D055, `lighting::LightUniform`): the drawn stars, their
+    /// light at this body, the bodies that can eclipse them, planetshine.
+    pub starlight: crate::lighting::LightUniform,
     /// Ground textures (`ground.rs`): x > 0 when loaded; y, z: fine and
     /// coarse tile sizes in detail-uv units.
     pub ground: Vec4,
@@ -78,11 +69,16 @@ pub struct TerrainParams {
     /// Under a hazy atmosphere (`lighting::HazeLight`): rgb the vertical
     /// optical depth, w the radius over the scale height (0 = no haze).
     pub haze: Vec4,
-    /// rgb: the diffuse fraction for an overhead Sun; w: the Sun's lux at
-    /// the camera (set each frame).
+    /// rgb: the diffuse fraction for an overhead Sun (w unused).
     pub haze_diffuse: Vec4,
     /// Rings (`rings`): x inner, y outer radius (m), z the profile's bins (0: none).
     pub rings: Vec4,
+    /// Under an opaque deck (`clouds`): rgb the gas's extinction at the
+    /// datum (m⁻¹), w its scale height (m).
+    pub fog: Vec4,
+    /// rgb: the sky's radiance the gas scatters towards the camera
+    /// (lux/sr); w 1 when the camera is below the deck (0: no fog).
+    pub fog_light: Vec4,
 }
 
 #[derive(Asset, AsBindGroup, Reflect, Debug, Clone, Default)]

@@ -33,8 +33,6 @@ fn the_shader_uses_these_constants() {
         format!("const TONE_MIN_M: f32 = {TONE_MIN_M:?};"),
         format!("zone_color: array<vec4<f32>, {MAX_ZONES}>,"),
         format!("zone_pattern: array<vec4<f32>, {MAX_ZONES}>,"),
-        format!("occluders: array<vec4<f32>, {}>,", crate::lighting::MAX_OCCLUDERS),
-        format!("for (var i = 0; i < {}; i++) {{", crate::lighting::MAX_OCCLUDERS),
     ] {
         assert!(wgsl.contains(&decl), "terrain.wgsl lacks `{decl}`");
     }

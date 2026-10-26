@@ -69,7 +69,11 @@ pub fn setup(
             atmosphere::spawn(&mut commands, &mut media, src.node, mean, a);
         }
         if let Some(e) = &def.emissive {
-            defs.light_source = Some((src.node, crate::lighting::luminous_power(e.luminosity_w, e.luminous_efficacy)));
+            defs.stars.push(crate::lighting::StarDef {
+                node: src.node,
+                lm: crate::lighting::luminous_power(e.luminosity_w, e.luminous_efficacy),
+                tint: e.temperature_k.map_or([1.0; 3], crate::lighting::color::star_tint),
+            });
         }
         // Bodies with a surface are drawn by the terrain system.
         if def.emissive.is_none() {
@@ -95,7 +99,18 @@ pub fn setup(
         ..default()
     }
     .build();
-    commands.spawn((SunLight, DirectionalLight { illuminance: 128_000.0, ..default() }, cascades, Transform::IDENTITY));
+    // One directional light per drawn star (lighting::star_slots), at most
+    // MAX_STARS; only the brightest casts shadow maps (settings::apply).
+    for slot in 0..defs.stars.len().min(crate::lighting::MAX_STARS) {
+        commands.spawn((
+            SunLight,
+            crate::lighting::StarLight(slot),
+            DirectionalLight { illuminance: 0.0, ..default() },
+            bevy::light::SunDisk::EARTH,
+            cascades.clone(),
+            Transform::IDENTITY,
+        ));
+    }
     commands.insert_resource(GlobalAmbientLight { brightness: 0.0, ..default() });
     commands.insert_resource(defs);
     commands.insert_resource(Assets3d {
@@ -131,8 +146,8 @@ fn craft_mesh(m: &sim::craft::RenderMesh) -> Mesh {
 #[derive(Resource, Default)]
 pub struct BodyDefs {
     pub defs: Vec<(NodeId, BodyVisualDef)>,
-    /// The star lighting the scene and its luminous power (lm).
-    pub light_source: Option<(NodeId, f64)>,
+    /// Every star (an emissive body), in the world's order.
+    pub stars: Vec<crate::lighting::StarDef>,
 }
 
 impl BodyDefs {
@@ -154,9 +169,7 @@ pub fn body_matrix(p: &BodyPhysical, t: Epoch) -> DMat3 {
 pub fn update_bodies(
     sim: Res<SimState>,
     rig: Res<CameraRig>,
-    defs: Res<BodyDefs>,
     mut bodies: Query<(&BodyVisual, &mut Transform), Without<SunLight>>,
-    mut light: Query<(&mut Transform, &mut DirectionalLight), With<SunLight>>,
 ) {
     let snap = sim.world.snapshot(sim.clock);
     for (body, mut t) in &mut bodies {
@@ -169,15 +182,6 @@ pub fn update_bodies(
             rotation: q.as_quat(),
             scale: Vec3::new(p.radius_eq as f32, p.radius_polar as f32, p.radius_eq as f32),
         };
-        if let Some((_, lm)) = defs.light_source.filter(|(n, _)| *n == body.0) {
-            if let Ok((mut lt, mut l)) = light.single_mut() {
-                // The shared light carries the flux at the camera; each lit
-                // body rescales it to its own distance (lighting.rs).
-                let dir = -pos.normalize().as_vec3();
-                *lt = Transform::IDENTITY.looking_to(dir, light_up(dir));
-                l.illuminance = crate::lighting::flux(lm, pos.length()) as f32;
-            }
-        }
     }
 }
 
@@ -333,24 +337,13 @@ pub fn update_ships(
     sim: Res<SimState>,
     rig: Res<CameraRig>,
     assets: Res<Assets3d>,
-    defs: Res<BodyDefs>,
+    scene: Res<crate::lighting::LightScene>,
     settings: Res<crate::settings::GraphicsSettings>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut ships: Query<(Entity, &ShipVisual, &mut Transform, &MeshMaterial3d<StandardMaterial>)>,
 ) {
-    use crate::lighting::{object_light, Sphere};
     let snap = sim.world.snapshot(sim.clock);
-    let rel = |n: NodeId| snap.relative_r(n, rig.anchor) - rig.cam_pos;
-    let star = defs.light_source.map(|(n, lm)| (rel(n), physical(&sim.world, n).map_or(0.0, |p| p.radius_eq), lm));
-    let bodies: Vec<Sphere> = sim
-        .world
-        .surfaces()
-        .filter_map(|s| {
-            let p = s.physical.as_ref()?;
-            let albedo = defs.get(s.node).map_or(0.3, |d| f64::from(d.albedo));
-            Some(Sphere { centre: rel(s.node), radius: p.radius_eq, albedo })
-        })
-        .collect();
+    let bodies = scene.spheres();
     let mut seen = vec![false; sim.fleet.len()];
     for (entity, ship, mut t, mat) in &mut ships {
         let Some(vessel) = sim.fleet.get(ship.0) else {
@@ -369,8 +362,10 @@ pub fn update_ships(
         // hides the Sun, plus planetshine as a diffuse glow where it does
         // (in sunlight the sky light and sunlight already dominate, and a
         // uniform glow would light every face).
-        let (visible, shine) = star.map_or((1.0, 0.0), |(c, radius, lm)| object_light(pos, c, radius, lm, &bodies));
-        let shine = if settings.earthshine { shine * (1.0 - visible) } else { 0.0 };
+        let light = crate::lighting::object_light(pos, &scene.stars, &scene.slots, &bodies);
+        let visible = light.visible;
+        let shine =
+            if settings.earthshine { crate::lighting::rules::luminance(light.shine) * (1.0 - visible) } else { 0.0 };
         let [r0, g0, b0] = if ship.0 == sim.active { ACTIVE_COLOR } else { SHIP_COLOR };
         let LinearRgba { red: r0, green: g0, blue: b0, .. } = Color::srgb(r0, g0, b0).to_linear();
         let k = visible as f32;

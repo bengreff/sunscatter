@@ -44,7 +44,7 @@ pub fn draw(
     }
     let ctx = contexts.ctx_mut()?;
     let Some(view) = map::view(&cam) else { return Ok(()) };
-    let Some((sun, _)) = defs.light_source else { return Ok(()) };
+    let Some(sun) = crate::lighting::brightest_star(&defs, &sim, rig.anchor, rig.cam_pos) else { return Ok(()) };
     let Some(radius) = sim.world.source(sun).and_then(|s| s.physical.as_ref()).map(|p| p.radius_eq) else {
         return Ok(());
     };

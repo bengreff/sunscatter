@@ -79,14 +79,17 @@ pub fn ambient_share(body: NodeId, sky: (f32, Option<NodeId>)) -> f32 {
 const NIGHT_AMBIENT: f32 = 0.001 / std::f32::consts::PI;
 const SKY_AMBIENT: f32 = 4000.0;
 
-/// Fraction of the Sun's disc not hidden by any body, from the camera (at
-/// the render origin); `lighting::eclipse_factor` is the one rule.
+/// Fraction of a star's disc not hidden by any other body (gas giants and
+/// other stars included), from the camera (at the render origin);
+/// `lighting::eclipse_factor` is the one rule.
 pub fn sun_visibility(sim: &SimState, rig: &CameraRig, sun: sim::frame::NodeId, sun_radius: f64) -> f64 {
     let snap = sim.world.snapshot(sim.clock);
     let sun_pos = snap.relative_r(sun, rig.anchor) - rig.cam_pos;
     let bodies: Vec<(DVec3, f64)> = sim
         .world
-        .surfaces()
+        .sources
+        .iter()
+        .filter(|s| s.node != sun)
         .filter_map(|s| {
             let p = s.physical.as_ref()?;
             Some((snap.relative_r(s.node, rig.anchor) - rig.cam_pos, (p.radius_eq + p.radius_polar) * 0.5))

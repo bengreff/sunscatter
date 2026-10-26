@@ -31,10 +31,12 @@ pub struct RingParams {
     pub center: Vec4,
     /// xyz: the ring plane's normal (the pole).
     pub normal: Vec4,
-    /// xyz: the star relative to the camera; w: its illuminance at the rings (lux).
-    pub star: Vec4,
     /// x inner, y outer radius (m), z the profile's bins.
     pub radii: Vec4,
+    /// The planet's light (`lighting::LightUniform`), its own body first
+    /// among the occluders: every drawn star, the planet's and its moons'
+    /// shadows.
+    pub starlight: crate::lighting::LightUniform,
 }
 
 #[derive(Asset, AsBindGroup, Reflect, Debug, Clone)]
@@ -219,13 +221,11 @@ pub fn setup(
 pub fn update(
     sim: Res<SimState>,
     rig: Res<CameraRig>,
-    defs: Res<BodyDefs>,
+    scene: Res<crate::lighting::LightScene>,
     mut rings: Query<(&Rings, &MeshMaterial3d<RingMaterial>, &mut Transform)>,
     mut materials: ResMut<Assets<RingMaterial>>,
 ) {
-    let Some((star_node, lm)) = defs.light_source else { return };
     let snap = sim.world.snapshot(sim.clock);
-    let star = snap.relative_r(star_node, rig.anchor) - rig.cam_pos;
     for (r, mat, mut t) in &mut rings {
         let Some(p) = sim.world.source(r.0).and_then(|s| s.physical.as_ref()) else { continue };
         let centre = snap.relative_r(r.0, rig.anchor) - rig.cam_pos;
@@ -239,8 +239,9 @@ pub fn update(
         };
         m.params.center = centre.as_vec3().extend(p.radius_eq as f32);
         m.params.normal = pole.as_vec3().extend(0.0);
-        let e = crate::lighting::flux(lm, (star - centre).length().max(1.0));
-        m.params.star = star.as_vec3().extend(e as f32);
+        if let (Some(i), Some(light)) = (scene.index(r.0), scene.body(r.0)) {
+            m.params.starlight = crate::lighting::LightUniform::new(&scene, &light, &[i], false);
+        }
     }
 }
 

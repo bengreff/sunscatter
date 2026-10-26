@@ -217,8 +217,13 @@ pub fn update(
             }
         }
         if let Some(d) = deck {
-            // Above the deck's top, only the gas above it (the shell is the deck).
+            // Above the deck's top, only the gas above it (the shell is the
+            // deck); below it, none: the shell is the sky, and the gas fogs
+            // the ground (`clouds::update`).
             let above = (rig.cam_pos - centre).length() - p.radius_eq > f64::from(d.top_m);
+            if !above {
+                candidates.pop();
+            }
             let want = if above { &d.above } else { &d.full };
             if a.1.medium != *want {
                 a.1.medium = want.clone();
@@ -320,15 +325,18 @@ pub fn update_sky_light(
     rig: Res<CameraRig>,
     mut commands: Commands,
     mut cams: Query<SkyLightCamera, With<MainCamera>>,
-    atmos: Query<&BodyAtmosphere>,
+    atmos: Query<(&BodyAtmosphere, Has<Atmosphere>)>,
     mut stash: Local<Option<GeneratedEnvironmentMapLight>>,
 ) {
     let snap = sim.world.snapshot(sim.clock);
-    // How deep the camera is in the nearest atmosphere (fraction of its
-    // thickness above the ground; above 1: outside).
+    // How deep the camera is in the nearest drawn atmosphere (fraction of
+    // its thickness above the ground; above 1: outside). An atmosphere not
+    // drawn (below an opaque deck: `update`) gives no sky light: Bevy would
+    // light the ground with the last drawn atmosphere's sky.
     let (depth, hazy) = atmos
         .iter()
-        .map(|a| {
+        .filter(|(_, drawn)| *drawn)
+        .map(|(a, _)| {
             let r = (rig.cam_pos - snap.relative_r(a.0, rig.anchor)).length();
             let (lo, hi) = (f64::from(a.1.inner_radius), f64::from(a.1.outer_radius));
             ((r - lo) / (hi - lo), a.2)
