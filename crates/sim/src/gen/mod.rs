@@ -82,6 +82,23 @@ pub fn generate(bodies: &[InitialBody], tree: &[NodeSpec], cfg: &GenConfig) -> (
     let seg_steps: Vec<usize> = (0..tree.len())
         .map(|n| if n == 0 { 0 } else { choose_segment_steps(&trial.samples[n], tree[n].tolerance, cfg) })
         .collect();
+    generate_with_segments(bodies, tree, cfg, &seg_steps)
+}
+
+/// [`generate`] with each node's segment length given (in steps; the
+/// root's is ignored) instead of chosen on a trial run: regenerating the
+/// start of a shipped ephemeris with its own segment lengths gives the
+/// same bits, without the trial.
+pub fn generate_with_segments(
+    bodies: &[InitialBody],
+    tree: &[NodeSpec],
+    cfg: &GenConfig,
+    seg_steps: &[usize],
+) -> (Ephemeris, Vec<NodeReport>) {
+    assert_eq!(cfg.start.fractional_second(), 0.0, "start must be whole seconds");
+    let total_steps = (cfg.end.whole_seconds() - cfg.start.whole_seconds()) / cfg.step;
+    let mut seg_steps = seg_steps.to_vec();
+    seg_steps[0] = 0;
     // Run until every node's last segment is complete and the window is
     // covered (powers of two: a whole number of the longest segment).
     let full_steps = if cfg.free_segments {

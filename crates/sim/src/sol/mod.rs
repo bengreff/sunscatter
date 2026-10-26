@@ -121,7 +121,8 @@ pub fn tree(bodies: &[InitialBody], catalog: &Catalog) -> Vec<NodeSpec> {
 
 /// Assumption set: Newtonian point masses for all bodies (the planets'
 /// systems and the dwarf planets' as one mass each), the Sun's 1PN field, and
-/// Earth's J2 about its IAU precessing pole.
+/// Earth's J2 about its IAU precessing pole. Segment lengths are free and
+/// coefficients quantized (stored as small integers).
 pub fn gen_config(bodies: &[InitialBody], years: f64) -> GenConfig {
     let start = sol_epoch();
     let idx = |name: &str| bodies.iter().position(|b| b.name == name).expect(name);

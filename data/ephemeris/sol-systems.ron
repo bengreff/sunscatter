@@ -1,0 +1,178 @@
+// The Solar System beyond the planets (D084, D014): dwarf planets and moon
+// systems, read by `ephem-tool sol` and the golden tests (sim::sol::systems).
+//
+// * Dwarf planets join the planetary integration as point masses (for those
+//   with moons, the system barycenter with the whole system's GM), from
+//   JPL Horizons small-body solutions (SSB-centred, ICRF).
+// * Each moon system is integrated in its barycenter's frame (the node of
+//   the planetary ephemeris) under the tides of the Sun and planets, with
+//   the primary's zonal field: J2, radius and pole from its body.ron, J4
+//   and J6 here (referenced to that radius). Members' states from Horizons
+//   relative to the barycenter. `step`: a few hundred per orbit of the
+//   fastest member; `trial_days`: the span that chooses segment lengths
+//   (whole orbits of the slowest member, which the golden test regenerates).
+// * GM in km³/s². Sources: "JPL" = the Horizons object pages (fetched
+//   2026-10-25; satellite values from JPL's satellite ephemerides JUP365,
+//   SAT441, URA182, NEP105, PLU060 and the TNO satellite solutions).
+// * Tolerances (D042): moons 100 m, a primary about its barycenter 10 m
+//   (the moons' positions about it go through it), dwarf planets 1 km.
+(
+    dwarfs: [
+        // Ceres: GM JPL (Dawn), inside Jupiter's orbit: under the Sun.
+        (name: "Ceres", horizons: "1;", gm: 62.6284, parent: "Sun", tolerance: 1000.0),
+        // Eris + Dysnomia: system GM from the JPL satellite solution's ranges
+        // (Eris 1069.1-1089.3, Dysnomia 9.56-29.7; Holler et al. 2021,
+        // 1.6466e22 kg). The current heliocentric solution is of the barycenter.
+        (name: "Eris barycenter", horizons: "136199;", gm: 1098.85, parent: "SSB", tolerance: 1000.0),
+        // Haumea + Hi'iaka + Namaka: 264.413 + 1.151 + 0.036 (JPL).
+        (name: "Haumea barycenter", horizons: "136108;", gm: 265.600, parent: "SSB", tolerance: 1000.0),
+        // Makemake: (2.69 +- 0.20)e21 kg from MK2's orbit (via Wikipedia,
+        // 2026-10), G = 6.6743e-20 km³/(kg s²); MK2 (r ~87 km) not modelled.
+        (name: "Makemake", horizons: "136472;", gm: 179.5, parent: "SSB", tolerance: 1000.0),
+        // Gonggong: (1.75 +- 0.07)e21 kg (Kiss et al. 2019, from Xiangliu).
+        (name: "Gonggong", horizons: "225088;", gm: 116.8, parent: "SSB", tolerance: 1000.0),
+        // Quaoar: (1.212 +- 0.005)e21 kg from Weywot's orbit (via Wikipedia, 2026-10).
+        (name: "Quaoar", horizons: "50000;", gm: 80.89, parent: "SSB", tolerance: 1000.0),
+        // Sedna: no moon, mass unknown. Estimate: diameter 906 km (Lellouch
+        // et al. 2013, Herschel) at an assumed 1.5 g/cm³: 5.84e20 kg.
+        (name: "Sedna", horizons: "90377;", gm: 39.0, parent: "SSB", tolerance: 1000.0),
+        // Orcus + Vanth: 38.5596 + 3.4704 (JPL).
+        (name: "Orcus barycenter", horizons: "90482;", gm: 42.0300, parent: "SSB", tolerance: 1000.0),
+    ],
+    systems: [
+        (
+            barycenter: "Jupiter barycenter",
+            horizons_center: "500@5",
+            step: 480,
+            degree: 20,
+            trial_days: 120.0,
+            perturbers: ["Sun", "Mercury", "Venus", "EMB", "Mars", "Saturn barycenter", "Uranus barycenter", "Neptune barycenter"],
+            // Juno: Iess et al. 2018, Nature 555, 220 (R = 71,492 km).
+            j4: -586.623e-6,
+            j6: 34.244e-6,
+            members: [
+                // JUP365 planet GM; the four moons and it are 2.5 km³/s² short of
+                // DE440's system GM (small moons, different solutions).
+                (name: "Jupiter", horizons: "599", gm: 126686531.900, tolerance: 10.0),
+                (name: "Io", horizons: "501", gm: 5959.9155, tolerance: 100.0),
+                (name: "Europa", horizons: "502", gm: 3202.7121, tolerance: 100.0),
+                (name: "Ganymede", horizons: "503", gm: 9887.8328, tolerance: 100.0),
+                (name: "Callisto", horizons: "504", gm: 7179.2834, tolerance: 100.0),
+            ],
+        ),
+        (
+            barycenter: "Saturn barycenter",
+            horizons_center: "500@6",
+            step: 240,
+            degree: 20,
+            // Phoebe's year is 550 days.
+            trial_days: 600.0,
+            perturbers: ["Sun", "Mercury", "Venus", "EMB", "Mars", "Jupiter barycenter", "Uranus barycenter", "Neptune barycenter"],
+            // Cassini Grand Finale: Iess et al. 2019, Science 364, eaat2965
+            // (R = 60,330 km: J4 -935.314e-6, J6 86.340e-6), rescaled to
+            // R = 60,268 km by (60330/60268)^n.
+            j4: -939.169e-6,
+            j6: 86.874e-6,
+            members: [
+                (name: "Saturn", horizons: "699", gm: 37931206.234, tolerance: 10.0),
+                (name: "Mimas", horizons: "601", gm: 2.503489, tolerance: 100.0),
+                (name: "Enceladus", horizons: "602", gm: 7.210367, tolerance: 100.0),
+                (name: "Tethys", horizons: "603", gm: 41.21, tolerance: 100.0),
+                (name: "Dione", horizons: "604", gm: 73.116, tolerance: 100.0),
+                (name: "Rhea", horizons: "605", gm: 153.94, tolerance: 100.0),
+                (name: "Titan", horizons: "606", gm: 8978.14, tolerance: 100.0),
+                (name: "Hyperion", horizons: "607", gm: 0.3705, tolerance: 100.0),
+                (name: "Iapetus", horizons: "608", gm: 120.52, tolerance: 100.0),
+                (name: "Phoebe", horizons: "609", gm: 0.5548, tolerance: 100.0),
+            ],
+        ),
+        (
+            barycenter: "Uranus barycenter",
+            horizons_center: "500@7",
+            step: 360,
+            degree: 20,
+            trial_days: 120.0,
+            perturbers: ["Sun", "Mercury", "Venus", "EMB", "Mars", "Jupiter barycenter", "Saturn barycenter", "Neptune barycenter"],
+            // Jacobson 2014, AJ 148, 76 (R = 25,559 km).
+            j4: -34.17e-6,
+            members: [
+                (name: "Uranus", horizons: "799", gm: 5793950.6103, tolerance: 10.0),
+                (name: "Miranda", horizons: "705", gm: 4.3, tolerance: 100.0),
+                (name: "Ariel", horizons: "701", gm: 83.43, tolerance: 100.0),
+                (name: "Umbriel", horizons: "702", gm: 85.40, tolerance: 100.0),
+                (name: "Titania", horizons: "703", gm: 222.8, tolerance: 100.0),
+                (name: "Oberon", horizons: "704", gm: 205.34, tolerance: 100.0),
+            ],
+        ),
+        (
+            barycenter: "Neptune barycenter",
+            horizons_center: "500@8",
+            step: 300,
+            degree: 20,
+            // Nereid's year is 360 days.
+            trial_days: 400.0,
+            perturbers: ["Sun", "Mercury", "Venus", "EMB", "Mars", "Jupiter barycenter", "Saturn barycenter", "Uranus barycenter"],
+            // Jacobson 2009, AJ 137, 4322 (R = 25,225 km: J4 -33.4e-6),
+            // rescaled to R = 24,764 km.
+            j4: -35.96e-6,
+            members: [
+                (name: "Neptune", horizons: "899", gm: 6835099.97, tolerance: 10.0),
+                (name: "Triton", horizons: "801", gm: 1428.495, tolerance: 100.0),
+                (name: "Proteus", horizons: "808", gm: 2.58, tolerance: 100.0),
+                // GM not measured: radius 170 km (JPL) at an assumed 1.5 g/cm³.
+                (name: "Nereid", horizons: "802", gm: 2.06, tolerance: 100.0),
+            ],
+        ),
+        (
+            barycenter: "Pluto barycenter",
+            horizons_center: "500@9",
+            step: 1800,
+            degree: 20,
+            trial_days: 120.0,
+            perturbers: ["Sun", "Jupiter barycenter", "Saturn barycenter", "Uranus barycenter", "Neptune barycenter"],
+            members: [
+                (name: "Pluto", horizons: "999", gm: 869.326, tolerance: 100.0),
+                (name: "Charon", horizons: "901", gm: 106.10, tolerance: 100.0),
+            ],
+        ),
+        (
+            barycenter: "Eris barycenter",
+            horizons_center: "500@20136199",
+            step: 3600,
+            degree: 20,
+            trial_days: 120.0,
+            perturbers: ["Sun", "Jupiter barycenter", "Saturn barycenter", "Uranus barycenter", "Neptune barycenter"],
+            members: [
+                // Dysnomia's GM is the middle of JPL's range (mass ratio 0.018).
+                // The TNO satellite solution ends at 2030-01-01: states from a
+                // day earlier, carried on the two-body conic.
+                (name: "Eris", horizons: "920136199", gm: 1079.25, tolerance: 100.0, state_jd: Some(2462501.5)),
+                (name: "Dysnomia", horizons: "120136199", gm: 19.60, tolerance: 100.0, state_jd: Some(2462501.5)),
+            ],
+        ),
+        (
+            barycenter: "Haumea barycenter",
+            horizons_center: "500@20136108",
+            step: 3600,
+            degree: 20,
+            trial_days: 120.0,
+            perturbers: ["Sun", "Jupiter barycenter", "Saturn barycenter", "Uranus barycenter", "Neptune barycenter"],
+            members: [
+                (name: "Haumea", horizons: "920136108", gm: 264.413, tolerance: 100.0, state_jd: Some(2462501.5)),
+                (name: "Hi'iaka", horizons: "120136108", gm: 1.151, tolerance: 100.0, state_jd: Some(2462501.5)),
+            ],
+        ),
+        (
+            barycenter: "Orcus barycenter",
+            horizons_center: "500@20090482",
+            step: 2700,
+            degree: 20,
+            trial_days: 120.0,
+            perturbers: ["Sun", "Jupiter barycenter", "Saturn barycenter", "Uranus barycenter", "Neptune barycenter"],
+            members: [
+                (name: "Orcus", horizons: "920090482", gm: 38.5596, tolerance: 100.0, state_jd: Some(2462501.5)),
+                (name: "Vanth", horizons: "120090482", gm: 3.4704, tolerance: 100.0, state_jd: Some(2462501.5)),
+            ],
+        ),
+    ],
+)
