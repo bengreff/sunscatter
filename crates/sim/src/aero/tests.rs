@@ -322,9 +322,15 @@ fn plate(l: f64) -> AeroBake {
     bake(&s, &c, &BakeOptions { level: 1, raster: 32 })
 }
 
+/// The free stream of a plate test: Re per metre, Mach, 216.65 K, no
+/// impact pressure (the plate is along the flow).
+fn stream(re_per_m: f64, mach: f64) -> boundary::Stream {
+    boundary::Stream::new(re_per_m, mach, 1.4, 216.65, 0.0)
+}
+
 /// Mean friction coefficient of the plate (both faces) at `re_l` along X.
 fn plate_cf(b: &AeroBake, l: f64, re_l: f64, mach: f64) -> f64 {
-    let f = friction::friction(&b.geometry, DVec3::X, &friction::Plate::new(re_l / l, mach, 1.4, 216.65));
+    let f = friction::friction(&b.geometry, DVec3::X, &stream(re_l / l, mach), |_| 1.0, None);
     f.0.x / (2.0 * l * 2.0)
 }
 
@@ -339,38 +345,45 @@ fn flat_plate_friction_matches_blasius_and_the_turbulent_plate() {
         println!("Re {re:e}: C_f {got:.5} (Blasius {want:.5})");
         assert!((got / want - 1.0).abs() < 0.08, "Re {re}: {got} vs {want}");
     }
-    // Laminar to 5·10⁵, turbulent after: against the plate's mean from
-    // the local laws (Blasius, then White's c_f = 0.455/ln²(0.06·Re_x),
-    // Viscous Fluid Flow, 3rd ed., eq. 6-78), integrated here; and against
-    // the published closed forms: Prandtl's mixed plate 0.074·Re^−⅕ −
-    // 1742/Re (Schlichting, Boundary-Layer Theory, ch. 21; its ⅕-power law
-    // holds to ~10⁷) and White's fully turbulent 0.523/ln²(0.06·Re) (eq.
-    // 6-79), where the laminar start is small.
+    // Transition from Re_x 5·10⁵ (Re_θ 469.5) to 10⁶, turbulent after:
+    // against the plate's mean from the local laws (Blasius, then White's
+    // c_f = 0.455/ln²(0.06·Re_x), Viscous Fluid Flow, 3rd ed., eq. 6-78,
+    // blended by the Dhawan–Narasimha intermittency), integrated here; and
+    // against the published closed forms: Prandtl–Schlichting's mixed
+    // plate 0.455/(log₁₀Re)^2.58 − 1700/Re for transition at 5·10⁵
+    // (Schlichting, Boundary-Layer Theory, ch. 21, from memory), and
+    // White's fully turbulent 0.523/ln²(0.06·Re) (eq. 6-79), where the
+    // laminar start is small.
     let mean_of_laws = |re: f64| {
-        let tr = friction::TRANSITION_RE;
-        let n = 20_000;
-        let h = (math::ln(re) - math::ln(tr)) / n as f64;
-        // ∫ c_f dRe over [tr, re] in ln Re (midpoint rule).
-        let turb: f64 = (0..n)
+        let n = 40_000;
+        let h = math::ln(re) / n as f64;
+        // ∫ c_f dRe over [1, re] in ln Re (midpoint rule).
+        let sum: f64 = (0..n)
             .map(|k| {
-                let r = math::exp(math::ln(tr) + (k as f64 + 0.5) * h);
-                friction::cf_incompressible(r) * r * h
+                let r = math::exp((k as f64 + 0.5) * h);
+                let t = 5.0e5;
+                let g = if r <= t {
+                    0.0
+                } else {
+                    let xi = 3.343 * (r - t) / t;
+                    1.0 - math::exp(-0.412 * xi * xi)
+                };
+                ((1.0 - g) * 0.664 / r.sqrt() + g * boundary::cf_turbulent(r)) * r * h
             })
             .sum();
-        (1.328 * tr.sqrt() + turb) / re
+        sum / re
     };
     for re in [3e6, 1e7, 3e7, 1e8] {
         let got = plate_cf(&b, l, re, 0.0);
         let laws = mean_of_laws(re);
-        let prandtl = 0.074 / math::exp(0.2 * math::ln(re)) - 1742.0 / re;
+        let lg = math::ln(re) / math::ln(10.0);
+        let schlichting = 0.455 / math::exp(2.58 * math::ln(lg)) - 1700.0 / re;
         let white = 0.523 / (math::ln(0.06 * re) * math::ln(0.06 * re));
-        println!("Re {re:e}: C_f {got:.5} (laws {laws:.5}, Prandtl {prandtl:.5}, White {white:.5})");
-        assert!((got / laws - 1.0).abs() < 0.02, "Re {re}: {got} vs {laws}");
-        if re <= 1e7 {
-            assert!((got / prandtl - 1.0).abs() < 0.04, "Re {re}: {got} vs {prandtl}");
-        }
+        println!("Re {re:e}: C_f {got:.5} (laws {laws:.5}, Prandtl–Schlichting {schlichting:.5}, White {white:.5})");
+        assert!((got / laws - 1.0).abs() < 0.03, "Re {re}: {got} vs {laws}");
+        assert!((got / schlichting - 1.0).abs() < 0.05, "Re {re}: {got} vs {schlichting}");
         if re >= 3e7 {
-            assert!((got / white - 1.0).abs() < 0.03, "Re {re}: {got} vs {white}");
+            assert!((got / white - 1.0).abs() < 0.02, "Re {re}: {got} vs {white}");
         }
     }
 }
@@ -383,15 +396,24 @@ fn compressible_turbulent_friction_falls_like_van_driest() {
     // F_c 3.49, F_Rx 0.089, 0.428. Hopkins & Inouye (AIAA J. 9(6), 1971)
     // found Van Driest II within about ±10 % of flat-plate and cone data
     // to M 7.4.
-    let p = |m: f64| friction::Plate::new(1e7, m, 1.4, 216.65).local(1.0);
+    let p = |m: f64| {
+        let e = stream(1e7, m).edge(0.0, 0.0);
+        let (inv_fc, frx) = e.van_driest(e.recovery(boundary::TURBULENT_RECOVERY, 216.65), 216.65);
+        boundary::cf_turbulent(frx * 1e7) * inv_fc
+    };
     for (m, want) in [(2.0, 0.779), (5.0, 0.427)] {
         let ratio = p(m) / p(0.0);
         println!("M {m}: C_f/C_f,inc {ratio:.3}");
         assert!((ratio / want - 1.0).abs() < 0.01, "M {m}: {ratio}");
     }
     assert!(p(5.0) < p(3.0) && p(3.0) < p(2.0));
-    // The incompressible local law.
-    assert!((p(0.0) - friction::cf_incompressible(1e7)).abs() < 1e-15);
+    assert!((p(0.0) / boundary::cf_turbulent(1e7) - 1.0).abs() < 1e-12);
+    // The layer at M 2, Re_x 10⁷ is fully turbulent (Re_θ ≫ 380·M_e) and
+    // takes that coefficient; at M 5 Re_θ 1,600 is still laminar (onset at
+    // 380·5 = 1,900).
+    let layer = |m: f64| stream(1e7, m).edge(0.0, 0.0).layer(1.0, 1.0, None, 216.65, false);
+    assert!((layer(2.0).shear / p(2.0) - 1.0).abs() < 1e-12 && layer(2.0).intermittency == 1.0);
+    assert_eq!(layer(5.0).intermittency, 0.0);
 }
 
 #[test]
@@ -401,8 +423,8 @@ fn friction_acts_along_the_flow_and_not_on_the_base() {
     let (s, c) =
         shape(&[Shape::Cylinder { base: DVec3::new(0.0, 0.0, -3.0), axis: DVec3::new(0.0, 0.0, 6.0), radius: 0.5 }]);
     let b = bake(&s, &c, &BakeOptions { level: 1, raster: 32 });
-    let p = friction::Plate::new(2e6, 0.5, 1.4, 288.15);
-    let (f, m) = friction::friction(&b.geometry, DVec3::Z, &p);
+    let p = boundary::Stream::new(2e6, 0.5, 1.4, 288.15, 0.0);
+    let (f, m) = friction::friction(&b.geometry, DVec3::Z, &p, |_| 1.0, None);
     assert!(f.z > 0.0 && f.truncate().length() < 1e-3 * f.z, "{f}");
     assert!(m.length() < 1e-3 * f.z * 6.0, "{m}");
     // About the flat plate's mean over the side (6 m run, πD·L wetted).

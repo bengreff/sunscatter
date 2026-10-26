@@ -36,6 +36,7 @@
 
 pub mod air;
 pub mod bake;
+pub mod boundary;
 pub mod friction;
 pub mod geodesic;
 pub mod slender;
@@ -151,16 +152,24 @@ fn continuum(bake: &AeroBake, s: &DirSums, d: DVec3, flow: &Flow, cd0: f64) -> (
 
 /// Aerodynamic force and moment (about the craft origin), body axes, at
 /// the flow's direction. `cd0` is the craft's subsonic drag coefficient on
-/// its projected area (a craft-data field later).
+/// its projected area (a craft-data field later). Skin friction with an
+/// adiabatic wall ([`aero_forces_wall`] with the skin's temperatures).
 pub fn aero_forces(bake: &AeroBake, flow: &Flow, cd0: f64) -> (DVec3, DVec3) {
+    aero_forces_wall(bake, flow, cd0, None)
+}
+
+/// [`aero_forces`] with each cell's skin temperature `wall` (K, one per
+/// cell; `None`: adiabatic wall) for the skin friction.
+pub fn aero_forces_wall(bake: &AeroBake, flow: &Flow, cd0: f64, wall: Option<&[f64]>) -> (DVec3, DVec3) {
     if flow.q <= 0.0 || flow.dir.length_squared() == 0.0 {
         return (DVec3::ZERO, DVec3::ZERO);
     }
     let d = flow.dir.normalize();
     let s = bake.sums_at(d);
     let (f_cont, m_cont) = continuum(bake, &s, d, flow, cd0);
-    let plate = friction::Plate::new(flow.reynolds_per_m, flow.mach, flow.gamma, flow.temperature);
-    let (f_fr, m_fr) = friction::friction(&bake.geometry, d, &plate);
+    let exposure = bake.exposure_weights(d);
+    let stream = boundary::Stream::of(flow);
+    let (f_fr, m_fr) = friction::friction(&bake.geometry, d, &stream, |i| exposure.at(i), wall);
     let (f_cont, m_cont) = (f_cont + f_fr, m_cont + m_fr);
     let f_fm = d * (2.0 * s.area);
     let m_fm = s.area_moment.cross(d) * 2.0;

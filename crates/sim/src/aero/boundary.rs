@@ -1,0 +1,354 @@
+//! The boundary layer on each wetted cell (D070, D085): its edge state,
+//! laminar–turbulent transition, skin friction and convective heating,
+//! with the wall's own temperature. One owner for both: friction
+//! ([`super::friction`]) and acreage heating (`thermal::heating`) read the
+//! same layer, heating through Reynolds' analogy.
+//!
+//! * **Edge state** (Newtonian tangent wedge, the model behind Tauber's
+//!   closed-form heating relations, NASA TP-2914, 1989, eqs. 57–58): a cell
+//!   at incidence θ (sin θ = s = −n·d) keeps the tangential velocity,
+//!   u_e = V·cos θ; the normal kinetic energy becomes enthalpy, T_e/T∞ =
+//!   1 + (γ−1)/2·M²·s²; the pressure is the free stream's plus the
+//!   modified-Newtonian impact pressure on exposed windward cells, p_e/p∞ =
+//!   1 + (γ/2)·M²·Cp,max·f·s² (f the cell's exposure); ρ_e/ρ∞ =
+//!   (p_e/p∞)/(T_e/T∞). At s = 0 the edge is the free stream (a plate
+//!   along the flow). Viscosity by Sutherland's law.
+//! * **Laminar** (Blasius with Eckert's reference temperature, wall at
+//!   T_w): T*/T_e = 1 + 0.032·M_e² + 0.58·(T_w/T_e − 1) (White, *Viscous
+//!   Fluid Flow*, 3rd ed., eq. 7-44), C* = ρ*μ*/(ρ_e·μ_e), local c_f =
+//!   0.664·√(C*/Re_x) on the edge's ½ρ_e·u_e², averaged exactly over a
+//!   cell's run lengths; momentum thickness Re_θ = 0.664·√(C*·Re_x).
+//! * **Turbulent** (White's c_f = 0.455/ln²(0.06·Re_x), *Viscous Fluid
+//!   Flow* eq. 6-78, transformed by Van Driest II with the wall at T_w:
+//!   White eq. 7-102; Hopkins & Inouye, AIAA J. 9(6), 1971, found it the
+//!   best of the transformations against flat-plate and cone data, within
+//!   ~10 %), from the leading edge.
+//! * **Transition**: the layer starts to turn turbulent where Re_θ first
+//!   reaches max([`RE_THETA_LOW`], [`RE_THETA_PER_MACH`]·M_e): the smooth
+//!   flat plate's onset at Re_x 5·10⁵ at low edge Mach numbers, the
+//!   Re_θ/M_e = const correlation of the Shuttle orbiter's flight data at
+//!   hypersonic speeds (Tauber eq. 51 and fig. 11). Onset x_t from the
+//!   cell's own edge state (local similarity); the transitional region is
+//!   as long as the laminar run before it (Tauber §4.2), the turbulent
+//!   share across it Dhawan & Narasimha's intermittency γ = 1 −
+//!   exp(−0.412·ξ²), ξ = (x − x_t)/λ (J. Fluid Mech. 3, 1958), with
+//!   3.34·λ = x_t (γ = 0.99 at 2·x_t). Friction and heating are (1−γ)·laminar
+//!   + γ·turbulent.
+//! * **Heating** (Colburn's Reynolds analogy, St = (c_f/2)·Pr^−⅔; Tauber
+//!   eq. 52: the form that fitted Zoby & Graves' flight and tunnel data
+//!   best): q̇ = St·ρ_e·u_e·c_p·(T_aw − T_w), T_aw = T_e·(1 + r·(γ−1)/2·M_e²),
+//!   r = √Pr laminar, ∛Pr turbulent. Negative when the wall is hotter than
+//!   the recovery temperature (the air cools it).
+//!
+//! Per unit free stream: shear per unit q∞, heat flux per unit ρ∞·V·c_p
+//! (kelvin), so friction needs no airspeed or gas constant.
+
+use super::air;
+use crate::math;
+
+/// Prandtl number of air.
+pub const PRANDTL: f64 = 0.72;
+/// Recovery factors: √Pr laminar, ∛Pr turbulent.
+pub const LAMINAR_RECOVERY: f64 = 0.85;
+pub const TURBULENT_RECOVERY: f64 = 0.89;
+/// Colburn's analogy factor 2·St/c_f = Pr^−⅔ (Pr 0.72).
+pub const COLBURN: f64 = 1.244_8;
+/// Transition onset at low edge Mach numbers: the momentum-thickness
+/// Reynolds number of a smooth flat plate at Re_x 5·10⁵ (0.664·√Re_x).
+pub const RE_THETA_LOW: f64 = 469.5;
+/// Transition onset at hypersonic speeds: Re_θ/M_e. Tauber (NASA TP-2914,
+/// eq. 51) gives 150–350 depending on roughness; STS-1 to 4 flight values at
+/// onset were 200–400 (his fig. 11). 380 reproduces STS-1's transition
+/// front on the windward centreline at 52.9, 47.5 and 44.2 km with this
+/// edge model (`tests/aero_boundary.rs`).
+pub const RE_THETA_PER_MACH: f64 = 380.0;
+/// Dhawan & Narasimha's intermittency constant.
+const DN: f64 = 0.412;
+/// ξ at the end of transition (γ = 0.99): √(ln 100 / 0.412).
+const XI_END: f64 = 3.343;
+
+/// The free stream of one evaluation, as the boundary layer needs it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Stream {
+    /// Free-stream Mach number, γ, static temperature (K).
+    pub mach: f64,
+    pub gamma: f64,
+    pub temperature: f64,
+    /// ρ∞·V/μ∞ (1/m).
+    pub re_per_m: f64,
+    /// μ∞ (Pa·s).
+    pub mu: f64,
+    /// (γ−1)/2·M²: T_e/T∞ = 1 + this·s².
+    kt: f64,
+    /// (γ/2)·M²·Cp,max: p_e/p∞ = 1 + this·f·s².
+    kp: f64,
+}
+
+impl Stream {
+    /// From the free stream: Reynolds number per metre, Mach, γ, static
+    /// temperature (K) and the Newtonian stagnation pressure coefficient
+    /// `cp_max` (zero: no impact pressure).
+    pub fn new(re_per_m: f64, mach: f64, gamma: f64, temperature: f64, cp_max: f64) -> Self {
+        let m2 = mach * mach;
+        Stream {
+            mach,
+            gamma,
+            temperature,
+            re_per_m,
+            mu: air::sutherland_viscosity(temperature),
+            kt: 0.5 * (gamma - 1.0) * m2,
+            kp: 0.5 * gamma * m2 * cp_max,
+        }
+    }
+
+    /// From an aerodynamic flow (Cp,max as the pressure model's).
+    pub fn of(flow: &super::Flow) -> Self {
+        let cp = air::cp_max(air::real_gas_gamma(flow.gamma, flow.speed), flow.mach);
+        Stream::new(flow.reynolds_per_m, flow.mach, flow.gamma, flow.temperature, cp)
+    }
+
+    /// The edge state of a cell at incidence `s` = sin θ (positive
+    /// windward) with exposure `f` (0..1).
+    pub fn edge(&self, s: f64, f: f64) -> Edge {
+        let s2 = (s * s).min(1.0);
+        let tr = 1.0 + self.kt * s2;
+        let impact = if s > 0.0 { self.kp * f * s2 } else { 0.0 };
+        let rho = (1.0 + impact) / tr;
+        let u = (1.0 - s2).sqrt();
+        let temperature = self.temperature * tr;
+        let mu = air::sutherland_viscosity(temperature);
+        Edge {
+            temperature,
+            rho,
+            u,
+            mach: self.mach * u / tr.sqrt(),
+            re_per_m: self.re_per_m * rho * u * self.mu / mu,
+            mu,
+            heating: self.kt * u * u,
+        }
+    }
+}
+
+/// A cell's boundary-layer edge state.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Edge {
+    /// Static temperature (K).
+    pub temperature: f64,
+    /// ρ_e/ρ∞ and u_e/V.
+    pub rho: f64,
+    pub u: f64,
+    pub mach: f64,
+    /// ρ_e·u_e/μ_e (1/m).
+    pub re_per_m: f64,
+    /// μ_e (Pa·s).
+    pub mu: f64,
+    /// u_e²/(2·c_p·T∞) = (γ−1)/2·M²·(u_e/V)²: T_aw = T_e + r·T∞·this.
+    heating: f64,
+}
+
+/// The layer on one cell (per unit free stream).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Layer {
+    /// Wall shear per unit q∞ (along the flow's tangential direction).
+    pub shear: f64,
+    /// Turbulent share (Dhawan–Narasimha intermittency).
+    pub intermittency: f64,
+    /// Laminar and turbulent heat flux per unit ρ∞·V·c_p (K): q̇ =
+    /// ρ∞·V·c_p·this. Zero unless asked for.
+    pub heat_laminar: f64,
+    pub heat_turbulent: f64,
+    /// Momentum-thickness Reynolds number at the cell's centre (laminar).
+    pub re_theta: f64,
+}
+
+impl Edge {
+    /// Adiabatic wall temperature (K) for recovery factor `r`.
+    pub fn recovery(&self, r: f64, t_inf: f64) -> f64 {
+        self.temperature + r * t_inf * self.heating
+    }
+
+    /// Eckert's reference factor C* = ρ*μ*/(ρ_e·μ_e) for a wall at `tw` (K).
+    pub fn reference(&self, tw: f64) -> f64 {
+        let te = self.temperature;
+        let t_star = te * (1.0 + 0.032 * self.mach * self.mach + 0.58 * (tw / te - 1.0)).max(0.05);
+        te / t_star * air::sutherland_viscosity(t_star) / self.mu
+    }
+
+    /// Van Driest II for a wall at `tw` (K): (1/F_c, F_Rx), c_f =
+    /// c_f,inc(F_Rx·Re_x)/F_c.
+    pub fn van_driest(&self, tw: f64, t_inf: f64) -> (f64, f64) {
+        let te = self.temperature;
+        let m = TURBULENT_RECOVERY * t_inf * self.heating / te;
+        let w = tw / te;
+        let fc = if m < 1e-12 {
+            let h = 0.5 * (w.sqrt() + 1.0);
+            h * h
+        } else {
+            let a2 = m / w;
+            let b = (1.0 + m) / w - 1.0;
+            let den = (b * b + 4.0 * a2).sqrt();
+            let s = math::asin(((2.0 * a2 - b) / den).clamp(-1.0, 1.0)) + math::asin((b / den).clamp(-1.0, 1.0));
+            m / (s * s)
+        };
+        (1.0 / fc, self.mu / air::sutherland_viscosity(tw) / fc)
+    }
+
+    /// Transition onset run length (m) for reference factor `c_star`.
+    pub fn onset(&self, c_star: f64) -> f64 {
+        let re_theta = RE_THETA_LOW.max(RE_THETA_PER_MACH * self.mach) / 0.664;
+        re_theta * re_theta / (c_star * self.re_per_m).max(1e-300)
+    }
+
+    /// The laminar mean skin-friction coefficient over run lengths `a..b`
+    /// (centre `x`) with reference factor `c_star`: ∫0.664·√(k/x) dx/(b−a),
+    /// k = C*/Re per metre.
+    fn laminar_mean(&self, c_star: f64, a: f64, b: f64) -> f64 {
+        let k = c_star / self.re_per_m;
+        if b > a {
+            1.328 * k.sqrt() * (b.sqrt() - a.sqrt()) / (b - a)
+        } else {
+            0.664 * (k / a.max(1e-300)).sqrt()
+        }
+    }
+
+    /// Laminar heat flux per unit ρ∞·V·c_p (K) over run lengths `a..b`,
+    /// wall at `tw` (K).
+    pub fn laminar_heat(&self, a: f64, b: f64, tw: f64, t_inf: f64) -> f64 {
+        if self.re_per_m <= 0.0 || b <= 0.0 {
+            return 0.0;
+        }
+        let cf = self.laminar_mean(self.reference(tw), a, b);
+        0.5 * COLBURN * self.rho * self.u * cf * (self.recovery(LAMINAR_RECOVERY, t_inf) - tw)
+    }
+
+    /// The layer over run lengths `a..b` (m, 0 ≤ a ≤ b; centre x =
+    /// (a+b)/2), wall at `wall` (K; `None`: adiabatic). With `heat`, the
+    /// heat fluxes too.
+    pub fn layer(&self, a: f64, b: f64, wall: Option<f64>, t_inf: f64, heat: bool) -> Layer {
+        let x = 0.5 * (a + b);
+        if self.re_per_m <= 0.0 || x <= 0.0 {
+            return Layer::default();
+        }
+        let t_lam = wall.unwrap_or_else(|| self.recovery(LAMINAR_RECOVERY, t_inf));
+        let c = self.reference(t_lam);
+        let cf_lam = self.laminar_mean(c, a, b);
+        let x_t = self.onset(c);
+        let gamma = if x <= x_t {
+            0.0
+        } else {
+            let xi = XI_END * (x - x_t) / x_t;
+            1.0 - math::exp(-DN * xi * xi)
+        };
+        let (mut cf_turb, mut t_turb) = (0.0, 0.0);
+        if gamma > 0.0 {
+            t_turb = wall.unwrap_or_else(|| self.recovery(TURBULENT_RECOVERY, t_inf));
+            let (inv_fc, frx) = self.van_driest(t_turb, t_inf);
+            cf_turb = cf_turbulent(frx * self.re_per_m * x) * inv_fc;
+        }
+        let mut layer = Layer {
+            shear: ((1.0 - gamma) * cf_lam + gamma * cf_turb) * self.rho * self.u * self.u,
+            intermittency: gamma,
+            re_theta: 0.664 * (c * self.re_per_m * x).sqrt(),
+            ..Layer::default()
+        };
+        if heat {
+            let flux = 0.5 * COLBURN * self.rho * self.u;
+            layer.heat_laminar = flux * cf_lam * (self.recovery(LAMINAR_RECOVERY, t_inf) - t_lam);
+            if gamma > 0.0 {
+                layer.heat_turbulent = flux * cf_turb * (self.recovery(TURBULENT_RECOVERY, t_inf) - t_turb);
+            }
+        }
+        layer
+    }
+}
+
+/// White's incompressible turbulent skin-friction coefficient
+/// 0.455/ln²(0.06·Re_x) (eq. 6-78) at Re_x `re`.
+pub fn cf_turbulent(re: f64) -> f64 {
+    if re <= 0.0 {
+        return 0.0;
+    }
+    let l = math::ln(0.06 * re);
+    0.455 / (l * l)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const T: f64 = 216.65;
+
+    #[test]
+    fn colburn_factor_is_pr_to_the_minus_two_thirds() {
+        let want = math::exp(-2.0 / 3.0 * math::ln(PRANDTL));
+        assert!((COLBURN / want - 1.0).abs() < 1e-4, "{want}");
+        // The recovery factors are the conventional rounded √Pr and ∛Pr.
+        assert!((LAMINAR_RECOVERY / PRANDTL.sqrt() - 1.0).abs() < 1e-2);
+        assert!((TURBULENT_RECOVERY / math::cbrt(PRANDTL) - 1.0).abs() < 1e-2);
+    }
+
+    #[test]
+    fn the_edge_runs_from_the_free_stream_to_stagnation() {
+        let s = Stream::new(1e6, 8.0, 1.4, T, 1.84);
+        // Along the flow: the free stream.
+        let e = s.edge(0.0, 1.0);
+        assert_eq!((e.temperature, e.rho, e.u, e.mach, e.re_per_m), (T, 1.0, 1.0, 8.0, 1e6));
+        // Facing it: at rest, at the total temperature T∞(1 + 0.2·M²) and
+        // the Newtonian stagnation pressure.
+        let e = s.edge(1.0, 1.0);
+        assert!((e.temperature / (T * 13.8) - 1.0).abs() < 1e-12 && e.u == 0.0 && e.re_per_m == 0.0);
+        assert!((e.rho * 13.8 - (1.0 + 0.7 * 64.0 * 1.84)).abs() < 1e-9);
+        // At 30°: u_e = V cos 30°, the shadowed side has no impact pressure.
+        let (lit, dark) = (s.edge(0.5, 1.0), s.edge(0.5, 0.0));
+        assert!((lit.u - 0.75f64.sqrt()).abs() < 1e-15 && lit.temperature == dark.temperature);
+        assert!(lit.rho > 10.0 * dark.rho);
+    }
+
+    #[test]
+    fn the_wall_temperature_changes_the_reference_state() {
+        // Eckert/White at M_e 0 (T* = T_e(1 + 0.58(T_w/T_e − 1))): a wall
+        // at 2·T_e gives T* = 1.58·T_e and C* = (1/1.58)·μ(1.58·T_e)/μ(T_e).
+        let e = Stream::new(1e6, 0.0, 1.4, T, 0.0).edge(0.0, 0.0);
+        let want = air::sutherland_viscosity(1.58 * T) / air::sutherland_viscosity(T) / 1.58;
+        assert!((e.reference(2.0 * T) / want - 1.0).abs() < 1e-12);
+        assert!((e.reference(T) - 1.0).abs() < 1e-15);
+        // Hot walls lower the friction, cold walls raise it (laminar and
+        // turbulent), at M 5.
+        let e = Stream::new(1e7, 5.0, 1.4, T, 0.0).edge(0.0, 0.0);
+        let aw = e.recovery(TURBULENT_RECOVERY, T);
+        let turb = |tw: f64| {
+            let (inv_fc, frx) = e.van_driest(tw, T);
+            cf_turbulent(frx * 1e7) * inv_fc
+        };
+        assert!(turb(0.3 * aw) > turb(aw) && turb(aw) > turb(1.5 * aw));
+        assert!(e.reference(0.3 * aw) > e.reference(aw));
+        // Van Driest II at low Mach number: its limit F_c = ((√(T_w/T_e) + 1)/2)².
+        for w in [0.5, 1.0, 3.0] {
+            let low = Stream::new(1e7, 1e-7, 1.4, T, 0.0).edge(0.0, 0.0);
+            let zero = Stream::new(1e7, 0.0, 1.4, T, 0.0).edge(0.0, 0.0);
+            let (a, b) = (low.van_driest(w * T, T).0, zero.van_driest(w * T, T).0);
+            let h = 0.5 * (w.sqrt() + 1.0);
+            assert!((b * h * h - 1.0).abs() < 1e-12 && (a / b - 1.0).abs() < 1e-6, "{w}: {a} {b}");
+        }
+    }
+
+    #[test]
+    fn transition_starts_at_the_criterion_and_ends_at_twice_the_run() {
+        // Incompressible plate, adiabatic: onset at Re_x 5·10⁵.
+        let e = Stream::new(1e6, 0.0, 1.4, T, 0.0).edge(0.0, 0.0);
+        let onset = e.onset(1.0);
+        assert!((onset * 1e6 / 5.0e5 - 1.0).abs() < 1e-3, "{onset}");
+        let at = |x: f64| e.layer(x, x, None, T, false);
+        assert_eq!(at(0.99 * onset).intermittency, 0.0);
+        let mid = at(1.5 * onset).intermittency;
+        assert!(mid > 0.5 && mid < 0.7, "{mid}");
+        assert!((at(2.0 * onset).intermittency - 0.99).abs() < 1e-3);
+        // The laminar Re_θ there is the criterion.
+        assert!((at(onset).re_theta / RE_THETA_LOW - 1.0).abs() < 1e-9);
+        // At edge Mach 3: Re_θ/M_e = 380.
+        let e = Stream::new(1e7, 3.0, 1.4, T, 0.0).edge(0.0, 0.0);
+        let c = e.reference(e.recovery(LAMINAR_RECOVERY, T));
+        let theta = 0.664 * (c * e.re_per_m * e.onset(c)).sqrt();
+        assert!((theta / (3.0 * RE_THETA_PER_MACH) - 1.0).abs() < 1e-9);
+    }
+}

@@ -134,6 +134,21 @@ pub struct AeroBake {
     pub fins: Vec<Fin>,
 }
 
+/// The exposures of the three grid directions around a flow direction and
+/// their barycentric weights.
+pub struct Exposure<'a> {
+    rows: [&'a [u8]; 3],
+    w: [f64; 3],
+}
+
+impl Exposure<'_> {
+    /// Cell `i`'s exposure (0..1).
+    pub fn at(&self, i: usize) -> f64 {
+        let (r, w) = (&self.rows, &self.w);
+        (w[0] * f64::from(r[0][i]) + w[1] * f64::from(r[1][i]) + w[2] * f64::from(r[2][i])) / 255.0
+    }
+}
+
 /// Per-direction working buffers.
 struct Raster {
     n: usize,
@@ -487,14 +502,17 @@ impl AeroBake {
     /// with the exposure interpolated barycentrically between the three
     /// grid directions around `d`; the nose radius interpolated likewise.
     pub fn sums_at(&self, d: DVec3) -> DirSums {
-        let w = self.grid.locate(d);
-        let rows = w.dirs.map(|k| &self.exposure[k as usize * self.cells..][..self.cells]);
-        let f = |i: usize| {
-            (w.w[0] * f64::from(rows[0][i]) + w.w[1] * f64::from(rows[1][i]) + w.w[2] * f64::from(rows[2][i])) / 255.0
-        };
-        let mut s = direction_sums(&self.geometry, d, f);
+        let e = self.exposure_weights(d);
+        let mut s = direction_sums(&self.geometry, d, |i| e.at(i));
         s.nose_radius = self.nose_radius_at(d);
         s
+    }
+
+    /// The exposure rows and barycentric weights around flow direction `d`
+    /// (unit, body axes): [`Exposure::at`] interpolates a cell's exposure.
+    pub fn exposure_weights(&self, d: DVec3) -> Exposure<'_> {
+        let w = self.grid.locate(d);
+        Exposure { rows: w.dirs.map(|k| &self.exposure[k as usize * self.cells..][..self.cells]), w: w.w }
     }
 
     /// The craft's extent along `d` (unit, body axes), interpolated like
