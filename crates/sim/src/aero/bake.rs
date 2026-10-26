@@ -143,6 +143,10 @@ pub struct AeroBake {
     pub sections: BodySections,
     /// Thin parts (fin lift).
     pub fins: Vec<Fin>,
+    /// The boundary layer's 3D relief along each grid direction: x_eff/x
+    /// (laminar, turbulent) at [`super::relief::STATIONS`] slabs
+    /// (direction-major).
+    pub relief: Vec<(f32, f32)>,
 }
 
 /// The exposures of the three grid directions around a flow direction and
@@ -157,6 +161,31 @@ impl Exposure<'_> {
     pub fn at(&self, i: usize) -> f64 {
         let (r, w) = (&self.rows, &self.w);
         (w[0] * f64::from(r[0][i]) + w[1] * f64::from(r[1][i]) + w[2] * f64::from(r[2][i])) / 255.0
+    }
+}
+
+/// The relief rows of the three grid directions around a flow direction,
+/// their weights and the craft's extent along it.
+pub struct Relief<'a> {
+    rows: [&'a [(f32, f32)]; 3],
+    w: [f64; 3],
+    extent: f64,
+}
+
+impl Relief<'_> {
+    /// x_eff/x (laminar, turbulent) at run length `x` (m), linear between
+    /// the slabs' middles.
+    pub fn at(&self, x: f64) -> (f64, f64) {
+        let n = super::relief::STATIONS;
+        let u = (x / self.extent.max(1e-9) * n as f64 - 0.5).clamp(0.0, (n - 1) as f64);
+        let (k, f) = ((u.floor() as usize).min(n - 2), u - u.floor().min((n - 2) as f64));
+        let (mut lam, mut turb) = (0.0, 0.0);
+        for (row, w) in self.rows.iter().zip(self.w) {
+            let (a, b) = (row[k], row[k + 1]);
+            lam += w * (f64::from(a.0) * (1.0 - f) + f64::from(b.0) * f);
+            turb += w * (f64::from(a.1) * (1.0 - f) + f64::from(b.1) * f);
+        }
+        (lam, turb)
     }
 }
 
@@ -208,6 +237,7 @@ pub fn bake(surface: &Surface, cells: &Cells, opts: &BakeOptions) -> AeroBake {
     let mut won = vec![0u32; nc];
     let mut f = vec![0.0; nc];
     let mut max_area: f64 = 0.0;
+    let mut relief = Vec::with_capacity(grid.dirs.len() * super::relief::STATIONS);
     for &d in &grid.dirs {
         let (u, v, _) = basis(d);
         // The raster spans the craft's projection (square pixels), so a
@@ -229,6 +259,7 @@ pub fn bake(surface: &Surface, cells: &Cells, opts: &BakeOptions) -> AeroBake {
         // The area distribution along d.
         let areas = super::wave::area_along(&rel, d, lo, hi);
         wave.push(super::wave::wave_drag_area(&areas, (hi - lo) / super::wave::STATIONS as f64));
+        relief.extend(super::relief::ratios(&rel, d, lo, hi));
         r.depth.fill(f64::INFINITY);
         r.owner.fill(NONE);
         r.stamp.fill(NONE);
@@ -272,7 +303,7 @@ pub fn bake(surface: &Surface, cells: &Cells, opts: &BakeOptions) -> AeroBake {
         nose_radius.push(nose(&geometry, d, fq, area));
     }
     let length = if max_area > 0.0 { 2.0 * (max_area / crate::math::PI).sqrt() } else { 2.0 * radius };
-    AeroBake { grid, geometry, exposure, nose_radius, cells: nc, length, extent, wave, sections, fins }
+    AeroBake { grid, geometry, exposure, nose_radius, cells: nc, length, extent, wave, sections, fins, relief }
 }
 
 /// The fins: cells whose opposite face (anti-parallel, straight through
@@ -525,6 +556,10 @@ impl AeroBake {
             n.into_iter().chain(c).chain([f.area, f.body_radius, f.semispan]).for_each(&mut put);
             f.cells.iter().for_each(|&c| put(f64::from(c)));
         }
+        for &(l, t) in &self.relief {
+            bytes.extend_from_slice(&l.to_bits().to_le_bytes());
+            bytes.extend_from_slice(&t.to_bits().to_le_bytes());
+        }
         bytes.extend_from_slice(&self.exposure);
         crate::ephem::fnv1a64(&bytes)
     }
@@ -537,6 +572,16 @@ impl AeroBake {
         let mut s = direction_sums(&self.geometry, d, |i| e.at(i));
         s.nose_radius = self.nose_radius_at(d);
         s
+    }
+
+    /// The boundary layer's 3D relief around flow direction `d` (unit, body
+    /// axes): [`Relief::at`] gives x_eff/x (laminar, turbulent) at a run
+    /// length, interpolated like the exposure.
+    pub fn relief_at(&self, d: DVec3) -> Relief<'_> {
+        let w = self.grid.locate(d);
+        let n = super::relief::STATIONS;
+        let extent = (0..3).map(|k| w.w[k] * self.extent[w.dirs[k] as usize]).sum();
+        Relief { rows: w.dirs.map(|k| &self.relief[k as usize * n..][..n]), w: w.w, extent }
     }
 
     /// The exposure rows and barycentric weights around flow direction `d`

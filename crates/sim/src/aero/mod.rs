@@ -41,10 +41,11 @@ pub mod boundary;
 pub mod crossflow;
 pub mod friction;
 pub mod geodesic;
+pub mod relief;
 pub mod slender;
 pub mod wave;
 
-pub use bake::{bake, AeroBake, BakeOptions, CellGeometry, DirSums};
+pub use bake::{bake, AeroBake, BakeOptions, CellGeometry, DirSums, Exposure, Relief};
 
 use crate::math;
 use glam::DVec3;
@@ -176,9 +177,9 @@ pub fn aero_forces(bake: &AeroBake, flow: &Flow, cd0: f64) -> (DVec3, DVec3) {
 /// cell; `None`: adiabatic wall) for the skin friction.
 pub fn aero_forces_wall(bake: &AeroBake, flow: &Flow, cd0: f64, wall: Option<&[f64]>) -> (DVec3, DVec3) {
     forces_with(bake, flow, cd0, |d| {
-        let exposure = bake.exposure_weights(d);
+        let (exposure, relief) = (bake.exposure_weights(d), bake.relief_at(d));
         let stream = boundary::Stream::of(flow);
-        friction::friction(&bake.geometry, d, &stream, |i| exposure.at(i), wall)
+        friction::friction(&bake.geometry, d, &stream, |i| exposure.at(i), |x| relief.at(x), wall)
     })
 }
 

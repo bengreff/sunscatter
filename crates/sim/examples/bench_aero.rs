@@ -207,9 +207,11 @@ fn per_cell(name: &str, surface: &sim::craft::Surface, cells: &sim::craft::Cells
         let walled = time(&mut || sink += sim::aero::aero_forces_wall(&b, &flow, 0.8, Some(&wall)).0.x);
         let stream = sim::aero::boundary::Stream::of(&flow);
         let d = flow.dir;
-        let e = b.exposure_weights(d);
-        let friction =
-            time(&mut || sink += sim::aero::friction::friction(&b.geometry, d, &stream, |i| e.at(i), Some(&wall)).0.x);
+        let (e, relief) = (b.exposure_weights(d), b.relief_at(d));
+        let friction = time(&mut || {
+            sink +=
+                sim::aero::friction::friction(&b.geometry, d, &stream, |i| e.at(i), |x| relief.at(x), Some(&wall)).0.x
+        });
         let air = sim::thermal::FlowHeat {
             flow: &flow,
             sutton_graves_k: sim::thermal::heating::SUTTON_GRAVES_EARTH,

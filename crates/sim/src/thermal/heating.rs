@@ -48,14 +48,17 @@
 //!   a fin's leading edge, a step) are stagnation regions of their own and
 //!   take the nose law (at the craft's nose radius: sharper edges heat
 //!   more); turbulent, never less than
-//!   laminar; across transition (1−γ)·laminar + γ·turbulent; at least
-//!   [`LEEWARD_FRACTION`] of the stagnation flux (leeward and separated
-//!   cells). Hot walls: the stagnation flux × (1 − T_w/T₀) (T₀ the total
+//!   laminar; across transition (1−γ)·laminar + γ·turbulent; on the lee
+//!   (from 6° leeward) and where separated at least [`LEEWARD_FRACTION`]
+//!   of the stagnation flux (windward cells have their own layer: a sharp
+//!   nose's huge stagnation flux must not set its flanks'). Hot walls: the stagnation flux × (1 − T_w/T₀) (T₀ the total
 //!   temperature), the layers' (T_aw − T_w): negative (cooling) above the
-//!   recovery temperature. Rarefied: bridged by Wilmoth's function in the
-//!   Knudsen number on the nose radius to the free-molecular energy flux
-//!   ½ρV³·f·sin θ (full accommodation; C_H = 1, Tauber fig. 8), the
-//!   stagnation flux capped at it (Sutton–Graves passes it at Kn ≳ 1).
+//!   recovery temperature. Rarefied: by Wilmoth's function, the stagnation
+//!   flux capped at and bridged to the free-molecular energy flux ½ρV³
+//!   (C_H = 1 at full accommodation, Tauber fig. 8; Sutton–Graves passes it
+//!   at Kn ≳ 1) in the Knudsen number on the nose radius, and each cell to
+//!   its free-molecular ½ρV³·f·sin θ in the Knudsen number on the body's
+//!   diameter, as the forces.
 //! * **Sunlight:** a flux vector S (W/m², the direction light travels, body
 //!   axes); a cell facing it absorbs ε·|S|·cos·A, shadowed by the craft
 //!   itself through the same exposure bake (parallel light is a flow
@@ -242,6 +245,9 @@ pub struct FlowHeat<'a> {
 const STAGNATION_SIN: f64 = 0.7;
 const STAGNATION_BLEND: f64 = 0.2;
 
+/// The leeward floor fades in over sin θ from 0 to −this (6°).
+const LEE_BLEND: f64 = 0.1;
+
 /// Earth air's specific gas constant (J/(kg·K)), for a flow without an
 /// airspeed.
 const EARTH_AIR_R: f64 = aero::air::GAS_CONSTANT / aero::air::EARTH_AIR_MOLAR_MASS;
@@ -323,10 +329,14 @@ fn convective(
     let rn = bake.nose_radius_at(d);
     // The continuum stagnation flux never exceeds the free-molecular
     // energy flux (C_H ≤ 1; Sutton–Graves passes it at Kn ≳ 1).
+    // The stagnation point is rarefied on the nose's scale (λ/Rn, Tauber
+    // fig. 8: its C_H to 1), the acreage on the body's (λ/D_b, as the
+    // forces): a sharp tip goes free molecular long before its flanks.
     let q_fm = 0.5 * rho * v * v * v;
-    let q_conv = sutton_graves(air.sutton_graves_k, rho, rn, v).min(q_fm);
+    let nose_bridge = if rn > 0.0 { aero::bridge(flow.knudsen * bake.length / rn) } else { 1.0 };
+    let q_conv = q_fm + (sutton_graves(air.sutton_graves_k, rho, rn, v).min(q_fm) - q_fm) * (1.0 - nose_bridge);
     let q_rad = air.radiative.map_or(0.0, |model| tauber_sutton(model, rho, rn, v));
-    let b = if rn > 0.0 { aero::bridge(flow.knudsen * bake.length / rn) } else { 1.0 };
+    let b = aero::bridge(flow.knudsen);
     let scale = rho * v * cp;
     let exposure = bake.exposure_weights(d);
     // The attached cells' continuum heating (NaN: separated).
@@ -349,9 +359,13 @@ fn convective(
     }
     for (i, (o, c)) in out.iter_mut().zip(cells).enumerate() {
         let hot = 1.0 - air.wall[i] / t0;
-        let floor = LEEWARD_FRACTION * q_conv * hot;
-        let q = if cont[i].is_nan() { floor } else { most(cont[i], floor) };
-        let lit = exposure.at(i) * (-c.normal.dot(d)).max(0.0);
+        let s = -c.normal.dot(d);
+        // The floor holds on the lee (fully from 6° leeward) and where
+        // separated; windward cells have their own layer.
+        let lee = (-s / LEE_BLEND).clamp(0.0, 1.0);
+        let floor = LEEWARD_FRACTION * q_conv * hot * lee * lee * (3.0 - 2.0 * lee);
+        let q = if cont[i].is_nan() { LEEWARD_FRACTION * q_conv * hot } else { most(cont[i], floor) };
+        let lit = exposure.at(i) * s.max(0.0);
         let rarefied = q_fm * hot * lit;
         *o += ((1.0 - b) * q + b * rarefied + q_rad * lit) * c.area;
     }

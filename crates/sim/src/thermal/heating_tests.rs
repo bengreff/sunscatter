@@ -182,8 +182,10 @@ fn a_hemisphere_heats_like_the_cosine_law_and_lees() {
             assert!(r > 0.02 && r < 0.25, "φ {phi:.0}°: {r}");
             seen[2] += 1;
         }
-        // Leeward and separated: at least the floor.
-        assert!(r >= LEEWARD_FRACTION * (1.0 - 1e-9), "φ {phi:.0}°: {r}");
+        // Leeward (from 6°) and separated: at least the floor.
+        if phi > 96.0 {
+            assert!(r >= LEEWARD_FRACTION * (1.0 - 1e-9), "φ {phi:.0}°: {r}");
+        }
     }
     assert!(seen.iter().all(|&n| n > 3), "{seen:?}");
 }
@@ -242,4 +244,52 @@ fn a_tick_s_boundary_layer_gives_the_same_heating() {
     let layer = crate::aero::friction::FlowLayer::new(b, &flow, Some(&wall), true);
     cell_heat_layer(b, &cells.cells, &air, &layer, DVec3::X * 1361.0, &mut scratch, &mut c);
     assert_eq!(a, c);
+}
+
+#[test]
+fn a_sharp_cone_heats_like_tauber_s_cone() {
+    // A 10° cone, 3 m long, nose first at 6 km/s, 60 km (laminar), wall at
+    // 1000 K. Tauber, NASA TP-2914, eq. 46 (the plate's eq. 48 × √3 by
+    // Mangler's transformation, with real-gas properties): q̇ =
+    // 4.03e-5·(ρ cos δ / x)^½·V^3.2·sin δ·(1 − h_w/h_aw), h_aw = h∞ + 0.4·V²,
+    // x along the surface from the apex. Ours: the plate's layer at the
+    // cell's run, relieved by the baked perimeter growth (x_eff ≈ x/3).
+    let delta = 10f64.to_radians();
+    let length = 3.0;
+    let r = length * math::tan(delta);
+    let (s, c) = crate::aero::tests::shape(&[Shape::Frustum {
+        base: DVec3::ZERO,
+        axis: DVec3::Z * length,
+        r_base: r,
+        r_top: 0.001,
+    }]);
+    let b = bake(&s, &c, &BakeOptions::default());
+    let v = 6000.0;
+    let flow = earth_flow(60e3, v, -DVec3::Z, b.length);
+    let tw = 1000.0;
+    let wall = vec![tw; c.cells.len()];
+    let air = FlowHeat { flow: &flow, sutton_graves_k: SUTTON_GRAVES_EARTH, radiative: None, wall: &wall };
+    let (mut out, mut scratch) = (vec![0.0; c.cells.len()], vec![0.0; c.cells.len()]);
+    cell_heat_flow(&b, &c.cells, Some(&air), DVec3::ZERO, &mut scratch, &mut out);
+    let rho = 2.0 * flow.q / (v * v);
+    let h_aw = CP * flow.temperature + 0.4 * v * v;
+    let (mut n, mut worst, mut sum) = (0, 0.0f64, 0.0);
+    for (cell, q) in c.cells.iter().zip(&out) {
+        // Flank cells away from the tip and the base.
+        let x = (length - cell.centroid.z) / math::cos(delta);
+        if cell.normal.z > -0.5 && cell.normal.z < 0.5 && x > 0.6 && x < 2.6 {
+            let tauber =
+                4.03e-5 * (rho * math::cos(delta) / x).sqrt() * pow(v, 3.2) * math::sin(delta) * (1.0 - CP * tw / h_aw);
+            let ratio = q / cell.area / tauber;
+            worst = worst.max((ratio - 1.0).abs());
+            sum += ratio;
+            n += 1;
+        }
+    }
+    let mean = sum / f64::from(n);
+    println!("cone flank, {n} cells: mean {mean:.3} of Tauber's cone, worst {worst:.3} from it");
+    // Our perfect-gas plate runs ~10 % under his laminar plate at these
+    // speeds (hypersonic_wedge_heating_is_tauber_s); the cells' run lengths
+    // and the baked relief add ±10 %.
+    assert!(n > 20 && (mean - 1.0).abs() < 0.12 && worst < 0.25, "{n} {mean} {worst}");
 }

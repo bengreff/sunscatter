@@ -7,7 +7,8 @@
 //!   steeply than 45° (bases, the lee of blunt steps) are in separated flow
 //!   and get none. Run length x = distance along the flow from the most
 //!   upstream point of the cells; each cell takes the layer over its extent
-//!   x ± h along the flow (h from its second moment of area).
+//!   x ± h along the flow (h from its second moment of area), relieved in
+//!   3D as the body's perimeter grows along the flow ([`super::relief`]).
 //! * **The layer** ([`super::boundary::Edge::layer`]): laminar (Blasius,
 //!   Eckert's reference temperature) to transition by Re_θ, turbulent
 //!   (White's law, Van Driest II) after, each with the wall's temperature
@@ -34,11 +35,13 @@ pub fn spans(cells: &[CellGeometry], d: DVec3) -> (Vec<(f64, f64)>, f64) {
 /// `exposure(i)` and wall temperatures `wall` (K per cell; `None`:
 /// adiabatic); `heat` asks for the heat fluxes too (with `wall`, also the
 /// laminar heating of a plate along the flow at each cell's run lengths).
+#[allow(clippy::too_many_arguments)]
 pub fn layers(
     cells: &[CellGeometry],
     d: DVec3,
     stream: &Stream,
     exposure: impl Fn(usize) -> f64,
+    relief: impl Fn(f64) -> (f64, f64),
     wall: Option<&[f64]>,
     heat: bool,
     mut each: impl FnMut(usize, f64, &Layer),
@@ -57,9 +60,10 @@ pub fn layers(
         let f = if s > 0.0 { exposure(i) } else { 0.0 };
         let x = x - front;
         let (a, b, tw) = ((x - h).max(0.0), x + h, wall.map(|w| w[i]));
-        let mut layer = stream.edge(s, f).layer(a, b, tw, stream.temperature, heat);
+        let r = relief(x.max(0.0));
+        let mut layer = stream.edge(s, f).layer_with(a, b, r, tw, stream.temperature, heat);
         if let (true, Some(tw)) = (heat, tw) {
-            layer.heat_aligned = aligned.laminar_heat(a, b, tw, stream.temperature);
+            layer.heat_aligned = aligned.laminar_heat(a * r.0, b * r.0, tw, stream.temperature);
         }
         each(i, s, &layer);
     }
@@ -72,10 +76,11 @@ pub fn friction(
     d: DVec3,
     stream: &Stream,
     exposure: impl Fn(usize) -> f64,
+    relief: impl Fn(f64) -> (f64, f64),
     wall: Option<&[f64]>,
 ) -> (DVec3, DVec3) {
     let (mut f, mut m) = (DVec3::ZERO, DVec3::ZERO);
-    layers(cells, d, stream, exposure, wall, false, |i, s, layer| {
+    layers(cells, d, stream, exposure, relief, wall, false, |i, s, layer| {
         let c = &cells[i];
         let along = (1.0 - s * s).max(0.0).sqrt();
         if along < 1e-12 || layer.shear == 0.0 {
@@ -109,13 +114,14 @@ impl FlowLayer {
         let dir = flow.dir.normalize();
         let mut layers = vec![None; bake.geometry.len()];
         if flow.q > 0.0 && dir.is_finite() {
-            let e = bake.exposure_weights(dir);
+            let (e, relief) = (bake.exposure_weights(dir), bake.relief_at(dir));
             let stream = Stream::of(flow);
             self::layers(
                 &bake.geometry,
                 dir,
                 &stream,
                 |i| e.at(i),
+                |x| relief.at(x),
                 wall,
                 heat,
                 |i, s, layer| {

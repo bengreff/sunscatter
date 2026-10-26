@@ -247,6 +247,14 @@ impl Edge {
     /// (a+b)/2), wall at `wall` (K; `None`: adiabatic). With `heat`, the
     /// heat fluxes too.
     pub fn layer(&self, a: f64, b: f64, wall: Option<f64>, t_inf: f64, heat: bool) -> Layer {
+        self.layer_with(a, b, (1.0, 1.0), wall, t_inf, heat)
+    }
+
+    /// [`Self::layer`] on a body whose layer is relieved in 3D: the laminar
+    /// layer (and its transition) at run lengths × `relief.0`, the
+    /// turbulent at × `relief.1` ([`super::relief`]).
+    pub fn layer_with(&self, a: f64, b: f64, relief: (f64, f64), wall: Option<f64>, t_inf: f64, heat: bool) -> Layer {
+        let (a, b, turbulent_x) = (a * relief.0, b * relief.0, 0.5 * (a + b) * relief.1);
         let x = 0.5 * (a + b);
         if self.re_per_m <= 0.0 || x <= 0.0 {
             return Layer::default();
@@ -269,7 +277,7 @@ impl Edge {
         let (mut cf_turb, mut t_turb) = (0.0, 0.0);
         if gamma > 0.0 {
             t_turb = wall.unwrap_or_else(|| self.recovery(TURBULENT_RECOVERY, t_inf));
-            cf_turb = self.turbulent_cf(x, t_turb, t_inf);
+            cf_turb = self.turbulent_cf(turbulent_x, t_turb, t_inf);
         }
         let mut layer = Layer {
             shear: ((1.0 - gamma) * cf_lam + gamma * cf_turb) * self.rho * self.u * self.u,

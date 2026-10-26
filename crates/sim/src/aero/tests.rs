@@ -329,8 +329,8 @@ fn the_bake_is_deterministic() {
 
 /// Golden hash of the unit-sphere bake (identical on every platform).
 /// 2026-10-26: the Knudsen length became the maximum body diameter (was
-/// the bounding-sphere diameter).
-const SPHERE_BAKE_HASH: u64 = 0xc55f_affc_0544_a528;
+/// the bounding-sphere diameter); then the layer's 3D relief was baked.
+const SPHERE_BAKE_HASH: u64 = 0x286d_75b8_f9aa_0ec4;
 
 /// A thin flat plate, `l` long along X, 2 m wide, 4 mm thick.
 fn plate(l: f64) -> AeroBake {
@@ -346,7 +346,7 @@ fn stream(re_per_m: f64, mach: f64) -> boundary::Stream {
 
 /// Mean friction coefficient of the plate (both faces) at `re_l` along X.
 fn plate_cf(b: &AeroBake, l: f64, re_l: f64, mach: f64) -> f64 {
-    let f = friction::friction(&b.geometry, DVec3::X, &stream(re_l / l, mach), |_| 1.0, None);
+    let f = friction::friction(&b.geometry, DVec3::X, &stream(re_l / l, mach), |_| 1.0, |_| (1.0, 1.0), None);
     f.0.x / (2.0 * l * 2.0)
 }
 
@@ -492,7 +492,7 @@ fn friction_acts_along_the_flow_and_not_on_the_base() {
         shape(&[Shape::Cylinder { base: DVec3::new(0.0, 0.0, -3.0), axis: DVec3::new(0.0, 0.0, 6.0), radius: 0.5 }]);
     let b = bake(&s, &c, &BakeOptions { level: 1, raster: 32 });
     let p = boundary::Stream::new(2e6, 0.5, 1.4, 288.15, 0.0);
-    let (f, m) = friction::friction(&b.geometry, DVec3::Z, &p, |_| 1.0, None);
+    let (f, m) = friction::friction(&b.geometry, DVec3::Z, &p, |_| 1.0, |_| (1.0, 1.0), None);
     assert!(f.z > 0.0 && f.truncate().length() < 1e-3 * f.z, "{f}");
     assert!(m.length() < 1e-3 * f.z * 6.0, "{m}");
     // About the flat plate's mean over the side (6 m run, πD·L wetted).
