@@ -149,7 +149,7 @@ impl Demo {
         self.step
     }
 
-    fn shot(&mut self, commands: &mut Commands, name: &str) {
+    pub(crate) fn shot(&mut self, commands: &mut Commands, name: &str) {
         self.shots += 1;
         let path = self.dir.join(format!("{:02}_{name}.png", self.shots));
         info!("demo screenshot {}", path.display());

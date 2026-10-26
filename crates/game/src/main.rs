@@ -35,6 +35,7 @@ mod sky;
 mod staging;
 mod state;
 mod terrain;
+mod tour;
 mod tracking;
 mod trajectory;
 
@@ -76,6 +77,8 @@ fn main() {
     if let Some(demo) = demo {
         app.insert_resource(demo);
     }
+    // A body tour replaces the demo's script.
+    let touring = tour::install(&mut app, demo_mode);
     app.insert_resource(ClearColor(Color::BLACK))
         .add_plugins(default_plugins(demo_mode, offscreen))
         .add_plugins(EguiPlugin::default())
@@ -95,7 +98,8 @@ fn main() {
                 state::read_controls,
                 hud::measure_fps,
                 settings_ui::toggle,
-                demo::run,
+                demo::run.run_if(move || !touring),
+                tour::run.run_if(move || touring),
                 bench::run,
                 settings::apply,
                 atmosphere::apply_settings,
@@ -123,6 +127,7 @@ fn main() {
             Update,
             (
                 camera::update,
+                tour::aim,
                 comms::update,
                 rendezvous::update,
                 map::update,

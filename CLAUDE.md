@@ -21,6 +21,7 @@ Real-scale 3D spaceflight, mission-design and logistics game in Rust. Being rebu
 - `cargo test -p sim` — fast sim tests (run constantly).
 - `cargo run -p game --release` — the prototype. `--features dev` (Bevy dynamic linking) for faster incremental builds while iterating; never for releases.
 - `SUNSCATTER_DEMO=<dir> [SUNSCATTER_DEMO_OFFSCREEN=1] cargo run -p game --release` — scripted flight (pad → orbit → parachute), screenshots of every graphics tier at each key view, graphics benchmark tables (`bench_*.md`), performance numbers with 11 vessels. Offscreen works with the screen locked. Use it to verify visual changes. Quick checks: `SUNSCATTER_DEMO_STOP_AFTER=<step>` (e.g. `Pad`, `MoonClose`), `SUNSCATTER_DEMO_NO_BENCH=1`. `SUNSCATTER_TIER=<tier>` sets the starting tier; `SUNSCATTER_HOME=<dir>` moves saves and settings.
+- `SUNSCATTER_TOUR=<body,body,…> SUNSCATTER_DEMO=<dir> SUNSCATTER_DEMO_OFFSCREEN=1 cargo run -p game --release` — body tour (`game::tour`): Minimal-tier shots of each body (disc from 3 radii, limb from low orbit, ground from 2 km at a low Sun), no interface, clock frozen.
 - Body data lives in `data/bodies/<body>/` (`body.ron` for sim, `visual.ron` for game, maps baked by `cargo run -p asset-tool --release -- all`).
 - `cargo run -p sim --release --example bench_coast` — coast integration cost per step.
 - `cargo run -p ephem-tool --release -- sol` — regenerate the Solar System ephemeris (needs `data/external/de440s.bsp`; see the tool's docs). The golden tests fail if the shipped file and code disagree.
