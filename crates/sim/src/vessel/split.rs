@@ -67,10 +67,23 @@ pub struct SplitPlan {
 }
 
 impl SplitPlan {
-    /// The pieces' craft, built through [`registry::craft_of`] (kept per
-    /// id for the process): where a split's cost is.
+    /// The pieces' craft with their designs, built through
+    /// [`registry::craft_of`] (kept per id for the process), one thread per
+    /// piece (each build is independent and deterministic): where a
+    /// split's cost is.
     pub fn crafts(&self) -> Vec<Arc<Craft>> {
-        self.ids.iter().map(registry::craft_of).collect()
+        std::thread::scope(|s| {
+            let built: Vec<_> = (self.ids.iter())
+                .map(|id| {
+                    s.spawn(move || {
+                        let craft = registry::craft_of(id);
+                        craft.design();
+                        craft
+                    })
+                })
+                .collect();
+            built.into_iter().map(|b| b.join().expect("a piece's craft")).collect()
+        })
     }
 }
 
