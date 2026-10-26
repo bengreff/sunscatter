@@ -187,6 +187,16 @@ pub fn sky_light_fade(height_fraction: f64) -> f32 {
     (1.0 - t * t * (3.0 - 2.0 * t)) as f32
 }
 
+/// Whether the camera's atmosphere is raymarched, at a camera `depth` in
+/// the nearest atmosphere (height above its ground as a fraction of its
+/// thickness; 1 or more: outside). "Raymarched" is adaptive: inside an
+/// atmosphere the lookup tables are accurate and much cheaper (~3 ms at the
+/// pad, 2026-09-26); from outside, their aerial perspective washes the
+/// ground out, so it raymarches there.
+pub fn raymarch(quality: AtmosphereQuality, depth: f64) -> bool {
+    quality == AtmosphereQuality::Raymarched && depth >= 1.0
+}
+
 /// Sky-light cubemap size (px per face): only diffuse and blurry reflections
 /// use it, and it is regenerated and filtered every frame.
 const SKY_LIGHT_SIZE: u32 = 64;
@@ -254,10 +264,15 @@ pub fn update_sky_light(
                 *stash = Some(g.clone());
             }
         }
-        // "Raymarched" is adaptive: inside an atmosphere the lookup tables
-        // are accurate and much cheaper; from outside, raymarching is needed.
+        // "Raymarched" is adaptive (`raymarch`), whether or not the sky light
+        // is on (it was tied to it from 2026-09-27, so the tiers without sky
+        // light raymarched at the pad too).
         if let Some(mut a) = atmo.filter(|_| settings.atmosphere == AtmosphereQuality::Raymarched) {
-            let want = if inside { AtmosphereMode::LookupTexture } else { AtmosphereMode::Raymarched };
+            let want = if raymarch(settings.atmosphere, depth) {
+                AtmosphereMode::Raymarched
+            } else {
+                AtmosphereMode::LookupTexture
+            };
             if a.rendering_method as u32 != want as u32 {
                 a.rendering_method = want;
             }
@@ -268,6 +283,23 @@ pub fn update_sky_light(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn raymarched_only_from_outside_the_atmosphere() {
+        // (quality, camera depth in the atmosphere, raymarched)
+        let cases = [
+            (AtmosphereQuality::Raymarched, 0.0, false), // at the pad: lookup tables
+            (AtmosphereQuality::Raymarched, 0.99, false),
+            (AtmosphereQuality::Raymarched, 1.0, true), // the top of the atmosphere
+            (AtmosphereQuality::Raymarched, 3.0, true), // 300 km up: raymarched
+            (AtmosphereQuality::Raymarched, f64::INFINITY, true), // no atmosphere near
+            (AtmosphereQuality::Lut, 3.0, false),
+            (AtmosphereQuality::Off, 3.0, false),
+        ];
+        for (q, depth, want) in cases {
+            assert_eq!(raymarch(q, depth), want, "{q:?} at {depth}");
+        }
+    }
 
     #[test]
     fn sky_light_fades_out_towards_the_top() {

@@ -4,9 +4,10 @@
 //!
 //! Minimal is the default and the only tier developed (D073): terrain
 //! relief (the drawn ground is the physical one), crisp surface zones
-//! (crisp-surfaces.md), a blue sky from the lookup-table atmosphere, stars,
-//! shadows and the simple ground pattern (terrain detail off); no bloom,
-//! flare, glint, planetshine or sky light.
+//! (crisp-surfaces.md), the physical sky (the atmosphere raymarched from
+//! outside it, lookup tables inside), stars, shadows and the simple ground
+//! pattern (terrain detail off); no bloom, flare, glint, planetshine or sky
+//! light.
 
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -116,7 +117,10 @@ impl GraphicsSettings {
             Tier::Minimal => GraphicsSettings {
                 terrain: true,
                 zones: true,
-                atmosphere: AtmosphereQuality::Lut,
+                // Adaptive: lookup tables inside an atmosphere, raymarched
+                // from outside, where the tables' aerial perspective washes
+                // the ground out (`atmosphere::mode`).
+                atmosphere: AtmosphereQuality::Raymarched,
                 star_magnitude: 5.0,
                 shadows: true,
                 msaa: MsaaLevel::X2,
@@ -248,9 +252,10 @@ mod tests {
         let m = GraphicsSettings::preset(Tier::Minimal);
         assert_eq!(Tier::default(), Tier::Minimal);
         // Relief on (the drawn ground is the physical ground), crisp zones,
-        // a sky, stars and shadows; the costly effects off.
+        // the physical sky (raymarched from orbit), stars and shadows; the
+        // costly effects off.
         assert!(m.terrain && m.zones && m.shadows && m.star_magnitude >= 5.0);
-        assert_eq!(m.atmosphere, AtmosphereQuality::Lut);
+        assert_eq!(m.atmosphere, AtmosphereQuality::Raymarched);
         assert!(!(m.detail || m.bloom || m.flare || m.ocean_glint || m.earthshine || m.sky_light));
         assert_ne!(m.msaa, MsaaLevel::X4);
     }
