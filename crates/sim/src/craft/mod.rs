@@ -10,6 +10,7 @@ pub mod engine;
 pub mod file;
 pub mod mass;
 pub mod mesh;
+pub mod stress;
 pub mod volume;
 
 pub use cells::{Cell, CellOptions, Cells, ContactKind, ContactPoint, Neighbour};
