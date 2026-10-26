@@ -18,6 +18,8 @@ use super::attitude::{Attitude, AttitudeControl};
 use super::burn::{BurnLimits, FlightPlan};
 use super::flown::{direction_and_rate, BurnCraft, Flight};
 use super::hold::AimKey;
+use super::limbo::{Limbo, LowThrust, LOW_THRUST};
+use super::pointing::{self, Pointing};
 use super::segment::{CoastStart, EndKind, Segment, SegmentKind};
 use crate::frame::NodeId;
 use crate::time::Epoch;
@@ -41,6 +43,10 @@ pub struct Trajectory {
     /// igniting right then starts from them.
     #[serde(default)]
     seed: Option<(Attitude, AttitudeControl)>,
+    /// The perturbation model of the vessel's segments ([`super::limbo`];
+    /// each segment has its own pointing). `None`: bare segments.
+    #[serde(default)]
+    limbo: Option<Limbo>,
 }
 
 /// What the burns of a trajectory are flown with.
@@ -61,8 +67,8 @@ impl Trajectory {
     /// Burns point their thrust along their law exactly (no craft).
     pub fn new(world: &World, t: Epoch, start: CoastStart, mass: f64, plan: &FlightPlan, limits: BurnLimits) -> Self {
         let fly = Flying { coast_horizon: start.horizon, limits, craft: None, seed: None };
-        let first = make_segment(world, plan, t, start, mass, 0, fly, BurnFrom::Coast(DVec3::ZERO));
-        Trajectory { segments: vec![first], coast_horizon: start.horizon, limits, craft: None, seed: None }
+        let first = make_segment(world, plan, t, start, mass, 0, fly, BurnFrom::Coast(DVec3::ZERO), None);
+        Trajectory { segments: vec![first], coast_horizon: start.horizon, limits, craft: None, seed: None, limbo: None }
     }
 
     /// As [`Trajectory::new`], with the burns flown by `craft`'s attitude
@@ -78,17 +84,38 @@ impl Trajectory {
         craft: BurnCraft,
         seed: (Attitude, AttitudeControl),
     ) -> Self {
+        Self::perturbed(world, t, start, mass, plan, limits, craft, seed, None)
+    }
+
+    /// As [`Trajectory::flown`], with perturbed segments ([`super::limbo`]):
+    /// the first coast holds `limbo`'s pointing, coasts after burns start
+    /// with an unknown attitude ([`Pointing::Mean`]; the vessel restarts
+    /// them once its attitude is known), and burns below [`LOW_THRUST`] are
+    /// flown as perturbed segments with continuous thrust.
+    #[allow(clippy::too_many_arguments)]
+    pub fn perturbed(
+        world: &World,
+        t: Epoch,
+        start: CoastStart,
+        mass: f64,
+        plan: &FlightPlan,
+        limits: BurnLimits,
+        craft: BurnCraft,
+        seed: (Attitude, AttitudeControl),
+        limbo: Option<Limbo>,
+    ) -> Self {
         let fly = Flying { coast_horizon: start.horizon, limits, craft: Some(craft), seed: Some(seed.0) };
-        let first = make_segment(world, plan, t, start, mass, 0, fly, BurnFrom::Exact(seed));
+        let first = make_segment(world, plan, t, start, mass, 0, fly, BurnFrom::Exact(seed), limbo.as_ref());
         let seed = Some(seed);
-        Trajectory { segments: vec![first], coast_horizon: start.horizon, limits, craft: Some(craft), seed }
+        Trajectory { segments: vec![first], coast_horizon: start.horizon, limits, craft: Some(craft), seed, limbo }
     }
 
     /// A trajectory made of one given segment (tests, and callers that build
     /// a segment themselves). Burns of a plan are followed after it ends.
     pub fn from_segment(segment: Segment) -> Self {
         let coast_horizon = segment.initial().horizon;
-        Trajectory { segments: vec![segment], coast_horizon, limits: BurnLimits::default(), craft: None, seed: None }
+        let limits = BurnLimits::default();
+        Trajectory { segments: vec![segment], coast_horizon, limits, craft: None, seed: None, limbo: None }
     }
 
     /// The segment containing the earliest stored time.
@@ -183,7 +210,13 @@ impl Trajectory {
         // A burn right after a burn starts where that one ended; after a
         // coast, the acceleration there gives the burn direction's rate.
         let from = prev.flight_end().map_or(BurnFrom::Coast(last.s.a), BurnFrom::Exact);
-        Some(make_segment(world, plan, t, start, prev.mass_at(end.t), index, self.flying(), from))
+        // A coast continuing a coast keeps its pointing (a pure function of
+        // time); after a burn the attitude is not known ahead.
+        let limbo = self.limbo.as_ref().map(|l| match (end.kind, prev.limbo()) {
+            (EndKind::Horizon, Some(p)) if matches!(prev.kind, SegmentKind::Coast) => l.with(p.pointing.clone(), None),
+            _ => l.with(Pointing::Mean, None),
+        });
+        Some(make_segment(world, plan, t, start, prev.mass_at(end.t), index, self.flying(), from, limbo.as_ref()))
     }
 
     fn flying(&self) -> Flying {
@@ -209,6 +242,15 @@ impl Trajectory {
             .find(|&e| e.seconds_since(t) > 0.0 && e.seconds_since(until) <= 0.0)
     }
 
+    /// The first coast segment that follows a burn and starts after `t` and
+    /// at or before `until`: its start (the attitude regime is checked there).
+    pub fn next_coast_after_burn(&self, t: Epoch, until: Epoch) -> Option<Epoch> {
+        (self.segments.windows(2))
+            .filter(|w| matches!(w[0].kind, SegmentKind::Burn(_)) && matches!(w[1].kind, SegmentKind::Coast))
+            .map(|w| w[1].t0)
+            .find(|&e| e.seconds_since(t) > 0.0 && e.seconds_since(until) <= 0.0)
+    }
+
     /// At a burn's ignition (the current segment, not yet flown past its
     /// start): flies it again from the vessel's actual attitude and control
     /// if they differ from the ones it was predicted with, dropping what
@@ -217,6 +259,21 @@ impl Trajectory {
     /// of their last tick). Returns the attitude the burn starts from.
     pub(super) fn refly(&mut self, world: &World, mut att: Attitude, control: AttitudeControl) -> Attitude {
         let cur = &self.segments[0];
+        if let (SegmentKind::Burn(law), Some(l)) = (cur.kind, cur.limbo().filter(|l| l.thrust.is_some())) {
+            // A low-thrust burn: held on its law from the actual attitude.
+            let s = cur.initial();
+            let snap = world.snapshot(cur.t0);
+            let axis = l.thrust.map_or(DVec3::Z, |t| t.axis);
+            let p = pointing::on_law(&law.direction, &att, axis, world, &snap, (s.anchor, s.r, s.v));
+            let held = p.attitude(world, &snap, s.anchor, s.r, s.v).unwrap_or(att);
+            if p != l.pointing {
+                let limbo = Some(Box::new(l.with(p, l.thrust)));
+                let (t0, mass, kind, index) = (cur.t0, cur.initial_mass(), cur.kind, cur.plan_index);
+                let rebuilt = Segment::start(world, t0, s, mass, kind, EndKind::BurnEnd, index, None, limbo);
+                self.segments = vec![rebuilt];
+            }
+            return held;
+        }
         let (SegmentKind::Burn(law), Some(flight)) = (cur.kind, cur.flight()) else { return att };
         if flight.craft.is_none() {
             return att;
@@ -238,6 +295,7 @@ impl Trajectory {
             EndKind::BurnEnd,
             cur.plan_index,
             Some(fresh),
+            cur.limbo().map(|l| Box::new(l.clone())),
         );
         self.segments = vec![rebuilt];
         att
@@ -267,8 +325,10 @@ impl Trajectory {
         }
         let cur = &self.segments[0];
         let seed = cur.flight().map(|f| f.start).or(self.seed).map_or(BurnFrom::Coast(DVec3::ZERO), BurnFrom::Exact);
-        let rebuilt =
-            make_segment(world, plan, cur.t0, cur.initial(), cur.initial_mass(), cur.plan_index, self.flying(), seed);
+        let pointing = cur.limbo().filter(|_| matches!(cur.kind, SegmentKind::Coast)).map(|l| l.pointing.clone());
+        let limbo = self.limbo.as_ref().map(|l| l.with(pointing.unwrap_or(Pointing::Mean), None));
+        let (t0, start, mass, index) = (cur.t0, cur.initial(), cur.initial_mass(), cur.plan_index);
+        let rebuilt = make_segment(world, plan, t0, start, mass, index, self.flying(), seed, limbo.as_ref());
         self.segments = vec![rebuilt];
         self.extend(world, plan, now, usize::MAX);
         self.prune_before(now);
@@ -303,7 +363,10 @@ enum BurnFrom {
 /// (with `i` the first burn from `index` not missed), else a coast up to
 /// that burn's ignition (or `coast_horizon`). Burns are flown within
 /// `limits` (burnout, or no mass flow with infinite propellant), by the
-/// craft from `from`.
+/// craft from `from`. With a perturbation model `limbo`, a coast takes its
+/// pointing, a burn below [`LOW_THRUST`] is flown as a perturbed segment
+/// held on its law, and a heavier burn gets the model with an unknown
+/// attitude (its thrust is flown by ticks).
 #[allow(clippy::too_many_arguments)]
 fn make_segment(
     world: &World,
@@ -314,6 +377,7 @@ fn make_segment(
     index: usize,
     fly: Flying,
     from: BurnFrom,
+    limbo: Option<&Limbo>,
 ) -> Segment {
     let Flying { coast_horizon, limits, craft, seed } = fly;
     let i = plan.next_from(index, t);
@@ -336,17 +400,28 @@ fn make_segment(
                 BurnFrom::Coast(a) => a,
                 BurnFrom::Exact(_) => DVec3::ZERO,
             };
-            let flight = Flight::new(craft, att, control, accel0);
             let start = CoastStart { horizon, ..start };
-            Segment::start(world, t, start, mass, SegmentKind::Burn(law), EndKind::BurnEnd, i, Some(flight))
+            let kind = SegmentKind::Burn(law);
+            if let (Some(l), Some(c)) = (limbo, craft.filter(|_| law.thrust < LOW_THRUST * mass)) {
+                let axis = c.engine.mount_dir;
+                let snap = world.snapshot(t);
+                let p = pointing::on_law(&law.direction, &att, axis, world, &snap, (start.anchor, start.r, start.v));
+                let limbo = Some(Box::new(l.with(p, Some(LowThrust { thrust: law.thrust, axis }))));
+                return Segment::start(world, t, start, mass, kind, EndKind::BurnEnd, i, None, limbo);
+            }
+            let flight = Flight::new(craft, att, control, accel0);
+            let limbo = limbo.map(|l| Box::new(l.with(Pointing::Mean, None)));
+            Segment::start(world, t, start, mass, kind, EndKind::BurnEnd, i, Some(flight), limbo)
         }
         Some(b) if b.t_start.seconds_since(t) <= coast_horizon => {
             let start = CoastStart { horizon: b.t_start.seconds_since(t), ..start };
-            Segment::start(world, t, start, mass, SegmentKind::Coast, EndKind::BurnStart, i, None)
+            let limbo = limbo.map(|l| Box::new(l.clone()));
+            Segment::start(world, t, start, mass, SegmentKind::Coast, EndKind::BurnStart, i, None, limbo)
         }
         _ => {
             let start = CoastStart { horizon: coast_horizon, ..start };
-            Segment::start(world, t, start, mass, SegmentKind::Coast, EndKind::Horizon, i, None)
+            let limbo = limbo.map(|l| Box::new(l.clone()));
+            Segment::start(world, t, start, mass, SegmentKind::Coast, EndKind::Horizon, i, None, limbo)
         }
     }
 }

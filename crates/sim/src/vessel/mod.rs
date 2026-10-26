@@ -43,6 +43,8 @@ mod hold;
 mod id;
 mod live;
 use live::{attitude_mode, Checked};
+pub mod limbo;
+pub mod pointing;
 mod segment;
 mod trajectory;
 
@@ -62,9 +64,8 @@ pub use segment::{coast_tolerance, CoastStart, EndKind, Sample, Segment, Segment
 pub use trajectory::Trajectory;
 
 use crate::craft::{Craft, CraftParams, MassProps};
-use crate::forces::{ambient_pressure, ActiveSources, DragModel, ForceContext};
+use crate::forces::{ambient_pressure, DragModel};
 use crate::frame::{BodyFixed, NodeId, Vec3};
-use crate::integrate::{Dopri5, Dynamics, Tolerance};
 use crate::math;
 use crate::time::Epoch;
 use crate::world::World;
@@ -202,22 +203,13 @@ pub struct Vessel {
     clock: ShipClock,
     /// Skin and interior temperatures (D065).
     thermal: VesselThermal,
-}
-
-/// The forces of a live tick from `t0`, with the proper-time rate.
-struct TickForces<'a> {
-    ctx: ForceContext<'a>,
-    t0: Epoch,
-}
-
-impl Dynamics for TickForces<'_> {
-    fn accel(&self, t: f64, r: DVec3, v: DVec3) -> DVec3 {
-        self.ctx.accel(self.t0.add_seconds(t), r, v)
-    }
-
-    fn accel_rate(&self, t: f64, r: DVec3, v: DVec3) -> (DVec3, f64) {
-        self.ctx.accel_rate(&self.ctx.world.snapshot(self.t0.add_seconds(t)), r, v)
-    }
+    /// Placeholders of the perturbed coasts ([`limbo`]).
+    #[serde(default)]
+    pub limbo: limbo::LimboSpec,
+    /// The attitude was set from outside while coasting: the coast restarts
+    /// from it at the next advance.
+    #[serde(default)]
+    repoint: bool,
 }
 
 /// Rotation matrix taking body-fixed axes of `body` to inertial axes at `t`.
@@ -265,6 +257,8 @@ impl Vessel {
             checked: Checked(true),
             clock: ShipClock::at(t, 0.0),
             thermal: VesselThermal::uniform(cells, nodes, aerothermal::INITIAL_K, t),
+            limbo: Default::default(),
+            repoint: false,
         };
         v.sync_landed_attitude(world);
         if !v.holds_where_landed(world) {
@@ -297,9 +291,12 @@ impl Vessel {
             checked: Checked(true),
             clock: ShipClock::at(t, 0.0),
             thermal: VesselThermal::uniform(cells, nodes, aerothermal::INITIAL_K, t),
+            limbo: Default::default(),
+            repoint: false,
         };
-        // Inside an atmosphere it is flown live.
-        if !in_atmosphere(world, &world.snapshot(t), anchor, r, aerothermal::LEAVE_ATMOSPHERE) {
+        // In air that needs it, it is flown live (the live boundary).
+        let boundary = vessel.limbo.boundary;
+        if limbo::may_coast(&boundary, world, &world.snapshot(t), anchor, (r, v), aerothermal::LEAVE_ATMOSPHERE) {
             vessel.start_coast(world);
         }
         vessel
@@ -405,6 +402,7 @@ impl Vessel {
         self.attitude = att;
         self.control.base = None;
         self.control.hold = (att.omega == DVec3::ZERO).then_some(att.q);
+        self.repoint = matches!(self.phase, Phase::Coasting { .. });
     }
 
     /// Sets the propellant (clamped to [0, capacity]). A coast is restarted
@@ -543,17 +541,20 @@ impl Vessel {
         let controls = if self.destroyed.is_some() { &cut } else { controls };
         loop {
             let before = (self.time, std::mem::discriminant(&self.phase));
+            // A coast restarted at its own time (a new attitude regime) moved on.
+            let mut restarted = false;
             match &self.phase {
                 Phase::Landed { .. } => self.advance_landed(world, target, controls),
                 Phase::Crashed { .. } => self.advance_grounded(world, target),
                 Phase::Powered { .. } => self.advance_powered(world, target, controls),
-                Phase::Coasting { .. } => self.advance_coasting(world, target, controls, &mut budget),
+                Phase::Coasting { .. } => restarted = self.advance_coasting(world, target, controls, &mut budget),
             }
             // Stop at the target, when neither time nor phase moved (waiting
             // for a segment, or less than one tick left), or out of budget
             // while coasting.
             let spent = budget.thermal == 0 && matches!(self.phase, Phase::Coasting { .. });
-            if self.time >= target || (self.time, std::mem::discriminant(&self.phase)) == before || spent {
+            let stuck = (self.time, std::mem::discriminant(&self.phase)) == before && !restarted;
+            if self.time >= target || stuck || spent {
                 return self.time;
             }
         }
@@ -592,31 +593,6 @@ impl Vessel {
         self.thermal.restart(self.time);
     }
 
-    /// Integrates one tick with a constant acceleration `thrust` (thrust
-    /// and lift) and `drag` (adaptive substeps, exact end). Returns the
-    /// state and the tick's proper-time increment; `None` if the
-    /// integration fails (non-finite state or force).
-    fn integrate_tick(
-        &self,
-        world: &World,
-        (anchor, r, v): (NodeId, DVec3, DVec3),
-        thrust: DVec3,
-        drag: DragModel,
-    ) -> Option<(DVec3, DVec3, f64)> {
-        let snap = world.snapshot(self.time);
-        let active = ActiveSources::select(world, &snap, anchor, r);
-        let f = TickForces {
-            ctx: ForceContext { world, anchor, active: &active, drag: Some(drag), thrust },
-            t0: self.time,
-        };
-        let integ = Dopri5::new(Tolerance { h_max: TICK, ..coast_tolerance() });
-        let mut st = integ.start(&f, 0.0, r, v, TICK);
-        while st.t < TICK {
-            integ.step(&f, &mut st, TICK).ok()?;
-        }
-        Some((st.r.value(), st.v.value(), st.x.value()))
-    }
-
     /// Replaces the current phase with a coast starting now.
     fn start_coast(&mut self, world: &World) {
         let state = self.state(world);
@@ -624,7 +600,15 @@ impl Vessel {
     }
 
     /// Replaces the current phase with a coast from `(anchor, r, v)` now.
-    fn start_coast_from(&mut self, world: &World, (anchor, r, v): (NodeId, DVec3, DVec3)) {
+    /// Its segments are perturbed ([`limbo`]); the first coast's attitude
+    /// is unknown until the next advance finds the regime
+    /// ([`pointing::Pointing::Mean`]).
+    fn start_coast_from(&mut self, world: &World, state: (NodeId, DVec3, DVec3)) {
+        self.start_coast_pointing(world, state, pointing::Pointing::Mean);
+    }
+
+    /// As [`Self::start_coast_from`], the first coast held by `pointing`.
+    fn start_coast_pointing(&mut self, world: &World, (anchor, r, v): (NodeId, DVec3, DVec3), p: pointing::Pointing) {
         let start = CoastStart {
             anchor,
             r,
@@ -637,8 +621,10 @@ impl Vessel {
         };
         let seed = (self.attitude, self.control);
         let (plan, limits, craft) = (&self.plan, self.burn_limits(), BurnCraft::of(&self.craft));
-        let trajectory = Trajectory::flown(world, self.time, start, self.mass(), plan, limits, craft, seed);
+        let model = Some(self.limbo_model(p));
+        let trajectory = Trajectory::perturbed(world, self.time, start, self.mass(), plan, limits, craft, seed, model);
         self.phase = Phase::Coasting { trajectory: Box::new(trajectory) };
+        self.repoint = false;
     }
 
     /// Extends the current coast (if any) until `until`, with at most
@@ -654,20 +640,17 @@ impl Vessel {
     /// while powered). Not integrated yet; the caller extends it.
     pub fn coast_from_now(&self, world: &World) -> Segment {
         let (anchor, r, v) = self.state(world);
-        Segment::new(
-            world,
-            self.time,
-            CoastStart {
-                anchor,
-                r,
-                v,
-                drag: Some(self.drag()),
-                contact_height: self.live_height(),
-                horizon: COAST_HORIZON,
-                fixed_anchor: false,
-                proper_time: self.clock.offset,
-            },
-        )
+        let start = CoastStart {
+            anchor,
+            r,
+            v,
+            drag: Some(self.drag()),
+            contact_height: self.live_height(),
+            horizon: COAST_HORIZON,
+            fixed_anchor: false,
+            proper_time: self.clock.offset,
+        };
+        Segment::new_limbo(world, self.time, start, self.mass(), self.limbo_model(pointing::Pointing::Mean))
     }
 
     /// The current segment (coast or planned burn), if on rails.

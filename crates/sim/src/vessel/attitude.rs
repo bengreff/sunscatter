@@ -387,6 +387,10 @@ fn drift(base: &RotationBase, control: &AttitudeControl, controls: &Controls, ai
 /// so 60 fps and one long jump give the same attitude bit for bit.
 /// `inertia_at(epoch)` is the inertia at an epoch after the vessel's time
 /// (it changes in planned burns); `aim_at(epoch)` what SAS aims at then.
+/// With `stop_settled`, returns at the end of the first control tick after
+/// which no more ticks are needed (a turn settled, a rotation stopped):
+/// that epoch, the attitude there (a perturbed coast restarts with the
+/// attitude known from then, `super::pointing`). Otherwise `None`.
 #[allow(clippy::too_many_arguments)]
 pub fn advance_coast(
     att: &mut Attitude,
@@ -394,10 +398,10 @@ pub fn advance_coast(
     (time, until): (Epoch, Epoch),
     controls: &Controls,
     torque: DVec3,
-    inertia_now: DMat3,
-    inertia_at: impl Fn(Epoch) -> DMat3,
+    (inertia_now, inertia_at): (DMat3, impl Fn(Epoch) -> DMat3),
     aim_at: impl Fn(Epoch) -> Aim,
-) {
+    stop_settled: bool,
+) -> Option<Epoch> {
     let tick = TICK;
     let mut base = control.base.unwrap_or(RotationBase { epoch: time, att: *att, inertia: inertia_now });
     if !controls.sas {
@@ -434,6 +438,11 @@ pub fn advance_coast(
             base.inertia = inertia_at(end);
             base.att = control_tick(&base.att, &base.inertia, control, controls, &act, &aim, tick).0;
             base.epoch = end;
+            if stop_settled && !needs_ticks(&base.att, control, controls, &aim_at(end)) {
+                *att = base.att;
+                control.base = Some(base);
+                return Some(end);
+            }
         } else if following(control, controls, &aim) {
             control.waiting = false;
             let end = base.epoch.add_seconds(FOLLOW_STEP);
@@ -473,6 +482,7 @@ pub fn advance_coast(
     }
     *att = drift(&base, control, controls, &aim_at(until), until.seconds_since(base.epoch));
     control.base = Some(base);
+    None
 }
 
 #[cfg(test)]

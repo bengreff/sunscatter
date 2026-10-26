@@ -26,17 +26,36 @@
 //! D064, D065): its engine and controls are cut, and it flies on (falls,
 //! bounces, tumbles) until it comes to rest.
 
-use super::aerothermal::{self, air_at, in_atmosphere, AeroTick, LEAVE_ATMOSPHERE};
+use super::aerothermal::{self, air_at, AeroTick, LEAVE_ATMOSPHERE};
 use super::attitude::{self, Actuators, Command, Gimbal};
+use super::coast_tolerance;
 use super::{AttitudeControl, Controls, Destruction, FlightPlan, Phase, Vessel, TICK};
 use crate::chute;
 use crate::contact::{self, Ground, Pose};
 use crate::craft::MassProps;
 use crate::forces::{altitude_above, ambient_pressure, ActiveSources, DragModel, ForceContext};
 use crate::frame::NodeId;
+use crate::integrate::{Dopri5, Dynamics, Tolerance};
 use crate::rigid;
+use crate::time::Epoch;
 use crate::world::World;
 use glam::{DQuat, DVec3};
+
+/// The forces of a live tick from `t0`, with the proper-time rate.
+struct TickForces<'a> {
+    ctx: ForceContext<'a>,
+    t0: Epoch,
+}
+
+impl Dynamics for TickForces<'_> {
+    fn accel(&self, t: f64, r: DVec3, v: DVec3) -> DVec3 {
+        self.ctx.accel(self.t0.add_seconds(t), r, v)
+    }
+
+    fn accel_rate(&self, t: f64, r: DVec3, v: DVec3) -> (DVec3, f64) {
+        self.ctx.accel_rate(&self.ctx.world.snapshot(self.t0.add_seconds(t)), r, v)
+    }
+}
 
 /// A contact tick that could not be completed: the state stopped being
 /// finite.
@@ -87,6 +106,31 @@ impl Vessel {
         self.tick_accel = None;
         self.control.base = None;
         self.rest_ticks = 0;
+    }
+
+    /// Integrates one tick with a constant acceleration `thrust` (thrust
+    /// and lift) and `drag` (adaptive substeps, exact end). Returns the
+    /// state and the tick's proper-time increment; `None` if the
+    /// integration fails (non-finite state or force).
+    fn integrate_tick(
+        &self,
+        world: &World,
+        (anchor, r, v): (NodeId, DVec3, DVec3),
+        thrust: DVec3,
+        drag: DragModel,
+    ) -> Option<(DVec3, DVec3, f64)> {
+        let snap = world.snapshot(self.time);
+        let active = ActiveSources::select(world, &snap, anchor, r);
+        let f = TickForces {
+            ctx: ForceContext { world, anchor, active: &active, drag: Some(drag), thrust },
+            t0: self.time,
+        };
+        let integ = Dopri5::new(Tolerance { h_max: TICK, ..coast_tolerance() });
+        let mut st = integ.start(&f, 0.0, r, v, TICK);
+        while st.t < TICK {
+            integ.step(&f, &mut st, TICK).ok()?;
+        }
+        Some((st.r.value(), st.v.value(), st.x.value()))
     }
 
     /// The surface nearest the centre of mass at `r` (anchor-relative) at
@@ -140,7 +184,7 @@ impl Vessel {
             let snap = world.snapshot(self.time);
             if !engine_on
                 && near.is_none_or(|(_, h)| h > live + contact::LEAVE)
-                && !in_atmosphere(world, &snap, anchor, r, LEAVE_ATMOSPHERE)
+                && super::limbo::may_coast(&self.limbo.boundary, world, &snap, anchor, (r, v), LEAVE_ATMOSPHERE)
             {
                 self.start_coast(world);
                 return;
@@ -218,6 +262,7 @@ impl Vessel {
             };
             let engine_heat = engine.heat(out.thrust, out.mdot);
             let mdot = out.mdot + cmd.rcs.dot(self.craft.rcs_flow);
+            let mdot = mdot + self.limbo.boil_off;
             let propellant = if self.debug { self.propellant } else { (self.propellant - mdot * TICK).max(0.0) };
             aerothermal::live_step(
                 &design,

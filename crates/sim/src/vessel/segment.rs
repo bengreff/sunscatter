@@ -23,14 +23,17 @@ use super::anchor::preferred_anchor;
 use super::attitude::{Attitude, AttitudeControl};
 use super::burn::BurnLaw;
 use super::flown::Flight;
+use super::limbo::Limbo;
 use crate::ephem::{Snapshot, SnapshotCache};
-use crate::forces::{altitude_above, ActiveSources, DragModel, ForceContext};
-use crate::frame::{NodeId, Vec3};
+use crate::forces::{ActiveSources, DragModel, ForceContext};
+use crate::frame::NodeId;
 use crate::integrate::{hermite5, Dopri5, Dynamics, NonFinite, StepSample, StepState, Tolerance};
 use crate::math::{Compensated, CompensatedScalar};
 use crate::time::Epoch;
 use crate::world::World;
 use glam::DVec3;
+
+mod events;
 
 /// Integration tolerance for coasts (position ~1 cm absolute, 1e-11 relative).
 pub fn coast_tolerance() -> Tolerance {
@@ -112,6 +115,12 @@ pub struct Segment {
     /// A burn's attitude, flown with it.
     #[serde(default)]
     flight: Option<Box<Flight>>,
+    /// The perturbation model of a vessel's coast or low-thrust burn
+    /// ([`super::limbo`]): its drag, radiation pressure and thrust replace
+    /// the attitude-independent drag of `drag`, and it marks the live
+    /// boundary as `entry`.
+    #[serde(default)]
+    limbo: Option<Box<Limbo>>,
 }
 
 /// Initial conditions and settings of a coast.
@@ -137,13 +146,20 @@ impl Segment {
     /// Starts a coast at `t0` (mass from the drag model, if any).
     pub fn new(world: &World, t0: Epoch, start: CoastStart) -> Self {
         let mass = start.drag.map_or(0.0, |d| d.mass);
-        Self::start(world, t0, start, mass, SegmentKind::Coast, EndKind::Horizon, 0, None)
+        Self::start(world, t0, start, mass, SegmentKind::Coast, EndKind::Horizon, 0, None, None)
+    }
+
+    /// Starts a perturbed coast at `t0` with mass `mass` ([`super::limbo`]).
+    pub fn new_limbo(world: &World, t0: Epoch, start: CoastStart, mass: f64, limbo: Limbo) -> Self {
+        let limbo = Some(Box::new(limbo));
+        Self::start(world, t0, start, mass, SegmentKind::Coast, EndKind::Horizon, 0, None, limbo)
     }
 
     /// Starts a segment of `kind` at `t0` with mass `mass`; reaching
     /// `start.horizon` ends it with `horizon_end`. A burn whose law or
     /// duration cannot be flown ends at once as [`EndKind::Failed`]. A burn
-    /// is flown from `flight` (its attitude at ignition).
+    /// is flown from `flight` (its attitude at ignition), unless `limbo`
+    /// gives it a continuous thrust.
     #[allow(clippy::too_many_arguments)]
     pub(super) fn start(
         world: &World,
@@ -154,6 +170,7 @@ impl Segment {
         horizon_end: EndKind,
         plan_index: usize,
         flight: Option<Flight>,
+        limbo: Option<Box<Limbo>>,
     ) -> Self {
         let CoastStart { anchor, r, v, drag, contact_height, horizon, fixed_anchor, proper_time } = start;
         let valid = match kind {
@@ -191,6 +208,7 @@ impl Segment {
             plan_index,
             entry: None,
             flight: flight.filter(|_| matches!(kind, SegmentKind::Burn(_))).map(Box::new),
+            limbo,
         };
         let integ = Dopri5::new(coast_tolerance());
         let f = seg.forces(world, &snaps);
@@ -215,12 +233,27 @@ impl Segment {
             mass0: self.mass0,
             kind: &self.kind,
             thrust: self.flight.as_ref().map_or(DVec3::ZERO, |f| f.thrust),
+            limbo: self.limbo.as_deref(),
         }
     }
 
     /// Mass at local time `t` (kg).
     pub fn mass_at(&self, t: f64) -> f64 {
-        mass_at(&self.kind, self.mass0, t)
+        mass_at(&self.kind, self.mass0, self.limbo.as_deref(), t)
+    }
+
+    /// The perturbation model, if this is a perturbed segment.
+    pub fn limbo(&self) -> Option<&Limbo> {
+        self.limbo.as_deref()
+    }
+
+    /// The attitude its pointing gives at local time `t` (a perturbed
+    /// segment whose attitude is known; `None` otherwise or past the
+    /// computed samples).
+    pub fn limbo_attitude(&self, world: &World, t: f64) -> Option<super::Attitude> {
+        let limbo = self.limbo.as_deref().filter(|l| l.pointing.is_known())?;
+        let (anchor, r, v) = self.eval(t)?;
+        limbo.pointing.attitude(world, &world.snapshot(self.t0.add_seconds(t)), anchor, r, v)
     }
 
     /// The initial conditions this segment was started from.
@@ -286,6 +319,7 @@ impl Segment {
                         mass0: self.mass0,
                         kind: &self.kind,
                         thrust: DVec3::ZERO,
+                        limbo: self.limbo.as_deref(),
                     };
                     burn_tick(&integ, f, law, &mut self.state, flight, self.horizon)
                 }
@@ -302,6 +336,7 @@ impl Segment {
                         mass0: self.mass0,
                         kind: &self.kind,
                         thrust: DVec3::ZERO,
+                        limbo: self.limbo.as_deref(),
                     };
                     integ.step(&f, &mut self.state, self.horizon)
                 }
@@ -361,6 +396,7 @@ impl Segment {
                     mass0: self.mass0,
                     kind: &self.kind,
                     thrust: self.flight.as_ref().map_or(DVec3::ZERO, |f| f.thrust),
+                    limbo: self.limbo.as_deref(),
                 };
                 (self.state.a, self.state.x_rate) = f.accel_rate_with(snap, self.state.t, r, v);
             }
@@ -390,72 +426,6 @@ impl Segment {
         self.state.r = Compensated::new(r_new);
         self.state.v = Compensated::new(v_new);
         true
-    }
-
-    /// First contact with a surface between two samples, by bisection on the
-    /// interpolated altitude.
-    fn find_contact(&self, world: &World, snaps: &SnapshotCache, a: &Sample, b: &Sample) -> Option<(f64, NodeId)> {
-        let near = |src: &crate::world::Source, reach: f64| {
-            snaps.with(self.t0.add_seconds(b.s.t), |snap| (b.s.r - snap.relative_r(src.node, self.anchor)).length())
-                <= reach
-        };
-        for src in world.surfaces() {
-            let alt = |t: f64| {
-                let (r, _) = hermite5(&a.s, &b.s, t);
-                let snap = world.snapshot(self.t0.add_seconds(t));
-                altitude_above(world, &snap, self.anchor, src.node, r).0 - self.contact_height
-            };
-            let radius = src.physical.as_ref().map_or(0.0, |p| p.radius_eq);
-            if !near(src, radius + 200_000.0) || alt(b.s.t) >= 0.0 {
-                continue;
-            }
-            let (mut lo, mut hi) = (a.s.t, b.s.t);
-            for _ in 0..60 {
-                let mid = 0.5 * (lo + hi);
-                if alt(mid) > 0.0 {
-                    lo = mid;
-                } else {
-                    hi = mid;
-                }
-            }
-            return Some((hi, src.node));
-        }
-        None
-    }
-
-    /// First descent below an atmosphere's top between two samples (from
-    /// at or above it at `a` to below at `b`), by bisection on the
-    /// interpolated altitude above the ellipsoid.
-    fn find_entry(&self, world: &World, snaps: &SnapshotCache, a: &Sample, b: &Sample) -> Option<(f64, NodeId)> {
-        for src in &world.sources {
-            let Some(p) = src.physical.as_ref() else { continue };
-            let Some(atm) = &p.atmosphere else { continue };
-            let d = snaps
-                .with(self.t0.add_seconds(b.s.t), |snap| (b.s.r - snap.relative_r(src.node, self.anchor)).length());
-            if d > p.radius_eq + atm.top + 200_000.0 {
-                continue;
-            }
-            let alt = |t: f64| {
-                let (r, _) = hermite5(&a.s, &b.s, t);
-                let snap = world.snapshot(self.t0.add_seconds(t));
-                let d = r - snap.relative_r(src.node, self.anchor);
-                p.altitude(p.rotation.to_fixed(Vec3::from_raw(d), snap.t)) - atm.top
-            };
-            if alt(b.s.t) >= 0.0 || alt(a.s.t) < 0.0 {
-                continue;
-            }
-            let (mut lo, mut hi) = (a.s.t, b.s.t);
-            for _ in 0..60 {
-                let mid = 0.5 * (lo + hi);
-                if alt(mid) >= 0.0 {
-                    lo = mid;
-                } else {
-                    hi = mid;
-                }
-            }
-            return Some((hi, src.node));
-        }
-        None
     }
 
     /// Drops samples the vessel has passed, keeping the one at or before `t`
@@ -550,11 +520,16 @@ fn hermite3(a: &Sample, b: &Sample, t: f64) -> f64 {
     h00 * a.delta + h10 * h * a.delta_rate + h01 * b.delta + h11 * h * b.delta_rate
 }
 
-/// Mass at local time `t` of a segment of `kind` starting with `mass0`.
-fn mass_at(kind: &SegmentKind, mass0: f64, t: f64) -> f64 {
-    match kind {
-        SegmentKind::Coast => mass0,
-        SegmentKind::Burn(law) => mass0 - law.mass_flow * t,
+/// Mass at local time `t` of a segment of `kind` starting with `mass0`
+/// (with the limbo model's boil-off, if any).
+fn mass_at(kind: &SegmentKind, mass0: f64, limbo: Option<&Limbo>, t: f64) -> f64 {
+    let flow = match kind {
+        SegmentKind::Coast => 0.0,
+        SegmentKind::Burn(law) => law.mass_flow,
+    };
+    match limbo {
+        Some(l) => l.mass(mass0, flow, t),
+        None => mass0 - flow * t,
     }
 }
 
@@ -571,12 +546,19 @@ struct Forces<'a, 'w> {
     kind: &'a SegmentKind,
     /// A burn's thrust acceleration for the current tick (inertial, m/s²).
     thrust: DVec3,
+    /// The perturbation model (drag, radiation pressure, low thrust).
+    limbo: Option<&'a Limbo>,
 }
 
 impl Dynamics for Forces<'_, '_> {
     /// Acceleration at local time `t`.
     fn accel(&self, t: f64, r: DVec3, v: DVec3) -> DVec3 {
-        self.snaps.with(self.t0.add_seconds(t), |snap| self.context(t).accel_with(snap, r, v))
+        self.snaps.with(self.t0.add_seconds(t), |snap| match self.limbo {
+            Some(l) => {
+                self.context(t).accel_with(snap, r, v) + l.accel(self.world, snap, self.anchor, r, v, self.mass(t))
+            }
+            None => self.context(t).accel_with(snap, r, v),
+        })
     }
 
     /// Acceleration and proper-time rate at local time `t`.
@@ -587,17 +569,24 @@ impl Dynamics for Forces<'_, '_> {
 
 impl Forces<'_, '_> {
     fn accel_rate_with(&self, snap: &Snapshot, t: f64, r: DVec3, v: DVec3) -> (DVec3, f64) {
-        self.context(t).accel_rate(snap, r, v)
+        let (a, rate) = self.context(t).accel_rate(snap, r, v);
+        match self.limbo {
+            Some(l) => (a + l.accel(self.world, snap, self.anchor, r, v, self.mass(t)), rate),
+            None => (a, rate),
+        }
     }
 
-    /// The forces at local time `t` (thrust and drag mass of a burn).
+    fn mass(&self, t: f64) -> f64 {
+        mass_at(self.kind, self.mass0, self.limbo, t)
+    }
+
+    /// The forces at local time `t` (thrust and drag mass of a burn; a
+    /// perturbed segment's drag is the limbo model's).
     fn context(&self, t: f64) -> ForceContext<'_> {
         let (drag, thrust) = match self.kind {
+            _ if self.limbo.is_some() => (None, self.thrust),
             SegmentKind::Coast => (self.drag, DVec3::ZERO),
-            SegmentKind::Burn(_) => {
-                let m = mass_at(self.kind, self.mass0, t);
-                (self.drag.map(|d| DragModel { mass: m, ..d }), self.thrust)
-            }
+            SegmentKind::Burn(_) => (self.drag.map(|d| DragModel { mass: self.mass(t), ..d }), self.thrust),
         };
         ForceContext { world: self.world, anchor: self.anchor, active: self.active, drag, thrust }
     }
@@ -619,7 +608,7 @@ fn burn_tick(
     let t_end = flight.next_tick_end(horizon);
     let (r, v) = (state.r.value(), state.v.value());
     let dir = f.snaps.with(f.t0.add_seconds(t), |snap| law.direction.direction(snap, f.anchor, r, v));
-    let masses = (mass_at(f.kind, f.mass0, t), mass_at(f.kind, f.mass0, t_end));
+    let masses = (f.mass(t), f.mass(t_end));
     f.thrust = flight.tick(law, dir, masses, t_end - t, t_end);
     (state.a, state.x_rate) = f.accel_rate(t, r, v);
     loop {

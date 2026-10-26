@@ -151,6 +151,9 @@ fn a_predicted_burn_is_what_is_flown() {
     // it) and the burn flown (from the attitude the turn ended in).
     let w = world();
     let mut ship = leo_ship(&w);
+    // Held still from the start: the coast knows its attitude (a perturbed
+    // coast, `vessel::pointing`), so the prediction has the forces flown.
+    ship.advance(&w, t0(), &sas(HoldMode::Stability), usize::MAX);
     let b = burn(&w, 300.0, DVec3::new(80.0, 10.0, -5.0));
     ship.set_plan(&w, plan(&[b])).unwrap();
     let after = t0().add_seconds(600.0);
@@ -161,7 +164,10 @@ fn a_predicted_burn_is_what_is_flown() {
     let (dr, dv) = ((predicted.1 - flown.1).length(), (predicted.2 - flown.2).length());
     println!("predicted vs flown 300 s after the burn: {dr:.2e} m, {dv:.2e} m/s");
     assert_eq!(predicted.0, flown.0);
-    assert!(dr < 0.01 && dv < 1e-5, "{dr} m, {dv} m/s");
+    // The turn before the burn and the damping after it are flown with the
+    // attitude unknown to the coast (orientation-averaged drag and light),
+    // where the prediction kept the held attitude: centimetres in 15 min.
+    assert!(dr < 0.05 && dv < 2e-4, "{dr} m, {dv} m/s");
 }
 
 #[test]
@@ -187,8 +193,11 @@ fn burns_and_holds_are_the_same_at_60_fps_and_in_one_jump() {
 }
 
 #[test]
-fn a_coast_does_not_depend_on_the_attitude() {
-    // Torque-free rotation, holds and input never move the centre of mass.
+fn a_coast_depends_on_the_attitude_only_through_drag_and_light() {
+    // Torque-free rotation, a prograde hold and rotation input present
+    // different areas to the thin air and to sunlight at 400 km
+    // (`vessel::limbo`): the centre of mass moves by metres in 50 minutes
+    // (drag ~1e-7 m/s² on the test craft), not more.
     let w = world();
     let end = t0().add_seconds(3_000.0);
     let mut states = Vec::new();
@@ -201,8 +210,10 @@ fn a_coast_does_not_depend_on_the_attitude() {
         ship.advance(&w, end, &controls, usize::MAX);
         states.push(ship.state(&w));
     }
-    assert_eq!(states[0], states[1]);
-    assert_eq!(states[0], states[2]);
+    for s in &states[1..] {
+        let d = (s.1 - states[0].1).length();
+        assert!(s.0 == states[0].0 && d > 1e-3 && d < 20.0, "{d} m");
+    }
 }
 
 #[test]

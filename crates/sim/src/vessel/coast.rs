@@ -6,12 +6,22 @@
 //! turn lead before ignition the maneuver hold takes over (D075), and at
 //! ignition the vessel checks the burn was predicted from the attitude it
 //! has ([`Trajectory::refly`]).
+//!
+//! Perturbed coasts ([`super::limbo`]): while a segment's pointing knows
+//! the attitude ([`super::pointing`]), the attitude is read from it; while
+//! it does not (a turn, rotation input), the controller flies it as above.
+//! The coast restarts from the current state when the regime changes: a
+//! command (checked at every advance), the control tick where a turn
+//! settles, a burn's end, the start of a planned burn's turn. Those epochs
+//! do not depend on frames, so the result does not either.
 
 use super::aerothermal;
 use super::attitude::{advance_coast, needs_ticks, Attitude, AttitudeControl, RotationBase, FOLLOW_STEP};
-use super::burn::{BurnLaw, FlightPlan};
+use super::burn::{BurnLaw, DirectionLaw, FlightPlan};
 use super::clock::ShipClock;
 use super::hold::{aim, hold_inputs, maneuver_direction, Aim, AimKey, HoldMode, LazySnapshot};
+use super::limbo::Limbo;
+use super::pointing::{self, Pointing, Rule};
 use super::segment::{EndKind, SegmentEnd, SegmentKind};
 use super::{Controls, Phase, Trajectory, Vessel, TICK};
 use crate::craft::CraftParams;
@@ -32,17 +42,77 @@ pub(super) struct Budget {
 }
 
 impl Vessel {
-    pub(super) fn advance_coasting(&mut self, world: &World, target: Epoch, controls: &Controls, budget: &mut Budget) {
+    /// The perturbation model of this vessel's segments, holding `p`.
+    pub(super) fn limbo_model(&self, p: Pointing) -> Limbo {
+        let mut l = Limbo::new(self.craft.id.clone(), self.craft.design.clone(), p, self.craft.mass.dry_mass);
+        l.optics = self.limbo.optics;
+        l.boil_off = if self.debug { 0.0 } else { self.limbo.boil_off };
+        l.boundary = self.limbo.boundary;
+        l.chute_area = self.chute.cd_area(&self.craft.chute);
+        l
+    }
+
+    /// Returns whether the vessel made progress (its time moved, or its
+    /// coast restarted).
+    pub(super) fn advance_coasting(
+        &mut self,
+        world: &World,
+        target: Epoch,
+        controls: &Controls,
+        budget: &mut Budget,
+    ) -> bool {
         if self.engine_running(controls) {
             self.thermal_to_now(world);
             let (anchor, r, v) = self.state(world);
             self.phase = Phase::Powered { anchor, r, v };
             self.tick_accel = None;
             self.control.base = None;
-            return;
+            return true;
         }
         // Armed now, opened by the first live tick (no air to fill it here).
         self.chute.armed |= controls.chute;
+        let restarted = self.repoint(world, controls);
+        let before = self.time;
+        self.coast_until(world, target, controls, budget);
+        restarted || self.time != before
+    }
+
+    /// Restarts the coast if the attitude regime the controls ask for is
+    /// not the current coast's pointing: a known pointing whose rule no
+    /// longer holds, or an unknown one where the attitude is now known.
+    /// Returns whether it restarted.
+    fn repoint(&mut self, world: &World, controls: &Controls) -> bool {
+        let Phase::Coasting { trajectory } = &self.phase else { return false };
+        let seg = trajectory.current();
+        let Some(current) = seg.limbo().map(|l| &l.pointing) else { return false };
+        if !matches!(seg.kind, SegmentKind::Coast) || seg.t0.seconds_since(self.time) > 0.0 {
+            return false;
+        }
+        let Some(state) = trajectory.eval(self.time) else { return false };
+        let inertia_now = self.mass_props().inertia;
+        let fly = Rails { world, trajectory, plan: &self.plan, craft: &self.craft, controls, inertia_now };
+        let rule = fly.rule_at(self.time, state.0);
+        if !self.repoint && current.is_known() && current.rule() == rule {
+            return false;
+        }
+        let aim = fly.aim_at(controls, self.time);
+        let eff = fly.effective(controls, self.time);
+        let snap = world.snapshot(self.time);
+        let lawful =
+            pointing::lawful(&rule, (&self.attitude, &self.control), &eff, &aim, world, &snap, state, inertia_now);
+        if !self.repoint && !current.is_known() && lawful.is_none() {
+            return false;
+        }
+        let p = lawful.unwrap_or(Pointing::Mean);
+        if let Some(a) = p.attitude(world, &snap, state.0, state.1, state.2) {
+            self.attitude = a;
+            self.control = p.control(key_of(&aim), self.time, a, inertia_now);
+        }
+        self.start_coast_pointing(world, state, p);
+        true
+    }
+
+    fn coast_until(&mut self, world: &World, target: Epoch, controls: &Controls, budget: &mut Budget) {
         let Phase::Coasting { trajectory } = &mut self.phase else { unreachable!() };
         // At a burn's ignition: flown from the attitude the vessel has.
         let control = AttitudeControl { base: None, ..self.control };
@@ -59,10 +129,16 @@ impl Vessel {
         if let Some((e, _)) = entry {
             reach = e;
         }
-        // Stop at the next ignition to check the attitude there.
+        // Stop at the next ignition to check the attitude there, and where
+        // the attitude regime may change: a coast after a burn, the start
+        // of a burn's turn from a known pointing.
         if let Some(e) = trajectory.next_ignition(self.time, reach) {
             reach = e;
         }
+        if let Some(e) = trajectory.next_coast_after_burn(self.time, reach) {
+            reach = e;
+        }
+        let known = trajectory.segment_at(self.time).and_then(|s| s.limbo()).map(|l| l.pointing.is_known());
         // Attitude and temperatures before pruning: control ticks read the
         // inertia, and the thermal lattice the position, at epochs after the
         // vessel's time, which the trajectory still holds.
@@ -70,6 +146,19 @@ impl Vessel {
         let mass_now = dry + self.propellant;
         let inertia_at = |e: Epoch| model.at(trajectory.mass_at(e).unwrap_or(mass_now) - dry).inertia;
         let inertia_now = model.at(self.propellant).inertia;
+        if known == Some(true) {
+            let fly = Rails { world, trajectory, plan: &self.plan, craft: &self.craft, controls, inertia_now };
+            if let Some((_, start)) = fly.turn(self.time).filter(|(_, s)| *s > self.time && *s < reach) {
+                reach = start;
+            }
+        }
+        // While the attitude is unknown, stop where a turn settles onto a
+        // rule that knows it.
+        let stop_settled = known == Some(false) && {
+            let fly = Rails { world, trajectory, plan: &self.plan, craft: &self.craft, controls, inertia_now };
+            let anchor = trajectory.eval(self.time).map_or(trajectory.current().initial().anchor, |s| s.0);
+            matches!(fly.rule_at(self.time, anchor), Rule::Stability | Rule::Inertial { .. } | Rule::Track(_))
+        };
         let design = self.craft.design().clone();
         let engine = self.craft.engine;
         let heat = |law: &BurnLaw| engine.heat(law.thrust, engine.mdot_max() * law.thrust / engine.thrust_vac);
@@ -77,6 +166,7 @@ impl Vessel {
         let propellant_at = |e: Epoch| (trajectory.mass_at(e).unwrap_or(mass_now) - dry).max(0.0);
         let mut t = self.time;
         let mut stopped = false;
+        let mut settled = None;
         loop {
             let e = self.thermal.next_lattice();
             if e.seconds_since(reach) > 0.0 {
@@ -92,18 +182,27 @@ impl Vessel {
                 self.thermal.pass(e);
                 continue;
             }
-            fly.attitude(&mut self.attitude, &mut self.control, (t, e), &inertia_at);
+            settled = fly.attitude(&mut self.attitude, &mut self.control, (t, e), &inertia_at, stop_settled);
+            if settled.is_some() {
+                break;
+            }
             t = e;
             let (anchor, r, v) = trajectory.eval(e).expect("the lattice epoch is in the trajectory");
             let sun = self.attitude.q.inverse() * aerothermal::coast_sunlight(world, e, anchor, r, v);
             let solved = aerothermal::coast_step(&design, &mut self.thermal, sun, propellant_at(e), e, false);
             budget.thermal = budget.thermal.saturating_sub(if solved { THERMAL_SOLVE_UNITS } else { 1 });
         }
-        if stopped {
+        if let Some(s) = settled {
+            reach = if s > self.time { s } else { self.time };
+        } else if stopped {
             reach = t;
         } else {
             let fly = Rails { world, trajectory, plan: &self.plan, craft: &self.craft, controls, inertia_now };
-            fly.attitude(&mut self.attitude, &mut self.control, (t, reach), &inertia_at);
+            if let Some(s) = fly.attitude(&mut self.attitude, &mut self.control, (t, reach), &inertia_at, stop_settled)
+            {
+                reach = if s > self.time { s } else { self.time };
+                settled = Some(s);
+            }
         }
         // Keep the samples back to where the next frame's control resumes:
         // a followed hold's base (up to a follow step behind), else at most
@@ -136,7 +235,7 @@ impl Vessel {
         let last = trajectory.last();
         let near_surface = matches!(last.end, Some(SegmentEnd { kind: EndKind::Surface { .. }, .. })) && at_end;
         self.time = reach;
-        if !stopped && (entry.is_some() || near_surface) {
+        if !stopped && settled.is_none() && (entry.is_some() || near_surface) {
             // In an atmosphere or close to a surface: flown in live ticks.
             self.thermal_to_now(world);
             let state = self.state(world);
@@ -155,6 +254,14 @@ impl Vessel {
         let design = self.craft.design().clone();
         let sun = self.attitude.q.inverse() * sun;
         aerothermal::coast_step(&design, &mut self.thermal, sun, self.propellant, self.time, true);
+    }
+}
+
+/// The key of a direction hold's aim.
+fn key_of(aim: &Aim) -> Option<AimKey> {
+    match aim {
+        Aim::Direction { key, .. } => Some(*key),
+        Aim::Stability => None,
     }
 }
 
@@ -182,6 +289,34 @@ impl Rails<'_> {
         Some((ignition, ignition.add_seconds(-lead)))
     }
 
+    /// Whether `epoch` is inside a planned burn's turn (the maneuver hold
+    /// then flies the craft, SAS on).
+    fn turning(&self, epoch: Epoch) -> bool {
+        self.turn(epoch).is_some_and(|(_, start)| epoch.seconds_since(start) >= 0.0)
+    }
+
+    /// The controls that fly the craft at `epoch`: the maneuver hold forced
+    /// during a burn's turn.
+    fn effective(&self, controls: &Controls, epoch: Epoch) -> Controls {
+        if self.turning(epoch) {
+            Controls { sas: true, hold: HoldMode::Maneuver, ..*controls }
+        } else {
+            *controls
+        }
+    }
+
+    /// The law of the next planned burn after the segment containing `epoch`.
+    fn next_burn(&self, epoch: Epoch) -> Option<&DirectionLaw> {
+        let seg = self.trajectory.segment_at(epoch)?;
+        self.plan.burns.get(self.plan.next_from(seg.plan_index, epoch)).map(|b| &b.law.direction)
+    }
+
+    /// The attitude regime the controls ask for at `epoch` ([`pointing::wanted`]).
+    fn rule_at(&self, epoch: Epoch, anchor: crate::frame::NodeId) -> Rule {
+        let eff = self.effective(self.controls, epoch);
+        pointing::wanted(&eff, self.next_burn(epoch), anchor, self.craft.engine.mount_dir)
+    }
+
     /// Whether the attitude stays as it is over `(t, e)` (no rotation, no
     /// control ticks, no turn or burn): the thermal lattice may skip.
     fn still(&self, att: &Attitude, control: &AttitudeControl, t: Epoch, e: Epoch) -> bool {
@@ -196,7 +331,7 @@ impl Rails<'_> {
     fn aim_at(&self, controls: &Controls, epoch: Epoch) -> Aim {
         let Some(seg) = self.trajectory.segment_at(epoch) else { return Aim::Stability };
         let Some(state) = self.trajectory.eval(epoch) else { return Aim::Stability };
-        let turning = self.turn(epoch).is_some_and(|(_, start)| epoch.seconds_since(start) >= 0.0);
+        let turning = self.turning(epoch);
         if !turning && (!controls.sas || controls.hold == HoldMode::Stability) {
             return Aim::Stability;
         }
@@ -212,38 +347,55 @@ impl Rails<'_> {
     }
 
     /// Carries the attitude over `(t, e)`: coasts by [`advance_coast`] (the
-    /// maneuver hold from a turn's start, with SAS on), burns from the
-    /// stored flight; at a burn's end the control continues from the
-    /// burn's.
+    /// maneuver hold from a turn's start, with SAS on) or read from their
+    /// known pointing, burns from the stored flight (or a low-thrust burn's
+    /// pointing); at a burn's end the control continues from the burn's.
+    /// With `stop_settled`, stops where a turn in a coast settles and
+    /// returns that epoch.
     fn attitude(
         &self,
         att: &mut Attitude,
         control: &mut AttitudeControl,
         (mut t, e): (Epoch, Epoch),
         inertia_at: &impl Fn(Epoch) -> DMat3,
-    ) {
+        stop_settled: bool,
+    ) -> Option<Epoch> {
         let torque = self.craft.torque;
         while t < e {
-            let Some(seg) = self.trajectory.segment_at(t) else { return };
-            match seg.kind {
-                SegmentKind::Burn(_) => {
-                    let end = seg.end.map_or(e, |x| seg.t0.add_seconds(x.t));
-                    let stop = if end < e { end } else { e };
-                    if let Some(a) = seg.attitude_at(stop.seconds_since(seg.t0)) {
+            let seg = self.trajectory.segment_at(t)?;
+            let end = seg.end.map_or(e, |x| seg.t0.add_seconds(x.t));
+            let stop = if end < e { end } else { e };
+            let known = seg.limbo().map(|l| &l.pointing).filter(|p| p.is_known());
+            match (seg.kind, known) {
+                (SegmentKind::Burn(_), _) => {
+                    let local = stop.seconds_since(seg.t0);
+                    if let Some(a) = seg.attitude_at(local).or_else(|| seg.limbo_attitude(self.world, local)) {
                         *att = a;
                     }
                     if stop == end {
                         if let Some((a, c)) = seg.flight_end() {
                             let base = RotationBase { epoch: end, att: a, inertia: inertia_at(end) };
                             (*att, *control) = (a, AttitudeControl { base: Some(base), ..c });
+                        } else if let Some(p) = known {
+                            *control = p.control(Some(AimKey::BURN), end, *att, inertia_at(end));
                         }
                     }
                     if stop == t {
-                        return;
+                        return None;
                     }
                     t = stop;
                 }
-                SegmentKind::Coast => {
+                (SegmentKind::Coast, Some(p)) => {
+                    if let Some(a) = seg.limbo_attitude(self.world, stop.seconds_since(seg.t0)) {
+                        *att = a;
+                        *control = p.control(key_of(&self.aim_at(self.controls, stop)), stop, a, inertia_at(stop));
+                    }
+                    if stop == t {
+                        return None;
+                    }
+                    t = stop;
+                }
+                (SegmentKind::Coast, None) => {
                     let turn = self.turn(t).map(|(_, start)| start);
                     let forced = Controls { sas: true, hold: HoldMode::Maneuver, ..*self.controls };
                     let (stop, controls) = match turn {
@@ -254,10 +406,16 @@ impl Rails<'_> {
                         None => (e, self.controls),
                     };
                     let aim_at = |x: Epoch| self.aim_at(controls, x);
-                    advance_coast(att, control, (t, stop), controls, torque, self.inertia_now, inertia_at, aim_at);
+                    let inertia = (self.inertia_now, inertia_at);
+                    let settled =
+                        advance_coast(att, control, (t, stop), controls, torque, inertia, aim_at, stop_settled);
+                    if settled.is_some() {
+                        return settled;
+                    }
                     t = stop;
                 }
             }
         }
+        None
     }
 }
