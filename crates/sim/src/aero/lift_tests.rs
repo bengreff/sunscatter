@@ -45,6 +45,28 @@ fn a_slender_cone_cylinder_has_the_slender_body_normal_force_slope() {
 }
 
 #[test]
+fn the_crossflow_term_follows_the_crossflow_mach_and_reynolds_numbers() {
+    // The cone-cylinder at α 30° (fineness 10, η 0.675 subsonic; plan area
+    // 9.067 m² over the base 0.785 m²): C_N = sin 2α·cos(α/2) +
+    // η·C_dn·sin²α·A_p/A_b. Jorgensen (NASA TR R-474): at M 0.5 (M_n 0.25)
+    // η·C_dn = 0.686·1.21 = 0.83; at M 2 (M_n 1.0) 0.751·1.98 = 1.49; at
+    // M 0.5 with Re_n = 5·10⁵ (supercritical, fig. 2) C_dn 0.27.
+    let b = cone_cylinder();
+    let a = 30f64.to_radians();
+    let d = DVec3::new(math::sin(a), 0.0, -math::cos(a));
+    let base = math::PI * 0.25;
+    let cn = |mach: f64, re: f64| slender::body_normal(&b.sections, d, mach, re).0.x / base;
+    let potential = math::sin(2.0 * a) * math::cos(0.5 * a);
+    let plan = 9.067 / base * 0.25;
+    for (mach, re, eta_cd) in [(0.5, 0.0, 0.686 * 1.21), (2.0, 0.0, 0.751 * 1.98), (0.5, 1e6, 0.686 * 0.27)] {
+        let want = potential + eta_cd * plan;
+        let got = cn(mach, re);
+        println!("α 30°, M {mach}, Re/m {re:e}: C_N {got:.3} (by hand {want:.3})");
+        assert!((got / want - 1.0).abs() < 0.03, "M {mach} Re {re}: {got} vs {want}");
+    }
+}
+
+#[test]
 fn slender_body_lift_fades_into_newtonian_by_mach_5() {
     let b = cone_cylinder();
     let base = math::PI * 0.25;

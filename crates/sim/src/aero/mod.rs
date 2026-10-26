@@ -37,6 +37,7 @@
 pub mod air;
 pub mod bake;
 pub mod boundary;
+pub mod crossflow;
 pub mod friction;
 pub mod geodesic;
 pub mod slender;
@@ -140,7 +141,7 @@ fn continuum(bake: &AeroBake, s: &DirSums, d: DVec3, flow: &Flow, cd0: f64) -> (
         let drag = f.dot(d);
         let aft = if d.dot(bake.sections.axis) >= 0.0 { bake.sections.axis } else { -bake.sections.axis };
         let axial = aft * drag;
-        let (bf, bm) = slender::body_normal(&bake.sections, d);
+        let (bf, bm) = slender::body_normal(&bake.sections, d, mach, flow.reynolds_per_m);
         let at = s.drag_lever / drag_n;
         f += (bf + axial - f) * sw;
         m += (bm + at.cross(axial) - m) * sw;

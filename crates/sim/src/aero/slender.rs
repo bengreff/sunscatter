@@ -11,8 +11,9 @@
 //!   viscous crossflow term q·η·C_dc·sin²α·2r(x) (Allen & Perkins, NACA TR
 //!   1048, 1951; the form of Jorgensen, NASA TR R-474, 1977). Together:
 //!   C_N = sin 2α·cos(α/2)·A_b/A + η·C_dc·sin²α·A_p/A. η from Allen &
-//!   Perkins' fineness table, C_dc = 1.2 (a cylinder in subcritical
-//!   crossflow). It acts along the crossflow (the air's velocity across
+//!   Perkins' fineness table, C_dc 1.2 (a cylinder in subcritical
+//!   crossflow), both against the crossflow Mach and Reynolds numbers
+//!   ([`super::crossflow`], Jorgensen's figures). It acts along the crossflow (the air's velocity across
 //!   the axis) at each section's station on the axis.
 //! * **Slenderness weight** ([`slenderness`]): the fineness along the flow
 //!   f = L/D (L the craft's extent along the flow, D the diameter of its
@@ -39,8 +40,6 @@ pub const STATIONS: usize = 64;
 /// A cell whose opposite face is closer than this × the craft's size is
 /// part of a fin.
 pub const WING_RATIO: f64 = 0.03;
-/// Crossflow drag coefficient of a circular cylinder, subcritical.
-pub const CROSSFLOW_CD: f64 = 1.2;
 
 /// The body's cross-section areas along its long axis.
 #[derive(Clone, Debug, PartialEq)]
@@ -151,8 +150,10 @@ pub fn slenderness(f: f64) -> f64 {
 }
 
 /// Slender-body normal force and its moment about the craft origin, per
-/// unit q (m², m³), for the flow direction `d` (unit, the air's motion).
-pub fn body_normal(b: &BodySections, d: DVec3) -> (DVec3, DVec3) {
+/// unit q (m², m³), for the flow direction `d` (unit, the air's motion) at
+/// free-stream Mach number `mach` and Reynolds number per metre
+/// `re_per_m` (zero: unknown; the crossflow subcritical).
+pub fn body_normal(b: &BodySections, d: DVec3, mach: f64, re_per_m: f64) -> (DVec3, DVec3) {
     // The nose is the end the air comes from.
     let from = -d;
     let (nose, forward) = if from.dot(b.axis) >= 0.0 { (b.axis, true) } else { (-b.axis, false) };
@@ -168,7 +169,9 @@ pub fn body_normal(b: &BodySections, d: DVec3) -> (DVec3, DVec3) {
     let potential = sin2a * math::cos(0.5 * alpha);
     let length = b.length();
     let diameter = 2.0 * (b.max_area() / math::PI).sqrt();
-    let viscous = crossflow_eta(length / diameter.max(1e-9)) * CROSSFLOW_CD * sin_a * sin_a;
+    let (mach_n, re_n) = (mach * sin_a, re_per_m * diameter * sin_a);
+    let eta = super::crossflow::eta(crossflow_eta(length / diameter.max(1e-9)), mach_n);
+    let viscous = eta * super::crossflow::coefficient(mach_n, re_n) * sin_a * sin_a;
     let (mut f, mut m) = (DVec3::ZERO, DVec3::ZERO);
     for k in 0..STATIONS {
         // Station k from the nose.
