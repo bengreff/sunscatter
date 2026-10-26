@@ -59,6 +59,9 @@ pub struct VolumeGrid {
     tank_height: Vec<f64>,
     tank_capacity: Vec<f64>,
     tank_samples: Vec<usize>,
+    /// Per tank: the nodes holding its samples and their heights, in node
+    /// then sample order ([`Self::propellant`] reads only its own).
+    by_tank: Vec<Vec<(u32, Vec<f64>)>>,
 }
 
 impl VolumeGrid {
@@ -157,6 +160,14 @@ impl VolumeGrid {
         for t in nodes.iter().flat_map(|n| &n.tank_of) {
             tank_samples[*t as usize] += 1;
         }
+        let by_tank = (0..tanks.len() as u32)
+            .map(|k| {
+                (nodes.iter().enumerate())
+                    .map(|(i, n)| (i as u32, heights(n, Some(k)).collect::<Vec<f64>>()))
+                    .filter(|(_, h)| !h.is_empty())
+                    .collect()
+            })
+            .collect();
         VolumeGrid {
             size,
             origin: lo,
@@ -167,6 +178,7 @@ impl VolumeGrid {
             tank_height: shapes.iter().map(|s| s.1).collect(),
             tank_capacity: tanks.iter().map(|t| t.1).collect(),
             tank_samples,
+            by_tank,
         }
     }
 
@@ -201,39 +213,34 @@ impl VolumeGrid {
             return;
         }
         if self.tank_height.len() == 1 {
-            self.share(mass, fill, None, out);
+            self.share(mass, fill, 0, out);
             return;
         }
         let capacity: f64 = self.tank_capacity.iter().sum();
-        let mut each = vec![0.0; out.len()];
         for k in (0..self.tank_height.len()).filter(|&k| self.tank_samples[k] > 0) {
-            self.share(mass * self.tank_capacity[k] / capacity, fill, Some(k as u32), &mut each);
-            for (o, e) in out.iter_mut().zip(&each) {
-                *o += e;
-            }
+            self.share(mass * self.tank_capacity[k] / capacity, fill, k, out);
         }
     }
 
-    /// `mass` in tank `tank` (`None`: the only one) filled to `fill`,
-    /// shared out over its samples into `out`.
-    fn share(&self, mass: f64, fill: f64, tank: Option<u32>, out: &mut [f64]) {
-        out.fill(0.0);
-        let level = self.tank_height[tank.unwrap_or(0) as usize] * fill.clamp(0.0, 1.0);
+    /// Adds `mass` in tank `k` filled to `fill`, shared out over its
+    /// samples, into `out` (only the nodes holding them: a craft of many
+    /// tanks costs its samples once, not every node per tank).
+    fn share(&self, mass: f64, fill: f64, k: usize, out: &mut [f64]) {
+        let level = self.tank_height[k] * fill.clamp(0.0, 1.0);
         let step = self.size / SAMPLES as f64;
         let weight = |h: f64| ((level - h) / step + 0.5).clamp(0.0, 1.0);
-        let heights = |n| heights(n, tank);
-        let total: f64 = self.nodes.iter().flat_map(heights).map(weight).sum();
+        let list = &self.by_tank[k];
+        let total: f64 = list.iter().flat_map(|(_, h)| h.iter().copied()).map(weight).sum();
         if total <= 0.0 {
             // Below the lowest sample: all in the node holding it.
-            let lowest = (0..self.nodes.len())
-                .filter(|&i| heights(&self.nodes[i]).next().is_some())
-                .map(|i| (heights(&self.nodes[i]).fold(f64::MAX, f64::min), i))
+            let lowest = (list.iter())
+                .map(|(i, h)| (h.iter().copied().fold(f64::MAX, f64::min), *i))
                 .fold((f64::MAX, 0), |b, x| if x.0 < b.0 { x } else { b });
-            out[lowest.1] = mass;
+            out[lowest.1 as usize] += mass;
             return;
         }
-        for (o, n) in out.iter_mut().zip(&self.nodes) {
-            *o = mass * heights(n).map(weight).sum::<f64>() / total;
+        for (i, h) in list {
+            out[*i as usize] += mass * h.iter().copied().map(weight).sum::<f64>() / total;
         }
     }
 }
