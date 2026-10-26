@@ -1,0 +1,8 @@
+// Proteus's visuals (read by crates/game; physical data is in body.ron).
+// base_color: an approximate visual colour (no colour map yet); albedo: geometric albedo (JPL Horizons) standing in for the Bond albedo.
+(
+    base_color: (0.32, 0.31, 0.30),
+    albedo: 0.06,
+    roughness: 0.95,
+    icon_color: (0.52, 0.51, 0.51),
+)

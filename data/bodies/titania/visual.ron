@@ -1,0 +1,8 @@
+// Titania's visuals (read by crates/game; physical data is in body.ron).
+// base_color: an approximate visual colour (no colour map yet); albedo: geometric albedo (JPL Horizons) standing in for the Bond albedo.
+(
+    base_color: (0.58, 0.56, 0.55),
+    albedo: 0.27,
+    roughness: 0.95,
+    icon_color: (0.74, 0.73, 0.72),
+)

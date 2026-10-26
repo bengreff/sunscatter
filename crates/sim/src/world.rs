@@ -67,6 +67,9 @@ pub struct Cluster {
     /// `r_m` the apoapsis of its orbit about the barycenter at the start of
     /// the ephemeris (m⁵/s²).
     pub quadrupole: f64,
+    /// The largest of those apoapsis distances (m): every member stays
+    /// within this of the barycenter.
+    pub extent: f64,
 }
 
 /// Which clusters are open for one evaluation (bit `c` for cluster `c`).
@@ -145,7 +148,8 @@ impl World {
         assert!(clusters.len() <= 64, "at most 64 moon systems");
         let mut cluster_list = Vec::with_capacity(clusters.len());
         for (c, &node) in clusters.iter().enumerate() {
-            cluster_list.push(Cluster { node, stand_in: sources.len(), quadrupole: quadrupole(&eph, node) });
+            let (quadrupole, extent) = quadrupole(&eph, node);
+            cluster_list.push(Cluster { node, stand_in: sources.len(), quadrupole, extent });
             let n = eph.node(node);
             sources.push(Source {
                 node,
@@ -179,6 +183,17 @@ impl World {
             }
         }
         OpenClusters(open)
+    }
+
+    /// Whether source `i` could be within `reach` of a vessel at `r`
+    /// (relative to `anchor`): false only for a member of a moon system whose
+    /// barycenter is farther than its extent plus `reach`. A cheap first test
+    /// for per-step searches over bodies (contact, nearest surface), which
+    /// then never evaluate the tables of far moons.
+    pub fn may_reach(&self, snap: &Snapshot, anchor: NodeId, r: DVec3, i: usize, reach: f64) -> bool {
+        let Role::Member(c) = self.sources[i].role else { return true };
+        let cl = &self.clusters[c];
+        (r - snap.relative_r(cl.node, anchor)).length() <= cl.extent + reach
     }
 
     /// Whether source `i` takes part in the gravity with these clusters open.
@@ -237,19 +252,20 @@ fn cluster_of(eph: &Ephemeris, id: NodeId) -> Option<usize> {
 
 /// `Σ GM_m r_m²` over the bodies under barycenter `node`, `r_m` the
 /// apoapsis distance of each one's osculating orbit about it at the start
-/// (its current distance if unbound).
-fn quadrupole(eph: &Ephemeris, node: NodeId) -> f64 {
+/// (its current distance if unbound, or if larger), and the largest `r_m`.
+fn quadrupole(eph: &Ephemeris, node: NodeId) -> (f64, f64) {
     let mu = eph.node(node).gm;
     let t = eph.start;
-    eph.bodies()
-        .filter(|&b| cluster_nodes(eph).contains(&node) && is_under(eph, b, node))
-        .map(|b| {
-            let k = eph.relative(b, node, t);
-            let el = crate::kepler::Elements::from_state(k.r, k.v, mu);
-            let reach = if el.e < 1.0 { el.a * (1.0 + el.e) } else { k.r.length() };
-            eph.node(b).gm * reach.max(k.r.length()) * reach.max(k.r.length())
-        })
-        .sum()
+    let (mut q, mut extent) = (0.0, 0.0f64);
+    for b in eph.bodies().filter(|&b| is_under(eph, b, node)) {
+        let k = eph.relative(b, node, t);
+        let el = crate::kepler::Elements::from_state(k.r, k.v, mu);
+        let reach = if el.e < 1.0 { el.a * (1.0 + el.e) } else { k.r.length() };
+        let r = reach.max(k.r.length());
+        q += eph.node(b).gm * r * r;
+        extent = extent.max(r);
+    }
+    (q, extent)
 }
 
 fn is_under(eph: &Ephemeris, id: NodeId, ancestor: NodeId) -> bool {
@@ -320,6 +336,11 @@ mod tests {
         // Q ~ GM_moon r² (the Moon's apogee about the barycenter).
         let q = w.clusters[c].quadrupole;
         assert!((6.0e29..9.0e29).contains(&q), "{q:e}");
+        assert!(
+            (3.3e8..4.2e8).contains(&w.clusters[c].extent),
+            "about the Moon's distance: {:e}",
+            w.clusters[c].extent
+        );
         let t = w.eph.start.add_seconds(3.0e6);
         let sun = w.find("Sun").unwrap().node;
         let i_earth = w.sources.iter().position(|s| s.name == "Earth").unwrap();
@@ -332,6 +353,11 @@ mod tests {
             assert!(open.contains(c) && w.counts(i_earth, open) && !w.counts(stand_in, open));
             let closed = w.open_clusters(&snap, sun, near_jupiter);
             assert!(!closed.contains(c) && !w.counts(i_earth, closed) && w.counts(stand_in, closed));
+            // A search near Jupiter can skip Earth and the Moon, never the Sun.
+            assert!(!w.may_reach(&snap, sun, near_jupiter, i_earth, 1e9));
+            assert!(w.may_reach(&snap, sun, near_earth, i_earth, 1e5));
+            let i_sun = w.sources.iter().position(|s| s.name == "Sun").unwrap();
+            assert!(w.may_reach(&snap, sun, near_jupiter, i_sun, 0.0));
             (near_earth, near_jupiter)
         };
         // Near Jupiter the point mass is the members' pull to far below the
@@ -347,17 +373,24 @@ mod tests {
         let full = accel(&w, near_jupiter);
         let err = (clustered - full).length();
         assert!(err > 0.0 && err < 1e-15, "{err:e}");
-        // Near Earth the cluster is open either way: identical arithmetic.
+        // Near Earth the Earth-Moon system is open either way; what differs
+        // is the far systems' quadrupoles, under the rule's bound.
         let full_near = accel(&w, near_earth);
         w.cutoff = 1e-12;
-        assert_eq!(accel(&w, near_earth), full_near);
+        let err = (accel(&w, near_earth) - full_near).length();
+        assert!(err < 1e-12 * CLUSTER_ERROR_FRACTION, "{err:e}");
     }
 
     #[test]
     fn sol_world_has_the_shipped_bodies() {
         let w = World::sol(eph());
         let solid: Vec<&str> = w.surfaces().map(|s| s.name.as_str()).collect();
-        assert_eq!(solid, ["Earth", "Moon"]);
+        for name in ["Mercury", "Earth", "Moon", "Mars", "Io", "Titan", "Triton", "Pluto", "Charon", "Ceres", "Eris"] {
+            assert!(solid.contains(&name), "{name} has a surface");
+        }
+        for name in ["Sun", "Jupiter", "Saturn", "Uranus", "Neptune"] {
+            assert!(!solid.contains(&name), "{name} has no surface");
+        }
         assert!(w.find("Sun").unwrap().relativistic);
         let order: Vec<&str> = w.anchor_order.iter().map(|&i| w.sources[i].name.as_str()).collect();
         assert_eq!(order, ["Moon", "Earth"]);

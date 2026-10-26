@@ -1,0 +1,28 @@
+// Hyperion. The `physical` section is read by the simulation (sim::body::data). Angles in degrees, rates in IAU units.
+// Radii: IAU WGCCRE 2015 triaxial 180.1 x 133.0 x 102.7 km as an oblate spheroid (equatorial sqrt(ab), polar c).
+// GM and orbit: JPL Horizons (satellite ephemerides); this file is size, gravity field and rotation.
+(
+    physical: (
+        name: "Hyperion",
+        radius_eq: 154768.5369,
+        radius_polar: 102700.0,
+        j2: 0.0,
+        // Placeholder: the rotation is chaotic (Wisdom, Peale and Mignard 1984); Saturn's pole and a 13-day spin, for display only.
+        rotation: (
+            ra_deg: 40.589,
+            dec_deg: 83.537,
+            ra_rate_deg_per_century: 0.0,
+            dec_rate_deg_per_century: 0.0,
+            w0_deg: 0.0,
+            w_rate_deg_per_day: 27.6923076923,
+        ),
+        atmosphere: None,
+        anchor_zone: None,
+        relativistic: false,
+        solid: true,
+        // Rails warp is disabled below this altitude (m, D062): no terrain yet, so the margin above the ellipsoid.
+        rails_floor: 2000.0,
+        heightmap: None,
+        sea_level: None,
+    ),
+)

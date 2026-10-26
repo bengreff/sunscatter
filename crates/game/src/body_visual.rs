@@ -196,9 +196,9 @@ pub fn bodies_dir() -> PathBuf {
     PathBuf::from(format!("{}/../../data/bodies", env!("CARGO_MANIFEST_DIR")))
 }
 
-/// Directory for one body (lowercase name).
+/// Directory for one body (the sim's rule, `sim::body::data::body_dir_name`).
 pub fn body_dir(name: &str) -> PathBuf {
-    bodies_dir().join(name.to_lowercase())
+    bodies_dir().join(sim::body::data::body_dir_name(name))
 }
 
 /// Loads a body's visual definition, if it has one.
@@ -216,6 +216,20 @@ pub fn load(name: &str) -> Option<BodyVisualDef> {
 
 #[cfg(test)]
 mod tests {
+    /// Every body directory's visual file parses (D051: a body is data).
+    #[test]
+    fn every_visual_file_parses() {
+        let mut n = 0;
+        for entry in std::fs::read_dir(super::bodies_dir()).unwrap() {
+            let path = entry.unwrap().path().join("visual.ron");
+            let Ok(text) = std::fs::read_to_string(&path) else { continue };
+            let def: Result<super::BodyVisualDef, _> = ron::from_str(&text);
+            assert!(def.is_ok(), "{}: {:?}", path.display(), def.err());
+            n += 1;
+        }
+        assert!(n >= 3, "Earth, the Moon and the Sun at least");
+    }
+
     #[test]
     fn shipped_definitions_parse() {
         for name in ["Earth", "Moon", "Sun"] {

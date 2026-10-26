@@ -1,0 +1,28 @@
+// Quaoar. The `physical` section is read by the simulation (sim::body::data). Angles in degrees, rates in IAU units.
+// Radii: triaxial 1,241.4 x 1,093.0 x 1,023.0 km diameters (Kiss et al. 2024) as an oblate spheroid.
+// Orbit: JPL Horizons small-body solution; GM in sol-systems.ron.
+(
+    physical: (
+        name: "Quaoar",
+        radius_eq: 582419.5653,
+        radius_polar: 511500.0,
+        j2: 0.0,
+        // Pole RA 259.6, Dec 53.1, spin 17.6792 h (Kiss et al. 2024, occultations; via Wikipedia).
+        rotation: (
+            ra_deg: 259.6,
+            dec_deg: 53.1,
+            ra_rate_deg_per_century: 0.0,
+            dec_rate_deg_per_century: 0.0,
+            w0_deg: 0.0,
+            w_rate_deg_per_day: 488.709896375,
+        ),
+        atmosphere: None,
+        anchor_zone: None,
+        relativistic: false,
+        solid: true,
+        // Rails warp is disabled below this altitude (m, D062): no terrain yet, so the margin above the ellipsoid.
+        rails_floor: 2000.0,
+        heightmap: None,
+        sea_level: None,
+    ),
+)

@@ -1,0 +1,8 @@
+// Europa's visuals (read by crates/game; physical data is in body.ron).
+// base_color: an approximate visual colour (no colour map yet); albedo: geometric albedo (JPL Horizons) standing in for the Bond albedo.
+(
+    base_color: (0.86, 0.81, 0.73),
+    albedo: 0.67,
+    roughness: 0.95,
+    icon_color: (0.98, 0.94, 0.87),
+)

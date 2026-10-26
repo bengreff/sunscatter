@@ -1,0 +1,8 @@
+// Venus's visuals (read by crates/game; physical data is in body.ron).
+// base_color: an approximate visual colour (no colour map yet); albedo: Bond albedo, NASA Planetary Fact Sheet (NSSDCA).
+(
+    base_color: (0.93, 0.86, 0.68),
+    albedo: 0.76,
+    roughness: 0.95,
+    icon_color: (1.00, 0.98, 0.83),
+)

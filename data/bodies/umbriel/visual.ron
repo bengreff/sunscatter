@@ -1,0 +1,8 @@
+// Umbriel's visuals (read by crates/game; physical data is in body.ron).
+// base_color: an approximate visual colour (no colour map yet); albedo: geometric albedo (JPL Horizons) standing in for the Bond albedo.
+(
+    base_color: (0.42, 0.42, 0.42),
+    albedo: 0.18,
+    roughness: 0.95,
+    icon_color: (0.61, 0.61, 0.61),
+)

@@ -1,0 +1,28 @@
+// Nereid. The `physical` section is read by the simulation (sim::body::data). Angles in degrees, rates in IAU units.
+// Radius: 170 km (JPL Horizons).
+// GM and orbit: JPL Horizons (satellite ephemerides); this file is size, gravity field and rotation.
+(
+    physical: (
+        name: "Nereid",
+        radius_eq: 170000.0,
+        radius_polar: 170000.0,
+        j2: 0.0,
+        // Placeholder pole (Neptune's); spin 11.594 h (Kiss et al. 2016, Kepler K2).
+        rotation: (
+            ra_deg: 299.36,
+            dec_deg: 43.46,
+            ra_rate_deg_per_century: 0.0,
+            dec_rate_deg_per_century: 0.0,
+            w0_deg: 0.0,
+            w_rate_deg_per_day: 745.213041228,
+        ),
+        atmosphere: None,
+        anchor_zone: None,
+        relativistic: false,
+        solid: true,
+        // Rails warp is disabled below this altitude (m, D062): no terrain yet, so the margin above the ellipsoid.
+        rails_floor: 2000.0,
+        heightmap: None,
+        sea_level: None,
+    ),
+)

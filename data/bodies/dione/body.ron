@@ -1,0 +1,30 @@
+// Dione. The `physical` section is read by the simulation (sim::body::data). Angles in degrees, rates in IAU units.
+// Rotation and shape: IAU WGCCRE 2015 (Archinal et al. 2018, CMDA 130:22) as in NAIF pck00011.tpc.
+// Radii: the triaxial IAU radii a, b, c as an oblate spheroid (equatorial sqrt(ab), polar c).
+// GM and orbit: JPL Horizons (satellite ephemerides); this file is size, gravity field and rotation.
+// J2 not measured.
+(
+    physical: (
+        name: "Dione",
+        radius_eq: 562349.0197,
+        radius_polar: 559600.0,
+        j2: 0.0,
+        // IAU mean rotation (constant and linear terms).
+        rotation: (
+            ra_deg: 40.66,
+            dec_deg: 83.52,
+            ra_rate_deg_per_century: -0.036,
+            dec_rate_deg_per_century: -0.004,
+            w0_deg: 357.6,
+            w_rate_deg_per_day: 131.5349316,
+        ),
+        atmosphere: None,
+        anchor_zone: None,
+        relativistic: false,
+        solid: true,
+        // Rails warp is disabled below this altitude (m, D062): no terrain yet, so the margin above the ellipsoid.
+        rails_floor: 2000.0,
+        heightmap: None,
+        sea_level: None,
+    ),
+)

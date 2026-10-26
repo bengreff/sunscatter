@@ -1,0 +1,28 @@
+// Eris. The `physical` section is read by the simulation (sim::body::data). Angles in degrees, rates in IAU units.
+// Radius: 1,163 km (Sicardy et al. 2011, occultation).
+// GM and orbit: JPL Horizons TNO satellite solutions (2022) and small-body solutions.
+(
+    physical: (
+        name: "Eris",
+        radius_eq: 1163000.0,
+        radius_polar: 1163000.0,
+        j2: 0.0,
+        // Assumed synchronous with Dysnomia (Szakats et al. 2023): pole = Dysnomia's orbit normal (computed from the JPL states), period 15.786 d.
+        rotation: (
+            ra_deg: 36.15713416,
+            dec_deg: 44.4857714,
+            ra_rate_deg_per_century: 0.0,
+            dec_rate_deg_per_century: 0.0,
+            w0_deg: 0.0,
+            w_rate_deg_per_day: 22.8051630129,
+        ),
+        atmosphere: None,
+        anchor_zone: None,
+        relativistic: false,
+        solid: true,
+        // Rails warp is disabled below this altitude (m, D062): no terrain yet, so the margin above the ellipsoid.
+        rails_floor: 2000.0,
+        heightmap: None,
+        sea_level: None,
+    ),
+)

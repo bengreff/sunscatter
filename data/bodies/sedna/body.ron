@@ -1,0 +1,28 @@
+// Sedna. The `physical` section is read by the simulation (sim::body::data). Angles in degrees, rates in IAU units.
+// Radius: 906 km diameter (Lellouch et al. 2013, Herschel).
+// Orbit: JPL Horizons small-body solution; GM in sol-systems.ron.
+(
+    physical: (
+        name: "Sedna",
+        radius_eq: 453000.0,
+        radius_polar: 453000.0,
+        j2: 0.0,
+        // Pole unknown: placeholder at the ecliptic north pole; spin 10.273 h (Gaudi et al. 2005).
+        rotation: (
+            ra_deg: 270.0,
+            dec_deg: 66.560708,
+            ra_rate_deg_per_century: 0.0,
+            dec_rate_deg_per_century: 0.0,
+            w0_deg: 0.0,
+            w_rate_deg_per_day: 841.039618417,
+        ),
+        atmosphere: None,
+        anchor_zone: None,
+        relativistic: false,
+        solid: true,
+        // Rails warp is disabled below this altitude (m, D062): no terrain yet, so the margin above the ellipsoid.
+        rails_floor: 2000.0,
+        heightmap: None,
+        sea_level: None,
+    ),
+)

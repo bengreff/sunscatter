@@ -1,8 +1,8 @@
 (
     version: 11,
     ephemeris: (
-        generator: "sol-nbody-v3 yoshida8 h=3600s degree=14 +sun1pn +earthJ2(iau pole)",
-        hash: 13272145921008071580,
+        generator: "sol-nbody-v4 yoshida8 h=3600s degree=14 +sun1pn +earthJ2(iau pole), 19 bodies; Jupiter barycenter: yoshida8 h=480s degree=20 +J2J4J6(iau pole) +tides[Sun,Mercury,Venus,EMB,Mars,Saturn barycenter,Uranus barycenter,Neptune barycenter]; Saturn barycenter: yoshida8 h=240s degree=20 +J2J4J6(iau pole) +tides[Sun,Mercury,Venus,EMB,Mars,Jupiter barycenter,Uranus barycenter,Neptune barycenter]; Uranus barycenter: yoshida8 h=360s degree=20 +J2J4J6(iau pole) +tides[Sun,Mercury,Venus,EMB,Mars,Jupiter barycenter,Saturn barycenter,Neptune barycenter]; Neptune barycenter: yoshida8 h=300s degree=20 +J2J4J6(iau pole) +tides[Sun,Mercury,Venus,EMB,Mars,Jupiter barycenter,Saturn barycenter,Uranus barycenter]; Pluto barycenter: yoshida8 h=1800s degree=20(iau pole) +tides[Sun,Jupiter barycenter,Saturn barycenter,Uranus barycenter,Neptune barycenter]; Eris barycenter: yoshida8 h=3600s degree=20(iau pole) +tides[Sun,Jupiter barycenter,Saturn barycenter,Uranus barycenter,Neptune barycenter]; Haumea barycenter: yoshida8 h=3600s degree=20(iau pole) +tides[Sun,Jupiter barycenter,Saturn barycenter,Uranus barycenter,Neptune barycenter]; Orcus barycenter: yoshida8 h=2700s degree=20(iau pole) +tides[Sun,Jupiter barycenter,Saturn barycenter,Uranus barycenter,Neptune barycenter]",
+        hash: 6635542722890147343,
     ),
     clock: (
         secs: 946790656,

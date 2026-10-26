@@ -1,0 +1,30 @@
+// Io. The `physical` section is read by the simulation (sim::body::data). Angles in degrees, rates in IAU units.
+// Rotation and shape: IAU WGCCRE 2015 (Archinal et al. 2018, CMDA 130:22) as in NAIF pck00011.tpc.
+// Radii: the triaxial IAU radii a, b, c as an oblate spheroid (equatorial sqrt(ab), polar c).
+// GM and orbit: JPL Horizons (satellite ephemerides); this file is size, gravity field and rotation.
+// J2: Galileo, Schubert et al. 2004 (Jupiter, ch. 13, table 13.1: 1859.5e-6 at 1,821.6 km), rescaled.
+(
+    physical: (
+        name: "Io",
+        radius_eq: 1824393.148,
+        radius_polar: 1815700.0,
+        j2: 0.00185379664,
+        // IAU pole with its periodic terms linearised about 2055: within 0.051 deg of the full series over 2030-2080; prime meridian without its periodic terms
+        rotation: (
+            ra_deg: 268.05,
+            dec_deg: 64.5,
+            ra_rate_deg_per_century: -0.009,
+            dec_rate_deg_per_century: 0.003,
+            w0_deg: 200.39,
+            w_rate_deg_per_day: 203.4889538,
+        ),
+        atmosphere: None,
+        anchor_zone: None,
+        relativistic: false,
+        solid: true,
+        // Rails warp is disabled below this altitude (m, D062): no terrain yet, so the margin above the ellipsoid.
+        rails_floor: 2000.0,
+        heightmap: None,
+        sea_level: None,
+    ),
+)

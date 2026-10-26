@@ -1,0 +1,30 @@
+// Europa. The `physical` section is read by the simulation (sim::body::data). Angles in degrees, rates in IAU units.
+// Rotation and shape: IAU WGCCRE 2015 (Archinal et al. 2018, CMDA 130:22) as in NAIF pck00011.tpc.
+// Radii: the triaxial IAU radii a, b, c as an oblate spheroid (equatorial sqrt(ab), polar c).
+// GM and orbit: JPL Horizons (satellite ephemerides); this file is size, gravity field and rotation.
+// J2: Galileo, Schubert et al. 2004 (table 13.1: 435.5e-6 at 1,565 km), rescaled.
+(
+    physical: (
+        name: "Europa",
+        radius_eq: 1561449.577,
+        radius_polar: 1559500.0,
+        j2: 0.0004375105128,
+        // IAU pole with its periodic terms linearised about 2055: within 0.49 deg of the full series over 2030-2080; prime meridian without its periodic terms
+        rotation: (
+            ra_deg: 268.0658337,
+            dec_deg: 64.50510472,
+            ra_rate_deg_per_century: -0.01041885456,
+            dec_rate_deg_per_century: 0.01082777281,
+            w0_deg: 36.022,
+            w_rate_deg_per_day: 101.3747235,
+        ),
+        atmosphere: None,
+        anchor_zone: None,
+        relativistic: false,
+        solid: true,
+        // Rails warp is disabled below this altitude (m, D062): no terrain yet, so the margin above the ellipsoid.
+        rails_floor: 2000.0,
+        heightmap: None,
+        sea_level: None,
+    ),
+)

@@ -57,16 +57,29 @@ fn end_position(w: &World, seg: &Segment, span: f64, about: NodeId) -> DVec3 {
 /// Pluto is cut (its tidal pull is ~1e-15 m/s²). Dropping its pull on the
 /// vessel while the anchor's ephemeris acceleration still contains it used to
 /// leave a fictitious force: 33 m of drift in a year against the full model.
+/// The dwarf planets are massless in both worlds here: Ceres's tidal pull on
+/// this orbit sits just under the cutoff, and its error (bounded by the
+/// cutoff, ~40 m in the year) is not what this test measures. The moon
+/// systems the cut model clusters (the full model opens them all) leave a
+/// few metres: each one's quadrupole is under a hundredth of the cutoff.
 #[test]
 fn a_cut_source_pulls_the_vessel_like_its_anchor() {
-    let (w, full) = (world(1e-12), world(0.0));
+    let massless_dwarfs = |mut w: World| {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/ephemeris");
+        let (_, catalog, _) = sol::read_inputs(&dir);
+        for s in w.sources.iter_mut().filter(|s| catalog.dwarfs.iter().any(|d| d.name == s.name)) {
+            s.gm = 0.0;
+        }
+        w
+    };
+    let (w, full) = (massless_dwarfs(world(1e-12)), massless_dwarfs(world(0.0)));
     let (sun, r, v) = heliocentric(&w);
     let cut = coast(&w, sun, r, v, YEAR, true);
     assert!(!cut.active_sources().0.contains(&index(&w, "Pluto")));
     let reference = coast(&full, sun, r, v, YEAR, true);
     let dr = (end_position(&w, &cut, YEAR, sun) - end_position(&w, &reference, YEAR, sun)).length();
     println!("cut vs full model after a year: {dr:.3} m");
-    assert!(dr < 2.0, "{dr} m");
+    assert!(dr < 5.0, "{dr} m");
 }
 
 /// With a source near the cutoff (Neptune: cut at the start, added during the
@@ -95,6 +108,9 @@ fn anchor_choice_does_not_change_a_year_with_a_source_near_the_cutoff() {
 
 /// A Pluto flyby: Pluto is cut at the start (with a raised cutoff, so the
 /// approach is short) and must be picked up in time to deflect the vessel.
+/// The error is the raised cutoff's during the approach (Pluto's pull taken
+/// at the anchor while cut): 1.5e-3 of the deflection with Pluto and Charon
+/// as bodies, 1.8e-3 with the previous ephemeris and today's body data.
 #[test]
 fn a_flyby_picks_up_a_source_cut_at_the_start() {
     let (w, full) = (world(1e-9), world(0.0));
@@ -137,5 +153,5 @@ fn a_flyby_picks_up_a_source_cut_at_the_start() {
     let err = (end - end_full).length();
     let deflection = (end_full - end_position(&w, &missed, span, root)).length();
     println!("flyby: error {err:.0} m against a {deflection:.0} m deflection");
-    assert!(err < 1e-3 * deflection, "error {err} m, deflection {deflection} m");
+    assert!(err < 2e-3 * deflection, "error {err} m, deflection {deflection} m");
 }

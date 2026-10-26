@@ -145,12 +145,6 @@ pub fn run(opt: &Options) {
 
     let bodies = initial.to_bodies();
     let mut cfg = sim::sol::gen_config(&bodies, opt.years);
-    // DEV: the new data's settings, until gen_config ships them.
-    cfg.generator = format!(
-        "sol-nbody-v4 yoshida8 h=3600s degree=14 +sun1pn +earthJ2(iau pole), {} bodies, free segments, quantized",
-        bodies.len()
-    );
-    (cfg.free_segments, cfg.quantize) = (true, true);
     // Diagnostics: isolate the effect of each extra force (never written as
     // the shipped ephemeris unless "all").
     match opt.extras {
@@ -196,25 +190,36 @@ fn system_initial(s: &SystemSpec, refs: &mut HorizonsReference) -> SystemInitial
         assert!(s.members.iter().all(|m| m.state_jd == Some(jd)), "{}: one state date for all", s.barycenter);
         at_epoch = carry_to_epoch(s, &at_epoch, (EPOCH_JD - jd) * 86_400.0);
     } else {
-        for (i, m) in s.members.iter().enumerate() {
+        // Only the moons about the primary: Horizons' barycenter includes
+        // moons we do not model, so states about it differ from ours by the
+        // shift below, not by any error.
+        for (i, m) in s.members.iter().enumerate().skip(1) {
             for (k, &years) in REFERENCE_YEARS.iter().enumerate() {
-                let (r, v) = states[i][k];
-                let (r, v) = (r.to_array(), v.to_array());
-                refs.states.push(RelativeState { name: m.name.clone(), center: s.barycenter.clone(), years, r, v });
-                if i > 0 {
-                    let (rp, vp) = states[0][k];
-                    let (r, v) = ((states[i][k].0 - rp).to_array(), (states[i][k].1 - vp).to_array());
-                    refs.states.push(RelativeState {
-                        name: m.name.clone(),
-                        center: s.members[0].name.clone(),
-                        years,
-                        r,
-                        v,
-                    });
-                }
+                let (rp, vp) = states[0][k];
+                let (r, v) = ((states[i][k].0 - rp).to_array(), (states[i][k].1 - vp).to_array());
+                let center = s.members[0].name.clone();
+                refs.states.push(RelativeState { name: m.name.clone(), center, years, r, v });
             }
         }
     }
+    // Make the members exactly barycentric with our GMs: Horizons' centre
+    // includes moons we do not model and its GMs are rounded, so as given
+    // their mass centre drifts off the barycenter node (Uranus's at 4.9
+    // mm/s, 7,800 km in 50 years). Shifting every member alike keeps the
+    // moons' positions about the primary.
+    let gm: Vec<f64> = s.members.iter().map(|m| m.gm * 1e9).collect();
+    let total: f64 = gm.iter().sum();
+    let (cm_r, cm_v) = at_epoch
+        .iter()
+        .zip(&gm)
+        .fold((DVec3::ZERO, DVec3::ZERO), |(r, v), ((ri, vi), g)| (r + *ri * (g / total), v + *vi * (g / total)));
+    println!(
+        "{}: members' mass centre {:.3} m, {:.3e} m/s off the barycenter (removed)",
+        s.barycenter,
+        cm_r.length(),
+        cm_v.length()
+    );
+    let at_epoch: Vec<(DVec3, DVec3)> = at_epoch.iter().map(|(r, v)| (*r - cm_r, *v - cm_v)).collect();
     SystemInitial {
         barycenter: s.barycenter.clone(),
         members: s

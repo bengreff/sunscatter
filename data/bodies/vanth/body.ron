@@ -1,0 +1,28 @@
+// Vanth. The `physical` section is read by the simulation (sim::body::data). Angles in degrees, rates in IAU units.
+// Radius: 221.5 km (JPL).
+// GM and orbit: JPL Horizons TNO satellite solutions (2022) and small-body solutions.
+(
+    physical: (
+        name: "Vanth",
+        radius_eq: 221500.0,
+        radius_polar: 221500.0,
+        j2: 0.0,
+        // Assumed synchronous (JPL: "sync"): pole = its orbit normal, period 9.54 d.
+        rotation: (
+            ra_deg: 323.3577018,
+            dec_deg: -14.27871924,
+            ra_rate_deg_per_century: 0.0,
+            dec_rate_deg_per_century: 0.0,
+            w0_deg: 0.0,
+            w_rate_deg_per_day: 37.739805011,
+        ),
+        atmosphere: None,
+        anchor_zone: None,
+        relativistic: false,
+        solid: true,
+        // Rails warp is disabled below this altitude (m, D062): no terrain yet, so the margin above the ellipsoid.
+        rails_floor: 2000.0,
+        heightmap: None,
+        sea_level: None,
+    ),
+)

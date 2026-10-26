@@ -1,0 +1,30 @@
+// Titan. The `physical` section is read by the simulation (sim::body::data). Angles in degrees, rates in IAU units.
+// Rotation and shape: IAU WGCCRE 2015 (Archinal et al. 2018, CMDA 130:22) as in NAIF pck00011.tpc.
+// Radii: the triaxial IAU radii a, b, c as an oblate spheroid (equatorial sqrt(ab), polar c).
+// GM and orbit: JPL Horizons (satellite ephemerides); this file is size, gravity field and rotation.
+// J2: Cassini, Iess et al. 2010, Science 327, 1367 (31.808e-6 at 2,575 km).
+(
+    physical: (
+        name: "Titan",
+        radius_eq: 2574964.993,
+        radius_polar: 2574470.0,
+        j2: 3.180898823e-05,
+        // IAU mean rotation (constant and linear terms).
+        rotation: (
+            ra_deg: 39.4827,
+            dec_deg: 83.4279,
+            ra_rate_deg_per_century: 0.0,
+            dec_rate_deg_per_century: 0.0,
+            w0_deg: 186.5855,
+            w_rate_deg_per_day: 22.5769768,
+        ),
+        atmosphere: None,
+        anchor_zone: None,
+        relativistic: false,
+        solid: true,
+        // Rails warp is disabled below this altitude (m, D062): no terrain yet, so the margin above the ellipsoid.
+        rails_floor: 2000.0,
+        heightmap: None,
+        sea_level: None,
+    ),
+)

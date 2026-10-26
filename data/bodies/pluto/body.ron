@@ -1,13 +1,15 @@
-// Pluto: size and orientation only, for display (map view, D054). To the
-// simulation it is still a point mass: no surface, J2 or atmosphere yet.
-// Radii and rotation: IAU WGCCRE 2015 (constant and linear terms; the small
-// periodic terms are left out). Angles in degrees, rates in IAU units.
+// Pluto. The `physical` section is read by the simulation (sim::body::data). Angles in degrees, rates in IAU units.
+// Rotation and shape: IAU WGCCRE 2015 (Archinal et al. 2018, CMDA 130:22) as in NAIF pck00011.tpc.
+// Radius: IAU mean radius (a sphere).
+// GM and orbit: JPL Horizons (satellite ephemerides); this file is size, gravity field and rotation.
+// J2 not measured.
 (
     physical: (
         name: "Pluto",
         radius_eq: 1188300.0,
         radius_polar: 1188300.0,
         j2: 0.0,
+        // IAU mean rotation (constant and linear terms).
         rotation: (
             ra_deg: 132.993,
             dec_deg: -6.163,
@@ -19,7 +21,9 @@
         atmosphere: None,
         anchor_zone: None,
         relativistic: false,
-        solid: false,
+        solid: true,
+        // Rails warp is disabled below this altitude (m, D062): no terrain yet, so the margin above the ellipsoid.
+        rails_floor: 2000.0,
         heightmap: None,
         sea_level: None,
     ),

@@ -1,0 +1,30 @@
+// Ganymede. The `physical` section is read by the simulation (sim::body::data). Angles in degrees, rates in IAU units.
+// Rotation and shape: IAU WGCCRE 2015 (Archinal et al. 2018, CMDA 130:22) as in NAIF pck00011.tpc.
+// Radius: IAU mean radius (a sphere).
+// GM and orbit: JPL Horizons (satellite ephemerides); this file is size, gravity field and rotation.
+// J2: Galileo, Schubert et al. 2004 (table 13.1: 127.53e-6 at 2,634.1 km), rescaled.
+(
+    physical: (
+        name: "Ganymede",
+        radius_eq: 2631200.0,
+        radius_polar: 2631200.0,
+        j2: 0.0001278112715,
+        // IAU pole with its periodic terms linearised about 2055: within 0.2 deg of the full series over 2030-2080; prime meridian without its periodic terms
+        rotation: (
+            ra_deg: 268.1140581,
+            dec_deg: 64.54272629,
+            ra_rate_deg_per_century: -0.01760771766,
+            dec_rate_deg_per_century: 0.04661187708,
+            w0_deg: 44.064,
+            w_rate_deg_per_day: 50.3176081,
+        ),
+        atmosphere: None,
+        anchor_zone: None,
+        relativistic: false,
+        solid: true,
+        // Rails warp is disabled below this altitude (m, D062): no terrain yet, so the margin above the ellipsoid.
+        rails_floor: 2000.0,
+        heightmap: None,
+        sea_level: None,
+    ),
+)

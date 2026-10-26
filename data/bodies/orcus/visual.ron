@@ -1,0 +1,8 @@
+// Orcus's visuals (read by crates/game; physical data is in body.ron).
+// base_color: an approximate visual colour (no colour map yet); albedo: geometric ~0.23 (Fornasier et al. 2013).
+(
+    base_color: (0.56, 0.56, 0.56),
+    albedo: 0.23,
+    roughness: 0.95,
+    icon_color: (0.73, 0.73, 0.73),
+)

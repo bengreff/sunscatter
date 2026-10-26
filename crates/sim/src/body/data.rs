@@ -194,9 +194,10 @@ pub fn default_bodies_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/bodies")
 }
 
-/// Directory name of a body: its ephemeris name in lower case.
+/// Directory name of a body: its ephemeris name in lower case, letters and
+/// digits only ("Hi'iaka" lives in `hiiaka`).
 pub fn body_dir_name(name: &str) -> String {
-    name.to_lowercase()
+    name.chars().filter(char::is_ascii_alphanumeric).map(|c| c.to_ascii_lowercase()).collect()
 }
 
 /// Loads a body from [`default_bodies_dir`]; panics if it is missing.
@@ -323,6 +324,13 @@ mod tests {
         assert!(def.physical.atmosphere.is_none() && def.heightmap.is_none() && def.anchor_zone.is_none());
         assert!(def.roughness.is_none() && def.terrain_detail.is_none());
         assert_eq!(def.physical.rotation.dec, 20.0 * DEG);
+    }
+
+    #[test]
+    fn directory_names_are_lower_case_letters_and_digits() {
+        assert_eq!(body_dir_name("Earth"), "earth");
+        assert_eq!(body_dir_name("Hi'iaka"), "hiiaka");
+        assert_eq!(body_dir_name("Eris barycenter"), "erisbarycenter");
     }
 
     #[test]

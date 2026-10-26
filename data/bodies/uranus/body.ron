@@ -1,13 +1,13 @@
-// Uranus: size and orientation only, for display (map view, D054). To the
-// simulation it is still a point mass: no surface, J2 or atmosphere yet.
-// Radii and rotation: IAU WGCCRE 2015 (constant and linear terms; the small
-// periodic terms are left out). Angles in degrees, rates in IAU units.
+// Uranus. The `physical` section is read by the simulation (sim::body::data). Angles in degrees, rates in IAU units.
+// Rotation and shape: IAU WGCCRE 2015 (Archinal et al. 2018, CMDA 130:22) as in NAIF pck00011.tpc.
+// J2: Jacobson 2014, AJ 148, 76 (R = 25,559 km). No surface: 1-bar ellipsoid.
 (
     physical: (
         name: "Uranus",
         radius_eq: 25559000.0,
         radius_polar: 24973000.0,
-        j2: 0.0,
+        j2: 0.00351068,
+        // IAU mean rotation (constant and linear terms).
         rotation: (
             ra_deg: 257.311,
             dec_deg: -15.175,
@@ -20,6 +20,7 @@
         anchor_zone: None,
         relativistic: false,
         solid: false,
+        rails_floor: 0.0,
         heightmap: None,
         sea_level: None,
     ),

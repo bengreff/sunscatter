@@ -121,14 +121,16 @@ pub fn tree(bodies: &[InitialBody], catalog: &Catalog) -> Vec<NodeSpec> {
 
 /// Assumption set: Newtonian point masses for all bodies (the planets'
 /// systems and the dwarf planets' as one mass each), the Sun's 1PN field, and
-/// Earth's J2 about its IAU precessing pole. Segment lengths are free and
-/// coefficients quantized (stored as small integers).
+/// Earth's J2 about its IAU precessing pole.
 pub fn gen_config(bodies: &[InitialBody], years: f64) -> GenConfig {
     let start = sol_epoch();
     let idx = |name: &str| bodies.iter().position(|b| b.name == name).expect(name);
     let earth = crate::body::earth();
     GenConfig {
-        generator: "sol-nbody-v3 yoshida8 h=3600s degree=14 +sun1pn +earthJ2(iau pole)".into(),
+        generator: format!(
+            "sol-nbody-v4 yoshida8 h=3600s degree=14 +sun1pn +earthJ2(iau pole), {} bodies",
+            bodies.len()
+        ),
         start,
         end: start.add_seconds((years * SECONDS_PER_JULIAN_YEAR).round()),
         step: 3600,
@@ -147,6 +149,12 @@ pub fn gen_config(bodies: &[InitialBody], years: f64) -> GenConfig {
             }],
             external: None,
         },
+        // Power-of-two segments and raw coefficients: the planets are the
+        // anchors (Earth, the Moon) whose tables must stay smooth. A fit has
+        // velocity jumps at segment boundaries in proportion to its error,
+        // and free lengths fit closer to the tolerance: a year anchored at the
+        // Sun then drifted 4.8 km from the same coast anchored at the
+        // barycenter, against 19 m with these settings.
         free_segments: false,
         quantize: false,
     }

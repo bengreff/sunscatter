@@ -1,18 +1,18 @@
-// Jupiter: size and orientation only, for display (map view, D054). To the
-// simulation it is still a point mass: no surface, J2 or atmosphere yet.
-// Radii and rotation: IAU WGCCRE 2015 (constant and linear terms; the small
-// periodic terms are left out). Angles in degrees, rates in IAU units.
+// Jupiter. The `physical` section is read by the simulation (sim::body::data). Angles in degrees, rates in IAU units.
+// Rotation and shape: IAU WGCCRE 2015 (Archinal et al. 2018, CMDA 130:22) as in NAIF pck00011.tpc.
+// J2: Juno, Iess et al. 2018, Nature 555, 220 (R = 71,492 km); J4, J6 in sol-systems.ron. No surface: 1-bar ellipsoid.
 (
     physical: (
         name: "Jupiter",
         radius_eq: 71492000.0,
         radius_polar: 66854000.0,
-        j2: 0.0,
+        j2: 0.014696514,
+        // IAU pole with its periodic terms linearised about 2055: within 0.0011 deg of the full series over 2030-2080
         rotation: (
-            ra_deg: 268.056595,
-            dec_deg: 64.495303,
-            ra_rate_deg_per_century: -0.006499,
-            dec_rate_deg_per_century: 0.002413,
+            ra_deg: 268.0586179,
+            dec_deg: 64.49595497,
+            ra_rate_deg_per_century: -0.006283517,
+            dec_rate_deg_per_century: 0.001377952054,
             w0_deg: 284.95,
             w_rate_deg_per_day: 870.536,
         ),
@@ -20,6 +20,7 @@
         anchor_zone: None,
         relativistic: false,
         solid: false,
+        rails_floor: 0.0,
         heightmap: None,
         sea_level: None,
     ),

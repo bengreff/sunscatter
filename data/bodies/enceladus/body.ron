@@ -1,0 +1,30 @@
+// Enceladus. The `physical` section is read by the simulation (sim::body::data). Angles in degrees, rates in IAU units.
+// Rotation and shape: IAU WGCCRE 2015 (Archinal et al. 2018, CMDA 130:22) as in NAIF pck00011.tpc.
+// Radii: the triaxial IAU radii a, b, c as an oblate spheroid (equatorial sqrt(ab), polar c).
+// GM and orbit: JPL Horizons (satellite ephemerides); this file is size, gravity field and rotation.
+// J2: Cassini, Iess et al. 2014, Science 344, 78 (5,435.2e-6 at 254.2 km), rescaled.
+(
+    physical: (
+        name: "Enceladus",
+        radius_eq: 253986.6926,
+        radius_polar: 248300.0,
+        j2: 0.00544376274,
+        // IAU mean rotation (constant and linear terms).
+        rotation: (
+            ra_deg: 40.66,
+            dec_deg: 83.52,
+            ra_rate_deg_per_century: -0.036,
+            dec_rate_deg_per_century: -0.004,
+            w0_deg: 6.32,
+            w_rate_deg_per_day: 262.7318996,
+        ),
+        atmosphere: None,
+        anchor_zone: None,
+        relativistic: false,
+        solid: true,
+        // Rails warp is disabled below this altitude (m, D062): no terrain yet, so the margin above the ellipsoid.
+        rails_floor: 2000.0,
+        heightmap: None,
+        sea_level: None,
+    ),
+)

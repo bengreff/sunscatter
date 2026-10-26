@@ -1,0 +1,8 @@
+// Titan's visuals (read by crates/game; physical data is in body.ron).
+// base_color: an approximate visual colour (no colour map yet); albedo: Bond albedo 0.27 (Li et al. 2011, Cassini).
+(
+    base_color: (0.85, 0.62, 0.32),
+    albedo: 0.27,
+    roughness: 0.95,
+    icon_color: (0.97, 0.78, 0.52),
+)

@@ -1,25 +1,27 @@
-// Mars: size and orientation only, for display (map view, D054). To the
-// simulation it is still a point mass: no surface, J2 or atmosphere yet.
-// Radii and rotation: IAU WGCCRE 2015 (constant and linear terms; the small
-// periodic terms are left out). Angles in degrees, rates in IAU units.
+// Mars. The `physical` section is read by the simulation (sim::body::data). Angles in degrees, rates in IAU units.
+// Rotation and shape: IAU WGCCRE 2015 (Archinal et al. 2018, CMDA 130:22) as in NAIF pck00011.tpc.
+// J2: NASA Planetary Fact Sheet (NSSDCA, Williams). To the ephemeris Mars is still its system (Phobos and Deimos not modelled).
 (
     physical: (
         name: "Mars",
         radius_eq: 3396190.0,
         radius_polar: 3376200.0,
-        j2: 0.0,
+        j2: 0.00196045,
+        // IAU pole with its periodic terms linearised about 2055: within 0.00021 deg of the full series over 2030-2080; prime meridian without its periodic terms
         rotation: (
-            ra_deg: 317.269202,
-            dec_deg: 54.432516,
-            ra_rate_deg_per_century: -0.10927547,
-            dec_rate_deg_per_century: -0.05827105,
+            ra_deg: 317.6811111,
+            dec_deg: 52.88632798,
+            ra_rate_deg_per_century: -0.1086145131,
+            dec_rate_deg_per_century: -0.06151591328,
             w0_deg: 176.049863,
-            w_rate_deg_per_day: 350.891982443297,
+            w_rate_deg_per_day: 350.891982443,
         ),
         atmosphere: None,
         anchor_zone: None,
         relativistic: false,
-        solid: false,
+        solid: true,
+        // Rails warp is disabled below this altitude (m, D062): no terrain yet, so the margin above the ellipsoid.
+        rails_floor: 2000.0,
         heightmap: None,
         sea_level: None,
     ),

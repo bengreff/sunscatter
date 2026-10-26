@@ -44,4 +44,18 @@ fn main() {
         acc += snap.relative(earth.node, w.eph.root()).r.x;
     }
     println!("snapshot + relative: {:.2} µs ({acc:e})", clock.elapsed().as_secs_f64() / 100_000.0 * 1e6);
+    // A frame's ephemeris work for the map: every body placed once.
+    let bodies: Vec<_> = w.eph.bodies().collect();
+    let clock = std::time::Instant::now();
+    for k in 0..10_000 {
+        let snap = w.snapshot(t0.add_seconds(k as f64 * 37.0));
+        for &b in &bodies {
+            acc += snap.relative_r(b, earth.node).x;
+        }
+    }
+    println!(
+        "all {} bodies placed: {:.2} µs per frame ({acc:e})",
+        bodies.len(),
+        clock.elapsed().as_secs_f64() / 10_000.0 * 1e6
+    );
 }

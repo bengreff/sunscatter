@@ -1,0 +1,30 @@
+// Ceres. The `physical` section is read by the simulation (sim::body::data). Angles in degrees, rates in IAU units.
+// Rotation and shape: IAU WGCCRE 2015 (Archinal et al. 2018, CMDA 130:22) as in NAIF pck00011.tpc.
+// Radii: the triaxial IAU radii a, b, c as an oblate spheroid (equatorial sqrt(ab), polar c).
+// GM and orbit: JPL Horizons (satellite ephemerides); this file is size, gravity field and rotation.
+// J2 left out for now (Dawn measured it; Park et al. 2016).
+(
+    physical: (
+        name: "Ceres",
+        radius_eq: 487300.0,
+        radius_polar: 446000.0,
+        j2: 0.0,
+        // IAU mean rotation (constant and linear terms).
+        rotation: (
+            ra_deg: 291.418,
+            dec_deg: 66.764,
+            ra_rate_deg_per_century: 0.0,
+            dec_rate_deg_per_century: 0.0,
+            w0_deg: 170.65,
+            w_rate_deg_per_day: 952.1532,
+        ),
+        atmosphere: None,
+        anchor_zone: None,
+        relativistic: false,
+        solid: true,
+        // Rails warp is disabled below this altitude (m, D062): no terrain yet, so the margin above the ellipsoid.
+        rails_floor: 2000.0,
+        heightmap: None,
+        sea_level: None,
+    ),
+)

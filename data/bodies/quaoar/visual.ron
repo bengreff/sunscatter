@@ -1,0 +1,8 @@
+// Quaoar's visuals (read by crates/game; physical data is in body.ron).
+// base_color: an approximate visual colour (no colour map yet); albedo: geometric ~0.12 (Braga-Ribas et al. 2013).
+(
+    base_color: (0.66, 0.47, 0.37),
+    albedo: 0.12,
+    roughness: 0.95,
+    icon_color: (0.81, 0.65, 0.56),
+)

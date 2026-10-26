@@ -1,0 +1,30 @@
+// Triton. The `physical` section is read by the simulation (sim::body::data). Angles in degrees, rates in IAU units.
+// Rotation and shape: IAU WGCCRE 2015 (Archinal et al. 2018, CMDA 130:22) as in NAIF pck00011.tpc.
+// Radius: IAU mean radius (a sphere).
+// GM and orbit: JPL Horizons (satellite ephemerides); this file is size, gravity field and rotation.
+// J2 not measured.
+(
+    physical: (
+        name: "Triton",
+        radius_eq: 1352600.0,
+        radius_polar: 1352600.0,
+        j2: 0.0,
+        // IAU pole with its periodic terms linearised about 2055: within 0.83 deg of the full series over 2030-2080; prime meridian without its periodic terms
+        rotation: (
+            ra_deg: 299.5725164,
+            dec_deg: 17.97023323,
+            ra_rate_deg_per_century: 20.54613107,
+            dec_rate_deg_per_century: 7.637481464,
+            w0_deg: 296.53,
+            w_rate_deg_per_day: -61.2572637,
+        ),
+        atmosphere: None,
+        anchor_zone: None,
+        relativistic: false,
+        solid: true,
+        // Rails warp is disabled below this altitude (m, D062): no terrain yet, so the margin above the ellipsoid.
+        rails_floor: 2000.0,
+        heightmap: None,
+        sea_level: None,
+    ),
+)

@@ -1,0 +1,30 @@
+// Callisto. The `physical` section is read by the simulation (sim::body::data). Angles in degrees, rates in IAU units.
+// Rotation and shape: IAU WGCCRE 2015 (Archinal et al. 2018, CMDA 130:22) as in NAIF pck00011.tpc.
+// Radius: IAU mean radius (a sphere).
+// GM and orbit: JPL Horizons (satellite ephemerides); this file is size, gravity field and rotation.
+// J2: Galileo, Schubert et al. 2004 (table 13.1: 32.7e-6 at 2,410.3 km).
+(
+    physical: (
+        name: "Callisto",
+        radius_eq: 2410300.0,
+        radius_polar: 2410300.0,
+        j2: 3.27e-05,
+        // IAU pole with its periodic terms linearised about 2055: within 0.039 deg of the full series over 2030-2080; prime meridian without its periodic terms
+        rotation: (
+            ra_deg: 268.162794,
+            dec_deg: 64.65237124,
+            ra_rate_deg_per_century: -0.06480827933,
+            dec_rate_deg_per_century: 0.2870363277,
+            w0_deg: 259.51,
+            w_rate_deg_per_day: 21.5710715,
+        ),
+        atmosphere: None,
+        anchor_zone: None,
+        relativistic: false,
+        solid: true,
+        // Rails warp is disabled below this altitude (m, D062): no terrain yet, so the margin above the ellipsoid.
+        rails_floor: 2000.0,
+        heightmap: None,
+        sea_level: None,
+    ),
+)

@@ -1,13 +1,13 @@
-// Mercury: size and orientation only, for display (map view, D054). To the
-// simulation it is still a point mass: no surface, J2 or atmosphere yet.
-// Radii and rotation: IAU WGCCRE 2015 (constant and linear terms; the small
-// periodic terms are left out). Angles in degrees, rates in IAU units.
+// Mercury. The `physical` section is read by the simulation (sim::body::data). Angles in degrees, rates in IAU units.
+// Rotation and shape: IAU WGCCRE 2015 (Archinal et al. 2018, CMDA 130:22) as in NAIF pck00011.tpc.
+// J2: NASA Planetary Fact Sheet (NSSDCA, Williams).
 (
     physical: (
         name: "Mercury",
         radius_eq: 2440530.0,
         radius_polar: 2438260.0,
-        j2: 0.0,
+        j2: 5.03e-05,
+        // prime meridian without its periodic terms
         rotation: (
             ra_deg: 281.0103,
             dec_deg: 61.4155,
@@ -19,7 +19,9 @@
         atmosphere: None,
         anchor_zone: None,
         relativistic: false,
-        solid: false,
+        solid: true,
+        // Rails warp is disabled below this altitude (m, D062): no terrain yet, so the margin above the ellipsoid.
+        rails_floor: 2000.0,
         heightmap: None,
         sea_level: None,
     ),

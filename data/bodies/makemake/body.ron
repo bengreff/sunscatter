@@ -1,0 +1,28 @@
+// Makemake. The `physical` section is read by the simulation (sim::body::data). Angles in degrees, rates in IAU units.
+// Radii: 1,434 x 1,420 km diameters (Brown 2013, occultation, via Wikipedia).
+// Orbit: JPL Horizons small-body solution; GM in sol-systems.ron.
+(
+    physical: (
+        name: "Makemake",
+        radius_eq: 717000.0,
+        radius_polar: 710000.0,
+        j2: 0.0,
+        // Pole unknown: placeholder at the ecliptic north pole; spin 22.8266 h (JPL).
+        rotation: (
+            ra_deg: 270.0,
+            dec_deg: 66.560708,
+            ra_rate_deg_per_century: 0.0,
+            dec_rate_deg_per_century: 0.0,
+            w0_deg: 0.0,
+            w_rate_deg_per_day: 378.505778346,
+        ),
+        atmosphere: None,
+        anchor_zone: None,
+        relativistic: false,
+        solid: true,
+        // Rails warp is disabled below this altitude (m, D062): no terrain yet, so the margin above the ellipsoid.
+        rails_floor: 2000.0,
+        heightmap: None,
+        sea_level: None,
+    ),
+)
