@@ -41,7 +41,8 @@
             lacunarity: 2.0,
             gain: 0.5,
             amplitude: 0.5,
-            ridge_threshold: 300.0,
+            // No ridged octaves: crater walls, not mountain crests, make this roughness (they made jagged teeth).
+            ridge_threshold: 1.0e9,
             // Crater-shaped detail (sim::terrain::craters): 6 octaves of cells from the map spacing
             // down to 102 m, 50% of them holding a bowl 0.15 as deep as it is wide (assumed from the
             // body's crater density; docs/features/solar-visuals.md).

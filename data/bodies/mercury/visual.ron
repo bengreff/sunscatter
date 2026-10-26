@@ -11,7 +11,8 @@
     color_map: Some("color.jpg"),
     zones: Some((
         map: "zones.png",
-        tint: 0.3,
+        // Low: the MD3 basemap is enhanced (false) colour; it classifies, it barely tints.
+        tint: 0.12,
         list: [
             (name: "low-reflectance material", source: (48, 51, 55), albedo: Some((0.068, 0.058, 0.045)),
                 pattern: (scale_m: 1500.0, contrast: 0.1)),
