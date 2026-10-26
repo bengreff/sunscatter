@@ -130,7 +130,7 @@ impl Canopy {
     /// Drag area (m²) of a canopy in `state`.
     pub fn cd_area_of(&self, state: CanopyState) -> f64 {
         match state {
-            CanopyState::Open { diameter, .. } => self.cd_area * (diameter / self.diameter).powi(2),
+            CanopyState::Open { diameter, .. } => self.cd_area * crate::math::powi(diameter / self.diameter, 2),
             _ => 0.0,
         }
     }

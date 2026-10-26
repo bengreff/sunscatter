@@ -181,7 +181,7 @@ impl ForceContext<'_> {
                     let d_min = dist.max(r_s.length()) - rho;
                     let strength = 60.0 * p.j2.abs() * s.gm * p.radius_eq * p.radius_eq * rho;
                     let threshold = crate::world::FAINT_ERROR_FRACTION * self.world.cutoff;
-                    if s.node == self.anchor || d_min <= 0.0 || strength >= threshold * d_min.powi(5) {
+                    if s.node == self.anchor || d_min <= 0.0 || strength >= threshold * crate::math::powi(d_min, 5) {
                         a += j2_accel(d, s.gm, p.j2, p.radius_eq, p.rotation.pole(snap.t));
                     }
                 }
