@@ -182,19 +182,21 @@ pub fn holds_clock(reached: Epoch, target: Epoch, stopped: bool) -> bool {
     !stopped && reached.seconds_since(target) < -TICK
 }
 
-/// How much more than the last frame's advance a compute-limited frame
-/// asks for.
+/// How much more than the clock moved last frame a frame may ask for: a
+/// little while compute limits it, twice otherwise (a warp change ramps
+/// up over a few frames: 1x to 1,000,000x in 20, a third of a second).
 pub const LIMITED_GROWTH: f64 = 1.25;
+pub const GROWTH: f64 = 2.0;
 
-/// The simulated span (s) a frame asks for: `wanted` (dt × warp), or while
-/// compute limits the clock, at most [`LIMITED_GROWTH`] × what the clock
-/// moved last frame (`last`). The vessels that finish first then lead the
-/// clock (drawn at their own time) by a quarter of a frame's progress, not
-/// by the whole warp span (4.6 h at 1,000,000x); the span grows back by
-/// 25 % a frame when compute allows.
+/// The simulated span (s) a frame asks for: `wanted` (dt × warp), at most
+/// [`GROWTH`] × what the clock moved last frame (`last`; [`LIMITED_GROWTH`]
+/// while compute limits the clock). The vessels that finish first lead the
+/// drawn clock (they are drawn at their own time) by a fraction of a
+/// frame's progress, never by a whole 1,000,000x span (4.6 h). A frame that
+/// did not move (paused, a vessel gone live at the clock) asks for `wanted`.
 pub fn frame_span(wanted: f64, limited: bool, last: f64) -> f64 {
-    if limited && last > 0.0 {
-        wanted.min(LIMITED_GROWTH * last)
+    if last > 0.0 {
+        wanted.min(if limited { LIMITED_GROWTH } else { GROWTH } * last)
     } else {
         wanted
     }

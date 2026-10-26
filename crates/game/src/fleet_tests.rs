@@ -64,18 +64,27 @@ fn the_achieved_warp_follows_the_rate_over_half_a_second() {
 }
 
 #[test]
-fn a_compute_limited_frame_asks_a_quarter_more_than_the_last() {
+fn a_frame_asks_a_little_more_than_the_clock_moved() {
     // (wanted, limited, last, span)
     let cases = [
-        (16_667.0, false, 600.0, 16_667.0),
+        (16_667.0, false, 600.0, 1_200.0),
+        (16_667.0, false, 16_000.0, 16_667.0),
         (16_667.0, true, 600.0, 750.0),
         (16_667.0, true, 16_000.0, 16_667.0),
         (16_667.0, true, 0.0, 16_667.0),
         (0.0167, true, 1.0, 0.0167),
+        (0.0167, false, 0.0167, 0.0167),
     ];
     for (wanted, limited, last, want) in cases {
         assert_eq!(frame_span(wanted, limited, last), want, "{wanted} {limited} {last}");
     }
+    // From 1x to 1,000,000x in twenty frames.
+    let (mut last, mut frames) = (1.0 / 60.0, 0);
+    while last < 1e6 / 60.0 {
+        last = frame_span(1e6 / 60.0, false, last);
+        frames += 1;
+    }
+    assert_eq!(frames, 20);
 }
 
 fn world() -> World {
@@ -230,7 +239,7 @@ fn fleet_frames() {
         let mut clock = warm;
         let start = clock;
         let (mut mean, mut worst, mut limited, mut ahead) = (0.0, 0.0f64, 0, 0.0);
-        let (mut over, mut lead, mut last, mut was_limited) = (0, 0.0f64, 0.0, false);
+        let (mut over, mut lead, mut last, mut was_limited) = (0, 0.0f64, 1.0 / 60.0, false);
         let wall = Instant::now();
         for frame in 0..frames {
             // As `state::advance`: a compute-limited frame asks a quarter
