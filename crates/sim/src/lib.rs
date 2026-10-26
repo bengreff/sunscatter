@@ -26,6 +26,7 @@ pub mod kepler;
 pub mod landing;
 pub mod light;
 pub mod math;
+pub mod proximity;
 pub mod relativity;
 pub mod rigid;
 pub mod save;
