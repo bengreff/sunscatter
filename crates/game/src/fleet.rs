@@ -65,10 +65,13 @@ pub struct Queue {
 }
 
 impl Queue {
-    pub fn new(times: impl Iterator<Item = Epoch>) -> Self {
+    /// The vessels at `times` for a frame to `target`: those already at or
+    /// past it (finished first in an earlier frame whose target was further
+    /// on) are done, never advanced back to it.
+    pub fn new(times: impl Iterator<Item = Epoch>, target: Epoch) -> Self {
         let time: Vec<Epoch> = times.collect();
-        let n = time.len();
-        Queue { time, slot: vec![Slot::Ready; n], chunks: vec![0; n] }
+        let slot = time.iter().map(|&t| if t >= target { Slot::Done } else { Slot::Ready }).collect();
+        Queue { slot, chunks: vec![0; time.len()], time }
     }
 
     /// The next vessel to advance: the ready one furthest behind (the clock
@@ -127,7 +130,7 @@ pub fn advance_fleet(
     deadline: Option<Instant>,
 ) -> FleetAdvance {
     let n = fleet.len();
-    let queue = Mutex::new(Queue::new(fleet.iter().map(|v| v.time)));
+    let queue = Mutex::new(Queue::new(fleet.iter().map(|v| v.time), target));
     let slots: Vec<Mutex<&mut Vessel>> = fleet.iter_mut().map(Mutex::new).collect();
     let work = || loop {
         let next = {

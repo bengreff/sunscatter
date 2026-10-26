@@ -351,3 +351,27 @@ fn debug_mode_burns_take_no_propellant() {
     ship.set_debug(&w, false);
     assert!(!ship.debug() && ship.propellant() == 16_000.0);
 }
+
+/// A frame target earlier than the vessel's own time (the game's next
+/// frame can ask for less than a vessel that finished first reached) does
+/// nothing: no rewind, and no panic when the vessel's segment starts after
+/// the target (review of 2026-10-26, PERF 1).
+#[test]
+fn a_target_before_the_vessel_does_nothing() {
+    let w = world();
+    let controls = Controls { sas: true, ..Controls::default() };
+    let mut ship = leo_ship(&w);
+    ship.set_plan(&w, plan(&[prograde(&w, 2_000.0, 100.0)])).unwrap();
+    for (at, back) in [(1_000.0, 500.0), (1_990.0, 1_000.0), (2_010.0, 1_000.0), (3_000.0, 1_000.0), (3_000.0, 2_005.0)]
+    {
+        ship.advance(&w, t0().add_seconds(at), &controls, usize::MAX);
+        let before = ship.clone();
+        let (reached, spent) = ship.advance_frame(&w, t0().add_seconds(back), &controls, usize::MAX);
+        assert_eq!((reached, spent), (before.time, 0), "at {at} s, back to {back} s");
+        assert_eq!(ship.time, before.time);
+        assert_eq!(ship.state(&w), before.state(&w));
+        assert_eq!(ship.mass(), before.mass());
+        assert_eq!(ship.trajectory(), before.trajectory());
+        assert_eq!(ship.advance(&w, t0().add_seconds(back), &controls, usize::MAX), before.time);
+    }
+}

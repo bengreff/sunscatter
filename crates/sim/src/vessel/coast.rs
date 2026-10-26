@@ -121,6 +121,11 @@ impl Vessel {
         stop_live: bool,
     ) -> (Epoch, usize) {
         let target = if target > world.end() { world.end() } else { target };
+        // A target behind the vessel (it finished a frame ahead of the
+        // clock): nothing to do, never a rewind.
+        if target < self.time {
+            return (self.time, 0);
+        }
         let mut budget = Budget::new(budget);
         self.systems.start_at(self.time);
         // A wreck has no engine or controls.

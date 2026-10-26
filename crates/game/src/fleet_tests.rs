@@ -9,7 +9,7 @@ fn t(s: f64) -> Epoch {
 
 #[test]
 fn the_vessel_furthest_behind_goes_first() {
-    let mut q = Queue::new([t(5.0), t(2.0), t(2.0), t(9.0)].into_iter());
+    let mut q = Queue::new([t(5.0), t(2.0), t(2.0), t(9.0)].into_iter(), t(10.0));
     // (picked, then finished at, more)
     assert_eq!(q.pick(), Some(1), "the earliest, lowest index on ties");
     assert_eq!(q.pick(), Some(2), "the busy one is not picked again");
@@ -26,12 +26,56 @@ fn the_vessel_furthest_behind_goes_first() {
 
 #[test]
 fn a_vessel_that_keeps_spending_without_moving_is_capped() {
-    let mut q = Queue::new([t(0.0)].into_iter());
+    let mut q = Queue::new([t(0.0)].into_iter(), t(10.0));
     for _ in 0..MAX_CHUNKS {
         assert_eq!(q.pick(), Some(0));
         q.finish(0, t(0.0), t(0.0), 10, true);
     }
     assert_eq!(q.pick(), None);
+}
+
+#[test]
+fn a_vessel_at_or_past_the_target_is_never_queued() {
+    let mut q = Queue::new([t(12.0), t(3.0), t(10.0)].into_iter(), t(10.0));
+    assert_eq!(q.slot, [Slot::Done, Slot::Ready, Slot::Done]);
+    assert_eq!(q.pick(), Some(1));
+    assert_eq!(q.pick(), None);
+}
+
+/// A frame's target can fall below vessels that finished first (after a
+/// compute-limited frame, a pause or a warp drop): they wait, never rewound
+/// (review of 2026-10-26, PERF 1: a coast went back in time, and one whose
+/// segment, a burn, started after the target panicked). Frames whose
+/// targets shrink and grow end at the same bits as one jump.
+#[test]
+fn a_shrinking_target_never_moves_a_vessel_back() {
+    ComputeTaskPool::get_or_init(TaskPool::default);
+    let w = world();
+    let controls = |_: usize| Controls { sas: true, ..Default::default() };
+    let mut fleet = leo_fleet(&w, 3);
+    let engine = sim::craft::test_craft().params().engine;
+    let burn = sim::vessel::PlannedBurn::delta_v_with(t(2_000.0), glam::DVec3::X * 50.0, &engine, None);
+    fleet[1].set_plan(&w, sim::vessel::FlightPlan { burns: vec![burn] }).expect("plan");
+    let end = t(4_000.0);
+    let mut reference = fleet.clone();
+    for (i, v) in reference.iter_mut().enumerate() {
+        v.advance(&w, end, &controls(i), usize::MAX);
+    }
+    // Vessel 1 ahead of the others (it finished first), then in its burn.
+    fleet[1].advance(&w, t(1_000.0), &controls(1), usize::MAX);
+    for target in [400.0, 1_500.0, 1_200.0, 2_010.0, 1_990.0, 3_000.0, 2_500.0, 4_000.0] {
+        let before: Vec<Epoch> = fleet.iter().map(|v| v.time).collect();
+        let adv = advance_fleet(&w, &mut fleet, &controls, t(target), None);
+        for (k, v) in fleet.iter().enumerate() {
+            assert!(v.time >= before[k], "vessel {k} went back from the target {target} s");
+            assert_eq!(adv.reached[k], v.time);
+        }
+    }
+    for (a, b) in fleet.iter().zip(&reference) {
+        assert_eq!(a.time, b.time);
+        assert_eq!(a.state(&w), b.state(&w), "vessel {:?}", a.id());
+        assert_eq!(a.mass(), b.mass());
+    }
 }
 
 #[test]
