@@ -11,6 +11,13 @@
         roughness: 0.12,
         albedo: (0.003, 0.008, 0.03),
         mask: Some("water.png"),
+        // Over a bright sandy bottom the water-leaving reflectance rises
+        // towards ~0.02, 0.09, 0.07 (π·Rrs over the Bahamas Banks at a few
+        // metres), fading with depth over ~10 m (two-flow model, clear
+        // tropical water: 1/(2·Kd) with Kd ≈ 0.05 /m): albedo +
+        // (shallow − albedo)·exp(−depth / shallow_depth_m).
+        shallow_albedo: Some((0.02, 0.09, 0.07)),
+        shallow_depth_m: Some(10.0),
     )),
     // Land zones (crisp-surfaces.md), baked into zones.png by
     // `asset-tool zones`. Sources are cluster centres of the Blue Marble

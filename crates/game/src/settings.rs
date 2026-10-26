@@ -3,9 +3,10 @@
 //! changing anything applies live (no restart).
 //!
 //! Minimal is the default and the only tier developed (D073): terrain
-//! relief (the drawn ground is the physical one), a blue sky from the
-//! lookup-table atmosphere, stars, shadows and the simple ground pattern
-//! (terrain detail off); no bloom, flare, glint, planetshine or sky light.
+//! relief (the drawn ground is the physical one), crisp surface zones
+//! (crisp-surfaces.md), a blue sky from the lookup-table atmosphere, stars,
+//! shadows and the simple ground pattern (terrain detail off); no bloom,
+//! flare, glint, planetshine or sky light.
 
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -65,6 +66,10 @@ pub struct GraphicsSettings {
     pub texture_size: u32,
     /// Close-range procedural detail layer on terrain.
     pub detail: bool,
+    /// Surface zones (D073, crisp-surfaces.md): crisp coasts and zone edges
+    /// at every distance, each zone one procedural texture, instead of the
+    /// magnified colour map.
+    pub zones: bool,
     pub atmosphere: AtmosphereQuality,
     /// Sun glint on Earth's oceans.
     pub ocean_glint: bool,
@@ -95,6 +100,7 @@ impl GraphicsSettings {
             terrain_error_px: 8.0,
             texture_size: 2048,
             detail: false,
+            zones: false,
             atmosphere: AtmosphereQuality::Off,
             ocean_glint: false,
             star_magnitude: 0.0,
@@ -109,6 +115,7 @@ impl GraphicsSettings {
         match tier {
             Tier::Minimal => GraphicsSettings {
                 terrain: true,
+                zones: true,
                 atmosphere: AtmosphereQuality::Lut,
                 star_magnitude: 5.0,
                 shadows: true,
@@ -240,11 +247,26 @@ mod tests {
     fn minimal_is_the_default_and_draws_what_physics_uses() {
         let m = GraphicsSettings::preset(Tier::Minimal);
         assert_eq!(Tier::default(), Tier::Minimal);
-        // Relief on (the drawn ground is the physical ground), a sky, stars
-        // and shadows; the costly effects off.
-        assert!(m.terrain && m.shadows && m.star_magnitude >= 5.0);
+        // Relief on (the drawn ground is the physical ground), crisp zones,
+        // a sky, stars and shadows; the costly effects off.
+        assert!(m.terrain && m.zones && m.shadows && m.star_magnitude >= 5.0);
         assert_eq!(m.atmosphere, AtmosphereQuality::Lut);
         assert!(!(m.detail || m.bloom || m.flare || m.ocean_glint || m.earthshine || m.sky_light));
         assert_ne!(m.msaa, MsaaLevel::X4);
+    }
+
+    #[test]
+    fn higher_tiers_are_unchanged_by_the_zones() {
+        // D073: only Minimal is developed; the others keep their presets
+        // (zones off) as before 2026-10-25.
+        let atmos = [AtmosphereQuality::Lut, AtmosphereQuality::Raymarched, AtmosphereQuality::Raymarched];
+        for (t, a) in [Tier::Low, Tier::Medium, Tier::High].into_iter().zip(atmos) {
+            let p = GraphicsSettings::preset(t);
+            assert!(!p.zones, "{t:?}");
+            assert_eq!(p.atmosphere, a, "{t:?}");
+        }
+        let low = GraphicsSettings::preset(Tier::Low);
+        assert_eq!((low.texture_size, low.msaa, low.shadows), (4096, MsaaLevel::X2, false));
+        assert!(!GraphicsSettings::preset(Tier::Ultra).zones);
     }
 }

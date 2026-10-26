@@ -154,6 +154,7 @@ fn graphics_tab(ui_: &mut egui::Ui, ui: &mut SettingsUi, settings: &mut Graphics
             }
         },
     );
+    ui_.checkbox(&mut s.zones, "Surface zones (crisp coasts, land and ice)");
     ui_.checkbox(&mut s.detail, "Surface detail layer");
     egui::ComboBox::from_label("Atmosphere").selected_text(format!("{:?}", s.atmosphere)).show_ui(ui_, |ui_| {
         for a in [AtmosphereQuality::Off, AtmosphereQuality::Lut, AtmosphereQuality::Raymarched] {

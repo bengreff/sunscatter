@@ -4,6 +4,14 @@
 // simple patch pattern), and water shading from
 // the body's water mask, also looked up per fragment (so it does not change
 // with the LOD level; CPU mirror and tests in water.rs).
+//
+// With surface zones (D073, crisp-surfaces.md; CPU mirrors and tests in
+// zones.rs) the colour map is replaced: one domain warp moves the lookups
+// of the zone map and the water mask, the coast is the bilinear sea
+// fraction thresholded at 0.5 over one pixel, zone edges are picked from a
+// gather of 4 zone texels and antialiased against the runner-up, each zone
+// has a procedural pattern, and a mipmapped zone-colour texture takes over
+// once a pixel covers about a zone texel.
 
 #import bevy_pbr::{
     pbr_fragment::pbr_input_from_standard_material,
@@ -56,6 +64,14 @@ struct TerrainParams {
     ground: vec4<f32>,
     // Mean linear colour of each ground layer.
     ground_means: array<vec4<f32>, 5>,
+    // Surface zones: x 1 when drawn, y the warp's first wavelength (m).
+    zones: vec4<f32>,
+    // rgb: shallow-water albedo (linear), w 1 when set.
+    shallow: vec4<f32>,
+    // Zone palette: rgb drawn colour (linear), w 1 for water zones.
+    zone_color: array<vec4<f32>, 16>,
+    // Zone pattern: x scale (m), y contrast.
+    zone_pattern: array<vec4<f32>, 16>,
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(100) var<uniform> terrain: TerrainParams;
@@ -67,6 +83,10 @@ struct TerrainParams {
 @group(#{MATERIAL_BIND_GROUP}) @binding(106) var ground_color_sampler: sampler;
 @group(#{MATERIAL_BIND_GROUP}) @binding(107) var ground_normal: texture_2d_array<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(108) var ground_normal_sampler: sampler;
+@group(#{MATERIAL_BIND_GROUP}) @binding(109) var zone_map: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(110) var zone_sampler: sampler;
+@group(#{MATERIAL_BIND_GROUP}) @binding(111) var zone_far: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(112) var zone_far_sampler: sampler;
 
 const PI: f32 = 3.14159265;
 // Distance (m) over which the simple ground pattern fades out.
@@ -142,6 +162,219 @@ fn fbm(p: vec2<f32>, octaves: i32) -> f32 {
 // Wraps a derivative of the longitude coordinate across the seam.
 fn wrap_d(d: f32) -> f32 {
     return d - round(d);
+}
+
+// ---- Surface zones (zones.rs mirrors the pure rules) ----
+
+// The warp's first octave amplitude (zone texels; zones::WARP_AMP_TEXELS);
+// amplitude and wavelength halve per octave.
+const WARP_AMP: f32 = 0.6;
+const WARP_OCTAVES: i32 = 10;
+// No warp or pattern octave is finer than these (m): the body-fixed
+// position is good to ~0.5 m in f32, and the simple ground pattern takes
+// over close up.
+const WARP_MIN_M: f32 = 100.0;
+const TONE_OCTAVES: i32 = 6;
+const TONE_MIN_M: f32 = 40.0;
+
+// An octave is fully drawn at a wavelength of 3 pixel footprints or more
+// and gone at 2 (zones::octave_weight).
+fn octave_weight(lam: f32, foot: f32) -> f32 {
+    return clamp(lam / max(foot, 1e-6) - 2.0, 0.0, 1.0);
+}
+
+// Integer lattice hash (exact for the lattice coordinates used, |c| < 2^24).
+fn hash3(c: vec3<i32>) -> u32 {
+    var h = (bitcast<u32>(c.x) * 0x8da6b343u) ^ (bitcast<u32>(c.y) * 0xd8163841u) ^ (bitcast<u32>(c.z) * 0xcb1ab31fu);
+    h = (h ^ (h >> 15u)) * 0x2c1b3c6du;
+    h = (h ^ (h >> 12u)) * 0x297a2d39u;
+    return h ^ (h >> 15u);
+}
+
+// Two independent 3D value noises in [-1, 1] (lattice spacing 1).
+fn vnoise2(p: vec3<f32>) -> vec2<f32> {
+    let fl = floor(p);
+    let i = vec3<i32>(fl);
+    let f = p - fl;
+    let u = f * f * (3.0 - 2.0 * f);
+    var c: array<vec2<f32>, 8>;
+    for (var k = 0; k < 8; k++) {
+        let h = hash3(i + vec3<i32>(k & 1, (k >> 1) & 1, (k >> 2) & 1));
+        c[k] = vec2(f32(h & 0xffffu), f32(h >> 16u)) * (1.0 / 65535.0);
+    }
+    let y0 = mix(mix(c[0], c[1], u.x), mix(c[2], c[3], u.x), u.y);
+    let y1 = mix(mix(c[4], c[5], u.x), mix(c[6], c[7], u.x), u.y);
+    return mix(y0, y1, u.z) * 2.0 - 1.0;
+}
+
+// The domain warp (zone texels): 3D fBm of the body-fixed position `p`
+// (m), wavelengths `lam0`, lam0/2, ..., each octave fading by footprint.
+fn zone_warp(p: vec3<f32>, lam0: f32, foot: f32) -> vec2<f32> {
+    var w = vec2(0.0);
+    var lam = lam0;
+    var amp = WARP_AMP;
+    for (var k = 0; k < WARP_OCTAVES; k++) {
+        let wt = octave_weight(lam, foot);
+        if wt <= 0.0 || lam < WARP_MIN_M {
+            break;
+        }
+        w += amp * wt * vnoise2(p / lam + f32(k) * vec3(17.31, 5.17, 11.73));
+        lam *= 0.5;
+        amp *= 0.5;
+    }
+    return w;
+}
+
+// A zone's pattern tone (about -1..1): fBm from `scale` (m) down, each
+// octave fading by footprint, so it reads the same from any distance.
+fn zone_tone(p: vec3<f32>, scale: f32, foot: f32) -> f32 {
+    var t = 0.0;
+    var lam = scale;
+    var amp = 0.5;
+    for (var k = 0; k < TONE_OCTAVES; k++) {
+        let wt = octave_weight(lam, foot);
+        if wt <= 0.0 || lam < TONE_MIN_M {
+            break;
+        }
+        t += amp * wt * vnoise2(p / lam + vec3(3.7, 41.3, 23.9) + f32(k) * vec3(7.13, 13.7, 3.31)).x;
+        lam *= 0.5;
+        amp *= 0.5;
+    }
+    return t;
+}
+
+// Bilinear weights of a gather's 4 texels ((i0,j1), (i1,j1), (i1,j0),
+// (i0,j0)) at fractions f, and their derivatives along f.x and f.y
+// (zones::gather_weights).
+fn gather_w(f: vec2<f32>) -> vec4<f32> {
+    return vec4((1.0 - f.x) * f.y, f.x * f.y, f.x * (1.0 - f.y), (1.0 - f.x) * (1.0 - f.y));
+}
+fn gather_dwx(f: vec2<f32>) -> vec4<f32> {
+    return vec4(-f.y, f.y, 1.0 - f.y, f.y - 1.0);
+}
+fn gather_dwy(f: vec2<f32>) -> vec4<f32> {
+    return vec4(1.0 - f.x, f.x, -f.x, f.x - 1.0);
+}
+
+// Change per pixel of a function with gradient g along the texel
+// fractions; jx, jy: texel coordinates per pixel along screen x, y
+// (zones::px_gradient).
+fn px_gradient(g: vec2<f32>, jx: vec2<f32>, jy: vec2<f32>) -> f32 {
+    return length(vec2(dot(g, jx), dot(g, jy)));
+}
+
+fn eq4(ids: vec4<u32>, z: u32) -> vec4<f32> {
+    return select(vec4(0.0), vec4(1.0), ids == vec4<u32>(z));
+}
+
+fn zone_col(i: u32) -> vec4<f32> {
+    return terrain.zone_color[min(i, 15u)];
+}
+
+struct ZoneOut {
+    // Land colour (and, far away, lakes in their water colour).
+    land: vec3<f32>,
+    // Sea coverage (water mask) and water-zone coverage (lakes, near).
+    sea: f32,
+    lake: f32,
+    // Shallowness of the sea floor (1 at the shore).
+    shallow: f32,
+    // The winning zone's pattern tone.
+    tone: f32,
+}
+
+// The zone surface at warped texture coordinates `uv` (derivatives dx, dy),
+// body-fixed position `p` (m) and pixel footprint `foot` (m).
+fn zone_surface(uv: vec2<f32>, dx: vec2<f32>, dy: vec2<f32>, p: vec3<f32>, foot: f32) -> ZoneOut {
+    var o = ZoneOut(vec3(0.0), 0.0, 0.0, 1.0, 0.0);
+    let zs = vec2<f32>(textureDimensions(zone_map, 0));
+    let jx = dx * zs;
+    let jy = dy * zs;
+    // Near: pixels smaller than half a zone texel; far: a texel or more.
+    let far = smoothstep(0.5, 1.0, max(length(jx), length(jy)));
+    let far_c = textureSampleGrad(zone_far, zone_far_sampler, uv, dx, dy);
+    o.shallow = far_c.a;
+    var near = vec3(0.0);
+    if far < 1.0 {
+        let t = uv * zs - 0.5;
+        let i = floor(t);
+        let f = t - i;
+        // Gathered at the 2x2 block's shared corner, so the hardware picks
+        // exactly the texels these weights are for.
+        let ids = vec4<u32>(textureGather(0, zone_map, zone_sampler, (i + 1.0) / zs) * 255.0 + 0.5);
+        let w = gather_w(f);
+        // Each zone's summed weight; the largest wins (zones::pick).
+        let s = vec4(dot(w, eq4(ids, ids.x)), dot(w, eq4(ids, ids.y)), dot(w, eq4(ids, ids.z)), dot(w, eq4(ids, ids.w)));
+        var win = ids.x;
+        var sw = s.x;
+        if s.y > sw { win = ids.y; sw = s.y; }
+        if s.z > sw { win = ids.z; sw = s.z; }
+        if s.w > sw { win = ids.w; sw = s.w; }
+        var run = win;
+        var sr = -1.0;
+        if ids.x != win && s.x > sr { run = ids.x; sr = s.x; }
+        if ids.y != win && s.y > sr { run = ids.y; sr = s.y; }
+        if ids.z != win && s.z > sr { run = ids.z; sr = s.z; }
+        if ids.w != win && s.w > sr { run = ids.w; sr = s.w; }
+        // The edge (margin 0) antialiased over one pixel (zones::edge_coverage).
+        var cov = 1.0;
+        if run != win {
+            let d = eq4(ids, win) - eq4(ids, run);
+            let g = vec2(dot(d, gather_dwx(f)), dot(d, gather_dwy(f)));
+            cov = clamp(0.5 + (sw - sr) / max(px_gradient(g, jx, jy), 1e-6), 0.5, 1.0);
+        }
+        // The satellite tint, baked in the far texture: its base level over
+        // the palette, both bilinear, so it varies smoothly.
+        let base = textureSampleLevel(zone_far, zone_far_sampler, uv, 0.0).rgb;
+        let pal = zone_col(ids.x).rgb * w.x + zone_col(ids.y).rgb * w.y + zone_col(ids.z).rgb * w.z + zone_col(ids.w).rgb * w.w;
+        let tint = base / max(pal, vec3(1e-5));
+        let pat = terrain.zone_pattern[min(win, 15u)];
+        o.tone = zone_tone(p, pat.x, foot);
+        let cw = zone_col(win);
+        let cr = zone_col(run);
+        near = mix(cr.rgb, cw.rgb, cov) * tint * (1.0 + pat.y * o.tone);
+        o.lake = (cw.w * cov + cr.w * (1.0 - cov)) * (1.0 - far);
+    }
+    o.land = mix(near, far_c.rgb, far);
+    // The sea: near, the exact bilinear coverage of a gather thresholded at
+    // 0.5 over one pixel (zones::coast_step); far, the filtered coverage.
+    if terrain.flags.w != 0u {
+        let ws = vec2<f32>(textureDimensions(water_map, 0));
+        let wjx = dx * ws;
+        let wjy = dy * ws;
+        let wfar = smoothstep(0.5, 1.0, max(length(wjx), length(wjy)));
+        var near_sea = 0.0;
+        if wfar < 1.0 {
+            let t = uv * ws - 0.5;
+            let i = floor(t);
+            let f = t - i;
+            let g = textureGather(0, water_map, water_sampler, (i + 1.0) / ws);
+            let raw = dot(g, gather_w(f));
+            let grad = px_gradient(vec2(dot(g, gather_dwx(f)), dot(g, gather_dwy(f))), wjx, wjy);
+            near_sea = clamp(0.5 + (raw - 0.5) / max(grad, 1e-6), 0.0, 1.0);
+        }
+        var far_sea = 0.0;
+        if wfar > 0.0 {
+            far_sea = textureSampleGrad(water_map, water_sampler, uv, dx, dy).r;
+        }
+        o.sea = mix(near_sea, far_sea, wfar);
+    }
+    return o;
+}
+
+// Rock on steep slopes and snow above the snow line (both physical;
+// shared by the detail layer and the zones). `n` in [0, 1] jitters the
+// thresholds.
+fn rock_cover(slope: f32, n: f32) -> f32 {
+    return smoothstep(0.08, 0.25, slope + (n - 0.5) * 0.1);
+}
+
+fn snow_cover(height: f32, lat: f32, n: f32, rock: f32) -> f32 {
+    if terrain.rock.w <= 0.0 {
+        return 0.0;
+    }
+    let line = terrain.rock.w * pow(max(cos(lat), 0.0), 1.5);
+    return smoothstep(line - 400.0, line + 400.0, height + (n - 0.5) * 600.0) * (1.0 - rock * 0.7);
 }
 
 #ifndef PREPASS_PIPELINE
@@ -236,19 +469,6 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
 
     let dx = vec2(wrap_d(dpdx(uv.x)), dpdx(uv.y));
     let dy = vec2(wrap_d(dpdy(uv.x)), dpdy(uv.y));
-    var color = terrain.base.rgb;
-    if terrain.flags.z != 0u {
-        color = textureSampleGrad(color_map, color_sampler, uv, dx, dy).rgb;
-    }
-    // Sea fraction; the baked coverage is sharpened into a clean coastline.
-    var water = 0.0;
-    var coast = 0.0;
-    if terrain.flags.w != 0u {
-        let raw = textureSampleGrad(water_map, water_sampler, uv, dx, dy).r;
-        water = smoothstep(0.3, 0.7, raw);
-        // A beach band on the land side of the coastline.
-        coast = smoothstep(0.02, 0.3, raw) * (1.0 - water);
-    }
     // Screen derivatives for the ground textures and normal perturbation
     // (taken here, in uniform control flow).
     let fine_uv = in.uv / terrain.ground.y;
@@ -265,6 +485,51 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     let height = in.color.g * 10000.0;
     let up = dir; // close enough to the ellipsoid normal for shading rules
     var roughness = terrain.snow.w;
+    let slope = 1.0 - clamp(dot(normalize(in.world_normal), normalize(rel)), 0.0, 1.0);
+
+    var color = terrain.base.rgb;
+    // Sea fraction (and, with zones, lakes).
+    var water = 0.0;
+    var coast = 0.0;
+    let zones_on = terrain.zones.x > 0.0;
+    var water_color = terrain.ocean.rgb;
+    if zones_on {
+        // The pixel footprint on the surface (m), and the one warp that
+        // moves both the zone and the sea lookups, so coasts and zone edges
+        // are fractal, line up and keep gaining detail closer in.
+        let foot = max(length(dp1), length(dp2));
+        let zs = vec2<f32>(textureDimensions(zone_map, 0));
+        let uv_w = uv + zone_warp(fixed, terrain.zones.y, foot) / zs;
+        let dxw = vec2(wrap_d(dpdx(uv_w.x)), dpdx(uv_w.y));
+        let dyw = vec2(wrap_d(dpdy(uv_w.x)), dpdy(uv_w.y));
+        let z = zone_surface(uv_w, dxw, dyw, fixed, foot);
+        color = z.land;
+        water = max(z.sea, z.lake);
+        // Open water, lighter over a shallow sea floor (lakes stay deep).
+        if terrain.shallow.w > 0.0 {
+            water_color = mix(terrain.ocean.rgb, terrain.shallow.rgb, z.shallow * (1.0 - z.lake));
+        }
+        // Rock on steep slopes and the snow line, on land (the detail
+        // layer has its own).
+        if terrain.flags.x == 0u && terrain.shape.w > 0.0 {
+            let n = z.tone * 0.5 + 0.5;
+            let rock = rock_cover(slope, n) * (1.0 - water);
+            let snow = snow_cover(height, lat, n, rock) * (1.0 - water);
+            color = mix(color, terrain.rock.rgb, rock * 0.6);
+            color = mix(color, terrain.snow.rgb, snow);
+        }
+    } else {
+        if terrain.flags.z != 0u {
+            color = textureSampleGrad(color_map, color_sampler, uv, dx, dy).rgb;
+        }
+        // The baked coverage sharpened into a coastline.
+        if terrain.flags.w != 0u {
+            let raw = textureSampleGrad(water_map, water_sampler, uv, dx, dy).r;
+            water = smoothstep(0.3, 0.7, raw);
+            // A beach band on the land side of the coastline.
+            coast = smoothstep(0.02, 0.3, raw) * (1.0 - water);
+        }
+    }
 
     // Close range: ground textures chosen per fragment from the colour map
     // (green: grass, bright and dry: sand), the coast (beach), slope (rock)
@@ -276,14 +541,8 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     if fade > 0.0 && water < 1.0 {
         let n = fbm(in.uv, 3);
         let lum = dot(color, vec3(0.2126, 0.7152, 0.0722));
-        let slope = 1.0 - clamp(dot(normalize(in.world_normal), normalize(rel)), 0.0, 1.0);
-        let rockiness = smoothstep(0.08, 0.25, slope + (n - 0.5) * 0.1);
-        var snow = 0.0;
-        if terrain.rock.w > 0.0 {
-            let line = terrain.rock.w * pow(max(cos(lat), 0.0), 1.5);
-            snow = smoothstep(line - 400.0, line + 400.0, height + (n - 0.5) * 600.0) * (1.0 - rockiness * 0.7);
-        }
-        snow = max(snow, smoothstep(0.45, 0.6, lum));
+        let rockiness = rock_cover(slope, n);
+        let snow = max(snow_cover(height, lat, n, rockiness), smoothstep(0.45, 0.6, lum));
         var w = array<f32, 5>(0.0, 0.0, 0.0, 0.0, 0.0);
         let green = clamp((color.g - max(color.r, color.b)) / (lum + 0.01) * 3.0, 0.0, 1.0);
         let dry = clamp((color.r - color.b) / (lum + 0.01), 0.0, 1.0) * smoothstep(0.06, 0.18, lum);
@@ -356,7 +615,12 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     }
     pbr_input.N = n_out;
 
-    color = mix(color, max(color, terrain.ocean.rgb), water);
+    if zones_on {
+        color = mix(color, water_color, water);
+    } else {
+        // The colour map under water is raised to at least the open-water albedo.
+        color = mix(color, max(color, terrain.ocean.rgb), water);
+    }
     if terrain.flags.y != 0u {
         roughness = mix(roughness, terrain.ocean.w, water);
     }

@@ -243,6 +243,7 @@ pub fn update(
             }
         }
         if let Some(mut mat) = materials.get_mut(&body.material) {
+            let zones_loaded = mat.extension.zone_map.is_some();
             let p = &mut mat.extension.params;
             p.fixed_x = m.x_axis.as_vec3().extend(0.0);
             p.fixed_y = m.y_axis.as_vec3().extend(0.0);
@@ -250,6 +251,8 @@ pub fn update(
             p.center = centre.as_vec3().extend(0.0);
             p.flags.x = u32::from(settings.detail);
             p.flags.y = u32::from(settings.ocean_glint);
+            // Zones draw once loaded (`update_textures`).
+            p.zones.x = if settings.zones && zones_loaded { 1.0 } else { 0.0 };
         }
     }
     terrain.drawn = drawn;

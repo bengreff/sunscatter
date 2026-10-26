@@ -1,6 +1,6 @@
 //! The terrain material (StandardMaterial plus our fragment shader) and the
-//! colour-map loader (the water mask's is in `water`) (decoded, resized to the settings cap and mipmapped on
-//! a background task).
+//! colour-map loader (decoded, resized to the settings cap and mipmapped on
+//! a background task; the water mask's is in `water`, the zones' in `zones`).
 
 use bevy::asset::RenderAssetUsages;
 use bevy::image::{ImageAddressMode, ImageFilterMode, ImageSampler, ImageSamplerDescriptor};
@@ -14,6 +14,8 @@ use bevy::render::render_resource::{
 use bevy::shader::ShaderDefVal;
 use bevy::shader::ShaderRef;
 use std::path::PathBuf;
+
+use super::zones::MAX_ZONES;
 
 pub type TerrainMaterial = ExtendedMaterial<StandardMaterial, TerrainExt>;
 
@@ -55,6 +57,15 @@ pub struct TerrainParams {
     pub ground: Vec4,
     /// Mean linear colour of each ground layer.
     pub ground_means: [Vec4; 5],
+    /// Surface zones (`zones`): x 1 when drawn, y the warp's first
+    /// wavelength (m).
+    pub zones: Vec4,
+    /// rgb: shallow-water albedo (linear), w 1 when set.
+    pub shallow: Vec4,
+    /// Zone palette (`zones::Palette`): rgb drawn colour, w 1 for water.
+    pub zone_color: [Vec4; MAX_ZONES],
+    /// Zone pattern: x scale (m), y contrast.
+    pub zone_pattern: [Vec4; MAX_ZONES],
 }
 
 #[derive(Asset, AsBindGroup, Reflect, Debug, Clone, Default)]
@@ -75,6 +86,14 @@ pub struct TerrainExt {
     #[texture(107, dimension = "2d_array")]
     #[sampler(108)]
     pub ground_normal: Option<Handle<Image>>,
+    /// Zone indices (`zones::ZoneMap`, sea filled), gathered per fragment.
+    #[texture(109)]
+    #[sampler(110)]
+    pub zone_map: Option<Handle<Image>>,
+    /// Zone colours and sea-floor shallowness, mipmapped (`zones::far_image`).
+    #[texture(111)]
+    #[sampler(112)]
+    pub zone_far: Option<Handle<Image>>,
 }
 
 impl MaterialExtension for TerrainExt {
@@ -187,7 +206,7 @@ fn halve(src: &[[f32; 3]], w: u32, h: u32) -> (Vec<[f32; 3]>, u32, u32) {
     (out, nw, nh)
 }
 
-fn srgb_to_linear(c: f32) -> f32 {
+pub(super) fn srgb_to_linear(c: f32) -> f32 {
     if c <= 0.04045 {
         c / 12.92
     } else {
@@ -195,7 +214,7 @@ fn srgb_to_linear(c: f32) -> f32 {
     }
 }
 
-fn linear_to_srgb(c: f32) -> f32 {
+pub(super) fn linear_to_srgb(c: f32) -> f32 {
     if c <= 0.003_130_8 {
         c * 12.92
     } else {

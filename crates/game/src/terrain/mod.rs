@@ -9,6 +9,7 @@ mod lod;
 mod material;
 pub mod mesh;
 pub mod water;
+pub mod zones;
 
 pub use lod::update;
 
@@ -77,8 +78,17 @@ pub struct TerrainBody {
     chunks: HashMap<ChunkKey, Chunk>,
     pending: HashMap<ChunkKey, Task<ChunkData>>,
     color_task: Option<Task<Maps>>,
-    /// Colour-map (and water-mask) width currently loaded or loading.
+    /// Colour-map width currently loaded or loading.
     color_width: u32,
+    /// Water-mask width currently loaded or loading (with zones on, at
+    /// least the zone map's, so coasts and zone edges match).
+    water_width: u32,
+    /// Surface zones: what loading them needs (taken when they start
+    /// loading, the first time the setting asks for them), the load, and
+    /// the zone map's width (from its header).
+    zone_inputs: Option<zones::ZoneInputs>,
+    zone_task: Option<Task<Option<zones::ZoneTextures>>>,
+    zone_width: Option<u32>,
     /// Elevation shown (the settings value when chunks were built).
     displaced: bool,
     def: BodyVisualDef,
@@ -98,9 +108,9 @@ impl Terrain {
         self.bodies.iter().map(|b| (b.node, &b.material))
     }
 
-    /// Chunks or colour maps are still being built.
+    /// Chunks or surface maps are still being built.
     pub fn busy(&self) -> bool {
-        self.bodies.iter().any(|b| !b.pending.is_empty() || b.color_task.is_some())
+        self.bodies.iter().any(|b| !b.pending.is_empty() || b.color_task.is_some() || b.zone_task.is_some())
     }
 }
 
@@ -140,6 +150,13 @@ pub fn setup(
         }
         let Some(p) = sim.world.source(*node).and_then(|s| s.physical.as_ref()) else { continue };
         let detail = def.detail.as_ref();
+        // Shallow water needs the sea floor (the heightmap) and a sea level.
+        let shallow = def
+            .ocean
+            .as_ref()
+            .filter(|o| o.shallow_depth_m.is_some() && p.terrain.is_some() && p.sea_level.is_some())
+            .and_then(|o| o.shallow_albedo)
+            .map_or(Vec4::ZERO, |a| v4(a, 1.0));
         let params = TerrainParams {
             shape: Vec4::new(
                 p.radius_eq as f32,
@@ -157,6 +174,7 @@ pub fn setup(
             // detail uv's 256-unit wrap, so there is no seam).
             ground: Vec4::new(if ground.is_some() { 1.0 } else { 0.0 }, 0.125, 1.0, 0.0),
             ground_means: ground.as_ref().map_or([Vec4::ONE; 5], |g| g.2),
+            shallow,
             ..default()
         };
         let material = materials.add(ExtendedMaterial {
@@ -167,6 +185,8 @@ pub fn setup(
                 water_map: None,
                 ground_color: ground.as_ref().map(|g| g.0.clone()),
                 ground_normal: ground.as_ref().map(|g| g.1.clone()),
+                zone_map: None,
+                zone_far: None,
             },
         });
         let shape = Shape {
@@ -177,6 +197,17 @@ pub fn setup(
             detail_scale: f64::from(detail.map_or(50.0, |d| d.scale_m)),
         };
         let heights = height_fn(&sim, *node);
+        let dir = body_visual::body_dir(&sim.world.eph.node(*node).name);
+        let zone_width = def.zones.as_ref().and_then(|z| image::image_dimensions(dir.join(&z.map)).ok()).map(|d| d.0);
+        let zone_inputs = def.zones.clone().map(|z| zones::ZoneInputs {
+            dir,
+            def: z,
+            color_map: def.color_map.clone(),
+            ocean: def.ocean.clone(),
+            heights: p.terrain.clone(),
+            sea_level: p.sea_level,
+            base_color: def.base_color,
+        });
         terrain.bodies.push(TerrainBody {
             node: *node,
             name: sim.world.eph.node(*node).name.clone(),
@@ -189,6 +220,10 @@ pub fn setup(
             pending: HashMap::new(),
             color_task: None,
             color_width: 0,
+            water_width: 0,
+            zone_inputs,
+            zone_task: None,
+            zone_width,
             displaced: false,
             def: def.clone(),
         });
@@ -201,14 +236,15 @@ fn body_matrix(sim: &SimState, node: NodeId) -> DMat3 {
     crate::scene::body_matrix(p, sim.clock)
 }
 
-/// A body's surface maps, loaded together at the texture size setting.
+/// A body's surface maps, loaded together (each only if its width changed).
 struct Maps {
     color: Option<Image>,
     water: Option<Image>,
 }
 
-/// Starts colour-map and water-mask loads when the texture size setting
-/// changes, and installs finished ones.
+/// Starts colour-map and water-mask loads when the texture size (or the
+/// zones setting) changes, the zones' the first time they are wanted, and
+/// installs finished ones.
 pub fn update_textures(
     settings: Res<GraphicsSettings>,
     mut terrain: ResMut<Terrain>,
@@ -216,19 +252,40 @@ pub fn update_textures(
     mut materials: ResMut<Assets<TerrainMaterial>>,
 ) {
     for body in &mut terrain.bodies {
+        if settings.zones {
+            if let Some(inputs) = body.zone_inputs.take() {
+                body.zone_task = Some(AsyncComputeTaskPool::get().spawn(async move { zones::load(inputs) }));
+            }
+        }
+        if let Some(task) = body.zone_task.as_mut() {
+            if let Some(loaded) = check_ready(task) {
+                body.zone_task = None;
+                if let (Some(z), Some(mut mat)) = (loaded, materials.get_mut(&body.material)) {
+                    let p = &mut mat.extension.params;
+                    p.zone_color = z.palette.color;
+                    p.zone_pattern = z.palette.pattern;
+                    p.zones.y = zones::warp_wavelength(body.shape.radius_eq, z.width) as f32;
+                    mat.extension.zone_map = Some(images.add(z.map));
+                    mat.extension.zone_far = Some(images.add(z.far));
+                }
+            }
+        }
         let color = body.def.color_map.clone();
         let water = body.def.ocean.as_ref().and_then(|o| o.mask.clone());
         if color.is_none() && water.is_none() {
             continue;
         }
-        if body.color_width != settings.texture_size && body.color_task.is_none() {
-            body.color_width = settings.texture_size;
+        let color_w = settings.texture_size;
+        let water_w = if settings.zones { color_w.max(body.zone_width.unwrap_or(0)) } else { color_w };
+        if (body.color_width, body.water_width) != (color_w, water_w) && body.color_task.is_none() {
+            let color = color.filter(|_| body.color_width != color_w);
+            let water = water.filter(|_| body.water_width != water_w);
+            (body.color_width, body.water_width) = (color_w, water_w);
             let dir = body_visual::body_dir(&body.name);
-            let width = settings.texture_size;
             body.color_task = Some(AsyncComputeTaskPool::get().spawn(async move {
                 Maps {
-                    color: color.and_then(|f| material::load_color_map(dir.join(f), width)),
-                    water: water.and_then(|f| water::load_water_map(&dir.join(f), width)),
+                    color: color.and_then(|f| material::load_color_map(dir.join(f), color_w)),
+                    water: water.and_then(|f| water::load_water_map(&dir.join(f), water_w)),
                 }
             }));
         }

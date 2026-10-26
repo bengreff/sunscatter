@@ -19,6 +19,9 @@ pub struct BodyVisualDef {
     pub ocean: Option<OceanDef>,
     #[serde(default)]
     pub detail: Option<DetailDef>,
+    /// Surface zones drawn crisp from any distance (D073, crisp-surfaces.md).
+    #[serde(default)]
+    pub zones: Option<ZonesDef>,
     #[serde(default)]
     pub atmosphere: Option<AtmosphereDef>,
     /// Self-luminous bodies (stars).
@@ -57,6 +60,70 @@ pub struct OceanDef {
     /// the body dir. Without one no water is drawn.
     #[serde(default)]
     pub mask: Option<String>,
+    /// With zones: the water-leaving reflectance over a bright shallow
+    /// bottom; water is drawn albedo + (shallow − albedo)·exp(−depth /
+    /// `shallow_depth_m`), the depth from the heightmap.
+    #[serde(default)]
+    pub shallow_albedo: Option<[f32; 3]>,
+    #[serde(default)]
+    pub shallow_depth_m: Option<f32>,
+}
+
+/// Surface zones: a zone map baked by `asset-tool zones` (which reads the
+/// classification fields from here) and how each zone is drawn.
+#[derive(Clone, Debug, Deserialize)]
+pub struct ZonesDef {
+    /// The zone map (8-bit index: 0 sea, 1..=N the list), relative to the body dir.
+    pub map: String,
+    /// How much of the colour map's variation survives inside a zone, as an
+    /// exponent of satellite / source (0: flat zone colours).
+    #[serde(default)]
+    pub tint: f32,
+    pub list: Vec<ZoneDef>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct ZoneDef {
+    #[allow(dead_code)] // For people and asset-tool's report.
+    pub name: String,
+    /// The zone's colour in the colour map (sRGB), the classifier's centre.
+    pub source: [u8; 3],
+    /// The colour it is drawn with (sRGB); default: `source`.
+    #[serde(default)]
+    pub color: Option<[u8; 3]>,
+    /// Classifier constraints (read by `asset-tool`).
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub min_abs_lat: Option<f32>,
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub max_abs_lat: Option<f32>,
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub min_height_m: Option<f32>,
+    #[serde(default)]
+    #[allow(dead_code)]
+    pub max_height_m: Option<f32>,
+    /// Drawn as water (lakes above sea level, which the sea mask does not hold).
+    #[serde(default)]
+    pub water: bool,
+    #[serde(default)]
+    pub pattern: PatternDef,
+}
+
+/// A zone's procedural texture: brightness × (1 + contrast × fBm), with
+/// octaves from `scale_m` down, each fading out by the pixel footprint.
+#[derive(Clone, Copy, Debug, Deserialize)]
+pub struct PatternDef {
+    pub scale_m: f32,
+    pub contrast: f32,
+}
+
+impl Default for PatternDef {
+    /// Flat (no pattern).
+    fn default() -> Self {
+        PatternDef { scale_m: 1000.0, contrast: 0.0 }
+    }
 }
 
 /// Close-range procedural detail layered over the colour map.
@@ -153,9 +220,22 @@ mod tests {
         for name in ["Earth", "Moon", "Sun"] {
             let def = super::load(name).unwrap();
             let mask = def.ocean.and_then(|o| o.mask);
-            for file in [def.color_map, mask].into_iter().flatten() {
+            let zones = def.zones.map(|z| z.map);
+            for file in [def.color_map, mask, zones].into_iter().flatten() {
                 assert!(super::body_dir(name).join(&file).exists(), "{name}: {file}");
             }
         }
+    }
+
+    #[test]
+    fn shipped_zones_parse_and_fit_the_palette() {
+        for name in ["Earth", "Moon"] {
+            let z = super::load(name).unwrap().zones.unwrap_or_else(|| panic!("{name} has zones"));
+            assert!(!z.list.is_empty() && z.list.len() < crate::terrain::zones::MAX_ZONES, "{name}");
+            assert!((0.0..=1.0).contains(&z.tint), "{name}");
+            assert!(z.list.iter().all(|d| d.pattern.scale_m > 0.0 && (0.0..1.0).contains(&d.pattern.contrast)));
+        }
+        let ocean = super::load("Earth").unwrap().ocean.unwrap();
+        assert!(ocean.shallow_albedo.is_some() && ocean.shallow_depth_m.is_some_and(|d| d > 0.0));
     }
 }
