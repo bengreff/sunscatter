@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# Git pre-push hook: refuse to push a commit to main that CI would fail.
+# Enable once per checkout: `git config core.hooksPath tools/git-hooks`.
+#
+# It checks the exact commit being pushed, not the working tree (other
+# agents' uncommitted edits must neither fail nor pass it): the commit is
+# checked out into a private mirror (`target/prepush/src`, its own index;
+# only changed files are rewritten, so builds stay incremental) and built
+# in `target/prepush/target`. The checks are CI's (`.github/workflows/ci.yml`):
+# format, file sizes, decision references, clippy and tests (--no-fail-fast)
+# for sim and the tools; clippy and tests for game when the push touches it.
+# Pushes that change only docs skip cargo. Bypass in an emergency with
+# `git push --no-verify` (CI still runs).
+set -uo pipefail
+root=$(git rev-parse --show-toplevel)
+zero=0000000000000000000000000000000000000000
+mirror="$root/target/prepush/src"
+index="$root/target/prepush/index"
+export CARGO_TARGET_DIR="$root/target/prepush/target"
+status=0
+
+check() {
+  local sha=$1 base=$2
+  local files
+  files=$(git diff --name-only "$base" "$sha" 2>/dev/null) || files=$(git ls-tree -r --name-only "$sha")
+  mkdir -p "$mirror"
+  # The mirror is private: --reset overwrites it, and only entries that
+  # differ from the previous checkout are rewritten (mtimes kept for cargo).
+  if [ -f "$index" ]; then
+    GIT_INDEX_FILE="$index" git --work-tree="$mirror" read-tree --reset -u "$sha" || return 1
+  else
+    GIT_INDEX_FILE="$index" git read-tree "$sha" && GIT_INDEX_FILE="$index" git --work-tree="$mirror" checkout-index -a -f -u || return 1
+  fi
+  echo "pre-push: checking ${sha:0:7} in $mirror" >&2
+  (cd "$mirror" && tools/check_file_sizes.sh && tools/check_decision_refs.sh) || return 1
+  if ! grep -qE '^(crates/|data/|Cargo\.(toml|lock)|\.github/)' <<<"$files"; then
+    echo "pre-push: docs only, cargo skipped" >&2
+    return 0
+  fi
+  (
+    cd "$mirror" || exit 1
+    cargo fmt --all -- --check || exit 1
+    cargo clippy -q -p sim -p ephem-tool -p asset-tool -p mcp --all-targets --locked -- -D warnings || exit 1
+    log="$CARGO_TARGET_DIR/test.log"
+    cargo test -q -p sim -p asset-tool -p mcp --locked --no-fail-fast >"$log" 2>&1 \
+      || { grep -E "FAILED|panicked at|^error" "$log" | head -20 >&2; exit 1; }
+    if grep -q '^crates/game/' <<<"$files"; then
+      cargo clippy -q -p game --all-targets --locked -- -D warnings || exit 1
+      cargo test -q -p game --locked --no-fail-fast >"$log" 2>&1 \
+        || { grep -E "FAILED|panicked at|^error" "$log" | head -20 >&2; exit 1; }
+    fi
+    exit 0
+  ) || return 1
+}
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+  [ "$local_sha" = "$zero" ] && continue
+  case "$remote_ref" in refs/heads/main) ;; *) continue ;; esac
+  base=$remote_sha
+  [ "$base" = "$zero" ] && base=$(git rev-parse -q --verify origin/main || echo "$local_sha^")
+  if ! check "$local_sha" "$base"; then
+    echo "pre-push: ${local_sha:0:7} fails CI's checks; not pushed (fix it, or --no-verify in an emergency)" >&2
+    status=1
+  fi
+done
+exit $status

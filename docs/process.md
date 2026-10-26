@@ -42,7 +42,7 @@ Before designing a solution to a hard problem, **look at how others solved it.**
 
 ## Engineering rules
 
-- **Work goes directly on `main`, committed and pushed regularly.** This changes to branches if the project is deployed or gains contributors. Every commit builds and passes the tests, and each has one purpose and a descriptive message.
+- **Work goes directly on `main`, committed and pushed regularly.** This changes to branches if the project is deployed or gains contributors. Every commit builds and passes the tests, and each has one purpose and a descriptive message. The git pre-push hook (`tools/git-hooks/pre-push`) enforces it: it runs CI's checks on the commit being pushed and refuses a push that would fail, because every red CI run emails the owner.
 - **Tests start with the first code**, not months later:
   - **Property tests:** conservation laws, round trips (orbital elements ↔ state vectors, save ↔ load).
   - **Golden tests:** against DE440 and real mission profiles.
