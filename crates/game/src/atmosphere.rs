@@ -8,7 +8,7 @@
 //! scattering coefficients relative to Hillaire's paper (scattering 3.996e-6,
 //! extinction 4.44e-6 per m); our data uses the paper's values.
 
-use crate::body_visual::AtmosphereDef;
+use crate::body_visual::{AtmosphereDef, ProfileDef};
 use crate::camera::{CameraRig, MainCamera};
 use crate::settings::{AtmosphereQuality, GraphicsSettings};
 use crate::state::SimState;
@@ -53,32 +53,64 @@ fn v3(a: [f32; 3]) -> Vec3 {
     Vec3::from_array(a)
 }
 
+/// Mie scattering terms for an aerosol with asymmetry `g` per channel:
+/// one term when the channels share it, otherwise one term per channel
+/// (Bevy's phase function has a single asymmetry), which together hold
+/// the same coefficients.
+pub fn mie_terms(scattering: [f32; 3], absorption: [f32; 3], falloff: Falloff, g: [f32; 3]) -> Vec<ScatteringTerm> {
+    if g[1] == g[0] && g[2] == g[0] {
+        return vec![ScatteringTerm {
+            absorption: v3(absorption),
+            scattering: v3(scattering),
+            falloff,
+            phase: PhaseFunction::Mie { asymmetry: g[0] },
+        }];
+    }
+    (0..3)
+        .map(|c| {
+            let only = |a: [f32; 3]| Vec3::from_array(std::array::from_fn(|i| if i == c { a[i] } else { 0.0 }));
+            ScatteringTerm {
+                absorption: only(absorption),
+                scattering: only(scattering),
+                falloff: falloff.clone(),
+                phase: PhaseFunction::Mie { asymmetry: g[c] },
+            }
+        })
+        .collect()
+}
+
+/// A layer's falloff over an atmosphere `h` thick (Bevy's falloff
+/// parameter is 1 at the ground and 0 at the top).
+fn falloff(profile: ProfileDef, h: f32) -> Falloff {
+    match profile {
+        ProfileDef::Exponential { scale_height_m } => Falloff::Exponential { scale: scale_height_m / h },
+        ProfileDef::Tent { center_m, width_m } => Falloff::Tent { center: 1.0 - center_m / h, width: width_m / h },
+    }
+}
+
 /// Builds the scattering medium; falloff parameters are normalised by the
 /// atmosphere thickness as Bevy expects.
 pub fn medium(def: &AtmosphereDef) -> ScatteringMedium {
     let h = def.thickness_m;
-    let mut terms = vec![
-        ScatteringTerm {
-            absorption: Vec3::ZERO,
-            scattering: v3(def.rayleigh_scattering),
-            falloff: Falloff::Exponential { scale: def.rayleigh_scale_height_m / h },
-            phase: PhaseFunction::Rayleigh,
-        },
-        ScatteringTerm {
-            absorption: v3(def.mie_absorption),
-            scattering: v3(def.mie_scattering),
-            falloff: Falloff::Exponential { scale: def.mie_scale_height_m / h },
-            phase: PhaseFunction::Mie { asymmetry: def.mie_asymmetry },
-        },
-    ];
+    let mut terms = vec![ScatteringTerm {
+        absorption: Vec3::ZERO,
+        scattering: v3(def.rayleigh_scattering),
+        falloff: Falloff::Exponential { scale: def.rayleigh_scale_height_m / h },
+        phase: PhaseFunction::Rayleigh,
+    }];
+    let mie_profile = ProfileDef::Exponential { scale_height_m: def.mie_scale_height_m };
+    let g = def.mie_asymmetry_rgb.unwrap_or([def.mie_asymmetry; 3]);
+    terms.extend(mie_terms(def.mie_scattering, def.mie_absorption, falloff(mie_profile, h), g));
     if let Some(o) = &def.ozone {
         terms.push(ScatteringTerm {
             absorption: v3(o.absorption),
             scattering: Vec3::ZERO,
-            // Falloff parameter p = 1 at the ground, 0 at the top.
-            falloff: Falloff::Tent { center: 1.0 - o.center_m / h, width: o.width_m / h },
+            falloff: falloff(ProfileDef::Tent { center_m: o.center_m, width_m: o.width_m }, h),
             phase: PhaseFunction::Isotropic,
         });
+    }
+    for l in &def.layers {
+        terms.extend(mie_terms(l.scattering, l.absorption, falloff(l.profile, h), l.asymmetry));
     }
     ScatteringMedium::new(256, 256, terms)
 }
@@ -101,8 +133,27 @@ pub fn spawn(
     commands.spawn((BodyAtmosphere(node, atmosphere.clone()), atmosphere, Transform::IDENTITY));
 }
 
+/// Atmospheres are drawn only within this many outer radii of their body:
+/// Bevy draws one per camera (the nearest), and a far one (Mars's seen from
+/// Jupiter) tinted everything through f32 round-off. Earth's still covers
+/// the Moon (65 radii).
+pub const RANGE_RADII: f64 = 100.0;
+
+/// The atmosphere to draw: of those within [`RANGE_RADII`] of the camera
+/// (`(distance from the body's centre, outer radius)` each), the one the
+/// camera is deepest in, relative to its size.
+pub fn active(candidates: &[(f64, f64)]) -> Option<usize> {
+    candidates
+        .iter()
+        .enumerate()
+        .filter(|(_, (d, r))| *d < RANGE_RADII * r)
+        .min_by(|a, b| (a.1 .0 / a.1 .1).total_cmp(&(b.1 .0 / b.1 .1)))
+        .map(|(i, _)| i)
+}
+
 /// Keeps atmospheres at their bodies' camera-relative centres, with their
-/// ground on the reference ellipsoid below the camera.
+/// ground on the reference ellipsoid below the camera, and draws only the
+/// [`active`] one (none with the atmosphere setting off).
 ///
 /// Bevy's atmosphere is a sphere. At the mean radius, ground on the
 /// ellipsoid sat kilometres above or below its "ground" (2 km above at the
@@ -111,12 +162,17 @@ pub fn spawn(
 pub fn update(
     sim: Res<SimState>,
     rig: Res<CameraRig>,
-    mut atmos: Query<(&mut BodyAtmosphere, &mut Transform, Option<&mut Atmosphere>)>,
+    settings: Res<GraphicsSettings>,
+    mut commands: Commands,
+    mut atmos: Query<(Entity, &mut BodyAtmosphere, &mut Transform, Option<&mut Atmosphere>)>,
+    mut drawn: Local<Option<Option<Entity>>>,
 ) {
     let snap = sim.world.snapshot(sim.clock);
-    for (mut a, mut t, live) in &mut atmos {
+    let mut candidates = Vec::new();
+    for (e, mut a, mut t, live) in &mut atmos {
         let centre = snap.relative_r(a.0, rig.anchor);
         t.translation = (centre - rig.cam_pos).as_vec3();
+        candidates.push((e, ((rig.cam_pos - centre).length(), f64::from(a.1.outer_radius))));
         let Some(p) = sim.world.source(a.0).and_then(|s| s.physical.as_ref()) else { continue };
         let up = (rig.cam_pos - centre).normalize_or_zero();
         let ground = p.ellipsoid_radius(up.dot(p.rotation.pole(sim.clock))) as f32;
@@ -128,6 +184,19 @@ pub fn update(
             }
         }
     }
+    let on = settings.atmosphere != AtmosphereQuality::Off;
+    let sizes: Vec<(f64, f64)> = candidates.iter().map(|c| c.1).collect();
+    let want = active(&sizes).filter(|_| on).map(|i| candidates[i].0);
+    if *drawn != Some(want) {
+        *drawn = Some(want);
+        for (e, a, _, _) in &atmos {
+            if Some(e) == want {
+                commands.entity(e).insert(a.1.clone());
+            } else {
+                commands.entity(e).remove::<Atmosphere>();
+            }
+        }
+    }
 }
 
 /// Tunes the camera's atmosphere settings, or turns atmospheres off.
@@ -136,23 +205,11 @@ pub fn update(
 /// camera's `AtmosphereSettings`: Bevy 0.19's extraction only visits cameras
 /// that still have settings, so removing them leaves stale render state (a
 /// grey sky).
-pub fn apply_settings(
-    settings: Res<GraphicsSettings>,
-    mut commands: Commands,
-    cams: Query<Entity, With<MainCamera>>,
-    atmos: Query<(Entity, &BodyAtmosphere)>,
-) {
+pub fn apply_settings(settings: Res<GraphicsSettings>, mut commands: Commands, cams: Query<Entity, With<MainCamera>>) {
     if !settings.is_changed() {
         return;
     }
-    let on = settings.atmosphere != AtmosphereQuality::Off;
-    for (e, a) in &atmos {
-        if on {
-            commands.entity(e).insert(a.1.clone());
-        } else {
-            commands.entity(e).remove::<Atmosphere>();
-        }
-    }
+    // Which atmosphere is drawn (if any): `update`.
     for cam in &cams {
         match settings.atmosphere {
             AtmosphereQuality::Off => {
@@ -299,6 +356,60 @@ mod tests {
         for (q, depth, want) in cases {
             assert_eq!(raymarch(q, depth), want, "{q:?} at {depth}");
         }
+    }
+
+    #[test]
+    fn mie_terms_split_by_channel_only_when_the_asymmetry_differs() {
+        let (s, a) = ([4.1e-5, 3.9e-5, 3.6e-5], [2.2e-6, 3.4e-6, 5.3e-6]);
+        let one = mie_terms(s, a, Falloff::Linear, [0.7; 3]);
+        assert_eq!(one.len(), 1);
+        assert_eq!((one[0].scattering, one[0].absorption), (v3(s), v3(a)));
+        // (asymmetry per channel): three terms, each one channel, summing
+        // to the aerosol's coefficients.
+        let g = [0.73, 0.75, 0.78];
+        let split = mie_terms(s, a, Falloff::Linear, g);
+        assert_eq!(split.len(), 3);
+        let sum = |f: fn(&ScatteringTerm) -> Vec3| split.iter().map(f).fold(Vec3::ZERO, |x, y| x + y);
+        assert_eq!(sum(|t| t.scattering), v3(s));
+        assert_eq!(sum(|t| t.absorption), v3(a));
+        for (c, t) in split.iter().enumerate() {
+            assert!(matches!(t.phase, PhaseFunction::Mie { asymmetry } if asymmetry == g[c]), "{c}");
+            assert_eq!(t.scattering.to_array().iter().filter(|&&v| v != 0.0).count(), 1, "{c}");
+        }
+    }
+
+    #[test]
+    fn layer_profiles_map_to_the_falloff_parameter() {
+        // Bevy's parameter is 1 at the ground and 0 at the top.
+        let h = 100_000.0;
+        let tent = falloff(ProfileDef::Tent { center_m: 25_000.0, width_m: 30_000.0 }, h);
+        assert!(
+            matches!(tent, Falloff::Tent { center, width } if (center - 0.75).abs() < 1e-6 && (width - 0.3).abs() < 1e-6)
+        );
+        let exp = falloff(ProfileDef::Exponential { scale_height_m: 11_100.0 }, h);
+        assert!(matches!(exp, Falloff::Exponential { scale } if (scale - 0.111).abs() < 1e-6));
+        // The density at the ground is the coefficient's, and at the top nothing.
+        assert!((exp.sample(1.0) - 1.0).abs() < 1e-6 && exp.sample(0.0).abs() < 1e-6);
+        assert!((tent.sample(0.75) - 1.0).abs() < 1e-6 && tent.sample(0.5) == 0.0);
+    }
+
+    #[test]
+    fn only_the_nearest_atmosphere_in_range_is_drawn() {
+        const EARTH: f64 = 6.471e6;
+        const MARS: f64 = 3.49e6;
+        // (case, (distance, outer radius) per atmosphere, drawn)
+        let cases: [(&str, &[(f64, f64)], Option<usize>); 5] = [
+            ("at Earth's pad", &[(6.37e6, EARTH), (7.8e10, MARS)], Some(0)),
+            ("at the Moon: Earth's still", &[(3.84e8, EARTH), (7.8e10, MARS)], Some(0)),
+            ("at Jupiter: none", &[(6.3e11, EARTH), (5.5e11, MARS)], None),
+            ("in Mars orbit", &[(7.8e10, EARTH), (3.8e6, MARS)], Some(1)),
+            ("no atmospheres", &[], None),
+        ];
+        for (case, c, want) in cases {
+            assert_eq!(active(c), want, "{case}");
+        }
+        // Between two bodies, the one the camera is deeper in, by size.
+        assert_eq!(active(&[(2.0 * EARTH, EARTH), (1.5 * MARS, MARS)]), Some(1));
     }
 
     #[test]

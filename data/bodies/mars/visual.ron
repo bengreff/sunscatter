@@ -5,4 +5,28 @@
     albedo: 0.25,
     roughness: 0.95,
     icon_color: (0.90, 0.63, 0.51),
+    // The sky (D052, Hillaire): CO2 Rayleigh scattering and suspended dust, at 680, 550, 440 nm.
+    // Sources and the arithmetic: docs/features/solar-visuals.md#mars (agent SKY).
+    // - Rayleigh: CO2 cross-sections 4.89, 11.6, 29.2 e-31 m2 (Sneep & Ubachs 2005, JQSRT 92, 293:
+    //   refractivity and King factor) x the surface number density 2.09e23 m-3 (699 Pa, 242 K: body.ron).
+    //   Scale height 11.1 km (body.ron's p = 0.699 exp(-0.00009 h) kPa).
+    // - Dust: optical depth 0.5 at 880 nm (typical outside dust storms: Lemmon et al. 2015, Icarus 251, 96),
+    //   well mixed (the gas's scale height); single-scattering albedo 0.95, 0.92, 0.87 (Wolff et al. 2009,
+    //   JGR 114, E00D04: 0.94-0.96 at 650 nm, 0.86-0.90 at 440 nm; Tomasko et al. 1999, JGR 104, 8987);
+    //   extinction and asymmetry per channel from Mie theory for the measured size distribution
+    //   (r_eff 1.5 um, v_eff 0.3; n = 1.5, k fitted to those albedos): Q_ext relative to 880 nm 0.962,
+    //   0.934, 0.910; g 0.73, 0.75, 0.78 (0.69 at 965 nm, as Tomasko et al. measured). The larger g in
+    //   blue makes the blue glow around the setting Sun; the dust's blue absorption the butterscotch sky.
+    atmosphere: Some((
+        thickness_m: 100000.0,
+        rayleigh_scattering: (1.02e-7, 2.43e-7, 6.11e-7),
+        rayleigh_scale_height_m: 11100.0,
+        mie_scattering: (4.11e-5, 3.87e-5, 3.57e-5),
+        mie_absorption: (2.17e-6, 3.36e-6, 5.33e-6),
+        mie_scale_height_m: 11100.0,
+        mie_asymmetry: 0.75,
+        mie_asymmetry_rgb: Some((0.73, 0.75, 0.78)),
+        // Mean surface reflectance (Bond albedo 0.25) with Mars's red slope.
+        ground_albedo: (0.27, 0.16, 0.09),
+    )),
 )

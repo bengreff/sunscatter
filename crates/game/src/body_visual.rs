@@ -166,10 +166,38 @@ pub struct AtmosphereDef {
     pub mie_absorption: [f32; 3],
     pub mie_scale_height_m: f32,
     pub mie_asymmetry: f32,
+    /// The Mie term's asymmetry per channel (red, green, blue) instead of
+    /// `mie_asymmetry`, for aerosols whose forward peak narrows towards the
+    /// blue (Mars's dust: the blue glow around the setting Sun).
+    #[serde(default)]
+    pub mie_asymmetry_rgb: Option<[f32; 3]>,
     /// Ozone-like absorbing layer (tent profile), optional.
     #[serde(default)]
     pub ozone: Option<OzoneDef>,
+    /// Further aerosol layers (cloud decks, haze), each with its own profile.
+    #[serde(default)]
+    pub layers: Vec<LayerDef>,
     pub ground_albedo: [f32; 3],
+}
+
+/// An aerosol layer: Mie scattering and absorption (m⁻¹ at its densest),
+/// the asymmetry per channel (red, green, blue), and its vertical profile.
+#[derive(Clone, Debug, Deserialize)]
+pub struct LayerDef {
+    pub scattering: [f32; 3],
+    #[serde(default)]
+    pub absorption: [f32; 3],
+    pub asymmetry: [f32; 3],
+    pub profile: ProfileDef,
+}
+
+/// How a layer's density varies with height above the ground.
+#[derive(Clone, Copy, Debug, Deserialize)]
+pub enum ProfileDef {
+    /// Densest at the ground, falling off with this scale height (m).
+    Exponential { scale_height_m: f32 },
+    /// Densest at `center_m`, falling linearly to zero `width_m / 2` above and below.
+    Tent { center_m: f32, width_m: f32 },
 }
 
 #[derive(Clone, Debug, Deserialize)]
