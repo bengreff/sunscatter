@@ -11,6 +11,7 @@ mod body_visual;
 mod camera;
 mod commands;
 mod comms;
+mod debris;
 mod demo;
 mod demo_checks;
 mod fleet;
@@ -114,7 +115,7 @@ fn main() {
         )
         .add_systems(
             Update,
-            (interface::pause::track_launch, state::advance, state::update_prediction, landing::update)
+            (interface::pause::track_launch, state::advance, debris::update, state::update_prediction, landing::update)
                 .chain()
                 .in_set(Stage::Simulate),
         )
@@ -201,6 +202,7 @@ impl Plugin for GameState {
             .init_resource::<interface::pause::LaunchSnapshot>()
             .init_resource::<interface::help::Help>()
             .init_resource::<interface::toasts::Toasts>()
+            .init_resource::<debris::Breakups>()
             .init_resource::<settings::GraphicsSettings>()
             .init_resource::<settings_ui::SettingsUi>()
             .init_resource::<bench::Bench>()
