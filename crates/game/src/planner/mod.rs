@@ -204,7 +204,11 @@ pub fn keys(
 
 impl Planner {
     /// Opens the planner on `vessel`'s plan (N, or Orbital ▸ Maneuvers).
+    /// Already open on it, the draft is kept: unsent edits are not lost.
     pub fn open_for(&mut self, vessel: &Vessel, now: Epoch) {
+        if self.open && self.vessel == Some(vessel.id()) {
+            return;
+        }
         self.open = true;
         self.vessel = Some(vessel.id());
         self.draft = draft_from(vessel.plan(), now);
@@ -407,6 +411,28 @@ mod tests {
             assert!((drag_dv(px) - dv).abs() < 1e-9, "{px} px: {}", drag_dv(px));
         }
         assert!((1..600).all(|k| drag_dv(f64::from(k)) > drag_dv(f64::from(k - 1))), "monotonic");
+    }
+
+    #[test]
+    fn opening_the_planner_again_keeps_unsent_edits() {
+        let mut sim = SimState::new();
+        sim.spawn_test_ships(1);
+        let (a, b) = (&sim.fleet[0], &sim.fleet[1]);
+        let mut p = Planner::default();
+        p.open_for(a, sim.clock);
+        assert!(p.open && p.vessel == Some(a.id()) && p.draft.is_empty());
+        let earth = sim.world.find("Earth").unwrap().node;
+        let edit = DraftBurn { t_start: sim.clock.add_seconds(600.0), dv: DVec3::X * 10.0, reference: earth };
+        p.draft.push(edit);
+        p.open_for(a, sim.clock);
+        assert_eq!(p.draft, [edit], "open on the same vessel: kept");
+        p.open_for(b, sim.clock);
+        assert!(p.vessel == Some(b.id()) && p.draft.is_empty(), "another vessel: its own plan");
+        p.open = false;
+        p.vessel = Some(a.id());
+        p.draft = vec![edit];
+        p.open_for(a, sim.clock);
+        assert!(p.draft.is_empty(), "closed, then opened: the vessel's plan again");
     }
 
     #[test]
