@@ -317,6 +317,44 @@ pub struct ContactForces {
     pub impact: Option<Impact>,
 }
 
+/// A contact point on or below the ground.
+struct Touch {
+    /// From the centre of mass (inertial).
+    lever: DVec3,
+    /// The terrain normal (inertial).
+    n: DVec3,
+    /// Along the normal (m).
+    depth: f64,
+    /// Relative to the ground.
+    v_point: DVec3,
+    /// Along −n (m/s).
+    closing: f64,
+}
+
+/// Where `cp` of `pose` touches `ground`, if it does.
+fn touch(ground: &Ground, pose: &Pose, cp: &ContactPoint) -> Option<Touch> {
+    let lever = pose.q * (cp.pos - pose.com);
+    let p = pose.r + lever;
+    let fixed = ground.fixed(p);
+    let clear = ground.physical.altitude_above_surface(fixed);
+    if clear > 0.0 {
+        return None;
+    }
+    let n = ground.normal_at_fixed(fixed.raw());
+    let up = ground.to_fixed.transpose() * fixed.raw().normalize();
+    let depth = -clear * n.dot(up);
+    let v_point = pose.v + pose.omega.cross(lever) - ground.velocity(p);
+    let closing = -v_point.dot(n);
+    Some(Touch { lever, n, depth, v_point, closing })
+}
+
+/// The normal force (N) the ground pushes contact point `cp` of `pose`
+/// with (zero off the ground): the load a part carries there
+/// (`sim::vessel::breakage`).
+pub fn normal_load(ground: &Ground, pose: &Pose, cp: &ContactPoint, c: &ContactFile) -> f64 {
+    touch(ground, pose, cp).map_or(0.0, |t| normal_force(cp.kind, c, t.depth, t.closing))
+}
+
 /// Contact force and torque on `pose` from `points` touching `ground`, for
 /// a substep of `dt` (friction is capped to what it can stop in `dt`).
 pub fn forces(
@@ -327,7 +365,7 @@ pub fn forces(
     max_speed: f64,
     dt: f64,
 ) -> ContactForces {
-    struct Touch {
+    struct Pressing {
         lever: DVec3,
         n: DVec3,
         f_n: f64,
@@ -337,19 +375,8 @@ pub fn forces(
     let mut out = ContactForces::default();
     let mut touches = Vec::new();
     for (i, cp) in points.iter().enumerate() {
-        let lever = pose.q * (cp.pos - pose.com);
-        let p = pose.r + lever;
-        let fixed = ground.fixed(p);
-        let clear = ground.physical.altitude_above_surface(fixed);
-        if clear > 0.0 {
-            continue;
-        }
+        let Some(Touch { lever, n, depth, v_point, closing }) = touch(ground, pose, cp) else { continue };
         out.touching = true;
-        let n = ground.normal_at_fixed(fixed.raw());
-        let up = ground.to_fixed.transpose() * fixed.raw().normalize();
-        let depth = -clear * n.dot(up);
-        let v_point = pose.v + pose.omega.cross(lever) - ground.velocity(p);
-        let closing = -v_point.dot(n);
         let (spring, stroke) = match cp.kind {
             ContactKind::Foot => (c.foot, c.foot.stroke),
             ContactKind::Hull => (c.hull, 0.0),
@@ -358,7 +385,7 @@ pub fn forces(
             out.impact = Some(Impact { point: i as u32, speed: closing });
         }
         let f_n = normal_force(cp.kind, c, depth, closing);
-        touches.push(Touch { lever, n, f_n, v_t: v_point + n * closing, mu: spring.friction });
+        touches.push(Pressing { lever, n, f_n, v_t: v_point + n * closing, mu: spring.friction });
     }
     let inv = pose.inertia.inverse();
     let count = touches.len() as f64;

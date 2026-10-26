@@ -35,10 +35,12 @@
 mod aerothermal;
 mod anchor;
 mod attitude;
+mod breakage;
 mod burn;
 mod clock;
 mod coast;
 mod coast_heat;
+pub mod debris;
 mod flown;
 mod hold;
 mod id;
@@ -47,6 +49,7 @@ use live::{attitude_mode, Checked};
 pub mod limbo;
 pub mod pointing;
 mod segment;
+pub mod split;
 mod systems;
 mod trajectory;
 
@@ -64,6 +67,7 @@ pub use flown::BurnCraft;
 pub use hold::{hold_direction, turn_lead, HoldInputs, HoldMode, SpeedReference, TargetState};
 pub use id::{VesselId, VesselIds};
 pub use segment::{coast_tolerance, CoastStart, EndKind, Sample, Segment, SegmentEnd, SegmentKind};
+pub use split::{Breakup, SplitPlan};
 pub use trajectory::Trajectory;
 
 use crate::craft::{Craft, CraftParams, MassProps};
@@ -220,6 +224,9 @@ pub struct Vessel {
     /// Internal systems on their lattice ([`crate::systems`]).
     #[serde(default)]
     pub systems: crate::systems::Systems,
+    /// Parts that broke at a live tick, waiting for [`Vessel::split`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    breakup: Option<split::Breakup>,
 }
 
 /// Rotation matrix taking body-fixed axes of `body` to inertial axes at `t`.
@@ -270,6 +277,7 @@ impl Vessel {
             limbo: Default::default(),
             repoint: false,
             systems: crate::systems::Systems::starting(t),
+            breakup: None,
         };
         v.sync_landed_attitude(world);
         if !v.holds_where_landed(world) {
@@ -305,6 +313,7 @@ impl Vessel {
             limbo: Default::default(),
             repoint: false,
             systems: crate::systems::Systems::starting(t),
+            breakup: None,
         };
         // In air that needs it, it is flown live (the live boundary).
         let boundary = vessel.limbo.boundary;
@@ -429,7 +438,8 @@ impl Vessel {
     /// Whether the engine runs with these controls (a throttle, and
     /// propellant or debug mode).
     pub fn engine_running(&self, controls: &Controls) -> bool {
-        self.craft.engine.setting(controls.throttle) > 0.0 && (self.debug || self.propellant > 0.0)
+        let engine = &self.craft.engine;
+        engine.thrust_vac > 0.0 && engine.setting(controls.throttle) > 0.0 && (self.debug || self.propellant > 0.0)
     }
 
     /// Thrust acceleration (inertial axes, m/s²) the engine would give at
@@ -582,6 +592,10 @@ impl Vessel {
         let controls = if self.destroyed.is_some() { &cut } else { controls };
         let live_at_start = matches!(self.phase, Phase::Powered { .. });
         loop {
+            // Broken up: nothing moves until the split is applied.
+            if self.breakup.is_some() {
+                return (self.time, budget.spent);
+            }
             let before = (self.time, std::mem::discriminant(&self.phase));
             // A coast restarted at its own time (a new attitude regime) moved
             // on; one that reached the live boundary stops there.

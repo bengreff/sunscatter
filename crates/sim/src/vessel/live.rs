@@ -251,7 +251,7 @@ impl Vessel {
                     Ok(t) => {
                         self.attitude = attitude::finish(t.att, &mut self.control, &cmd, false);
                         if let Some(im) = t.impact {
-                            self.destroy(Destruction::Impact { speed: im.speed, point: im.point });
+                            self.impacted(im);
                         }
                         (t.r, t.v, t.touching, t.delta)
                     }
@@ -280,8 +280,12 @@ impl Vessel {
             self.clock.add(self.time, delta);
             self.phase = Phase::Powered { anchor, r: r1, v: v1 };
             self.tick_accel = Some((v1 - v) / TICK);
-            self.check_overheat();
+            let flow = aero.as_ref().map(|a| a.flow(att0));
+            self.check_limits(world, flow.as_ref(), contact_body.map(|b| (anchor, b)));
             self.systems_after_tick(world);
+            if self.breakup.is_some() {
+                return;
+            }
             if let Some(body) = contact_body {
                 let input = engine_on || controls.rotate != DVec3::ZERO;
                 if self.rest(world, anchor, body, touching, input, controls) {
@@ -314,6 +318,7 @@ impl Vessel {
         let mut impact = None;
         // Destroyed (now or before): engine and controls cut.
         let mut dead = self.destroyed.is_some();
+        let whole = self.craft.design().parts.len() <= 1;
         for k in 0..contact::SUBSTEPS {
             let snap = world.snapshot(self.time.add_seconds(h * k as f64));
             let ground = Ground::new(world, &snap, anchor, body);
@@ -345,12 +350,13 @@ impl Vessel {
             // An impact: the point past its free travel is still closing
             // too fast after the substep's contact force (its closing speed
             // at the start of the substep, the event's peak, is reported).
-            if let Some(im) = c.impact.filter(|_| !self.debug && !dead) {
+            if let Some(im) = c.impact.filter(|_| !self.debug && !dead && impact.is_none()) {
                 let after = Pose { r, v, q: att.q, omega: att.omega, ..pose };
                 let point = &self.craft.contacts[im.point as usize];
                 if contact::closing_speed(&ground, &after, point) > self.craft.impact_max_speed {
                     impact = Some(im);
-                    dead = true;
+                    // A craft of parts loses the part (`breakage`), not its engine.
+                    dead = whole;
                 }
             }
         }
@@ -359,7 +365,7 @@ impl Vessel {
 
     /// After a tick: destroyed if a temperature is above its limit (not in
     /// debug mode, D064).
-    fn check_overheat(&mut self) {
+    pub(super) fn check_overheat(&mut self) {
         if self.debug || self.destroyed.is_some() {
             return;
         }
