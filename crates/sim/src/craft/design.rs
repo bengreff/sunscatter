@@ -45,6 +45,9 @@ pub struct CraftDesign {
     /// flow directions: the attitude-independent drag of coasts and
     /// predictions (a vessel flown live uses the full aerodynamics).
     pub mean_drag_area: f64,
+    /// Areas per direction for attitude-dependent drag and radiation
+    /// pressure on rails (`docs/features/limbo.md`).
+    pub surfaces: crate::forces::SurfaceTable,
 }
 
 impl CraftDesign {
@@ -83,6 +86,7 @@ impl CraftDesign {
         let skin_max = cells.iter().map(|c| c.max_k.unwrap_or(t.skin_max_k)).collect();
         let cd0 = craft.spec.aero.cd0;
         let mean_drag_area = mean_drag_area(&bake, cd0);
+        let surfaces = crate::forces::SurfaceTable::new(&bake, cd0);
         CraftDesign {
             bake,
             network,
@@ -96,6 +100,7 @@ impl CraftDesign {
             cells: cells.clone(),
             cd0,
             mean_drag_area,
+            surfaces,
         }
     }
 

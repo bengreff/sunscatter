@@ -12,6 +12,11 @@
 //! cutoff, is neglected. (Dropping a cut source's pull altogether would leave
 //! its full pull on the anchor as a fictitious force on the vessel.)
 
+pub mod radiation;
+pub mod surface;
+
+pub use surface::{MeanSurface, Optics, Surface, SurfaceTable};
+
 use crate::ephem::Snapshot;
 use crate::frame::{BodyFixed, NodeId, Vec3};
 use crate::gen::{j2_accel, schwarzschild_accel};
