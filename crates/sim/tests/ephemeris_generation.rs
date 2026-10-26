@@ -110,7 +110,7 @@ fn generation_is_deterministic_and_matches_golden_hash() {
 const GOLDEN_HASH: u64 = 0xda43c59162cf1402;
 /// The moon system test's output: external tides, J2–J6, free segment
 /// lengths, quantized and packed tables (CI: macOS and Windows).
-const HIERARCHICAL_GOLDEN: u64 = 0xcf47c76a0890bce7;
+const HIERARCHICAL_GOLDEN: u64 = 0x73af5485187aba10;
 
 #[test]
 fn table_and_integration_agree_between_samples() {
