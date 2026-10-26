@@ -164,6 +164,17 @@ impl Pointing {
         }
     }
 
+    /// A torque-free pointing's attitude at `t` (`None` for the others):
+    /// [`Self::attitude`] without a snapshot.
+    pub fn free_at(&self, t: Epoch) -> Option<Attitude> {
+        match self {
+            Pointing::Free { epoch, att, inertia, cache } => {
+                Some(cache.0.get_or_init(|| FreeRotation::new(att, inertia)).at(t.seconds_since(*epoch)))
+            }
+            _ => None,
+        }
+    }
+
     /// The attitude-control state that continues this pointing at `epoch`
     /// with attitude `att` (when the segment ends and the controller takes
     /// over again): a held attitude, a settled direction hold with its

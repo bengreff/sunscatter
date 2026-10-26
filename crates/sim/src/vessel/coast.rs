@@ -194,9 +194,10 @@ impl Vessel {
                 break;
             }
             t = e;
-            let (anchor, r, v) = trajectory.eval(e).expect("the lattice epoch is in the trajectory");
-            let sun = self.attitude.q.inverse() * aerothermal::coast_sunlight(world, e, anchor, r, v);
-            let solved = aerothermal::coast_step(&design, &mut self.thermal, sun, propellant_at(e), e, false);
+            let state = trajectory.eval(e).expect("the lattice epoch is in the trajectory");
+            let pointing = trajectory.segment_at(e).and_then(|s| s.limbo()).map(|l| &l.pointing);
+            let suns = aerothermal::coast_suns(world, e, state, pointing.filter(|p| p.is_known()), &self.attitude);
+            let solved = aerothermal::coast_step(&design, &mut self.thermal, &suns, propellant_at(e), e, false);
             budget.thermal = budget.thermal.saturating_sub(if solved { THERMAL_SOLVE_UNITS } else { 1 });
         }
         if let Some(s) = settled {
@@ -262,7 +263,8 @@ impl Vessel {
         let sun = aerothermal::coast_sunlight(world, self.time, anchor, r, v);
         let design = self.craft.design().clone();
         let sun = self.attitude.q.inverse() * sun;
-        aerothermal::coast_step(&design, &mut self.thermal, sun, self.propellant, self.time, true);
+        let sun = aerothermal::CoastSun::one(sun);
+        aerothermal::coast_step(&design, &mut self.thermal, &sun, self.propellant, self.time, true);
     }
 }
 

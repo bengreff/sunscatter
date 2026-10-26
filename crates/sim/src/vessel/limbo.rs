@@ -154,7 +154,13 @@ pub fn ceiling(atm: &Atmosphere) -> f64 {
 /// vessel at `(r, v)` relative to `anchor` (in source order). Altitude by
 /// the geocentric-latitude ellipsoid, as `BodyPhysical::altitude`.
 pub fn each_air(world: &World, snap: &Snapshot, anchor: NodeId, r: DVec3, v: DVec3, mut f: impl FnMut(Rarefied)) {
-    for s in &world.sources {
+    // A closed moon system is far away: its moons' air is not looked at
+    // (nor their positions evaluated).
+    let open = world.open_clusters(snap, anchor, r);
+    for (i, s) in world.sources.iter().enumerate() {
+        if !world.counts(i, open) {
+            continue;
+        }
         let Some(p) = s.physical.as_ref() else { continue };
         let Some(atm) = &p.atmosphere else { continue };
         let top = ceiling(atm);

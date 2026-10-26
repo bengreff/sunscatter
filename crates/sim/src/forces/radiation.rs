@@ -21,7 +21,14 @@ const INLINE: usize = 8;
 /// from `r` (relative to `anchor`): the radiation pressure (Pa, for a
 /// perfectly absorbing surface facing the star) and the unit direction the
 /// light travels (inertial axes).
+///
+/// Moons of a closed moon system (`World::open_clusters`: beyond their
+/// system's tidal reach, over an AU from Jupiter's) are not occluders, so a
+/// far system's moons are never evaluated (the snapshot evaluates them
+/// lazily): from there a moon hides at most ~1e-4 of the Sun's disc, and
+/// only in an exact alignment.
 pub fn starlight(world: &World, snap: &Snapshot, anchor: NodeId, r: DVec3, mut f: impl FnMut(f64, DVec3)) {
+    let open = world.open_clusters(snap, anchor, r);
     for star in &world.sources {
         let Some(p) = star.physical.as_ref().filter(|p| p.luminosity > 0.0) else { continue };
         let at_star = snap.relative_r(star.node, anchor);
@@ -34,8 +41,8 @@ pub fn starlight(world: &World, snap: &Snapshot, anchor: NodeId, r: DVec3, mut f
         let mut inline = [(DVec3::ZERO, 0.0); INLINE];
         let mut n = 0;
         let mut spill: Vec<(DVec3, f64)> = Vec::new();
-        for s in &world.sources {
-            if s.node == star.node {
+        for (i, s) in world.sources.iter().enumerate() {
+            if s.node == star.node || !world.counts(i, open) {
                 continue;
             }
             let Some(b) = &s.physical else { continue };
