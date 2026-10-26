@@ -359,3 +359,67 @@ fn a_rough_heat_shield_trips_its_layer() {
     assert_eq!(smooth, (0.0, 0.0));
     assert!(rough.1 > 0.9 && rough.1 >= rough.0, "{rough:?}");
 }
+
+#[test]
+fn coast_heat_is_the_per_sample_calls_bit_for_bit() {
+    // The test craft under one sun, under orbit samples of sunlight (one in
+    // shadow) and in thin air from 12 directions: one pass over the cells
+    // gives the same bits as the sunlight averaged per sample, then the
+    // air's samples added one by one.
+    let c = crate::craft::test_craft();
+    let (cells, b) = (&c.cells.cells, crate::aero::tests::craft_bake());
+    let n = cells.len();
+    let dir = |k: usize| {
+        let a = 0.7 * k as f64;
+        DVec3::new(math::cos(a), math::sin(a), 0.3 * k as f64 - 1.5).normalize()
+    };
+    let suns: Vec<DVec3> = (0..6).map(|k| if k == 4 { DVec3::ZERO } else { dir(k) * 1361.0 }).collect();
+    let air: Vec<(DVec3, f64)> = (0..12).map(|k| (dir(k + 7), 3.0 + k as f64)).collect();
+    for (suns, air) in [(&suns[..1], &[][..]), (&suns[..], &[][..]), (&suns[..1], &air[..]), (&suns[..], &air[..])] {
+        let (mut want, mut scratch) = (vec![0.0; n], vec![0.0; n]);
+        if let [one] = suns {
+            cell_heat_flow(b, cells, None, *one, &mut scratch, &mut want);
+        } else {
+            let mut each = vec![0.0; n];
+            for &s in suns {
+                cell_heat_flow(b, cells, None, s, &mut scratch, &mut each);
+                for (h, x) in want.iter_mut().zip(&each) {
+                    *h += x * (1.0 / suns.len() as f64);
+                }
+            }
+        }
+        for &a in air {
+            free_molecular_heat(b, cells, a, 1.0 / air.len() as f64, &mut scratch, &mut want);
+        }
+        let (mut got, mut exposure) = (vec![f64::NAN; n], Vec::new());
+        coast_heat(b, cells, suns, air, &mut exposure, &mut got);
+        assert!(
+            got.iter().zip(&want).all(|(a, b)| a.to_bits() == b.to_bits()),
+            "{} suns, {} air",
+            suns.len(),
+            air.len()
+        );
+        assert!(want.iter().any(|&h| h > 0.0));
+    }
+}
+
+#[test]
+fn exposure_at_divides_each_weighted_byte_as_before() {
+    // The lookup tables give the bits of Σ w·e/255 summed from zero in grid
+    // order, as the division per cell did.
+    let (cells, b) = (crate::craft::test_craft().cells.cells.len(), crate::aero::tests::craft_bake());
+    for k in 0..40 {
+        let a = 0.37 * k as f64;
+        let d = DVec3::new(math::cos(a), math::sin(a), 0.05 * k as f64 - 1.0).normalize();
+        let mut got = vec![0.0; cells];
+        b.exposure_at(d, &mut got);
+        let w = b.grid.locate(d);
+        for (i, g) in got.iter().enumerate() {
+            let mut want = 0.0;
+            for j in 0..3 {
+                want += w.w[j] * f64::from(b.exposure[w.dirs[j] as usize * cells + i]) / 255.0;
+            }
+            assert_eq!(g.to_bits(), want.to_bits(), "direction {k}, cell {i}");
+        }
+    }
+}

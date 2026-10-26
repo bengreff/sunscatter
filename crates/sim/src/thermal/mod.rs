@@ -29,7 +29,8 @@ mod blocks;
 pub mod heating;
 
 pub use heating::{
-    cell_heat_flow, cell_heat_layer, free_molecular_heat, sutton_graves, tauber_sutton, FlowHeat, TauberSutton,
+    cell_heat_flow, cell_heat_layer, coast_heat, free_molecular_heat, sutton_graves, tauber_sutton, FlowHeat,
+    TauberSutton,
 };
 
 use crate::craft::Cell;

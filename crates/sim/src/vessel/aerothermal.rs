@@ -49,6 +49,7 @@ use crate::thermal::{self, ThermalState, COAST_CONVERGED, DEFAULT_SWEEPS};
 use crate::time::Epoch;
 use crate::world::World;
 use glam::{DQuat, DVec3};
+use std::sync::Arc;
 
 /// The coast thermal lattice (s): a third of the test craft's skin time
 /// constant (C/(4εσT³) ≈ 1,600 s at 290 K).
@@ -102,6 +103,42 @@ pub struct VesselThermal {
     /// Coasts: the thin air's key ([`CoastSun`]) at the last solve.
     #[serde(default)]
     hold_air: DVec3,
+    /// Coasts: the nodes' heat capacities of the last solve.
+    #[serde(skip)]
+    capacities: Capacities,
+}
+
+/// The nodes' heat capacities (J/K) of a coast solve, kept for its design
+/// and propellant load: a coast without burns reuses them instead of
+/// summing the tanks' volume grid at every solve (the same bits). A cache:
+/// not saved, and equal to any other (it is derived from the design and
+/// the propellant, which are compared), like [`crate::craft::DesignSlot`].
+#[derive(Clone, Default)]
+struct Capacities(Option<(Arc<CraftDesign>, u64, Vec<f64>)>);
+
+impl Capacities {
+    /// The capacities of `design`'s nodes with `propellant` kg aboard.
+    fn get(&mut self, design: &Arc<CraftDesign>, propellant: f64) -> &[f64] {
+        let kept = matches!(&self.0, Some((d, p, _)) if Arc::ptr_eq(d, design) && *p == propellant.to_bits());
+        if !kept {
+            let mut out = vec![0.0; design.nodes()];
+            design.node_capacity(propellant, &mut out);
+            self.0 = Some((design.clone(), propellant.to_bits(), out));
+        }
+        self.0.as_ref().map_or(&[], |c| &c.2[..])
+    }
+}
+
+impl PartialEq for Capacities {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+impl std::fmt::Debug for Capacities {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("Capacities")
+    }
 }
 
 fn lattice_default() -> f64 {
@@ -127,6 +164,7 @@ impl VesselThermal {
             step: LATTICE,
             hold_power: 0.0,
             hold_air: DVec3::ZERO,
+            capacities: Capacities::default(),
         }
     }
 
@@ -494,7 +532,7 @@ pub fn live_step(
 /// `sun` is the sunlight in body axes ([`CoastSun`], [`coast_suns`]): its
 /// key decides the skip, its samples' heating is averaged.
 pub fn coast_step(
-    design: &CraftDesign,
+    design: &Arc<CraftDesign>,
     th: &mut VesselThermal,
     sun: &CoastSun,
     propellant: f64,
@@ -519,30 +557,16 @@ pub fn coast_step(
         }
     }
     let mut b = Buffers::new(design);
-    let heat_of = |sun: DVec3, scratch: &mut [f64], out: &mut [f64]| {
-        thermal::cell_heat_flow(&design.bake, &design.cells, None, sun, scratch, out);
-    };
-    if let [one] = suns {
-        heat_of(*one, &mut b.scratch, &mut b.heat);
-    } else {
-        let mut each = vec![0.0; b.heat.len()];
-        let w = 1.0 / suns.len() as f64;
-        for &s in suns {
-            heat_of(s, &mut b.scratch, &mut each);
-            for (h, x) in b.heat.iter_mut().zip(&each) {
-                *h += x * w;
-            }
-        }
+    // The sunlight (averaged over its samples) and the free-molecular
+    // heating on the cells facing the air, shaded by the craft itself,
+    // averaged over the samples.
+    let mut exposure = std::mem::take(&mut b.scratch);
+    thermal::coast_heat(&design.bake, &design.cells, suns, &sun.air, &mut exposure, &mut b.heat);
+    for &(i, share) in &design.nozzle_cells {
+        b.heat[i as usize] += burn / dt * share;
     }
-    // Free-molecular heating on the cells facing the air, shaded by the
-    // craft itself, averaged over the samples.
-    let w = 1.0 / sun.air.len().max(1) as f64;
-    for &air in &sun.air {
-        thermal::free_molecular_heat(&design.bake, &design.cells, air, w, &mut b.scratch, &mut b.heat);
-    }
-    engine_and_nodes(design, burn / dt, propellant, &mut b);
     let before = th.state.clone();
-    let (heat, node_heat, capacity) = (&b.heat, &b.node_heat, &b.node_capacity);
+    let (heat, node_heat, capacity) = (&b.heat, &b.node_heat, th.capacities.get(design, propellant));
     design.network.step_to(&mut th.state, heat, node_heat, capacity, SINK_K, dt, DEFAULT_SWEEPS, COAST_CONVERGED);
     let change = |now: &[f64], was: &[f64]| now.iter().zip(was).map(|(a, b)| (a - b).abs()).fold(0.0, f64::max);
     let change = change(&th.state.skin, &before.skin).max(change(&th.state.nodes, &before.nodes));

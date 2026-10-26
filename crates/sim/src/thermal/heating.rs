@@ -251,6 +251,56 @@ pub fn free_molecular_heat(
     }
 }
 
+/// The heat inputs of a coast step in one pass over the cells: the
+/// sunlight of [`cell_heat_flow`] without air for each of `suns` (one, or
+/// samples averaged with equal weights) and [`free_molecular_heat`] for
+/// each of `air` (weighted 1/len), into `out` (overwritten). The same bits
+/// as those calls in that order (each cell's sum is taken in the same
+/// order; a cell turned away adds nothing either way); `exposure` is
+/// scratch (a row of exposures per sample).
+pub fn coast_heat(
+    bake: &AeroBake,
+    cells: &[Cell],
+    suns: &[DVec3],
+    air: &[(DVec3, f64)],
+    exposure: &mut Vec<f64>,
+    out: &mut [f64],
+) {
+    let n = cells.len();
+    // (direction, flux, weight) per sample: sunlight shines along its
+    // direction l onto cells facing −l; air travels along its direction.
+    let mut samples: Vec<(DVec3, f64, f64)> = Vec::with_capacity(suns.len() + air.len());
+    let sun_weight = if suns.len() == 1 { None } else { Some(1.0 / suns.len() as f64) };
+    for &sun in suns {
+        let flux = sun.length();
+        if flux > 0.0 {
+            samples.push((sun / flux, flux, 0.0));
+        }
+    }
+    let lit = samples.len();
+    let air_weight = 1.0 / air.len().max(1) as f64;
+    samples.extend(air.iter().map(|&(d, f)| (d, f, air_weight)));
+    exposure.resize(samples.len() * n, 0.0);
+    for (row, s) in exposure.chunks_exact_mut(n.max(1)).zip(&samples) {
+        bake.exposure_at(s.0, row);
+    }
+    for (i, (o, c)) in out.iter_mut().zip(cells).enumerate() {
+        let mut h = 0.0;
+        for (k, &(d, flux, weight)) in samples.iter().enumerate() {
+            let cos = -c.normal.dot(d);
+            let f = exposure[k * n + i];
+            let add = match (cos > 0.0, k >= lit, sun_weight) {
+                (false, _, _) => 0.0,
+                (true, true, _) => flux * cos * f * c.area * weight,
+                (true, false, Some(w)) => c.emissivity * flux * cos * f * c.area * w,
+                (true, false, None) => c.emissivity * flux * cos * f * c.area,
+            };
+            h += add;
+        }
+        *o = h;
+    }
+}
+
 /// The air side of [`cell_heat_flow`].
 #[derive(Clone, Copy, Debug)]
 pub struct FlowHeat<'a> {

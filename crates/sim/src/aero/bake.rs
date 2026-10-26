@@ -627,14 +627,22 @@ impl AeroBake {
 
     /// Each cell's exposure (0..1) at flow direction `d`, interpolated like
     /// [`Self::sums_at`]. `out` has one entry per cell.
+    ///
+    /// Each weighted byte `w·e/255` is looked up in a table of the 256
+    /// values made per direction (the same bits as dividing per cell, at
+    /// a 20th of the divisions: coast steps call this per heat sample).
     pub fn exposure_at(&self, d: DVec3, out: &mut [f64]) {
         let w = self.grid.locate(d);
-        out.fill(0.0);
-        for k in 0..3 {
-            let row = &self.exposure[w.dirs[k] as usize * self.cells..][..self.cells];
-            for (o, &e) in out.iter_mut().zip(row) {
-                *o += w.w[k] * f64::from(e) / 255.0;
+        let mut table = [[0.0f64; 256]; 3];
+        for (t, &wk) in table.iter_mut().zip(&w.w) {
+            for (e, v) in t.iter_mut().enumerate() {
+                *v = wk * e as f64 / 255.0;
             }
+        }
+        let row = |k: usize| &self.exposure[w.dirs[k] as usize * self.cells..][..self.cells];
+        let (r0, r1, r2) = (row(0), row(1), row(2));
+        for (((o, &e0), &e1), &e2) in out.iter_mut().zip(r0).zip(r1).zip(r2) {
+            *o = 0.0 + table[0][e0 as usize] + table[1][e1 as usize] + table[2][e2 as usize];
         }
     }
 }
