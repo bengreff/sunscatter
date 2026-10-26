@@ -20,6 +20,7 @@ struct RingParams {
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> ring: RingParams;
 @group(#{MATERIAL_BIND_GROUP}) @binding(1) var profile: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(2) var profile_sampler: sampler;
 
 const PI: f32 = 3.14159265;
 
@@ -29,15 +30,14 @@ fn fragment(in: VertexOutput) -> @location(0) vec4<f32> {
     let n = normalize(ring.normal.xyz);
     let d = p - ring.center.xyz;
     let r = length(d - n * dot(d, n));
-    let bins = ring.radii.z;
-    let x = (r - ring.radii.x) / (ring.radii.y - ring.radii.x) * bins - 0.5;
-    if x < -0.5 || x > bins - 0.5 {
+    // The profile averaged over the pixel's radial footprint (its mips).
+    let bin_m = (ring.radii.y - ring.radii.x) / ring.radii.z;
+    let lod = log2(max(fwidth(r) / bin_m, 1.0));
+    let u = (r - ring.radii.x) / (ring.radii.y - ring.radii.x);
+    if u < 0.0 || u > 1.0 {
         discard;
     }
-    let i0 = clamp(i32(floor(x)), 0, i32(bins) - 1);
-    let i1 = min(i0 + 1, i32(bins) - 1);
-    let f = clamp(x - floor(x), 0.0, 1.0);
-    let s = mix(textureLoad(profile, vec2(i0, 0), 0), textureLoad(profile, vec2(i1, 0), 0), f);
+    let s = textureSampleLevel(profile, profile_sampler, vec2(u, 0.5), lod);
     let tau = s.a;
     let v = normalize(-p);
     let l = normalize(ring.star.xyz - p);

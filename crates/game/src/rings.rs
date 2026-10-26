@@ -41,8 +41,10 @@ pub struct RingParams {
 pub struct RingMaterial {
     #[uniform(0)]
     pub params: RingParams,
-    /// rgb: albedo, a: normal optical depth, per bin (read with textureLoad).
+    /// rgb: albedo, a: normal optical depth, per bin, with its mip chain
+    /// ([`mip_chain`]): sampled over each pixel's radial footprint.
     #[texture(1)]
+    #[sampler(2)]
     pub profile: Handle<Image>,
 }
 
@@ -112,18 +114,67 @@ pub fn f16_bits(v: f32) -> u16 {
     (half + ((mant >> 12) & 1)) as u16
 }
 
-/// Loads a ring profile as an RGBA16F texture one pixel high.
+/// The profile's mip levels after the first: each halves the bins (width
+/// ⌊w/2⌋, an odd last bin joining the last pair, as the GPU sizes mips),
+/// averaging the albedo and the transmission at normal incidence (a coarse
+/// bin's τ is −ln of its bins' mean e^−τ, so it lets as much light through
+/// as they do). Seen from afar, the rings are then the average of the
+/// ringlets a pixel covers, not one of them picked at random (aliasing:
+/// speckles where the occultation's τ is noisy).
+pub fn mip_chain(bins: &[[f32; 4]]) -> Vec<Vec<[f32; 4]>> {
+    let mut levels: Vec<Vec<[f32; 4]>> = Vec::new();
+    let mut cur = bins.to_vec();
+    while cur.len() > 1 {
+        let n = cur.len() / 2;
+        let next: Vec<[f32; 4]> = (0..n)
+            .map(|i| {
+                let group = if i + 1 == n { &cur[2 * i..] } else { &cur[2 * i..2 * i + 2] };
+                let k = group.len() as f32;
+                let mut out = [0.0; 4];
+                for b in group {
+                    for c in 0..3 {
+                        out[c] += b[c] / k;
+                    }
+                    out[3] += (-b[3]).exp() / k;
+                }
+                out[3] = -out[3].max(1e-30).ln();
+                out
+            })
+            .collect();
+        levels.push(next.clone());
+        cur = next;
+    }
+    levels
+}
+
+/// Loads a ring profile as an RGBA16F texture one pixel high, with its
+/// mip chain and a linear sampler.
 pub fn load_profile(path: &std::path::Path, def: &RingsDef) -> Option<Image> {
+    use bevy::image::{ImageAddressMode, ImageFilterMode, ImageSampler, ImageSamplerDescriptor};
     let img = image::open(path).map_err(|e| error!("ring profile {}: {e}", path.display())).ok()?.to_luma16();
     let bins = profile_bins(def, img.as_raw());
-    let data: Vec<u8> = bins.iter().flat_map(|b| b.iter().flat_map(|v| f16_bits(*v).to_le_bytes())).collect();
-    Some(Image::new(
+    let mips = mip_chain(&bins);
+    let data: Vec<u8> = std::iter::once(&bins)
+        .chain(&mips)
+        .flat_map(|level| level.iter().flat_map(|b| b.iter().flat_map(|v| f16_bits(*v).to_le_bytes())))
+        .collect();
+    let mut image = Image::new(
         Extent3d { width: bins.len() as u32, height: 1, depth_or_array_layers: 1 },
         TextureDimension::D2,
         data,
         TextureFormat::Rgba16Float,
         RenderAssetUsages::RENDER_WORLD,
-    ))
+    );
+    image.texture_descriptor.mip_level_count = 1 + mips.len() as u32;
+    image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
+        address_mode_u: ImageAddressMode::ClampToEdge,
+        address_mode_v: ImageAddressMode::ClampToEdge,
+        mag_filter: ImageFilterMode::Linear,
+        min_filter: ImageFilterMode::Linear,
+        mipmap_filter: ImageFilterMode::Linear,
+        ..default()
+    });
+    Some(image)
 }
 
 /// Spawns a ring disc for every body with rings, and gives the body's
@@ -223,6 +274,26 @@ mod tests {
             outer_m: 140.0,
             albedo: vec![(92.0, [0.2; 3]), (140.0, [0.5; 3])],
         }
+    }
+
+    #[test]
+    fn mips_average_albedo_and_transmission() {
+        let ln2 = 2f32.ln();
+        // Five bins: the level below has two (the odd last bin joins the
+        // last pair), then one.
+        let bins = [[0.2, 0.2, 0.2, 0.0], [0.4, 0.4, 0.4, 100.0], [0.5; 4], [0.5; 4], [0.5; 4]];
+        let mips = mip_chain(&bins);
+        assert_eq!(mips.iter().map(Vec::len).collect::<Vec<_>>(), [2, 1]);
+        // (case, texel, expected albedo, expected optical depth)
+        let cases = [
+            ("clear and opaque: half the light, tau ln 2", mips[0][0], 0.3, ln2),
+            ("three equal bins keep their values", mips[0][1], 0.5, 0.5),
+        ];
+        for (case, t, albedo, tau) in cases {
+            assert!((t[0] - albedo).abs() < 1e-6 && (t[3] - tau).abs() < 1e-5, "{case}: {t:?}");
+        }
+        let mean_t = 0.5 * (0.5 + (-0.5f32).exp());
+        assert!((mips[1][0][3] + mean_t.ln()).abs() < 1e-5, "the top level: {:?}", mips[1][0]);
     }
 
     #[test]

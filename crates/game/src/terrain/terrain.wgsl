@@ -100,12 +100,15 @@ struct TerrainParams {
 // Zone colours, sampled with the colour map's sampler (the same settings;
 // zones are drawn only once the colour map is loaded).
 @group(#{MATERIAL_BIND_GROUP}) @binding(110) var zone_far: texture_2d<f32>;
-// Ring profile (rgb albedo, a normal optical depth per bin), read with textureLoad.
+// Ring profile (rgb albedo, a normal optical depth per bin, with mips that
+// average the transmission: rings::mip_chain), read with textureLoad.
 @group(#{MATERIAL_BIND_GROUP}) @binding(111) var ring_profile: texture_2d<f32>;
 
 // Sunlight through the rings at `p` (world, camera-relative): exp(−τ/|μ|)
-// where the ray to the star crosses the ring plane (rings::ring_transmission).
-fn ring_transmission(p: vec3<f32>) -> f32 {
+// where the ray to the star crosses the ring plane (rings::ring_transmission),
+// the profile averaged over `foot` (m, the pixel's footprint): no speckles
+// where the occultation's τ is noisy.
+fn ring_transmission(p: vec3<f32>, foot: f32) -> f32 {
     let bins = terrain.rings.z;
     if bins <= 0.0 {
         return 1.0;
@@ -122,14 +125,18 @@ fn ring_transmission(p: vec3<f32>) -> f32 {
         return 1.0;
     }
     let r = length(rel + l * t);
-    let x = (r - terrain.rings.x) / (terrain.rings.y - terrain.rings.x) * bins - 0.5;
-    if x < -0.5 || x > bins - 0.5 {
+    let u = (r - terrain.rings.x) / (terrain.rings.y - terrain.rings.x);
+    if u < 0.0 || u > 1.0 {
         return 1.0;
     }
-    let i0 = clamp(i32(floor(x)), 0, i32(bins) - 1);
-    let i1 = min(i0 + 1, i32(bins) - 1);
+    let bin_m = (terrain.rings.y - terrain.rings.x) / bins;
+    let level = min(i32(floor(log2(max(foot / bin_m, 1.0)))), i32(textureNumLevels(ring_profile)) - 1);
+    let count = i32(textureDimensions(ring_profile, level).x);
+    let x = u * f32(count) - 0.5;
+    let i0 = clamp(i32(floor(x)), 0, count - 1);
+    let i1 = min(i0 + 1, count - 1);
     let f = clamp(x - floor(x), 0.0, 1.0);
-    let tau = mix(textureLoad(ring_profile, vec2(i0, 0), 0).a, textureLoad(ring_profile, vec2(i1, 0), 0).a, f);
+    let tau = mix(textureLoad(ring_profile, vec2(i0, 0), level).a, textureLoad(ring_profile, vec2(i1, 0), level).a, f);
     return exp(-tau / abs(mu));
 }
 
@@ -735,7 +742,8 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     out.color = apply_pbr_lighting(pbr_input);
     // Sunlight at this body's own distance, dimmed where another body
     // hides the star (D055: never the flux at the camera).
-    let sun = terrain.light.w * eclipse(in.world_position.xyz) * ring_transmission(in.world_position.xyz);
+    let foot = length(fwidth(in.world_position.xyz));
+    let sun = terrain.light.w * eclipse(in.world_position.xyz) * ring_transmission(in.world_position.xyz, foot);
     // The sky light (Bevy's environment map) is the sky seen from the
     // camera; a point where the Sun has set has no such sky. Fade all
     // non-direct light out through twilight (Sun 6° below to 3° above the
