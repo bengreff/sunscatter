@@ -19,7 +19,10 @@ pub fn sections(d: &FlightData) -> Vec<Section> {
             s.toned(format!("  {}", p.name), &p.state, part_tone(p.tone));
         }
     }
-    if let Some(n) = crate::staging::next(&d.stages) {
+    let next = crate::staging::next(&d.stages);
+    if next.is_some() && d.landed {
+        s.note("on the ground: staging locked (P still deploys the parachutes)", Tone::Dim);
+    } else if let Some(n) = next {
         s.button(format!("Activate stage {n}  (Space)"), MenuAction::NextStage);
     } else if !d.stages.is_empty() {
         s.note("every stage is active", Tone::Dim);
@@ -62,6 +65,15 @@ mod tests {
             items.last(),
             Some(&Item::Button { label: "Activate stage 0  (Space)".into(), action: MenuAction::NextStage })
         );
+    }
+
+    #[test]
+    fn on_the_ground_the_button_gives_way_to_a_note() {
+        let mut d = data(&Controls::default(), &ChuteState::default());
+        d.landed = true;
+        let s = sections(&d);
+        assert!(!s[0].items.iter().any(|i| matches!(i, Item::Button { .. })));
+        assert!(matches!(s[0].items.last(), Some(Item::Note(n, Tone::Dim)) if n.contains("staging locked")));
     }
 
     #[test]

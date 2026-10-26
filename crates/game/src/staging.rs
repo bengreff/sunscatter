@@ -5,7 +5,10 @@
 //!
 //! Stages are numbered as KSP does: the highest number fires first, stage
 //! 0 last, and the stack is listed with stage 0 at the top. A stage is
-//! *next* until it is activated, then *active*.
+//! *next* until it is activated, then *active*. Staging is locked on the
+//! ground (Space is the launch key in KSP habits; here the throttle
+//! launches, and Space on the pad must not arm the parachutes). P is not
+//! locked: nothing refuses the parachute command (D079).
 
 use sim::chute::{CanopyState, ChuteSpec, ChuteState};
 use sim::vessel::Controls;
@@ -47,6 +50,24 @@ pub struct Stage {
 pub enum Activation {
     /// The parachute command (the same as P, D079).
     ArmParachutes,
+}
+
+/// Why nothing was activated.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Refusal {
+    /// Landed or wrecked: staging is locked on the ground.
+    Grounded,
+    NoStageLeft,
+}
+
+impl Refusal {
+    /// What the player is told.
+    pub fn message(self) -> &'static str {
+        match self {
+            Refusal::Grounded => "On the ground: staging locked (P still deploys the parachutes)",
+            Refusal::NoStageLeft => "No stage left to activate",
+        }
+    }
 }
 
 /// What a vessel's stages are made of now.
@@ -134,13 +155,22 @@ pub fn activation(number: u32) -> Option<Activation> {
     (number == 0).then_some(Activation::ArmParachutes)
 }
 
-/// Activates the next stage on `controls`; returns what it did.
-pub fn activate_next(s: &StageInputs, controls: &mut Controls) -> Option<Activation> {
-    let a = next(&stack(s)).and_then(activation)?;
+/// Activates the next stage on `controls`, unless the craft is on the
+/// ground (`grounded`: landed or wrecked); returns what it did.
+pub fn activate_next(s: &StageInputs, grounded: bool, controls: &mut Controls) -> Result<Activation, Refusal> {
+    if grounded {
+        return Err(Refusal::Grounded);
+    }
+    let a = next(&stack(s)).and_then(activation).ok_or(Refusal::NoStageLeft)?;
     match a {
         Activation::ArmParachutes => controls.chute = true,
     }
-    Some(a)
+    Ok(a)
+}
+
+/// Whether a vessel counts as on the ground for staging.
+pub fn grounded(vessel: &sim::vessel::Vessel) -> bool {
+    matches!(vessel.phase, sim::vessel::Phase::Landed { .. } | sim::vessel::Phase::Crashed { .. })
 }
 
 #[cfg(test)]
@@ -196,13 +226,30 @@ mod tests {
         let chute = ChuteState::default();
         let mut c = Controls::default();
         let before = c;
-        assert_eq!(activate_next(&inputs(&before, &chute, &spec, false), &mut c), Some(Activation::ArmParachutes));
+        assert_eq!(activate_next(&inputs(&before, &chute, &spec, false), false, &mut c), Ok(Activation::ArmParachutes));
         assert!(c.chute);
         let after = c;
         let s = stack(&inputs(&after, &chute, &spec, false));
         assert_eq!(s[0].state, StageState::Active);
         assert_eq!(next(&s), None);
-        assert_eq!(activate_next(&inputs(&after, &chute, &spec, false), &mut c), None);
+        assert_eq!(activate_next(&inputs(&after, &chute, &spec, false), false, &mut c), Err(Refusal::NoStageLeft));
+    }
+
+    #[test]
+    fn staging_is_locked_on_the_ground_and_changes_nothing() {
+        let spec = sim::craft::test_craft().params().chute;
+        let chute = ChuteState::default();
+        // (grounded, result, armed after)
+        let table = [(true, Err(Refusal::Grounded), false), (false, Ok(Activation::ArmParachutes), true)];
+        for (grounded, want, armed) in table {
+            let mut c = Controls::default();
+            let before = c;
+            assert_eq!(activate_next(&inputs(&before, &chute, &spec, false), grounded, &mut c), want, "{grounded}");
+            assert_eq!(c.chute, armed, "{grounded}");
+        }
+        assert!(Refusal::Grounded.message().contains("P still deploys"));
+        let sim = crate::state::SimState::new();
+        assert!(grounded(sim.ship()), "on the pad");
     }
 
     #[test]

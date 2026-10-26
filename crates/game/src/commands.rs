@@ -139,13 +139,12 @@ pub fn apply(
             GameCommand::SetSas(on) => sim.controls.sas = *on,
             GameCommand::NextStage => {
                 let mut controls = sim.controls;
-                let done = crate::staging::activate_next(
-                    &crate::staging::StageInputs::of(sim.ship(), &sim.controls),
-                    &mut controls,
-                );
+                let ship = sim.ship();
+                let inputs = crate::staging::StageInputs::of(ship, &sim.controls);
+                let done = crate::staging::activate_next(&inputs, crate::staging::grounded(ship), &mut controls);
                 sim.controls = controls;
-                if done.is_none() {
-                    toasts.push(time.elapsed_secs_f64(), "No stage left to activate", false);
+                if let Err(why) = done {
+                    toasts.push(time.elapsed_secs_f64(), why.message(), false);
                 }
             }
             GameCommand::SetDebug(on) => {
