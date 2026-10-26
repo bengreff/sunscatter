@@ -209,7 +209,7 @@ impl Stream {
             real: (self.gas == Gas::Air && self.speed > 0.0 && self.mach > 0.0 && s > 0.0).then(|| {
                 let r_gas = self.speed * self.speed / (self.gamma * self.mach * self.mach * self.temperature);
                 let cp = self.gamma * r_gas / (self.gamma - 1.0);
-                RealGas { rho: self.rho, speed: self.speed, cp, h_inf: cp * self.temperature, s: s.min(1.0) }
+                RealGas { rho: self.rho, speed: self.speed, cp, h_inf: cp * self.temperature, s: s.min(1.0), f }
             }),
         }
     }
@@ -249,6 +249,9 @@ struct RealGas {
     h_inf: f64,
     /// sin θ of the cell (the wedge angle's sine).
     s: f64,
+    /// The cell's exposure (0..1): the share of the impact pressure it
+    /// gets, as in the edge state.
+    f: f64,
 }
 
 /// The layer on one cell (per unit free stream).
@@ -396,7 +399,8 @@ impl Edge {
     /// equilibrium-air properties (Moeckel & Weston, Hansen) from 1 to
     /// 11 km/s and 3 to 60 km, ±15 % (NASA TP-2914, eq. 56b): q̇ =
     /// 2.45e-5·(ρ sin²δ cos^2.62 δ)^0.8·x^−0.2·V^3.7·(0.9 − h_w/H) W/m², x
-    /// the turbulent run (m). Weighted in from nothing at 3.5 km/s to full
+    /// the turbulent run (m), with ρ sin²δ (the Newtonian impact) times the
+    /// cell's exposure f as in the edge state. Weighted in from nothing at 3.5 km/s to full
     /// at 4.5 km/s; zero for other gases, leeward cells and without the free
     /// stream's speed. The layer takes the larger of it and the perfect-gas
     /// value, which runs 25–35 % under it at 7 km/s (the perfect gas's
@@ -409,8 +413,10 @@ impl Edge {
         }
         let pow = |v: f64, e: f64| if v > 0.0 { math::exp(e * math::ln(v)) } else { 0.0 };
         let c2 = (1.0 - r.s * r.s).max(0.0);
-        // cos^2.62 δ = (cos² δ)^1.31.
-        let base = r.rho * r.s * r.s * pow(c2, 1.31);
+        // cos^2.62 δ = (cos² δ)^1.31; ρ∞ sin² δ is the Newtonian impact
+        // (the edge density's rise), so a shaded cell gets its exposure's
+        // share, as in the edge state.
+        let base = r.rho * r.f * r.s * r.s * pow(c2, 1.31);
         let big_h = r.h_inf + 0.5 * r.speed * r.speed;
         let q = 2.45e-5 * pow(base, 0.8) * pow(x, -0.2) * pow(r.speed, 3.7) * (0.9 - r.cp * tw / big_h);
         w * q / (r.rho * r.speed * r.cp)
