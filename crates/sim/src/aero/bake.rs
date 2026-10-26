@@ -423,7 +423,8 @@ pub fn direction_sums(cells: &[CellGeometry], d: DVec3, f: impl Fn(usize) -> f64
 /// c = O + Rn·n) at the front: within half the projected disc's diameter
 /// of the most upstream such cell (a sphere's region is 0.3·Rn deep), so
 /// faces far downstream (a rocket's fin tops) are not part of the nose.
-/// Bounded by twice the radius of the projected area's disc (a flat face).
+/// A face flatter than a hemisphere over the craft's projected disc takes
+/// Zoby & Sullivan's effective radius ([`effective_nose_radius`]).
 /// Without a smooth stagnation region (an edge or a point facing the flow),
 /// the size of the best-facing exposed cell.
 fn nose(cells: &[CellGeometry], d: DVec3, f: impl Fn(usize) -> f64, area: f64) -> f64 {
@@ -454,11 +455,8 @@ fn nose(cells: &[CellGeometry], d: DVec3, f: impl Fn(usize) -> f64, area: f64) -
             let (dr, dt) = (r - rm, t - tm);
             (num + w * dr.dot(dt), den + w * dt.dot(dt))
         });
-        if den > 1e-12 && num > 0.0 {
-            (num / den).min(cap)
-        } else {
-            cap
-        }
+        let r_n = if den > 1e-12 && num > 0.0 { num / den } else { f64::INFINITY };
+        effective_nose_radius(0.5 * cap, r_n)
     } else {
         let best = cells
             .iter()
@@ -468,6 +466,35 @@ fn nose(cells: &[CellGeometry], d: DVec3, f: impl Fn(usize) -> f64, area: f64) -
             .fold((f64::MIN, 0.0), |b, x| if x.0 > b.0 { x } else { b });
         (best.1 / crate::math::PI).max(0.0).sqrt().min(cap)
     }
+}
+
+/// r_B/r_eff against r_B/r_N for spherical segments of base radius r_B
+/// and sphere radius r_N with a sharp corner (a flat face at 0): the
+/// stagnation-point velocity gradient relative to a hemisphere of the base
+/// radius. Zoby & Sullivan, "Effects of Corner Radius on Stagnation-Point
+/// Velocity Gradients on Blunt Axisymmetric Bodies", NASA TM X-1067
+/// (1965), fig. 4, read from the figure (±0.02).
+const ZOBY_SULLIVAN: [(f64, f64); 5] = [(0.0, 0.29), (0.4, 0.50), (0.6, 0.60), (0.8, 0.81), (1.0, 1.0)];
+
+/// The effective nose radius (for stagnation heating, ∝ 1/√r) of a face of
+/// sphere radius `r_n` (∞: flat) over a body whose projected disc has
+/// radius `r_b`: r_N where the face is at least as curved as a hemisphere
+/// over r_B, else r_B over Zoby & Sullivan's velocity-gradient ratio (a
+/// flat face 3.45·r_B, not r_B: its stagnation gradient is the
+/// hemisphere's × 0.29), never above r_N.
+pub fn effective_nose_radius(r_b: f64, r_n: f64) -> f64 {
+    if r_b <= 0.0 {
+        return r_n;
+    }
+    let x = if r_n.is_finite() { r_b / r_n } else { 0.0 };
+    if x >= 1.0 {
+        return r_n;
+    }
+    let t = &ZOBY_SULLIVAN;
+    let k = t.partition_point(|e| e.0 <= x).clamp(1, t.len() - 1);
+    let (a, b) = (t[k - 1], t[k]);
+    let ratio = a.1 + (b.1 - a.1) * (x - a.0) / (b.0 - a.0);
+    (r_b / ratio).min(r_n)
 }
 
 impl Raster {

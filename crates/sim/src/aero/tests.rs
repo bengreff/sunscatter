@@ -306,6 +306,29 @@ fn the_bell_shadows_the_base_when_flying_base_first() {
 }
 
 #[test]
+fn flat_faces_take_zoby_and_sullivan_s_effective_nose_radius() {
+    // NASA TM X-1067 fig. 4: a flat face with a sharp corner has the
+    // stagnation velocity gradient of a hemisphere of 3.45 times its
+    // radius; a spherical segment with r_B/r_N 0.4 that of 2 r_B; from
+    // about 0.6 the sphere's own radius.
+    assert!((bake::effective_nose_radius(1.0, f64::INFINITY) / 3.448 - 1.0).abs() < 1e-3);
+    assert!((bake::effective_nose_radius(1.0, 2.5) - 2.0).abs() < 1e-12);
+    assert!((bake::effective_nose_radius(0.6, 1.0) - 1.0).abs() < 1e-12);
+    assert_eq!(bake::effective_nose_radius(0.5, 0.5), 0.5);
+    // A flat-faced cylinder (radius 1 m) end on: ≈ 3.45 m; the capsule's
+    // shield (r_N 4.7 m over a 2.1 m disc): ≈ 3.9 m.
+    let (s, c) =
+        shape(&[Shape::Cylinder { base: DVec3::new(0.0, 0.0, -1.0), axis: DVec3::new(0.0, 0.0, 2.0), radius: 1.0 }]);
+    let b = bake(&s, &c, &BakeOptions::default());
+    let rn = b.nose_radius_at(DVec3::Z);
+    assert!((rn / 3.45 - 1.0).abs() < 0.05, "{rn}");
+    let rn = capsule().nose_radius_at(DVec3::Z);
+    assert!(rn > 3.6 && rn < 4.2, "{rn}");
+    // A sphere: its own radius.
+    assert!((sphere().nose_radius_at(DVec3::Z) - 1.0).abs() < 0.05);
+}
+
+#[test]
 fn the_knudsen_length_is_the_maximum_body_diameter() {
     // Wilmoth's Kn = λ/D_b (AIAA 97-2510): a sphere's diameter, a capsule's
     // heat-shield diameter (2·√(4.7² − 4.2²) = 4.22 m), the slender test
