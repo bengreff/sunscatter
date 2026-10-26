@@ -120,7 +120,7 @@ fn leo_fleet(w: &World, n: usize) -> Vec<Vessel> {
 fn deadlines_and_threads_change_the_clock_not_the_motion() {
     ComputeTaskPool::get_or_init(TaskPool::default);
     let w = world();
-    let controls = |i: usize| Controls { sas: i % 2 == 0, ..Default::default() };
+    let controls = |i: usize| Controls { sas: i.is_multiple_of(2), ..Default::default() };
     let end = t(2.0 * 86_400.0);
     let mut reference = leo_fleet(&w, 4);
     for (i, v) in reference.iter_mut().enumerate() {

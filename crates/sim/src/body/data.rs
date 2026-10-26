@@ -430,6 +430,8 @@ mod tests {
         };
         let triton = |d: f64| {
             let n7 = 177.85 + 52.316 * d / 36_525.0;
+            // IAU WGCCRE coefficients (degrees); -6.28 is not 2π.
+            #[allow(clippy::approx_constant)]
             let ra_k = [-32.35, -6.28, -2.08, -0.74, -0.28, -0.11, -0.07, -0.02, -0.01];
             let dec_k = [22.55, 2.10, 0.55, 0.16, 0.05, 0.02, 0.01];
             let ra = 299.36 + ra_k.iter().enumerate().map(|(k, a)| a * sind((k + 1) as f64 * n7)).sum::<f64>();
