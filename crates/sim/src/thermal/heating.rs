@@ -44,7 +44,10 @@
 //!   Tauber, NASA TP-2914, 1989, fig. 5) and a plate along the flow at its
 //!   run length (at most q̇_stag): a nose takes its stagnation law, flanks
 //!   far downstream their own boundary layer, surfaces along the flow a
-//!   plate's; turbulent, never less than
+//!   plate's; cells facing the flow beyond the sonic point (sin θ > 0.7:
+//!   a fin's leading edge, a step) are stagnation regions of their own and
+//!   take the nose law (at the craft's nose radius: sharper edges heat
+//!   more); turbulent, never less than
 //!   laminar; across transition (1−γ)·laminar + γ·turbulent; at least
 //!   [`LEEWARD_FRACTION`] of the stagnation flux (leeward and separated
 //!   cells). Hot walls: the stagnation flux × (1 − T_w/T₀) (T₀ the total
@@ -232,6 +235,14 @@ pub struct FlowHeat<'a> {
     pub wall: &'a [f64],
 }
 
+/// Cells facing the flow more steeply than this (sin θ, the sonic point of
+/// a blunt body near 45°; Tauber, TP-2914, fig. 5) are in a subsonic
+/// stagnation region of their own, wherever they are on the craft (a fin's
+/// leading edge, a step): the nose law, not the layer from the front;
+/// blended over ±[`STAGNATION_BLEND`]/2 around it.
+const STAGNATION_SIN: f64 = 0.7;
+const STAGNATION_BLEND: f64 = 0.2;
+
 /// Earth air's specific gas constant (J/(kg·K)), for a flow without an
 /// airspeed.
 const EARTH_AIR_R: f64 = aero::air::GAS_CONSTANT / aero::air::EARTH_AIR_MOLAR_MASS;
@@ -308,7 +319,10 @@ fn convective(bake: &AeroBake, cells: &[Cell], air: &FlowHeat, cont: &mut [f64],
             let hot = 1.0 - air.wall[i] / t0;
             let nose = q_conv * hot * exposure.at(i) * s.max(0.0);
             let aligned = least(scale * layer.heat_aligned, q_conv * hot);
-            let lam = least(scale * layer.heat_laminar, most(nose, aligned));
+            let from_front = least(scale * layer.heat_laminar, most(nose, aligned));
+            let x = ((s - STAGNATION_SIN) / STAGNATION_BLEND + 0.5).clamp(0.0, 1.0);
+            let local = x * x * (3.0 - 2.0 * x);
+            let lam = local * nose + (1.0 - local) * from_front;
             let turb = most(scale * layer.heat_turbulent, lam);
             let gamma = layer.intermittency;
             cont[i] = (1.0 - gamma) * lam + gamma * turb;
