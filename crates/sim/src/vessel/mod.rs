@@ -77,7 +77,6 @@ use crate::frame::{BodyFixed, NodeId, Vec3};
 use crate::math;
 use crate::time::Epoch;
 use crate::world::World;
-use coast::Budget;
 use glam::{DMat3, DQuat, DVec3};
 
 /// Physics tick for powered flight and attitude control (s).
@@ -549,87 +548,6 @@ impl Vessel {
             }
             Phase::Coasting { trajectory } => {
                 trajectory.eval(t).or_else(|| trajectory.eval(self.time)).expect("vessel time is inside its trajectory")
-            }
-        }
-    }
-
-    /// Advances the vessel towards `target` (never past it, nor past the
-    /// ephemeris end). Returns the time actually reached: coasts stop when
-    /// `budget` work units are spent (the game then holds its clock back
-    /// and continues next frame; the result is the same as without a
-    /// budget). A unit is about a microsecond of work on the reference Mac
-    /// ([`STEP_UNITS`] per coast integration step, [`solve_units`] per
-    /// coast thermal solve): the integration may spend `budget` units and
-    /// the lattices as many. Live ticks are not budgeted. A coast that
-    /// reaches the live boundary stops there.
-    pub fn advance(&mut self, world: &World, target: Epoch, controls: &Controls, budget: usize) -> Epoch {
-        self.advance_budgeted(world, target, controls, budget, false).0
-    }
-
-    /// One frame of the game ([`Self::advance`]), also returning the
-    /// budget units spent; and a vessel that goes live inside the call (an
-    /// atmosphere, a surface, an engine starting, a landed craft waking)
-    /// with more than [`LIVE_STOP`] of it still to go stops there: the game
-    /// caps the warp before it flies live ticks (D081), so no rails-warp
-    /// frame flies thousands of them. The motion is the same either way.
-    pub fn advance_frame(
-        &mut self,
-        world: &World,
-        target: Epoch,
-        controls: &Controls,
-        budget: usize,
-    ) -> (Epoch, usize) {
-        self.advance_budgeted(world, target, controls, budget, true)
-    }
-
-    fn advance_budgeted(
-        &mut self,
-        world: &World,
-        target: Epoch,
-        controls: &Controls,
-        budget: usize,
-        stop_live: bool,
-    ) -> (Epoch, usize) {
-        let target = if target > world.end() { world.end() } else { target };
-        let mut budget = Budget::new(budget);
-        self.systems.start_at(self.time);
-        // A wreck has no engine or controls.
-        let cut = Controls::default();
-        let controls = if self.destroyed.is_some() { &cut } else { controls };
-        let live_at_start = matches!(self.phase, Phase::Powered { .. });
-        loop {
-            // Broken up: nothing moves until the split is applied.
-            if self.breakup.is_some() {
-                return (self.time, budget.spent);
-            }
-            let before = (self.time, std::mem::discriminant(&self.phase));
-            // A coast restarted at its own time (a new attitude regime) moved
-            // on; one that reached the live boundary stops there.
-            let (mut restarted, mut went_live) = (false, false);
-            match &self.phase {
-                Phase::Landed { .. } => self.advance_landed(world, target, controls),
-                Phase::Crashed { .. } => self.advance_grounded(world, target),
-                Phase::Powered { .. } => self.advance_powered(world, target, controls),
-                Phase::Coasting { .. } => {
-                    let c = self.advance_coasting(world, target, controls, &mut budget);
-                    (restarted, went_live) = (c.progressed, c.entered);
-                }
-            }
-            // Stop at the target, when neither time nor phase moved (waiting
-            // for a segment, or less than one tick left), or out of budget
-            // (integration or lattices) while coasting.
-            let spent = (budget.thermal == 0 || budget.steps == 0) && matches!(self.phase, Phase::Coasting { .. });
-            let stuck = (self.time, std::mem::discriminant(&self.phase)) == before && !restarted;
-            // At the live boundary the game holds its clock and caps the
-            // warp (D081) instead of flying live ticks through an atmosphere
-            // for the rest of a rails-warp frame; in a frame, the same for
-            // any way of going live.
-            let woke = stop_live
-                && !live_at_start
-                && matches!(self.phase, Phase::Powered { .. })
-                && target.seconds_since(self.time) > LIVE_STOP;
-            if self.time >= target || stuck || spent || went_live || woke {
-                return (self.time, budget.spent);
             }
         }
     }
