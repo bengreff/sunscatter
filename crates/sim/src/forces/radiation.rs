@@ -65,6 +65,16 @@ pub fn starlight(world: &World, snap: &Snapshot, anchor: NodeId, r: DVec3, mut f
     }
 }
 
+/// Sunlight at `r` (relative to `anchor`): the flux vector of every star
+/// (W/m², along the light, inertial), eclipses included; the same as
+/// [`crate::light::sunlight`] to rounding, without its allocations and
+/// trigonometry for bodies that cannot shade.
+pub fn sunlight(world: &World, snap: &Snapshot, anchor: NodeId, r: DVec3) -> DVec3 {
+    let mut flux = DVec3::ZERO;
+    starlight(world, snap, anchor, r, |p, dir| flux += dir * (p * C));
+    flux
+}
+
 /// Whether a sphere of radius `radius` at `to_c` (from the point) can hide
 /// part of a star of radius `star_r` at distance `ds` in unit direction
 /// `u`. False only where [`eclipse_factor`] finds no overlap: the body is

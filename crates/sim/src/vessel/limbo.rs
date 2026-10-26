@@ -91,12 +91,11 @@ impl Default for LiveBoundary {
 }
 
 /// A vessel's limbo placeholders, saved with it until craft data carries
-/// them: skin optics, propellant boil-off (kg/s; zero for the test craft's
-/// storable propellants) and the live boundary.
+/// them: skin optics and the live boundary. (Boil-off is the consumables
+/// system's, `crate::systems::Consumables`.)
 #[derive(Clone, Copy, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct LimboSpec {
     pub optics: Optics,
-    pub boil_off: f64,
     pub boundary: LiveBoundary,
 }
 

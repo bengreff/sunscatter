@@ -46,6 +46,7 @@ use live::{attitude_mode, Checked};
 pub mod limbo;
 pub mod pointing;
 mod segment;
+mod systems;
 mod trajectory;
 
 pub use aerothermal::{air_at, coast_sunlight, in_atmosphere, AeroTick, Air, VesselThermal, LATTICE, MAX_SKIP};
@@ -210,6 +211,9 @@ pub struct Vessel {
     /// from it at the next advance.
     #[serde(default)]
     repoint: bool,
+    /// Internal systems on their lattice ([`crate::systems`]).
+    #[serde(default)]
+    pub systems: crate::systems::Systems,
 }
 
 /// Rotation matrix taking body-fixed axes of `body` to inertial axes at `t`.
@@ -259,6 +263,7 @@ impl Vessel {
             thermal: VesselThermal::uniform(cells, nodes, aerothermal::INITIAL_K, t),
             limbo: Default::default(),
             repoint: false,
+            systems: crate::systems::Systems::starting(t),
         };
         v.sync_landed_attitude(world);
         if !v.holds_where_landed(world) {
@@ -293,6 +298,7 @@ impl Vessel {
             thermal: VesselThermal::uniform(cells, nodes, aerothermal::INITIAL_K, t),
             limbo: Default::default(),
             repoint: false,
+            systems: crate::systems::Systems::starting(t),
         };
         // In air that needs it, it is flown live (the live boundary).
         let boundary = vessel.limbo.boundary;
@@ -536,6 +542,7 @@ impl Vessel {
     pub fn advance(&mut self, world: &World, target: Epoch, controls: &Controls, budget: usize) -> Epoch {
         let target = if target > world.end() { world.end() } else { target };
         let mut budget = Budget { steps: budget, thermal: budget };
+        self.systems.start_at(self.time);
         // A wreck has no engine or controls.
         let cut = Controls::default();
         let controls = if self.destroyed.is_some() { &cut } else { controls };
@@ -584,6 +591,7 @@ impl Vessel {
         if let Phase::Landed { body, fixed, .. } | Phase::Crashed { body, fixed, .. } = self.phase {
             self.clock.advance_landed(world, body, fixed, target);
         }
+        self.systems_grounded(world, target);
         self.time = target;
         self.sync_landed_attitude(world);
     }

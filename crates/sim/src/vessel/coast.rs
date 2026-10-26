@@ -54,7 +54,7 @@ impl Vessel {
     pub(super) fn limbo_model(&self, p: Pointing) -> Limbo {
         let mut l = Limbo::new(self.craft.id.clone(), self.craft.design.clone(), p, self.craft.mass.dry_mass);
         l.optics = self.limbo.optics;
-        l.boil_off = if self.debug { 0.0 } else { self.limbo.boil_off };
+        l.boil_off = if self.debug { 0.0 } else { self.systems.consumables.boil_off };
         l.boundary = self.limbo.boundary;
         l.chute_area = self.chute.cd_area(&self.craft.chute);
         l
@@ -142,16 +142,6 @@ impl Vessel {
         if let Some((e, _)) = entry {
             reach = e;
         }
-        // Stop at the next ignition to check the attitude there, and where
-        // the attitude regime may change: a coast after a burn, the start
-        // of a burn's turn from a known pointing.
-        if let Some(e) = trajectory.next_ignition(self.time, reach) {
-            reach = e;
-        }
-        if let Some(e) = trajectory.next_coast_after_burn(self.time, reach) {
-            reach = e;
-        }
-        let known = trajectory.segment_at(self.time).and_then(|s| s.limbo()).map(|l| l.pointing.is_known());
         // Attitude and temperatures before pruning: control ticks read the
         // inertia, and the thermal lattice the position, at epochs after the
         // vessel's time, which the trajectory still holds.
@@ -159,19 +149,9 @@ impl Vessel {
         let mass_now = dry + self.propellant;
         let inertia_at = |e: Epoch| model.at(trajectory.mass_at(e).unwrap_or(mass_now) - dry).inertia;
         let inertia_now = model.at(self.propellant).inertia;
-        if known == Some(true) {
-            let fly = Rails { world, trajectory, plan: &self.plan, craft: &self.craft, controls, inertia_now };
-            if let Some((_, start)) = fly.turn(self.time).filter(|(_, s)| *s > self.time && *s < reach) {
-                reach = start;
-            }
-        }
-        // While the attitude is unknown, stop where a turn settles onto a
-        // rule that knows it.
-        let stop_settled = known == Some(false) && {
-            let fly = Rails { world, trajectory, plan: &self.plan, craft: &self.craft, controls, inertia_now };
-            let anchor = trajectory.eval(self.time).map_or(trajectory.current().initial().anchor, |s| s.0);
-            matches!(fly.rule_at(self.time, anchor), Rule::Stability | Rule::Inertial { .. } | Rule::Track(_))
-        };
+        let fly = Rails { world, trajectory, plan: &self.plan, craft: &self.craft, controls, inertia_now };
+        let stop_settled;
+        (reach, stop_settled) = fly.regime_stops(self.time, reach);
         let design = self.craft.design().clone();
         let engine = self.craft.engine;
         let heat = |law: &BurnLaw| engine.heat(law.thrust, engine.mdot_max() * law.thrust / engine.thrust_vac);
@@ -181,7 +161,10 @@ impl Vessel {
         let mut stopped = false;
         let mut settled = None;
         loop {
-            let e = self.thermal.next_lattice();
+            // The thermal and systems lattices in time order (the attitude
+            // is carried forward only); systems first at a shared epoch.
+            let e_systems = self.systems.next().filter(|s| *s <= self.thermal.next_lattice());
+            let e = e_systems.unwrap_or_else(|| self.thermal.next_lattice());
             if e.seconds_since(reach) > 0.0 {
                 break;
             }
@@ -191,6 +174,17 @@ impl Vessel {
                 break;
             }
             let fly = Rails { world, trajectory, plan: &self.plan, craft: &self.craft, controls, inertia_now };
+            if e_systems.is_some() {
+                settled = fly.attitude(&mut self.attitude, &mut self.control, (t, e), &inertia_at, stop_settled);
+                if settled.is_some() {
+                    break;
+                }
+                t = e;
+                let (anchor, r, _) = trajectory.eval(e).expect("the lattice epoch is in the trajectory");
+                self.systems.step(&Vessel::systems_env(world, e, (anchor, r), self.attitude.q, propellant_at(e)));
+                budget.thermal = budget.thermal.saturating_sub(1);
+                continue;
+            }
             if fly.still(&self.attitude, &self.control, t, e) && self.thermal.passes(e) {
                 self.thermal.pass(e);
                 continue;
@@ -302,6 +296,33 @@ impl Rails<'_> {
         let mass = self.trajectory.mass_at(t)?;
         let lead = self.trajectory.craft()?.turn_lead(mass);
         Some((ignition, ignition.add_seconds(-lead)))
+    }
+
+    /// Where an advance from `time` must stop before `reach` for the
+    /// attitude regime to be checked (`Vessel::repoint`): the next
+    /// ignition (the attitude there), a coast after a burn, the start of a
+    /// burn's turn from a known pointing. And whether to stop where a turn
+    /// settles: the attitude is unknown and the controls ask for a rule
+    /// that knows it.
+    fn regime_stops(&self, time: Epoch, mut reach: Epoch) -> (Epoch, bool) {
+        let tr = self.trajectory;
+        if let Some(e) = tr.next_ignition(time, reach) {
+            reach = e;
+        }
+        if let Some(e) = tr.next_coast_after_burn(time, reach) {
+            reach = e;
+        }
+        let known = tr.segment_at(time).and_then(|s| s.limbo()).map(|l| l.pointing.is_known());
+        if known == Some(true) {
+            if let Some((_, start)) = self.turn(time).filter(|(_, s)| *s > time && *s < reach) {
+                reach = start;
+            }
+        }
+        let stop_settled = known == Some(false) && {
+            let anchor = tr.eval(time).map_or(tr.current().initial().anchor, |s| s.0);
+            matches!(self.rule_at(time, anchor), Rule::Stability | Rule::Inertial { .. } | Rule::Track(_))
+        };
+        (reach, stop_settled)
     }
 
     /// Whether `epoch` is inside a planned burn's turn (the maneuver hold

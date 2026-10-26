@@ -262,7 +262,7 @@ impl Vessel {
             };
             let engine_heat = engine.heat(out.thrust, out.mdot);
             let mdot = out.mdot + cmd.rcs.dot(self.craft.rcs_flow);
-            let mdot = mdot + self.limbo.boil_off;
+            let mdot = mdot + self.systems.consumables.boil_off;
             let propellant = if self.debug { self.propellant } else { (self.propellant - mdot * TICK).max(0.0) };
             aerothermal::live_step(
                 &design,
@@ -280,6 +280,7 @@ impl Vessel {
             self.phase = Phase::Powered { anchor, r: r1, v: v1 };
             self.tick_accel = Some((v1 - v) / TICK);
             self.check_overheat();
+            self.systems_after_tick(world);
             if let Some(body) = contact_body {
                 let input = engine_on || controls.rotate != DVec3::ZERO;
                 if self.rest(world, anchor, body, touching, input, controls) {

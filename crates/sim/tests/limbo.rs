@@ -133,11 +133,24 @@ fn a_month_of_low_thrust_is_the_same_at_every_warp() {
     println!("a month of 0.5 N: {drained:.3} kg of propellant");
 }
 
+/// The test craft with systems that do something in low orbit: a
+/// body-fixed panel and loads that drain the battery in eclipse, and
+/// propellant boiling off.
+fn with_systems(mut s: Vessel) -> Vessel {
+    s.systems.power.spec.tracking = false;
+    s.systems.power.spec.load = 2_000.0;
+    s.systems.power.spec.capacity = 1.0e7;
+    s.systems.power.charge = 1.0e7;
+    s.systems.consumables.boil_off = 1e-4;
+    s
+}
+
 #[test]
-fn a_year_of_drag_decay_is_the_same_at_every_warp() {
+fn a_year_of_drag_decay_and_systems_is_the_same_at_every_warp() {
     let w = world();
-    // 300 km: the test craft (20 t, end on) loses ~25 km in a year.
-    let s = ship(&w, circular(300_000.0, 0.9), 16_000.0);
+    // 300 km: the test craft (20 t, end on) loses tens of km in a year;
+    // its battery cycles with every eclipse and its propellant boils off.
+    let s = with_systems(ship(&w, circular(300_000.0, 0.9), 16_000.0));
     let controls = sas(HoldMode::Prograde);
     same_at_every_warp(&w, &s, 60.0, &[1.0 / 60.0], &controls);
     same_at_every_warp(&w, &s, 2.0 * DAY, &[1_000.0 / 60.0], &controls);
@@ -145,8 +158,41 @@ fn a_year_of_drag_decay_is_the_same_at_every_warp() {
     let earth = w.find("Earth").unwrap();
     let (_, r, v) = year.state(&w);
     let a = Elements::from_state(r, v, earth.gm).a;
-    println!("a year at 300 km: semi-major axis {:.1} km lower", (RE + 300_000.0 - a) / 1e3);
+    let p = &year.systems.power;
+    println!(
+        "a year at 300 km: semi-major axis {:.1} km lower; battery {:.2} MJ, shortfall {:.1} MJ; {:.0} kg boiled off",
+        (RE + 300_000.0 - a) / 1e3,
+        p.charge / 1e6,
+        p.shortfall / 1e6,
+        year.systems.consumables.boiled
+    );
     assert!(a < RE + 300_000.0 - 5_000.0, "{a}");
+    // Every lattice point of the year was stepped; boil-off drained the
+    // propellant at its rate (as a mass flow of every segment).
+    assert_eq!(year.systems.epoch, Some(year.time));
+    let boiled = 1e-4 * 365.0 * DAY;
+    assert!((year.systems.consumables.boiled - boiled).abs() < 1e-6 * boiled);
+    assert!((16_000.0 - year.propellant() - boiled).abs() < 1e-6 * boiled, "{}", year.propellant());
+    assert!(p.shortfall > 0.0, "the loads outran the battery in some eclipses");
+}
+
+#[test]
+fn systems_continue_bit_for_bit_after_a_save_between_lattice_points() {
+    let w = world();
+    let mut s = with_systems(ship(&w, circular(400_000.0, 0.9), 16_000.0));
+    let controls = sas(HoldMode::Stability);
+    let mid = t0().add_seconds(5_000.0 + 12.345);
+    fly(&w, &mut s, mid, 1.0 / 60.0 * 600.0, &controls);
+    assert!(s.systems.epoch.unwrap() < mid, "between lattice points");
+    let mut ids = VesselIds::default();
+    ids.allocate();
+    let text = SaveGame::capture(&w, mid, std::slice::from_ref(&s), ids, 0, controls).to_ron();
+    let mut loaded = SaveGame::from_ron(&text).unwrap().vessels.remove(0);
+    assert_eq!(loaded, s);
+    let end = t0().add_seconds(2.0 * DAY);
+    fly(&w, &mut s, end, 1e3 / 60.0, &controls);
+    fly(&w, &mut loaded, end, 1e6 / 60.0, &controls);
+    assert_same(&w, &mut loaded, &mut s, "after load");
 }
 
 #[test]
