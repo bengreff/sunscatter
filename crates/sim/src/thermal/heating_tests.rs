@@ -24,6 +24,7 @@ fn earth_flow(altitude: f64, v: f64, dir: DVec3, length: f64) -> Flow {
         temperature: a.temperature,
         speed: v,
         gas: Default::default(),
+        roughness: 0.0,
     }
 }
 
@@ -321,4 +322,40 @@ fn the_test_craft_s_nose_takes_the_stagnation_flux_and_its_lee_a_little() {
             assert!(*f >= LEEWARD_FRACTION * q0 * (1.0 - 1e-9), "{f}");
         }
     }
+}
+
+#[test]
+fn a_rough_heat_shield_trips_its_layer() {
+    // The capsule heat shield first at 2.5 km/s and 30 km (high Reynolds
+    // number, little dissociation), wall at 1000 K: smooth, the shield's
+    // layer stays laminar; with an ablated surface's roughness (0.74 mm,
+    // Wilder & Prabhu, NTRS 20190028253, Table 7) the Reshotko–Tumin
+    // criterion trips it across the shield, more readily towards the
+    // shoulder where the edge velocity has grown.
+    let shield = Shape::SphereCap { center: DVec3::Z * 4.0, axis: -DVec3::Z, radius: 4.7, height: 0.5 };
+    let after = Shape::Frustum { base: DVec3::Z * -0.2, axis: DVec3::Z * 3.0, r_base: 2.0, r_top: 0.6 };
+    let (s, c) = crate::aero::tests::shape(&[shield, after]);
+    let b = bake(&s, &c, &BakeOptions::default());
+    let mut flow = earth_flow(30e3, 2500.0, DVec3::Z, b.length);
+    let wall = vec![1000.0; c.cells.len()];
+    // The shield's cells near its centre and near its rim: mean turbulent share.
+    let shares = |flow: &Flow| {
+        let layer = crate::aero::friction::FlowLayer::new(&b, flow, Some(&wall), false);
+        let (mut centre, mut rim) = ((0.0, 0), (0.0, 0));
+        for l in layer.layers.iter().flatten() {
+            let (sin, l) = l;
+            if *sin > 0.995 {
+                centre = (centre.0 + l.intermittency, centre.1 + 1);
+            } else if *sin > 0.88 && *sin < 0.95 {
+                rim = (rim.0 + l.intermittency, rim.1 + 1);
+            }
+        }
+        (centre.0 / f64::from(centre.1.max(1)), rim.0 / f64::from(rim.1.max(1)))
+    };
+    let smooth = shares(&flow);
+    flow.roughness = 0.74e-3;
+    let rough = shares(&flow);
+    println!("capsule at 2.5 km/s, 30 km: smooth (centre, rim) {smooth:?}, rough {rough:?}");
+    assert_eq!(smooth, (0.0, 0.0));
+    assert!(rough.1 > 0.9 && rough.1 >= rough.0, "{rough:?}");
 }

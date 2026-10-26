@@ -203,6 +203,7 @@ fn pieces(d: &CraftDesign, propellant: f64, n: usize) -> [f64; 4] {
         temperature: 230.0,
         speed: 300.0 * mach,
         gas: Default::default(),
+        roughness: 0.0,
     };
     let per = |f: &mut dyn FnMut()| {
         let (_, ms) = timed(|| (0..n).for_each(|_| f()));

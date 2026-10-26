@@ -67,6 +67,7 @@ fn main() {
             temperature: 230.0,
             speed: 3600.0,
             gas: Default::default(),
+            roughness: 0.0,
         };
         let (f, m) = aero_forces(&b, &flow, 0.8);
         sink += f + m;
@@ -95,6 +96,7 @@ fn main() {
             temperature: 230.0,
             speed: 3600.0,
             gas: Default::default(),
+            roughness: 0.0,
         };
         sink += aero_forces(&b, &flow, 0.8).0;
     });
@@ -108,6 +110,7 @@ fn main() {
         temperature: 230.0,
         speed: 3600.0,
         gas: Default::default(),
+        roughness: 0.0,
     };
     let wall = state.skin.clone();
     let air = FlowHeat { flow: &flow, sutton_graves_k: SUTTON_GRAVES_EARTH, radiative: None, wall: &wall };
@@ -194,6 +197,7 @@ fn earth_flow(altitude: f64, v: f64, dir: DVec3, length: f64) -> Flow {
         temperature: a.temperature,
         speed: v,
         gas: Default::default(),
+        roughness: 0.0,
     }
 }
 

@@ -55,6 +55,7 @@ fn flow(speed: f64, rho: f64, gas: Gas, gamma: f64, molar_mass: f64) -> Flow {
         temperature: t,
         speed,
         gas,
+        roughness: 0.0,
     }
 }
 

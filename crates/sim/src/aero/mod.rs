@@ -80,6 +80,9 @@ pub struct Flow {
     pub speed: f64,
     /// The gas (viscosity, Prandtl number, shock density ratio).
     pub gas: gas::Gas,
+    /// The surface's roughness height (m, peak to valley; zero: smooth),
+    /// for roughness-induced transition ([`boundary::Edge::tripped`]).
+    pub roughness: f64,
 }
 
 /// Wilmoth's rarefied bridging weight: C = C_cont + (C_fm − C_cont)·b with

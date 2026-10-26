@@ -97,6 +97,10 @@ pub const SLENDER_ONSET: [(f64, f64); 11] = [
 /// airspeeds (m/s; his relation holds above 3,962).
 const TAUBER_FROM: f64 = 3_500.0;
 const TAUBER_FULL: f64 = 4_500.0;
+/// Roughness-induced transition: Re_θ·(k/θ)·(T_e/T_w)^1.31 at onset
+/// (Paredes et al.'s revision of Reshotko & Tumin, via Hein et al. 2019,
+/// eq. 15).
+pub const ROUGHNESS_TRIP: f64 = 455.0;
 /// Dhawan & Narasimha's intermittency constant.
 const DN: f64 = 0.412;
 /// ξ at the end of transition (γ = 0.99): √(ln 100 / 0.412).
@@ -124,6 +128,9 @@ pub struct Stream {
     /// heating of air ([`Edge::tauber_turbulent`]); zero: none.
     speed: f64,
     rho: f64,
+    /// Surface roughness height k (m; peak to valley), for roughness-induced
+    /// transition ([`ROUGHNESS_TRIP`]); zero: smooth.
+    roughness: f64,
 }
 
 impl Stream {
@@ -145,7 +152,14 @@ impl Stream {
             gas: Gas::Air,
             speed: 0.0,
             rho: 0.0,
+            roughness: 0.0,
         }
+    }
+
+    /// With the surface's roughness height `k` (m).
+    pub fn with_roughness(mut self, k: f64) -> Self {
+        self.roughness = k.max(0.0);
+        self
     }
 
     /// The same stream in `gas` (Earth air in [`Self::new`]).
@@ -169,6 +183,7 @@ impl Stream {
         Stream::new(flow.reynolds_per_m, flow.mach, flow.gamma, flow.temperature, cp)
             .with_gas(flow.gas)
             .with_speed(flow.speed, rho)
+            .with_roughness(flow.roughness)
     }
 
     /// The edge state of a cell at incidence `s` = sin θ (positive
@@ -190,6 +205,7 @@ impl Stream {
             mu,
             heating: self.kt * u * u,
             props: self.props,
+            roughness: self.roughness,
             real: (self.gas == Gas::Air && self.speed > 0.0 && self.mach > 0.0 && s > 0.0).then(|| {
                 let r_gas = self.speed * self.speed / (self.gamma * self.mach * self.mach * self.temperature);
                 let cp = self.gamma * r_gas / (self.gamma - 1.0);
@@ -219,6 +235,8 @@ pub struct Edge {
     /// Air's free stream on a windward cell, for the real-gas turbulent
     /// heating ([`Self::tauber_turbulent`]).
     real: Option<RealGas>,
+    /// Surface roughness height (m).
+    roughness: f64,
 }
 
 /// What Tauber's real-gas turbulent relation needs of a windward cell.
@@ -281,6 +299,24 @@ impl Edge {
             m / (s * s)
         };
         (1.0 / fc, self.mu / self.props.viscosity(tw) / fc)
+    }
+
+    /// The turbulent share the surface's roughness forces on this edge with
+    /// the wall at `tw` (K): Reshotko & Tumin's transient-growth
+    /// correlation as revised by Paredes et al., Re_θ·(k/θ)·(T_e/T_w)^1.31 =
+    /// 455 at the onset (Hein et al., J. Spacecraft and Rockets 56(2), 2019,
+    /// eq. 15; Apollo- and Orion-like capsules). Re_θ·k/θ = ρ_e·u_e·k/μ_e,
+    /// so the criterion is the edge's roughness Reynolds number, independent
+    /// of the run: a cell whose edge passes it is tripped (fully turbulent;
+    /// a roughness trip has no long transitional region), blended over
+    /// ±5 % of the criterion for continuity. Zero on a smooth surface.
+    pub fn tripped(&self, tw: f64) -> f64 {
+        if self.roughness <= 0.0 || self.re_per_m <= 0.0 || tw <= 0.0 {
+            return 0.0;
+        }
+        let ratio = self.temperature / tw;
+        let value = self.re_per_m * self.roughness * math::exp(1.31 * math::ln(ratio));
+        ((value / ROUGHNESS_TRIP - 0.95) / 0.1).clamp(0.0, 1.0)
     }
 
     /// Transition onset run length (m) for reference factor `c_star`, by the
@@ -402,7 +438,7 @@ impl Edge {
         // The first of the two criteria (the slender-cone one in the body's
         // run, so × the laminar relief in the layer's).
         let x_t = self.onset(c).min(self.slender_onset() * relief.0);
-        let gamma = if x <= x_t {
+        let smooth = if x <= x_t {
             0.0
         } else {
             let xi = XI_END * (x - x_t) / x_t;
@@ -413,6 +449,7 @@ impl Edge {
                 1.0 - math::exp(-DN * xi * xi)
             }
         };
+        let gamma = smooth.max(self.tripped(t_lam));
         let (mut cf_turb, mut t_turb) = (0.0, 0.0);
         if gamma > 0.0 {
             t_turb = wall.unwrap_or_else(|| self.recovery(self.props.turbulent_recovery, t_inf));
@@ -518,6 +555,27 @@ mod tests {
             let h = 0.5 * (w.sqrt() + 1.0);
             assert!((b * h * h - 1.0).abs() < 1e-12 && (a / b - 1.0).abs() < 1e-6, "{w}: {a} {b}");
         }
+    }
+
+    #[test]
+    fn roughness_trips_the_layer_at_the_reshotko_tumin_criterion() {
+        // Re_θ·(k/θ)·(T_e/T_w)^1.31 = Re_k,e·(T_e/T_w)^1.31 = 455 (Hein et al.
+        // 2019, eq. 15): at Re per metre 1e6 and T_w = T_e a 0.455 mm
+        // roughness is at the criterion; twice that trips the layer
+        // everywhere along the run, half of it nowhere.
+        let e = Stream::new(1e6, 0.5, 1.4, T, 0.0).edge(0.0, 0.0);
+        let at = |k: f64, x: f64| {
+            let r = Stream::new(1e6, 0.5, 1.4, T, 0.0).with_roughness(k).edge(0.0, 0.0);
+            r.layer(x, x, Some(T), T, false).intermittency
+        };
+        assert_eq!(e.tripped(T), 0.0);
+        let k = ROUGHNESS_TRIP / 1e6;
+        assert!((at(k, 0.01) - 0.5).abs() < 1e-9, "{}", at(k, 0.01));
+        assert_eq!(at(2.0 * k, 0.01), 1.0);
+        assert_eq!(at(0.5 * k, 0.01), 0.0);
+        // A cold wall (T_w = T_e/2) trips at 2^−1.31 of the height.
+        let r = Stream::new(1e6, 0.5, 1.4, T, 0.0).with_roughness(k * math::exp(-1.31 * math::ln(2.0))).edge(0.0, 0.0);
+        assert!((r.tripped(0.5 * T) - 0.5).abs() < 1e-9);
     }
 
     #[test]
