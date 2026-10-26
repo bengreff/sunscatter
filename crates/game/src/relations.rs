@@ -5,7 +5,7 @@
 //! Physics never does (rule 1: no reference bodies in the motion).
 
 use glam::DVec3;
-use sim::ephem::{Ephemeris, NodeKind};
+use sim::ephem::Ephemeris;
 use sim::frame::NodeId;
 use sim::kepler::Elements;
 use sim::time::Epoch;
@@ -116,26 +116,11 @@ pub fn vessel_orbit(world: &World, dom: &Dominance, t: Epoch, vessel: &Vessel) -
     orbit_about(world, t, anchor, r, v, body)
 }
 
-/// The body a node orbits for display: the dominant body of its parent
-/// barycenter, or (for that dominant body) the barycenter's own primary.
-/// Earth → Sun, Moon → Earth, Jupiter → Sun, Sun → none.
+/// The body a node orbits for display: the sim's one rule of the body
+/// hierarchy ([`sim::vessel::primary`]). Earth → Sun, Moon → Earth,
+/// Jupiter → Sun, Sun → none.
 pub fn primary(eph: &Ephemeris, node: NodeId) -> Option<NodeId> {
-    let parent = eph.node(node).parent?;
-    if eph.node(parent).kind == NodeKind::Body {
-        return Some(parent);
-    }
-    let dominant = eph
-        .nodes()
-        .iter()
-        .enumerate()
-        .filter(|(_, n)| n.parent == Some(parent) && n.kind == NodeKind::Body)
-        .max_by(|a, b| a.1.gm.total_cmp(&b.1.gm))
-        .map(|(i, _)| NodeId(i as u16))?;
-    if dominant != node {
-        Some(dominant)
-    } else {
-        primary(eph, parent)
-    }
+    sim::vessel::primary(eph, node)
 }
 
 /// A body's Laplace sphere of influence about its display primary.
@@ -160,8 +145,11 @@ struct Sphere {
 /// innermost sphere containing o. So: Earth for the Moon and for LEO, the
 /// Moon in low lunar orbit, the Sun for Earth and for deep space.
 ///
-/// The radii are taken once at construction time (they change slowly).
-/// Display only: physics never uses it (rule 1).
+/// The radii ([`sim::vessel::laplace_radius`]) are taken once at
+/// construction time (they change slowly); the attitude hold's automatic
+/// reference is the same rule with the radii at each instant
+/// ([`sim::vessel::hold_reference`]). Display only: physics never uses it
+/// (rule 1).
 #[derive(Clone, Debug)]
 pub struct Dominance {
     root: NodeId,
@@ -180,7 +168,7 @@ impl Dominance {
                 None => root = root.or(Some(body)),
                 Some(p) => {
                     let d = eph.relative(body, p, t).r.length();
-                    let radius = d * (eph.node(body).gm / eph.node(p).gm).powf(0.4);
+                    let radius = sim::vessel::laplace_radius(d, eph.node(body).gm, eph.node(p).gm);
                     spheres.push(Sphere { body, primary: p, radius });
                 }
             }

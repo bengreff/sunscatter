@@ -10,10 +10,10 @@
 
 use super::aerothermal::{coast_sunlight, LATTICE, ORBIT_AVERAGE_PERIOD};
 use crate::aero;
-use crate::ephem::Snapshot;
+use crate::ephem::{Kinematics, Snapshot};
 use crate::frame::NodeId;
 use crate::time::Epoch;
-use crate::world::World;
+use crate::world::{Source, World};
 use glam::DVec3;
 
 /// Samples of a coast step's average over an orbit ([`coast_suns`]).
@@ -94,16 +94,16 @@ pub fn coast_air(
             return icosahedron().into_iter().map(|d| (d, flux)).collect();
         }
         Some(p) if flux > 1.0 => {
-            let body = world.source(anchor);
-            let el = body.map(|b| crate::kepler::Elements::from_state(r, v, b.gm));
-            if let (Some(b), Some(el)) = (body, el) {
+            if let Some((b, k)) = orbited(world, &snap, anchor, r) {
+                let el = crate::kepler::Elements::from_state(r - k.r, v - k.v, b.gm);
                 if el.e < 1.0 && el.period(b.gm) <= ORBIT_AVERAGE_PERIOD {
                     // Half the sunlight's samples: the air has no shadow edge.
                     let n = ORBIT_SAMPLES / 2;
                     let samples: Option<Vec<_>> = (0..n)
-                        .map(|k| {
-                            let m = 2.0 * crate::math::PI * (k as f64 + 0.5) / n as f64 - el.argp;
-                            let (rk, vk) = crate::kepler::Elements { mean_anomaly: m, ..el }.to_state(b.gm);
+                        .map(|i| {
+                            let m = 2.0 * crate::math::PI * (i as f64 + 0.5) / n as f64 - el.argp;
+                            let (rb, vb) = crate::kepler::Elements { mean_anomaly: m, ..el }.to_state(b.gm);
+                            let (rk, vk) = (rb + k.r, vb + k.v);
                             let q = p.attitude(world, &snap, anchor, rk, vk)?.q;
                             let (d, f) = air_flux(world, &snap, anchor, (rk, vk), length);
                             Some((q.inverse() * d, f))
@@ -118,6 +118,15 @@ pub fn coast_air(
         _ => {}
     }
     vec![(att.q.inverse() * dir, flux)]
+}
+
+/// The body a coast's orbit averages are taken about: the hold's automatic
+/// reference ([`super::hold::hold_reference`]), the same for every anchor
+/// (rule 1); and its state relative to `anchor`.
+fn orbited<'w>(world: &'w World, snap: &Snapshot, anchor: NodeId, r: DVec3) -> Option<(&'w Source, Kinematics)> {
+    let body = super::hold::hold_reference(world, snap, anchor, r);
+    let k = if body == anchor { Kinematics::default() } else { snap.relative(body, anchor) };
+    Some((world.source(body)?, k))
 }
 
 /// The 12 directions of an icosahedron (an isotropic average).
@@ -183,18 +192,19 @@ fn orbit_suns(
     (anchor, r, v): (NodeId, DVec3, DVec3),
     p: &super::pointing::Pointing,
 ) -> Option<Vec<DVec3>> {
-    let body = world.source(anchor)?;
+    let snap = world.snapshot(t);
+    let (body, kb) = orbited(world, &snap, anchor, r)?;
     let phys = body.physical.as_ref().filter(|b| b.luminosity == 0.0)?;
-    let el = crate::kepler::Elements::from_state(r, v, body.gm);
+    let (r_b, v_b) = (r - kb.r, v - kb.v);
+    let el = crate::kepler::Elements::from_state(r_b, v_b, body.gm);
     if !(el.e < 1.0 && el.a * (1.0 - el.e) > phys.radius_eq && el.period(body.gm) <= ORBIT_AVERAGE_PERIOD) {
         return None;
     }
-    let snap = world.snapshot(t);
     let stars: Vec<(DVec3, f64)> = (world.sources.iter())
         .filter_map(|s| s.physical.as_ref().filter(|x| x.luminosity > 0.0).map(|x| (s, x.luminosity)))
         .map(|(s, l)| {
-            let at_star = snap.relative_r(s.node, anchor);
-            let d = (r - at_star).length();
+            let at_star = snap.relative_r(s.node, body.node);
+            let d = (r_b - at_star).length();
             (at_star.normalize(), crate::light::star_flux(l, d))
         })
         .collect();
@@ -206,7 +216,7 @@ fn orbit_suns(
         // not slide round the orbit from one lattice point to the next.
         let m = 2.0 * crate::math::PI * (k as f64 + 0.5) / n as f64 - el.argp;
         let (rk, vk) = crate::kepler::Elements { mean_anomaly: m, ..el }.to_state(body.gm);
-        let q = p.attitude(world, &snap, anchor, rk, vk)?.q;
+        let q = p.attitude(world, &snap, anchor, rk + kb.r, vk + kb.v)?.q;
         let mut flux = DVec3::ZERO;
         for &(to_star, s) in &stars {
             let along = rk.dot(to_star);
@@ -217,4 +227,55 @@ fn orbit_suns(
         suns.push(q.inverse() * flux);
     }
     Some(suns)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::pointing::{Pointing, TrackRule};
+    use super::super::Attitude;
+    use super::*;
+    use crate::ephem::Ephemeris;
+    use glam::DQuat;
+
+    fn sol() -> World {
+        let path = format!("{}/../../{}", env!("CARGO_MANIFEST_DIR"), crate::sol::EPHEMERIS_PATH);
+        World::sol(std::sync::Arc::new(Ephemeris::from_bytes(&std::fs::read(path).unwrap()).unwrap()))
+    }
+
+    /// A craft held prograde at 200 km: its sunlight and thin air are
+    /// averaged over its orbit about Earth whatever the anchor its state is
+    /// given relative to (rule 1; they followed the anchor, so about the
+    /// Sun or a barycenter there was no average).
+    #[test]
+    fn orbit_averages_do_not_depend_on_the_anchor() {
+        let w = sol();
+        let earth = w.find("Earth").unwrap();
+        let t = crate::sol::sol_epoch().add_seconds(3.0 * 86_400.0);
+        let el = crate::kepler::Elements { a: 6_578_137.0, e: 0.001, i: 0.9, raan: 1.0, argp: 0.5, mean_anomaly: 0.3 };
+        let (r, v) = el.to_state(earth.gm);
+        let rule = TrackRule { reference: earth.node, surface: false, dir: DVec3::X, axis: DVec3::Z, auto: true };
+        let p = Pointing::Track { rule, rel: DQuat::from_xyzw(0.1, 0.2, 0.0, 1.0).normalize() };
+        let att = Attitude { q: DQuat::IDENTITY, omega: DVec3::ZERO };
+        let snap = w.snapshot(t);
+        let at = |anchor: NodeId| {
+            let k = if anchor == earth.node { Kinematics::default() } else { snap.relative(earth.node, anchor) };
+            (anchor, r + k.r, v + k.v)
+        };
+        let about_earth = coast_suns(&w, t, at(earth.node), Some(&p), &att);
+        let air = coast_air(&w, t, at(earth.node), Some(&p), &att, 10.0);
+        assert_eq!(about_earth.suns.len(), ORBIT_SAMPLES);
+        assert_eq!(air.len(), ORBIT_SAMPLES / 2);
+        for anchor in [w.eph.root(), w.find("Sun").unwrap().node, w.find("Moon").unwrap().node] {
+            let suns = coast_suns(&w, t, at(anchor), Some(&p), &att);
+            assert_eq!(suns.suns.len(), ORBIT_SAMPLES);
+            for (a, b) in suns.suns.iter().zip(&about_earth.suns) {
+                assert!((*a - *b).length() <= 1e-6 * b.length().max(1.0), "{a} {b}");
+            }
+            let other = coast_air(&w, t, at(anchor), Some(&p), &att, 10.0);
+            assert_eq!(other.len(), air.len());
+            for ((da, fa), (db, fb)) in other.iter().zip(&air) {
+                assert!((*da - *db).length() < 1e-6 && (fa - fb).abs() <= 1e-6 * fb, "{da} {fa} {db} {fb}");
+            }
+        }
+    }
 }

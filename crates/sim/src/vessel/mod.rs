@@ -65,7 +65,8 @@ pub use burn::{
 };
 pub use clock::{landed_rate, ShipClock, LANDED_STEP};
 pub use flown::BurnCraft;
-pub use hold::{hold_direction, turn_lead, HoldInputs, HoldMode, SpeedReference, TargetState};
+pub use hold::{hold_direction, hold_reference, laplace_radius, primary, turn_lead};
+pub use hold::{HoldInputs, HoldMode, SpeedReference, TargetState};
 pub use id::{VesselId, VesselIds};
 pub use segment::{coast_tolerance, CoastStart, EndKind, Sample, Segment, SegmentEnd, SegmentKind};
 pub use split::{Breakup, SplitPlan};
@@ -103,8 +104,8 @@ pub struct Controls {
     /// The velocity prograde and retrograde follow (the navball's mode).
     #[serde(default)]
     pub speed: SpeedReference,
-    /// The body prograde and retrograde are relative to (the navball's
-    /// reference; a control choice, never physics). `None`: the anchor.
+    /// The body prograde and retrograde are relative to, if named (a control
+    /// choice, never physics). `None`: the automatic one, [`hold_reference`].
     #[serde(default)]
     pub reference: Option<NodeId>,
     /// What the target modes aim at.

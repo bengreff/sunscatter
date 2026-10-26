@@ -203,7 +203,7 @@ impl Trajectory {
         let (t, index) = match end.kind {
             EndKind::BurnStart => (plan.burns.get(prev.plan_index)?.t_start, prev.plan_index),
             EndKind::BurnEnd => (prev.t0.add_seconds(end.t), prev.plan_index + 1),
-            EndKind::Horizon => (prev.t0.add_seconds(end.t), prev.plan_index),
+            EndKind::Horizon | EndKind::Regime => (prev.t0.add_seconds(end.t), prev.plan_index),
             EndKind::Surface { .. } | EndKind::EphemerisEnd | EndKind::Failed => return None,
         };
         let last = prev.samples.last().expect("segment has a sample");
@@ -244,11 +244,16 @@ impl Trajectory {
             .find(|&e| e.seconds_since(t) > 0.0 && e.seconds_since(until) <= 0.0)
     }
 
-    /// The first coast segment that follows a burn and starts after `t` and
-    /// at or before `until`: its start (the attitude regime is checked there).
+    /// The first coast segment that follows a burn, or a coast that ended
+    /// where its automatic reference changed ([`EndKind::Regime`]), and
+    /// starts after `t` and at or before `until`: its start (the attitude
+    /// regime is checked there).
     pub fn next_coast_after_burn(&self, t: Epoch, until: Epoch) -> Option<Epoch> {
+        let regime = |s: &Segment| s.end.is_some_and(|e| e.kind == EndKind::Regime);
         (self.segments.windows(2))
-            .filter(|w| matches!(w[0].kind, SegmentKind::Burn(_)) && matches!(w[1].kind, SegmentKind::Coast))
+            .filter(|w| {
+                (matches!(w[0].kind, SegmentKind::Burn(_)) || regime(&w[0])) && matches!(w[1].kind, SegmentKind::Coast)
+            })
             .map(|w| w[1].t0)
             .find(|&e| e.seconds_since(t) > 0.0 && e.seconds_since(until) <= 0.0)
     }
@@ -345,7 +350,7 @@ impl Trajectory {
 
 /// Whether a finished segment is followed by another.
 fn continues(seg: &Segment) -> bool {
-    matches!(seg.end.map(|e| e.kind), Some(EndKind::BurnStart | EndKind::BurnEnd | EndKind::Horizon))
+    matches!(seg.end.map(|e| e.kind), Some(EndKind::BurnStart | EndKind::BurnEnd | EndKind::Horizon | EndKind::Regime))
 }
 
 /// What a burn starting a segment is flown from (passed once per segment).

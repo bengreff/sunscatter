@@ -66,6 +66,11 @@ pub enum EndKind {
     /// The integration could not continue (non-finite state or force). The
     /// segment ends at its last good sample; the vessel stays there.
     Failed,
+    /// A coast held in an automatic frame (`pointing::TrackRule::auto`)
+    /// reached a step where the automatic reference body is another
+    /// (`hold::hold_reference`): the next coast starts with the attitude
+    /// unknown while the hold turns to the new body's frame.
+    Regime,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -364,9 +369,28 @@ impl Segment {
                 self.end = Some(self.limit_end(world));
                 return taken + 1;
             }
+            if self.reference_changed(world, &snaps) {
+                self.end = Some(SegmentEnd { t: self.state.t, kind: EndKind::Regime });
+                return taken + 1;
+            }
             self.after_step(world, &snaps);
         }
         max_steps
+    }
+
+    /// Whether a coast held in an automatic frame has reached, at its last
+    /// step, a point where the automatic reference body is another one.
+    fn reference_changed(&self, world: &World, snaps: &SnapshotCache) -> bool {
+        let Some(super::pointing::Pointing::Track { rule, .. }) = self.limbo.as_deref().map(|l| &l.pointing) else {
+            return false;
+        };
+        if !rule.auto || !matches!(self.kind, SegmentKind::Coast) {
+            return false;
+        }
+        let r = self.state.r.value();
+        let now = snaps
+            .with(self.t0.add_seconds(self.state.t), |snap| super::hold::hold_reference(world, snap, self.anchor, r));
+        now != rule.reference
     }
 
     /// The end at `horizon`: the ephemeris end if that is what limited it.

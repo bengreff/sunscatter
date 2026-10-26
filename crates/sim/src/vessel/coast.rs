@@ -197,8 +197,10 @@ impl Vessel {
         self.chute.armed |= controls.chute;
         let restarted = self.repoint(world, controls);
         let before = self.time;
-        let entered = self.coast_until(world, target, controls, budget);
-        Coasted { progressed: restarted || self.time != before, entered }
+        let (entered, settled) = self.coast_until(world, target, controls, budget);
+        // A turn settled (even at the vessel's time): the next advance
+        // restarts the coast with the attitude known.
+        Coasted { progressed: restarted || settled || self.time != before, entered }
     }
 
     /// Restarts the coast if the attitude regime the controls ask for is
@@ -220,7 +222,7 @@ impl Vessel {
         let inertia_now = self.mass_props().inertia;
         let fly = Rails { world, trajectory, plan: &self.plan, craft: &self.craft, controls, inertia_now };
         let rule = fly.rule_at(self.time, state.0);
-        if !self.repoint && current.is_known() && current.rule() == rule {
+        if !self.repoint && current.is_known() && current.rule().same_regime(&rule) {
             return false;
         }
         let aim = fly.aim_at(controls, self.time);
@@ -240,8 +242,9 @@ impl Vessel {
         true
     }
 
-    /// Returns whether it went live at the live boundary.
-    fn coast_until(&mut self, world: &World, target: Epoch, controls: &Controls, budget: &mut Budget) -> bool {
+    /// Returns whether it went live at the live boundary, and whether a turn
+    /// settled where it stopped.
+    fn coast_until(&mut self, world: &World, target: Epoch, controls: &Controls, budget: &mut Budget) -> (bool, bool) {
         let Phase::Coasting { trajectory } = &mut self.phase else { unreachable!() };
         // At a burn's ignition: flown from the attitude the vessel has.
         let control = AttitudeControl { base: None, ..self.control };
@@ -370,9 +373,9 @@ impl Vessel {
             self.thermal_to_now(world);
             let state = self.state(world);
             self.go_live(state);
-            return entry.is_some();
+            return (entry.is_some(), false);
         }
-        false
+        (false, settled.is_some())
     }
 
     /// Steps the temperatures from their lattice epoch to the vessel's time
@@ -424,10 +427,11 @@ impl Rails<'_> {
 
     /// Where an advance from `time` must stop before `reach` for the
     /// attitude regime to be checked (`Vessel::repoint`): the next
-    /// ignition (the attitude there), a coast after a burn, the start of a
-    /// burn's turn from a known pointing. And whether to stop where a turn
-    /// settles: the attitude is unknown and the controls ask for a rule
-    /// that knows it.
+    /// ignition (the attitude there), a coast after a burn or after a
+    /// change of automatic reference, the start of a burn's turn. And
+    /// whether to stop where a turn settles: the attitude is unknown and
+    /// the controls ask (with the turn's forced hold) for a rule that knows
+    /// it.
     fn regime_stops(&self, time: Epoch, mut reach: Epoch) -> (Epoch, bool) {
         let tr = self.trajectory;
         if let Some(e) = tr.next_ignition(time, reach) {
@@ -437,7 +441,9 @@ impl Rails<'_> {
             reach = e;
         }
         let known = tr.segment_at(time).and_then(|s| s.limbo()).map(|l| l.pointing.is_known());
-        if known == Some(true) {
+        // A burn's turn forces the maneuver hold from its start, whatever
+        // the pointing: the regime is checked there, not at a later frame.
+        if known.is_some() {
             if let Some((_, start)) = self.turn(time).filter(|(_, s)| *s > time && *s < reach) {
                 reach = start;
             }
@@ -472,9 +478,15 @@ impl Rails<'_> {
     }
 
     /// The attitude regime the controls ask for at `epoch` ([`pointing::wanted`]).
+    /// The automatic reference ([`super::hold::hold_reference`]) is asked
+    /// only when the controls name no body.
     fn rule_at(&self, epoch: Epoch, anchor: crate::frame::NodeId) -> Rule {
         let eff = self.effective(self.controls, epoch);
-        pointing::wanted(&eff, self.next_burn(epoch), anchor, self.craft.engine.mount_dir)
+        let auto = || {
+            let (anchor, r) = self.trajectory.eval(epoch).map_or((anchor, DVec3::ZERO), |s| (s.0, s.1));
+            super::hold::hold_reference(self.world, &self.world.snapshot(epoch), anchor, r)
+        };
+        pointing::wanted(&eff, self.next_burn(epoch), auto, self.craft.engine.mount_dir)
     }
 
     /// Whether the attitude stays as it is over `(t, e)` (no rotation, no
@@ -549,6 +561,11 @@ impl Rails<'_> {
                     if let Some(a) = seg.limbo_attitude(self.world, stop.seconds_since(seg.t0)) {
                         *att = a;
                         *control = p.control(key_of(&self.aim_at(self.controls, stop)), stop, a, inertia_at(stop));
+                    }
+                    // The automatic reference changed: the hold turns to the
+                    // new body's frame (control ticks), not snapped onto it.
+                    if stop == end && seg.end.is_some_and(|x| x.kind == EndKind::Regime) {
+                        control.settled = None;
                     }
                     if stop == t {
                         return None;

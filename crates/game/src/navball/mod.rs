@@ -125,12 +125,14 @@ pub(crate) fn target_state(
 }
 
 /// States the navball's references in the controls for the attitude hold
-/// (D075): the speed reference (its mode), the reference body (its
-/// dominant body) and the target (a body exactly, a vessel at its state
-/// now). A control choice, never physics.
+/// (D075): the speed reference (its mode) and the target (a body exactly,
+/// a vessel at its state now). The reference body is left to the sim's
+/// rule (`hold_reference` in `sim::vessel`, the dominant body as a pure
+/// function of time and state): set from the display's dominance each
+/// frame, a change of dominant body would restart a coast at a frame time
+/// (rule 4). A control choice, never physics.
 fn feed_hold(mut sim: ResMut<SimState>, nav: Res<Navball>) {
     let t = sim.clock;
-    let reference = sim.dominant_of(sim.active);
     let target = nav.target.and_then(|tg| match tg {
         NavTarget::Body(node) => Some(TargetState { anchor: node, epoch: t, r: DVec3::ZERO, v: DVec3::ZERO }),
         NavTarget::Vessel(id) => {
@@ -141,7 +143,7 @@ fn feed_hold(mut sim: ResMut<SimState>, nav: Res<Navball>) {
     });
     let c = &mut sim.controls;
     c.speed = rules::speed_reference(nav.mode);
-    c.reference = Some(reference);
+    c.reference = None;
     c.target = target;
 }
 
@@ -176,12 +178,15 @@ pub fn nav_state(sim: &SimState, tracked: &Tracked, aps: &Apsides, nav: &mut Nav
     let vessel = sim.ship();
     let t = sim.clock;
     let (anchor, r, v) = vessel.state_at(&sim.world, t);
-    // The reference is the dominant body (D056's tidal rule): the altitude,
-    // speed and markers are relative to it.
-    let body = sim.dominant_of(sim.active);
+    // The reference is the dominant body (D056's tidal rule) as the
+    // attitude hold takes it (`hold_reference`, at this instant): the
+    // altitude, speed and markers are relative to the body a prograde hold
+    // follows.
+    let snap = sim.world.snapshot(t);
+    let body = sim::vessel::hold_reference(&sim.world, &snap, anchor, r);
     let src = sim.world.source(body)?;
     let p = src.physical.as_ref()?;
-    let k = sim.world.snapshot(t).relative(body, anchor);
+    let k = snap.relative(body, anchor);
     let rel = r - k.r;
     let v_orb = v - k.v;
     let v_srf = v_orb - p.rotation.omega(t).raw().cross(rel);

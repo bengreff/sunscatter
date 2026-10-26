@@ -17,7 +17,7 @@
 use super::attitude::{quat_from_rotvec, Attitude, RotationBase};
 use super::burn::FlightPlan;
 use super::Controls;
-use crate::ephem::Snapshot;
+use crate::ephem::{Ephemeris, NodeKind, Snapshot};
 use crate::frame::NodeId;
 use crate::math;
 use crate::time::Epoch;
@@ -161,9 +161,124 @@ impl<'a, 'w> LazySnapshot<'a, 'w> {
     }
 }
 
+/// The heaviest body directly under barycenter `bary` (the first of equal
+/// ones).
+fn heaviest(eph: &Ephemeris, bary: NodeId) -> Option<NodeId> {
+    let mut best: Option<NodeId> = None;
+    for b in eph.bodies().filter(|&b| eph.node(b).parent == Some(bary)) {
+        if best.is_none_or(|x| eph.node(b).gm > eph.node(x).gm) {
+            best = Some(b);
+        }
+    }
+    best
+}
+
+/// The body a node orbits (its primary): its parent body, or for a node
+/// under a barycenter that barycenter's heaviest body (or, for that body
+/// itself, the barycenter's own primary). Earth → Sun, Moon → Earth,
+/// Charon → Pluto, Jupiter → Sun, Sun → none. The one rule of the body
+/// hierarchy (D056; the game's display primary is this).
+pub fn primary(eph: &Ephemeris, node: NodeId) -> Option<NodeId> {
+    let parent = eph.node(node).parent?;
+    if eph.node(parent).kind == NodeKind::Body {
+        return Some(parent);
+    }
+    match heaviest(eph, parent) {
+        Some(h) if h != node => Some(h),
+        _ => primary(eph, parent),
+    }
+}
+
+/// The heaviest body directly under each node, by node index.
+fn heaviest_under(eph: &Ephemeris) -> Vec<Option<NodeId>> {
+    let mut heaviest: Vec<Option<NodeId>> = vec![None; eph.nodes().len()];
+    for b in eph.bodies() {
+        if let Some(p) = eph.node(b).parent {
+            let h = &mut heaviest[p.0 as usize];
+            if h.is_none_or(|x| eph.node(b).gm > eph.node(x).gm) {
+                *h = Some(b);
+            }
+        }
+    }
+    heaviest
+}
+
+/// Calls `f` with each body whose [`primary`] is `body` (`heaviest` from
+/// [`heaviest_under`]): the bodies under it or, when it is the heaviest
+/// body under a barycenter, under that barycenter, directly or as the
+/// heaviest body of a barycenter there.
+fn satellites(eph: &Ephemeris, heaviest: &[Option<NodeId>], body: NodeId, mut f: impl FnMut(NodeId)) {
+    let bary = eph.node(body).parent.filter(|&p| eph.node(p).kind != NodeKind::Body);
+    let heads = bary.is_some_and(|b| heaviest[b.0 as usize] == Some(body));
+    let around = |p: NodeId| p == body || (heads && Some(p) == bary);
+    for (i, n) in eph.nodes().iter().enumerate() {
+        let id = NodeId(i as u16);
+        if id == body || !n.parent.is_some_and(around) {
+            continue;
+        }
+        match n.kind {
+            NodeKind::Body => f(id),
+            _ => heaviest[i].into_iter().for_each(&mut f),
+        }
+    }
+}
+
+/// The Laplace radius of a body of `gm` a distance `d` from its primary of
+/// `gm_primary`: `d·(gm/gm_primary)^(2/5)`, where its pull relative to the
+/// primary's tide equals the primary's pull relative to its own (D056).
+pub fn laplace_radius(d: f64, gm: f64, gm_primary: f64) -> f64 {
+    d * math::exp(0.4 * math::ln(gm / gm_primary))
+}
+
+/// The body prograde and retrograde are relative to when the player names
+/// none ([`Controls::reference`] `None`): the deepest body whose Laplace
+/// sphere ([`laplace_radius`] about its [`primary`] at this instant)
+/// contains the vessel at `r` (relative to `anchor`), descending from the
+/// root body; the root body (the Sun) if none does. D056's dominance as a
+/// pure function of time and state, the same for every anchor (rule 1).
+/// A control choice: it says where the craft points, never how it is
+/// pulled.
+pub fn hold_reference(world: &World, snap: &Snapshot, anchor: NodeId, r: DVec3) -> NodeId {
+    let eph = &world.eph;
+    let root = eph.root();
+    let top = if eph.node(root).kind == NodeKind::Body { Some(root) } else { heaviest(eph, root) };
+    let Some(mut current) = top else { return anchor };
+    let d_star = world.star_distance(snap, anchor, r);
+    let heaviest = heaviest_under(eph);
+    loop {
+        let at_current = snap.relative_r(current, anchor);
+        let s = (r - at_current).length();
+        let gm = eph.node(current).gm;
+        let mut inside: Option<(NodeId, f64)> = None;
+        satellites(eph, &heaviest, current, |b| {
+            // Inside b's sphere, |r − r_b| < k·d with d = |r_b − r_P| ≤
+            // |r − r_b| + s, so d < s/(1 − k) and |r − r_b| < k·s/(1 − k);
+            // k ≤ (m/M)^(1/4) for m < M. A body that cannot come that close
+            // (a far moon system, a dwarf planet: World::may_reach) is not
+            // evaluated.
+            let ratio = eph.node(b).gm / gm;
+            let k = ratio.sqrt().sqrt();
+            let far = |src| k < 1.0 && !world.may_reach(snap, anchor, r, d_star, src, k * s / (1.0 - k));
+            if world.source(b).is_some_and(far) {
+                return;
+            }
+            let at = snap.relative_r(b, anchor);
+            let q = (r - at).length() / laplace_radius((at - at_current).length(), eph.node(b).gm, gm);
+            if q < 1.0 && inside.is_none_or(|(_, best)| q < best) {
+                inside = Some((b, q));
+            }
+        });
+        match inside {
+            Some((b, _)) => current = b,
+            None => return current,
+        }
+    }
+}
+
 /// The hold inputs for a vessel at `(r, v)` relative to `anchor` at the
-/// snapshot's epoch, with `controls`' reference body (or the anchor) and
-/// target. Relative states go through the frame tree (rule 3).
+/// snapshot's epoch, with `controls`' reference body (or the automatic
+/// one, [`hold_reference`]; the anchor when the mode reads no velocity)
+/// and target. Relative states go through the frame tree (rule 3).
 pub fn hold_inputs(
     world: &World,
     snap: &LazySnapshot,
@@ -171,7 +286,14 @@ pub fn hold_inputs(
     controls: &Controls,
     maneuver: Option<DVec3>,
 ) -> HoldInputs {
-    let body = controls.reference.unwrap_or(anchor);
+    // The automatic reference only where the mode reads the velocity.
+    let reads_velocity =
+        matches!(controls.hold, HoldMode::Prograde | HoldMode::Retrograde) && controls.speed != SpeedReference::Target;
+    let body = match controls.reference {
+        Some(body) => body,
+        None if reads_velocity => hold_reference(world, snap.get(), anchor, r),
+        None => anchor,
+    };
     let (rel_r, rel_v) = if body == anchor {
         (r, v)
     } else {
@@ -357,5 +479,110 @@ mod tests {
         assert!(small > SETTLE && big > small, "{small} {big}");
         assert_eq!(libm::round(big / super::super::TICK) * super::super::TICK, big);
         assert_eq!(turn_lead(&DMat3::IDENTITY, DVec3::ZERO), SETTLE);
+    }
+
+    fn sol() -> World {
+        let path = format!("{}/../../{}", env!("CARGO_MANIFEST_DIR"), crate::sol::EPHEMERIS_PATH);
+        World::sol(std::sync::Arc::new(Ephemeris::from_bytes(&std::fs::read(path).unwrap()).unwrap()))
+    }
+
+    /// The rule without shortcuts: satellites from [`primary`], every
+    /// sphere evaluated.
+    fn exhaustive(world: &World, snap: &Snapshot, anchor: NodeId, r: DVec3) -> NodeId {
+        let eph = &world.eph;
+        let bodies: Vec<NodeId> = eph.bodies().collect();
+        let mut current = bodies.iter().copied().find(|&b| primary(eph, b).is_none()).unwrap();
+        loop {
+            let at_c = snap.relative_r(current, anchor);
+            let gm = eph.node(current).gm;
+            let mut best: Option<(NodeId, f64)> = None;
+            for &b in bodies.iter().filter(|&&b| primary(eph, b) == Some(current)) {
+                let at = snap.relative_r(b, anchor);
+                let q = (r - at).length() / laplace_radius((at - at_c).length(), eph.node(b).gm, gm);
+                if q < 1.0 && best.is_none_or(|(_, x)| q < x) {
+                    best = Some((b, q));
+                }
+            }
+            match best {
+                Some((b, _)) => current = b,
+                None => return current,
+            }
+        }
+    }
+
+    #[test]
+    fn satellites_are_the_bodies_whose_primary_it_is() {
+        let w = sol();
+        let eph = &w.eph;
+        for body in eph.bodies() {
+            let mut sats = Vec::new();
+            satellites(eph, &heaviest_under(eph), body, |b| sats.push(b));
+            sats.sort();
+            let expected: Vec<NodeId> = eph.bodies().filter(|&b| primary(eph, b) == Some(body)).collect();
+            assert_eq!(sats, expected, "{}", eph.node(body).name);
+        }
+        let id = |n: &str| w.find(n).unwrap().node;
+        assert_eq!(primary(eph, id("Moon")), Some(id("Earth")));
+        assert_eq!(primary(eph, id("Earth")), Some(id("Sun")));
+        assert_eq!(primary(eph, id("Charon")), Some(id("Pluto")));
+        assert_eq!(primary(eph, id("Io")), Some(id("Jupiter")));
+        assert_eq!(primary(eph, id("Sun")), None);
+    }
+
+    /// The automatic reference: the deepest Laplace sphere containing the
+    /// vessel, the same whatever the anchor (rule 1), and the same as the
+    /// rule evaluated without shortcuts, at the table's points and at
+    /// 3,000 points about every body from just above its surface to ten
+    /// times its sphere.
+    #[test]
+    fn the_automatic_reference_is_the_deepest_sphere_whatever_the_anchor() {
+        let w = sol();
+        let eph = &w.eph;
+        let id = |n: &str| w.find(n).unwrap().node;
+        let t = crate::sol::sol_epoch().add_seconds(3.0 * 86_400.0);
+        let snap = w.snapshot(t);
+        let anchors = [eph.root(), id("Sun"), id("Earth"), id("Moon"), id("Jupiter")];
+        let check = |about: NodeId, offset: DVec3| {
+            let answers: Vec<NodeId> = (anchors.iter().chain([&about]))
+                .map(|&a| hold_reference(&w, &snap, a, snap.relative_r(about, a) + offset))
+                .collect();
+            assert!(answers.iter().all(|&x| x == answers[0]), "{} {offset}: {answers:?}", eph.node(about).name);
+            let full = exhaustive(&w, &snap, about, offset);
+            assert_eq!(answers[0], full, "{} {offset}", eph.node(about).name);
+            answers[0]
+        };
+        let table = [
+            ("Earth", 6.8e6, "Earth"),
+            ("Earth", 4.0e8, "Earth"),
+            ("Earth", 1.5e9, "Sun"),
+            ("Moon", 1.9e6, "Moon"),
+            ("Jupiter", 1.0e8, "Jupiter"),
+            ("Io", 2.5e6, "Io"),
+            ("Pluto", 3.0e6, "Pluto"),
+            ("Ceres", 1.0e6, "Ceres"),
+            ("Sun", 1.0e12, "Sun"),
+        ];
+        for (about, d, expected) in table {
+            let got = check(id(about), DVec3::new(0.6, -0.48, 0.64) * d);
+            assert_eq!(got, id(expected), "{about} at {d} m");
+        }
+        // A fixed pseudo-random sweep.
+        let mut seed = 0x2545_f491_4f6c_dd1du64;
+        let mut next = || {
+            seed ^= seed << 13;
+            seed ^= seed >> 7;
+            seed ^= seed << 17;
+            (seed >> 11) as f64 / (1u64 << 53) as f64
+        };
+        for body in eph.bodies() {
+            let radius = w.source(body).and_then(|s| s.physical.as_ref()).map_or(1e3, |p| p.radius_eq);
+            let sphere = primary(eph, body)
+                .map_or(1e13, |p| laplace_radius(snap.relative_r(body, p).length(), eph.node(body).gm, eph.node(p).gm));
+            for _ in 0..70 {
+                let d = radius * 1.01 * math::exp(next() * math::ln(10.0 * sphere / radius));
+                let dir = DVec3::new(next() - 0.5, next() - 0.5, next() - 0.5).normalize();
+                check(body, dir * d);
+            }
+        }
     }
 }

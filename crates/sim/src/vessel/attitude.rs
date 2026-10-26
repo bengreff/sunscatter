@@ -439,9 +439,17 @@ pub fn advance_coast(
             base.att = control_tick(&base.att, &base.inertia, control, controls, &act, &aim, tick).0;
             base.epoch = end;
             if stop_settled && !needs_ticks(&base.att, control, controls, &aim_at(end)) {
-                *att = base.att;
                 control.base = Some(base);
-                return Some(end);
+                if end > time {
+                    *att = base.att;
+                    return Some(end);
+                }
+                // Settled in ticks resumed from a base behind the start
+                // (the aim changed there: a command, a burn's turn): the
+                // regime holds from the start, an epoch every frame rate
+                // stops at.
+                *att = drift(&base, control, controls, &aim_at(time), time.seconds_since(base.epoch));
+                return Some(time);
             }
         } else if following(control, controls, &aim) {
             control.waiting = false;

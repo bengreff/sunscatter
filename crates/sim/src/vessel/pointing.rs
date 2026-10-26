@@ -59,6 +59,11 @@ pub struct TrackRule {
     pub dir: DVec3,
     /// The body axis held on it (+Z the nose, or the engine's axis).
     pub axis: DVec3,
+    /// `reference` is the automatic one ([`super::hold::hold_reference`],
+    /// the player named none): the segment ends where that body changes
+    /// (`super::segment`), at an integrator step, never at a frame.
+    #[serde(default)]
+    pub auto: bool,
 }
 
 /// The attitude law of a segment.
@@ -202,11 +207,32 @@ impl Pointing {
     }
 }
 
+impl Rule {
+    /// Whether two rules are the same regime: equal, except that two
+    /// automatic frame rules hold whatever the automatic reference is (the
+    /// segment's own event marks where it changes, not a frame).
+    pub fn same_regime(&self, other: &Rule) -> bool {
+        match (self, other) {
+            (Rule::Track(a), Rule::Track(b)) if a.auto && b.auto => {
+                (a.surface, a.dir, a.axis) == (b.surface, b.dir, b.axis)
+            }
+            _ => self == other,
+        }
+    }
+}
+
 /// The rule the controls ask for: `controls` (with the maneuver hold
 /// forced during a planned burn's turn), `burn` the law of the next
-/// planned burn (the maneuver hold's direction), `anchor` the default
-/// reference, `engine_axis` the thrust axis in body axes.
-pub fn wanted(controls: &Controls, burn: Option<&DirectionLaw>, anchor: NodeId, engine_axis: DVec3) -> Rule {
+/// planned burn (the maneuver hold's direction), `auto` the automatic
+/// reference body (asked only if the controls name none,
+/// [`super::hold::hold_reference`]), `engine_axis` the thrust axis in body
+/// axes.
+pub fn wanted(
+    controls: &Controls,
+    burn: Option<&DirectionLaw>,
+    auto: impl FnOnce() -> NodeId,
+    engine_axis: DVec3,
+) -> Rule {
     if controls.rotate != DVec3::ZERO {
         return Rule::Mean;
     }
@@ -222,7 +248,11 @@ pub fn wanted(controls: &Controls, burn: Option<&DirectionLaw>, anchor: NodeId, 
                 SpeedReference::Target => return Rule::Mean,
             };
             let dir = if controls.hold == HoldMode::Prograde { DVec3::X } else { DVec3::NEG_X };
-            Rule::Track(TrackRule { reference: controls.reference.unwrap_or(anchor), surface, dir, axis: DVec3::Z })
+            let (reference, auto) = match controls.reference {
+                Some(body) => (body, false),
+                None => (auto(), true),
+            };
+            Rule::Track(TrackRule { reference, surface, dir, axis: DVec3::Z, auto })
         }
         _ => held(controls, burn).with_axis(engine_axis),
     }
@@ -238,7 +268,7 @@ fn held(controls: &Controls, burn: Option<&DirectionLaw>) -> Rule {
             None => Rule::Stability,
             Some(DirectionLaw::Inertial(d)) => Rule::Inertial { dir: d.normalize(), axis: DVec3::Z },
             Some(&DirectionLaw::Tracking { reference, axes }) => {
-                Rule::Track(TrackRule { reference, surface: false, dir: axes.normalize(), axis: DVec3::Z })
+                Rule::Track(TrackRule { reference, surface: false, dir: axes.normalize(), axis: DVec3::Z, auto: false })
             }
         },
         // Handled by the caller.
@@ -311,7 +341,7 @@ pub fn on_law(
             Pointing::Fixed { q: snap_axis(att.q, axis, dir), rule: Rule::Inertial { dir, axis } }
         }
         DirectionLaw::Tracking { reference, axes } => {
-            let rule = TrackRule { reference, surface: false, dir: axes.normalize(), axis };
+            let rule = TrackRule { reference, surface: false, dir: axes.normalize(), axis, auto: false };
             let (rr, rv) = rule.motion(world, snap, anchor, r, v);
             match frame(rr, rv) {
                 Some(p) => {
@@ -355,7 +385,9 @@ mod tests {
         let sas = Controls { sas: true, ..Controls::default() };
         let law = DirectionLaw::Tracking { reference: moon, axes: DVec3::new(0.0, 0.0, 2.0) };
         let inertial = DirectionLaw::Inertial(DVec3::new(0.0, 3.0, 4.0));
-        let track = |reference, surface, dir| Rule::Track(TrackRule { reference, surface, dir, axis: z });
+        let track = |reference, surface, dir| {
+            Rule::Track(TrackRule { reference, surface, dir, axis: z, auto: reference == earth })
+        };
         let cases = [
             (Controls { rotate: DVec3::X, ..sas }, None, Rule::Mean),
             (Controls { sas: false, ..sas }, None, Rule::Free),
@@ -382,7 +414,7 @@ mod tests {
             ),
         ];
         for (controls, burn, expected) in cases {
-            assert_eq!(wanted(&controls, burn, earth, z), expected, "{controls:?} {burn:?}");
+            assert_eq!(wanted(&controls, burn, || earth, z), expected, "{controls:?} {burn:?}");
         }
     }
 
@@ -393,7 +425,7 @@ mod tests {
         let t0 = sol::sol_epoch();
         let el = Elements { a: 6.9e6, e: 0.01, i: 0.7, raan: 0.3, argp: 0.2, mean_anomaly: 0.0 };
         let (r, v) = el.to_state(earth.gm);
-        let rule = TrackRule { reference: earth.node, surface: false, dir: DVec3::X, axis: DVec3::Z };
+        let rule = TrackRule { reference: earth.node, surface: false, dir: DVec3::X, axis: DVec3::Z, auto: false };
         // A settled prograde hold, nose 3 µrad off the velocity, some roll.
         let q0 = (quat_arc(DVec3::Z, (v.normalize() + r.normalize() * 3e-6).normalize())
             * DQuat::from_xyzw(0.0, 0.0, 0.2, 1.0).normalize())
