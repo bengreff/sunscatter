@@ -44,8 +44,9 @@ pub struct TerrainParams {
     /// Lighting (D055, `lighting.rs`). xyz: the star's centre relative to
     /// the camera, w: its radius (m).
     pub star: Vec4,
-    /// The body that can eclipse the star here: centre, radius (w = 0: none).
-    pub occluder: Vec4,
+    /// The bodies that can eclipse the star here (`lighting::occluders`):
+    /// centre, radius (w = 0: unused slot).
+    pub occluders: [Vec4; crate::lighting::MAX_OCCLUDERS],
     /// Planetshine: the reflecting body's centre, w: illuminance (lux) at
     /// this body's centre.
     pub shine: Vec4,

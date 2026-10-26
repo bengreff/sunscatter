@@ -53,13 +53,71 @@ pub fn planetshine(at: DVec3, body: DVec3, r: f64, albedo: f64, e_star: f64, to_
 }
 
 /// What one body receives: its sunlight relative to the flux at `camera`,
-/// the body most likely to eclipse the star there, and the brightest
-/// planetshine (reflector index, lux at the body's centre).
-#[derive(Clone, Copy, Debug, PartialEq)]
+/// the bodies that can eclipse the star somewhere on it (deepest shadow
+/// first, at most [`MAX_OCCLUDERS`]), and the brightest planetshine
+/// (reflector index, lux at the body's centre).
+#[derive(Clone, Debug, PartialEq)]
 pub struct BodyLight {
     pub sun_scale: f64,
-    pub occluder: Option<usize>,
+    pub occluders: Vec<usize>,
     pub shine: Option<(usize, f64)>,
+}
+
+/// The most occluders a body's surface takes shadows from (the terrain
+/// shader's array): a moon's shadow on its planet while the planet's
+/// other moons, or its rings' parent, also stand near the Sun.
+pub const MAX_OCCLUDERS: usize = 4;
+
+/// Shadows hiding less of the star than this (0.1 %) are not drawn.
+const MIN_SHADOW: f64 = 1e-3;
+
+/// How deep a shadow `occ` can cast anywhere on `target`, lit by a star of
+/// radius `star_r` at `star`: 0 when `target` lies wholly outside `occ`'s
+/// penumbra, else the largest share of the star's disc `occ` can hide
+/// there, (its angular radius / the star's)² at most 1, seen from the
+/// target's point nearest it. Distant planets near the Sun's direction
+/// (Mercury seen from Jupiter) hide ~10⁻⁷: they never compete with a moon.
+pub fn shadow_depth(target: Sphere, occ: Sphere, star: DVec3, star_r: f64) -> f64 {
+    let axis = occ.centre - star;
+    let d = axis.length();
+    if occ.radius <= 0.0 || d <= star_r + occ.radius {
+        return 0.0;
+    }
+    let u = axis / d;
+    let w = target.centre - occ.centre;
+    let x = w.dot(u);
+    if x <= -target.radius || w.length() <= target.radius + occ.radius {
+        return 0.0;
+    }
+    // The penumbra is the cone tangent to both discs, crossing between
+    // them: apex a = d r / (R + r) sunward of the occluder, half-angle β
+    // with sin β = (R + r) / d. The target meets it when its centre lies
+    // within its radius of the cone's surface.
+    let sin_b = (star_r + occ.radius) / d;
+    let cos_b = (1.0 - sin_b * sin_b).sqrt();
+    let t = x + d * occ.radius / (star_r + occ.radius);
+    let rho = (w - u * x).length();
+    let outside = if t > 0.0 { rho * cos_b - t * sin_b } else { (w + u * (t - x)).length() };
+    if outside >= target.radius {
+        return 0.0;
+    }
+    let near = w.length() - target.radius;
+    let s_ang = (star_r / (star - target.centre).length()).asin();
+    let o_ang = (occ.radius / near).clamp(0.0, 1.0).asin();
+    (o_ang / s_ang).powi(2).min(1.0)
+}
+
+/// The bodies that can eclipse the star on `bodies[i]`: deepest shadow
+/// first (ties by index, so the choice is deterministic), at most
+/// [`MAX_OCCLUDERS`], none shallower than [`MIN_SHADOW`].
+pub fn occluders(i: usize, bodies: &[Sphere], star: DVec3, star_r: f64) -> Vec<usize> {
+    let mut found: Vec<(usize, f64)> = (0..bodies.len())
+        .filter(|&j| j != i)
+        .map(|j| (j, shadow_depth(bodies[i], bodies[j], star, star_r)))
+        .filter(|&(_, depth)| depth >= MIN_SHADOW)
+        .collect();
+    found.sort_by(|a, b| b.1.total_cmp(&a.1).then(a.0.cmp(&b.0)));
+    found.into_iter().take(MAX_OCCLUDERS).map(|(j, _)| j).collect()
 }
 
 /// A lit or occluding body for [`body_light`]: centre, radius, albedo.
@@ -70,25 +128,13 @@ pub struct Sphere {
     pub albedo: f64,
 }
 
-/// Lighting for body `i` of `bodies`, with a star of luminous power `lm` at
-/// `star` and the camera at the origin.
-pub fn body_light(i: usize, bodies: &[Sphere], star: DVec3, lm: f64) -> BodyLight {
+/// Lighting for body `i` of `bodies`, with a star of luminous power `lm`
+/// and radius `star_r` at `star` and the camera at the origin.
+pub fn body_light(i: usize, bodies: &[Sphere], star: DVec3, star_r: f64, lm: f64) -> BodyLight {
     let me = bodies[i];
-    let to_star = star - me.centre;
-    let e_here = flux(lm, to_star.length());
+    let e_here = flux(lm, (star - me.centre).length());
     let sun_scale = e_here / flux(lm, star.length().max(1.0));
-    // The occluder: the other body closest to the star's direction, between
-    // this body and the star.
-    let occluder = (0..bodies.len())
-        .filter(|&j| j != i)
-        .filter(|&j| (bodies[j].centre - me.centre).dot(to_star) > 0.0)
-        .map(|j| {
-            let to_j = bodies[j].centre - me.centre;
-            let sep = to_j.normalize().dot(to_star.normalize()).clamp(-1.0, 1.0).acos();
-            (j, sep - (bodies[j].radius / to_j.length()).clamp(0.0, 1.0).asin())
-        })
-        .min_by(|a, b| a.1.total_cmp(&b.1))
-        .map(|(j, _)| j);
+    let occluders = occluders(i, bodies, star, star_r);
     let shine = (0..bodies.len())
         .filter(|&j| j != i)
         .map(|j| {
@@ -100,7 +146,7 @@ pub fn body_light(i: usize, bodies: &[Sphere], star: DVec3, lm: f64) -> BodyLigh
         // Below starlight (~0.001 lux) it would not show.
         .filter(|(_, e)| *e > 1e-4)
         .max_by(|a, b| a.1.total_cmp(&b.1));
-    BodyLight { sun_scale, occluder, shine }
+    BodyLight { sun_scale, occluders, shine }
 }
 
 /// Light at a small object (a ship) at `at`: the fraction of the star's
@@ -286,11 +332,14 @@ pub fn update_terrain(
         .collect();
     let sky = crate::sky::sky_ambient(&sim, &rig, &defs, &settings);
     for (i, (node, handle)) in terrain.materials().enumerate() {
-        let l = body_light(i, &spheres, star, lm);
+        let l = body_light(i, &spheres, star, star_r, lm);
         let Some(mut mat) = materials.get_mut(handle) else { continue };
         let p = &mut mat.extension.params;
         p.star = star.as_vec3().extend(star_r as f32);
-        p.occluder = l.occluder.map_or(Vec4::ZERO, |j| spheres[j].centre.as_vec3().extend(spheres[j].radius as f32));
+        p.occluders = [Vec4::ZERO; MAX_OCCLUDERS];
+        for (slot, &j) in p.occluders.iter_mut().zip(&l.occluders) {
+            *slot = spheres[j].centre.as_vec3().extend(spheres[j].radius as f32);
+        }
         p.shine = match l.shine.filter(|_| settings.earthshine) {
             Some((j, e)) => spheres[j].centre.as_vec3().extend(e as f32),
             None => Vec4::ZERO,
@@ -353,13 +402,13 @@ mod tests {
         let earth = Sphere { centre: DVec3::new(-3.84e8, 0.0, 0.0), radius: EARTH_R, albedo: 0.3 };
         let moon = Sphere { centre: DVec3::new(0.0, 0.0, 0.0) + DVec3::X * 2.0e6, radius: 1.737e6, albedo: 0.12 };
         let bodies = [earth, moon];
-        let lm_moon = body_light(1, &bodies, sun, lm);
-        let lm_earth = body_light(0, &bodies, sun, lm);
+        let lm_moon = body_light(1, &bodies, sun, SUN_R, lm);
+        let lm_earth = body_light(0, &bodies, sun, SUN_R, lm);
         // Flux at each body's own distance, relative to the camera's.
         assert!((lm_moon.sun_scale - (AU / (AU + 2.0e6)).powi(2)).abs() < 1e-9);
         assert!(lm_earth.sun_scale > lm_moon.sun_scale);
         // Earth sits between the Moon and the Sun: the Moon's occluder.
-        assert_eq!(lm_moon.occluder, Some(0));
+        assert_eq!(lm_moon.occluders, vec![0]);
         // Full Moon: from the Moon, Earth is new (no Earthshine), and the
         // full Moon lights Earth's night side.
         assert_eq!(lm_moon.shine, None);
@@ -370,7 +419,7 @@ mod tests {
         // (everything shifts) leaves it unchanged.
         let shift = DVec3::new(1e7, 3e7, 0.0);
         let moved: Vec<Sphere> = bodies.iter().map(|b| Sphere { centre: b.centre + shift, ..*b }).collect();
-        let (_, moved_shine) = body_light(0, &moved, sun + shift, lm).shine.expect("moonshine");
+        let (_, moved_shine) = body_light(0, &moved, sun + shift, SUN_R, lm).shine.expect("moonshine");
         assert!((moved_shine - moonshine).abs() < 1e-9 * moonshine);
     }
 
@@ -462,6 +511,77 @@ mod tests {
             [(0.0, 1.0), (34_000.0, 1.0), (57_000.0, 0.5), (74_000.0, 0.5 * (6.0f64 / 23.0).powi(2)), (90_000.0, 0.0)]
         {
             assert!((share_above(tent, h) - want).abs() < 1e-9, "{h}");
+        }
+    }
+
+    const JUP_R: f64 = 7.1492e7;
+    const IO_R: f64 = 1.8216e6;
+    const IO_A: f64 = 4.217e8;
+
+    fn sphere(x: f64, y: f64, radius: f64) -> Sphere {
+        Sphere { centre: DVec3::new(x, y, 0.0), radius, albedo: 0.5 }
+    }
+
+    #[test]
+    fn a_moon_shadows_its_planet_and_far_planets_do_not() {
+        // Jupiter at the origin, the Sun 5.2 AU along −x; moons sunward of
+        // Jupiter at Io's distance, their shadow axis `off` Jupiter radii
+        // from its centre. (case, bodies, target, expected occluders)
+        let sun = DVec3::new(-5.2 * AU, 0.0, 0.0);
+        let jup = sphere(0.0, 0.0, JUP_R);
+        let io = |off: f64| sphere(-IO_A, off * JUP_R, IO_R);
+        let mercury = sphere(-4.81 * AU, 0.0, 2.44e6);
+        let cases: Vec<(&str, Vec<Sphere>, usize, Vec<usize>)> = vec![
+            ("Io's transit (0.33 radii off the centre)", vec![jup, io(0.33)], 0, vec![1]),
+            // The old rule took the body nearest the Sun's direction: Mercury.
+            ("Mercury in line hides ~1e-5: not drawn", vec![jup, mercury, io(0.33)], 0, vec![2]),
+            ("the penumbra grazes the limb", vec![jup, io(1.02)], 0, vec![1]),
+            ("the shadow misses the limb", vec![jup, io(1.05)], 0, vec![]),
+            ("Io beside Jupiter, not in line", vec![jup, sphere(0.0, IO_A, IO_R)], 0, vec![]),
+            ("Io beyond Jupiter: no shadow on Jupiter", vec![jup, sphere(IO_A, 0.0, IO_R)], 0, vec![]),
+            ("Io beyond Jupiter: in its shadow", vec![jup, sphere(IO_A, 0.0, IO_R)], 1, vec![0]),
+            ("Io sunward: Jupiter does not shadow it", vec![jup, io(0.0)], 1, vec![]),
+        ];
+        for (case, bodies, target, want) in cases {
+            assert_eq!(occluders(target, &bodies, sun, SUN_R), want, "{case}");
+        }
+    }
+
+    #[test]
+    fn the_deepest_shadows_are_kept_in_a_fixed_order() {
+        // Six small moons in transit at once, radii 20 to 120 km (each
+        // hides less than the Sun's disc): the four largest, largest first;
+        // two equal ones by index.
+        let sun = DVec3::new(-5.2 * AU, 0.0, 0.0);
+        let mut bodies = vec![sphere(0.0, 0.0, JUP_R)];
+        for (k, r) in [20e3, 120e3, 60e3, 100e3, 40e3, 100e3].into_iter().enumerate() {
+            bodies.push(sphere(-IO_A, (k as f64 * 0.1 - 0.25) * JUP_R, r));
+        }
+        assert_eq!(occluders(0, &bodies, sun, SUN_R), vec![2, 4, 6, 3]);
+        // Moving the camera (every centre shifts) changes nothing.
+        let shift = DVec3::new(3e9, -2e8, 7e8);
+        let moved: Vec<Sphere> = bodies.iter().map(|b| Sphere { centre: b.centre + shift, ..*b }).collect();
+        assert_eq!(occluders(0, &moved, sun + shift, SUN_R), vec![2, 4, 6, 3]);
+    }
+
+    #[test]
+    fn every_visible_eclipse_on_the_surface_is_selected() {
+        // Wherever `eclipse_factor` dims a point of Jupiter's sunlit
+        // hemisphere by more than the threshold, the moon is an occluder:
+        // the selection never drops a shadow the eclipse rule would draw.
+        let sun = DVec3::new(-5.2 * AU, 0.0, 0.0);
+        let jup = sphere(0.0, 0.0, JUP_R);
+        for off in [0.0, 0.5, 0.9, 1.0, 1.01, 1.02, 1.03, 1.04, 1.1] {
+            let bodies = [jup, sphere(-IO_A, off * JUP_R, IO_R)];
+            let chosen = occluders(0, &bodies, sun, SUN_R) == vec![1];
+            let occ = [(bodies[1].centre, IO_R)];
+            let dimmed = (0..=400).any(|k| {
+                let y = (off - 0.1 + 0.2 * f64::from(k) / 400.0) * JUP_R;
+                let x = -(JUP_R * JUP_R - y * y).max(0.0).sqrt();
+                y.abs() <= JUP_R && eclipse_factor(DVec3::new(x, y, 0.0), sun, SUN_R, &occ) < 1.0 - MIN_SHADOW
+            });
+            assert!(chosen || !dimmed, "offset {off}: a visible shadow was dropped");
+            assert!(dimmed || !chosen || off > 1.0, "offset {off}: chosen without a shadow");
         }
     }
 

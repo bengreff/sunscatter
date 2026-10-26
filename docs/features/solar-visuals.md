@@ -74,7 +74,7 @@ Ground views (tour, second pass): Titan's ground is a dim orange-brown under an 
 
 ### Lighting checks (SKY, 2026-10-26)
 
-With the tour's event views: Io and Europa at their eclipse ingress (2030) show Jupiter's shadow across half the disc with a soft penumbral edge, as `sim::light::eclipse_factor` gives (correct). Saturn's rings shadow the planet and the planet shadows the rings, from the south (2030) and from the north (`SUNSCATTER_TOUR_DATE=2047-03-01`). **Open:** Io's shadow transit on Jupiter (the `transit` view, Io's shadow axis 0.33 radii from the centre in January 2030) shows no shadow on Jupiter: the terrain's one occluder per body (`lighting::body_light`) is to be checked for a moon's shadow on its primary. Planetshine from Jupiter on its moons' night sides is not yet checked.
+With the tour's event views: Io and Europa at their eclipse ingress (2030) show Jupiter's shadow across half the disc with a soft penumbral edge, as `sim::light::eclipse_factor` gives (correct). Saturn's rings shadow the planet and the planet shadows the rings, from the south (2030) and from the north (`SUNSCATTER_TOUR_DATE=2047-03-01`). **Fixed (SKY3):** Io's shadow transit on Jupiter (the `transit` view, Io's shadow axis 0.33 radii from the centre in January 2030) showed no shadow: each body took one occluder, the body nearest the Sun's direction seen from its centre, and from Jupiter that was an inner planet (Mercury lies within 4.3° of the Sun there, Io's shadow axis 3.2° off). Now every body takes up to `MAX_OCCLUDERS` (4) bodies whose penumbra cone reaches it (`lighting::shadow_depth`: the cone tangent to the star's and the occluder's discs), ranked by the share of the star's disc they can hide there (Mercury ~10⁻⁵, Io 1), ties by index, none under 0.1 %; the shader sums their hidden areas as `sim::light::eclipse_factor` does, with the separation from atan2 (acos lost a third of the Sun's radius in f32). Io's shadow is now a sharp black disc on Jupiter's clouds. Tests: a table (transit, Mercury in line, the penumbra grazing or missing the limb, Io beside or beyond Jupiter), the four deepest kept in a fixed order, and every surface point the eclipse rule dims belongs to a selected occluder. Planetshine from Jupiter on its moons' night sides is not yet checked.
 
 ## Giants (SKY)
 
@@ -102,6 +102,35 @@ OPAL: Outer Planet Atmospheres Legacy, PI A. Simon (GO 13937), NASA/ESA Hubble, 
 `game::rings`: an annulus in the equatorial plane (alpha-blended, both faces). Each fragment is a slab of optical depth τ: coverage 1 − exp(−τ/μ_v); brightness from the single-scattering slab law with isotropic particles (lit face ϖ/4 · μ_s/(μ_s+μ_v) · (1 − e^{−τ(1/μ_s+1/μ_v)}), unlit face ϖ/4 · μ_s/(μ_s−μ_v) · (e^{−τ/μ_s} − e^{−τ/μ_v})), lit by the Sun's illuminance at Saturn; the planet's shadow falls on them (a sphere test). The planet receives the rings' shadow: `terrain.wgsl` dims sunlight by exp(−τ/|μ|) where the ray to the Sun crosses the ring plane (`ring_transmission`, mirrored in Rust and tested). The tour frames a ringed body's disc at 3 ring radii.
 
 **Not a bug: the rings seen from the south.** The tour's first shot looked as if the rings were hidden wherever they passed in front of the planet. In 2030 the Sun lights the rings' south face (Saturn's equinox was in 2025; the next is in 2039), the disc view stands near the Sun's direction, so south of the ring plane, and keeps north up: from the south with north up the rings' near arc is the upper one, crossing the northern hemisphere (as in Hubble's 2003–2004 images), and the lower arc, behind the planet, is correctly hidden. The planet's sizes and the ellipse's offset match the perspective of a camera 3 ring radii out at 18° south. `SUNSCATTER_TOUR_DATE=2047-03-01` shows the north face, near arc below. Two real faults were found on the way and fixed: the tour's shot frame rendered from the camera rig's own position (the shot is taken after the tour moves to the next view; the last view's framing is now kept for that frame), and the rings and their shadow on the planet aliased into speckles where the occultation's τ is noisy (10 km bins against ~360 km pixels): the profile now has mip levels averaging the albedo and the transmission e^−τ (`rings::mip_chain`), sampled at the pixel's radial footprint, on the rings and in the terrain shader's ring shadow.
+
+## Any star, any body: the audit (SKY3, 2026-10-26)
+
+The owner: "an engine that will be applicable with any planet and any number of light sources without any bugs." Every place that assumed one star (the Sun), one occluder or reflector, or a named body, at commit 65e9797 (file:line there). Severity: **H** wrong with two stars or in another system, **M** approximate, **L** tooling. Status: *fixed* (with the commit's tests), *open* (with the reason).
+
+| Where (65e9797) | Assumption | Sev. | Status |
+|---|---|---|---|
+| scene.rs:71-73, :135 | `BodyDefs.light_source`: one star; with two emissive bodies the last wins | H | open |
+| scene.rs:98, :173 | one `SunLight` (`single_mut`), white, Bevy's default sun disc (Earth's) | H | open |
+| lighting.rs:133-150 `body_light` | one star; one occluder (the body nearest the Sun's direction: Mercury beat Io seen from Jupiter); one planetshine source | H | occluders fixed (`occluders`, `shadow_depth`); stars, shine open |
+| lighting.rs:154-165 `object_light` | one star; the brightest planetshine instead of the sum | M | open |
+| lighting.rs:195-206 exposure | one star's flux, referenced to *that* star's flux at 1 AU (a dim star's habitable zone exposed like Earth's) | M | open |
+| lighting.rs:318-354 `update_terrain` | one star feeds `star`, `occluder`, `shine`; the shine tint ignores the star's colour; the haze diffuse uses one star | H | open |
+| terrain.wgsl:60-63, :746-776 | one `star`/`occluder`/`shine`; the whole PBR output (every light, the sky light) scaled by one star's eclipse, rings and elevation; the haze by one star's air mass | H | open |
+| terrain.wgsl (Bevy's light direction) | the light's direction is camera→star, not fragment→star: a body far from the camera (Earth seen from Jupiter) gets a slightly wrong phase | M | open |
+| terrain.wgsl:112-142 | ring shadow only on the ring's own planet, one star | M | open |
+| scene.rs:341-389 (ships) | one star, one eclipse factor on the whole material; occluders and reflectors from `world.surfaces()` (solid bodies only: Jupiter never eclipsed or lit a ship) | H | open |
+| rings.rs:226-243, rings.wgsl:58-62 | one star, white; the parent's shadow only (hard, no penumbra, no moons); no planetshine on the unlit face | H/M | open |
+| clouds.rs:100-125, clouds.wgsl:20-24 | one star, white, no eclipses, no planetshine (the deck itself is data-driven, `cloud_top`) | H/M | open |
+| atmosphere.rs:170-177 | one atmosphere drawn per camera (Bevy) | M | open (engine limit) |
+| atmosphere (Bevy) | the sky's light ignores eclipses: the sky stays bright in a total solar eclipse | M | open |
+| sky/mod.rs:43-96, stars.rs:185-202 | sky ambient, `sun_visibility` and `daylight_of` for one star; occluders from `surfaces()` only | M | open |
+| sky/flare.rs:47-73 | one star's flare, warm colour hard-coded | L | open |
+| tour.rs:281-300, :364, :405 | event search with one star and the primary as the only occluder | L | open |
+| demo.rs, state.rs, tracking.rs, trajectory, map.rs | "Earth", "Moon", "Sun" by name (pad, test ships, plot frames) | L/M | open (gameplay setup, not rendering) |
+| sim light.rs:63-88 `sunlight` | the stars' beams returned as one vector sum: thermal (heating.rs:218-229, live.rs:429) and power (systems/power.rs:69-75) treat it as one beam; two stars on opposite sides cancel | H | open |
+| sim light.rs:146-170, coast_heat.rs:216-237 | orbit-averaged sunlight: the orbited body the only occluder, stars summed into one vector | M/H | open |
+| sim world.rs:128-130 | `World.star` = the first luminous source (used for distance shortcuts only) | L | open |
+| visual.ron `emissive` | no star temperature: a light's colour cannot follow the star | M | open |
 
 ## Solid bodies (LANDS)
 

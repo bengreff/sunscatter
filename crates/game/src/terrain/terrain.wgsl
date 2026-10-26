@@ -53,11 +53,12 @@ struct TerrainParams {
     flags: vec4<u32>,
     // rgb: base colour without a map.
     base: vec4<f32>,
-    // Lighting (D055): the star (centre, radius), the body that can eclipse
-    // it, planetshine (reflector centre, lux here), and rgb shine colour +
-    // w this body's sunlight relative to the shared light's.
+    // Lighting (D055): the star (centre, radius), the bodies that can
+    // eclipse it here (centre, radius; w = 0 unused), planetshine
+    // (reflector centre, lux here), and rgb shine colour + w this body's
+    // sunlight relative to the shared light's.
     star: vec4<f32>,
-    occluder: vec4<f32>,
+    occluders: array<vec4<f32>, 4>,
     shine: vec4<f32>,
     light: vec4<f32>,
     // Ground textures: x > 0 loaded; y, z fine and coarse tile (detail uv).
@@ -170,24 +171,27 @@ fn disc_overlap(r1: f32, r2: f32, d: f32) -> f32 {
     return r1 * r1 * (a1 - sin(a1) * cos(a1)) + r2 * r2 * (a2 - sin(a2) * cos(a2));
 }
 
-// Fraction of the star's disc visible from `p` past the occluder; mirrors
-// `sim::light::eclipse_factor`.
+// Fraction of the star's disc visible from `p` past the occluders (their
+// hidden areas add up); mirrors `sim::light::eclipse_factor`. The
+// separation is atan2(|a × b|, a · b): acos loses ~3e-4 rad in f32 near
+// zero, a third of the Sun's radius seen from Jupiter.
 fn eclipse(p: vec3<f32>) -> f32 {
-    let r = terrain.occluder.w;
-    if r <= 0.0 {
-        return 1.0;
-    }
     let to_star = terrain.star.xyz - p;
     let ds = length(to_star);
-    let to_c = terrain.occluder.xyz - p;
-    let dc = length(to_c);
-    if dc <= r || dc >= ds || dot(to_c, to_star) <= 0.0 {
-        return 1.0;
-    }
     let s_ang = asin(clamp(terrain.star.w / ds, 0.0, 1.0));
-    let o_ang = asin(clamp(r / dc, 0.0, 1.0));
-    let sep = acos(clamp(dot(to_c / dc, to_star / ds), -1.0, 1.0));
-    return clamp(1.0 - disc_overlap(s_ang, o_ang, sep) / (PI * s_ang * s_ang), 0.0, 1.0);
+    var hidden = 0.0;
+    for (var i = 0; i < 4; i++) {
+        let o = terrain.occluders[i];
+        let to_c = o.xyz - p;
+        let dc = length(to_c);
+        if o.w <= 0.0 || dc <= o.w || dc >= ds || dot(to_c, to_star) <= 0.0 {
+            continue;
+        }
+        let o_ang = asin(clamp(o.w / dc, 0.0, 1.0));
+        let sep = atan2(length(cross(to_c / dc, to_star / ds)), dot(to_c / dc, to_star / ds));
+        hidden += disc_overlap(s_ang, o_ang, sep);
+    }
+    return clamp(1.0 - hidden / (PI * s_ang * s_ang), 0.0, 1.0);
 }
 
 fn hash2(p: vec2<f32>) -> f32 {
