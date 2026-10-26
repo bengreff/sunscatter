@@ -35,6 +35,10 @@
             gain: 0.5,
             amplitude: 0.5,
             ridge_threshold: 300.0,
+            // Crater-shaped detail (sim::terrain::craters): 6 octaves of cells from the map spacing
+            // down to 87 m, 20% of them holding a bowl 0.15 as deep as it is wide (assumed from the
+            // body's crater density; docs/features/solar-visuals.md).
+            craters: Some((octaves: 6, density: 0.2, depth_ratio: 0.15)),
         )),
         sea_level: None,
     ),

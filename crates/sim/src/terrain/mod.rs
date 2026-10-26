@@ -19,6 +19,7 @@
 //! Determinism: latitude/longitude come from [`crate::math`] (libm) trig; the
 //! lookup and the blends are plain IEEE arithmetic on integer data.
 
+pub mod craters;
 pub mod detail;
 pub mod noise;
 

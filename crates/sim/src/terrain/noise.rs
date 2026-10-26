@@ -10,7 +10,7 @@ use glam::DVec3;
 
 /// 64-bit mix of a lattice point and a seed (SplitMix64 finaliser).
 #[inline]
-fn hash(x: i64, y: i64, z: i64, seed: u64) -> u64 {
+pub(crate) fn hash(x: i64, y: i64, z: i64, seed: u64) -> u64 {
     let mut h = seed
         ^ (x as u64).wrapping_mul(0x9E37_79B9_7F4A_7C15)
         ^ (y as u64).wrapping_mul(0xC2B2_AE3D_27D4_EB4F)

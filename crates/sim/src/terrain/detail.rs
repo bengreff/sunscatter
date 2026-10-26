@@ -53,6 +53,10 @@ pub struct DetailParams {
     /// Selects an independent noise field.
     #[serde(default)]
     pub seed: u64,
+    /// Crater-shaped detail for cratered bodies ([`super::craters`]), added
+    /// whatever the roughness. `None`: none.
+    #[serde(default)]
+    pub craters: Option<super::craters::CraterDetail>,
 }
 
 /// Baked roughness (RMS residual, m) on an equirectangular grid.
@@ -164,8 +168,18 @@ pub fn coast_weight(base: f64, sea: Option<f64>) -> f64 {
     }
 }
 
-/// The fractal sum at body-fixed point `p` (m) for local roughness `rough` (m).
+/// The detail at body-fixed point `p` (m) for local roughness `rough` (m):
+/// the fractal sum, plus the crater field where the body has one.
 pub fn fractal(params: &DetailParams, p: DVec3, rough: f64) -> f64 {
+    let rough_part = fbm(params, p, rough);
+    match &params.craters {
+        Some(c) => rough_part + super::craters::field(c, p, params.wavelength, params.lacunarity, params.seed),
+        None => rough_part,
+    }
+}
+
+/// The fractal sum, scaled by the roughness.
+fn fbm(params: &DetailParams, p: DVec3, rough: f64) -> f64 {
     let mut amp = params.amplitude * rough;
     if amp < MIN_AMPLITUDE_M {
         return 0.0;
@@ -210,6 +224,7 @@ mod tests {
             amplitude: 1.0,
             ridge_threshold: 100.0,
             seed: 0,
+            craters: None,
         }
     }
 
