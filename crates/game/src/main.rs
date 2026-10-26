@@ -13,6 +13,7 @@ mod commands;
 mod comms;
 mod demo;
 mod demo_checks;
+mod fleet;
 mod format;
 mod hud;
 mod interface;
@@ -48,6 +49,23 @@ enum Stage {
     Scene,
 }
 
+/// Bevy's default plugins with the window and the thread pools
+/// ([`fleet::task_pools`]).
+fn default_plugins(demo_mode: bool, offscreen: bool) -> bevy::app::PluginGroupBuilder {
+    DefaultPlugins
+        .set(WindowPlugin {
+            primary_window: Some(Window {
+                title: "Sunscatter v0.2 — Earth–Moon prototype".into(),
+                // The demo measures frame times: don't wait for the display.
+                present_mode: if demo_mode { PresentMode::AutoNoVsync } else { PresentMode::AutoVsync },
+                visible: !offscreen,
+                ..default()
+            }),
+            ..default()
+        })
+        .set(TaskPoolPlugin { task_pool_options: fleet::task_pools() })
+}
+
 fn main() {
     let mut app = App::new();
     let demo = demo::Demo::from_env();
@@ -58,16 +76,7 @@ fn main() {
         app.insert_resource(demo);
     }
     app.insert_resource(ClearColor(Color::BLACK))
-        .add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window {
-                title: "Sunscatter v0.2 — Earth–Moon prototype".into(),
-                // The demo measures frame times: don't wait for the display.
-                present_mode: if demo_mode { PresentMode::AutoNoVsync } else { PresentMode::AutoVsync },
-                visible: !offscreen,
-                ..default()
-            }),
-            ..default()
-        }))
+        .add_plugins(default_plugins(demo_mode, offscreen))
         .add_plugins(EguiPlugin::default())
         .add_plugins((terrain::TerrainPlugin, sky::SkyPlugin, atmosphere::AtmosphereFixPlugin))
         .add_plugins(GameState)

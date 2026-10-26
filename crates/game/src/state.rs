@@ -5,7 +5,7 @@ use crate::commands::{GameCommand, InputContext, Keys};
 use crate::relations::Dominance;
 use crate::trajectory::{self, settings::OrbitSettings};
 use bevy::prelude::*;
-use bevy::tasks::{futures::check_ready, AsyncComputeTaskPool, ComputeTaskPool, Task};
+use bevy::tasks::{futures::check_ready, AsyncComputeTaskPool, Task};
 use glam::DVec3;
 use sim::craft::test_craft;
 use sim::ephem::Ephemeris;
@@ -13,7 +13,7 @@ use sim::frame::NodeId;
 use sim::kepler::Elements;
 use sim::sol;
 use sim::time::Epoch;
-use sim::vessel::{Controls, HoldMode, Phase, Segment, Vessel, VesselId, VesselIds, TICK};
+use sim::vessel::{Controls, HoldMode, Phase, Segment, Vessel, VesselId, VesselIds};
 use sim::world::World;
 use std::sync::Arc;
 
@@ -30,10 +30,10 @@ pub const MAX_PHYSICS_WARP: usize = 3;
 pub const PAD_LAT: f64 = 28.6082;
 pub const PAD_LON: f64 = -80.66;
 
-/// Per-vessel, per-frame integration budgets (steps, ~7 µs each) so a frame
-/// never stalls. When a coast can't keep up, the clock is held back: warp is
-/// then limited by compute, never the physics.
-pub(crate) const COAST_STEPS_PER_FRAME: usize = 1_200;
+/// Per-frame look-ahead budgets (integration steps, ~10 µs each). The
+/// vessels themselves advance within the frame's time ([`crate::fleet`]):
+/// when they can't keep up, the clock is held back and the warp is limited
+/// by compute, never the physics.
 pub(crate) const LOOKAHEAD_STEPS_PER_FRAME: usize = 1_500;
 const OTHER_LOOKAHEAD_STEPS_PER_FRAME: usize = 300;
 
@@ -49,6 +49,15 @@ pub struct SimState {
     pub controls: Controls,
     /// Frames where the clock was held back by integration budget.
     pub compute_limited: bool,
+    /// The warp actually achieved (simulated over real seconds, smoothed
+    /// over about half a second): shown when compute limits it.
+    pub achieved_warp: f64,
+    /// Wall time of the vessels' advance per frame (ms, smoothed like the
+    /// warp): shown with the frame rate.
+    pub sim_ms: f64,
+    /// How far the clock moved last frame (s): a compute-limited frame asks
+    /// only a little more of the next ([`crate::fleet::frame_span`]).
+    pub last_advance: f64,
     /// Controls on their way to an uncrewed active vessel (D034).
     pub remote: RemoteControls,
     /// The display rule for "which body is this about" (D056), rebuilt when
@@ -85,6 +94,9 @@ impl SimState {
             warp: 0,
             controls: Controls { sas: true, ..Default::default() },
             compute_limited: false,
+            achieved_warp: 1.0,
+            sim_ms: 0.0,
+            last_advance: 0.0,
             remote: RemoteControls::default(),
         }
     }
@@ -331,30 +343,26 @@ pub fn advance(
     let dt = time.delta_secs_f64().min(0.1);
     // Nothing is simulated past the ephemeris window: the clock stops there.
     let end = sim.world.end();
-    let target = sim.clock.add_seconds(dt * warp);
+    let span = crate::fleet::frame_span(dt * warp, sim.compute_limited, sim.last_advance);
+    let target = sim.clock.add_seconds(span);
     let target = if target > end { end } else { target };
     let sim = &mut *sim;
     let passive = Controls { sas: true, ..Default::default() };
-    // Vessels are independent, so advancing them in parallel is deterministic.
-    let world = &sim.world;
     let active = sim.active;
-    let reached: Vec<(Epoch, bool)> = ComputeTaskPool::get().scope(|scope| {
-        for (i, vessel) in sim.fleet.iter_mut().enumerate() {
-            let controls = if i == active { active_controls } else { passive };
-            scope.spawn(async move {
-                let r = vessel.advance(world, target, &controls, COAST_STEPS_PER_FRAME);
-                (r, stopped(vessel))
-            });
-        }
-    });
-    let mut clock = target;
-    for (r, stopped) in reached {
-        if holds_clock(r, target, stopped) && r < clock {
-            clock = r;
-        }
-    }
+    let controls = move |i: usize| if i == active { active_controls } else { passive };
+    // Vessels are independent: advanced in parallel within the frame's
+    // time for the simulation, the slowest first (`crate::fleet`).
+    let start = std::time::Instant::now();
+    let deadline = start + std::time::Duration::from_secs_f64(crate::fleet::SIM_FRAME_TIME);
+    let before = sim.clock;
+    let adv = crate::fleet::advance_fleet(&sim.world, &mut sim.fleet, &controls, target, Some(deadline));
+    let clock = crate::fleet::clock_after(&adv, target);
     sim.compute_limited = clock < target;
     sim.clock = clock;
+    sim.achieved_warp = crate::fleet::achieved_warp(sim.achieved_warp, clock.seconds_since(before), dt);
+    sim.last_advance = clock.seconds_since(before);
+    let ms = start.elapsed().as_secs_f64() * 1e3;
+    sim.sim_ms += (dt / 0.5).min(1.0) * (ms - sim.sim_ms);
     sim.refresh_dominance();
     // Look ahead as far as the drawn line needs (D056), a bounded number of
     // steps per frame.
@@ -434,20 +442,6 @@ pub fn below_rails_floor(world: &World, t: Epoch, anchor: NodeId, r: DVec3) -> O
         let alt = p.altitude(p.rotation.to_fixed(sim::frame::Vec3::from_raw(rel), t));
         (alt < p.rails_floor).then_some((s.node, p.rails_floor))
     })
-}
-
-/// Whether a vessel's motion has ended for good at a time before the clock
-/// (its trajectory failed or reached the ephemeris end): it stays there and
-/// must not hold the clock.
-fn stopped(vessel: &Vessel) -> bool {
-    matches!(&vessel.phase, Phase::Coasting { trajectory } if trajectory.finished())
-}
-
-/// Whether a vessel that reached `reached` holds the clock back from
-/// `target`: powered vessels trail by less than a tick; a coast that could
-/// not be integrated far enough holds it; a stopped vessel never does.
-pub fn holds_clock(reached: Epoch, target: Epoch, stopped: bool) -> bool {
-    !stopped && reached.seconds_since(target) < -TICK
 }
 
 /// The predicted trajectory while powered (the stored segment is used
@@ -607,15 +601,5 @@ mod tests {
         sim.controls.throttle = 0.0;
         sim.active = sim.fleet.len() - 1;
         assert_eq!(sim.rails_block(), Some(RailsBlock::Live));
-    }
-
-    #[test]
-    fn only_a_lagging_live_vessel_holds_the_clock() {
-        let t = sol::sol_epoch();
-        // (seconds behind the target, stopped, holds)
-        let cases = [(0.0, false, false), (0.5 * TICK, false, false), (10.0, false, true), (10.0, true, false)];
-        for (behind, stopped, holds) in cases {
-            assert_eq!(holds_clock(t.add_seconds(-behind), t, stopped), holds, "{behind} {stopped}");
-        }
     }
 }

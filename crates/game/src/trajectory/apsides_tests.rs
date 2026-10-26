@@ -249,7 +249,8 @@ type Shown = [Option<(Epoch, f64, bool)>; 2];
 /// revolution of look-ahead) for `frames` frames at `warp`: the next Ap
 /// and Pe each frame shows.
 fn fly_an_orbit(el: Elements, warp: f64, frames: usize) -> Vec<(Epoch, Shown)> {
-    use crate::state::{COAST_STEPS_PER_FRAME, LOOKAHEAD_STEPS_PER_FRAME};
+    use crate::fleet::CHUNK_UNITS;
+    use crate::state::LOOKAHEAD_STEPS_PER_FRAME;
     let mut sim = SimState::new();
     let earth = sim.world.find("Earth").unwrap().clone();
     let (r, v) = el.to_state(earth.gm);
@@ -264,7 +265,7 @@ fn fly_an_orbit(el: Elements, warp: f64, frames: usize) -> Vec<(Epoch, Shown)> {
         let target = sim.clock.add_seconds(warp / 60.0);
         let world = sim.world.clone();
         let ship = &mut sim.fleet[sim.active];
-        sim.clock = ship.advance(&world, target, &controls, COAST_STEPS_PER_FRAME);
+        sim.clock = ship.advance(&world, target, &controls, CHUNK_UNITS);
         if let Some(seg) = ship.trajectory().map(|t| t.last()) {
             let until = crate::trajectory::lookahead_until(&world, seg, sim.clock, &orbits);
             ship.extend_coast(&world, until, LOOKAHEAD_STEPS_PER_FRAME);

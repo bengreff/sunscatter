@@ -222,7 +222,7 @@ pub fn draw(
         let kind = if rails { "rails" } else { "physics" };
         let why = match limit {
             Some(WarpLimit::Throttle) => "  limited: throttle".to_string(),
-            Some(WarpLimit::Compute) => "  limited: compute".to_string(),
+            Some(WarpLimit::Compute) => format!("  limited: compute, {} achieved", warp_label(sim.achieved_warp)),
             Some(WarpLimit::Floor(f)) => format!("  limited: below {}", crate::format::distance(f)),
             Some(WarpLimit::Live) => "  limited: flying live".to_string(),
             Some(WarpLimit::OtherLive(id)) => format!("  limited: Vessel {id} is flying live"),
@@ -234,7 +234,7 @@ pub fn draw(
                 ui_.label(egui::RichText::new(why).monospace().small().color(theme::WARN));
             }
             if show_fps {
-                ui_.label(dim(&format!("  {} fps", fps.text())));
+                ui_.label(dim(&format!("  {} fps, sim {:.1} ms", fps.text(), sim.sim_ms)));
             }
         });
     });
