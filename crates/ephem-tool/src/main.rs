@@ -3,7 +3,7 @@
 //! ```text
 //! cargo run -p ephem-tool --release -- fetch
 //! cargo run -p ephem-tool --release -- sol [--bsp data/external/de440s.bsp] [--years 50]
-//!     [--out data/ephemeris] [--bodies data/bodies] [--extras all|none|gr|j2]
+//!     [--out data/ephemeris] [--bodies data/bodies] [--extras all|none|gr|j2] [--fit-rounds 3]
 //! ```
 //!
 //! `fetch` downloads the JPL Horizons states the catalog
@@ -23,6 +23,7 @@
 //! Download the kernel first:
 //! `curl -L -o data/external/de440s.bsp https://naif.jpl.nasa.gov/pub/naif/generic_kernels/spk/planets/de440s.bsp`
 
+mod fit;
 mod horizons;
 mod sol;
 
@@ -39,10 +40,13 @@ fn main() {
             let extras = flag("--extras").unwrap_or_else(|| "all".into());
             let out = PathBuf::from(flag("--out").unwrap_or_else(|| "data/ephemeris".into()));
             let bodies = PathBuf::from(flag("--bodies").unwrap_or_else(|| "data/bodies".into()));
-            sol::run(&sol::Options { bsp: &bsp, years, extras: &extras, out: &out, bodies: &bodies });
+            let fit_rounds = flag("--fit-rounds").map_or(3, |n| n.parse().expect("--fit-rounds must be a count"));
+            sol::run(&sol::Options { bsp: &bsp, years, extras: &extras, out: &out, bodies: &bodies, fit_rounds });
         }
         _ => {
-            eprintln!("usage: ephem-tool fetch | sol [--bsp PATH] [--years N] [--out DIR] [--bodies DIR] [--extras all|none|gr|j2]");
+            eprintln!(
+                "usage: ephem-tool fetch | sol [--bsp PATH] [--years N] [--out DIR] [--bodies DIR] [--extras all|none|gr|j2] [--fit-rounds N]"
+            );
             std::process::exit(2);
         }
     }

@@ -1,6 +1,7 @@
 //! Solar System generation: planets from DE440, dwarf planets and moon
 //! systems from JPL Horizons (`data/ephemeris/sol-systems.ron`).
 
+use crate::fit::{fit_query, fit_system};
 use crate::horizons::{Query, EPOCH_JD, REFERENCE_YEARS};
 use anise::constants::frames::{
     EARTH_J2000, JUPITER_BARYCENTER_J2000, MARS_BARYCENTER_J2000, MERCURY_J2000, MOON_J2000, NEPTUNE_BARYCENTER_J2000,
@@ -10,6 +11,7 @@ use anise::prelude::{Almanac, Frame};
 use glam::DVec3;
 use serde::Serialize;
 use sim::ephem::{fnv1a64, Ephemeris, Motion};
+use sim::gen::InitialBody;
 use sim::kepler::Elements;
 use sim::sol::systems::{SystemInitial, SystemSpec};
 use sim::sol::{
@@ -18,6 +20,7 @@ use sim::sol::{
 };
 use sim::time::Epoch;
 use std::path::Path;
+use std::sync::Arc;
 
 /// Bodies integrated, with DE440 GM values (km³/s², from the DE440 header).
 /// Mars…Pluto are system barycenters (moon systems are integrated after).
@@ -74,6 +77,9 @@ pub fn fetch() {
     for s in &cat.systems {
         for i in 0..s.members.len() {
             member_query(s, i).fetch();
+            if s.members[i].state_jd.is_none() {
+                fit_query(s, i).fetch();
+            }
         }
     }
 }
@@ -84,6 +90,8 @@ pub struct Options<'a> {
     pub extras: &'a str,
     pub out: &'a Path,
     pub bodies: &'a Path,
+    /// Rounds of fitting the moons' initial states to Horizons (0: none).
+    pub fit_rounds: usize,
 }
 
 pub fn run(opt: &Options) {
@@ -136,13 +144,6 @@ pub fn run(opt: &Options) {
     };
     write_ron(opt.out, "de440-reference.ron", &reference);
 
-    let systems = SystemsInitial {
-        epoch_tdb_seconds: epoch.whole_seconds(),
-        systems: cat.systems.iter().map(|s| system_initial(s, &mut horizons)).collect(),
-    };
-    write_ron(opt.out, sim::sol::SYSTEMS_INITIAL_FILE, &systems);
-    write_ron(opt.out, "horizons-reference.ron", &horizons);
-
     let bodies = initial.to_bodies();
     let mut cfg = sim::sol::gen_config(&bodies, opt.years);
     // Diagnostics: isolate the effect of each extra force (never written as
@@ -155,7 +156,28 @@ pub fn run(opt: &Options) {
         other => panic!("unknown --extras {other}"),
     }
     let started = std::time::Instant::now();
-    let (eph, report) = sim::sol::generate_sol_with(&cfg, &initial, &cat, &systems, opt.years, opt.bodies);
+    let (planets, mut report) = sim::sol::generate_planets(&cfg, &initial, &cat);
+    let planets = Arc::new(planets);
+    let built: Vec<SystemInitial> = std::thread::scope(|scope| {
+        let jobs: Vec<_> = cat
+            .systems
+            .iter()
+            .map(|s| {
+                let planets = planets.clone();
+                scope.spawn(move || system_initial(s, &planets, opt))
+            })
+            .collect();
+        jobs.into_iter().map(|j| j.join().expect("system initial states")).collect()
+    });
+    let systems = SystemsInitial { epoch_tdb_seconds: epoch.whole_seconds(), systems: built };
+    for s in &cat.systems {
+        horizons.states.extend(moon_references(s));
+    }
+    write_ron(opt.out, sim::sol::SYSTEMS_INITIAL_FILE, &systems);
+    write_ron(opt.out, "horizons-reference.ron", &horizons);
+
+    let (eph, r) = sim::sol::generate_systems(&planets, &cat, &systems, opt.years, opt.bodies);
+    report.extend(r);
     println!("generated in {:.1} s", started.elapsed().as_secs_f64());
     for r in &report {
         let tol = node_tolerance(&cat, &r.name);
@@ -181,57 +203,74 @@ pub fn run(opt: &Options) {
     compare_horizons(&eph, &horizons);
 }
 
-/// A system's members at the epoch, relative to its barycenter, and their
-/// Horizons reference states (each moon also about the primary).
-fn system_initial(s: &SystemSpec, refs: &mut HorizonsReference) -> SystemInitial {
+/// Horizons reference states of each moon about its primary (the
+/// golden tests'); none for the TNO binaries, whose solutions end at the epoch.
+fn moon_references(s: &SystemSpec) -> Vec<RelativeState> {
+    if s.members[0].state_jd.is_some() {
+        return Vec::new();
+    }
     let states: Vec<Vec<(DVec3, DVec3)>> = (0..s.members.len()).map(|i| member_query(s, i).states()).collect();
-    let mut at_epoch: Vec<(DVec3, DVec3)> = states.iter().map(|v| v[0]).collect();
+    let mut out = Vec::new();
+    for (i, m) in s.members.iter().enumerate().skip(1) {
+        for (k, &years) in REFERENCE_YEARS.iter().enumerate() {
+            let (rp, vp) = states[0][k];
+            let (r, v) = ((states[i][k].0 - rp).to_array(), (states[i][k].1 - vp).to_array());
+            out.push(RelativeState { name: m.name.clone(), center: s.members[0].name.clone(), years, r, v });
+        }
+    }
+    out
+}
+
+/// A system's members at the epoch, relative to its barycenter, with the
+/// catalog's GMs (the closed system's stand-in takes their total, `World`), then
+/// fitted to Horizons over the window (`fit`).
+fn system_initial(s: &SystemSpec, planets: &Arc<Ephemeris>, opt: &Options) -> SystemInitial {
+    let states: Vec<(DVec3, DVec3)> = (0..s.members.len()).map(|i| member_query(s, i).states()[0]).collect();
+    let gm: Vec<f64> = s.members.iter().map(|m| m.gm * 1e9).collect();
+    let mut at_epoch = states;
     if let Some(jd) = s.members[0].state_jd {
         assert!(s.members.iter().all(|m| m.state_jd == Some(jd)), "{}: one state date for all", s.barycenter);
-        at_epoch = carry_to_epoch(s, &at_epoch, (EPOCH_JD - jd) * 86_400.0);
-    } else {
-        // Only the moons about the primary: Horizons' barycenter includes
-        // moons we do not model, so states about it differ from ours by the
-        // shift below, not by any error.
-        for (i, m) in s.members.iter().enumerate().skip(1) {
-            for (k, &years) in REFERENCE_YEARS.iter().enumerate() {
-                let (rp, vp) = states[0][k];
-                let (r, v) = ((states[i][k].0 - rp).to_array(), (states[i][k].1 - vp).to_array());
-                let center = s.members[0].name.clone();
-                refs.states.push(RelativeState { name: m.name.clone(), center, years, r, v });
-            }
-        }
+        at_epoch = carry_to_epoch(&gm, &at_epoch, (EPOCH_JD - jd) * 86_400.0);
     }
     // Make the members exactly barycentric with our GMs: Horizons' centre
     // includes moons we do not model and its GMs are rounded, so as given
     // their mass centre drifts off the barycenter node (Uranus's at 4.9
     // mm/s, 7,800 km in 50 years). Shifting every member alike keeps the
     // moons' positions about the primary.
-    let gm: Vec<f64> = s.members.iter().map(|m| m.gm * 1e9).collect();
     let total: f64 = gm.iter().sum();
     let (cm_r, cm_v) = at_epoch
         .iter()
         .zip(&gm)
         .fold((DVec3::ZERO, DVec3::ZERO), |(r, v), ((ri, vi), g)| (r + *ri * (g / total), v + *vi * (g / total)));
-    println!(
-        "{}: members' mass centre {:.3} m, {:.3e} m/s off the barycenter (removed)",
+    let mut bodies: Vec<InitialBody> = s
+        .members
+        .iter()
+        .zip(&at_epoch)
+        .zip(&gm)
+        .map(|((m, (r, v)), &g)| InitialBody { name: m.name.clone(), gm: g, r: *r - cm_r, v: *v - cm_v })
+        .collect();
+    let mut log = format!(
+        "{}: members' mass centre {:.3} m, {:.3e} m/s off the barycenter (removed)\n",
         s.barycenter,
         cm_r.length(),
         cm_v.length()
     );
-    let at_epoch: Vec<(DVec3, DVec3)> = at_epoch.iter().map(|(r, v)| (*r - cm_r, *v - cm_v)).collect();
+    let obs = (opt.fit_rounds > 0 && s.members[0].state_jd.is_none()).then(|| crate::fit::observations(s)).flatten();
+    if opt.fit_rounds > 0 && s.members[0].state_jd.is_none() && obs.is_none() {
+        log += "  not fitted: no Horizons states over the window cached and no kernels\n";
+    }
+    if let Some(obs) = obs {
+        let primary = sim::sol::primary_physical(s, opt.bodies);
+        for line in fit_system(s, &mut bodies, planets, &primary, &obs, opt.fit_rounds) {
+            log += &format!("  fit {:10} worst over 50 y {:9.3e} m -> {:9.3e} m\n", line.name, line.before, line.after);
+        }
+    }
+    print!("{log}");
     SystemInitial {
         barycenter: s.barycenter.clone(),
-        members: s
-            .members
+        members: bodies
             .iter()
-            .zip(&at_epoch)
-            .map(|(m, (r, v))| InitialBodyRecord {
-                name: m.name.clone(),
-                gm: m.gm * 1e9,
-                r: r.to_array(),
-                v: v.to_array(),
-            })
+            .map(|b| InitialBodyRecord { name: b.name.clone(), gm: b.gm, r: b.r.to_array(), v: b.v.to_array() })
             .collect(),
     }
 }
@@ -239,8 +278,7 @@ fn system_initial(s: &SystemSpec, refs: &mut HorizonsReference) -> SystemInitial
 /// Barycentric states carried `dt` seconds on two-body conics: each
 /// secondary about the primary (μ of the pair), the primary placed so the
 /// barycenter stays at the origin.
-fn carry_to_epoch(s: &SystemSpec, states: &[(DVec3, DVec3)], dt: f64) -> Vec<(DVec3, DVec3)> {
-    let gm: Vec<f64> = s.members.iter().map(|m| m.gm * 1e9).collect();
+fn carry_to_epoch(gm: &[f64], states: &[(DVec3, DVec3)], dt: f64) -> Vec<(DVec3, DVec3)> {
     let total: f64 = gm.iter().sum();
     let rel: Vec<(DVec3, DVec3)> = states[1..]
         .iter()

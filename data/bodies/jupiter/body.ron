@@ -7,12 +7,12 @@
         radius_eq: 71492000.0,
         radius_polar: 66854000.0,
         j2: 0.014696514,
-        // IAU pole with its periodic terms linearised about 2055: within 0.0011 deg of the full series over 2030-2080
+        // IAU series with its periodic terms of at least 0.01 deg (0 of 15): within 0.002 deg (pole) and 0 deg (W) of the full series over 2030-2080
         rotation: (
-            ra_deg: 268.0586179,
-            dec_deg: 64.49595497,
-            ra_rate_deg_per_century: -0.006283517,
-            dec_rate_deg_per_century: 0.001377952054,
+            ra_deg: 268.056595,
+            dec_deg: 64.495303,
+            ra_rate_deg_per_century: -0.006499,
+            dec_rate_deg_per_century: 0.002413,
             w0_deg: 284.95,
             w_rate_deg_per_day: 870.536,
         ),

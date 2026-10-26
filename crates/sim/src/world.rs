@@ -190,10 +190,17 @@ impl World {
                 star_distance,
             });
             let n = eph.node(node);
+            // Its members' total GM, so opening or closing the system
+            // changes the pull only by its quadrupole (the barycenter node's
+            // GM, which moved it in the planetary integration, can differ from
+            // the satellite solutions' by a few 1e-8: Jupiter's by 2.5 km³/s²;
+            // at Earth that is ~4e-15 m/s² of a cut pull).
+            let gm = sources.iter().filter(|s| s.role == Role::Member(c)).map(|s| s.gm).sum::<f64>();
+            let gm = if gm > 0.0 { gm } else { n.gm };
             sources.push(Source {
                 node,
                 name: n.name.clone(),
-                gm: n.gm,
+                gm,
                 physical: None,
                 relativistic: false,
                 anchor_zone: None,

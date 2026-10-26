@@ -120,19 +120,8 @@ pub struct SystemInitial {
 }
 
 impl SystemSpec {
-    /// The members' GMs (SI) in a system of total GM `barycenter_gm` (the
-    /// barycenter node's, which moved it in the planetary integration): the
-    /// moons' from the catalog, the primary's the rest. So a closed system's
-    /// stand-in pulls exactly as its members do from afar (the primary
-    /// takes up rings and unmodelled moons: Saturn's rings, Namaka).
-    pub fn member_gms(&self, barycenter_gm: f64) -> Vec<f64> {
-        let moons: Vec<f64> = self.members[1..].iter().map(|m| m.gm * 1e9).collect();
-        let primary = barycenter_gm - moons.iter().sum::<f64>();
-        std::iter::once(primary).chain(moons).collect()
-    }
-
     /// The members as integration bodies (GM in SI) from their initial
-    /// states (which carry the GMs, [`Self::member_gms`]).
+    /// states (which carry the GMs).
     pub fn bodies(&self, initial: &SystemInitial) -> Vec<InitialBody> {
         self.members
             .iter()

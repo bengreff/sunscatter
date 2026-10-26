@@ -116,35 +116,36 @@ fn accuracy_against_de440_is_within_recorded_bounds() {
     }
 }
 
-/// Every Horizons reference state: within a metre or two at the epoch (the
-/// fits' tolerance), then within a drift rate per year recorded per body
-/// (constants and model differences: moons up to ~300 km a year, Oberon's
-/// mean motion off by 3e-6; dwarf planets a few km to Ceres's 7 km a year).
+/// Every Horizons reference state (2030 to 2080) within the worst error
+/// measured with a margin (docs/features/solar-system.md): the moons'
+/// initial states are fitted to JPL's satellite ephemerides over the whole
+/// window (ephem-tool fit), which trades the epoch's metre for no drift, so
+/// what remains is model differences (Charon 110 m, Titan 8 km, Mimas
+/// 390 km; Proteus, not fitted, 320 km).
 #[test]
 fn accuracy_against_horizons_is_within_recorded_bounds() {
     let eph = shipped();
     let refs: HorizonsReference =
         ron::from_str(&std::fs::read_to_string(dir().join("horizons-reference.ron")).unwrap()).unwrap();
-    // Bound per year (m), 1.5x the worst measured rate, by body.
-    let rate = |name: &str| match name {
-        "Io" | "Mimas" | "Tethys" | "Ariel" | "Titania" | "Ceres" => 2.5e5,
-        "Oberon" => 4.5e5,
-        "Nereid" | "Miranda" | "Enceladus" | "Callisto" | "Europa" | "Uranus" => 1.5e5,
-        "Triton" | "Proteus" | "Dione" | "Rhea" | "Charon" | "Pluto" | "Ganymede" | "Neptune" => 6.0e4,
-        "Jupiter" | "Saturn" | "Titan" | "Hyperion" | "Iapetus" | "Umbriel" => 2.5e4,
-        _ => 5.0e3,
+    // Worst over 1-50 years, measured 2026-10-26, times 1.5 (m).
+    let bound = |name: &str| {
+        1.5 * match name {
+            "Triton" | "Nereid" | "Mimas" | "Ceres" | "Proteus" => 5.0e5,
+            "Tethys" => 1.8e5,
+            "Europa" | "Titania" | "Oberon" | "Miranda" => 5.5e4,
+            "Io" | "Ganymede" | "Ariel" | "Makemake" | "Haumea barycenter" => 3.6e4,
+            "Dione" | "Hyperion" | "Gonggong" | "Quaoar" | "Sedna" | "Orcus barycenter" => 2.2e4,
+            "Eris barycenter" | "Umbriel" | "Rhea" | "Callisto" | "Titan" => 1.2e4,
+            "Enceladus" | "Iapetus" | "Phoebe" => 5.0e3,
+            "Charon" => 200.0,
+            other => panic!("no bound for {other}"),
+        }
     };
-    let mut worst: Vec<(String, f64)> = Vec::new();
     for s in &refs.states {
         let err = sol::relative_error(&eph, s);
-        let bound = if s.years == 0.0 { 100.0 } else { rate(&s.name) * s.years.max(1.0) + 1.0e4 };
-        assert!(err < bound, "{} rel {} at +{}y: {err:.3e} m > {bound:.1e} m", s.name, s.center, s.years);
-        if s.years > 0.0 {
-            worst.push((format!("{} rel {} +{}y", s.name, s.center, s.years), err / s.years));
-        }
+        let limit = bound(&s.name);
+        assert!(err < limit, "{} rel {} at +{}y: {err:.3e} m > {limit:.1e} m", s.name, s.center, s.years);
     }
-    worst.sort_by(|a, b| b.1.total_cmp(&a.1));
-    println!("fastest drifts (m/yr): {:?}", &worst[..5]);
     assert!(refs.states.len() > 150, "the references cover every body");
 }
 
@@ -222,4 +223,39 @@ fn the_solar_system_has_every_planet_dwarf_planet_and_moon_over_100_km() {
     // The file stays within its budget (D046: each file well under 50 MB).
     let size = std::fs::metadata(dir().join("sol-2030.bin")).unwrap().len();
     assert!(size < 20_000_000, "{size} bytes");
+}
+
+/// A closed moon system pulls as its stand-in (D023 clusters): the stand-in's
+/// GM is its members' total, so where a cluster opens or closes the
+/// gravity changes only by the system's quadrupole, under the rule's bound
+/// (a hundredth of the cutoff), not by a mismatch of masses.
+#[test]
+fn opening_a_moon_system_changes_its_pull_by_less_than_the_rule_allows() {
+    use glam::DVec3;
+    let w = sim::world::World::sol(Arc::new(shipped()));
+    let t = w.eph.start.add_seconds(1.0e8);
+    let snap = w.snapshot(t);
+    let root = w.eph.root();
+    let budget = w.cutoff * sim::world::CLUSTER_ERROR_FRACTION;
+    for (c, cl) in w.clusters.iter().enumerate() {
+        let stand_in = &w.sources[cl.stand_in];
+        let members: Vec<&sim::world::Source> =
+            w.sources.iter().filter(|s| s.role == sim::world::Role::Member(c)).collect();
+        let total: f64 = members.iter().map(|m| m.gm).sum();
+        assert!((stand_in.gm - total).abs() <= 1e-12 * total, "{}: {} vs {total}", stand_in.name, stand_in.gm);
+        // Just outside where it opens: (3 Q / (budget d^4)) = 1.
+        let d_open = (3.0 * cl.quadrupole / budget).powf(0.25) * 1.01;
+        let b = snap.relative_r(cl.node, root);
+        for dir in [DVec3::X, DVec3::Y, DVec3::new(0.3, -0.5, 0.8).normalize()] {
+            let r = b + dir * d_open;
+            let pull = |gm: f64, at: DVec3| {
+                let d = r - at;
+                -d * (gm / (d.length_squared() * d.length()))
+            };
+            let point = pull(stand_in.gm, b);
+            let resolved = members.iter().fold(DVec3::ZERO, |a, m| a + pull(m.gm, snap.relative_r(m.node, root)));
+            let jump = (point - resolved).length();
+            assert!(jump < budget, "{}: {jump:e} m/s² at {d_open:e} m (budget {budget:e})", stand_in.name);
+        }
+    }
 }
