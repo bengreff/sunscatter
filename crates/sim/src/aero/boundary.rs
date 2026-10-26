@@ -192,7 +192,7 @@ impl Edge {
             let a2 = m / w;
             let b = (1.0 + m) / w - 1.0;
             let den = (b * b + 4.0 * a2).sqrt();
-            let s = math::asin(((2.0 * a2 - b) / den).clamp(-1.0, 1.0)) + math::asin((b / den).clamp(-1.0, 1.0));
+            let s = asin_sum(((2.0 * a2 - b) / den).clamp(-1.0, 1.0), (b / den).clamp(-1.0, 1.0));
             m / (s * s)
         };
         (1.0 / fc, self.mu / air::sutherland_viscosity(tw) / fc)
@@ -259,7 +259,12 @@ impl Edge {
             0.0
         } else {
             let xi = XI_END * (x - x_t) / x_t;
-            1.0 - math::exp(-DN * xi * xi)
+            // Beyond ξ 9.5, 1 − exp(−0.412 ξ²) rounds to 1.
+            if xi > 9.5 {
+                1.0
+            } else {
+                1.0 - math::exp(-DN * xi * xi)
+            }
         };
         let (mut cf_turb, mut t_turb) = (0.0, 0.0);
         if gamma > 0.0 {
@@ -280,6 +285,20 @@ impl Edge {
             }
         }
         layer
+    }
+}
+
+/// asin a + asin b (a, b in −1..1) with one arcsine: asin(a√(1−b²) +
+/// b√(1−a²)), its supplement where both are positive and a² + b² > 1 (the
+/// sum beyond π/2).
+fn asin_sum(a: f64, b: f64) -> f64 {
+    let s = math::asin((a * (1.0 - b * b).max(0.0).sqrt() + b * (1.0 - a * a).max(0.0).sqrt()).clamp(-1.0, 1.0));
+    if a > 0.0 && b > 0.0 && a * a + b * b > 1.0 {
+        math::PI - s
+    } else if a < 0.0 && b < 0.0 && a * a + b * b > 1.0 {
+        -math::PI - s
+    } else {
+        s
     }
 }
 
@@ -350,6 +369,16 @@ mod tests {
             let (a, b) = (low.van_driest(w * T, T).0, zero.van_driest(w * T, T).0);
             let h = 0.5 * (w.sqrt() + 1.0);
             assert!((b * h * h - 1.0).abs() < 1e-12 && (a / b - 1.0).abs() < 1e-6, "{w}: {a} {b}");
+        }
+    }
+
+    #[test]
+    fn one_arcsine_for_two() {
+        for a in [-1.0, -0.9, -0.5, 0.0, 0.3, 0.7, 0.95, 1.0] {
+            for b in [-1.0, -0.8, -0.2, 0.0, 0.4, 0.8, 1.0] {
+                let want = math::asin(a) + math::asin(b);
+                assert!((asin_sum(a, b) - want).abs() < 1e-7, "{a} {b}: {} vs {want}", asin_sum(a, b));
+            }
         }
     }
 

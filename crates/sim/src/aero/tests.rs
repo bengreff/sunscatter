@@ -466,6 +466,25 @@ fn a_blunt_base_carries_the_published_base_pressure() {
 }
 
 #[test]
+fn a_tick_s_boundary_layer_gives_the_same_forces() {
+    // The test craft at M 1.2, 12 km (turbulent aft), skin at 300–600 K:
+    // the layer computed once gives aero_forces_wall's bits at its own
+    // flow, and within 0.1 % at a flow 2 mrad away (an integration stage).
+    let c = test_craft();
+    let wall: Vec<f64> = (0..c.cells.cells.len()).map(|i| 300.0 + (i % 7) as f64 * 50.0).collect();
+    let mut f = flow(DVec3::new(0.05, 0.02, -1.0), 1.2, 1e-5);
+    (f.reynolds_per_m, f.temperature, f.speed) = (6.4e6, 216.65, 354.0);
+    let b = craft_bake();
+    let layer = friction::FlowLayer::new(b, &f, Some(&wall), false);
+    assert_eq!(aero_forces_layer(b, &f, 0.8, &layer), aero_forces_wall(b, &f, 0.8, Some(&wall)));
+    let mut g = f;
+    g.dir = math::rotate_axis(f.dir.normalize(), DVec3::X, 2e-3);
+    let (exact, reused) = (aero_forces_wall(b, &g, 0.8, Some(&wall)), aero_forces_layer(b, &g, 0.8, &layer));
+    assert!((exact.0 - reused.0).length() < 1e-3 * exact.0.length(), "{exact:?} {reused:?}");
+    assert!((exact.1 - reused.1).length() < 1e-3 * exact.1.length(), "{exact:?} {reused:?}");
+}
+
+#[test]
 fn friction_acts_along_the_flow_and_not_on_the_base() {
     // A cylinder along the flow: friction on its side only (its upstream
     // face has no flow along it, the downstream face is separated).

@@ -25,7 +25,8 @@
 pub mod heating;
 
 pub use heating::{
-    cell_heat, cell_heat_flow, heating_shape, sutton_graves, tauber_sutton, FlowHeat, HeatInput, TauberSutton,
+    cell_heat, cell_heat_flow, cell_heat_layer, heating_shape, sutton_graves, tauber_sutton, FlowHeat, HeatInput,
+    TauberSutton,
 };
 
 use crate::craft::Cell;

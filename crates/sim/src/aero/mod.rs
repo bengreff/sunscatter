@@ -175,15 +175,30 @@ pub fn aero_forces(bake: &AeroBake, flow: &Flow, cd0: f64) -> (DVec3, DVec3) {
 /// [`aero_forces`] with each cell's skin temperature `wall` (K, one per
 /// cell; `None`: adiabatic wall) for the skin friction.
 pub fn aero_forces_wall(bake: &AeroBake, flow: &Flow, cd0: f64, wall: Option<&[f64]>) -> (DVec3, DVec3) {
+    forces_with(bake, flow, cd0, |d| {
+        let exposure = bake.exposure_weights(d);
+        let stream = boundary::Stream::of(flow);
+        friction::friction(&bake.geometry, d, &stream, |i| exposure.at(i), wall)
+    })
+}
+
+/// [`aero_forces`] with the skin friction from a boundary layer computed
+/// once for a nearby flow ([`friction::FlowLayer`]: a live tick's, reused at its
+/// integration stages). At the layer's own flow, the same bits as
+/// [`aero_forces_wall`] with its wall.
+pub fn aero_forces_layer(bake: &AeroBake, flow: &Flow, cd0: f64, layer: &friction::FlowLayer) -> (DVec3, DVec3) {
+    forces_with(bake, flow, cd0, |d| layer.friction(&bake.geometry, d))
+}
+
+/// The forces with the skin friction `friction(d)` (per unit q).
+fn forces_with(bake: &AeroBake, flow: &Flow, cd0: f64, friction: impl Fn(DVec3) -> (DVec3, DVec3)) -> (DVec3, DVec3) {
     if flow.q <= 0.0 || flow.dir.length_squared() == 0.0 {
         return (DVec3::ZERO, DVec3::ZERO);
     }
     let d = flow.dir.normalize();
     let s = bake.sums_at(d);
     let (f_cont, m_cont) = continuum(bake, &s, d, flow, cd0);
-    let exposure = bake.exposure_weights(d);
-    let stream = boundary::Stream::of(flow);
-    let (f_fr, m_fr) = friction::friction(&bake.geometry, d, &stream, |i| exposure.at(i), wall);
+    let (f_fr, m_fr) = if flow.reynolds_per_m > 0.0 { friction(d) } else { (DVec3::ZERO, DVec3::ZERO) };
     let (f_cont, m_cont) = (f_cont + f_fr, m_cont + m_fr);
     let f_fm = d * (2.0 * s.area);
     let m_fm = s.area_moment.cross(d) * 2.0;

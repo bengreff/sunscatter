@@ -62,7 +62,6 @@
 //!   direction). The absorptivity is the emissivity (grey skin) until the
 //!   craft data carries a solar absorptivity.
 
-use crate::aero::boundary::Stream;
 use crate::aero::{self, friction, AeroBake, Flow};
 use crate::craft::Cell;
 use glam::DVec3;
@@ -260,8 +259,26 @@ pub fn cell_heat_flow(
 ) {
     out.fill(0.0);
     if let Some(air) = air {
-        convective(bake, cells, air, scratch, out);
+        let layer = friction::FlowLayer::new(bake, air.flow, Some(air.wall), true);
+        convective(bake, cells, air, &layer, scratch, out);
     }
+    sunlight(bake, cells, sun, scratch, out);
+}
+
+/// [`cell_heat_flow`] with the boundary layer already computed for the
+/// air's flow and walls (`layer`, with its heat fluxes: a live tick's, shared
+/// with its forces); the same bits.
+pub fn cell_heat_layer(
+    bake: &AeroBake,
+    cells: &[Cell],
+    air: &FlowHeat,
+    layer: &friction::FlowLayer,
+    sun: DVec3,
+    scratch: &mut [f64],
+    out: &mut [f64],
+) {
+    out.fill(0.0);
+    convective(bake, cells, air, layer, scratch, out);
     sunlight(bake, cells, sun, scratch, out);
 }
 
@@ -282,9 +299,16 @@ fn most(a: f64, b: f64) -> f64 {
     }
 }
 
-/// The air's heat into each cell (W), added to `out` (`cont` a per-cell
-/// buffer).
-fn convective(bake: &AeroBake, cells: &[Cell], air: &FlowHeat, cont: &mut [f64], out: &mut [f64]) {
+/// The air's heat into each cell (W), added to `out`, from the boundary
+/// layer `layer` (`cont` a per-cell buffer).
+fn convective(
+    bake: &AeroBake,
+    cells: &[Cell],
+    air: &FlowHeat,
+    layer: &friction::FlowLayer,
+    cont: &mut [f64],
+    out: &mut [f64],
+) {
     let flow = air.flow;
     if flow.q <= 0.0 || flow.dir.length_squared() == 0.0 || flow.temperature <= 0.0 {
         return;
@@ -306,28 +330,23 @@ fn convective(bake: &AeroBake, cells: &[Cell], air: &FlowHeat, cont: &mut [f64],
     let scale = rho * v * cp;
     let exposure = bake.exposure_weights(d);
     // The attached cells' continuum heating (NaN: separated).
-    cont.fill(f64::NAN);
-    let stream = Stream::of(flow);
-    friction::layers(
-        &bake.geometry,
-        d,
-        &stream,
-        |i| exposure.at(i),
-        Some(air.wall),
-        true,
-        |i, s, layer| {
-            let hot = 1.0 - air.wall[i] / t0;
-            let nose = q_conv * hot * exposure.at(i) * s.max(0.0);
-            let aligned = least(scale * layer.heat_aligned, q_conv * hot);
-            let from_front = least(scale * layer.heat_laminar, most(nose, aligned));
-            let x = ((s - STAGNATION_SIN) / STAGNATION_BLEND + 0.5).clamp(0.0, 1.0);
-            let local = x * x * (3.0 - 2.0 * x);
-            let lam = local * nose + (1.0 - local) * from_front;
-            let turb = most(scale * layer.heat_turbulent, lam);
-            let gamma = layer.intermittency;
-            cont[i] = (1.0 - gamma) * lam + gamma * turb;
-        },
-    );
+    for (i, (c, layer)) in cont.iter_mut().zip(&layer.layers).enumerate() {
+        let Some((s, layer)) = layer else {
+            *c = f64::NAN;
+            continue;
+        };
+        let s = *s;
+        let hot = 1.0 - air.wall[i] / t0;
+        let nose = q_conv * hot * exposure.at(i) * s.max(0.0);
+        let aligned = least(scale * layer.heat_aligned, q_conv * hot);
+        let from_front = least(scale * layer.heat_laminar, most(nose, aligned));
+        let x = ((s - STAGNATION_SIN) / STAGNATION_BLEND + 0.5).clamp(0.0, 1.0);
+        let local = x * x * (3.0 - 2.0 * x);
+        let lam = local * nose + (1.0 - local) * from_front;
+        let turb = most(scale * layer.heat_turbulent, lam);
+        let gamma = layer.intermittency;
+        *c = (1.0 - gamma) * lam + gamma * turb;
+    }
     for (i, (o, c)) in out.iter_mut().zip(cells).enumerate() {
         let hot = 1.0 - air.wall[i] / t0;
         let floor = LEEWARD_FRACTION * q_conv * hot;

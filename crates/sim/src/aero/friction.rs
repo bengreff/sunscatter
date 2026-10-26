@@ -13,8 +13,9 @@
 //!   (White's law, Van Driest II) after, each with the wall's temperature
 //!   (adiabatic without one); the edge state from the cell's incidence.
 
-use super::bake::CellGeometry;
+use super::bake::{AeroBake, CellGeometry};
 use super::boundary::{Layer, Stream};
+use super::Flow;
 use glam::DVec3;
 
 /// Cells facing downstream more steeply than this (n·d above) are separated.
@@ -85,4 +86,61 @@ pub fn friction(
         m += c.centroid.cross(shear);
     });
     (f, m)
+}
+
+/// One flow's boundary layer over the attached cells, computed once and
+/// reused: within a live tick the force is evaluated at several attitudes
+/// (the rotation's integration stages), a few milliradians apart, and the
+/// heating reads the same layer. [`FlowLayer::friction`] keeps each cell's shear
+/// magnitude and takes its direction from the evaluated flow: at the flow
+/// it was computed for, the same bits as [`friction`].
+#[derive(Clone, Debug, PartialEq)]
+pub struct FlowLayer {
+    /// The flow direction it was computed at (unit, body axes).
+    pub dir: DVec3,
+    /// Per cell: sin θ and its layer; `None` where separated.
+    pub layers: Vec<Option<(f64, Layer)>>,
+}
+
+impl FlowLayer {
+    /// The layer of `flow` over `bake`'s cells with wall temperatures
+    /// `wall` (K per cell; `None`: adiabatic); `heat`: with the heat fluxes.
+    pub fn new(bake: &AeroBake, flow: &Flow, wall: Option<&[f64]>, heat: bool) -> Self {
+        let dir = flow.dir.normalize();
+        let mut layers = vec![None; bake.geometry.len()];
+        if flow.q > 0.0 && dir.is_finite() {
+            let e = bake.exposure_weights(dir);
+            let stream = Stream::of(flow);
+            self::layers(
+                &bake.geometry,
+                dir,
+                &stream,
+                |i| e.at(i),
+                wall,
+                heat,
+                |i, s, layer| {
+                    layers[i] = Some((s, *layer));
+                },
+            );
+        }
+        FlowLayer { dir, layers }
+    }
+
+    /// Friction force and its moment about the craft origin, per unit q,
+    /// for the flow direction `d` (unit) near the skin's.
+    pub fn friction(&self, cells: &[CellGeometry], d: DVec3) -> (DVec3, DVec3) {
+        let (mut f, mut m) = (DVec3::ZERO, DVec3::ZERO);
+        for (c, layer) in cells.iter().zip(&self.layers) {
+            let Some((_, layer)) = layer else { continue };
+            let s = -c.normal.dot(d);
+            let along = (1.0 - s * s).max(0.0).sqrt();
+            if along < 1e-12 || layer.shear == 0.0 {
+                continue;
+            }
+            let shear = (d + c.normal * s) * (layer.shear / along * c.area);
+            f += shear;
+            m += c.centroid.cross(shear);
+        }
+        (f, m)
+    }
 }

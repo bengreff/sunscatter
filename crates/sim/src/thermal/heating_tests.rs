@@ -229,3 +229,17 @@ fn rarefied_heating_tends_to_the_free_molecular_flux() {
     let peak = sphere_fluxes(&flow, 300.0).iter().map(|q| q.0).fold(0.0, f64::max);
     assert!((peak / stagnation(&flow, 300.0) - 1.0).abs() < 0.03, "{peak}");
 }
+
+#[test]
+fn a_tick_s_boundary_layer_gives_the_same_heating() {
+    let flow = earth_flow(45e3, 3000.0, -DVec3::Z, 2.0);
+    let (cells, b) = sphere();
+    let wall: Vec<f64> = (0..cells.cells.len()).map(|i| 400.0 + (i % 5) as f64 * 100.0).collect();
+    let air = FlowHeat { flow: &flow, sutton_graves_k: SUTTON_GRAVES_EARTH, radiative: None, wall: &wall };
+    let n = cells.cells.len();
+    let (mut a, mut c, mut scratch) = (vec![0.0; n], vec![0.0; n], vec![0.0; n]);
+    cell_heat_flow(b, &cells.cells, Some(&air), DVec3::X * 1361.0, &mut scratch, &mut a);
+    let layer = crate::aero::friction::FlowLayer::new(b, &flow, Some(&wall), true);
+    cell_heat_layer(b, &cells.cells, &air, &layer, DVec3::X * 1361.0, &mut scratch, &mut c);
+    assert_eq!(a, c);
+}

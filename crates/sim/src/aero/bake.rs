@@ -276,16 +276,25 @@ pub fn bake(surface: &Surface, cells: &Cells, opts: &BakeOptions) -> AeroBake {
 }
 
 /// The fins: cells whose opposite face (anti-parallel, straight through
-/// the part along −n) is closer than `thin`, grouped by primitive; a group
+/// the part along −n, on the same primitive) is closer than `thin`,
+/// grouped by primitive; a group
 /// is a fin when its cells lie in two parallel planes (each side's normals
 /// within 8° of their mean) and it is thin for its size (thickness under
 /// [`FIN_THICKNESS`] × √planform).
 fn find_fins(surface: &Surface, cells: &Cells, geometry: &[CellGeometry], thin: f64) -> Vec<Fin> {
     let mut by_primitive: Vec<(u32, Vec<u32>, f64)> = Vec::new();
+    // A fin's opposite face is its own primitive's: each cell is cast only
+    // against those triangles (O(cells × triangles per primitive)).
+    let primitives = cells.cells.iter().map(|c| c.primitive as usize + 1).max().unwrap_or(0);
+    let mut own: Vec<Vec<u32>> = vec![Vec::new(); primitives];
+    for (t, &cell) in cells.tri_cell.iter().enumerate() {
+        own[cells.cells[cell as usize].primitive as usize].push(t as u32);
+    }
     for (i, g) in geometry.iter().enumerate() {
         let n = g.normal;
         let mut nearest = f64::INFINITY;
-        for tri in &surface.triangles {
+        for &t in &own[cells.cells[i].primitive as usize] {
+            let tri = &surface.triangles[t as usize];
             let [a, b, c] = tri.map(|k| surface.positions[k as usize]);
             let tn = (b - a).cross(c - a);
             if tn.dot(n) >= -0.9 * tn.length() {
