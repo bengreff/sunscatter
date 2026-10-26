@@ -154,16 +154,18 @@ pub fn ceiling(atm: &Atmosphere) -> f64 {
 /// vessel at `(r, v)` relative to `anchor` (in source order). Altitude by
 /// the geocentric-latitude ellipsoid, as `BodyPhysical::altitude`.
 pub fn each_air(world: &World, snap: &Snapshot, anchor: NodeId, r: DVec3, v: DVec3, mut f: impl FnMut(Rarefied)) {
-    // A closed moon system is far away: its moons' air is not looked at
-    // (nor their positions evaluated).
-    let open = world.open_clusters(snap, anchor, r);
-    for (i, s) in world.sources.iter().enumerate() {
-        if !world.counts(i, open) {
-            continue;
-        }
+    for s in &world.sources {
         let Some(p) = s.physical.as_ref() else { continue };
         let Some(atm) = &p.atmosphere else { continue };
         let top = ceiling(atm);
+        // A moon of a system farther than its extent plus the air's reach is
+        // passed over without evaluating its position.
+        if let crate::world::Role::Member(c) = s.role {
+            let cl = &world.clusters[c];
+            if (r - snap.relative_r(cl.node, anchor)).length() > cl.extent + p.radius_eq + top {
+                continue;
+            }
+        }
         let k = if s.node == anchor { Default::default() } else { snap.relative(s.node, anchor) };
         let d = r - k.r;
         let dist = d.length();

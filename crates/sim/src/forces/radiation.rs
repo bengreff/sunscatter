@@ -11,7 +11,7 @@ use crate::ephem::Snapshot;
 use crate::frame::NodeId;
 use crate::light::{eclipse_factor, star_flux};
 use crate::relativity::C;
-use crate::world::World;
+use crate::world::{Role, World};
 use glam::DVec3;
 
 /// Occluders kept inline before spilling to the heap.
@@ -22,13 +22,20 @@ const INLINE: usize = 8;
 /// perfectly absorbing surface facing the star) and the unit direction the
 /// light travels (inertial axes).
 ///
-/// Moons of a closed moon system (`World::open_clusters`: beyond their
-/// system's tidal reach, over an AU from Jupiter's) are not occluders, so a
-/// far system's moons are never evaluated (the snapshot evaluates them
-/// lazily): from there a moon hides at most ~1e-4 of the Sun's disc, and
-/// only in an exact alignment.
+/// A moon system (`World::clusters`) whose sphere (its barycenter, its
+/// extent plus its largest member's radius) cannot reach the star's shadow
+/// cone is passed over as a whole, so its bodies are never evaluated (the
+/// snapshot evaluates moons lazily); every other body is tested on its own.
+/// Both tests only drop bodies that hide nothing: the result is the one rule
+/// with every body an occluder ([`crate::light::sunlight`]).
 pub fn starlight(world: &World, snap: &Snapshot, anchor: NodeId, r: DVec3, mut f: impl FnMut(f64, DVec3)) {
-    let open = world.open_clusters(snap, anchor, r);
+    // The largest member radius of each moon system.
+    let mut member_r = vec![0.0f64; world.clusters.len()];
+    for s in &world.sources {
+        if let (Role::Member(c), Some(b)) = (s.role, &s.physical) {
+            member_r[c] = member_r[c].max(b.radius_eq);
+        }
+    }
     for star in &world.sources {
         let Some(p) = star.physical.as_ref().filter(|p| p.luminosity > 0.0) else { continue };
         let at_star = snap.relative_r(star.node, anchor);
@@ -41,11 +48,26 @@ pub fn starlight(world: &World, snap: &Snapshot, anchor: NodeId, r: DVec3, mut f
         let mut inline = [(DVec3::ZERO, 0.0); INLINE];
         let mut n = 0;
         let mut spill: Vec<(DVec3, f64)> = Vec::new();
-        for (i, s) in world.sources.iter().enumerate() {
-            if s.node == star.node || !world.counts(i, open) {
+        // Per moon system: decided (bit) and may shade (bit).
+        let (mut decided, mut shades) = (0u64, 0u64);
+        for s in &world.sources {
+            if s.node == star.node {
                 continue;
             }
             let Some(b) = &s.physical else { continue };
+            if let Role::Member(c) = s.role {
+                if decided & (1 << c) == 0 {
+                    decided |= 1 << c;
+                    let cl = &world.clusters[c];
+                    let to_c = snap.relative_r(cl.node, anchor) - r;
+                    if system_may_shade(to_c, cl.extent, member_r[c], u, ds, p.radius_eq) {
+                        shades |= 1 << c;
+                    }
+                }
+                if shades & (1 << c) == 0 {
+                    continue;
+                }
+            }
             let c = snap.relative_r(s.node, anchor);
             if !may_occlude(c - r, b.radius_eq, u, ds, p.radius_eq) {
                 continue;
@@ -80,6 +102,23 @@ pub fn sunlight(world: &World, snap: &Snapshot, anchor: NodeId, r: DVec3) -> DVe
     let mut flux = DVec3::ZERO;
     starlight(world, snap, anchor, r, |p, dir| flux += dir * (p * C));
     flux
+}
+
+/// Whether any body of a moon system can hide part of the star: the system
+/// at `to_c` (its barycenter, from the point), every member within
+/// `extent` of it and of radius at most `member_r`. False only where no
+/// such body passes [`may_occlude`]: all behind the point, all beyond the
+/// star, or the barycenter farther from the line of sight than the extent
+/// plus the largest radius plus the star's apparent radius at the farthest
+/// member's distance (margin 1e-6).
+fn system_may_shade(to_c: DVec3, extent: f64, member_r: f64, u: DVec3, ds: f64, star_r: f64) -> bool {
+    let along = to_c.dot(u);
+    let dc = to_c.length();
+    if along + extent + member_r <= 0.0 || dc - extent - member_r >= ds {
+        return false;
+    }
+    let perp = (to_c - u * along).length();
+    perp <= (extent + member_r + star_r * (dc + extent) / ds) * (1.0 + 1e-6)
 }
 
 /// Whether a sphere of radius `radius` at `to_c` (from the point) can hide
@@ -155,5 +194,38 @@ mod tests {
             }
         }
         assert!(penumbra > 0, "some points in the penumbra");
+    }
+
+    /// The one rule far from Earth too: in the shadows of planets and
+    /// dwarf planets inside closed moon systems (Uranus, Neptune, Pluto and
+    /// Eris seen from beyond their tidal reach) and across their penumbrae,
+    /// the filtered sunlight is `light::sunlight`'s (every body an occluder).
+    #[test]
+    fn far_shadows_are_the_one_rules() {
+        let w = world();
+        let t = sol::sol_epoch().add_seconds(3.0 * 86_400.0);
+        let snap = w.snapshot(t);
+        let sun = w.find("Sun").unwrap().node;
+        let (mut dark, mut partial) = (0, 0);
+        for (name, dist) in
+            [("Uranus", 5.0e10), ("Uranus", 9.0e10), ("Neptune", 1.3e11), ("Eris", 1.5e10), ("Pluto", 9.0e9)]
+        {
+            let body = w.find(name).unwrap();
+            let at = snap.relative_r(body.node, sun);
+            let side = at.normalize().any_orthonormal_vector();
+            let radius = body.physical.as_ref().unwrap().radius_eq;
+            for k in -20..=20 {
+                // Across the shadow, behind the body, out to twice its radius.
+                let r = at + at.normalize() * dist + side * (radius * 0.1 * k as f64);
+                let full = crate::light::sunlight(&w, &snap, sun, r);
+                let got = sunlight(&w, &snap, sun, r);
+                assert!((got - full).length() <= 1e-12 * full.length().max(1e-300), "{name} {k}: {got} vs {full}");
+                let unshaded =
+                    crate::light::star_flux(w.find("Sun").unwrap().physical.as_ref().unwrap().luminosity, (r).length());
+                dark += usize::from(full.length() < 0.5 * unshaded);
+                partial += usize::from(full.length() < 0.999 * unshaded);
+            }
+        }
+        assert!(dark > 0 && partial > dark, "some points in shadow ({dark}) and penumbra ({partial})");
     }
 }
