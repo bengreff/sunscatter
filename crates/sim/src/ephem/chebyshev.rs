@@ -25,6 +25,10 @@ pub struct ChebTable {
     pub degree: usize,
     /// Layout: `[segment][axis x,y,z][coefficient]`.
     pub coeffs: Vec<f64>,
+    /// If not zero, every coefficient is a whole multiple of this power of
+    /// two (the generator rounded them), and the file stores the multiples
+    /// as packed integers. Zero: arbitrary f64 coefficients.
+    pub quantum: f64,
 }
 
 impl ChebTable {
@@ -199,7 +203,7 @@ mod tests {
                 coeffs.extend(interpolate_lobatto(&vals));
             }
         }
-        (ChebTable { start: Epoch::J2000, seg_len, degree, coeffs }, f)
+        (ChebTable { start: Epoch::J2000, seg_len, degree, coeffs, quantum: 0.0 }, f)
     }
 
     #[test]

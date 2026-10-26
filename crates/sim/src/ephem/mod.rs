@@ -193,6 +193,24 @@ impl Ephemeris {
         acc_a - acc_b
     }
 
+    /// Position of `of` relative to `about`, composed through their lowest
+    /// common ancestor: bit-identical to `relative(..).r` (and to a
+    /// snapshot's `relative_r`), without derivatives or allocation.
+    pub fn relative_r(&self, of: NodeId, about: NodeId, t: Epoch) -> DVec3 {
+        let (mut a, mut b) = (of, about);
+        let (mut acc_a, mut acc_b) = (DVec3::ZERO, DVec3::ZERO);
+        while a != b {
+            if self.depth[a.0 as usize] >= self.depth[b.0 as usize] {
+                acc_a += self.node(a).motion.eval_r(t);
+                a = self.node(a).parent.expect("walked past root");
+            } else {
+                acc_b += self.node(b).motion.eval_r(t);
+                b = self.node(b).parent.expect("walked past root");
+            }
+        }
+        acc_a - acc_b
+    }
+
     /// Kinematics relative to the root (the system/bubble frame). Prefer
     /// [`Ephemeris::relative`] for anything that needs precision.
     pub fn absolute(&self, of: NodeId, t: Epoch) -> Kinematics {
@@ -404,6 +422,7 @@ mod tests {
         for (x, y) in [(2, 1), (2, 3), (3, 2), (0, 2)] {
             assert_eq!(snap.relative(NodeId(x), NodeId(y)), e.relative(NodeId(x), NodeId(y), t));
             assert_eq!(snap.relative_r(NodeId(x), NodeId(y)), e.relative(NodeId(x), NodeId(y), t).r);
+            assert_eq!(e.relative_r(NodeId(x), NodeId(y), t), e.relative(NodeId(x), NodeId(y), t).r);
             assert_eq!(moved.relative(NodeId(x), NodeId(y)), snap.relative(NodeId(x), NodeId(y)));
         }
     }

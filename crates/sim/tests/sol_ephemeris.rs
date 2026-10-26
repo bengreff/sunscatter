@@ -26,7 +26,8 @@ fn shipped_ephemeris_matches_regeneration_bit_for_bit() {
     let bodies = initial.to_bodies();
     // Two years: equal to the trial span, so segment choices are identical to
     // the full 50-year run and every table here is a prefix of the shipped one.
-    let (regen, _) = sim::gen::generate(&bodies, &sol::tree(&bodies), &sol::gen_config(&bodies, 2.0));
+    let tree = sol::tree(&bodies, &sol::Catalog::default());
+    let (regen, _) = sim::gen::generate(&bodies, &tree, &sol::gen_config(&bodies, 2.0));
     let full = shipped();
     assert_eq!(regen.generator, full.generator);
     for (a, b) in regen.nodes().iter().zip(full.nodes()) {

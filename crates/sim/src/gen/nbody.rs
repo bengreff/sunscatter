@@ -1,23 +1,49 @@
 //! N-body system for ephemeris generation: Newtonian point masses (all pairs)
-//! plus optional recorded extras — the Sun's first post-Newtonian correction
-//! and zonal J2 of oblate bodies (with reaction). Which extras a system uses is
-//! part of its generator config, so the assumption set is explicit (D026).
+//! plus optional recorded extras — the Sun's first post-Newtonian correction,
+//! zonal harmonics (J2, J4, J6) of oblate bodies (with reaction), and
+//! perturbers taken from an already generated ephemeris (a moon system
+//! integrated in its barycenter's frame, under the Sun's and the other
+//! planets' tides). Which extras a system uses is part of its generator
+//! config, so the assumption set is explicit (D026).
 
 use super::InitialBody;
+use crate::ephem::Ephemeris;
+use crate::frame::NodeId;
 use crate::integrate::Separable;
 use crate::math::Compensated;
 use glam::DVec3;
+use std::sync::Arc;
 
 /// Speed of light (m/s).
 pub const C: f64 = 299_792_458.0;
 
-/// A body whose J2 acts on every other body, about its (precessing) pole.
+/// A body whose zonal harmonics act on every other body, about its
+/// (precessing) pole. `j4` and `j6` of zero leave exactly the J2 arithmetic.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Oblate {
     pub body: usize,
     pub j2: f64,
+    pub j4: f64,
+    pub j6: f64,
     pub radius: f64,
     pub rotation: crate::body::Rotation,
+}
+
+/// Perturbers that are not integrated here: nodes of an ephemeris generated
+/// before (the planets, for a moon system). The system's frame origin is
+/// the node `origin` (its barycenter); every body feels each perturber's
+/// pull minus the pull on the origin, which moves with the perturbers as a
+/// point mass of the system's total mass (the indirect term). With the
+/// root as origin the frame is inertial and the pull is direct.
+#[derive(Clone, Debug, PartialEq)]
+pub struct External {
+    pub eph: Arc<Ephemeris>,
+    pub origin: NodeId,
+    /// (node, GM) of each perturber, in summation order.
+    pub perturbers: Vec<(NodeId, f64)>,
+    /// Index into `perturbers` of the one whose 1PN field acts on every
+    /// body (the Sun, for bodies integrated in the barycentric frame).
+    pub relativistic: Option<usize>,
 }
 
 /// Forces beyond Newtonian point masses.
@@ -26,6 +52,13 @@ pub struct Extras {
     /// Index of the body whose 1PN (Schwarzschild) field acts on all others.
     pub relativistic_center: Option<usize>,
     pub oblate: Vec<Oblate>,
+    pub external: Option<External>,
+}
+
+impl Extras {
+    fn velocity_dependent(&self) -> bool {
+        self.relativistic_center.is_some() || self.external.as_ref().is_some_and(|e| e.relativistic.is_some())
+    }
 }
 
 pub struct NBody {
@@ -77,9 +110,32 @@ impl NBody {
         for ob in &self.extras.oblate {
             let pole = ob.rotation.pole(self.epoch.add_seconds(self.t));
             for k in (0..n).filter(|&k| k != ob.body) {
-                let a = j2_accel(pos[k] - pos[ob.body], self.gm[ob.body], ob.j2, ob.radius, pole);
+                let d = pos[k] - pos[ob.body];
+                let mut a = j2_accel(d, self.gm[ob.body], ob.j2, ob.radius, pole);
+                if ob.j4 != 0.0 || ob.j6 != 0.0 {
+                    a += j4_j6_accel(d, self.gm[ob.body], ob.j4, ob.j6, ob.radius, pole);
+                }
                 acc[k] += a;
                 acc[ob.body] -= a * (self.gm[k] / self.gm[ob.body]);
+            }
+        }
+        if let Some(ext) = &self.extras.external {
+            let t = self.epoch.add_seconds(self.t);
+            let root = ext.eph.root();
+            let inertial = ext.origin == root;
+            // Perturbers relative to the origin through the root, the origin
+            // evaluated once (the same bits as walking from each perturber
+            // when their common ancestor is the root, as for planets and a
+            // moon system's barycenter).
+            let origin = ext.eph.relative_r(ext.origin, root, t);
+            for &(node, gm) in &ext.perturbers {
+                let p = ext.eph.relative_r(node, root, t) - origin;
+                let indirect = if inertial { DVec3::ZERO } else { p * (gm / (p.length_squared() * p.length())) };
+                for (k, a) in acc.iter_mut().enumerate() {
+                    let d = p - pos[k];
+                    let d2 = d.length_squared();
+                    *a += d * (gm / (d2 * d2.sqrt())) - indirect;
+                }
             }
         }
         acc
@@ -91,6 +147,13 @@ impl NBody {
             let pos: Vec<DVec3> = self.r.iter().map(Compensated::value).collect();
             for k in (0..self.gm.len()).filter(|&k| k != s) {
                 acc[k] += schwarzschild_accel(pos[k] - pos[s], vel[k] - vel[s], self.gm[s]);
+            }
+        }
+        if let Some((ext, i)) = self.extras.external.as_ref().and_then(|e| e.relativistic.map(|i| (e, i))) {
+            let (node, gm) = ext.perturbers[i];
+            let k_s = ext.eph.relative(node, ext.origin, self.epoch.add_seconds(self.t));
+            for (k, a) in acc.iter_mut().enumerate() {
+                *a += schwarzschild_accel(self.r[k].value() - k_s.r, vel[k] - k_s.v, gm);
             }
         }
     }
@@ -110,6 +173,30 @@ pub fn j2_accel(r: DVec3, gm: f64, j2: f64, radius: f64, pole: DVec3) -> DVec3 {
     let k = -1.5 * j2 * gm * radius * radius / (d2 * d2 * d);
     let zr2 = 5.0 * z * z / d2;
     (r * (1.0 - zr2) + pole * (2.0 * z)) * k
+}
+
+/// Acceleration at `r` (relative to the oblate body's centre) from its J4
+/// and J6 terms (the gradient of `−(μ/r) Σ J_n (R/r)^n P_n(z/r)`; with
+/// [`j2_accel`], the zonal field to degree 6).
+pub fn j4_j6_accel(r: DVec3, gm: f64, j4: f64, j6: f64, radius: f64, pole: DVec3) -> DVec3 {
+    let d2 = r.length_squared();
+    let d = d2.sqrt();
+    let s = r.dot(pole) / d; // sine of the latitude
+    let s2 = s * s;
+    let q = radius * radius / d2;
+    // U_n = -(μ/r) J_n q^(n/2) P_n(s); a = -∇U. With u = μ/r², per term:
+    //   radial:  -(n+1) J_n q^(n/2) P_n(s) u   (along r̂, outward positive)
+    //   along the pole direction p̂ − s r̂:  J_n q^(n/2) P_n'(s) u
+    let p4 = (35.0 * s2 * s2 - 30.0 * s2 + 3.0) / 8.0;
+    let dp4 = (140.0 * s2 * s - 60.0 * s) / 8.0;
+    let p6 = (231.0 * s2 * s2 * s2 - 315.0 * s2 * s2 + 105.0 * s2 - 5.0) / 16.0;
+    let dp6 = (1386.0 * s2 * s2 * s - 1260.0 * s2 * s + 210.0 * s) / 16.0;
+    let (c4, c6) = (j4 * q * q, j6 * q * q * q);
+    let radial = -(5.0 * c4 * p4 + 7.0 * c6 * p6);
+    let polar = c4 * dp4 + c6 * dp6;
+    let u = gm / d2;
+    let rhat = r / d;
+    (rhat * radial + (pole - rhat * s) * polar) * u
 }
 
 /// First post-Newtonian acceleration of a test body in a mass's static field.
@@ -136,7 +223,7 @@ impl Separable for NBody {
         let v0: Vec<DVec3> = self.v.iter().map(Compensated::value).collect();
         let mut acc = base.clone();
         self.add_velocity_dependent(&mut acc, &v0);
-        if self.extras.relativistic_center.is_some() {
+        if self.extras.velocity_dependent() {
             for _ in 0..3 {
                 let mid: Vec<DVec3> = v0.iter().zip(&acc).map(|(v, a)| *v + *a * (0.5 * h)).collect();
                 acc.clone_from(&base);
@@ -164,5 +251,29 @@ mod tests {
         let base = j2 * gm * rad * rad / r.powi(4);
         assert!((eq.x + 1.5 * base).abs() < 1e-12 * base.abs().max(1.0));
         assert!((pol.z - 3.0 * base).abs() < 1e-12 * base.abs().max(1.0));
+    }
+
+    /// J4 and J6 against a finite-difference gradient of their potential.
+    #[test]
+    fn j4_j6_match_the_gradient_of_the_zonal_potential() {
+        let (gm, rad, j4, j6) = (1.266_865_3e17, 7.1492e7, -5.866e-4, 3.42e-5);
+        let pole = DVec3::new(0.1, -0.2, 1.0).normalize();
+        let potential = |r: DVec3| {
+            let d = r.length();
+            let s = r.dot(pole) / d;
+            let p4 = (35.0 * s.powi(4) - 30.0 * s * s + 3.0) / 8.0;
+            let p6 = (231.0 * s.powi(6) - 315.0 * s.powi(4) + 105.0 * s * s - 5.0) / 16.0;
+            -(gm / d) * (j4 * (rad / d).powi(4) * p4 + j6 * (rad / d).powi(6) * p6)
+        };
+        for r in [DVec3::new(4.2e8, 1.0e7, 3.0e7), DVec3::new(1.0e8, -5.0e7, 6.0e7), DVec3::new(0.0, 0.0, 9.0e7)] {
+            let h = 1.0;
+            let grad = DVec3::new(
+                potential(r + DVec3::X * h) - potential(r - DVec3::X * h),
+                potential(r + DVec3::Y * h) - potential(r - DVec3::Y * h),
+                potential(r + DVec3::Z * h) - potential(r - DVec3::Z * h),
+            ) / (2.0 * h);
+            let a = j4_j6_accel(r, gm, j4, j6, rad, pole);
+            assert!((a + grad).length() < 1e-6 * grad.length(), "{a} vs {}", -grad);
+        }
     }
 }

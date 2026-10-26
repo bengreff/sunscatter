@@ -66,7 +66,7 @@ pub fn run(bsp: &Path, years: f64, extras: &str) {
     write_ron("data/ephemeris/de440-reference.ron", &reference);
 
     let bodies: Vec<InitialBody> = initial.to_bodies();
-    let tree = sim::sol::tree(&bodies);
+    let tree = sim::sol::tree(&bodies, &sim::sol::Catalog::default());
     let mut cfg = sim::sol::gen_config(&bodies, years);
     // Diagnostics: isolate the effect of each extra force (never written as the
     // shipped ephemeris unless "all").

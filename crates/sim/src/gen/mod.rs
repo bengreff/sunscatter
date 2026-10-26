@@ -10,7 +10,7 @@ mod fit;
 mod nbody;
 
 pub use fit::{fit_rails, RailsFit};
-pub use nbody::{j2_accel, schwarzschild_accel, Extras, NBody, Oblate};
+pub use nbody::{j2_accel, j4_j6_accel, schwarzschild_accel, External, Extras, NBody, Oblate};
 
 use crate::ephem::{ChebTable, Ephemeris, Motion, Node, NodeKind};
 use crate::frame::NodeId;
@@ -56,6 +56,13 @@ pub struct GenConfig {
     pub rails_stride: usize,
     /// Forces beyond point masses (part of the recorded assumption set).
     pub extras: Extras,
+    /// Segment lengths: powers of two of the step (the planets', so their
+    /// tables stay as generated) or any whole number of steps (shorter
+    /// tables for moons).
+    pub free_segments: bool,
+    /// Round table coefficients to a power of two well under each node's
+    /// tolerance (`quantum_for`), so the file stores them as small integers.
+    pub quantize: bool,
 }
 
 /// What the generator decided for one node, and how well it fits.
@@ -75,9 +82,14 @@ pub fn generate(bodies: &[InitialBody], tree: &[NodeSpec], cfg: &GenConfig) -> (
     let seg_steps: Vec<usize> = (0..tree.len())
         .map(|n| if n == 0 { 0 } else { choose_segment_steps(&trial.samples[n], tree[n].tolerance, cfg) })
         .collect();
-    // Round up so every node's last segment is complete and the window is covered.
-    let longest = seg_steps.iter().copied().max().unwrap_or(1).max(1);
-    let full_steps = (total_steps as usize).div_ceil(longest) * longest;
+    // Run until every node's last segment is complete and the window is
+    // covered (powers of two: a whole number of the longest segment).
+    let full_steps = if cfg.free_segments {
+        seg_steps.iter().filter(|&&s| s > 0).map(|&s| (total_steps as usize).div_ceil(s) * s).max().unwrap_or(0)
+    } else {
+        let longest = seg_steps.iter().copied().max().unwrap_or(1).max(1);
+        (total_steps as usize).div_ceil(longest) * longest
+    };
     let full = run(bodies, tree, cfg, full_steps, Some(&seg_steps));
 
     let mut nodes = Vec::with_capacity(tree.len());
@@ -151,6 +163,7 @@ fn run(
                 seg_len: seg_steps.map_or(0, |s| s[n] as i64 * cfg.step),
                 degree: cfg.degree,
                 coeffs: Vec::new(),
+                quantum: quantum_for(tree[n].tolerance, cfg),
             })
             .collect(),
         table_err: vec![0.0; n_nodes],
@@ -162,7 +175,7 @@ fn run(
         let t = (k as i64 * cfg.step) as f64;
         let body_kin = sys.kinematics();
         for n in 1..n_nodes {
-            let s = relative_sample(&body_kin, bodies, tree, n, t);
+            let s = relative_sample(&body_kin, bodies, tree, n, t, cfg.extras.external.is_some());
             if k % cfg.rails_stride == 0 {
                 out.rails_samples[n].push(s);
             }
@@ -173,7 +186,7 @@ fn run(
                     let len = seg[n];
                     if buffers[n].len() > len {
                         let seg_samples: Vec<StepSample> = buffers[n].iter().take(len + 1).copied().collect();
-                        let (coeffs, err) = fit_segment(&seg_samples, cfg.degree);
+                        let (coeffs, err) = fit_segment(&seg_samples, cfg.degree, out.tables[n].quantum);
                         out.tables[n].coeffs.extend(coeffs);
                         out.table_err[n] = out.table_err[n].max(err);
                         buffers[n].drain(..len);
@@ -186,14 +199,21 @@ fn run(
 }
 
 /// State of node `n` relative to its parent from body kinematics (r, v, a).
+/// With `origin_root` the root is the frame's origin (a moon system's
+/// barycenter node, where the integration is centred), not the members'
+/// barycenter.
 fn relative_sample(
     kin: &[(DVec3, DVec3, DVec3)],
     bodies: &[InitialBody],
     tree: &[NodeSpec],
     n: usize,
     t: f64,
+    origin_root: bool,
 ) -> StepSample {
     let bary = |spec: &NodeSpec| {
+        if origin_root && spec.parent.is_none() {
+            return (DVec3::ZERO, DVec3::ZERO, DVec3::ZERO);
+        }
         let total: f64 = spec.members.iter().map(|&b| bodies[b].gm).sum();
         let mut acc = (DVec3::ZERO, DVec3::ZERO, DVec3::ZERO);
         for &b in &spec.members {
@@ -209,10 +229,30 @@ fn relative_sample(
     StepSample { t, r: me.0 - parent.0, v: me.1 - parent.1, a: me.2 - parent.2 }
 }
 
+/// The coefficient quantum of a node with this tolerance: the largest power
+/// of two under `tolerance / (8 (degree + 1))`, so rounding every
+/// coefficient moves a position by at most an eighth of the tolerance per
+/// axis. Zero (no rounding) unless the config quantizes.
+pub fn quantum_for(tolerance: f64, cfg: &GenConfig) -> f64 {
+    if !cfg.quantize || tolerance <= 0.0 {
+        return 0.0;
+    }
+    let target = tolerance / (8.0 * (cfg.degree + 1) as f64);
+    let mut q = 1.0f64;
+    while q > target {
+        q *= 0.5;
+    }
+    while q * 2.0 <= target {
+        q *= 2.0;
+    }
+    q
+}
+
 /// Fits one segment spanning `samples` (equally spaced, both ends included):
-/// interpolates at Lobatto nodes (values from quintic Hermite between samples)
-/// and returns the coefficients plus the max position error at the samples.
-fn fit_segment(samples: &[StepSample], degree: usize) -> (Vec<f64>, f64) {
+/// interpolates at Lobatto nodes (values from quintic Hermite between samples),
+/// rounds the coefficients to multiples of `quantum` (if not zero), and
+/// returns them plus the max position error at the samples.
+fn fit_segment(samples: &[StepSample], degree: usize, quantum: f64) -> (Vec<f64>, f64) {
     let (t0, t1) = (samples[0].t, samples[samples.len() - 1].t);
     let h = samples[1].t - t0;
     let len = t1 - t0;
@@ -226,6 +266,11 @@ fn fit_segment(samples: &[StepSample], degree: usize) -> (Vec<f64>, f64) {
     for axis in 0..3 {
         let vals: Vec<f64> = pts.iter().map(|p| p.to_array()[axis]).collect();
         coeffs.extend(crate::ephem::interpolate_lobatto(&vals));
+    }
+    if quantum > 0.0 {
+        // Exact: dividing and multiplying by a power of two, and rounding.
+        // (+ 0.0 turns a rounded -0.0 into the +0.0 the file reads back.)
+        coeffs.iter_mut().for_each(|c| *c = (*c / quantum).round() * quantum + 0.0);
     }
     let mut max_err: f64 = 0.0;
     for s in samples {
@@ -241,17 +286,35 @@ fn fit_segment(samples: &[StepSample], degree: usize) -> (Vec<f64>, f64) {
     (coeffs, max_err)
 }
 
-/// Largest power-of-two number of steps whose segments fit the trial samples
-/// within half the tolerance.
+/// Largest number of steps whose segments fit the trial samples within half
+/// the tolerance: a power of two, or with `free_segments` any whole number
+/// (the largest power of two that fits, then a bisection up to the next).
 fn choose_segment_steps(samples: &[StepSample], tolerance: f64, cfg: &GenConfig) -> usize {
+    let quantum = quantum_for(tolerance, cfg);
+    let fits = |steps: usize| {
+        steps < samples.len()
+            && samples
+                .windows(steps + 1)
+                .step_by(steps)
+                .all(|w| fit_segment(w, cfg.degree, quantum).1 <= 0.5 * tolerance)
+    };
     let mut steps = 1usize << 16;
-    while steps > 4 {
-        let fits = steps < samples.len()
-            && samples.windows(steps + 1).step_by(steps).all(|w| fit_segment(w, cfg.degree).1 <= 0.5 * tolerance);
-        if fits {
-            return steps;
-        }
+    while steps > 4 && !fits(steps) {
         steps /= 2;
     }
-    steps
+    if !cfg.free_segments || steps <= 4 {
+        return steps;
+    }
+    // `steps` fits; find the largest that fits below twice it (assuming
+    // the error grows with length, which bisection needs).
+    let (mut lo, mut hi) = (steps, 2 * steps);
+    while hi - lo > 1 {
+        let mid = (lo + hi) / 2;
+        if fits(mid) {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    lo
 }
