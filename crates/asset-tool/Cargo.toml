@@ -10,8 +10,7 @@ publish = false
 flate2 = "1"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 tiff = "0.11"
-
-[dev-dependencies]
+# visual.ron's zone list (zones.rs); also the star catalogue's test.
 ron = "0.10"
 serde.workspace = true
 

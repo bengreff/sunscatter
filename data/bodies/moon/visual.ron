@@ -5,6 +5,20 @@
     albedo: 0.12,
     roughness: 0.95,
     icon_color: (0.8, 0.8, 0.78),
+    // Surface zones (crisp-surfaces.md), baked into zones.png by
+    // `asset-tool zones` from the LROC colour map (cluster centres in
+    // CIELAB, 2026-10-25). The far side's highlands are brighter than the
+    // near side's, hence two highland zones.
+    zones: Some((
+        map: "zones.png",
+        tint: 0.5,
+        list: [
+            (name: "mare", source: (126, 124, 128), pattern: (scale_m: 1500.0, contrast: 0.08)),
+            (name: "highland", source: (188, 183, 179), pattern: (scale_m: 1000.0, contrast: 0.12)),
+            (name: "bright highland", source: (217, 215, 216), pattern: (scale_m: 1000.0, contrast: 0.1)),
+            (name: "bright ejecta", source: (238, 240, 242), pattern: (scale_m: 600.0, contrast: 0.1)),
+        ],
+    )),
     detail: Some((
         scale_m: 25.0,
         strength: 0.55,

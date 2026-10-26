@@ -1,4 +1,4 @@
-//! Earth and Moon: heightmaps, colour maps, roughness and (Earth) the water mask.
+//! Earth and Moon: heightmaps, colour maps, roughness, zones and (Earth) the water mask.
 
 use std::path::{Path, PathBuf};
 
@@ -95,6 +95,8 @@ pub enum Map {
     Water,
     /// Derived from the committed heightmap, after it is baked.
     Roughness,
+    /// Derived from the committed colour, water and height maps, after they are baked.
+    Zones,
 }
 
 /// Command-line options for the body bakes.
@@ -106,6 +108,8 @@ pub struct Opts {
     pub color_w: Option<usize>,
     /// Override the water mask width.
     pub water_w: Option<usize>,
+    /// Override the zone map width.
+    pub zones_w: Option<usize>,
     /// Bake only this map.
     pub only: Option<Map>,
     /// Write small previews to `data/external/previews/`.
@@ -128,6 +132,9 @@ pub fn earth(o: Opts) {
     if o.wants(Map::Roughness) {
         crate::roughness::bake("earth");
     }
+    if o.wants(Map::Zones) {
+        zones("earth", o);
+    }
 }
 
 pub fn moon(o: Opts) {
@@ -140,6 +147,15 @@ pub fn moon(o: Opts) {
     if o.wants(Map::Roughness) {
         crate::roughness::bake("moon");
     }
+    if o.wants(Map::Zones) {
+        zones("moon", o);
+    }
+}
+
+/// Bakes a body's zone map from its committed maps (see [`crate::zones`]).
+pub fn zones(body: &str, o: Opts) {
+    let preview = o.previews.then(|| preview_path(&format!("{body}_zones.png")));
+    crate::zones::bake(body, o.zones_w.unwrap_or(crate::zones::ZONES_W), preview.as_deref());
 }
 
 /// Heights and the water mask both come from ETOPO, read once.

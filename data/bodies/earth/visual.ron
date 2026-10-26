@@ -7,7 +7,39 @@
     icon_color: (0.45, 0.65, 1.0),
     // Open ocean's water-leaving reflectance (π·Rrs for clear water: ~0.03 at
     // 443 nm, ~0.008 at 555 nm, ~0.003 at 670 nm).
-    ocean: Some((roughness: 0.12, albedo: (0.003, 0.008, 0.03), mask: Some("water.png"))),
+    ocean: Some((
+        roughness: 0.12,
+        albedo: (0.003, 0.008, 0.03),
+        mask: Some("water.png"),
+    )),
+    // Land zones (crisp-surfaces.md), baked into zones.png by
+    // `asset-tool zones`. Sources are cluster centres of the Blue Marble
+    // land pixels (k-means in CIELAB, 2026-10-25); each zone is drawn in
+    // its source colour (the map's own reflectance) with a procedural
+    // pattern. No constraints are needed: everything the ice zone takes
+    // below 55° latitude is a real glacier (Patagonia, Kerguelen, South
+    // Georgia, high mountains), and salt pans are nearer "pale ground".
+    zones: Some((
+        map: "zones.png",
+        tint: 0.3,
+        list: [
+            (name: "ice", source: (237, 239, 240), pattern: (scale_m: 3000.0, contrast: 0.05)),
+            (name: "dark forest", source: (20, 24, 9), pattern: (scale_m: 600.0, contrast: 0.25)),
+            (name: "forest", source: (31, 43, 15), pattern: (scale_m: 800.0, contrast: 0.25)),
+            (name: "woodland", source: (61, 62, 31), pattern: (scale_m: 1000.0, contrast: 0.25)),
+            (name: "scrub", source: (100, 85, 55), pattern: (scale_m: 1200.0, contrast: 0.2)),
+            (name: "red earth", source: (116, 74, 42), pattern: (scale_m: 2000.0, contrast: 0.15)),
+            (name: "steppe", source: (137, 119, 88), pattern: (scale_m: 1500.0, contrast: 0.15)),
+            (name: "desert", source: (185, 156, 117), pattern: (scale_m: 2500.0, contrast: 0.12)),
+            (name: "tundra", source: (98, 98, 83), pattern: (scale_m: 1000.0, contrast: 0.2)),
+            (name: "bare rock", source: (150, 148, 138), pattern: (scale_m: 700.0, contrast: 0.25)),
+            // Salt pans and ground with patchy snow.
+            (name: "pale ground", source: (209, 213, 215), pattern: (scale_m: 1500.0, contrast: 0.15)),
+            // Lakes above sea level and inland seas (the Caspian), which the
+            // sea mask does not hold: near-black in the map.
+            (name: "lake", source: (3, 6, 8), water: true),
+        ],
+    )),
     detail: Some((
         scale_m: 40.0,
         strength: 0.5,
