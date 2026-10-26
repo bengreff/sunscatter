@@ -39,6 +39,7 @@
 
 mod bodies;
 mod color;
+mod giants;
 mod grid;
 mod resample;
 mod roughness;
@@ -87,6 +88,7 @@ fn main() {
             stars::run();
             bodies::check();
         }
+        Some("giants") => giants::run(&args[1..]),
         Some("check") => bodies::check(),
         Some("inspect") => {
             let t = source::read_tiff(Path::new(args.get(1).expect("inspect needs a file")));

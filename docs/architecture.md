@@ -53,7 +53,7 @@ A short map to search before building anything: who owns what, the frame order, 
 | Apoapsides, periapsides and impact of a vessel's predicted trajectory (extrema of distance to the dominant body, D076), cached per vessel | `game::trajectory::apsides` | every Ap/Pe readout reads it (map markers, navball cluster, Orbital menu, tracking, MCP, planner); nothing shows osculating Ap/Pe |
 | Vessel lines: adaptive sampling of stored segments, frustum culling, the drawn points kept per frame (`Lines`) | `game::trajectory::lines` | the renderer never integrates; picking reads `Lines` |
 | Burn planner: draft, handles (drag → Δv, `drag_dv`), clicks on the line | `game::planner` (`view` for the 3D/map part) | the plan is sent as `GameCommand::SetPlan` |
-| Lighting: star flux per object, eclipses, planetshine (D055) | `game::lighting` (rules; fills the terrain uniforms; the shader mirrors `sim::light::eclipse_factor` and fades sky light through twilight) | ambient/starlight in `game::sky`; exposure fixed (D055) |
+| Lighting: star flux per object, eclipses, planetshine (D055) | `game::lighting` (rules; fills the terrain uniforms; the shader mirrors `sim::light::eclipse_factor` and fades sky light through twilight); the camera's exposure from the starlight at the camera (`exposure_ev100`, D087) | ambient/starlight in `game::sky` |
 | Camera pose and limits, zoom, collision with surfaces and the ship, yaw reference and up blending | `game::camera` (pure rules in `camera::rules`) | terrain via `sim::forces::altitude_above` |
 | Navball cluster (D080): the ball (`ball`), the ORBIT/SURFACE/TARGET switch, essentials, SAS and hold buttons, the throttle bar (`rules::throttle_from_bar`), the state line (`game::hud::state_word`) | `game::navball` (rules in `navball::rules`) | |
 | A vessel's state at the clock (for drawing) | `sim::vessel::Vessel::state_at` | never integrates (rule 4) |
@@ -62,7 +62,9 @@ A short map to search before building anything: who owns what, the frame order, 
 | Terrain look: colour map, water mask, ground textures, waves | `game::terrain` (`material`, `water`, `ground`, `terrain.wgsl`) | textures in `data/textures/terrain` (CC0) |
 | Surface zones (D073): classification of the real maps into each body's zone list (`zones.png`) | `asset-tool::zones` | the list is body data in `visual.ron` |
 | Drawing zones: zone map and far texture, palette, warp, coast step, zone pick (CPU mirrors of the shader's rules) | `game::terrain::zones` (`terrain.wgsl` mirrors it) | the `zones` toggle, on in Minimal |
-| Which atmosphere mode a camera uses (tables inside, raymarching outside) | `game::atmosphere::raymarch` | |
+| Which atmosphere mode a camera uses (tables inside, raymarching outside); which body's atmosphere is drawn (the one the camera is deepest in, within 100 radii); the scattering medium from `visual.ron` (per-channel Mie asymmetry, aerosol layers) | `game::atmosphere` (`raymarch`, `active`, `medium`) | |
+| Body tour screenshots (disc, limb, ground per body) | `game::tour` (poses: `tour::pose`) | `SUNSCATTER_TOUR` |
+| Giant planets' colour maps (OPAL, calibrated to measured albedos) | `asset-tool::giants` | docs/features/solar-visuals.md |
 | Graphics tiers and toggles | `game::settings`; the settings screen in `game::settings_ui` | Minimal is the default and only developed tier (D073); `persist::GRAPHICS_VERSION` resets older saved graphics |
 | Flight-view layout (D080): fixed places, the menu bar, the two docks and their stacking; theme, pause menu, key help | `game::interface` (`layout` is pure rules) | open menus and expanded sections saved in `settings.ron` |
 | Task menus (D080): the registry (`MenuId`: title, key, dock, order), each menu's content as a pure function of `FlightData`, the generic section renderer; the stage stack and next-stage rule (skeleton) | `game::interface::menus` | a new task is one `MenuId` entry plus its content function |
