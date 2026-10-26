@@ -425,11 +425,13 @@ fn compressible_turbulent_friction_falls_like_van_driest() {
     assert!(p(5.0) < p(3.0) && p(3.0) < p(2.0));
     assert!((p(0.0) / boundary::cf_turbulent(1e7) - 1.0).abs() < 1e-12);
     // The layer at M 2, Re_x 10⁷ is fully turbulent (Re_θ ≫ 350·M_e) and
-    // takes that coefficient; at M 5 Re_θ 1,600 is still laminar (onset at
-    // 350·5 = 1,750).
-    let layer = |m: f64| stream(1e7, m).edge(0.0, 0.0).layer(1.0, 1.0, None, 216.65, false);
-    assert!((layer(2.0).shear / p(2.0) - 1.0).abs() < 1e-12 && layer(2.0).intermittency == 1.0);
-    assert_eq!(layer(5.0).intermittency, 0.0);
+    // takes that coefficient; at M 5 it is too, past a sharp cone's onset in
+    // flight (Re_x 3·10⁶, Softley); at M 5, Re_x 2·10⁶ (Re_θ ≈ 730, under
+    // 350·5) it is laminar.
+    let layer = |m: f64, re: f64| stream(re, m).edge(0.0, 0.0).layer(1.0, 1.0, None, 216.65, false);
+    assert!((layer(2.0, 1e7).shear / p(2.0) - 1.0).abs() < 1e-12 && layer(2.0, 1e7).intermittency == 1.0);
+    assert!((layer(5.0, 1e7).shear / p(5.0) - 1.0).abs() < 1e-9);
+    assert_eq!(layer(5.0, 2e6).intermittency, 0.0);
 }
 
 #[test]

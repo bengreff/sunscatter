@@ -27,7 +27,10 @@
 //!   reaches max([`RE_THETA_LOW`], [`RE_THETA_PER_MACH`]·M_e): the smooth
 //!   flat plate's onset at Re_x 5·10⁵ at low edge Mach numbers, the
 //!   Re_θ/M_e = const correlation of the Shuttle orbiter's flight data at
-//!   hypersonic speeds (Tauber eq. 51 and fig. 11). Onset x_t from the
+//!   hypersonic speeds (Tauber eq. 51 and fig. 11); or where the edge
+//!   Reynolds number of the run reaches sharp slender cones' flight values
+//!   against the edge Mach number ([`SLENDER_ONSET`], Softley via Tauber
+//!   fig. 10), whichever comes first. Onset x_t from the
 //!   cell's own edge state (local similarity); the transitional region is
 //!   as long as the laminar run before it (Tauber §4.2), the turbulent
 //!   share across it Dhawan & Narasimha's intermittency γ = 1 −
@@ -64,6 +67,26 @@ pub const RE_THETA_LOW: f64 = 469.5;
 /// edge model (`tests/aero_boundary.rs`; STS-1 to 4 values at onset
 /// were 200–400, his fig. 11).
 pub const RE_THETA_PER_MACH: f64 = 350.0;
+/// Transition onset of sharp slender cones in flight: the edge Reynolds
+/// number of the run against the edge Mach number (Softley et al., as
+/// faired in Tauber, NASA TP-2914, fig. 10: Re/ft 2·10⁶, uniform wall
+/// temperature; read from the figure), held at its ends. Below M_e ≈ 3
+/// the momentum-thickness criterion always comes first; at hypersonic edge
+/// Mach numbers this one does (Re_θ/M_e = 350 would put a sharp cone's onset
+/// ~30 times later than flight at M_e 10).
+pub const SLENDER_ONSET: [(f64, f64); 11] = [
+    (4.9, 3.0e6),
+    (6.0, 3.25e6),
+    (7.0, 3.6e6),
+    (8.0, 4.2e6),
+    (9.0, 5.0e6),
+    (10.0, 6.2e6),
+    (11.0, 8.0e6),
+    (12.0, 1.07e7),
+    (13.0, 1.5e7),
+    (14.0, 2.2e7),
+    (14.7, 3.2e7),
+];
 /// Dhawan & Narasimha's intermittency constant.
 const DN: f64 = 0.412;
 /// ξ at the end of transition (γ = 0.99): √(ln 100 / 0.412).
@@ -198,10 +221,30 @@ impl Edge {
         (1.0 / fc, self.mu / air::sutherland_viscosity(tw) / fc)
     }
 
-    /// Transition onset run length (m) for reference factor `c_star`.
+    /// Transition onset run length (m) for reference factor `c_star`, by the
+    /// momentum-thickness criterion (in the layer's own, relieved, run).
     pub fn onset(&self, c_star: f64) -> f64 {
         let re_theta = RE_THETA_LOW.max(RE_THETA_PER_MACH * self.mach) / 0.664;
         re_theta * re_theta / (c_star * self.re_per_m).max(1e-300)
+    }
+
+    /// Transition onset run length (m) by the edge Reynolds number of
+    /// sharp slender cones in flight against the edge Mach number
+    /// ([`SLENDER_ONSET`]; in the body's own run).
+    pub fn slender_onset(&self) -> f64 {
+        let t = &SLENDER_ONSET;
+        let m = self.mach;
+        let re = if m <= t[0].0 {
+            t[0].1
+        } else if m >= t[t.len() - 1].0 {
+            t[t.len() - 1].1
+        } else {
+            let k = t.partition_point(|e| e.0 <= m);
+            let (a, b) = (t[k - 1], t[k]);
+            // Log-linear in Re.
+            a.1 * math::exp(math::ln(b.1 / a.1) * (m - a.0) / (b.0 - a.0))
+        };
+        re / self.re_per_m.max(1e-300)
     }
 
     /// The laminar mean skin-friction coefficient over run lengths `a..b`
@@ -262,7 +305,9 @@ impl Edge {
         let t_lam = wall.unwrap_or_else(|| self.recovery(LAMINAR_RECOVERY, t_inf));
         let c = self.reference(t_lam);
         let cf_lam = self.laminar_mean(c, a, b);
-        let x_t = self.onset(c);
+        // The first of the two criteria (the slender-cone one in the body's
+        // run, so × the laminar relief in the layer's).
+        let x_t = self.onset(c).min(self.slender_onset() * relief.0);
         let gamma = if x <= x_t {
             0.0
         } else {
@@ -408,5 +453,18 @@ mod tests {
         let c = e.reference(e.recovery(LAMINAR_RECOVERY, T));
         let theta = 0.664 * (c * e.re_per_m * e.onset(c)).sqrt();
         assert!((theta / (3.0 * RE_THETA_PER_MACH) - 1.0).abs() < 1e-9);
+        // At edge Mach 10 a sharp cone's onset comes first: at Re_x 6.2·10⁶
+        // (Softley), where Re_θ/M_e is ~120 (a plate's; a cone's is √3 less).
+        let e = Stream::new(1e6, 10.0, 1.4, T, 0.0).edge(0.0, 0.0);
+        let c = e.reference(1000.0);
+        let x = e.slender_onset();
+        assert!((x * 1e6 / 6.2e6 - 1.0).abs() < 1e-9 && x < e.onset(c));
+        let at = |x: f64| e.layer(x, x, Some(1000.0), T, false).intermittency;
+        assert!(at(0.99 * x) == 0.0 && at(1.5 * x) > 0.5);
+        let theta = 0.664 * (c * e.re_per_m * x).sqrt();
+        assert!(theta / 10.0 < 0.4 * RE_THETA_PER_MACH, "{}", theta / 10.0);
+        // Log-linear between the figure's points.
+        let e = Stream::new(1.0, 8.5, 1.4, T, 0.0).edge(0.0, 0.0);
+        assert!((e.slender_onset() / (4.2e6 * (5.0f64 / 4.2).sqrt()) - 1.0).abs() < 1e-9);
     }
 }
