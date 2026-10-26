@@ -31,8 +31,9 @@ impl Segment {
         for src in world.surfaces() {
             let alt = |t: f64| {
                 let (r, _) = hermite5(&a.s, &b.s, t);
-                let snap = world.snapshot(self.t0.add_seconds(t));
-                altitude_above(world, &snap, self.anchor, src.node, r).0 - self.contact_height
+                snaps.with(self.t0.add_seconds(t), |snap| {
+                    altitude_above(world, snap, self.anchor, src.node, r).0 - self.contact_height
+                })
             };
             let radius = src.physical.as_ref().map_or(0.0, |p| p.radius_eq);
             if !near(src, radius + 200_000.0) || alt(b.s.t) >= 0.0 {
@@ -63,7 +64,7 @@ impl Segment {
         b: &Sample,
     ) -> Option<(f64, NodeId)> {
         if let Some(limbo) = self.limbo.as_deref() {
-            return self.find_live_boundary(world, limbo, a, b);
+            return self.find_live_boundary(world, snaps, limbo, a, b);
         }
         let d_star = snaps.with(self.t0.add_seconds(b.s.t), |snap| world.star_distance(snap, self.anchor, b.s.r));
         for src in &world.sources {
@@ -79,9 +80,10 @@ impl Segment {
             }
             let alt = |t: f64| {
                 let (r, _) = hermite5(&a.s, &b.s, t);
-                let snap = world.snapshot(self.t0.add_seconds(t));
-                let d = r - snap.relative_r(src.node, self.anchor);
-                p.altitude(p.rotation.to_fixed(Vec3::from_raw(d), snap.t)) - atm.top
+                snaps.with(self.t0.add_seconds(t), |snap| {
+                    let d = r - snap.relative_r(src.node, self.anchor);
+                    p.altitude(p.rotation.to_fixed(Vec3::from_raw(d), snap.t)) - atm.top
+                })
             };
             if alt(b.s.t) >= 0.0 || alt(a.s.t) < 0.0 {
                 continue;
@@ -103,22 +105,32 @@ impl Segment {
     /// First crossing into air that needs live flight (the limbo model's
     /// boundary) between two samples, by bisection on the interpolated
     /// state; the body is the one whose air it is.
-    fn find_live_boundary(&self, world: &World, limbo: &Limbo, a: &Sample, b: &Sample) -> Option<(f64, NodeId)> {
+    fn find_live_boundary(
+        &self,
+        world: &World,
+        snaps: &SnapshotCache,
+        limbo: &Limbo,
+        a: &Sample,
+        b: &Sample,
+    ) -> Option<(f64, NodeId)> {
         let live = |t: f64| {
             let (r, v) = hermite5(&a.s, &b.s, t);
-            let snap = world.snapshot(self.t0.add_seconds(t));
-            let mut body = None;
-            each_air(world, &snap, self.anchor, r, v, |air| {
-                if body.is_none() && air.altitude < air.top && limbo.boundary.exceeded(air.rho, air.v_rel.length()) {
-                    body = Some(air.body);
-                }
-            });
-            body
+            snaps.with(self.t0.add_seconds(t), |snap| {
+                let mut body = None;
+                each_air(world, snap, self.anchor, r, v, |air| {
+                    if body.is_none() && air.altitude < air.top && limbo.boundary.exceeded(air.rho, air.v_rel.length())
+                    {
+                        body = Some(air.body);
+                    }
+                });
+                body
+            })
         };
+        // The end first (the snapshot at hand): most steps stay clear.
+        let body = live(b.s.t)?;
         if live(a.s.t).is_some() {
             return None;
         }
-        let body = live(b.s.t)?;
         let (mut lo, mut hi) = (a.s.t, b.s.t);
         for _ in 0..60 {
             let mid = 0.5 * (lo + hi);

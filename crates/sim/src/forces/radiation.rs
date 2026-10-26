@@ -29,14 +29,15 @@ const INLINE: usize = 8;
 /// Both tests only drop bodies that hide nothing: the result is the one rule
 /// with every body an occluder ([`crate::light::sunlight`]).
 pub fn starlight(world: &World, snap: &Snapshot, anchor: NodeId, r: DVec3, mut f: impl FnMut(f64, DVec3)) {
-    // The largest member radius of each moon system.
-    let mut member_r = vec![0.0f64; world.clusters.len()];
+    // The largest member radius of each moon system (at most 64 systems:
+    // `World::clusters`).
+    let mut member_r = [0.0f64; 64];
     for s in &world.sources {
         if let (Role::Member(c), Some(b)) = (s.role, &s.physical) {
             member_r[c] = member_r[c].max(b.radius_eq);
         }
     }
-    for star in &world.sources {
+    for (k, star) in world.sources.iter().enumerate() {
         let Some(p) = star.physical.as_ref().filter(|p| p.luminosity > 0.0) else { continue };
         let at_star = snap.relative_r(star.node, anchor);
         let to_star = at_star - r;
@@ -44,6 +45,14 @@ pub fn starlight(world: &World, snap: &Snapshot, anchor: NodeId, r: DVec3, mut f
         if ds <= p.radius_eq {
             continue;
         }
+        // Every point between the vessel and the star's disc is within `ds`
+        // of the star, so a body (or moon system) that keeps farther than
+        // `ds` plus its size from the star (`Source::faint_min_distance`,
+        // `Cluster::star_distance`, measured from `World::star`) hides
+        // nothing and is passed over without evaluating its position.
+        let keeps_away = |q: Option<f64>, size: f64| {
+            world.star == Some(k) && q.is_some_and(|q| q - ds > size * (1.0 + 1e-6) + 1e-6 * ds)
+        };
         let u = to_star / ds;
         let mut inline = [(DVec3::ZERO, 0.0); INLINE];
         let mut n = 0;
@@ -59,14 +68,18 @@ pub fn starlight(world: &World, snap: &Snapshot, anchor: NodeId, r: DVec3, mut f
                 if decided & (1 << c) == 0 {
                     decided |= 1 << c;
                     let cl = &world.clusters[c];
-                    let to_c = snap.relative_r(cl.node, anchor) - r;
-                    if system_may_shade(to_c, cl.extent, member_r[c], u, ds, p.radius_eq) {
-                        shades |= 1 << c;
+                    if !keeps_away(Some(cl.star_distance), cl.extent + member_r[c]) {
+                        let to_c = snap.relative_r(cl.node, anchor) - r;
+                        if system_may_shade(to_c, cl.extent, member_r[c], u, ds, p.radius_eq) {
+                            shades |= 1 << c;
+                        }
                     }
                 }
                 if shades & (1 << c) == 0 {
                     continue;
                 }
+            } else if keeps_away(s.faint_min_distance, b.radius_eq) {
+                continue;
             }
             let c = snap.relative_r(s.node, anchor);
             if !may_occlude(c - r, b.radius_eq, u, ds, p.radius_eq) {

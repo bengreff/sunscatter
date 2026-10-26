@@ -166,8 +166,10 @@ pub fn each_air(world: &World, snap: &Snapshot, anchor: NodeId, r: DVec3, v: DVe
                 continue;
             }
         }
-        let k = if s.node == anchor { Default::default() } else { snap.relative(s.node, anchor) };
-        let d = r - k.r;
+        // The position first (the same bits as the full kinematics'), so a
+        // far body's velocity is never evaluated.
+        let at = if s.node == anchor { DVec3::ZERO } else { snap.relative_r(s.node, anchor) };
+        let d = r - at;
         let dist = d.length();
         if dist - p.radius_eq >= top {
             continue;
@@ -181,7 +183,8 @@ pub fn each_air(world: &World, snap: &Snapshot, anchor: NodeId, r: DVec3, v: DVe
         if air.rho.is_nan() || air.rho <= 0.0 {
             continue;
         }
-        let v_air = k.v + (pole * p.rotation.w_rate).cross(d);
+        let body_v = if s.node == anchor { DVec3::ZERO } else { snap.relative(s.node, anchor).v };
+        let v_air = body_v + (pole * p.rotation.w_rate).cross(d);
         f(Rarefied {
             body: s.node,
             altitude,
