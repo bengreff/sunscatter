@@ -43,6 +43,13 @@ pub struct BubbleState {
     pub since_contact: Option<u32>,
 }
 
+impl BubbleState {
+    /// Not in a bubble (what a save leaves out).
+    pub fn is_idle(&self) -> bool {
+        *self == BubbleState::default()
+    }
+}
+
 /// What the rule reads of one vessel at a tick epoch.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Candidate {

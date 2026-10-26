@@ -36,6 +36,7 @@ mod aerothermal;
 mod anchor;
 mod attitude;
 mod breakage;
+pub mod bubble;
 mod burn;
 mod clock;
 mod coast;
@@ -227,6 +228,9 @@ pub struct Vessel {
     /// Parts that broke at a live tick, waiting for [`Vessel::split`].
     #[serde(default, skip_serializing_if = "Option::is_none")]
     breakup: Option<split::Breakup>,
+    /// Held live in a 10 km bubble (D082, [`bubble`]).
+    #[serde(default, skip_serializing_if = "crate::proximity::BubbleState::is_idle")]
+    bubble: crate::proximity::BubbleState,
 }
 
 /// Rotation matrix taking body-fixed axes of `body` to inertial axes at `t`.
@@ -278,6 +282,7 @@ impl Vessel {
             repoint: false,
             systems: crate::systems::Systems::starting(t),
             breakup: None,
+            bubble: Default::default(),
         };
         v.sync_landed_attitude(world);
         if !v.holds_where_landed(world) {
@@ -314,6 +319,7 @@ impl Vessel {
             repoint: false,
             systems: crate::systems::Systems::starting(t),
             breakup: None,
+            bubble: Default::default(),
         };
         // In air that needs it, it is flown live (the live boundary).
         let boundary = vessel.limbo.boundary;

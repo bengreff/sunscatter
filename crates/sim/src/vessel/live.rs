@@ -26,13 +26,13 @@
 //! D064, D065): its engine and controls are cut, and it flies on (falls,
 //! bounces, tumbles) until it comes to rest.
 
-use super::aerothermal::{self, air_at, AeroTick, LEAVE_ATMOSPHERE};
+use super::aerothermal::{self, air_at, AeroTick, Air, LEAVE_ATMOSPHERE};
 use super::attitude::{self, Actuators, Command, Gimbal};
 use super::coast_tolerance;
-use super::{AttitudeControl, Controls, Destruction, FlightPlan, Phase, Vessel, TICK};
+use super::{Attitude, AttitudeControl, Controls, Destruction, FlightPlan, Phase, Vessel, TICK};
 use crate::chute;
 use crate::contact::{self, Ground, Pose};
-use crate::craft::MassProps;
+use crate::craft::{CraftDesign, EngineOutput, MassProps};
 use crate::forces::{altitude_above, ambient_pressure, ActiveSources, DragModel, ForceContext};
 use crate::frame::NodeId;
 use crate::integrate::{Dopri5, Dynamics, Tolerance};
@@ -59,19 +59,166 @@ impl Dynamics for TickForces<'_> {
 
 /// A contact tick that could not be completed: the state stopped being
 /// finite.
-struct Failed;
+pub(super) struct Failed;
 
-/// A completed contact tick.
-struct ContactTick {
-    r: DVec3,
-    v: DVec3,
-    att: super::Attitude,
-    touching: bool,
+/// A live tick's start ([`Vessel::begin_tick`]): the state, the controls
+/// latched into the engine output and the attitude command, and the tick's
+/// air, all from the vessel at the tick's start.
+pub(super) struct TickStart<'d> {
+    pub(super) anchor: NodeId,
+    pub(super) r: DVec3,
+    pub(super) v: DVec3,
+    /// The tick's length (s; [`TICK`] but for a tick that aligns a vessel
+    /// with a bubble's lattice) and its end.
+    pub(super) dt: f64,
+    pub(super) until: Epoch,
+    engine_on: bool,
+    /// The surface it may touch, if within its live height of one.
+    pub(super) contact_body: Option<NodeId>,
+    pub(super) props: MassProps,
+    design: &'d CraftDesign,
+    air: Option<Air>,
+    aero: Option<AeroTick<'d>>,
+    drag: DragModel,
+    lift: DVec3,
+    sun_body: DVec3,
+    att0: DQuat,
+    out: EngineOutput,
+    pub(super) cmd: Command,
+    /// Attitude and control before the command (restored if the tick fails).
+    pub(super) before: (Attitude, AttitudeControl),
+}
+
+impl TickStart<'_> {
+    /// The aerodynamic torque (body axes) at attitude `q`.
+    pub(super) fn aero_torque(&self, q: DQuat) -> DVec3 {
+        self.aero.as_ref().map_or(DVec3::ZERO, |a| a.torque(q))
+    }
+
+    /// Whether the command was the only torque but contact (no air).
+    pub(super) fn in_vacuum(&self) -> bool {
+        self.aero.is_none()
+    }
+}
+
+/// Where a tick took the vessel.
+pub(super) struct TickEnd {
+    pub(super) r: DVec3,
+    pub(super) v: DVec3,
+    /// On the ground during the last substep.
+    pub(super) touching: bool,
     /// Proper-time increment over the tick.
+    pub(super) delta: f64,
+}
+
+/// A tick's contact substeps for one vessel ([`contact::SUBSTEPS`] of its
+/// `dt`): ground contact if it is near a surface, and the craft contacts
+/// a bubble adds (`super::bubble`). Semi-implicit Euler for the
+/// translation, RK4 for the rotation.
+pub(super) struct Substeps<'a> {
+    vessel: &'a Vessel,
+    world: &'a World,
+    start: &'a TickStart<'a>,
+    active: ActiveSources,
+    h: f64,
+    pub(super) r: DVec3,
+    pub(super) v: DVec3,
+    pub(super) att: Attitude,
+    touching: bool,
     delta: f64,
-    /// The impact that destroyed the craft during the tick (engine and
-    /// controls cut from then on).
+    /// The impact that destroyed the craft (or its part) during the tick.
     impact: Option<contact::Impact>,
+    /// Destroyed (now or before): engine and controls cut.
+    dead: bool,
+    whole: bool,
+}
+
+impl<'a> Substeps<'a> {
+    pub(super) fn new(vessel: &'a Vessel, world: &'a World, start: &'a TickStart<'a>) -> Self {
+        let active = ActiveSources::select(world, &world.snapshot(vessel.time), start.anchor, start.r);
+        Substeps {
+            vessel,
+            world,
+            start,
+            active,
+            h: start.dt / contact::SUBSTEPS as f64,
+            r: start.r,
+            v: start.v,
+            att: vessel.attitude,
+            touching: false,
+            delta: 0.0,
+            impact: None,
+            dead: vessel.destroyed.is_some(),
+            whole: vessel.craft.design().parts.len() <= 1,
+        }
+    }
+
+    /// The substep's length (s).
+    pub(super) fn h(&self) -> f64 {
+        self.h
+    }
+
+    /// Substep `k`, with `kick`, a contact force and torque about the
+    /// centre of mass (inertial) from another craft at the substep's
+    /// start, applied as an impulse before the drift.
+    pub(super) fn step(&mut self, k: usize, kick: Option<(DVec3, DVec3)>) -> Result<(), Failed> {
+        let (vessel, s, world, h) = (self.vessel, self.start, self.world, self.h);
+        let props = &s.props;
+        let snap = world.snapshot(vessel.time.add_seconds(h * k as f64));
+        let ground = s.contact_body.map(|body| Ground::new(world, &snap, s.anchor, body));
+        let (r, v, att) = (self.r, self.v, self.att);
+        let pose = Pose { r, v, q: att.q, omega: att.omega, com: props.com, mass: props.mass, inertia: props.inertia };
+        let craft = &vessel.craft;
+        let c = ground.as_ref().map_or(contact::ContactForces::default(), |g| {
+            contact::forces(g, &pose, &craft.contacts, &craft.contact, craft.impact_max_speed, h)
+        });
+        self.touching = c.touching;
+        let thrust = if self.dead { 0.0 } else { s.out.thrust };
+        let thrust_accel = att.q * s.cmd.thrust_dir * (thrust / props.mass) + s.lift;
+        let ctx =
+            ForceContext { world, anchor: s.anchor, active: &self.active, drag: Some(s.drag), thrust: thrust_accel };
+        let (a, rate) = ctx.accel_rate(&snap, r, v);
+        let a = a + c.force / props.mass;
+        let command = if self.dead { DVec3::ZERO } else { s.cmd.torque };
+        let torque = command + att.q.inverse() * c.torque + s.aero_torque(att.q);
+        if !(a.is_finite() && torque.is_finite()) {
+            return Err(Failed);
+        }
+        self.delta += rate * h;
+        let mut v = v + a * h;
+        let mut att = att;
+        if let Some((force, tau)) = kick {
+            if !(force.is_finite() && tau.is_finite()) {
+                return Err(Failed);
+            }
+            v += force * (h / props.mass);
+            att.omega += att.q * (props.inertia.inverse() * (att.q.inverse() * tau)) * h;
+        }
+        let r = r + v * h;
+        let att = rigid::tick(&att, &props.inertia, torque, h);
+        (self.r, self.v, self.att) = (r, v, att);
+        // An impact: the point past its free travel is still closing
+        // too fast after the substep's contact force (its closing speed
+        // at the start of the substep, the event's peak, is reported).
+        if let (Some(im), Some(g)) =
+            (c.impact.filter(|_| !vessel.debug && !self.dead && self.impact.is_none()), &ground)
+        {
+            let after = Pose { r, v, q: att.q, omega: att.omega, ..pose };
+            let point = &craft.contacts[im.point as usize];
+            if contact::closing_speed(g, &after, point) > craft.impact_max_speed {
+                self.impact = Some(im);
+                // A craft of parts loses the part (`breakage`), not its engine.
+                self.dead = self.whole;
+            }
+        }
+        Ok(())
+    }
+
+    /// Where the substeps took the vessel, its attitude (before SAS's
+    /// bookkeeping) and the impact, if one destroyed the craft or a part.
+    pub(super) fn end(self) -> (TickEnd, Attitude, Option<contact::Impact>) {
+        (TickEnd { r: self.r, v: self.v, touching: self.touching, delta: self.delta }, self.att, self.impact)
+    }
 }
 
 impl Vessel {
@@ -108,9 +255,9 @@ impl Vessel {
         self.rest_ticks = 0;
     }
 
-    /// Integrates one tick with a constant acceleration `thrust` (thrust
-    /// and lift) and `drag` (adaptive substeps, exact end). Returns the
-    /// state and the tick's proper-time increment; `None` if the
+    /// Integrates one tick of `dt` with a constant acceleration `thrust`
+    /// (thrust and lift) and `drag` (adaptive substeps, exact end). Returns
+    /// the state and the tick's proper-time increment; `None` if the
     /// integration fails (non-finite state or force).
     fn integrate_tick(
         &self,
@@ -118,6 +265,7 @@ impl Vessel {
         (anchor, r, v): (NodeId, DVec3, DVec3),
         thrust: DVec3,
         drag: DragModel,
+        dt: f64,
     ) -> Option<(DVec3, DVec3, f64)> {
         let snap = world.snapshot(self.time);
         let active = ActiveSources::select(world, &snap, anchor, r);
@@ -125,10 +273,10 @@ impl Vessel {
             ctx: ForceContext { world, anchor, active: &active, drag: Some(drag), thrust },
             t0: self.time,
         };
-        let integ = Dopri5::new(Tolerance { h_max: TICK, ..coast_tolerance() });
-        let mut st = integ.start(&f, 0.0, r, v, TICK);
-        while st.t < TICK {
-            integ.step(&f, &mut st, TICK).ok()?;
+        let integ = Dopri5::new(Tolerance { h_max: dt, ..coast_tolerance() });
+        let mut st = integ.start(&f, 0.0, r, v, dt);
+        while st.t < dt {
+            integ.step(&f, &mut st, dt).ok()?;
         }
         Some((st.r.value(), st.v.value(), st.x.value()))
     }
@@ -176,191 +324,199 @@ impl Vessel {
 
     pub(super) fn advance_powered(&mut self, world: &World, target: crate::time::Epoch, controls: &Controls) {
         while self.time.add_seconds(TICK) <= target {
-            let Phase::Powered { anchor, r, v } = self.phase else { unreachable!() };
-            let engine_on = self.engine_running(controls);
-            let near = self.nearest_surface(world, anchor, r);
-            let live = self.live_height();
-            let contact_body = near.filter(|&(_, h)| h <= live).map(|(b, _)| b);
-            let snap = world.snapshot(self.time);
-            if !engine_on
-                && near.is_none_or(|(_, h)| h > live + contact::LEAVE)
-                && super::limbo::may_coast(&self.limbo.boundary, world, &snap, anchor, (r, v), LEAVE_ATMOSPHERE)
-            {
+            let design = self.craft.design().clone();
+            let until = self.time.add_seconds(TICK);
+            let Some(start) = self.begin_tick(world, controls, &design, (TICK, until)) else {
                 self.start_coast(world);
                 return;
-            }
-            let props = self.mass_props();
-            let engine = self.craft.engine;
-            let p = ambient_pressure(world, &snap, anchor, r);
-            let design = self.craft.design().clone();
-            let air = air_at(world, &snap, anchor, r, v);
-            if self.destroyed.is_none() {
-                let speed = air.as_ref().map_or(0.0, |a| a.wind.length());
-                let q = air.as_ref().map_or(0.0, |a| 0.5 * a.rho * speed * speed);
-                let height = near.map_or(f64::INFINITY, |(_, h)| h);
-                let flow = chute::Flow { q, speed, height };
-                self.chute.step(&self.craft.chute, controls.chute, flow, TICK, self.debug);
-            }
-            let chute_area = self.chute.cd_area(&self.craft.chute);
-            let chute = (chute_area > 0.0).then_some((chute_area, self.craft.chute.mount));
-            let aero = (air.as_ref().and_then(|a| AeroTick::new(&design, a, props.com, chute)))
-                .map(|t| t.with_layer(self.attitude.q, &self.thermal.state.skin));
-            let (cd_area, lift) =
-                aero.as_ref().map_or((0.0, DVec3::ZERO), |a| a.drag_and_lift(self.attitude.q, props.mass));
-            let drag = DragModel { cd_area, mass: props.mass };
-            let aero_torque = |q: DQuat| aero.as_ref().map_or(DVec3::ZERO, |a| a.torque(q));
-            let sun_body = self.attitude.q.inverse() * crate::light::sunlight(world, &snap, anchor, r);
-            let heat_tick = aero.as_ref().zip(air.as_ref());
-            let att0 = self.attitude.q;
-            let out = engine.tick_output(controls.throttle, p, self.propellant, TICK, self.debug);
-            let gimbal = Gimbal {
-                lever: engine.mount_pos - props.com,
-                dir: engine.mount_dir,
-                thrust: out.thrust,
-                max_angle: engine.gimbal,
             };
-            // The RCS draws on the main propellant: dry, only the gimbal turns.
-            let rcs_fed = self.debug || self.propellant > 0.0;
-            let act = Actuators { torque: if rcs_fed { self.craft.torque } else { DVec3::ZERO }, gimbal: Some(gimbal) };
-            let before = (self.attitude, self.control);
-            let aim = self.aim(world, &snap, (anchor, r, v), controls);
-            let cmd = attitude::command(&self.attitude, &props.inertia, &mut self.control, controls, &act, &aim, TICK);
-            let (r1, v1, touching, delta) = match contact_body {
-                None => {
-                    let next = rigid::tick_with(&self.attitude, &props.inertia, |q| cmd.torque + aero_torque(q), TICK);
-                    let att = attitude::finish(next, &mut self.control, &cmd, aero.is_none());
-                    let thrust = att.q * cmd.thrust_dir * (out.thrust / props.mass) + lift;
-                    // A tick that cannot be integrated (non-finite state) leaves the
-                    // vessel where it is, like a failed coast segment.
-                    let Some((r1, v1, delta)) = self.integrate_tick(world, (anchor, r, v), thrust, drag) else {
-                        (self.attitude, self.control) = before;
-                        return;
-                    };
-                    self.attitude = att;
-                    (r1, v1, false, delta)
-                }
-                Some(body) => match self.contact_tick(
-                    world,
-                    (anchor, body),
-                    (r, v),
-                    &cmd,
-                    out.thrust,
-                    &props,
-                    (drag, lift, &aero_torque),
-                ) {
-                    Ok(t) => {
-                        self.attitude = attitude::finish(t.att, &mut self.control, &cmd, false);
-                        if let Some(im) = t.impact {
-                            self.impacted(im);
-                        }
-                        (t.r, t.v, t.touching, t.delta)
-                    }
-                    Err(Failed) => {
-                        (self.attitude, self.control) = before;
-                        return;
-                    }
-                },
-            };
-            let engine_heat = engine.heat(out.thrust, out.mdot);
-            let mdot = out.mdot + cmd.rcs.dot(self.craft.rcs_flow);
-            let mdot = mdot + self.systems.consumables.boil_off;
-            let propellant = if self.debug { self.propellant } else { (self.propellant - mdot * TICK).max(0.0) };
-            aerothermal::live_step(
-                &design,
-                &mut self.thermal,
-                heat_tick,
-                att0,
-                sun_body,
-                engine_heat,
-                propellant,
-                TICK,
-            );
-            self.propellant = propellant;
-            self.time = self.time.add_seconds(TICK);
-            self.clock.add(self.time, delta);
-            self.phase = Phase::Powered { anchor, r: r1, v: v1 };
-            self.tick_accel = Some((v1 - v) / TICK);
-            let flow = aero.as_ref().map(|a| a.flow(att0));
-            self.check_limits(world, flow.as_ref(), contact_body.map(|b| (anchor, b)));
-            self.systems_after_tick(world);
-            if self.breakup.is_some() {
+            let Some(end) = self.fly_tick(world, &start) else { return };
+            if self.finish_tick(world, start, end, controls) {
                 return;
-            }
-            if let Some(body) = contact_body {
-                let input = engine_on || controls.rotate != DVec3::ZERO;
-                if self.rest(world, anchor, body, touching, input, controls) {
-                    return;
-                }
             }
         }
     }
 
-    /// One tick of contact substeps from `(r, v)` at the vessel's time with
-    /// the command `cmd`, engine thrust `thrust` (N) and the tick's
-    /// aerodynamics (drag model, lift acceleration, torque at an attitude).
-    #[allow(clippy::too_many_arguments)]
-    fn contact_tick(
+    /// Whether a live vessel at `(anchor, r, v)` with the engine `engine_on`
+    /// and the nearest surface `near` (body, height) would return to a coast
+    /// now: engine off, [`contact::LEAVE`] above its live height and out of
+    /// air that needs live flight (the live boundary).
+    fn coasts(
         &self,
         world: &World,
-        (anchor, body): (NodeId, NodeId),
-        (mut r, mut v): (DVec3, DVec3),
-        cmd: &Command,
-        thrust: f64,
-        props: &MassProps,
-        (drag, lift, aero_torque): (DragModel, DVec3, &dyn Fn(DQuat) -> DVec3),
-    ) -> Result<ContactTick, Failed> {
-        let h = TICK / contact::SUBSTEPS as f64;
-        let active = ActiveSources::select(world, &world.snapshot(self.time), anchor, r);
-        let drag = Some(drag);
-        let mut att = self.attitude;
-        let mut touching = false;
-        let mut delta = 0.0;
-        let mut impact = None;
-        // Destroyed (now or before): engine and controls cut.
-        let mut dead = self.destroyed.is_some();
-        let whole = self.craft.design().parts.len() <= 1;
-        for k in 0..contact::SUBSTEPS {
-            let snap = world.snapshot(self.time.add_seconds(h * k as f64));
-            let ground = Ground::new(world, &snap, anchor, body);
-            let pose =
-                Pose { r, v, q: att.q, omega: att.omega, com: props.com, mass: props.mass, inertia: props.inertia };
-            let c = contact::forces(
-                &ground,
-                &pose,
-                &self.craft.contacts,
-                &self.craft.contact,
-                self.craft.impact_max_speed,
-                h,
-            );
-            touching = c.touching;
-            let thrust = if dead { 0.0 } else { thrust };
-            let thrust_accel = att.q * cmd.thrust_dir * (thrust / props.mass) + lift;
-            let ctx = ForceContext { world, anchor, active: &active, drag, thrust: thrust_accel };
-            let (a, rate) = ctx.accel_rate(&snap, r, v);
-            let a = a + c.force / props.mass;
-            let command = if dead { DVec3::ZERO } else { cmd.torque };
-            let torque = command + att.q.inverse() * c.torque + aero_torque(att.q);
-            if !(a.is_finite() && torque.is_finite()) {
-                return Err(Failed);
-            }
-            delta += rate * h;
-            v += a * h;
-            r += v * h;
-            att = rigid::tick(&att, &props.inertia, torque, h);
-            // An impact: the point past its free travel is still closing
-            // too fast after the substep's contact force (its closing speed
-            // at the start of the substep, the event's peak, is reported).
-            if let Some(im) = c.impact.filter(|_| !self.debug && !dead && impact.is_none()) {
-                let after = Pose { r, v, q: att.q, omega: att.omega, ..pose };
-                let point = &self.craft.contacts[im.point as usize];
-                if contact::closing_speed(&ground, &after, point) > self.craft.impact_max_speed {
-                    impact = Some(im);
-                    // A craft of parts loses the part (`breakage`), not its engine.
-                    dead = whole;
-                }
+        snap: &crate::ephem::Snapshot,
+        (anchor, r, v): (NodeId, DVec3, DVec3),
+        engine_on: bool,
+        near: Option<(NodeId, f64)>,
+    ) -> bool {
+        let live = self.live_height();
+        !engine_on
+            && near.is_none_or(|(_, h)| h > live + contact::LEAVE)
+            && super::limbo::may_coast(&self.limbo.boundary, world, snap, anchor, (r, v), LEAVE_ATMOSPHERE)
+    }
+
+    /// Whether a live vessel would return to a coast now with `controls`
+    /// (it is live for its own reasons otherwise: thrust, air, the ground).
+    pub(super) fn would_coast(&self, world: &World, controls: &Controls) -> bool {
+        let Phase::Powered { anchor, r, v } = self.phase else { return true };
+        let near = self.nearest_surface(world, anchor, r);
+        self.coasts(world, &world.snapshot(self.time), (anchor, r, v), self.engine_running(controls), near)
+    }
+
+    /// Starts a live tick of `dt` ending at `until` with `controls`: the
+    /// parachutes step, the air and the attitude command are found. `None`:
+    /// the vessel returns to a coast instead (never while a bubble holds it
+    /// live, D082).
+    pub(super) fn begin_tick<'d>(
+        &mut self,
+        world: &World,
+        controls: &Controls,
+        design: &'d CraftDesign,
+        (dt, until): (f64, Epoch),
+    ) -> Option<TickStart<'d>> {
+        let Phase::Powered { anchor, r, v } = self.phase else { unreachable!() };
+        let engine_on = self.engine_running(controls);
+        let near = self.nearest_surface(world, anchor, r);
+        let live = self.live_height();
+        let contact_body = near.filter(|&(_, h)| h <= live).map(|(b, _)| b);
+        let snap = world.snapshot(self.time);
+        if !self.bubble.member && self.coasts(world, &snap, (anchor, r, v), engine_on, near) {
+            return None;
+        }
+        let props = self.mass_props();
+        let engine = self.craft.engine;
+        let p = ambient_pressure(world, &snap, anchor, r);
+        let air = air_at(world, &snap, anchor, r, v);
+        if self.destroyed.is_none() {
+            let speed = air.as_ref().map_or(0.0, |a| a.wind.length());
+            let q = air.as_ref().map_or(0.0, |a| 0.5 * a.rho * speed * speed);
+            let height = near.map_or(f64::INFINITY, |(_, h)| h);
+            let flow = chute::Flow { q, speed, height };
+            self.chute.step(&self.craft.chute, controls.chute, flow, dt, self.debug);
+        }
+        let chute_area = self.chute.cd_area(&self.craft.chute);
+        let chute = (chute_area > 0.0).then_some((chute_area, self.craft.chute.mount));
+        let aero = (air.as_ref().and_then(|a| AeroTick::new(design, a, props.com, chute)))
+            .map(|t| t.with_layer(self.attitude.q, &self.thermal.state.skin));
+        let (cd_area, lift) =
+            aero.as_ref().map_or((0.0, DVec3::ZERO), |a| a.drag_and_lift(self.attitude.q, props.mass));
+        let drag = DragModel { cd_area, mass: props.mass };
+        let sun_body = self.attitude.q.inverse() * crate::light::sunlight(world, &snap, anchor, r);
+        let att0 = self.attitude.q;
+        let out = engine.tick_output(controls.throttle, p, self.propellant, dt, self.debug);
+        let gimbal = Gimbal {
+            lever: engine.mount_pos - props.com,
+            dir: engine.mount_dir,
+            thrust: out.thrust,
+            max_angle: engine.gimbal,
+        };
+        // The RCS draws on the main propellant: dry, only the gimbal turns.
+        let rcs_fed = self.debug || self.propellant > 0.0;
+        let act = Actuators { torque: if rcs_fed { self.craft.torque } else { DVec3::ZERO }, gimbal: Some(gimbal) };
+        let before = (self.attitude, self.control);
+        let aim = self.aim(world, &snap, (anchor, r, v), controls);
+        let cmd = attitude::command(&self.attitude, &props.inertia, &mut self.control, controls, &act, &aim, dt);
+        Some(TickStart {
+            anchor,
+            r,
+            v,
+            dt,
+            until,
+            engine_on,
+            contact_body,
+            props,
+            design,
+            air,
+            aero,
+            drag,
+            lift,
+            sun_body,
+            att0,
+            out,
+            cmd,
+            before,
+        })
+    }
+
+    /// Flies a tick on its own: away from surfaces the translation
+    /// adaptively with the tick's constant thrust and the rotation with the
+    /// command and the air's torque; near one, contact substeps. `None` if
+    /// the tick cannot be integrated (non-finite state): the vessel stays
+    /// where it is, like a failed coast segment.
+    pub(super) fn fly_tick(&mut self, world: &World, s: &TickStart) -> Option<TickEnd> {
+        let Some(_) = s.contact_body else {
+            let torque = |q: DQuat| s.cmd.torque + s.aero_torque(q);
+            let next = rigid::tick_with(&self.attitude, &s.props.inertia, torque, s.dt);
+            let att = attitude::finish(next, &mut self.control, &s.cmd, s.aero.is_none());
+            let thrust = att.q * s.cmd.thrust_dir * (s.out.thrust / s.props.mass) + s.lift;
+            let Some((r1, v1, delta)) = self.integrate_tick(world, (s.anchor, s.r, s.v), thrust, s.drag, s.dt) else {
+                (self.attitude, self.control) = s.before;
+                return None;
+            };
+            self.attitude = att;
+            return Some(TickEnd { r: r1, v: v1, touching: false, delta });
+        };
+        let mut sub = Substeps::new(self, world, s);
+        let ok = (0..contact::SUBSTEPS).all(|k| sub.step(k, None).is_ok());
+        let (end, att, impact) = sub.end();
+        if !ok {
+            (self.attitude, self.control) = s.before;
+            return None;
+        }
+        self.attitude = attitude::finish(att, &mut self.control, &s.cmd, false);
+        if let Some(im) = impact {
+            self.impacted(im);
+        }
+        Some(end)
+    }
+
+    /// Ends a tick: propellant and temperatures over it, the new state and
+    /// time, the limits (D065, D066, D083) and systems, and rest on the
+    /// ground. Returns whether the vessel stopped (it broke up or came to
+    /// rest).
+    pub(super) fn finish_tick(&mut self, world: &World, s: TickStart, end: TickEnd, controls: &Controls) -> bool {
+        let TickStart {
+            anchor,
+            v,
+            dt,
+            until,
+            engine_on,
+            contact_body,
+            design,
+            air,
+            aero,
+            cmd,
+            out,
+            att0,
+            sun_body,
+            ..
+        } = s;
+        let TickEnd { r: r1, v: v1, touching, delta } = end;
+        let engine = self.craft.engine;
+        let engine_heat = engine.heat(out.thrust, out.mdot);
+        let mdot = out.mdot + cmd.rcs.dot(self.craft.rcs_flow);
+        let mdot = mdot + self.systems.consumables.boil_off;
+        let propellant = if self.debug { self.propellant } else { (self.propellant - mdot * dt).max(0.0) };
+        let heat_tick = aero.as_ref().zip(air.as_ref());
+        aerothermal::live_step(design, &mut self.thermal, heat_tick, att0, sun_body, engine_heat, propellant, dt);
+        self.propellant = propellant;
+        self.time = until;
+        self.clock.add(self.time, delta);
+        self.phase = Phase::Powered { anchor, r: r1, v: v1 };
+        self.tick_accel = Some((v1 - v) / dt);
+        let flow = aero.as_ref().map(|a| a.flow(att0));
+        self.check_limits(world, flow.as_ref(), contact_body.map(|b| (anchor, b)));
+        self.systems_after_tick(world);
+        if self.breakup.is_some() {
+            return true;
+        }
+        if let Some(body) = contact_body {
+            let input = engine_on || controls.rotate != DVec3::ZERO;
+            if self.rest(world, anchor, body, touching, input, controls) {
+                return true;
             }
         }
-        Ok(ContactTick { r, v, att, touching, delta, impact })
+        false
     }
 
     /// After a tick: destroyed if a temperature is above its limit (not in
