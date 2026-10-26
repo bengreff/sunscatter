@@ -63,6 +63,30 @@ pub fn octave_weight(wavelength_m: f32, footprint_m: f32) -> f32 {
     (wavelength_m / footprint_m.max(1e-6) - 2.0).clamp(0.0, 1.0)
 }
 
+/// The simple ground pattern near the ground (`terrain.wgsl`, the Minimal
+/// tier's depth cue, D073): its octaves (wavelengths 8 detail units,
+/// halving), and the broad patches' contrast in stops.
+#[cfg_attr(not(test), allow(dead_code))] // The shader's constants; a test pins them.
+pub const GROUND_OCTAVES: usize = 8;
+#[cfg_attr(not(test), allow(dead_code))]
+pub const GROUND_PATCH_STOPS: f32 = 0.35;
+
+/// A ground-pattern octave: full at a wavelength of 8 pixel footprints or
+/// more, gone at 4 (stricter than the zones' octaves: it is closer and
+/// higher in contrast).
+#[cfg_attr(not(test), allow(dead_code))] // The shader's rule on the CPU; tests pin it.
+pub fn ground_octave_weight(period: f32, footprint: f32) -> f32 {
+    (period / (4.0 * footprint.max(1e-9)) - 1.0).clamp(0.0, 1.0)
+}
+
+/// The ground pattern's brightness factor: 2^((fine + contrast × patch) ×
+/// near), `fine` the octaves' sum (about −1..1), `patch` the broad patches
+/// (−1..1), `near` 1 at the camera fading to 0 at 20 km.
+#[cfg_attr(not(test), allow(dead_code))] // The shader's rule on the CPU; tests pin it.
+pub fn ground_gain(fine: f32, patch: f32, near: f32) -> f32 {
+    ((fine + GROUND_PATCH_STOPS * patch) * near).exp2()
+}
+
 /// How many octaves (wavelengths `first_m`, `first_m`/2, …, none under
 /// `min_m`, at most `max`) are drawn at a pixel footprint.
 #[cfg_attr(not(test), allow(dead_code))] // The shader's loop; tests pin it.

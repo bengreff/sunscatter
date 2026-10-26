@@ -93,6 +93,17 @@ struct TerrainParams {
 const PI: f32 = 3.14159265;
 // Distance (m) over which the simple ground pattern fades out.
 const SIMPLE_GROUND_M: f32 = 20000.0;
+// The simple ground pattern (zones::GROUND_*): octaves, and the broad
+// patches' contrast (stops).
+const GROUND_OCTAVES: i32 = 8;
+const GROUND_PATCH_STOPS: f32 = 0.35;
+
+// A ground-pattern octave of wavelength `period` (detail units) at a pixel
+// footprint `foot` (the same units): full at 8 pixels a wavelength, gone
+// at 4 (zones::ground_octave_weight).
+fn ground_octave_weight(period: f32, foot: f32) -> f32 {
+    return clamp(period / (4.0 * max(foot, 1e-9)) - 1.0, 0.0, 1.0);
+}
 
 // Area of overlap of two discs (radii r1, r2, centres d apart); mirrors
 // `sim::light::disc_overlap` (tested there).
@@ -593,23 +604,38 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
         }
     }
     // Without the detail layer (the Minimal tier, D073): a simple ground
-    // pattern for depth perception near the ground, lighter and darker
-    // patches at four scales (5 m to 320 m on Earth). Each scale fades out
-    // before its patches shrink under ~2 pixels, so nothing shimmers.
+    // texture for depth perception near the ground (zones::ground_*
+    // mirror the rules). Lighter and darker patches at 8 scales, 320 m down
+    // to 2.5 m on Earth (detail units / 0.125, halving), each fading out
+    // between 8 and 4 pixels a wavelength so nothing shimmers, plus broad
+    // patches of cover and bare ground from the two coarsest, fading in
+    // between 32 and 64 pixels a wavelength. Typically ±0.3 stops, at most
+    // ~±1.
     if terrain.flags.x == 0u && water < 1.0 {
         let near = clamp(1.0 - dist / SIMPLE_GROUND_M, 0.0, 1.0);
         if near > 0.0 {
             let foot = max(length(duv1), length(duv2));
-            var tone = 0.0;
+            var fine = 0.0;
+            var coarse = 0.0;
             var freq = 0.125;
             var amp = 0.5;
-            for (var k = 0; k < 4; k++) {
-                let w = clamp(1.0 - foot * freq * 2.0, 0.0, 1.0);
-                tone += amp * w * (noise(in.uv * freq, 256.0 * freq) - 0.5);
-                freq *= 4.0;
-                amp *= 0.7;
+            for (var k = 0; k < GROUND_OCTAVES; k++) {
+                let w = ground_octave_weight(1.0 / freq, foot);
+                if w <= 0.0 {
+                    break;
+                }
+                let o = f32(k) * vec2(7.31, 3.17);
+                let n = (noise(in.uv * freq + o, 256.0 * freq) - 0.5) * 2.0;
+                fine += amp * w * n;
+                if k < 2 {
+                    coarse += amp * w * n;
+                }
+                freq *= 2.0;
+                amp *= 0.8;
             }
-            color *= 1.0 + tone * 0.8 * near * (1.0 - water);
+            let pw = clamp(4.0 / foot / 32.0 - 1.0, 0.0, 1.0);
+            let patches = (smoothstep(-0.15, 0.15, coarse) * 2.0 - 1.0) * pw;
+            color *= exp2((fine + GROUND_PATCH_STOPS * patches) * near * (1.0 - water));
         }
     }
     // Water lies at sea level: shade it with the sphere's normal at this

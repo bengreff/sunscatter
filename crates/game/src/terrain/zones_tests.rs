@@ -74,6 +74,33 @@ fn texel_block_wraps_longitude_and_clamps_latitude() {
 }
 
 #[test]
+fn ground_pattern_is_visible_close_and_fades_by_footprint() {
+    // (wavelength, footprint, weight): full at 8 pixels, gone at 4.
+    for (period, foot, want) in
+        [(8.0, 1.0, 1.0), (6.0, 1.0, 0.5), (4.0, 1.0, 0.0), (2.5, 0.01, 1.0), (320.0, 100.0, 0.0)]
+    {
+        assert!((ground_octave_weight(period, foot) - want).abs() < 1e-6, "{period} {foot}");
+    }
+    // At the pad camera (~60 m off, ~1 mrad pixels, 40 m detail units: a
+    // footprint of ~0.002 units) all 8 octaves are drawn, 320 m to 2.5 m.
+    let foot = 60.0 * 1.2e-3 / 40.0;
+    let periods: Vec<f32> = (0..GROUND_OCTAVES).map(|k| 8.0 / 2f32.powi(k as i32)).collect();
+    assert!(periods.iter().all(|&p| ground_octave_weight(p, foot) == 1.0));
+    assert_eq!(periods.last().map(|p| p * 40.0), Some(2.5));
+    // The brightness: a broad patch alone is ±0.35 stops; nothing far away.
+    assert!((ground_gain(0.0, 1.0, 1.0) - 2f32.powf(0.35)).abs() < 1e-6);
+    assert!((ground_gain(0.0, -1.0, 1.0) - 2f32.powf(-0.35)).abs() < 1e-6);
+    assert!((ground_gain(0.5, 1.0, 0.0) - 1.0).abs() < 1e-6);
+    let wgsl = include_str!("terrain.wgsl");
+    for decl in [
+        format!("const GROUND_OCTAVES: i32 = {GROUND_OCTAVES};"),
+        format!("const GROUND_PATCH_STOPS: f32 = {GROUND_PATCH_STOPS:?};"),
+    ] {
+        assert!(wgsl.contains(&decl), "terrain.wgsl lacks `{decl}`");
+    }
+}
+
+#[test]
 fn gather_weights_are_bilinear() {
     for (fx, fy) in [(0.0, 0.0), (0.25, 0.75), (1.0, 0.5)] {
         let (w, dx, dy) = gather_weights(fx, fy);
