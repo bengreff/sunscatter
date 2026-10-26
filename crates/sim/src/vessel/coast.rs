@@ -33,6 +33,14 @@ use glam::{DMat3, DVec3};
 /// integration step; [`Vessel::advance`]).
 pub const THERMAL_SOLVE_UNITS: usize = 30;
 
+/// What a coasting advance did.
+pub(super) struct Coasted {
+    /// The time moved, or the coast restarted.
+    pub progressed: bool,
+    /// It went live at the live boundary (an atmosphere).
+    pub entered: bool,
+}
+
 /// What is left of an [`Vessel::advance`] call's work budget.
 pub(super) struct Budget {
     /// Coast integration steps.
@@ -53,28 +61,28 @@ impl Vessel {
     }
 
     /// Returns whether the vessel made progress (its time moved, or its
-    /// coast restarted).
+    /// coast restarted) and whether it went live at the live boundary.
     pub(super) fn advance_coasting(
         &mut self,
         world: &World,
         target: Epoch,
         controls: &Controls,
         budget: &mut Budget,
-    ) -> bool {
+    ) -> Coasted {
         if self.engine_running(controls) {
             self.thermal_to_now(world);
             let (anchor, r, v) = self.state(world);
             self.phase = Phase::Powered { anchor, r, v };
             self.tick_accel = None;
             self.control.base = None;
-            return true;
+            return Coasted { progressed: true, entered: false };
         }
         // Armed now, opened by the first live tick (no air to fill it here).
         self.chute.armed |= controls.chute;
         let restarted = self.repoint(world, controls);
         let before = self.time;
-        self.coast_until(world, target, controls, budget);
-        restarted || self.time != before
+        let entered = self.coast_until(world, target, controls, budget);
+        Coasted { progressed: restarted || self.time != before, entered }
     }
 
     /// Restarts the coast if the attitude regime the controls ask for is
@@ -84,11 +92,15 @@ impl Vessel {
     fn repoint(&mut self, world: &World, controls: &Controls) -> bool {
         let Phase::Coasting { trajectory } = &self.phase else { return false };
         let seg = trajectory.current();
-        let Some(current) = seg.limbo().map(|l| &l.pointing) else { return false };
         if !matches!(seg.kind, SegmentKind::Coast) || seg.t0.seconds_since(self.time) > 0.0 {
             return false;
         }
         let Some(state) = trajectory.eval(self.time) else { return false };
+        let Some(current) = seg.limbo().map(|l| &l.pointing) else {
+            // A coast from before perturbed coasts (an older save): restart it.
+            self.start_coast_pointing(world, state, Pointing::Mean);
+            return true;
+        };
         let inertia_now = self.mass_props().inertia;
         let fly = Rails { world, trajectory, plan: &self.plan, craft: &self.craft, controls, inertia_now };
         let rule = fly.rule_at(self.time, state.0);
@@ -112,7 +124,8 @@ impl Vessel {
         true
     }
 
-    fn coast_until(&mut self, world: &World, target: Epoch, controls: &Controls, budget: &mut Budget) {
+    /// Returns whether it went live at the live boundary.
+    fn coast_until(&mut self, world: &World, target: Epoch, controls: &Controls, budget: &mut Budget) -> bool {
         let Phase::Coasting { trajectory } = &mut self.phase else { unreachable!() };
         // At a burn's ignition: flown from the attitude the vessel has.
         let control = AttitudeControl { base: None, ..self.control };
@@ -240,7 +253,9 @@ impl Vessel {
             self.thermal_to_now(world);
             let state = self.state(world);
             self.go_live(state);
+            return entry.is_some();
         }
+        false
     }
 
     /// Steps the temperatures from their lattice epoch to the vessel's time

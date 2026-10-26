@@ -541,20 +541,27 @@ impl Vessel {
         let controls = if self.destroyed.is_some() { &cut } else { controls };
         loop {
             let before = (self.time, std::mem::discriminant(&self.phase));
-            // A coast restarted at its own time (a new attitude regime) moved on.
-            let mut restarted = false;
+            // A coast restarted at its own time (a new attitude regime) moved
+            // on; one that reached the live boundary stops there.
+            let (mut restarted, mut went_live) = (false, false);
             match &self.phase {
                 Phase::Landed { .. } => self.advance_landed(world, target, controls),
                 Phase::Crashed { .. } => self.advance_grounded(world, target),
                 Phase::Powered { .. } => self.advance_powered(world, target, controls),
-                Phase::Coasting { .. } => restarted = self.advance_coasting(world, target, controls, &mut budget),
+                Phase::Coasting { .. } => {
+                    let c = self.advance_coasting(world, target, controls, &mut budget);
+                    (restarted, went_live) = (c.progressed, c.entered);
+                }
             }
             // Stop at the target, when neither time nor phase moved (waiting
             // for a segment, or less than one tick left), or out of budget
             // while coasting.
             let spent = budget.thermal == 0 && matches!(self.phase, Phase::Coasting { .. });
             let stuck = (self.time, std::mem::discriminant(&self.phase)) == before && !restarted;
-            if self.time >= target || stuck || spent {
+            // At the live boundary the game holds its clock and caps the
+            // warp (D081) instead of flying live ticks through an atmosphere
+            // for the rest of a rails-warp frame.
+            if self.time >= target || stuck || spent || went_live {
                 return self.time;
             }
         }

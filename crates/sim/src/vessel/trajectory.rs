@@ -115,7 +115,9 @@ impl Trajectory {
     pub fn from_segment(segment: Segment) -> Self {
         let coast_horizon = segment.initial().horizon;
         let limits = BurnLimits::default();
-        Trajectory { segments: vec![segment], coast_horizon, limits, craft: None, seed: None, limbo: None }
+        // A perturbed segment's continuations are perturbed alike.
+        let limbo = segment.limbo().cloned();
+        Trajectory { segments: vec![segment], coast_horizon, limits, craft: None, seed: None, limbo }
     }
 
     /// The segment containing the earliest stored time.

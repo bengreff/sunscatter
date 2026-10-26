@@ -69,7 +69,17 @@ fn a_segment_ended_at_its_horizon_is_continued() {
         fixed_anchor: false,
         proper_time: 0.0,
     };
-    ship.phase = Phase::Coasting { trajectory: Box::new(Trajectory::from_segment(Segment::new(&w, t0, start))) };
+    // A perturbed coast holding the regime the controls ask for (SAS off:
+    // torque-free from the attitude now), so the vessel keeps it.
+    let free = super::pointing::Pointing::Free {
+        epoch: t0,
+        att: ship.attitude,
+        inertia: ship.mass_props().inertia,
+        cache: Default::default(),
+    };
+    let limbo = ship.limbo_model(free);
+    let seg = Segment::new_limbo(&w, t0, start, ship.mass(), limbo);
+    ship.phase = Phase::Coasting { trajectory: Box::new(Trajectory::from_segment(seg)) };
     let target = t0.add_seconds(1_000.0);
     assert_eq!(ship.advance(&w, target, &Controls::default(), usize::MAX), target);
     let seg = ship.segment().unwrap();
