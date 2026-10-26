@@ -151,6 +151,8 @@ pub fn active(candidates: &[(f64, f64)]) -> Option<usize> {
         .map(|(i, _)| i)
 }
 
+type AtmosphereItem = (Entity, &'static mut BodyAtmosphere, &'static mut Transform, Option<&'static mut Atmosphere>);
+
 /// Keeps atmospheres at their bodies' camera-relative centres, with their
 /// ground on the reference ellipsoid below the camera, and draws only the
 /// [`active`] one (none with the atmosphere setting off).
@@ -164,7 +166,7 @@ pub fn update(
     rig: Res<CameraRig>,
     settings: Res<GraphicsSettings>,
     mut commands: Commands,
-    mut atmos: Query<(Entity, &mut BodyAtmosphere, &mut Transform, Option<&mut Atmosphere>)>,
+    mut atmos: Query<AtmosphereItem>,
     mut drawn: Local<Option<Option<Entity>>>,
 ) {
     let snap = sim.world.snapshot(sim.clock);
@@ -398,7 +400,8 @@ mod tests {
         const EARTH: f64 = 6.471e6;
         const MARS: f64 = 3.49e6;
         // (case, (distance, outer radius) per atmosphere, drawn)
-        let cases: [(&str, &[(f64, f64)], Option<usize>); 5] = [
+        type Case<'a> = (&'a str, &'a [(f64, f64)], Option<usize>);
+        let cases: [Case; 5] = [
             ("at Earth's pad", &[(6.37e6, EARTH), (7.8e10, MARS)], Some(0)),
             ("at the Moon: Earth's still", &[(3.84e8, EARTH), (7.8e10, MARS)], Some(0)),
             ("at Jupiter: none", &[(6.3e11, EARTH), (5.5e11, MARS)], None),
