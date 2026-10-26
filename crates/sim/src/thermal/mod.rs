@@ -9,19 +9,23 @@
 //! capacities are an input of each step (they change as propellant drains),
 //! and heat sources (engine losses, later reactors and electronics) go
 //! into them. [`ThermalNetwork::step`] advances the network by backward
-//! Euler, solved by Gauss–Seidel sweeps in cell order, then node order:
-//! each cell's update solves its own implicit balance a·T + εσA·T⁴ = b
-//! exactly (Newton on the quartic, linearising the radiation from an upper
-//! bound, so it never overshoots), with its neighbours at their latest
-//! values, over-relaxed at coast steps ([`relaxation`]); a node's is linear. Every coefficient is positive and the system
-//! diagonally dominant, so the step is stable at any dt. Sweeps stop when
-//! no temperature changes by more than [`CONVERGED`] (relative), at most
-//! `max_sweeps`: a deterministic rule (same inputs, same sweeps). Live
-//! ticks (20 ms) converge in 2–3 sweeps; energy is conserved to the
-//! convergence tolerance.
+//! Euler, solved by block Gauss–Seidel sweeps ([`blocks`]): the strongly
+//! coupled unknowns (chains of thin rings along struts, a node and the
+//! cells it holds) form trees solved exactly in every sweep, the rest of
+//! the links take their neighbours' latest values; each unknown's
+//! radiation is linearised at its current temperature (one Newton step per
+//! sweep: the tangent of the convex εσA·T⁴ lies below it, so a cell lands
+//! at or above the root and comes down to it). Every coefficient is
+//! positive and the system diagonally dominant, so the step is stable at
+//! any dt. Sweeps stop when no temperature changes by more than
+//! [`CONVERGED`] (relative), at most `max_sweeps`: a deterministic rule
+//! (same inputs, same sweeps). Live ticks (20 ms) converge in 3–4 sweeps,
+//! 600 s coast steps in about 10 (`examples/bench_thermal`); energy is
+//! conserved to the convergence tolerance.
 //!
 //! Heat inputs (aerodynamic, sunlight) come from [`heating`].
 
+mod blocks;
 pub mod heating;
 
 pub use heating::{
@@ -33,70 +37,14 @@ use crate::craft::Cell;
 
 /// Stefan–Boltzmann constant (W/(m²·K⁴), CODATA 2018).
 pub const STEFAN_BOLTZMANN: f64 = 5.670_374_419e-8;
-/// Most Gauss–Seidel sweeps per step.
+/// Most sweeps per step.
 pub const DEFAULT_SWEEPS: usize = 128;
 
-/// Over-relaxation of the skin cells' updates for a step of `dt` (s): none
-/// for live ticks (converged in 2–4 sweeps); at coast steps the skin's
-/// conduction along the craft converges slowly, and over-relaxing cuts the
-/// sweeps (measured on the finned test craft, 14.5 m long, from a uniform
-/// start in sunlight: 60 s 28 sweeps at 1.3; 600 s 77 at 1.6 (130 at 1.8);
-/// 3600 s 257 at 1.6, 163 at 1.7, 104 at 1.75, 182 at 1.85).
-/// The fixed point, and so the solution, is the same.
-pub fn relaxation(dt: f64) -> f64 {
-    if dt < 1.0 {
-        1.0
-    } else if dt < 300.0 {
-        1.3
-    } else if dt < 1800.0 {
-        1.6
-    } else {
-        1.75
-    }
-}
 /// Sweeps stop when the largest change is below this × the hottest temperature.
 pub const CONVERGED: f64 = 1e-13;
 /// The same for coast steps (minutes to a day long): ~0.03 mK. Their
 /// inputs are orbit averages, far coarser.
 pub const COAST_CONVERGED: f64 = 1e-5;
-/// Most Newton iterations per cell update.
-const NEWTON: usize = 8;
-
-/// The root T ≥ 0 of a·T + r·T⁴ = b (a, r, b ≥ 0), by Newton from `guess`
-/// (the current temperature). The function is convex and increasing, so the
-/// first step lands at or above the root (clamped to the upper bounds)
-/// and the iterates then decrease monotonically to it: no overshoot at any
-/// dt. Stops when a step changes nothing (relative 1e-15).
-pub fn cell_temperature(a: f64, r: f64, b: f64, guess: f64) -> f64 {
-    if b <= 0.0 {
-        return 0.0;
-    }
-    if r <= 0.0 {
-        return if a > 0.0 { b / a } else { guess };
-    }
-    let newton = |t: f64| {
-        let t3 = t * t * t;
-        t - (a * t + r * t3 * t - b) / (a + 4.0 * r * t3)
-    };
-    // Upper bounds of the root: b/a and (b/r)^¼ (the latter only when
-    // needed; it costs two square roots).
-    let mut t = if guess > 0.0 { newton(guess) } else { f64::INFINITY };
-    if a > 0.0 {
-        t = t.min(b / a);
-    }
-    if t.is_infinite() || r * t * t * t * t > b {
-        t = t.min((b / r).sqrt().sqrt());
-    }
-    for _ in 0..NEWTON {
-        let next = newton(t);
-        if next >= t || t - next <= 1e-15 * t {
-            return next.min(t);
-        }
-        t = next;
-    }
-    t
-}
-
 /// How the interior is divided and joined (built per craft design).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Interior {
@@ -136,6 +84,9 @@ pub struct ThermalNetwork {
     /// Cells under each node (CSR).
     under_start: Vec<u32>,
     under: Vec<u32>,
+    /// The solver's blocks (built from the conductances above, which must
+    /// not change after construction; capacities and radiation may).
+    blocks: blocks::Blocks,
 }
 
 /// A vessel's temperatures (K).
@@ -240,10 +191,27 @@ impl ThermalNetwork {
         let (node_start, node_links) = csr(interior.nodes, both);
         let (under_start, under) =
             csr(interior.nodes, interior.cell_node.iter().enumerate().map(|(i, &n)| (n, i as u32)));
+        let capacity: Vec<f64> = cells.iter().map(|c| c.skin_mass() * c.specific_heat).collect();
+        let to_node: Vec<f64> = cells.iter().map(|c| c.coupling.unwrap_or(interior.coupling) * c.area).collect();
+        let n = cells.len();
+        let mut rows: Vec<Vec<(u32, f64)>> = (0..n)
+            .map(|i| {
+                let own = &links[start[i] as usize..start[i + 1] as usize];
+                own.iter().copied().chain([((n as u32) + interior.cell_node[i], to_node[i])]).collect()
+            })
+            .collect();
+        rows.extend((0..interior.nodes).map(|j| {
+            let own = &node_links[node_start[j] as usize..node_start[j + 1] as usize];
+            let below = &under[under_start[j] as usize..under_start[j + 1] as usize];
+            own.iter().map(|&(k, g)| (n as u32 + k, g)).chain(below.iter().map(|&i| (i, to_node[i as usize]))).collect()
+        }));
+        let strength_capacity: Vec<f64> =
+            capacity.iter().copied().chain(std::iter::repeat_n(0.0, interior.nodes)).collect();
+        let blocks = blocks::Blocks::new(&rows, &strength_capacity);
         ThermalNetwork {
-            capacity: cells.iter().map(|c| c.skin_mass() * c.specific_heat).collect(),
             radiation: cells.iter().map(|c| c.emissivity * STEFAN_BOLTZMANN * c.area).collect(),
-            to_node: cells.iter().map(|c| c.coupling.unwrap_or(interior.coupling) * c.area).collect(),
+            capacity,
+            to_node,
             cell_node: interior.cell_node.clone(),
             start,
             links,
@@ -251,6 +219,7 @@ impl ThermalNetwork {
             node_links,
             under_start,
             under,
+            blocks,
         }
     }
 
@@ -260,18 +229,6 @@ impl ThermalNetwork {
 
     pub fn nodes(&self) -> usize {
         self.node_start.len() - 1
-    }
-
-    fn neighbours(&self, i: usize) -> &[(u32, f64)] {
-        &self.links[self.start[i] as usize..self.start[i + 1] as usize]
-    }
-
-    fn node_neighbours(&self, j: usize) -> &[(u32, f64)] {
-        &self.node_links[self.node_start[j] as usize..self.node_start[j + 1] as usize]
-    }
-
-    fn cells_under(&self, j: usize) -> &[u32] {
-        &self.under[self.under_start[j] as usize..self.under_start[j + 1] as usize]
     }
 
     /// Heat content Σ C·T over the cells and the nodes (J; conservation
@@ -303,6 +260,12 @@ impl ThermalNetwork {
 
     /// [`Self::step`] converged to `tolerance` (relative) instead of
     /// [`CONVERGED`] (coast steps: [`COAST_CONVERGED`]).
+    ///
+    /// Each sweep goes through the blocks ([`blocks`]) in order: every
+    /// unknown's balance with its radiation linearised at its current
+    /// temperature and its links outside the block's tree at their latest
+    /// values; the tree is eliminated from its leaves onto its root and
+    /// solved back.
     #[allow(clippy::too_many_arguments)]
     pub fn step_to(
         &self,
@@ -318,50 +281,92 @@ impl ThermalNetwork {
         let (n, m) = (self.cells(), self.nodes());
         assert!(heat.len() == n && state.skin.len() == n, "thermal step: {} cells, {} inputs", n, heat.len());
         assert!(node_heat.len() == m && node_capacity.len() == m && state.nodes.len() == m, "thermal step: nodes");
-        let old = state.skin.clone();
-        let old_nodes = state.nodes.clone();
+        let b = &self.blocks;
+        let total = n + m;
         let env4 = t_env * t_env * t_env * t_env;
         let inv_dt = 1.0 / dt;
-        let omega = relaxation(dt);
+        // The step's inputs in solve order: the diagonal and right-hand side
+        // without radiation and the other links, and the radiation.
+        let (mut base_d, mut base_y, mut rad, mut x) = (
+            Vec::with_capacity(total),
+            Vec::with_capacity(total),
+            Vec::with_capacity(total),
+            Vec::with_capacity(total),
+        );
+        for (k, &u) in b.order.iter().enumerate() {
+            let u = u as usize;
+            let (c, src, r, t) = if u < n {
+                (self.capacity[u] * inv_dt, heat[u], self.radiation[u], state.skin[u])
+            } else {
+                (node_capacity[u - n] * inv_dt, node_heat[u - n], 0.0, state.nodes[u - n])
+            };
+            base_d.push(c + b.sum_g[k]);
+            base_y.push(c * t + src + r * env4);
+            rad.push(r);
+            x.push(t);
+        }
+        let old_of = |k: usize| {
+            let u = b.order[k] as usize;
+            if u < n {
+                state.skin[u]
+            } else {
+                state.nodes[u - n]
+            }
+        };
+        let mut acc = vec![(0.0f64, 0.0f64); total];
+        let mut dy = vec![(0.0f64, 0.0f64); total];
         let mut done = 0;
         while done < max_sweeps {
             done += 1;
             let (mut change, mut hottest) = (0.0f64, 1.0f64);
-            for i in 0..n {
-                // a·T + r·T⁴ = b with the neighbours and the node at their
-                // latest values.
-                let tb = state.nodes[self.cell_node[i] as usize];
-                let mut a = self.capacity[i] * inv_dt + self.to_node[i];
-                let mut b =
-                    self.capacity[i] * inv_dt * old[i] + heat[i] + self.radiation[i] * env4 + self.to_node[i] * tb;
-                for &(j, g) in self.neighbours(i) {
-                    a += g;
-                    b += g * state.skin[j as usize];
+            for w in b.block_start.windows(2) {
+                let (lo, hi) = (w[0] as usize, w[1] as usize);
+                for k in lo..hi {
+                    let (ad, ay) = acc[k];
+                    let mut d = base_d[k] - ad;
+                    let mut y = base_y[k] + ay;
+                    acc[k] = (0.0, 0.0);
+                    let r = rad[k];
+                    if r > 0.0 {
+                        let t = x[k];
+                        let t3 = t * t * t;
+                        d += 4.0 * r * t3;
+                        y += 3.0 * r * t3 * t;
+                    }
+                    for &(v, g) in &b.rest[b.rest_start[k] as usize..b.rest_start[k + 1] as usize] {
+                        y += g * x[v as usize];
+                    }
+                    dy[k] = (d, y);
+                    let p = b.parent[k];
+                    if p != blocks::NONE && d > 0.0 {
+                        let f = b.from_parent[k] / d;
+                        let a = &mut acc[p as usize];
+                        *a = (a.0 + f * b.to_parent[k], a.1 + f * y);
+                    }
                 }
-                let t = cell_temperature(a, self.radiation[i], b, state.skin[i]);
-                let t = (state.skin[i] + omega * (t - state.skin[i])).max(0.5 * t);
-                change = change.max((t - state.skin[i]).abs());
-                hottest = hottest.max(t);
-                state.skin[i] = t;
-            }
-            for j in 0..m {
-                let c = node_capacity[j] * inv_dt;
-                let (mut diag, mut rhs) = (c, c * old_nodes[j] + node_heat[j]);
-                for &(k, g) in self.node_neighbours(j) {
-                    diag += g;
-                    rhs += g * state.nodes[k as usize];
+                for k in (lo..hi).rev() {
+                    let p = b.parent[k];
+                    let (d, mut y) = dy[k];
+                    if p != blocks::NONE {
+                        y += b.to_parent[k] * x[p as usize];
+                    }
+                    // An isolated unknown without capacity keeps its value.
+                    let t = if d > 0.0 { y / d } else { old_of(k) };
+                    change = change.max((t - x[k]).abs());
+                    hottest = hottest.max(t);
+                    x[k] = t;
                 }
-                for &i in self.cells_under(j) {
-                    diag += self.to_node[i as usize];
-                    rhs += self.to_node[i as usize] * state.skin[i as usize];
-                }
-                let t = if diag > 0.0 { rhs / diag } else { old_nodes[j] };
-                change = change.max((t - state.nodes[j]).abs());
-                hottest = hottest.max(t);
-                state.nodes[j] = t;
             }
             if change <= tolerance * hottest {
                 break;
+            }
+        }
+        for (k, &u) in b.order.iter().enumerate() {
+            let u = u as usize;
+            if u < n {
+                state.skin[u] = x[k];
+            } else {
+                state.nodes[u - n] = x[k];
             }
         }
         done

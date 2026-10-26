@@ -204,17 +204,61 @@ fn overheat_reports_the_cell_furthest_over_its_limit_then_the_interior() {
 }
 
 #[test]
-fn the_cell_balance_is_solved_from_any_guess() {
-    // (a, r, b): a·T + r·T⁴ = b.
-    let cases = [(1.0, 0.0, 300.0), (0.0, 1e-8, 1e4), (50.0, 2e-8, 2e5), (1e6, 4.5e-8, 3e8), (1e-3, 4.5e-8, 1e7)];
-    for (a, r, b) in cases {
-        for guess in [0.0, 1.0, 290.0, 5000.0, 1e6] {
-            let t = cell_temperature(a, r, b, guess);
-            let residual = a * t + r * t * t * t * t - b;
-            assert!(t > 0.0 && residual.abs() < 1e-12 * b, "{a} {r} {b} from {guess}: {t}, {residual}");
-        }
+fn the_blocks_cover_every_link_once_and_solve_children_first() {
+    let net = &test_craft().design().network;
+    let b = &net.blocks;
+    let total = net.cells() + net.nodes();
+    let mut seen = vec![false; total];
+    for &u in &b.order {
+        assert!(!std::mem::replace(&mut seen[u as usize], true), "unknown {u} twice");
     }
-    assert_eq!(cell_temperature(1.0, 1e-8, 0.0, 300.0), 0.0);
+    assert!(seen.iter().all(|&s| s));
+    let mut links = 0;
+    for w in b.block_start.windows(2) {
+        for k in w[0]..w[1] {
+            let p = b.parent[k as usize];
+            // Every parent comes later in the same block.
+            assert!(p == blocks::NONE || (p > k && p < w[1]), "position {k}: parent {p}");
+            links += usize::from(p != blocks::NONE);
+        }
+        assert_eq!((w[0]..w[1]).filter(|&k| b.parent[k as usize] == blocks::NONE).count(), 1, "one root");
+    }
+    // Tree links (both directions) and the rest are every link of the network.
+    let rest = b.rest.len();
+    let cell_links = net.links.len();
+    let node_links = (0..net.nodes()).map(|j| (net.node_start[j + 1] - net.node_start[j]) as usize).sum::<usize>();
+    assert_eq!(2 * links + rest, cell_links + node_links + 2 * net.cells());
+    // The strut and leg chains are blocks: far fewer blocks than unknowns.
+    assert!(b.block_start.len() - 1 < total / 2, "{} blocks", b.block_start.len() - 1);
+}
+
+#[test]
+fn coast_steps_converge_in_few_sweeps_where_chains_of_rings_used_to_crawl() {
+    // The test craft's legs and struts are chains of thin rings coupled
+    // ~50 times more strongly to each other than to anything else: point
+    // Gauss–Seidel took 97 sweeps for a 600 s step from 290 K in sunlight
+    // (23 over-relaxed); the blocks solve each chain exactly.
+    let (net, cap) = with_nodes();
+    let cells = &test_craft().cells.cells;
+    let mut heat = vec![0.0; cells.len()];
+    let mut scratch = vec![0.0; cells.len()];
+    let input = HeatInput { flow_dir: DVec3::ZERO, q_stag: 0.0, sun: DVec3::new(1361.0, 0.0, 0.0) };
+    cell_heat(craft_bake(), cells, &input, &mut scratch, &mut heat);
+    let node_heat = vec![0.0; net.nodes()];
+    let mut s = ThermalState::uniform(cells.len(), net.nodes(), 290.0);
+    for k in 0..10 {
+        let sweeps = net.step_to(&mut s, &heat, &node_heat, &cap, 2.725, 600.0, DEFAULT_SWEEPS, COAST_CONVERGED);
+        assert!(sweeps <= 12, "step {k}: {sweeps} sweeps");
+    }
+    // And to the solution: against the same step converged to 1e-14, within
+    // a few millikelvin.
+    let mut a = s.clone();
+    let mut exact = s.clone();
+    net.step_to(&mut a, &heat, &node_heat, &cap, 2.725, 600.0, DEFAULT_SWEEPS, COAST_CONVERGED);
+    net.step_to(&mut exact, &heat, &node_heat, &cap, 2.725, 600.0, 10_000, 1e-14);
+    let err = (a.skin.iter().zip(&exact.skin)).chain(a.nodes.iter().zip(&exact.nodes)).map(|(x, y)| (x - y).abs());
+    let err = err.fold(0.0, f64::max);
+    assert!(err < 5e-3, "{err} K");
 }
 
 #[test]
