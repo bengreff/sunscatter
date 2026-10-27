@@ -157,6 +157,10 @@ pub struct Runtime {
     pub unpowered: Vec<Lost>,
     #[serde(default)]
     pub buses: Vec<super::power::BusRun>,
+    /// The crew's exposure to acceleration and their injuries
+    /// (`systems::crew`).
+    #[serde(default)]
+    pub crew: super::crew::CrewRun,
 }
 
 impl Runtime {

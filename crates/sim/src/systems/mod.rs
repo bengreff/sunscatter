@@ -21,6 +21,7 @@
 //! panel, a battery, constant loads) and [`Consumables`] (boil-off).
 
 pub mod command;
+pub mod crew;
 pub mod data;
 pub mod failure;
 pub mod fins;

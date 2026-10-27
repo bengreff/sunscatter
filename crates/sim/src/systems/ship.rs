@@ -77,7 +77,17 @@ pub fn tick(def: &ShipDef, state: &mut ShipState, env: &TickEnv, draws: &[f64], 
     }
     effects.extend(super::failure::step(def, state, env));
     super::power::step_ship(def, state, env.sun, env.dt, env.at);
+    let outside = cabin_k(state, env.bodies.as_ref());
+    super::crew::step(def, state, Some(env.accel), outside, env.dt, env.at);
     effects
+}
+
+/// The cabin's part's temperature (K): the mean of its skin cells this
+/// tick, else room temperature.
+fn cabin_k(state: &ShipState, bodies: Option<&super::structure::Bodies>) -> f64 {
+    let part = state.cabin.as_ref().map(|c| c.part);
+    let found = bodies.zip(part).and_then(|(b, p)| b.ids.iter().position(|&x| x == p).and_then(|k| b.kelvin.get(k)));
+    found.copied().unwrap_or(293.15)
 }
 
 /// Draws `kg` for thruster block `i` from its feed: a bottle's gas, or its
@@ -144,5 +154,6 @@ pub fn lattice(def: &ShipDef, state: &mut ShipState, at: Epoch, env: &plumbing::
     let vented = plumbing::slow(def, state, env, dt);
     plumbing::fast(def, state, &before, &a, dt);
     super::power::step_ship(def, state, env.sun, dt, at);
+    super::crew::step(def, state, None, env.air_k.unwrap_or(293.15), dt, at);
     vented
 }
