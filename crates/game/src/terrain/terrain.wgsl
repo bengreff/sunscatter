@@ -354,18 +354,21 @@ struct ZoneOut {
 
 // The zone surface at warped texture coordinates `uv` (derivatives dx, dy),
 // body-fixed position `p` (m) and pixel footprint `foot` (m).
-fn zone_surface(uv: vec2<f32>, dx: vec2<f32>, dy: vec2<f32>, p: vec3<f32>, foot: f32) -> ZoneOut {
+// `dx`, `dy`: the warped coordinates' derivatives (the edges'
+// antialiasing); `dx0`, `dy0`: the unwarped ones (how many texels a pixel
+// covers, and the filtered lookups), continuous where the warp stops.
+fn zone_surface(uv: vec2<f32>, dx: vec2<f32>, dy: vec2<f32>, dx0: vec2<f32>, dy0: vec2<f32>, p: vec3<f32>, foot: f32) -> ZoneOut {
     var o = ZoneOut(vec3(0.0), 0.0, 0.0, 1.0, 0.0);
     let zs = vec2<f32>(textureDimensions(zone_map, 0));
     let jx = dx * zs;
     let jy = dy * zs;
     // Near: pixels smaller than half a zone texel; far: a texel or more.
-    let far = smoothstep(0.5, 1.0, max(length(jx), length(jy)));
+    let far = smoothstep(0.5, 1.0, max(length(dx0 * zs), length(dy0 * zs)));
     // Fully near (a pixel under half a zone texel), the far colour is not
     // drawn: the base level (the tint below) gives the shallowness too.
     var far_c = vec4(0.0);
     if far > 0.0 {
-        far_c = textureSampleGrad(zone_far, color_sampler, uv, dx, dy);
+        far_c = textureSampleGrad(zone_far, color_sampler, uv, dx0, dy0);
     }
     o.shallow = far_c.a;
     var near = vec3(0.0);
@@ -386,7 +389,8 @@ fn zone_surface(uv: vec2<f32>, dx: vec2<f32>, dy: vec2<f32>, p: vec3<f32>, foot:
             textureLoad(zone_map, vec2(x1, y0), 0).r,
             textureLoad(zone_map, vec2(x0, y0), 0).r,
         );
-        let ids = vec4<u32>(g * 255.0 + 0.5);
+        // The zone indices, without the edge flag (zones::EDGE_BIT).
+        let ids = vec4<u32>(g * 255.0 + 0.5) & vec4(0x7fu);
         let w = gather_w(f);
         // Each zone's summed weight; the largest wins (zones::pick).
         let s = vec4(dot(w, eq4(ids, ids.x)), dot(w, eq4(ids, ids.y)), dot(w, eq4(ids, ids.z)), dot(w, eq4(ids, ids.w)));
@@ -431,7 +435,7 @@ fn zone_surface(uv: vec2<f32>, dx: vec2<f32>, dy: vec2<f32>, p: vec3<f32>, foot:
         let ws = vec2<f32>(textureDimensions(water_map, 0));
         let wjx = dx * ws;
         let wjy = dy * ws;
-        let wfar = smoothstep(0.5, 1.0, max(length(wjx), length(wjy)));
+        let wfar = smoothstep(0.5, 1.0, max(length(dx0 * ws), length(dy0 * ws)));
         var near_sea = 0.0;
         if wfar < 1.0 {
             let t = uv * ws - 0.5;
@@ -444,7 +448,7 @@ fn zone_surface(uv: vec2<f32>, dx: vec2<f32>, dy: vec2<f32>, p: vec3<f32>, foot:
         }
         var far_sea = 0.0;
         if wfar > 0.0 {
-            far_sea = textureSampleGrad(water_map, water_sampler, uv, dx, dy).r;
+            far_sea = textureSampleGrad(water_map, water_sampler, uv, dx0, dy0).r;
         }
         o.sea = mix(near_sea, far_sea, wfar);
     }
@@ -715,10 +719,22 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
         // are fractal, line up and keep gaining detail closer in.
         let foot = max(length(dp1), length(dp2));
         let zs = vec2<f32>(textureDimensions(zone_map, 0));
-        let uv_w = uv + zone_warp(fixed, terrain.zones.y, foot) / zs;
+        // The warp only near an edge (the zone map's flag at this texel,
+        // zones::edge_mask) and where pixels are under a zone texel:
+        // elsewhere every lookup it can reach sees one zone and one side of
+        // the coast (the warp took ~10 ms of a 23 ms frame from orbit).
+        let n = vec2<i32>(zs);
+        let c = vec2<i32>(floor(uv * zs));
+        let flag = textureLoad(zone_map, vec2(((c.x % n.x) + n.x) % n.x, clamp(c.y, 0, n.y - 1)), 0).r;
+        let near_edge = flag * 255.0 > 127.5;
+        let pixel_texels = max(length(dx * zs), length(dy * zs));
+        var uv_w = uv;
+        if near_edge && pixel_texels < 1.0 {
+            uv_w = uv + zone_warp(fixed, terrain.zones.y, foot) / zs;
+        }
         let dxw = vec2(wrap_d(dpdx(uv_w.x)), dpdx(uv_w.y));
         let dyw = vec2(wrap_d(dpdy(uv_w.x)), dpdy(uv_w.y));
-        let z = zone_surface(uv_w, dxw, dyw, fixed, foot);
+        let z = zone_surface(uv_w, dxw, dyw, dx, dy, fixed, foot);
         color = z.land;
         water = max(z.sea, z.lake);
         // Open water, lighter over a shallow sea floor (lakes stay deep).

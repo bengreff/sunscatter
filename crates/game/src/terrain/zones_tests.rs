@@ -261,3 +261,51 @@ fn shipped_zone_maps_index_their_lists() {
         }
     }
 }
+
+#[test]
+fn the_edge_mask_marks_what_the_warp_can_reach() {
+    // A 16 × 8 map: sea (0) west of column 6, zone 3 east, and one lake
+    // texel (5) at (12, 4).
+    let (w, h) = (16, 8);
+    let mut data = vec![3u8; w * h];
+    for j in 0..h {
+        for i in 0..6 {
+            data[j * w + i] = 0;
+        }
+    }
+    data[4 * w + 12] = 5;
+    let raw = ZoneMap { w, h, data };
+    let m = edge_mask(&raw, 1);
+    let edge = |i: usize, j: usize| m[j * w + i];
+    // (column, row, edge): the coast at 5|6 and its band of one texel; the
+    // wrap at 15|0 (zone 3 against sea); the lake's square; open interior.
+    let cases = [
+        (4, 2, true),
+        (5, 2, true),
+        (6, 2, true),
+        (7, 2, true),
+        (8, 2, false),
+        (2, 2, false),
+        (0, 0, true),
+        (15, 7, true),
+        (14, 0, true),
+        (13, 0, false),
+        (12, 4, true),
+        (11, 3, true),
+        (13, 5, true),
+        (10, 4, true),
+        (12, 1, false),
+        (9, 6, false),
+    ];
+    for (i, j, want) in cases {
+        assert_eq!(edge(i, j), want, "({i}, {j})");
+    }
+    // One zone everywhere: no edge; marking keeps the index in the low bits.
+    let flat = ZoneMap { w, h, data: vec![2; w * h] };
+    assert!(edge_mask(&flat, 4).iter().all(|e| !e));
+    let mut marked = raw.clone();
+    marked.mark_edges(&m);
+    assert_eq!(marked.data[2 * w + 6], 3 | EDGE_BIT);
+    assert_eq!(marked.data[2 * w + 8], 3);
+    assert!(raw.data.iter().all(|&v| v < EDGE_BIT), "indices stay under the flag");
+}

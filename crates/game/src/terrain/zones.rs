@@ -513,7 +513,79 @@ pub fn load(inp: ZoneInputs) -> Option<ZoneTextures> {
         _ => None,
     };
     let base = far_texels(&raw, &filled, &pal, sat.as_deref(), shallow.as_deref());
+    filled.mark_edges(&edge_mask(&raw, EDGE_RADIUS));
     Some(ZoneTextures { map: filled.to_image(), far: far_image(base, raw.w, raw.h), palette: pal, width: raw.w })
+}
+
+/// The zone map's flag for texels near an edge (its top bit; indices stay
+/// under 128): only there can the warp change what is drawn.
+pub const EDGE_BIT: u8 = 0x80;
+
+/// How far (zone texels) the warp and the shader's 2×2 lookup reach from a
+/// point: the warp's octaves sum to 2 × `WARP_AMP_TEXELS` (1.2), the
+/// gather one more, and one for the texel the test is made in.
+pub const EDGE_RADIUS: usize = 4;
+
+/// Texels within `radius` (square, longitude wrapping, latitude clamped)
+/// of a texel whose raw value differs from a neighbour's: a zone edge, a
+/// lake's or the coast (the raw map keeps the sea as 0). Elsewhere every
+/// lookup the warp can reach sees one zone and one side of the coast, so
+/// the shader skips the warp there (the zones' warp took ~10 ms of a 23 ms
+/// frame at 3024×1964 from 185 km, 2026-10-26, nearly all of it where it
+/// changed nothing).
+pub fn edge_mask(raw: &ZoneMap, radius: usize) -> Vec<bool> {
+    let (w, h) = (raw.w, raw.h);
+    let at = |i: usize, j: usize| raw.data[j * w + i];
+    // Texels with a 4-neighbour of another value.
+    let mut seed = vec![false; w * h];
+    for j in 0..h {
+        for i in 0..w {
+            let v = at(i, j);
+            let east = at((i + 1) % w, j);
+            let south = if j + 1 < h { at(i, j + 1) } else { v };
+            if v != east {
+                seed[j * w + i] = true;
+                seed[j * w + (i + 1) % w] = true;
+            }
+            if v != south {
+                seed[j * w + i] = true;
+                seed[(j + 1) * w + i] = true;
+            }
+        }
+    }
+    // Dilated by `radius`: along longitude (wrapping), then latitude.
+    let mut rows = vec![false; w * h];
+    for j in 0..h {
+        for i in 0..w {
+            if seed[j * w + i] {
+                for d in 0..=2 * radius {
+                    rows[j * w + (i + w * (radius + 1) + d - radius) % w] = true;
+                }
+            }
+        }
+    }
+    let mut out = vec![false; w * h];
+    for j in 0..h {
+        for i in 0..w {
+            if rows[j * w + i] {
+                for jj in j.saturating_sub(radius)..=(j + radius).min(h - 1) {
+                    out[jj * w + i] = true;
+                }
+            }
+        }
+    }
+    out
+}
+
+impl ZoneMap {
+    /// Sets [`EDGE_BIT`] on the texels of `edges`.
+    pub fn mark_edges(&mut self, edges: &[bool]) {
+        for (v, &e) in self.data.iter_mut().zip(edges) {
+            if e {
+                *v |= EDGE_BIT;
+            }
+        }
+    }
 }
 
 #[cfg(test)]
