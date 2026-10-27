@@ -255,6 +255,9 @@ pub fn update(
         f.center = centre.as_vec3().extend(0.0);
         // Zones draw once loaded (`update_textures`).
         f.flags.x = if parts.zones && zones_loaded { 1.0 } else { 0.0 };
+        // The warp and the zones' pattern (off only in the benchmark).
+        f.flags.y = if parts.zone_warp { 1.0 } else { 0.0 };
+        f.flags.z = if parts.zone_pattern { 1.0 } else { 0.0 };
     }
     terrain.drawn = drawn;
 }

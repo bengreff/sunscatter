@@ -50,7 +50,8 @@ pub struct TerrainFrame {
     /// (`sky::ambient_share`: the daylight sky stand-in lights only the body
     /// whose air the camera is in).
     pub ambient: Vec4,
-    /// x: 1 when the zones are drawn (loaded, `look::Parts::zones`).
+    /// x: 1 when the zones are drawn (loaded, `look::Parts::zones`); y, z: 1
+    /// with their warp and their pattern (off only in the benchmark).
     pub flags: Vec4,
     /// Under an opaque deck (`clouds`): rgb the gas's extinction at the
     /// datum (m⁻¹), w its scale height (m).

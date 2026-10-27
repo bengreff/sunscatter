@@ -54,7 +54,7 @@ struct TerrainFrame {
     starlight: Lights,
     // x: this body's share of the global ambient light (sky::ambient_share).
     ambient: vec4<f32>,
-    // x: 1 when the zones are drawn.
+    // x: 1 when the zones are drawn; y, z: 1 with their warp, their pattern.
     flags: vec4<f32>,
     // Under an opaque deck: rgb the gas's extinction at the datum (m⁻¹), w
     // its scale height (m); rgb the sky's radiance (lux/sr), w 1 when on.
@@ -219,14 +219,24 @@ fn vnoise2(p: vec3<f32>) -> vec2<f32> {
     let i = vec3<i32>(fl);
     let f = p - fl;
     let u = f * f * (3.0 - 2.0 * f);
-    var c: array<vec2<f32>, 8>;
-    for (var k = 0; k < 8; k++) {
-        let h = hash3(i + vec3<i32>(k & 1, (k >> 1) & 1, (k >> 2) & 1));
-        c[k] = vec2(f32(h & 0xffffu), f32(h >> 16u)) * (1.0 / 65535.0);
-    }
-    let y0 = mix(mix(c[0], c[1], u.x), mix(c[2], c[3], u.x), u.y);
-    let y1 = mix(mix(c[4], c[5], u.x), mix(c[6], c[7], u.x), u.y);
+    // The 8 corners by name, not in a local array (which can spill).
+    let c0 = corner(i);
+    let c1 = corner(i + vec3(1, 0, 0));
+    let c2 = corner(i + vec3(0, 1, 0));
+    let c3 = corner(i + vec3(1, 1, 0));
+    let c4 = corner(i + vec3(0, 0, 1));
+    let c5 = corner(i + vec3(1, 0, 1));
+    let c6 = corner(i + vec3(0, 1, 1));
+    let c7 = corner(i + vec3(1, 1, 1));
+    let y0 = mix(mix(c0, c1, u.x), mix(c2, c3, u.x), u.y);
+    let y1 = mix(mix(c4, c5, u.x), mix(c6, c7, u.x), u.y);
     return mix(y0, y1, u.z) * 2.0 - 1.0;
+}
+
+// Two lattice values in [0, 1] at integer cell `c`.
+fn corner(c: vec3<i32>) -> vec2<f32> {
+    let h = hash3(c);
+    return vec2(f32(h & 0xffffu), f32(h >> 16u)) * (1.0 / 65535.0);
 }
 
 // The same value noise from the lattice texture (noise.rs): one trilinear
@@ -260,6 +270,9 @@ fn octave_noise2(k: i32, q: vec3<f32>) -> vec2<f32> {
 // (m), wavelengths `lam0`, lam0/2, ..., each octave fading by footprint.
 fn zone_warp(p: vec3<f32>, lam0: f32, foot: f32) -> vec2<f32> {
     var w = vec2(0.0);
+    if frame_data.flags.y <= 0.0 {
+        return w;
+    }
     var lam = lam0;
     var amp = WARP_AMP;
     var q = p / lam0;
@@ -280,6 +293,9 @@ fn zone_warp(p: vec3<f32>, lam0: f32, foot: f32) -> vec2<f32> {
 // octave fading by footprint, so it reads the same from any distance.
 fn zone_tone(p: vec3<f32>, scale: f32, foot: f32) -> f32 {
     var t = 0.0;
+    if frame_data.flags.z <= 0.0 {
+        return t;
+    }
     var lam = scale;
     var amp = 0.5;
     var q = p / scale;
@@ -345,7 +361,12 @@ fn zone_surface(uv: vec2<f32>, dx: vec2<f32>, dy: vec2<f32>, p: vec3<f32>, foot:
     let jy = dy * zs;
     // Near: pixels smaller than half a zone texel; far: a texel or more.
     let far = smoothstep(0.5, 1.0, max(length(jx), length(jy)));
-    let far_c = textureSampleGrad(zone_far, color_sampler, uv, dx, dy);
+    // Fully near (a pixel under half a zone texel), the far colour is not
+    // drawn: the base level (the tint below) gives the shallowness too.
+    var far_c = vec4(0.0);
+    if far > 0.0 {
+        far_c = textureSampleGrad(zone_far, color_sampler, uv, dx, dy);
+    }
     o.shallow = far_c.a;
     var near = vec3(0.0);
     if far < 1.0 {
@@ -389,7 +410,11 @@ fn zone_surface(uv: vec2<f32>, dx: vec2<f32>, dy: vec2<f32>, p: vec3<f32>, foot:
         }
         // The satellite tint, baked in the far texture: its base level over
         // the palette, both bilinear, so it varies smoothly.
-        let base = textureSampleLevel(zone_far, color_sampler, uv, 0.0).rgb;
+        let base4 = textureSampleLevel(zone_far, color_sampler, uv, 0.0);
+        let base = base4.rgb;
+        if far <= 0.0 {
+            o.shallow = base4.a;
+        }
         let pal = zone_col(ids.x).rgb * w.x + zone_col(ids.y).rgb * w.y + zone_col(ids.z).rgb * w.z + zone_col(ids.w).rgb * w.w;
         let tint = base / max(pal, vec3(1e-5));
         let pat = terrain.zone_pattern[min(win, 15u)];
@@ -538,14 +563,17 @@ fn lighting_input_of(in: pbr_types::PbrInput) -> lighting::LightingInput {
 fn shade(in: pbr_types::PbrInput, color: vec3<f32>, p: vec3<f32>, n: vec3<f32>) -> vec3<f32> {
     let foot = length(fwidth(p));
     let up_here = normalize(p - frame_data.center.xyz);
-    var factor: array<vec3<f32>, 4>;
+    // Each slot's factor, by name (a dynamically indexed local array can spill).
+    var f0 = vec3(0.0);
+    var f1 = vec3(0.0);
+    var f2 = vec3(0.0);
+    var f3 = vec3(0.0);
     var sky_num = vec3(0.0);
     var sky_den = 0.0;
     var lit = vec3(0.0);
     for (var k = 0; k < MAX_STARS; k++) {
         let s = frame_data.starlight.stars[k];
         let sl = frame_data.starlight.star_light[k];
-        factor[k] = vec3(0.0);
         if s.w <= 0.0 || sl.w <= 0.0 {
             continue;
         }
@@ -566,7 +594,15 @@ fn shade(in: pbr_types::PbrInput, color: vec3<f32>, p: vec3<f32>, n: vec3<f32>) 
             f *= exp(-terrain.haze.rgb * airmass);
             lit += color * terrain.haze_diffuse.rgb * sl.rgb * seen * mu / PI * view.exposure;
         }
-        factor[k] = f;
+        if k == 0 {
+            f0 = f;
+        } else if k == 1 {
+            f1 = f;
+        } else if k == 2 {
+            f2 = f;
+        } else {
+            f3 = f;
+        }
         let e_cam = lighting_luminance(sl.rgb) / sl.w;
         sky_num += f * e_cam;
         sky_den += e_cam;
@@ -587,16 +623,17 @@ fn shade(in: pbr_types::PbrInput, color: vec3<f32>, p: vec3<f32>, n: vec3<f32>) 
             shadow = shadows::fetch_directional_shadow(i, in.world_position, in.world_normal, view_z, in.frag_coord.xy);
         }
         let c = lighting::directional_light(i, &input, true) * shadow * view.exposure;
-        lit += c * factor[slot_of_light(i)];
+        let slot = slot_of_light(i);
+        lit += c * select(select(select(f3, f2, slot == 2), f1, slot == 1), f0, slot == 0);
     }
     var sky = vec3(1.0);
     if sky_den > 0.0 {
         sky = sky_num / sky_den;
     }
     // Bevy's ambient term (no environment map, no clustered lights here).
-    let f0 = mix(input.F0_dielectric, input.F0_metallic, input.metallic);
+    let spec0 = mix(input.F0_dielectric, input.F0_metallic, input.metallic);
     let amb = ambient_light(
-        in.world_position, in.N, in.V, NdotV, input.diffuse_color, f0,
+        in.world_position, in.N, in.V, NdotV, input.diffuse_color, spec0,
         input.layers[lighting::LAYER_BASE].perceptual_roughness, in.diffuse_occlusion,
     );
     lit += amb * view.exposure * sky;

@@ -138,6 +138,6 @@ mod tests {
         assert!(md.contains("| −atmosphere | 5.50 | 6.00 | +2.50 ms |"), "{md}");
         let labels: Vec<String> = configurations().into_iter().map(|c| c.0).collect();
         assert_eq!(labels[0], LOOK);
-        assert!(labels.contains(&"−relief".to_string()) && labels.len() == 10);
+        assert!(labels.contains(&"−relief".to_string()) && labels.len() == 12);
     }
 }

@@ -25,6 +25,9 @@ pub struct Parts {
     pub relief: bool,
     /// Surface zones (off: the colour map).
     pub zones: bool,
+    /// The zones' domain warp (crisp, fractal edges) and their pattern.
+    pub zone_warp: bool,
+    pub zone_pattern: bool,
     /// Atmospheres.
     pub atmosphere: bool,
     /// Raymarching the atmosphere from outside it (off: lookup tables).
@@ -41,6 +44,8 @@ impl Default for Parts {
         Parts {
             relief: true,
             zones: true,
+            zone_warp: true,
+            zone_pattern: true,
             atmosphere: true,
             raymarch: true,
             shadows: true,
@@ -59,6 +64,8 @@ impl Parts {
         vec![
             ("relief", Parts { relief: false, ..on }),
             ("zones", Parts { zones: false, ..on }),
+            ("zones' warp", Parts { zone_warp: false, ..on }),
+            ("zones' pattern", Parts { zone_pattern: false, ..on }),
             ("atmosphere", Parts { atmosphere: false, ..on }),
             ("raymarching from outside", Parts { raymarch: false, ..on }),
             ("shadows", Parts { shadows: false, ..on }),
@@ -100,11 +107,23 @@ mod tests {
     fn the_benchmark_turns_off_one_part_at_a_time() {
         let on = Parts::default();
         let parts = Parts::each_off();
-        assert_eq!(parts.len(), 9);
+        assert_eq!(parts.len(), 11);
         for (name, p) in &parts {
             // Exactly one part differs from the look.
             let flags = |p: &Parts| {
-                [p.relief, p.zones, p.atmosphere, p.raymarch, p.shadows, p.msaa, p.stars, p.planetshine, p.flare]
+                [
+                    p.relief,
+                    p.zones,
+                    p.zone_warp,
+                    p.zone_pattern,
+                    p.atmosphere,
+                    p.raymarch,
+                    p.shadows,
+                    p.msaa,
+                    p.stars,
+                    p.planetshine,
+                    p.flare,
+                ]
             };
             let off = flags(p).iter().zip(flags(&on)).filter(|(a, b)| **a != *b).count();
             assert_eq!(off, 1, "{name}");
