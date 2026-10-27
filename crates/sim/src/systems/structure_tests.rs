@@ -363,3 +363,61 @@ fn pressure_raises_the_buckling_load() {
         last = g;
     }
 }
+
+/// What the systems' steps of SYSTEMS2 cost per live tick on the Falcon 9
+/// (ship-model.md §10's budget: the whole systems step under 0.5 ms).
+#[test]
+#[ignore]
+fn cost_per_tick() {
+    let craft = falcon9();
+    let def = craft.ship.as_ref().unwrap();
+    let mut state = ShipState::initial(def);
+    state.clamped = false;
+    let (ids, parents, kelvin) = bodies_of(&craft);
+    let pushes = merlins(&craft, 845e3);
+    let b = Bodies {
+        ids: &ids,
+        parents: &parents,
+        dry: &craft.part_mass,
+        kelvin: &kelvin,
+        pushes: &pushes,
+        ambient: 101_325.0,
+        hottest: &kelvin,
+        q: 20e3,
+        mach: 1.0,
+    };
+    let m = Motion { accel: DVec3::Z * 14.0, ..Motion::default() };
+    let t0 = Epoch::new(1_000_000_000, 0.0);
+    let env = crate::systems::ship::TickEnv {
+        at: t0,
+        dt: 0.02,
+        p: 101_325.0,
+        throttle: 1.0,
+        accel: m.accel,
+        omega: DVec3::ZERO,
+        alpha: DVec3::ZERO,
+        com: DVec3::ZERO,
+        sun: DVec3::new(-1361.0, 0.0, 0.0),
+        air_k: Some(288.0),
+        debug: false,
+        bodies: Some(b),
+    };
+    let n = 2000;
+    let t = std::time::Instant::now();
+    for _ in 0..n {
+        step(def, &mut state, &b, &m, t0, false);
+    }
+    let s = t.elapsed().as_secs_f64() / f64::from(n) * 1e3;
+    let t = std::time::Instant::now();
+    for _ in 0..n {
+        crate::systems::failure::step(def, &mut state, &env);
+    }
+    let f = t.elapsed().as_secs_f64() / f64::from(n) * 1e3;
+    let t = std::time::Instant::now();
+    for _ in 0..n {
+        crate::systems::power::step_ship(def, &mut state, env.sun, 0.02, t0);
+        crate::systems::crew::step(def, &mut state, Some(m.accel), 293.0, 0.02, t0);
+    }
+    let p = t.elapsed().as_secs_f64() / f64::from(n) * 1e3;
+    println!("per tick: structure {s:.3} ms, failures {f:.3} ms, power and crew {p:.3} ms");
+}

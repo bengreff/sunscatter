@@ -12,6 +12,7 @@
 - **Snap.** Ratio ≥ 1 (not in debug mode): an alarm ("snapped"/"buckled"), `Effect::Snap(child, load)` → `Breakup::torn`: the child's side tears off with what hangs from it, no separation system fires. Each part's peak ratio goes into its history (`History::peak_load`).
 - **Data** (D101): the second stage's axial design load is Dragon and its trunk at the user's guide's 6 g axial limit factor (falcon9.md §6.4), 820 kN; an ablator or core wall carries no stack load (`Wall::allowable` = 0).
 - **Falcon 9 numbers** (tests): lift-off: each stack joint carries the mass above × 13.6 m/s², ratios ≤ 0.24; held on the pad at full thrust the octaweb's joint carries the weight above it; max-Q 36 kPa at 4° α with the gimbal balancing: every joint ≤ 0.70 (Dragon ring 0.65); near MECO at 4.9 g the Dragon ring 0.59; the demo's gravity turn (pitch program held directly, ~4° through max-Q): ring peak 0.61; a straight-up full-throttle ascent through MECO, separation and 30 s of MVac: nothing breaks.
+- **Cost** (`cost_per_tick`, ignored; release, reference Mac under the night's load): per live tick on the Falcon 9, the joints 0.011 ms, the failures 0.004 ms, power and crew 0.011 ms (ship-model.md §10's budget for the whole systems step: 0.5 ms).
 - **Not done:** thruster couples are not among the forces (hundreds of newtons); joints' fatigue (no data); a joint's own stiffness (rigid, D103); a leg's strut capacity (no data: legs are left to the contact).
 
 ## Failures (`sim::systems::failure`)
