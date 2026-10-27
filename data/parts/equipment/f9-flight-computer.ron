@@ -4,5 +4,6 @@
     id: "f9-flight-computer", name: "Falcon 9 flight computer (triplex)", era: 2010, provisional: true,
     generator: Component(envelope: Box(0.4, 0.3, 0.2), power: 150.0, control: true,
         equipment: Computer(channels: 3, mass: 15.0)),
-    failures: [(mode: "channel", hazard: PerHour(1.0e-4), outcome: Lost, source: "class estimate, low bound; provisional")],
+    // falcon9.md §6.3: no avionics-caused failure in 642 flights: low end 0, no statistical mode (D105).
+    ratings: (vibration_grms: 14.1, vibration_s: 360.0),
 )

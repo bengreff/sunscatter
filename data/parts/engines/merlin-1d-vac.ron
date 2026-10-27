@@ -21,5 +21,12 @@
         "thrust_vac": (981.0e3, "P: Falcon User's Guide Table 2-1, 220,500 lbf, falcon9.md §2.2"),
         "isp_vac": (348.0, "P: SpaceX web page, falcon9.md §2.2"),
     },
-    ratings: (reliability: 8.0, life: Starts(4.0), burn_time: 600.0),
+    ratings: (reliability: 8.0, life: Starts(4.0), burn_time: 600.0, vibration_grms: 26.0, vibration_s: 1100.0),
+    // falcon9.md §6.3: 1 restart failure in ~1,300 starts (Starlink 9-3: a sense
+    // line fatigued by vibration leaked LOX, a hard start). The leak path is not
+    // simulated yet, so its low end stands in; remove it once it is (then 0).
+    failures: [
+        (mode: "restart", hazard: PerStart(8.0e-5), outcome: Uncontained,
+         source: "falcon9.md §6.3: 1 in ~1,300 MVac starts, low end 8e-5 per start (the vibration-fatigue leak not modelled)"),
+    ],
 )

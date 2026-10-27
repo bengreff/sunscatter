@@ -2,5 +2,5 @@
 // (DATA): P published, E estimate, D derived, U unknown (proposed value).
 (
     id: "dragon-trunk-solar", name: "Crew Dragon trunk solar array (body-mounted cells)", era: 2019, provisional: true,
-    generator: Component(envelope: Box(0.3, 0.3, 0.1), equipment: Solar(area: 5.0, efficiency: 0.29, mass: 20.0)),   // E: 1.5–2 kW
+    generator: Component(envelope: Box(0.3, 0.3, 0.1), equipment: Solar(area: 8.9, efficiency: 0.30, mass: 20.0)),   // D: 3.7 × 3.0 m × 80 % cells, 3.6 kW peak (falcon9.md §5.3)
 )

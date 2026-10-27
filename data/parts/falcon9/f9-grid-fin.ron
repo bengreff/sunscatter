@@ -8,4 +8,8 @@
         deflection_deg: 20.0, rate_dps: 30.0, deploy_rate_dps: 45.0, deployed_deg: 90.0,   // U, E
         actuator: Hydraulic,                                                              // P
     ),
+    failures: [
+        (mode: "hydraulic pump stall", hazard: PerCycle(1.6e-4), outcome: Lost,
+         source: "falcon9.md §6.3: 1 stall in 652 landings (2018, before the backup pump), low end 1.6e-4 per landing"),
+    ],
 )

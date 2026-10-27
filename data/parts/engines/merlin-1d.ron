@@ -22,10 +22,14 @@
         "isp_vac": (311.0, "P: SpaceX web page 2013, falcon9.md §2.1"),
         "dry_mass": (470.0, "E: Tom Mueller 2015, 1,030 lb with TVC actuators, falcon9.md §2.1"),
     },
-    ratings: (reliability: 8.0, life: Starts(30.0), burn_time: 1800.0),
+    // Engine-mounted equipment: qualification 26 g rms for 3 × a ~150 s ascent (E, falcon9.md §6.4).
+    ratings: (reliability: 8.0, life: Starts(30.0), burn_time: 1800.0, vibration_grms: 26.0, vibration_s: 450.0),
+    // falcon9.md §6.3: the low end (one-sided 10 % Poisson bound) of Block 5's
+    // own record; no uncontained mode (0 in 5,778 engine-ascents: low end 0, D105).
     failures: [
-        (mode: "turbopump", hazard: PerHour(0.02), outcome: Uncontained, source: "class estimate, low bound (falcon9.md §6 to follow)"),
-        (mode: "controller shutdown", hazard: PerHour(0.1), outcome: BenignShutdown, source: "class estimate, low bound; CRS-1 engine-out (P)"),
-        (mode: "ignition", hazard: PerStart(0.001), outcome: IgnitionFailure, source: "class estimate, low bound"),
+        (mode: "in-flight shutdown", hazard: PerHour(2.2e-3), outcome: BenignShutdown,
+         source: "falcon9.md §6.3: 2 in 241 Block 5 engine-hours, low end 2.2e-3/h"),
+        (mode: "ignition", hazard: PerStart(1.7e-5), outcome: IgnitionFailure,
+         source: "falcon9.md §6.3: ≥1 pad ignition failure in ~6,300 starts, low end 1.7e-5 per start"),
     ],
 )

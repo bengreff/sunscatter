@@ -1,8 +1,8 @@
 // Catalog entry (D101; sim::catalog). Provisional: public numbers from memory,
 // to be replaced by docs/features/falcon9.md (DATA) as it lands.
 (
-    id: "f9-battery", name: "Falcon 9 lithium-ion battery", era: 2015, provisional: true,
+    id: "f9-battery", name: "Falcon 9 lithium-ion battery (2.5 kWh, U: falcon9.md §5.3)", era: 2015, provisional: true,
     generator: Component(envelope: Box(0.4, 0.3, 0.25),
-        equipment: Battery(capacity_wh: 3000.0, voltage: 28.0, specific_energy: 120.0, internal_resistance: 0.02, max_power: 3000.0),
+        equipment: Battery(capacity_wh: 2500.0, voltage: 28.0, specific_energy: 120.0, internal_resistance: 0.02, max_power: 3000.0),
         max_k: 330.0),
 )

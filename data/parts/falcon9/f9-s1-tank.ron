@@ -11,5 +11,5 @@
         axial_load: 6.0e6, min_gauge: 0.003,                 // D: 6 MN limit (RP-1 barrel); E 3 mm
         ullage: 0.02,                                        // E
     ),
-    ratings: (vibration_grms: 9.0, vibration_s: 300.0),
+    ratings: (vibration_grms: 12.0, vibration_s: 450.0),   // E: tank-mounted 6 g rms + 6 dB (falcon9.md §6.4)
 )

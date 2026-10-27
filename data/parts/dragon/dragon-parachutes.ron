@@ -5,12 +5,14 @@
     generator: Component(envelope: Box(1.0, 0.8, 0.6),
         equipment: Chute(mass: 400.0, spec: (                                   // E mass; P diameters (FAA)
             mount: (0.0, 0.0, 0.3),
-            // Cd·A: drogues ~0.55 × their area; mains for ~7 m/s at ~9.5 t. Opening loads U.
-            drogue: (cd_area: 29.0, diameter: 5.8, fill_constant: 10.0, reefing: [(cd_fraction: 0.4, until: 6.0)],
-                     deploy_max_q: 9.5e3, max_load: 3.0e5),
-            main: (cd_area: 2900.0, diameter: 35.4, fill_constant: 7.0,
-                   reefing: [(cd_fraction: 0.1, until: 6.0), (cd_fraction: 0.3, until: 12.0)],
-                   deploy_max_q: 2.0e3, max_load: 1.5e6),
+            // falcon9.md §4.5: drogues 29 m² for both (E), 12 kPa, 500 kN (D);
+            // mains 3,150 m² for four (D), reefed 15 % for 6 s (U), 2.5 kPa,
+            // 1.0 MN (D); deployed at ~5.5 km and ~1.8 km (P).
+            drogue: (cd_area: 29.0, diameter: 5.8, fill_constant: 10.0, reefing: [],
+                     deploy_max_q: 1.2e4, max_load: 5.0e5),
+            main: (cd_area: 3150.0, diameter: 35.4, fill_constant: 7.0,
+                   reefing: [(cd_fraction: 0.15, until: 6.0)],
+                   deploy_max_q: 2.5e3, max_load: 1.0e6),
             main_height: 1800.0,
         ))),
 )
