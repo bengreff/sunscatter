@@ -21,6 +21,7 @@ pub mod ephem;
 pub mod forces;
 pub mod frame;
 pub mod gen;
+pub mod gravity;
 pub mod integrate;
 pub mod kepler;
 pub mod landing;

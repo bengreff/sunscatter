@@ -75,7 +75,7 @@ fn a_cut_source_pulls_the_vessel_like_its_anchor() {
     let (w, full) = (massless_dwarfs(world(1e-12)), massless_dwarfs(world(0.0)));
     let (sun, r, v) = heliocentric(&w);
     let cut = coast(&w, sun, r, v, YEAR, true);
-    assert!(!cut.active_sources().0.contains(&index(&w, "Pluto")));
+    assert!(!cut.active_sources().contains(index(&w, "Pluto")));
     let reference = coast(&full, sun, r, v, YEAR, true);
     let dr = (end_position(&w, &cut, YEAR, sun) - end_position(&w, &reference, YEAR, sun)).length();
     println!("cut vs full model after a year: {dr:.3} m");
@@ -96,10 +96,10 @@ fn anchor_choice_does_not_change_a_year_with_a_source_near_the_cutoff() {
     let about_sun = coast(&w, sun, r, v, YEAR, true);
     let about_ssb = coast(&w, root, r + shift.r, v + shift.v, YEAR, true);
     for seg in [&about_sun, &about_ssb] {
-        assert!(seg.active_sources().0.contains(&neptune), "Neptune is added during the year");
+        assert!(seg.active_sources().contains(neptune), "Neptune is added during the year");
         let (a, r0, _) = seg.eval(0.0).unwrap();
         let start = sim::forces::ActiveSources::select(&w, &w.snapshot(t0()), a, r0);
-        assert!(!start.0.contains(&neptune), "Neptune is cut at the start");
+        assert!(!start.contains(neptune), "Neptune is cut at the start");
     }
     let dr = (end_position(&w, &about_sun, YEAR, sun) - end_position(&w, &about_ssb, YEAR, sun)).length();
     println!("Sun- vs barycenter-anchored after a year: {dr:.3} m");
@@ -126,8 +126,8 @@ fn a_flyby_picks_up_a_source_cut_at_the_start() {
     let (a, r0, _) = seg.eval(0.0).unwrap();
     let i = index(&w, "Pluto");
     let first = sim::forces::ActiveSources::select(&w, &w.snapshot(t0()), a, r0);
-    assert!(!first.0.contains(&i), "Pluto is cut at the start");
-    assert!(seg.active_sources().0.contains(&i), "the flyby picks Pluto up");
+    assert!(!first.contains(i), "Pluto is cut at the start");
+    assert!(seg.active_sources().contains(i), "the flyby picks Pluto up");
     // The source set is stored state: extending in small chunks is identical.
     let start = CoastStart {
         anchor: root,

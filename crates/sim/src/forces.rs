@@ -19,7 +19,7 @@ pub use surface::{MeanSurface, Optics, Surface, SurfaceTable};
 
 use crate::ephem::Snapshot;
 use crate::frame::{BodyFixed, NodeId, Vec3};
-use crate::gen::{j2_accel, schwarzschild_accel};
+use crate::gen::schwarzschild_accel;
 use crate::relativity::proper_time_rate;
 use crate::time::Epoch;
 use crate::world::World;
@@ -33,19 +33,30 @@ pub struct DragModel {
     pub mass: f64,
 }
 
-/// The gravity sources simulated in full (indices into `World::sources`,
-/// sorted). Every other source is *cut*: it pulls the vessel exactly as it
-/// pulls the anchor, so only its tidal term (the difference) is neglected.
-/// A segment only ever adds sources ([`ActiveSources::add`]), at step
-/// boundaries, so the set is part of the stored integrator state.
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct ActiveSources(pub Vec<usize>);
+/// A gravity source simulated in full: its index in `World::sources` and
+/// the degree of its gravity field the vessel includes (0: none; D090,
+/// [`field_degree`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Active {
+    pub source: usize,
+    pub degree: u16,
+}
+
+/// The gravity sources simulated in full (sorted by source index), each with
+/// the degree of its field the vessel includes. Every other source is
+/// *cut*: it pulls the vessel exactly as it pulls the anchor, so only its
+/// tidal term (the difference) is neglected. A segment only ever adds
+/// sources and raises degrees ([`ActiveSources::grow`]), at step boundaries,
+/// so the set is part of the stored integrator state.
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ActiveSources(pub Vec<Active>);
 
 impl ActiveSources {
     /// The anchor (if it is a source) and every source whose tidal
     /// acceleration at the vessel relative to the anchor,
     /// `|g_s(vessel) − g_s(anchor)|`, is at least the world cutoff (sources
-    /// a bound proves below it are not evaluated: `World::may_be_active`).
+    /// a bound proves below it are not evaluated: `World::may_be_active`),
+    /// each with the degree of its field that can matter ([`field_degree`]).
     pub fn select(world: &World, snap: &Snapshot, anchor: NodeId, r: DVec3) -> Self {
         let view = world.gravity_view(snap, anchor, r);
         let keep = world
@@ -54,21 +65,42 @@ impl ActiveSources {
                 let s = &world.sources[i];
                 s.node == anchor || tidal(s.gm, snap.relative_r(s.node, anchor), r) >= world.cutoff
             })
+            .map(|source| Active { source, degree: field_degree(world, snap, anchor, r, source) })
             .collect();
         ActiveSources(keep)
     }
 
+    /// Every source, each field at its full degree: the full model (tests).
+    pub fn all(world: &World) -> Self {
+        let degree = |s: &crate::world::Source| {
+            s.physical.as_ref().and_then(|p| p.gravity.as_ref()).map_or(0, |f| f.degree() as u16)
+        };
+        ActiveSources(world.sources.iter().enumerate().map(|(i, s)| Active { source: i, degree: degree(s) }).collect())
+    }
+
     /// Adds the sources [`Self::select`] would pick now (the same set as
     /// `add(&select(..))`, without allocating; sources already in the set
-    /// are not re-tested). Returns whether the set grew.
+    /// are not re-tested) and raises each member's field degree to what it
+    /// needs now. Returns whether anything changed.
     pub fn grow(&mut self, world: &World, snap: &Snapshot, anchor: NodeId, r: DVec3) -> bool {
         let mut grew = false;
+        for k in 0..self.0.len() {
+            let a = self.0[k];
+            let full = world.sources[a.source].physical.as_ref().and_then(|p| p.gravity.as_ref());
+            if full.is_some_and(|f| usize::from(a.degree) < f.degree()) {
+                let degree = field_degree(world, snap, anchor, r, a.source);
+                if degree > a.degree {
+                    self.0[k].degree = degree;
+                    grew = true;
+                }
+            }
+        }
         let view = world.gravity_view(snap, anchor, r);
         for i in world.may_be_active_all(snap, anchor, r, &view) {
             let s = &world.sources[i];
-            if let Err(pos) = self.0.binary_search(&i) {
+            if let Err(pos) = self.0.binary_search_by_key(&i, |a| a.source) {
                 if s.node == anchor || tidal(s.gm, snap.relative_r(s.node, anchor), r) >= world.cutoff {
-                    self.0.insert(pos, i);
+                    self.0.insert(pos, Active { source: i, degree: field_degree(world, snap, anchor, r, i) });
                     grew = true;
                 }
             }
@@ -76,16 +108,68 @@ impl ActiveSources {
         grew
     }
 
-    /// Adds the sources of `other`. Returns whether the set grew.
+    /// Adds the sources of `other` and raises degrees to `other`'s. Returns
+    /// whether anything changed.
     pub fn add(&mut self, other: &ActiveSources) -> bool {
-        let before = self.0.len();
-        for &i in &other.0 {
-            if let Err(pos) = self.0.binary_search(&i) {
-                self.0.insert(pos, i);
+        let mut changed = false;
+        for a in &other.0 {
+            match self.0.binary_search_by_key(&a.source, |b| b.source) {
+                Ok(k) if self.0[k].degree < a.degree => {
+                    self.0[k].degree = a.degree;
+                    changed = true;
+                }
+                Ok(_) => {}
+                Err(pos) => {
+                    self.0.insert(pos, *a);
+                    changed = true;
+                }
             }
         }
-        self.0.len() != before
+        changed
     }
+
+    /// Whether source `i` is simulated in full.
+    pub fn contains(&self, i: usize) -> bool {
+        self.0.binary_search_by_key(&i, |a| a.source).is_ok()
+    }
+
+    /// The degree of source `i`'s field included (`None` if it is cut).
+    pub fn degree(&self, i: usize) -> Option<u16> {
+        self.0.binary_search_by_key(&i, |a| a.source).ok().map(|k| self.0[k].degree)
+    }
+}
+
+/// The degree of source `i`'s gravity field a vessel at `r` (relative to
+/// `anchor`) includes (D090): where the bounds of every degree above it,
+/// summed, could reach a hundredth of the cutoff ([`field_threshold`]). For
+/// the anchor's own field that is the field at the vessel; for another
+/// body's, like the cut rule for pulls, its change over the anchor-vessel
+/// segment (`ρ = |r|`, at least `d` from the body), bounded by
+/// [`crate::gravity::Field::included_degree`]'s tidal form; where the
+/// segment reaches the body, the field at the vessel. With a zero cutoff,
+/// every degree of the data.
+pub fn field_degree(world: &World, snap: &Snapshot, anchor: NodeId, r: DVec3, i: usize) -> u16 {
+    let s = &world.sources[i];
+    let Some(f) = s.physical.as_ref().and_then(|p| p.gravity.as_deref()) else { return 0 };
+    let gm = f.gm.unwrap_or(s.gm);
+    let threshold = field_threshold(world);
+    let r_s = if s.node == anchor { DVec3::ZERO } else { snap.relative_r(s.node, anchor) };
+    let dist = (r - r_s).length();
+    let rho = r.length();
+    let d_min = dist.max(r_s.length()) - rho;
+    let degree = if s.node == anchor || d_min <= 0.0 {
+        f.included_degree(gm, dist, threshold, None)
+    } else {
+        f.included_degree(gm, d_min, threshold, Some(rho))
+    };
+    degree as u16
+}
+
+/// The acceleration a body's neglected field degrees may reach at a vessel
+/// (m/s²): a hundredth of the cutoff, as for the other model
+/// simplifications (clusters, faint bodies; D023).
+pub fn field_threshold(world: &World) -> f64 {
+    crate::world::FAINT_ERROR_FRACTION * world.cutoff
 }
 
 /// Point-mass gravity at `d` from a source.
@@ -123,8 +207,9 @@ impl ForceContext<'_> {
 
     /// The acceleration and the proper-time rate `dδ/dt`
     /// ([`crate::relativity::proper_time_rate`]) of a vessel at `(r, v)`:
-    /// the potential of every source (cut or not) at the vessel, and its
-    /// velocity relative to the barycentre (the anchor's through the frame
+    /// the potential of every source (cut or not) at the vessel, with each
+    /// active source's field to its included degree, and its velocity
+    /// relative to the barycentre (the anchor's through the frame
     /// tree, plus `v`). The acceleration is the same bits as
     /// [`Self::accel_with`].
     pub fn accel_rate(&self, snap: &Snapshot, r: DVec3, v: DVec3) -> (DVec3, f64) {
@@ -145,11 +230,11 @@ impl ForceContext<'_> {
         let path = snap.path_to(self.anchor);
         for i in self.world.counted(&view) {
             let s = &self.world.sources[i];
-            while active.next_if(|&&a| a < i).is_some() {}
-            let is_active = active.next_if_eq(&&i).is_some();
+            while active.next_if(|a| a.source < i).is_some() {}
+            let entry = active.next_if(|a| a.source == i);
             // Positions only, except where a velocity is needed (drag, 1PN).
             let r_s = path.relative_r(s.node);
-            if !is_active {
+            let Some(entry) = entry else {
                 // Cut: it pulls the vessel as it pulls the anchor, which
                 // cancels its share of the anchor's acceleration (rule 1).
                 if s.node != self.anchor {
@@ -159,7 +244,7 @@ impl ForceContext<'_> {
                     u += s.gm / (r - r_s).length();
                 }
                 continue;
-            }
+            };
             let d = r - r_s;
             let d2 = d.length_squared();
             let dist = d2.sqrt();
@@ -168,22 +253,14 @@ impl ForceContext<'_> {
                 u += s.gm / dist;
             }
             if let Some(p) = &s.physical {
-                // J2 where it can matter relative to the anchor, as the cut
-                // rule does for pulls: the anchor's own always; another body's
-                // where its J2 field's change over the anchor-vessel segment,
-                // at most 60 |J2| GM R² ρ / d⁵ (ρ = |r|, d the least distance
-                // from the segment), reaches a hundredth of the cutoff.
-                // Otherwise vessel and anchor feel the same J2 pull, and
-                // leaving it out of both is the bound's error (the Moon's J2
-                // at LEO: ~1e-19 m/s²). With a zero cutoff, always.
-                if p.j2 != 0.0 {
-                    let rho = r.length();
-                    let d_min = dist.max(r_s.length()) - rho;
-                    let strength = 60.0 * p.j2.abs() * s.gm * p.radius_eq * p.radius_eq * rho;
-                    let threshold = crate::world::FAINT_ERROR_FRACTION * self.world.cutoff;
-                    if s.node == self.anchor || d_min <= 0.0 || strength >= threshold * crate::math::powi(d_min, 5) {
-                        a += j2_accel(d, s.gm, p.j2, p.radius_eq, p.rotation.pole(snap.t));
-                    }
+                // The body's figure to the degree that can matter here (D090,
+                // `field_degree`); its potential joins the clock's (J2 is
+                // ~3e-13 of the rate in LEO, the rest under 1e-15).
+                if let Some(field) = p.gravity.as_deref().filter(|_| entry.degree >= 2) {
+                    let gm = field.gm.unwrap_or(s.gm);
+                    let (g, pot) = field.accel(gm, d, &p.rotation, snap.t, usize::from(entry.degree), rate);
+                    a += g;
+                    u += pot;
                 }
                 if let (Some(atm), Some(drag)) = (&p.atmosphere, self.drag) {
                     // Cheap spherical bound before the exact ellipsoid altitude.

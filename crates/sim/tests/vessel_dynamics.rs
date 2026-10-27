@@ -423,7 +423,7 @@ fn coast_segment_matches_golden_hash() {
     assert_eq!(hash, COAST_GOLDEN, "coast output changed (or differs on this platform)");
 }
 
-const COAST_GOLDEN: u64 = 0x52d1c9bd138d14f1;
+const COAST_GOLDEN: u64 = 0x374e3a8c39f8c71f;
 
 /// A powered vessel trails the clock by up to a tick; shown at the clock
 /// (`state_at`), it lands within millimetres of where the next tick puts it,

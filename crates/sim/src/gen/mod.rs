@@ -10,7 +10,7 @@ mod fit;
 mod nbody;
 
 pub use fit::{fit_rails, RailsFit};
-pub use nbody::{j2_accel, j4_j6_accel, schwarzschild_accel, External, Extras, NBody, Oblate};
+pub use nbody::{schwarzschild_accel, External, Extras, NBody, Oblate};
 
 use crate::ephem::{ChebTable, Ephemeris, Motion, Node, NodeKind};
 use crate::frame::NodeId;

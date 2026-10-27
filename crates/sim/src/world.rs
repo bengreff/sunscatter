@@ -573,7 +573,7 @@ mod tests {
 
     #[test]
     fn a_far_moon_system_pulls_as_one_mass_and_opens_near() {
-        use crate::forces::{ActiveSources, ForceContext};
+        use crate::forces::{field_degree, Active, ActiveSources, ForceContext};
         let mut w = World::sol(eph());
         // Every barycenter below the root is a cluster with a stand-in source
         // after the bodies; its members belong to it.
@@ -612,13 +612,17 @@ mod tests {
             (near_earth, near_jupiter)
         };
         // Near Jupiter the clustered model is the full one (zero cutoff: every
-        // cluster open, every source in) to within the rules' budgets: each
-        // closed system's quadrupole, each faint body left out and each
-        // far planet's J2 under a hundredth of the cutoff.
+        // cluster open, every source in, every field at its data's degree)
+        // to within the rules' budgets: each closed system's quadrupole, each
+        // faint body left out and each body's neglected field degrees under a
+        // hundredth of the cutoff.
         let accel = |w: &World, r: DVec3| {
-            let active = ActiveSources((0..w.sources.len()).collect());
+            let snap = w.snapshot(t);
+            let active = ActiveSources(
+                (0..w.sources.len()).map(|i| Active { source: i, degree: field_degree(w, &snap, sun, r, i) }).collect(),
+            );
             let ctx = ForceContext { world: w, anchor: sun, active: &active, drag: None, thrust: DVec3::ZERO };
-            ctx.accel_with(&w.snapshot(t), r, DVec3::ZERO)
+            ctx.accel_with(&snap, r, DVec3::ZERO)
         };
         let clustered = accel(&w, near_jupiter);
         w.cutoff = 0.0;
@@ -628,11 +632,14 @@ mod tests {
         let budget = 1e-12 * FAINT_ERROR_FRACTION * (w.sources.len() as f64);
         assert!(err > 0.0 && err < budget, "{err:e} > {budget:e}");
         // Near Earth the Earth-Moon system is open either way; what differs
-        // is the far systems' quadrupoles, under the rule's bound.
+        // is the far systems' quadrupoles and the neglected field degrees,
+        // each under its rule's bound.
         let full_near = accel(&w, near_earth);
         w.cutoff = 1e-12;
+        let fields = w.sources.iter().filter(|s| s.physical.as_ref().is_some_and(|p| p.gravity.is_some())).count();
+        let budget = 1e-12 * (CLUSTER_ERROR_FRACTION + FAINT_ERROR_FRACTION * fields as f64);
         let err = (accel(&w, near_earth) - full_near).length();
-        assert!(err < 1e-12 * CLUSTER_ERROR_FRACTION, "{err:e}");
+        assert!(err < budget, "{err:e} > {budget:e}");
     }
 
     #[test]

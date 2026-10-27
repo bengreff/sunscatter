@@ -375,6 +375,12 @@ Close the D070 gaps listed in `docs/design/aero-thermal.md`. Model laminar–tur
 **D087: Exposure follows the starlight at the camera.** *Default taken 2026-10-26 (owner away; reversible). Refines D055's fixed exposure.*
 - The camera's exposure is scaled by the stellar flux at the camera's position (a photographer setting exposure for the light where they are), never by the scene's luminance. Near Earth nothing changes; at Saturn (1 % of Earth's sunlight) a day side reads like Earth's, and night sides stay as dark relative to day sides as D055 requires. A setting can turn it off.
 
+**D090: Vessels feel the bodies' measured gravity fields, as spherical harmonics truncated by significance.** *Decided, 2026-10-26 (owner: "accurate gravity fields"). Refines D023 and motion-model §4.*
+- A body's field beyond its point mass is its published spherical-harmonic model (fully normalized C̄nm, S̄nm, with the model's reference radius and GM) in its own rotating frame, through its rotation model (`sim::gravity`, Pines' singularity-free recursion). A body without one keeps its J2 as the degree-2 zonal case of the same model. Every vessel force goes through it: coasts, limbo, live ticks, planned burns, the landing predictor, the bubble.
+- **Truncation, in the spirit of the cutoff:** a vessel includes a body's degrees up to where the bounds of all higher degrees together stay under a hundredth of the cutoff (10⁻¹⁴ m/s²): at the vessel for its anchor's field, and for another body's field their change between the anchor and the vessel, as the cut rule does for pulls. The degree only grows within a segment and is stored with it (chunked = single pass, rule 4); it depends on the vessel's position, so a far vessel pays for nothing.
+- **Data** in `data/bodies/<body>/gravity.ron` (D051), generated from the public models and truncated to the degree the game's lowest orbits need (measured; sources, degrees and frames in [solar-system.md](features/solar-system.md)).
+- The proper-time potential includes the field to the same degree (J2 is ~3e-13 of the rate in LEO).
+
 ## Open questions
 
 1. What kind of organization the player leads (D027).

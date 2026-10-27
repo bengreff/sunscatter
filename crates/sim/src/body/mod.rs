@@ -130,6 +130,23 @@ impl Rotation {
         Vec3::from_raw(math::rotate_z(x, ra + math::PI / 2.0))
     }
 
+    /// The body-fixed → inertial rotation at `t` as a matrix (its transpose
+    /// is the inverse): [`Self::to_inertial`]'s three rotations, each angle's
+    /// sine and cosine computed once (a gravity field rotates a position in
+    /// and its acceleration back out).
+    pub fn matrix(&self, t: Epoch) -> glam::DMat3 {
+        use glam::DMat3;
+        let (ra, dec) = self.pole_radec(t);
+        let (sa, ca) = (math::sin(ra + math::PI / 2.0), math::cos(ra + math::PI / 2.0));
+        let (sb, cb) = (math::sin(math::PI / 2.0 - dec), math::cos(math::PI / 2.0 - dec));
+        let w = self.angle(t);
+        let (sw, cw) = (math::sin(w), math::cos(w));
+        let rz_a = DMat3::from_cols(DVec3::new(ca, sa, 0.0), DVec3::new(-sa, ca, 0.0), DVec3::Z);
+        let rx_b = DMat3::from_cols(DVec3::X, DVec3::new(0.0, cb, sb), DVec3::new(0.0, -sb, cb));
+        let rz_w = DMat3::from_cols(DVec3::new(cw, sw, 0.0), DVec3::new(-sw, cw, 0.0), DVec3::Z);
+        rz_a * rx_b * rz_w
+    }
+
     pub fn to_fixed(&self, v: Vec3<Inertial>, t: Epoch) -> Vec3<BodyFixed> {
         let (ra, dec) = self.pole_radec(t);
         let x = math::rotate_z(v.raw(), -(ra + math::PI / 2.0));
@@ -143,8 +160,14 @@ pub struct BodyPhysical {
     pub name: String,
     pub radius_eq: f64,
     pub radius_polar: f64,
-    /// Zonal harmonic J2 (dimensionless), referenced to `radius_eq`.
+    /// Zonal harmonic J2 (dimensionless), referenced to `radius_eq`: the
+    /// ephemeris generator's figure (`gen::Oblate`). Vessels feel
+    /// [`Self::gravity`].
     pub j2: f64,
+    /// The gravity field beyond the point mass that vessels feel (D090):
+    /// the body's `gravity.ron` if it has one, else the degree-2 zonal field
+    /// of `j2` (`None` without either). Shared between clones of the world.
+    pub gravity: Option<Arc<crate::gravity::Field>>,
     pub rotation: Rotation,
     pub atmosphere: Option<Atmosphere>,
     /// Has a surface that vessels can land on or hit.

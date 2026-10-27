@@ -164,6 +164,7 @@ pub fn parse_body(text: &str, dir: &Path) -> Result<BodyDef, DataError> {
             radius_eq: p.radius_eq,
             radius_polar: p.radius_polar,
             j2: p.j2,
+            gravity: (p.j2 != 0.0).then(|| std::sync::Arc::new(crate::gravity::Field::j2(p.j2, p.radius_eq))),
             rotation: p.rotation.to_rotation().map_err(err)?,
             atmosphere: p.atmosphere,
             solid: p.solid,
@@ -216,11 +217,18 @@ impl BodyDef {
     }
 }
 
-/// Loads `<dir>/body.ron` (without terrain; see [`BodyDef::load_terrain`]).
+/// Loads `<dir>/body.ron` and the body's gravity field, `<dir>/gravity.ron`
+/// if it has one (without terrain; see [`BodyDef::load_terrain`]).
 pub fn load_body(dir: &Path) -> Result<BodyDef, DataError> {
     let path = dir.join(BODY_FILE);
     let text = std::fs::read_to_string(&path).map_err(|e| DataError { path, message: e.to_string() })?;
-    parse_body(&text, dir)
+    let mut def = parse_body(&text, dir)?;
+    let field = crate::gravity::file::load(dir)
+        .map_err(|message| DataError { path: dir.join(crate::gravity::file::GRAVITY_FILE), message })?;
+    if field.is_some() {
+        def.physical.gravity = field;
+    }
+    Ok(def)
 }
 
 /// `data/bodies` of this source tree (development builds and tests).
@@ -311,6 +319,7 @@ mod tests {
             radius_eq,
             radius_polar,
             j2,
+            gravity: (j2 != 0.0).then(|| std::sync::Arc::new(crate::gravity::Field::j2(j2, radius_eq))),
             rotation,
             atmosphere,
             solid,
