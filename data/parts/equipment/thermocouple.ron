@@ -1,0 +1,8 @@
+// Catalog entry (D101; sim::catalog). falcon9.md §5.2: thermocouples and RTDs
+// on the engines, tanks, avionics and TPS (E: present), ±1 K (E: class).
+// `temperature` reports the liquids of the tanks of its part, and the part.
+(
+    id: "thermocouple", name: "Thermocouple / RTD", era: 2010, provisional: true,
+    generator: Component(envelope: Cylinder(0.01, 0.05), power: 0.5,
+        equipment: Sensor(quantity: "temperature", accuracy: 1.0, rate_hz: 10.0, mass: 0.1)),
+)

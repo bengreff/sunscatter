@@ -1,0 +1,9 @@
+// Catalog entry (D101; sim::catalog). falcon9.md §5.2: pressure transducers on
+// every tank (P: present, "a sense line for a pressure sensor", SpaceX 2024),
+// ~0.1 % of full scale, 100 Hz+ (E: class). A 0.7 MPa transducer on a main
+// tank: 700 Pa. `pressure` reports every tank of its part.
+(
+    id: "pressure-transducer", name: "Tank pressure transducer (0.7 MPa)", era: 2010, provisional: true,
+    generator: Component(envelope: Cylinder(0.02, 0.08), power: 1.0,
+        equipment: Sensor(quantity: "pressure", accuracy: 700.0, rate_hz: 100.0, mass: 0.3)),
+)

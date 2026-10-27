@@ -73,6 +73,10 @@
         // Four crew in suits (~100 kg each) and ~300 kg of cargo (E).
         (id: "dragon.crew-and-cargo", entry: "mass-item", set: {"mass": 700.0}, in: "dragon.capsule", pos: (0.0, 0.0, 1.0)),
         (id: "dragon.solar", entry: "dragon-trunk-solar", in: "dragon.trunk", pos: (1.7, 0.0, 1.8)),
+        // falcon9.md §5.2: transducers on every tank and bottle, thermocouples (no level gauging known: U).
+        (id: "dragon.tank-pressure", entry: "high-pressure-transducer", in: "dragon.capsule", pos: (1.0, -0.5, 0.6)),
+        (id: "dragon.copv-pressure", entry: "copv-pressure-transducer", in: "dragon.capsule", pos: (0.9, 0.4, 0.45)),
+        (id: "dragon.thermocouple", entry: "thermocouple", in: "dragon.capsule", pos: (0.8, 0.0, 1.2)),
         // Second stage (tank frame: z 0 at falcon9.md's 47.99).
         (id: "s2.helium", entry: "f9-s2-helium-copv", pattern: Radial(count: 3, start_deg: 0.0), in: "s2.tank", pos: (0.9, 0.0, 6.0)),
         (id: "s2.transfer-tube", entry: "f9-s2-transfer-tube", in: "s2.tank", pos: (0.0, 0.0, 1.76)),
@@ -82,13 +86,22 @@
         (id: "s2.imu", entry: "imu", pattern: Radial(count: 3, start_deg: 60.0), in: "s2.tank", pos: (1.5, 0.0, 8.7)),
         (id: "s2.gps", entry: "gps-receiver", pattern: Radial(count: 2, start_deg: 90.0), in: "s2.tank", pos: (1.4, 0.0, 8.5)),
         (id: "s2.avionics", entry: "mass-item", set: {"mass": 150.0}, in: "s2.tank", pos: (1.0, 1.0, 8.6)),
+        // falcon9.md §5.2: level sensors, tank and COPV pressure transducers, thermocouples.
+        (id: "s2.lox-level", entry: "level-sensor", in: "s2.tank", pos: (1.2, 0.3, 5.0)),
+        (id: "s2.rp1-level", entry: "level-sensor", in: "s2.tank", pos: (1.2, 0.3, 1.0)),
+        (id: "s2.lox-pressure", entry: "pressure-transducer", in: "s2.tank", pos: (1.5, -0.3, 7.5)),
+        (id: "s2.rp1-pressure", entry: "pressure-transducer", in: "s2.tank", pos: (1.5, -0.3, 0.5)),
+        (id: "s2.copv-pressure", entry: "copv-pressure-transducer", in: "s2.tank", pos: (0.0, -0.5, 6.5)),
+        (id: "s2.thermocouple", entry: "thermocouple", in: "s2.tank", pos: (1.3, 0.6, 4.0)),
         (id: "s2.nitrogen", entry: "f9-nitrogen-copv", in: "s2.skirt", pos: (0.0, -1.1, 0.8)),
+        (id: "s2.n2-pressure", entry: "copv-pressure-transducer", in: "s2.skirt", pos: (0.6, -0.9, 0.8)),
         (id: "s2.coldgas", entry: "f9-s2-cold-gas", pattern: Radial(count: 2, start_deg: 45.0), in: "s2.skirt", pos: (1.6, 0.0, 0.6)),
         (id: "s2.lox-valve", entry: "prevalve", in: "s2.skirt", pos: (0.8, 0.8, 1.2)),
         (id: "s2.rp1-valve", entry: "prevalve", in: "s2.skirt", pos: (-0.8, 0.8, 1.2)),
         // First stage (interstage frame: z 0 at 39.77; tank frame at 4.30; octaweb at 1.0).
         (id: "s1.coldgas", entry: "f9-cold-gas-pod", pattern: Radial(count: 2, start_deg: 45.0), in: "s1.interstage", pos: (1.6, 0.0, 6.03)),
         (id: "s1.nitrogen", entry: "f9-nitrogen-copv", pattern: Radial(count: 2, start_deg: 135.0), in: "s1.interstage", pos: (1.0, 0.0, 3.0)),
+        (id: "s1.n2-pressure", entry: "copv-pressure-transducer", in: "s1.interstage", pos: (0.5, 0.5, 3.0)),
         // falcon9.md §5.1, §5.3: triplex computers, 3 IMUs, 2 GPS, 2 × 2.5 kWh (U).
         (id: "s1.computer", entry: "f9-flight-computer", in: "s1.interstage", pos: (1.0, 0.0, 3.23)),
         (id: "s1.battery", entry: "f9-battery", pattern: Radial(count: 2, start_deg: 90.0), in: "s1.interstage", pos: (1.0, 0.0, 3.23)),
@@ -99,6 +112,13 @@
         (id: "s1.helium", entry: "f9-helium-copv", pattern: Radial(count: 6, start_deg: 0.0), in: "s1.tank", pos: (1.05, 0.0, 27.0)),
         (id: "s1.downcomer", entry: "f9-lox-downcomer", in: "s1.tank", pos: (0.0, 0.0, 7.4)),
         (id: "s1.raceway", entry: "mass-item", set: {"mass": 250.0}, in: "s1.tank", pos: (1.75, 0.0, 17.0)),
+        // falcon9.md §5.2: level sensors, tank and COPV pressure transducers, thermocouples.
+        (id: "s1.lox-level", entry: "level-sensor", in: "s1.tank", pos: (1.2, 0.3, 25.0)),
+        (id: "s1.rp1-level", entry: "level-sensor", in: "s1.tank", pos: (1.2, 0.3, 6.0)),
+        (id: "s1.lox-pressure", entry: "pressure-transducer", in: "s1.tank", pos: (1.5, -0.3, 34.0)),
+        (id: "s1.rp1-pressure", entry: "pressure-transducer", in: "s1.tank", pos: (1.5, -0.3, 12.0)),
+        (id: "s1.copv-pressure", entry: "copv-pressure-transducer", in: "s1.tank", pos: (0.0, -0.6, 28.0)),
+        (id: "s1.thermocouple", entry: "thermocouple", in: "s1.tank", pos: (1.3, 0.6, 20.0)),
         (id: "s1.lox-valve", entry: "prevalve", in: "s1.octaweb", pos: (0.6, 0.6, 2.8)),
         (id: "s1.rp1-valve", entry: "prevalve", in: "s1.octaweb", pos: (-0.6, 0.6, 2.8)),
         (id: "s1.heat-shield", entry: "mass-item", set: {"mass": 500.0}, in: "s1.octaweb", pos: (0.0, 0.0, 0.1)),
@@ -148,18 +168,24 @@
     ],
     electrical: [
         (name: "s1.bus", voltage: 28.0,
-         members: ["s1.battery#*", "s1.computer", "s1.imu#*", "s1.gps#*", "s1.lox-valve", "s1.rp1-valve", "s1.coldgas#*"]),
+         members: ["s1.battery#*", "s1.computer", "s1.imu#*", "s1.gps#*", "s1.lox-valve", "s1.rp1-valve", "s1.coldgas#*",
+                   "s1.lox-level", "s1.rp1-level", "s1.lox-pressure", "s1.rp1-pressure", "s1.copv-pressure", "s1.n2-pressure", "s1.thermocouple"]),
         (name: "s2.bus", voltage: 28.0,
-         members: ["s2.battery#*", "s2.computer", "s2.imu#*", "s2.gps#*", "s2.lox-valve", "s2.rp1-valve", "s2.coldgas#*"]),
+         members: ["s2.battery#*", "s2.computer", "s2.imu#*", "s2.gps#*", "s2.lox-valve", "s2.rp1-valve", "s2.coldgas#*",
+                   "s2.lox-level", "s2.rp1-level", "s2.lox-pressure", "s2.rp1-pressure", "s2.copv-pressure", "s2.n2-pressure", "s2.thermocouple"]),
         (name: "dragon.bus", voltage: 120.0,
          members: ["dragon.battery#*", "dragon.solar", "dragon.computer", "dragon.imu#*", "dragon.gps#*", "dragon.star#*",
-                   "dragon.eclss", "dragon.docking", "dragon.superdraco#*", "dragon.draco#*", "dragon.draco-forward"]),
+                   "dragon.eclss", "dragon.docking", "dragon.superdraco#*", "dragon.draco#*", "dragon.draco-forward",
+                   "dragon.tank-pressure", "dragon.copv-pressure", "dragon.thermocouple"]),
     ],
     data: [
-        (from: "s1.computer", to: ["s1.imu#*", "s1.gps#*", "s1.merlin.*", "s1.gridfin#*", "s1.leg#*", "s1.coldgas#*", "s1.lox-valve", "s1.rp1-valve"]),
-        (from: "s2.computer", to: ["s2.imu#*", "s2.gps#*", "s2.mvac", "s2.coldgas#*", "s2.lox-valve", "s2.rp1-valve"]),
+        (from: "s1.computer", to: ["s1.imu#*", "s1.gps#*", "s1.merlin.*", "s1.gridfin#*", "s1.leg#*", "s1.coldgas#*", "s1.lox-valve", "s1.rp1-valve",
+                                   "s1.lox-level", "s1.rp1-level", "s1.lox-pressure", "s1.rp1-pressure", "s1.copv-pressure", "s1.n2-pressure", "s1.thermocouple"]),
+        (from: "s2.computer", to: ["s2.imu#*", "s2.gps#*", "s2.mvac", "s2.coldgas#*", "s2.lox-valve", "s2.rp1-valve",
+                                   "s2.lox-level", "s2.rp1-level", "s2.lox-pressure", "s2.rp1-pressure", "s2.copv-pressure", "s2.n2-pressure", "s2.thermocouple"]),
         (from: "dragon.computer", to: ["dragon.imu#*", "dragon.gps#*", "dragon.star#*", "dragon.superdraco#*", "dragon.draco#*",
-                                       "dragon.draco-forward", "dragon.chutes", "dragon.nose", "dragon.docking", "dragon.eclss"]),
+                                       "dragon.draco-forward", "dragon.chutes", "dragon.nose", "dragon.docking", "dragon.eclss",
+                                       "dragon.tank-pressure", "dragon.copv-pressure", "dragon.thermocouple"]),
     ],
     // Densified propellants (P: LOX 66.5 K, RP-1 266.5 K); 3.5 bar flight ullage (E).
     loading: [

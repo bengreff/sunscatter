@@ -19,12 +19,14 @@
 //! `inertial` (an IMU: attitude, angular rates, specific force), `attitude`
 //! (a star tracker), `position` (a GNSS receiver: position, velocity and
 //! altitude), `rates`, `acceleration`, `altitude` (a radar altimeter),
-//! `tank-level`, `pressure`, `temperature` (in the tanks, bottles or parts
-//! of their own part), `strain` (the joints at their part). A sensor
+//! `tank-level`, `pressure` (the tanks), `bottle-pressure` (the bottles),
+//! `temperature` (the tanks' liquids and the part), each of its own part;
+//! `strain` (the joints at its part). A sensor
 //! counts while it is switched on, its part intact, and linked to a
 //! working computer (D106: "the actual mechanisms behind how your ship gets
 //! the data"). Each engine's own controller reads its thrust (falcon9.md
-//! §5.2: chamber pressure and the rest), to 1 %.
+//! §5.2: chamber pressure and the rest), to 1 %; each battery's management
+//! electronics its charge, to 1 %.
 
 use crate::craft::ship::ShipDef;
 use crate::craft::state::ShipState;
@@ -202,6 +204,11 @@ pub fn knowledge(def: &ShipDef, state: &ShipState, debug: bool) -> Knowledge {
         }
         let mine = |part: u32| part == s.part;
         match q {
+            "bottle-pressure" => {
+                for (i, _) in def.bottles.iter().enumerate().filter(|(_, b)| mine(b.part)) {
+                    k.learn(Quantity::BottlePressure(i as u32), acc);
+                }
+            }
             "tank-level" | "pressure" | "temperature" => {
                 for (i, t) in def.tanks.iter().enumerate().filter(|(_, t)| mine(t.part)) {
                     let quantity = match q {
@@ -210,11 +217,6 @@ pub fn knowledge(def: &ShipDef, state: &ShipState, debug: bool) -> Knowledge {
                         _ => Quantity::TankTemperature(i as u32),
                     };
                     k.learn(quantity, if q == "tank-level" { acc * t.capacity } else { acc });
-                }
-                if q == "pressure" {
-                    for (i, _) in def.bottles.iter().enumerate().filter(|(_, b)| mine(b.part)) {
-                        k.learn(Quantity::BottlePressure(i as u32), acc);
-                    }
                 }
                 if q == "temperature" {
                     k.learn(Quantity::PartTemperature(s.part), acc);
@@ -231,6 +233,10 @@ pub fn knowledge(def: &ShipDef, state: &ShipState, debug: bool) -> Knowledge {
     // Each engine's own controller (falcon9.md §5.2), while its part is intact.
     for (i, e) in def.engines.iter().enumerate().filter(|(_, e)| intact(e.part)) {
         k.learn(Quantity::EngineThrust(i as u32), 0.01 * e.data.thrust_vac);
+    }
+    // Each battery's management electronics report its charge, to 1 %.
+    for (i, b) in def.batteries.iter().enumerate().filter(|(_, b)| intact(b.part)) {
+        k.learn(Quantity::BatteryCharge(i as u32), 0.01 * b.item.capacity);
     }
     k
 }
@@ -286,6 +292,19 @@ mod tests {
         assert_eq!(k.precision(Quantity::Position), Some(3.0));
         assert!(k.knows(Quantity::Attitude) && k.knows(Quantity::Velocity));
         assert!(k.knows(Quantity::EngineThrust(0)));
+        // falcon9.md §5.2's tank sensors: levels, pressures, temperatures.
+        let tank = |id: &str| def.tanks.iter().position(|t| t.id == id).unwrap() as u32;
+        let lox = tank("s1.tank:lox");
+        assert_eq!(k.precision(Quantity::TankPressure(lox)), Some(700.0));
+        assert_eq!(k.precision(Quantity::TankTemperature(lox)), Some(1.0));
+        assert!(
+            (k.precision(Quantity::TankLevel(lox)).unwrap() / def.tanks[lox as usize].capacity - 0.005).abs() < 1e-12
+        );
+        assert!(k.knows(Quantity::TankPressure(tank("dragon.nto#1:main"))));
+        assert!(!k.knows(Quantity::TankLevel(tank("dragon.nto#1:main"))), "Dragon's gauging: unknown");
+        assert!((0..def.bottles.len() as u32).all(|b| k.knows(Quantity::BottlePressure(b))));
+        assert!((0..def.batteries.len() as u32).all(|b| k.knows(Quantity::BatteryCharge(b))));
+        assert!(!k.knows(Quantity::JointLoad(0)), "no strain gauges in flight");
         // Every computer off: no sensor reaches anything.
         for (i, c) in def.components.iter().enumerate() {
             if c.id.ends_with(".computer") {

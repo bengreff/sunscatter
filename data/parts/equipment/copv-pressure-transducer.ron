@@ -1,0 +1,9 @@
+// Catalog entry (D101; sim::catalog). falcon9.md §5.2: pressure transducers on
+// every bottle (P: present; the CRS-7 and AMOS-6 investigations read them),
+// ~0.1 % of full scale (E: class). A 6,000 psi (41.4 MPa) transducer on a
+// COPV: 41 kPa. `bottle-pressure` reports every bottle of its part.
+(
+    id: "copv-pressure-transducer", name: "COPV pressure transducer (41 MPa)", era: 2010, provisional: true,
+    generator: Component(envelope: Cylinder(0.02, 0.08), power: 1.0,
+        equipment: Sensor(quantity: "bottle-pressure", accuracy: 4.1e4, rate_hz: 100.0, mass: 0.3)),
+)
