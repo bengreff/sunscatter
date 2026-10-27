@@ -34,6 +34,15 @@ pub fn can_ignite(igniter: Igniter, ignitions: u32, ground: bool) -> bool {
     ground || igniter == Igniter::Hypergolic || ignitions > 0
 }
 
+/// Whether an engine (or other actuator) `owner` can be commanded: its own
+/// function in (not lost, with power), and if computers are linked to it,
+/// one of them working.
+pub fn reachable(def: &ShipDef, state: &ShipState, owner: &str) -> bool {
+    let mut links = def.links.iter().filter(|l| l.to.iter().any(|(id, _)| id == owner)).peekable();
+    let linked = links.peek().is_some();
+    !state.runtime.out(owner) && (!linked || links.any(|l| !state.runtime.out(&l.from.0)))
+}
+
 /// Applies `command` (see the module); the effects the vessel acts on are
 /// returned. Naming nothing the craft has is an error (nothing changes).
 pub fn apply(def: &ShipDef, state: &mut ShipState, command: &ShipCommand, cx: Context) -> Result<Vec<Effect>, String> {
@@ -47,10 +56,15 @@ pub fn apply(def: &ShipDef, state: &mut ShipState, command: &ShipCommand, cx: Co
             }
             let ground = state.clamped;
             for i in picked {
-                let (d, e) = (&def.engines[i], &mut state.engines[i]);
-                if e.status != EngineStatus::Off {
+                let d = &def.engines[i];
+                if state.engines[i].status != EngineStatus::Off {
                     continue;
                 }
+                if !reachable(def, state, &d.owner) {
+                    state.runtime.event(cx.at, format!("{}: no working controller or computer: no start", d.id), true);
+                    continue;
+                }
+                let e = &mut state.engines[i];
                 if !can_ignite(d.data.igniter, e.ignitions, ground) {
                     state.runtime.event(cx.at, format!("{}: no ignition left", d.id), true);
                     continue;
@@ -179,5 +193,35 @@ pub fn carry_out(def: &ShipDef, state: &mut ShipState, kind: &OrderKind, at: Epo
                 Vec::new()
             }
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::systems::runtime::Lost;
+
+    /// Without power to the second stage's flight computer the MVac cannot
+    /// be started (its start goes through it); with it, it starts.
+    #[test]
+    fn an_engine_needs_a_working_computer() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/craft/falcon9-crew");
+        let def = crate::craft::load_definition(&path).unwrap().ship.unwrap();
+        let mvac = def.engines.iter().position(|e| e.id == "s2.mvac").unwrap();
+        let at = Epoch::new(1_000_000_000, 0.0);
+        let cx = Context { at, sequence: false };
+        let mut state = ShipState::initial(&def);
+        state.clamped = false;
+        let part = def.computers.iter().find(|c| c.id == "s2.computer").unwrap().part;
+        state.runtime.unpowered.push(Lost { part, owner: "s2.computer".into(), why: "bus dead".into() });
+        apply(&def, &mut state, &ShipCommand::Ignite("s2".into()), cx).unwrap();
+        assert_eq!(state.engines[mvac].status, EngineStatus::Off);
+        assert!(state.runtime.events.last().unwrap().text.contains("no working controller"));
+        state.runtime.unpowered.clear();
+        apply(&def, &mut state, &ShipCommand::Ignite("s2".into()), cx).unwrap();
+        assert!(
+            matches!(state.engines[mvac].status, EngineStatus::Starting)
+                || state.runtime.engines[mvac].settling.is_some()
+        );
     }
 }

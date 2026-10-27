@@ -118,6 +118,12 @@ pub fn draw_block(def: &ShipDef, state: &mut ShipState, i: usize, kg: f64) {
     }
 }
 
+/// Whether thruster block `i` can fire: its function in (not lost, with
+/// power) and its feed holding anything.
+pub fn block_ready(def: &ShipDef, state: &ShipState, i: usize) -> bool {
+    !state.runtime.out(&def.thrusters[i].id) && block_fed(&def.thrusters[i].feed, state)
+}
+
 /// Whether a thruster block's feed holds anything.
 pub fn block_fed(feed: &Feed, state: &ShipState) -> bool {
     match feed {

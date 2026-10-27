@@ -215,6 +215,12 @@ impl Runtime {
         }
     }
 
+    /// Whether `owner`'s function is out: lost to a failure, or without
+    /// power (`systems::power`).
+    pub fn out(&self, owner: &str) -> bool {
+        self.lost.iter().chain(&self.unpowered).any(|l| l.owner == owner)
+    }
+
     /// Records an event (the oldest dropped beyond [`EVENTS_KEPT`]).
     pub fn event(&mut self, at: Epoch, text: impl Into<String>, alarm: bool) {
         self.events.push(Event { at, text: text.into(), alarm });

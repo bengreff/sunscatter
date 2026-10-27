@@ -19,7 +19,7 @@ use crate::craft::parts::combine_engines;
 use crate::craft::ship::ShipDef;
 use crate::craft::state::{Effect, ShipState};
 use crate::craft::{Engine, EngineOutput, MassProps};
-use crate::systems::{command, propulsion, ship::block_fed, OrderKind};
+use crate::systems::{command, propulsion, OrderKind};
 use crate::world::World;
 use glam::DVec3;
 use std::sync::Arc;
@@ -213,8 +213,8 @@ impl Vessel {
         };
         let t = propulsion::output(def, state, p, dt, self.debug);
         let gimbal = Gimbal { lever: t.pos - props.com, dir: t.dir, thrust: t.thrust, max_angle: t.gimbal };
-        let fed: Vec<bool> = (def.thrusters.iter().zip(&state.thrusters))
-            .map(|(d, s)| s.enabled && (self.debug || block_fed(&d.feed, state)))
+        let fed: Vec<bool> = (0..def.thrusters.len())
+            .map(|i| state.thrusters[i].enabled && (self.debug || crate::systems::ship::block_ready(def, state, i)))
             .collect();
         let (torque, rcs_flow) = def.rcs_authority(props.com, &fed);
         // Deployed grid fins in the air add their authority.

@@ -20,10 +20,10 @@ pub fn travel(angle: f64, target: f64, rate: f64, dt: f64) -> f64 {
 }
 
 /// Whether mechanism `i`'s actuator is lost (`Runtime::lost`: its pump,
-/// its drive): it stays where it is.
+/// its drive) or without power: it stays where it is.
 pub fn stuck(def: &ShipDef, state: &ShipState, i: usize) -> bool {
     let m = &def.mechanisms[i];
-    state.runtime.lost.iter().any(|l| l.part == m.part || l.owner == m.id)
+    state.runtime.lost.iter().any(|l| l.part == m.part || l.owner == m.id) || state.runtime.out(&m.id)
 }
 
 /// Moves every mechanism for `dt` seconds (a lost one stays).

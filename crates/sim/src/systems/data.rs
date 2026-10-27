@@ -186,10 +186,11 @@ pub fn knowledge(def: &ShipDef, state: &ShipState, debug: bool) -> Knowledge {
     }
     let mut k = Knowledge::default();
     let intact = |part: u32| state.parts.iter().find(|p| p.part == part).is_none_or(|p| p.integrity > 0.0);
-    // Switched on, its part intact, its function not lost (a failure).
+    // Switched on, its part intact, its function neither lost (a failure)
+    // nor without power.
     let on = |id: &str, part: u32| {
         let i = def.components.iter().position(|c| c.id == id);
-        let lost = state.runtime.lost.iter().any(|l| l.owner == id);
+        let lost = state.runtime.out(id);
         intact(part) && !lost && i.is_none_or(|i| state.power.get(i).is_none_or(|s| s.on))
     };
     // Computers that work, and what they are linked to.

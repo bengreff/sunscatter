@@ -7,7 +7,7 @@
 //! must be enabled and fed. Rotation keeps the attitude authority of
 //! `ShipDef::rcs_authority`.
 
-use super::ship::block_fed;
+use super::ship::block_ready;
 use crate::craft::ship::ShipDef;
 use crate::craft::state::ShipState;
 use crate::vessel::G0;
@@ -37,7 +37,7 @@ pub fn translate(def: &ShipDef, state: &ShipState, com: DVec3, want: DVec3, infi
     }
     let dir = want / want.length();
     for (i, (t, s)) in def.thrusters.iter().zip(&state.thrusters).enumerate() {
-        if !s.enabled || !(infinite || block_fed(&t.feed, state)) {
+        if !s.enabled || !(infinite || block_ready(def, state, i)) {
             continue;
         }
         for n in t.nozzles.iter().filter(|n| n.dir.normalize().dot(dir) >= ALIGNED) {
@@ -53,8 +53,8 @@ pub fn translate(def: &ShipDef, state: &ShipState, com: DVec3, want: DVec3, infi
 /// Whether any enabled, fed nozzle can push along `dir` (body axes).
 pub fn can_push(def: &ShipDef, state: &ShipState, dir: DVec3) -> bool {
     let d = dir.normalize();
-    (def.thrusters.iter().zip(&state.thrusters)).any(|(t, s)| {
-        s.enabled && block_fed(&t.feed, state) && t.nozzles.iter().any(|n| n.dir.normalize().dot(d) >= ALIGNED)
+    (def.thrusters.iter().zip(&state.thrusters).enumerate()).any(|(i, (t, s))| {
+        s.enabled && block_ready(def, state, i) && t.nozzles.iter().any(|n| n.dir.normalize().dot(d) >= ALIGNED)
     })
 }
 
