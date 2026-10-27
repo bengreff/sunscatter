@@ -28,7 +28,6 @@
     detail: Some((
         scale_m: 25.0,
         strength: 0.55,
-        fade_m: None,
         // Basalt (Venera 13/14: dark, platy).
         rock_color: (0.06, 0.06, 0.058),
     )),

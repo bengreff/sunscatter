@@ -117,7 +117,7 @@ pub fn update(
     sim: Res<SimState>,
     rig: Res<CameraRig>,
     scene: Res<crate::lighting::LightScene>,
-    settings: Res<crate::settings::GraphicsSettings>,
+    parts: Res<crate::look::Parts>,
     terrain: Res<crate::terrain::Terrain>,
     mut decks: Query<(&Deck, &MeshMaterial3d<DeckMaterial>, &mut Transform, &mut Visibility)>,
     mut materials: ResMut<Assets<DeckMaterial>>,
@@ -150,7 +150,7 @@ pub fn update(
         m.params.center = centre.as_vec3().extend(0.0);
         m.params.inside = inside;
         if let Some(light) = scene.body(deck.0) {
-            m.params.starlight = crate::lighting::LightUniform::new(&scene, &light, &[], settings.earthshine);
+            m.params.starlight = crate::lighting::LightUniform::new(&scene, &light, &[], parts.planetshine);
         }
         let ground = terrain.materials().find(|(n, _)| *n == deck.0).and_then(|(_, h)| terrain_materials.get_mut(h));
         if let Some(mut g) = ground {

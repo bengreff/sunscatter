@@ -1,9 +1,10 @@
 //! Scripted demo flight (set `SUNSCATTER_DEMO=<screenshot dir>`): flies the
 //! same pad → orbit → de-orbit → parachute profile as the sim scenario test,
 //! through the real app loop. At each key view it freezes the clock and
-//! captures every graphics tier; at the pad and in orbit it runs the graphics
-//! benchmark (every tier, each feature alone). Used to verify the game end to
-//! end, to judge visuals, and as a reproducible showcase.
+//! captures the one look (D073); at the pad and in orbit it runs the look's
+//! benchmark (the look, and the look without each part: what each costs).
+//! Used to verify the game end to end, to judge visuals, and as a
+//! reproducible showcase.
 //!
 //! The script drives the same controls a player would, except that it holds
 //! attitude directly (magic attitude hold) like the scenario test. It opens
@@ -15,7 +16,6 @@ use crate::bench::{self, Bench};
 use crate::camera::{self, CameraRig, Focus};
 use crate::interface::layout::InterfaceSettings;
 use crate::interface::menus::MenuId;
-use crate::settings::{GraphicsSettings, Tier};
 use crate::state::{SimPause, SimState};
 use crate::terrain::Terrain;
 use bevy::app::AppExit;
@@ -33,8 +33,8 @@ const ZOOM_FRAMES: u32 = 40;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Step {
     Pad,
-    /// Opt-in (`SUNSCATTER_DEMO_ZOOM=1`, or a tier name): zoom out from 50 m to 20,000 km
-    /// over the pad and back, at High, a screenshot every frame (the owner's
+    /// Opt-in (`SUNSCATTER_DEMO_ZOOM=1`): zoom out from 50 m to 20,000 km
+    /// over the pad and back, a screenshot every frame (the owner's
     /// "whitish shapes" when zooming).
     ZoomSweep(u32),
     Ascent,
@@ -66,10 +66,9 @@ pub(crate) enum Step {
     Menu,
 }
 
-/// Capturing one view in every tier.
+/// Capturing one view, once the terrain has settled.
 struct Capture {
     view: &'static str,
-    tier: usize,
     timer: f64,
 }
 
@@ -101,8 +100,6 @@ pub struct Demo {
     capture: Option<Capture>,
     /// A benchmark was started and its results are pending.
     benching: bool,
-    /// Graphics tier used while flying (between captures).
-    flying_tier: Tier,
     /// End the demo after this step (`SUNSCATTER_DEMO_STOP_AFTER`, e.g. `Pad`).
     stop_after: Option<String>,
     /// Run the graphics benchmark (off with `SUNSCATTER_DEMO_NO_BENCH`).
@@ -139,7 +136,6 @@ impl Demo {
             perf: PerfSample::default(),
             capture: None,
             benching: false,
-            flying_tier: Tier::Medium,
             stop_after: std::env::var("SUNSCATTER_DEMO_STOP_AFTER").ok(),
             bench: std::env::var_os("SUNSCATTER_DEMO_NO_BENCH").is_none(),
         })
@@ -169,11 +165,11 @@ impl Demo {
         self.shot_taken = false;
     }
 
-    /// Starts capturing `view` in every tier (the clock is frozen meanwhile),
-    /// unless `SUNSCATTER_DEMO_NO_CAPTURE` is set (benchmark-only runs).
+    /// Starts capturing `view` (the clock is frozen meanwhile), unless
+    /// `SUNSCATTER_DEMO_NO_CAPTURE` is set (benchmark-only runs).
     fn capture(&mut self, view: &'static str) {
         if std::env::var_os("SUNSCATTER_DEMO_NO_CAPTURE").is_none() {
-            self.capture = Some(Capture { view, tier: 0, timer: 0.0 });
+            self.capture = Some(Capture { view, timer: 0.0 });
         }
     }
 }
@@ -195,32 +191,16 @@ fn view_sunlit(rig: &mut CameraRig, sim: &SimState, body: sim::frame::NodeId, an
 }
 
 /// Runs the capture sub-state; returns true while it is busy.
-fn run_capture(
-    demo: &mut Demo,
-    commands: &mut Commands,
-    dt: f64,
-    settings: &mut GraphicsSettings,
-    terrain: &Terrain,
-    pause: &mut SimPause,
-) -> bool {
+fn run_capture(demo: &mut Demo, commands: &mut Commands, dt: f64, terrain: &Terrain, pause: &mut SimPause) -> bool {
     let Some(cap) = demo.capture.as_mut() else { return false };
     pause.0 = true;
-    let tier = Tier::ALL[cap.tier];
-    if cap.timer == 0.0 {
-        *settings = settings.with_preset(tier);
-    }
     cap.timer += dt;
     let settled = cap.timer > SETTLE_MIN && !terrain.busy();
     if settled || cap.timer > SETTLE_MAX {
-        let name = format!("{}_{}", cap.view, tier.name().to_lowercase());
-        cap.tier += 1;
-        cap.timer = 0.0;
-        if cap.tier == Tier::ALL.len() {
-            demo.capture = None;
-            *settings = settings.with_preset(demo.flying_tier);
-            pause.0 = false;
-        }
-        demo.shot(commands, &name);
+        let name = cap.view;
+        demo.capture = None;
+        pause.0 = false;
+        demo.shot(commands, name);
     }
     true
 }
@@ -233,7 +213,6 @@ pub fn run(
     demo: Option<ResMut<Demo>>,
     mut sim: ResMut<SimState>,
     mut rig: ResMut<CameraRig>,
-    mut settings: ResMut<GraphicsSettings>,
     mut bench: ResMut<Bench>,
     mut pause: ResMut<SimPause>,
     terrain: Res<Terrain>,
@@ -246,7 +225,7 @@ pub fn run(
 ) {
     let Some(mut demo) = demo else { return };
     let dt = time.delta_secs_f64();
-    if run_capture(&mut demo, &mut commands, dt, &mut settings, &terrain, &mut pause) {
+    if run_capture(&mut demo, &mut commands, dt, &terrain, &mut pause) {
         return;
     }
     if demo.benching {
@@ -288,21 +267,14 @@ pub fn run(
                 rig.distance = 300.0;
                 demo.capture("pad_top");
             } else if demo.shot_taken && demo.bench && !demo.benching && bench.results.is_empty() {
-                bench.start("pad", *settings);
+                bench.start("pad");
                 demo.benching = true;
             } else if demo.shot_taken && (!demo.bench || !bench.results.is_empty()) {
                 if demo.zoom_sweep {
                     demo.zoom_sweep = false;
-                    // `SUNSCATTER_DEMO_ZOOM=<tier>` picks the tier (default High).
-                    let tier = std::env::var("SUNSCATTER_DEMO_ZOOM")
-                        .ok()
-                        .and_then(|n| Tier::ALL.into_iter().find(|t| t.name().eq_ignore_ascii_case(&n)))
-                        .unwrap_or(Tier::High);
-                    *settings = settings.with_preset(tier);
                     (rig.pitch, rig.distance) = (0.35, ZOOM_NEAR);
                     demo.next(Step::ZoomSweep(0));
                 } else {
-                    *settings = settings.with_preset(demo.flying_tier);
                     // Debug mode (D064): the test craft cannot reach orbit on
                     // its own propellant.
                     let s = &mut *sim;
@@ -403,7 +375,7 @@ pub fn run(
                     warn!("demo: orbit save failed: {e:?}");
                 }
             } else if demo.bench && !demo.benching && bench.view != "orbit" {
-                bench.start("orbit", *settings);
+                bench.start("orbit");
                 demo.benching = true;
             } else {
                 demo.next(Step::Plunge);
@@ -508,7 +480,6 @@ pub fn run(
                 demo.shot_taken = true;
                 demo.shot(&mut commands, "moon_night");
             } else if demo.timer > 4.0 {
-                settings.set_if_neq(GraphicsSettings::preset(Tier::Minimal));
                 rig.focus = Focus::Ship;
                 rig.distance = 3.0e6;
                 sim.spawn_test_ships(10);
@@ -516,8 +487,7 @@ pub fn run(
             }
         }
         Step::Perf(level) => {
-            // 11 vessels in flight; measure frame times at 1x, 1000x, 1e6x
-            // (Minimal graphics, like the prototype's measurements).
+            // 11 vessels in flight; measure frame times at 1x, 1000x, 1e6x.
             // (At 1e6x this stage spans ~46 days: the demo orbit must be high
             // enough that drag does not decay it meanwhile.)
             const LEVELS: [usize; 3] = [0, 6, 9];
@@ -554,7 +524,6 @@ pub fn run(
                     // Landing stays closed through the burn: the impact
                     // marker must not show (demo_checks).
                     iface.menus.show_only(None, &[]);
-                    *settings = settings.with_preset(demo.flying_tier);
                     rig.distance = 60.0;
                     sim.warp = 3;
                     sim.controls.throttle = 1.0;
@@ -572,7 +541,7 @@ pub fn run(
         }
         Step::Fall if !demo.deorbit_done => {
             // Landing/Reentry open, the clock held, Earth in view from afar
-            // until the impact marker is drawn (at most 6 s), then every tier.
+            // until the impact marker is drawn (at most 6 s), then a shot.
             iface.menus.show_only(Some(MenuId::Landing), &["braking", "reentry", "parachute"]);
             pause.0 = true;
             (rig.distance, rig.pitch) = (1.2e7, 0.8);

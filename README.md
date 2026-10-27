@@ -12,11 +12,11 @@ Sunscatter is a real-scale spaceflight, mission-design and logistics game. It is
 ```bash
 cargo run -p game --release          # fly: Z full throttle, W/A/S/D/Q/E steer, P parachute, . and , warp
 cargo test -p sim                    # simulation tests (deterministic; CI runs them on macOS and Windows)
-SUNSCATTER_DEMO=/tmp/shots cargo run -p game --release   # scripted flight, screenshots of every graphics tier, benchmark tables
+SUNSCATTER_DEMO=/tmp/shots cargo run -p game --release   # scripted flight, screenshots of each view, the look's benchmark
 ```
 
 Other keys:
-- F3: graphics settings, including the tier and a benchmark. F4: performance overlay.
+- F3: settings (orbits, controls, interface; one look, no graphics settings, with a benchmark of its parts). F4: performance overlay. `SUNSCATTER_PROFILE=1`: where each frame goes.
 - F5 / F9: quicksave / quickload. F6: the save list.
 - F7: tracking station. `[` / `]`: previous / next vessel.
 - F2: spawn 10 test ships.

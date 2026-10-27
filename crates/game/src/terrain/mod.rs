@@ -4,7 +4,6 @@
 //! surface never has holes. Chunk transforms are camera-relative, computed
 //! from f64 every frame.
 
-mod ground;
 mod lod;
 mod material;
 pub mod mesh;
@@ -14,8 +13,8 @@ pub mod zones;
 pub use lod::update;
 
 use crate::body_visual::{self, BodyVisualDef};
+use crate::look::{Parts, COLOR_MAP_WIDTH};
 use crate::scene::BodyDefs;
-use crate::settings::GraphicsSettings;
 use crate::state::SimState;
 use bevy::asset::embedded_asset;
 use bevy::pbr::ExtendedMaterial;
@@ -94,7 +93,7 @@ pub struct TerrainBody {
     /// Largest allowed sag of a chunk's flat triangles below the ellipsoid (m).
     max_sag: f64,
     shape: Shape,
-    /// Heights from data; used when terrain elevation is enabled.
+    /// Heights from data (left out only by the benchmark, `Parts::relief`).
     heights: Option<HeightFn>,
     material: Handle<TerrainMaterial>,
     chunks: HashMap<ChunkKey, Chunk>,
@@ -106,12 +105,11 @@ pub struct TerrainBody {
     /// least the zone map's, so coasts and zone edges match).
     water_width: u32,
     /// Surface zones: what loading them needs (taken when they start
-    /// loading, the first time the setting asks for them), the load, and
-    /// the zone map's width (from its header).
+    /// loading), the load, and the zone map's width (from its header).
     zone_inputs: Option<zones::ZoneInputs>,
     zone_task: Option<Task<Option<zones::ZoneTextures>>>,
     zone_width: Option<u32>,
-    /// Elevation shown (the settings value when chunks were built).
+    /// Elevation shown (`Parts::relief` when the chunks were built).
     displaced: bool,
     def: BodyVisualDef,
 }
@@ -162,10 +160,8 @@ pub fn setup(
     sim: Res<SimState>,
     defs: Res<BodyDefs>,
     mut materials: ResMut<Assets<TerrainMaterial>>,
-    mut images: ResMut<Assets<Image>>,
 ) {
     let mut terrain = Terrain::default();
-    let ground = ground::load().map(|g| (images.add(g.color), images.add(g.normal), g.means));
     for (node, def) in &defs.defs {
         if def.emissive.is_some() {
             continue;
@@ -183,20 +179,11 @@ pub fn setup(
         let haze =
             def.atmosphere.as_ref().filter(|a| a.raymarch_inside).map(|a| crate::lighting::haze_light(a, p.radius_eq));
         let params = TerrainParams {
-            shape: Vec4::new(
-                p.radius_eq as f32,
-                p.radius_polar as f32,
-                detail.map_or(1.0, |d| d.fade_m.unwrap_or(d.scale_m * 400.0)),
-                detail.map_or(0.0, |d| d.strength),
-            ),
+            shape: Vec4::new(p.radius_eq as f32, p.radius_polar as f32, 0.0, detail.map_or(0.0, |d| d.strength)),
             rock: detail.map_or(Vec4::ZERO, |d| v4(d.rock_color, d.snow_line_m.unwrap_or(-1.0))),
             snow: detail.map_or(v4([1.0; 3], def.roughness), |d| v4(d.snow_color, def.roughness)),
-            ocean: def.ocean.as_ref().map_or(Vec4::ONE, |o| v4(o.albedo, o.roughness)),
+            ocean: def.ocean.as_ref().map_or(Vec4::ONE, |o| v4(o.albedo, 1.0)),
             base: v4(def.base_color, 1.0),
-            // Tiles of 5 m and 40 m for a 40 m detail scale (they divide the
-            // detail uv's 256-unit wrap, so there is no seam).
-            ground: Vec4::new(if ground.is_some() { 1.0 } else { 0.0 }, 0.125, 1.0, 0.0),
-            ground_means: ground.as_ref().map_or([Vec4::ONE; 5], |g| g.2),
             shallow,
             ambient: Vec4::ONE,
             clouds: def.clouds.map_or(Vec4::ZERO, |c| Vec4::new(c.scale_m, c.warp, c.stretch.max(1.0), c.contrast)),
@@ -210,8 +197,6 @@ pub fn setup(
                 params,
                 color_map: None,
                 water_map: None,
-                ground_color: ground.as_ref().map(|g| g.0.clone()),
-                ground_normal: ground.as_ref().map(|g| g.1.clone()),
                 zone_map: None,
                 zone_far: None,
                 ring_profile: None,
@@ -270,17 +255,18 @@ struct Maps {
     water: Option<Image>,
 }
 
-/// Starts colour-map and water-mask loads when the texture size (or the
-/// zones setting) changes, the zones' the first time they are wanted, and
+/// Starts the colour-map and water-mask loads (again when the benchmark
+/// turns the zones off or on: the water mask is at least the zone map's
+/// width with zones), the zones' the first time they are wanted, and
 /// installs finished ones.
 pub fn update_textures(
-    settings: Res<GraphicsSettings>,
+    parts: Res<Parts>,
     mut terrain: ResMut<Terrain>,
     mut images: ResMut<Assets<Image>>,
     mut materials: ResMut<Assets<TerrainMaterial>>,
 ) {
     for body in &mut terrain.bodies {
-        if settings.zones {
+        if parts.zones {
             if let Some(inputs) = body.zone_inputs.take() {
                 body.zone_task = Some(AsyncComputeTaskPool::get().spawn(async move { zones::load(inputs) }));
             }
@@ -303,8 +289,8 @@ pub fn update_textures(
         if color.is_none() && water.is_none() {
             continue;
         }
-        let color_w = settings.texture_size;
-        let water_w = if settings.zones { color_w.max(body.zone_width.unwrap_or(0)) } else { color_w };
+        let color_w = COLOR_MAP_WIDTH;
+        let water_w = if parts.zones { color_w.max(body.zone_width.unwrap_or(0)) } else { color_w };
         if (body.color_width, body.water_width) != (color_w, water_w) && body.color_task.is_none() {
             let color = color.filter(|_| body.color_width != color_w);
             let water = water.filter(|_| body.water_width != water_w);

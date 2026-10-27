@@ -1,14 +1,19 @@
-//! Graphics benchmark: frame times per tier and per feature (each feature
-//! alone on top of Minimal), measured in the running app from the current
-//! view. Started from the settings window or by the demo.
+//! The look's benchmark: frame times of the one look (D073) and of the look
+//! without each of its parts (`look::Parts::each_off`), measured in the
+//! running app from the current view: what each part costs. The parts are
+//! switched for the measurement only (never a setting). Started from
+//! Settings ▸ Interface or by the demo.
 
-use crate::settings::{AtmosphereQuality, GraphicsSettings, MsaaLevel, Tier};
+use crate::look::Parts;
 use bevy::prelude::*;
 
 /// Seconds to let a configuration settle (pipelines compile, LOD builds)
 /// before measuring, and how long to measure.
 const WARMUP: f64 = 1.5;
 const MEASURE: f64 = 2.5;
+
+/// The baseline's label: the whole look.
+pub const LOOK: &str = "the look";
 
 #[derive(Clone, Debug)]
 pub struct BenchResult {
@@ -19,55 +24,19 @@ pub struct BenchResult {
 
 #[derive(Resource, Default)]
 pub struct Bench {
-    queue: Vec<(String, GraphicsSettings)>,
-    current: Option<(String, GraphicsSettings)>,
+    queue: Vec<(String, Parts)>,
+    current: Option<(String, Parts)>,
     timer: f64,
     samples: Vec<f64>,
-    /// Settings to restore when finished.
-    restore: Option<GraphicsSettings>,
     pub results: Vec<BenchResult>,
     /// Label of the view the results were measured from.
     pub view: String,
 }
 
-/// Every configuration measured: the five tiers, then each feature alone.
-pub fn configurations() -> Vec<(String, GraphicsSettings)> {
-    let mut v: Vec<(String, GraphicsSettings)> =
-        Tier::ALL.iter().map(|&t| (format!("tier {}", t.name()), GraphicsSettings::preset(t))).collect();
-    let min = GraphicsSettings { tier: None, ..GraphicsSettings::preset(Tier::Minimal) };
-    let ultra = GraphicsSettings::preset(Tier::Ultra);
-    let features: [(&str, GraphicsSettings); 11] = [
-        ("terrain (Ultra LOD)", GraphicsSettings { terrain: true, terrain_error_px: 1.0, ..min }),
-        ("textures 8k", GraphicsSettings { texture_size: ultra.texture_size, ..min }),
-        ("detail layer", GraphicsSettings { terrain: true, detail: true, ..min }),
-        ("atmosphere LUT", GraphicsSettings { atmosphere: AtmosphereQuality::Lut, ..min }),
-        ("atmosphere raymarched", GraphicsSettings { atmosphere: AtmosphereQuality::Raymarched, ..min }),
-        ("ocean glint", GraphicsSettings { ocean_glint: true, ..min }),
-        ("stars mag 8", GraphicsSettings { star_magnitude: 8.0, ..min }),
-        ("bloom", GraphicsSettings { bloom: true, ..min }),
-        ("flare", GraphicsSettings { flare: true, ..min }),
-        ("shadows", GraphicsSettings { shadows: true, ..min }),
-        ("MSAA 4x", GraphicsSettings { msaa: MsaaLevel::X4, ..min }),
-    ];
-    v.extend(features.into_iter().map(|(n, s)| (format!("+{n}"), s)));
-    v.push(("+earthshine".into(), GraphicsSettings { earthshine: true, ..min }));
-    v.push(("+sky light".into(), GraphicsSettings { atmosphere: AtmosphereQuality::Lut, sky_light: true, ..min }));
-    // Minimal draws surface zones (D073): their cost is Minimal without them.
-    v.push(("Minimal −zones".into(), GraphicsSettings { zones: false, ..min }));
-    // Each feature taken out of High, where they interact (terrain shading
-    // at full resolution, MSAA, atmosphere): what it costs in a real tier.
-    let high = GraphicsSettings { tier: None, ..GraphicsSettings::preset(Tier::High) };
-    let without: [(&str, GraphicsSettings); 8] = [
-        ("terrain", GraphicsSettings { terrain: false, ..high }),
-        ("detail layer", GraphicsSettings { detail: false, ..high }),
-        ("atmosphere", GraphicsSettings { atmosphere: AtmosphereQuality::Off, ..high }),
-        ("MSAA", GraphicsSettings { msaa: MsaaLevel::Off, ..high }),
-        ("shadows", GraphicsSettings { shadows: false, ..high }),
-        ("bloom", GraphicsSettings { bloom: false, ..high }),
-        ("textures 8k", GraphicsSettings { texture_size: 2048, ..high }),
-        ("terrain error 2px", GraphicsSettings { terrain_error_px: 8.0, ..high }),
-    ];
-    v.extend(without.into_iter().map(|(n, s)| (format!("High −{n}"), s)));
+/// Every configuration measured: the look, then the look without each part.
+pub fn configurations() -> Vec<(String, Parts)> {
+    let mut v = vec![(LOOK.to_string(), Parts::default())];
+    v.extend(Parts::each_off().into_iter().map(|(name, p)| (format!("−{name}"), p)));
     v
 }
 
@@ -79,10 +48,9 @@ impl Bench {
     /// Starts measuring every configuration, or only those named in
     /// `SUNSCATTER_BENCH_ONLY` (a developer filter: comma-separated label
     /// fragments, run in that order).
-    pub fn start(&mut self, view: &str, current: GraphicsSettings) {
+    pub fn start(&mut self, view: &str) {
         let mut q = configurations();
         if let Ok(only) = std::env::var("SUNSCATTER_BENCH_ONLY") {
-            // A comma-separated list of labels, run in that order.
             let all = q;
             q = only
                 .split(',')
@@ -92,7 +60,6 @@ impl Bench {
         q.reverse();
         self.queue = q;
         self.current = None;
-        self.restore = Some(current);
         self.results.clear();
         self.view = view.to_string();
     }
@@ -104,19 +71,19 @@ impl Bench {
     }
 }
 
-/// Minimal-tier baseline (ms) for cost columns.
+/// The whole look's frame time (ms), the cost column's reference.
 pub fn baseline(results: &[BenchResult]) -> Option<f64> {
-    results.iter().find(|r| r.label == "tier Minimal").map(|r| r.avg_ms)
+    results.iter().find(|r| r.label == LOOK).map(|r| r.avg_ms)
 }
 
-pub fn run(time: Res<Time>, mut bench: ResMut<Bench>, mut settings: ResMut<GraphicsSettings>) {
+pub fn run(time: Res<Time>, mut bench: ResMut<Bench>, mut parts: ResMut<Parts>) {
     if !bench.running() {
         return;
     }
     let dt = time.delta_secs_f64();
     if bench.current.is_none() {
         let next = bench.queue.pop().expect("running");
-        *settings = next.1;
+        parts.set_if_neq(next.1);
         bench.current = Some(next);
         bench.timer = 0.0;
         bench.samples.clear();
@@ -135,20 +102,42 @@ pub fn run(time: Res<Time>, mut bench: ResMut<Bench>, mut settings: ResMut<Graph
         info!("bench [{}] {label}: {:.2} ms avg, {:.2} ms p95", bench.view, avg * 1e3, p95 * 1e3);
         bench.results.push(BenchResult { label, avg_ms: avg * 1e3, p95_ms: p95 * 1e3 });
         if bench.queue.is_empty() {
-            if let Some(r) = bench.restore.take() {
-                *settings = r;
-            }
+            parts.set_if_neq(Parts::default());
         }
     }
 }
 
-/// Results as a Markdown table (for the plan's review and the demo log).
+/// Results as a Markdown table: each part's cost is the look's frame time
+/// less the look's without it.
 pub fn markdown(bench: &Bench) -> String {
     let base = baseline(&bench.results).unwrap_or(0.0);
     let mut out =
-        format!("View: {}\n\n| Configuration | avg ms | p95 ms | cost vs Minimal |\n|---|---|---|---|\n", bench.view);
+        format!("View: {}\n\n| Configuration | avg ms | p95 ms | part's cost |\n|---|---|---|---|\n", bench.view);
     for r in &bench.results {
-        out += &format!("| {} | {:.2} | {:.2} | {:+.2} ms |\n", r.label, r.avg_ms, r.p95_ms, r.avg_ms - base);
+        out += &format!("| {} | {:.2} | {:.2} | {:+.2} ms |\n", r.label, r.avg_ms, r.p95_ms, base - r.avg_ms);
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_table_gives_each_parts_cost_against_the_look() {
+        let bench = Bench {
+            results: vec![
+                BenchResult { label: LOOK.into(), avg_ms: 8.0, p95_ms: 9.0 },
+                BenchResult { label: "−atmosphere".into(), avg_ms: 5.5, p95_ms: 6.0 },
+            ],
+            view: "orbit".into(),
+            ..Bench::default()
+        };
+        let md = markdown(&bench);
+        assert!(md.contains("| the look | 8.00 | 9.00 | +0.00 ms |"), "{md}");
+        assert!(md.contains("| −atmosphere | 5.50 | 6.00 | +2.50 ms |"), "{md}");
+        let labels: Vec<String> = configurations().into_iter().map(|c| c.0).collect();
+        assert_eq!(labels[0], LOOK);
+        assert!(labels.contains(&"−relief".to_string()) && labels.len() == 10);
+    }
 }

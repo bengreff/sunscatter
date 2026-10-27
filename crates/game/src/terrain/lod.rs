@@ -5,8 +5,8 @@ use super::mesh::{ChunkData, ChunkKey, GRID};
 use super::{body_matrix, Chunk, Terrain, TerrainBody, TerrainChunk, TerrainMaterial};
 use super::{EVICT_AFTER, MAX_IN_FLIGHT, MAX_LEVEL, SPAWNS_PER_FRAME};
 use crate::camera::{CameraRig, MainCamera};
+use crate::look::{Parts, TERRAIN_ERROR_PX};
 use crate::map;
-use crate::settings::GraphicsSettings;
 use crate::state::SimState;
 use bevy::asset::RenderAssetUsages;
 use bevy::light::NotShadowCaster;
@@ -151,7 +151,7 @@ pub fn update(
     mut commands: Commands,
     sim: Res<SimState>,
     rig: Res<CameraRig>,
-    settings: Res<GraphicsSettings>,
+    parts: Res<Parts>,
     cam: Query<(&Camera, &Transform, &Projection), With<MainCamera>>,
     mut terrain: ResMut<Terrain>,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -165,13 +165,13 @@ pub fn update(
     let mut budget = SPAWNS_PER_FRAME;
     let mut drawn = 0;
     for body in &mut terrain.bodies {
-        if body.displaced != settings.terrain || body.chunks.is_empty() && body.pending.is_empty() {
+        if body.displaced != parts.relief || body.chunks.is_empty() && body.pending.is_empty() {
             for (_, c) in body.chunks.drain() {
                 commands.entity(c.entity).despawn();
             }
             body.pending.clear();
-            body.displaced = settings.terrain;
-            body.shape.height = if settings.terrain { body.heights.clone() } else { None };
+            body.displaced = parts.relief;
+            body.shape.height = if parts.relief { body.heights.clone() } else { None };
             for key in ChunkKey::roots() {
                 let shape = body.shape.clone();
                 body.pending
@@ -208,8 +208,7 @@ pub fn update(
         let r_min = body.shape.radius_polar - 11_000.0;
         let r_max = body.shape.radius_eq + 9_000.0;
         let horizon = (h * h - r_min * r_min).max(0.0).sqrt() + (r_max * r_max - r_min * r_min).sqrt();
-        let ctx =
-            Ctx { cam_fixed, focal: view.focal(), threshold: f64::from(settings.terrain_error_px), horizon, frame };
+        let ctx = Ctx { cam_fixed, focal: view.focal(), threshold: f64::from(TERRAIN_ERROR_PX), horizon, frame };
         let selected = body.select(&ctx, &mut budget);
         drawn += selected.len();
 
@@ -252,10 +251,8 @@ pub fn update(
             p.fixed_y = m.y_axis.as_vec3().extend(0.0);
             p.fixed_z = m.z_axis.as_vec3().extend(0.0);
             p.center = centre.as_vec3().extend(0.0);
-            p.flags.x = u32::from(settings.detail);
-            p.flags.y = u32::from(settings.ocean_glint);
             // Zones draw once loaded (`update_textures`).
-            p.zones.x = if settings.zones && zones_loaded { 1.0 } else { 0.0 };
+            p.zones.x = if parts.zones && zones_loaded { 1.0 } else { 0.0 };
         }
     }
     terrain.drawn = drawn;

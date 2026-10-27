@@ -2,9 +2,9 @@
 //! glows. Fades with the fraction of the Sun's disc that bodies hide.
 
 use crate::camera::{CameraRig, MainCamera};
+use crate::look::Parts;
 use crate::map;
 use crate::scene::BodyDefs;
-use crate::settings::GraphicsSettings;
 use crate::state::SimState;
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
@@ -36,10 +36,10 @@ pub fn draw(
     sim: Res<SimState>,
     rig: Res<CameraRig>,
     defs: Res<BodyDefs>,
-    settings: Res<GraphicsSettings>,
+    parts: Res<Parts>,
     cam: Query<(&Camera, &Transform, &Projection), With<MainCamera>>,
 ) -> Result {
-    if !settings.flare {
+    if !parts.flare {
         return Ok(());
     }
     let ctx = contexts.ctx_mut()?;

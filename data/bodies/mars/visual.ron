@@ -58,8 +58,6 @@
     detail: Some((
         scale_m: 25.0,
         strength: 0.55,
-        // Keep detail out to 40 km (as the Moon): the thin air barely hides it.
-        fade_m: Some(40000.0),
         rock_color: (0.16, 0.10, 0.07),
     )),
 )

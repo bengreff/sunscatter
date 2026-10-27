@@ -23,8 +23,6 @@
     detail: Some((
         scale_m: 25.0,
         strength: 0.55,
-        // Airless: keep detail out to 40 km (as the Moon).
-        fade_m: Some(40000.0),
         rock_color: (0.169, 0.168, 0.164),
     )),
 )

@@ -1,6 +1,6 @@
 //! The terrain material (StandardMaterial plus our fragment shader) and the
-//! colour-map loader (decoded, resized to the settings cap and mipmapped on
-//! a background task; the water mask's is in `water`, the zones' in `zones`).
+//! colour-map loader (decoded, resized to the look's cap and mipmapped on a
+//! background task; the water mask's is in `water`, the zones' in `zones`).
 
 use bevy::asset::RenderAssetUsages;
 use bevy::image::{ImageAddressMode, ImageFilterMode, ImageSampler, ImageSamplerDescriptor};
@@ -44,11 +44,6 @@ pub struct TerrainParams {
     /// Lighting (D055, `lighting::LightUniform`): the drawn stars, their
     /// light at this body, the bodies that can eclipse them, planetshine.
     pub starlight: crate::lighting::LightUniform,
-    /// Ground textures (`ground.rs`): x > 0 when loaded; y, z: fine and
-    /// coarse tile sizes in detail-uv units.
-    pub ground: Vec4,
-    /// Mean linear colour of each ground layer.
-    pub ground_means: [Vec4; 5],
     /// Surface zones (`zones`): x 1 when drawn, y the warp's first
     /// wavelength (m).
     pub zones: Vec4,
@@ -92,16 +87,7 @@ pub struct TerrainExt {
     #[texture(103)]
     #[sampler(104)]
     pub water_map: Option<Handle<Image>>,
-    /// Ground layers (colour, normal), as 2D texture arrays.
-    #[texture(105, dimension = "2d_array")]
-    #[sampler(106)]
-    pub ground_color: Option<Handle<Image>>,
-    #[texture(107, dimension = "2d_array")]
-    #[sampler(108)]
-    pub ground_normal: Option<Handle<Image>>,
     /// Zone indices (`zones::ZoneMap`, sea filled), read with `textureLoad`.
-    /// No samplers of their own: the fragment stage allows 16, and High's
-    /// view bindings plus these would be 17 (a crash, 2026-10-25).
     #[texture(109)]
     pub zone_map: Option<Handle<Image>>,
     /// Zone colours and sea-floor shallowness, mipmapped

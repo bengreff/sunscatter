@@ -22,8 +22,8 @@ pub use rules::{
 };
 
 use crate::camera::CameraRig;
+use crate::look::Parts;
 use crate::scene::BodyDefs;
-use crate::settings::GraphicsSettings;
 use crate::state::SimState;
 use crate::terrain::{Terrain, TerrainMaterial};
 use bevy::prelude::*;
@@ -208,7 +208,6 @@ pub fn update_exposure(
     rig: Res<CameraRig>,
     defs: Res<BodyDefs>,
     scene: Res<LightScene>,
-    settings: Res<GraphicsSettings>,
     mut cams: Query<&mut bevy::camera::Exposure, With<crate::camera::MainCamera>>,
 ) {
     if scene.stars.is_empty() {
@@ -223,7 +222,7 @@ pub fn update_exposure(
         (h < f64::from(a.thickness_m)).then(|| haze_exposure_share(&haze_above(a, p.radius_eq, h)))
     });
     let e_cam = scene.lux_at_camera() * haze.unwrap_or(1.0);
-    let ev100 = exposure_ev100(crate::camera::EV100, e_cam, reference_lux(), settings.starlight_exposure);
+    let ev100 = exposure_ev100(crate::camera::EV100, e_cam, reference_lux());
     for mut e in &mut cams {
         if (e.ev100 - ev100).abs() > 1e-4 {
             e.ev100 = ev100;
@@ -237,18 +236,18 @@ pub fn update_terrain(
     rig: Res<CameraRig>,
     defs: Res<BodyDefs>,
     scene: Res<LightScene>,
-    settings: Res<GraphicsSettings>,
+    parts: Res<Parts>,
     terrain: Res<Terrain>,
     mut materials: ResMut<Assets<TerrainMaterial>>,
 ) {
-    let sky = crate::sky::sky_ambient(&sim, &rig, &defs, &settings);
+    let sky = crate::sky::sky_ambient(&sim, &rig, &defs);
     let spheres = scene.spheres();
     for (node, handle) in terrain.materials() {
         let Some(i) = scene.index(node) else { continue };
         let l = body_light(i, &spheres, &scene.stars, &scene.slots);
         let Some(mut mat) = materials.get_mut(handle) else { continue };
         let p = &mut mat.extension.params;
-        p.starlight = LightUniform::new(&scene, &l, &[], settings.earthshine);
+        p.starlight = LightUniform::new(&scene, &l, &[], parts.planetshine);
         p.ambient.x = crate::sky::ambient_share(node, sky);
     }
 }

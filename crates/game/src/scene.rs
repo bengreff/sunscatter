@@ -100,7 +100,7 @@ pub fn setup(
     }
     .build();
     // One directional light per drawn star (lighting::star_slots), at most
-    // MAX_STARS; only the brightest casts shadow maps (settings::apply).
+    // MAX_STARS; only the brightest casts shadow maps (look::apply).
     for slot in 0..defs.stars.len().min(crate::lighting::MAX_STARS) {
         commands.spawn((
             SunLight,
@@ -338,7 +338,7 @@ pub fn update_ships(
     rig: Res<CameraRig>,
     assets: Res<Assets3d>,
     scene: Res<crate::lighting::LightScene>,
-    settings: Res<crate::settings::GraphicsSettings>,
+    parts: Res<crate::look::Parts>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut ships: Query<(Entity, &ShipVisual, &mut Transform, &MeshMaterial3d<StandardMaterial>)>,
 ) {
@@ -365,7 +365,7 @@ pub fn update_ships(
         let light = crate::lighting::object_light(pos, &scene.stars, &scene.slots, &bodies);
         let visible = light.visible;
         let shine =
-            if settings.earthshine { crate::lighting::rules::luminance(light.shine) * (1.0 - visible) } else { 0.0 };
+            if parts.planetshine { crate::lighting::rules::luminance(light.shine) * (1.0 - visible) } else { 0.0 };
         let [r0, g0, b0] = if ship.0 == sim.active { ACTIVE_COLOR } else { SHIP_COLOR };
         let LinearRgba { red: r0, green: g0, blue: b0, .. } = Color::srgb(r0, g0, b0).to_linear();
         let k = visible as f32;

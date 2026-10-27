@@ -2,8 +2,8 @@
 //! our inertial frame) drawn as pixel-sized billboards with colours from B−V.
 
 use crate::camera::CameraRig;
+use crate::look::{Parts, STAR_MAGNITUDE};
 use crate::scene::BodyDefs;
-use crate::settings::GraphicsSettings;
 use crate::state::SimState;
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::NoFrustumCulling;
@@ -121,12 +121,13 @@ fn build_mesh(stars: &[Star], limit: f32) -> Mesh {
         .with_inserted_indices(Indices::U32(idx))
 }
 
-/// Rebuilds the star mesh when the magnitude limit changes, and fades the
-/// stars in daylight (inside an atmosphere with the Sun up).
+/// Builds the star mesh (rebuilt when the benchmark turns the stars off and
+/// on), and fades the stars in daylight (inside an atmosphere with the Sun
+/// up).
 #[allow(clippy::too_many_arguments)]
 pub fn update(
     mut commands: Commands,
-    settings: Res<GraphicsSettings>,
+    parts: Res<Parts>,
     sim: Res<SimState>,
     rig: Res<CameraRig>,
     defs: Res<BodyDefs>,
@@ -134,7 +135,7 @@ pub fn update(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StarMaterial>>,
 ) {
-    let limit = settings.star_magnitude;
+    let limit = if parts.stars { STAR_MAGNITUDE } else { 0.0 };
     if limit != field.built_for {
         field.built_for = limit;
         if let Some(e) = field.entity.take() {
@@ -154,9 +155,12 @@ pub fn update(
             field.entity = Some(e);
         }
     }
-    let day = daylight(&sim, &rig, &defs);
-    if let Some(mut m) = materials.get_mut(&field.material) {
-        m.params.intensity = 1.0 - 0.98 * day;
+    // Touched only when it changes: a modified material is prepared again.
+    let intensity = 1.0 - 0.98 * daylight(&sim, &rig, &defs);
+    if materials.get(&field.material).is_some_and(|m| (m.params.intensity - intensity).abs() > 1e-4) {
+        if let Some(mut m) = materials.get_mut(&field.material) {
+            m.params.intensity = intensity;
+        }
     }
 }
 

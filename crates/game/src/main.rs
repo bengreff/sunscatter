@@ -22,6 +22,7 @@ mod hud;
 mod interface;
 mod landing;
 mod lighting;
+mod look;
 mod map;
 mod map_view;
 mod navball;
@@ -33,7 +34,6 @@ mod rendezvous;
 mod rings;
 mod saves;
 mod scene;
-mod settings;
 mod settings_ui;
 mod sky;
 mod staging;
@@ -106,8 +106,8 @@ fn main() {
                 demo::run.run_if(move || !touring),
                 tour::run.run_if(move || touring),
                 bench::run,
-                settings::apply,
-                atmosphere::apply_settings,
+                look::apply,
+                atmosphere::configure_camera,
                 sky::install_haze,
                 camera::read_input,
                 hud::pick_bodies,
@@ -151,7 +151,7 @@ fn main() {
             (
                 scene::update_bodies,
                 atmosphere::update,
-                atmosphere::update_sky_light,
+                atmosphere::update_mode,
                 scene::update_ships,
                 (scene::update_flames, scene::update_canopies).after(scene::update_ships),
                 (terrain::update, lighting::update_terrain).chain(),
@@ -238,7 +238,7 @@ impl Plugin for GameState {
             .init_resource::<interface::help::Help>()
             .init_resource::<interface::toasts::Toasts>()
             .init_resource::<debris::Breakups>()
-            .init_resource::<settings::GraphicsSettings>()
+            .init_resource::<look::Parts>()
             .init_resource::<settings_ui::SettingsUi>()
             .init_resource::<bench::Bench>()
             .init_resource::<map::MapView>()

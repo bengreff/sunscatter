@@ -287,10 +287,10 @@ const EXPOSURE_STOPS: (f64, f64) = (-14.0, 4.0);
 /// [`reference_lux`], shifted by the stops between the stellar flux at the
 /// camera (`e_cam`: every star's, inverse square, no eclipses: it is the
 /// light where the photographer is, never the scene's luminance) and
-/// `e_ref`. `follow` false: the fixed base exposure (D055).
-pub fn exposure_ev100(base: f32, e_cam: f64, e_ref: f64, follow: bool) -> f32 {
+/// `e_ref`.
+pub fn exposure_ev100(base: f32, e_cam: f64, e_ref: f64) -> f32 {
     let stops = (e_cam / e_ref).log2();
-    if !follow || stops.is_nan() {
+    if stops.is_nan() {
         return base;
     }
     base + stops.clamp(EXPOSURE_STOPS.0, EXPOSURE_STOPS.1) as f32

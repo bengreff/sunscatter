@@ -2,15 +2,12 @@ enable dual_source_blending;
 
 // Sunscatter's copy of Bevy 0.19.1's `bevy_pbr/atmosphere/render_sky.wgsl`
 // (MIT/Apache-2.0), installed over the embedded original by `sky::haze`.
-// Changes, for geometry pixels only (the sky is unchanged):
-// - beyond the aerial-view LUT's range the ray is raymarched instead of
-//   clamping the in-scatter to the LUT's last slice (with the transmittance
-//   still taken over the whole distance, far ground turned dark behind a
-//   hard edge: the owner's "dark horizon");
-// - the haze strength setting scales the aerial perspective: in-scatter by
-//   HAZE and the optical depth by HAZE (as if the air were HAZE times as
-//   dense along the view ray; 1 = physical).
-// sunscatter haze override
+// Change, for geometry pixels only (the sky is unchanged): beyond the
+// aerial-view LUT's range the ray is raymarched instead of clamping the
+// in-scatter to the LUT's last slice (with the transmittance still taken
+// over the whole distance, far ground turned dark behind a hard edge: the
+// owner's "dark horizon").
+// sunscatter sky override
 #import bevy_pbr::atmosphere::{
     bindings::{view, settings},
     functions::{
@@ -29,8 +26,6 @@ enable dual_source_blending;
 #else
 @group(0) @binding(13) var depth_texture: texture_depth_2d;
 #endif
-
-const HAZE: f32 = {{HAZE}};
 
 struct RenderSkyOutput {
 #ifdef DUAL_SOURCE_BLENDING
@@ -78,8 +73,6 @@ fn main(in: FullscreenVertexOutput) -> RenderSkyOutput {
             inscattering = result.inscattering;
             transmittance = result.transmittance;
         }
-        inscattering *= HAZE;
-        transmittance = pow(transmittance, vec3(HAZE));
     }
 
     // exposure compensation

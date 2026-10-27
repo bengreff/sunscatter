@@ -1,6 +1,6 @@
 //! Body tour (`SUNSCATTER_TOUR=<body,body,…>` with `SUNSCATTER_DEMO=<dir>`,
 //! usually `SUNSCATTER_DEMO_OFFSCREEN=1`): screenshots of each listed body
-//! in the Minimal tier, with the clock frozen. Per body: the whole disc
+//! in the one look (D073), with the clock frozen. Per body: the whole disc
 //! sunlit from 3 radii (`disc`), the limb from low orbit (`limb`: 1.5 % of
 //! the radius up, or just above the atmosphere's top), and the ground from
 //! 2 km at a low Sun (`ground`, solid bodies only). Each shot waits for the
@@ -13,7 +13,6 @@
 use crate::camera::{self, CameraRig, Focus, MainCamera};
 use crate::demo::{Demo, Step};
 use crate::scene::BodyDefs;
-use crate::settings::{GraphicsSettings, Tier};
 use crate::state::{SimPause, SimState};
 use crate::terrain::Terrain;
 use bevy::app::AppExit;
@@ -336,7 +335,6 @@ pub fn run(
     mut sim: ResMut<SimState>,
     defs: Res<BodyDefs>,
     mut rig: ResMut<CameraRig>,
-    mut settings: ResMut<GraphicsSettings>,
     mut pause: ResMut<SimPause>,
     terrain: Res<Terrain>,
     mut exit: MessageWriter<AppExit>,
@@ -344,7 +342,6 @@ pub fn run(
     let Some(mut tour) = tour else { return };
     if !tour.started {
         tour.started = true;
-        *settings = settings.with_preset(Tier::Minimal);
         // Not a demo step: the demo's per-step checks stay quiet.
         demo.step = Step::Done;
         if let Some(date) = tour.date {

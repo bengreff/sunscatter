@@ -185,13 +185,7 @@ fn zones_def() -> ZonesDef {
 
 #[test]
 fn palette_packing() {
-    let ocean = OceanDef {
-        roughness: 0.1,
-        albedo: [0.003, 0.008, 0.03],
-        mask: None,
-        shallow_albedo: None,
-        shallow_depth_m: None,
-    };
+    let ocean = OceanDef { albedo: [0.003, 0.008, 0.03], mask: None, shallow_albedo: None, shallow_depth_m: None };
     let p = palette(&zones_def(), Some(&ocean), [0.5, 0.5, 0.5]);
     assert_eq!(p.color[0], Vec4::new(0.5, 0.5, 0.5, 0.0));
     let forest = lin([31, 43, 15]);

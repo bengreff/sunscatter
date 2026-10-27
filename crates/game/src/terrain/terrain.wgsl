@@ -1,8 +1,7 @@
 // Terrain surface: StandardMaterial lighting with the body's colour map
 // looked up per fragment from the body-fixed direction (no UV seams or pole
-// pinching), a close-range procedural detail layer (or, with it off, a
-// simple patch pattern), and water shading from
-// the body's water mask, also looked up per fragment (so it does not change
+// pinching), a simple ground pattern close up, and water shading from the
+// body's water mask, also looked up per fragment (so it does not change
 // with the LOD level; CPU mirror and tests in water.rs).
 //
 // With surface zones (D073, crisp-surfaces.md; CPU mirrors and tests in
@@ -16,7 +15,6 @@
 #import bevy_pbr::{
     pbr_fragment::pbr_input_from_standard_material,
     pbr_functions::alpha_discard,
-    mesh_view_bindings::globals,
 }
 #import sunscatter::light::{Lights, eclipse, MAX_STARS, MAX_SHINES}
 
@@ -48,25 +46,21 @@ struct TerrainParams {
     fixed_z: vec4<f32>,
     // xyz: body centre relative to the camera (world space).
     center: vec4<f32>,
-    // x: equatorial radius, y: polar radius, z: detail fade distance (m), w: detail strength.
+    // x: equatorial radius, y: polar radius, z: unused, w: rock and snow on (> 0).
     shape: vec4<f32>,
     // rgb: rock colour, w: snow line (m, < 0 = none).
     rock: vec4<f32>,
     // rgb: snow colour, w: surface roughness.
     snow: vec4<f32>,
-    // rgb: open-water albedo (linear), w: water roughness.
+    // rgb: open-water albedo (linear).
     ocean: vec4<f32>,
-    // x: detail on, y: glint on, z: has colour map, w: has water mask.
+    // z: has colour map, w: has water mask (x, y unused).
     flags: vec4<u32>,
     // rgb: base colour without a map.
     base: vec4<f32>,
     // Lighting (D055, lighting::LightUniform): the drawn stars and their
     // light here, the bodies that can eclipse them, planetshine.
     starlight: Lights,
-    // Ground textures: x > 0 loaded; y, z fine and coarse tile (detail uv).
-    ground: vec4<f32>,
-    // Mean linear colour of each ground layer.
-    ground_means: array<vec4<f32>, 5>,
     // Surface zones: x 1 when drawn, y the warp's first wavelength (m).
     zones: vec4<f32>,
     // rgb: shallow-water albedo (linear), w 1 when set.
@@ -97,12 +91,7 @@ struct TerrainParams {
 @group(#{MATERIAL_BIND_GROUP}) @binding(102) var color_sampler: sampler;
 @group(#{MATERIAL_BIND_GROUP}) @binding(103) var water_map: texture_2d<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(104) var water_sampler: sampler;
-@group(#{MATERIAL_BIND_GROUP}) @binding(105) var ground_color: texture_2d_array<f32>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(106) var ground_color_sampler: sampler;
-@group(#{MATERIAL_BIND_GROUP}) @binding(107) var ground_normal: texture_2d_array<f32>;
-@group(#{MATERIAL_BIND_GROUP}) @binding(108) var ground_normal_sampler: sampler;
-// Zone indices, read with textureLoad (no sampler: the fragment stage's 16
-// samplers are all taken at High and Ultra).
+// Zone indices, read with textureLoad.
 @group(#{MATERIAL_BIND_GROUP}) @binding(109) var zone_map: texture_2d<f32>;
 // Zone colours, sampled with the colour map's sampler (the same settings;
 // zones are drawn only once the colour map is loaded).
@@ -178,20 +167,6 @@ fn noise(p: vec2<f32>, period: f32) -> f32 {
     let c = hash2((i + vec2(0.0, 1.0)) % period);
     let d = hash2((i + vec2(1.0, 1.0)) % period);
     return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
-}
-
-// `octaves` octaves, normalised to [0, 1]; coordinates wrap at 256, so each
-// octave's period is 256·2^k.
-fn fbm(p: vec2<f32>, octaves: i32) -> f32 {
-    var sum = 0.0;
-    var amp = 0.5;
-    var freq = 1.0;
-    for (var k = 0; k < octaves; k++) {
-        sum += amp * noise(p * freq, 256.0 * freq);
-        amp *= 0.5;
-        freq *= 2.0;
-    }
-    return sum / (1.0 - amp * 2.0 + 1e-6);
 }
 
 // Wraps a derivative of the longitude coordinate across the seam.
@@ -408,9 +383,8 @@ fn zone_surface(uv: vec2<f32>, dx: vec2<f32>, dy: vec2<f32>, p: vec3<f32>, foot:
     return o;
 }
 
-// Rock on steep slopes and snow above the snow line (both physical;
-// shared by the detail layer and the zones). `n` in [0, 1] jitters the
-// thresholds.
+// Rock on steep slopes and snow above the snow line (both physical). `n`
+// in [0, 1] jitters the thresholds.
 fn rock_cover(slope: f32, n: f32) -> f32 {
     return smoothstep(0.08, 0.25, slope + (n - 0.5) * 0.1);
 }
@@ -462,45 +436,6 @@ fn vertex(vertex: TerrainVertex) -> VertexOutput {
     return out;
 }
 #endif
-
-// Ground layers, in `ground::LAYERS` order.
-const GRASS: i32 = 0;
-const SOIL: i32 = 1;
-const SAND: i32 = 2;
-const ROCK: i32 = 3;
-const SNOW: i32 = 4;
-
-// Wave height gradient (d/du, d/dv) at detail-uv `p` and time `t`: a few
-// sines whose wave vectors are whole multiples of 2π/256, so they repeat
-// exactly with the detail uv's 256-unit wrap (no seam).
-fn wave_slope(p: vec2<f32>, t: f32) -> vec2<f32> {
-    let base = 6.2831853 / 256.0;
-    var g = vec2(0.0);
-    let ks = array<vec2<f32>, 4>(vec2(1024.0, 310.0), vec2(-700.0, 1300.0), vec2(2300.0, -900.0), vec2(400.0, 3100.0));
-    let amps = array<f32, 4>(0.0009, 0.0007, 0.0004, 0.0003);
-    let speeds = array<f32, 4>(0.9, 1.1, 1.6, 2.0);
-    for (var i = 0; i < 4; i++) {
-        let k = ks[i] * base;
-        let ph = dot(k, p) + speeds[i] * t;
-        g += amps[i] * k * cos(ph);
-    }
-    return g;
-}
-
-// Perturbs normal `n` by tangent-space normal `tn` (x along +u, y along +v),
-// with the frame built from screen derivatives of position and uv.
-fn perturb(n: vec3<f32>, dp1: vec3<f32>, dp2: vec3<f32>, duv1: vec2<f32>, duv2: vec2<f32>, tn: vec3<f32>) -> vec3<f32> {
-    let dp2perp = cross(dp2, n);
-    let dp1perp = cross(n, dp1);
-    let t = dp2perp * duv1.x + dp1perp * duv2.x;
-    let b = dp2perp * duv1.y + dp1perp * duv2.y;
-    let m = max(dot(t, t), dot(b, b));
-    if m <= 0.0 {
-        return n;
-    }
-    let s = inverseSqrt(m);
-    return normalize(t * s * tn.x + b * s * tn.y + n * tn.z);
-}
 
 #ifndef PREPASS_PIPELINE
 // The slot (terrain.starlight.stars) of Bevy's directional light `i`: the star in its
@@ -672,14 +607,7 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
 
     let dx = vec2(wrap_d(dpdx(uv.x)), dpdx(uv.y));
     let dy = vec2(wrap_d(dpdy(uv.x)), dpdy(uv.y));
-    // Screen derivatives for the ground textures and normal perturbation
-    // (taken here, in uniform control flow).
-    let fine_uv = in.uv / terrain.ground.y;
-    let coarse_uv = in.uv / terrain.ground.z;
-    let fdx = dpdx(fine_uv);
-    let fdy = dpdy(fine_uv);
-    let cdx = dpdx(coarse_uv);
-    let cdy = dpdy(coarse_uv);
+    // Screen derivatives (taken here, in uniform control flow).
     let dp1 = dpdx(in.world_position.xyz);
     let dp2 = dpdy(in.world_position.xyz);
     let duv1 = dpdx(in.uv);
@@ -687,13 +615,12 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
 
     let height = in.color.g * 10000.0;
     let up = dir; // close enough to the ellipsoid normal for shading rules
-    var roughness = terrain.snow.w;
+    let roughness = terrain.snow.w;
     let slope = 1.0 - clamp(dot(normalize(in.world_normal), normalize(rel)), 0.0, 1.0);
 
     var color = terrain.base.rgb;
     // Sea fraction (and, with zones, lakes).
     var water = 0.0;
-    var coast = 0.0;
     let zones_on = terrain.zones.x > 0.0;
     var water_color = terrain.ocean.rgb;
     if zones_on {
@@ -712,9 +639,8 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
         if terrain.shallow.w > 0.0 {
             water_color = mix(terrain.ocean.rgb, terrain.shallow.rgb, z.shallow * (1.0 - z.lake));
         }
-        // Rock on steep slopes and the snow line, on land (the detail
-        // layer has its own).
-        if terrain.flags.x == 0u && terrain.shape.w > 0.0 {
+        // Rock on steep slopes and the snow line, on land.
+        if terrain.shape.w > 0.0 {
             let n = z.tone * 0.5 + 0.5;
             let rock = rock_cover(slope, n) * (1.0 - water);
             let snow = snow_cover(height, lat, n, rock) * (1.0 - water);
@@ -744,68 +670,19 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
         if terrain.flags.w != 0u {
             let raw = textureSampleGrad(water_map, water_sampler, uv, dx, dy).r;
             water = smoothstep(0.3, 0.7, raw);
-            // A beach band on the land side of the coastline.
-            coast = smoothstep(0.02, 0.3, raw) * (1.0 - water);
         }
     }
 
-    // Close range: ground textures chosen per fragment from the colour map
-    // (green: grass, bright and dry: sand), the coast (beach), slope (rock)
-    // and snow line; each used relative to its mean colour, so the satellite
-    // colour stays and only the detail comes from the texture.
     let dist = length(in.world_position.xyz);
-    let fade = select(0.0, clamp(1.0 - dist / terrain.shape.z, 0.0, 1.0), terrain.flags.x != 0u);
     var n_out = normalize(pbr_input.N);
-    if fade > 0.0 && water < 1.0 {
-        let n = fbm(in.uv, 3);
-        let lum = dot(color, vec3(0.2126, 0.7152, 0.0722));
-        let rockiness = rock_cover(slope, n);
-        let snow = max(snow_cover(height, lat, n, rockiness), smoothstep(0.45, 0.6, lum));
-        var w = array<f32, 5>(0.0, 0.0, 0.0, 0.0, 0.0);
-        let green = clamp((color.g - max(color.r, color.b)) / (lum + 0.01) * 3.0, 0.0, 1.0);
-        let dry = clamp((color.r - color.b) / (lum + 0.01), 0.0, 1.0) * smoothstep(0.06, 0.18, lum);
-        w[ROCK] = rockiness;
-        w[SNOW] = snow * (1.0 - rockiness);
-        let rest = max(1.0 - w[ROCK] - w[SNOW], 0.0);
-        w[SAND] = rest * max(coast, dry * (1.0 - green));
-        // Patches at ~80 m and ~10 m: clearings of bare soil in grassland,
-        // so a single 5 km colour-map pixel is not one uniform field.
-        let cover = fbm(in.uv * 0.5 + vec2(31.0, 7.0), 3) * 0.7 + fbm(in.uv * 4.0 + vec2(3.0, 11.0), 2) * 0.3;
-        let clearing = smoothstep(0.52, 0.62, cover) * 0.8;
-        w[GRASS] = (rest - w[SAND]) * green * (1.0 - clearing);
-        w[SOIL] = max(rest - w[SAND] - w[GRASS], 0.0);
-        var rel_col = vec3(0.0);
-        var tn = vec3(0.0);
-        for (var i = 0; i < 5; i++) {
-            if w[i] > 0.001 {
-                let f = textureSampleGrad(ground_color, ground_color_sampler, fine_uv, i, fdx, fdy).rgb;
-                let c = textureSampleGrad(ground_color, ground_color_sampler, coarse_uv, i, cdx, cdy).rgb;
-                let mean = max(terrain.ground_means[i].rgb, vec3(0.01));
-                rel_col += w[i] * (f / mean) * mix(vec3(1.0), c / mean, 0.5);
-                let nf = textureSampleGrad(ground_normal, ground_normal_sampler, fine_uv, i, fdx, fdy).xyz * 2.0 - 1.0;
-                tn += w[i] * nf;
-            }
-        }
-        if terrain.ground.x > 0.0 {
-            // Snow and rock take their own colour; the others keep the map's.
-            let base = mix(color, terrain.rock.rgb, w[ROCK] * 0.6);
-            let base2 = mix(base, terrain.snow.rgb, w[SNOW]);
-            // Lighter and darker patches (uneven cover, moisture).
-            let tone = 1.0 + (fbm(in.uv * 1.5 + vec2(5.0, 19.0), 3) - 0.5) * 0.7;
-            color = mix(color, base2 * rel_col * tone, fade * (1.0 - water));
-            let tn_n = normalize(vec3(tn.xy * fade * (1.0 - water), max(tn.z, 0.1)));
-            n_out = perturb(n_out, dp1, dp2, duv1, duv2, tn_n);
-        }
-    }
-    // Without the detail layer (the Minimal tier, D073): a simple ground
-    // texture for depth perception near the ground (zones::ground_*
-    // mirror the rules). Lighter and darker patches at 8 scales, 320 m down
-    // to 2.5 m on Earth (detail units / 0.125, halving), each fading out
-    // between 8 and 4 pixels a wavelength so nothing shimmers, plus broad
-    // patches of cover and bare ground from the two coarsest, fading in
-    // between 32 and 64 pixels a wavelength. Typically ±0.3 stops, at most
-    // ~±1.
-    if terrain.flags.x == 0u && water < 1.0 {
+    // A simple ground texture for depth perception near the ground
+    // (zones::ground_* mirror the rules, D073): lighter and darker patches
+    // at 8 scales, 320 m down to 2.5 m on Earth (detail units / 0.125,
+    // halving), each fading out between 8 and 4 pixels a wavelength so
+    // nothing shimmers, plus broad patches of cover and bare ground from the
+    // two coarsest, fading in between 32 and 64 pixels a wavelength.
+    // Typically ±0.3 stops, at most ~±1.
+    if water < 1.0 {
         let near = clamp(1.0 - dist / SIMPLE_GROUND_M, 0.0, 1.0);
         if near > 0.0 {
             let foot = max(length(duv1), length(duv2));
@@ -841,11 +718,6 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
         let sphere_n = normalize(in.world_position.xyz - terrain.center.xyz);
         n_out = normalize(mix(n_out, sphere_n, water));
     }
-    // Waves on water, near the camera.
-    if water > 0.0 && fade > 0.0 {
-        let g = wave_slope(in.uv, globals.time) * 3.0 * fade * water;
-        n_out = perturb(n_out, dp1, dp2, duv1, duv2, normalize(vec3(-g.x, -g.y, 1.0)));
-    }
     pbr_input.N = n_out;
 
     if zones_on {
@@ -853,9 +725,6 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     } else {
         // The colour map under water is raised to at least the open-water albedo.
         color = mix(color, max(color, terrain.ocean.rgb), water);
-    }
-    if terrain.flags.y != 0u {
-        roughness = mix(roughness, terrain.ocean.w, water);
     }
 
     pbr_input.material.base_color = vec4(color, 1.0);

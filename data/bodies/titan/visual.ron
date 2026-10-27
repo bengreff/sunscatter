@@ -25,7 +25,6 @@
     detail: Some((
         scale_m: 25.0,
         strength: 0.55,
-        fade_m: None,
         // Water-ice cobbles and dark organic sand (Huygens' landing site).
         rock_color: (0.14, 0.12, 0.09),
     )),

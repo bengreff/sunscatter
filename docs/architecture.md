@@ -61,21 +61,21 @@ A short map to search before building anything: who owns what, the frame order, 
 | Fps readout (0.5 s windows) | `game::hud::FpsMeter` | |
 | Profiler (`SUNSCATTER_PROFILE=1`): CPU per system, schedule and thread from Bevy's `trace` spans (`spans`), GPU per pass group from timestamps between passes (`gpu`), counts that drive the cost; the ranked report every 5 s (terminal, `profile.log`, Utilities ▸ Diagnostics) | `game::profile` (rules in `profile::report`) | off: the spans are filtered at their source |
 | Terrain meshes and LOD, geomorphing | `game::terrain` (`lod`, `mesh`) | heights via `sim` |
-| Terrain look: colour map, water mask, ground textures, waves | `game::terrain` (`material`, `water`, `ground`, `terrain.wgsl`) | textures in `data/textures/terrain` (CC0) |
+| Terrain look: colour map, water mask, the simple ground pattern close up | `game::terrain` (`material`, `water`, `terrain.wgsl`) | |
 | Surface zones (D073): classification of the real maps into each body's zone list (`zones.png`) | `asset-tool::zones` | the list is body data in `visual.ron` |
-| Drawing zones: zone map and far texture, palette, warp, coast step, zone pick (CPU mirrors of the shader's rules) | `game::terrain::zones` (`terrain.wgsl` mirrors it) | the `zones` toggle, on in Minimal |
+| Drawing zones: zone map and far texture, palette, warp, coast step, zone pick (CPU mirrors of the shader's rules) | `game::terrain::zones` (`terrain.wgsl` mirrors it) | always drawn (off only in the benchmark, `look::Parts`) |
 | Which atmosphere mode a camera uses (tables inside, raymarching outside); which body's atmosphere is drawn (the one the camera is deepest in, within 100 radii); the scattering medium from `visual.ron` (per-channel Mie asymmetry, aerosol layers) | `game::atmosphere` (`raymarch`, `active`, `medium`) | |
 | Body tour screenshots (disc, limb, ground per body) | `game::tour` (poses: `tour::pose`; the ground view's height through thick air: `ground_altitude`) | `SUNSCATTER_TOUR` |
 | Giant planets' colour maps (OPAL, calibrated to measured albedos) | `asset-tool::giants` | docs/features/solar-visuals.md |
 | Planetary rings: the disc, its slab lighting, the ring shadow on the planet (`ring_transmission`), the profile's mips (`mip_chain`); the profile bake | `game::rings` (`rings.wgsl`; `terrain.wgsl` mirrors the shadow), `asset-tool::rings` | Saturn's in `visual.ron` |
 | Opaque cloud decks (any body with `cloud_top`): the shell (a Lambert sphere from above, the sky from below), which medium the sky is drawn with (`atmosphere::DeckMedia`; none below the deck), the ground's fog below the deck | `game::clouds` (`clouds.wgsl`; `terrain.wgsl`'s `deck_fog`) | `cloud_top`, `ground_diffuse` in `visual.ron` |
 | Solid bodies' maps beyond Earth and the Moon: DEM datum conversion to the `body.ron` spheroid, mosaics, the per-body source table; procedural relief (triaxial shape, Gazetteer and random craters) where no DEM exists | `asset-tool::planets`, `::specs`, `::relief` (`::global` reads USGS/PDS grids, `::gazetteer` the IAU names) | heights are physical (D047): `sim` samples `height.png` × `height_scale` |
-| Graphics tiers and toggles | `game::settings`; the settings screen in `game::settings_ui` | Minimal is the default and only developed tier (D073); `persist::GRAPHICS_VERSION` resets older saved graphics |
+| The one look (D073): its constants, the camera's MSAA and shadow maps (`apply`), the parts the benchmark switches off (`Parts`, never a setting); the look's benchmark | `game::look`, `game::bench`; the settings screen (no graphics settings) in `game::settings_ui` | older settings files' graphics are ignored |
 | Flight-view layout (D080): fixed places, the menu bar, the two docks and their stacking; theme, pause menu, key help | `game::interface` (`layout` is pure rules) | open menus and expanded sections saved in `settings.ron` |
 | Task menus (D080): the registry (`MenuId`: title, key, dock, order), each menu's content as a pure function of `FlightData`, the generic section renderer; the stage stack and next-stage rule (skeleton) | `game::interface::menus` | a new task is one `MenuId` entry plus its content function |
 | Discrete changes to the simulation (warp, switch, delete, load, revert, reset); which keys act | `game::commands` (`GameCommand`, `InputContext`) | the hook for MCP and scripting |
 | Advancing the fleet each frame: chunks of work on the compute pool, furthest-behind first, a frame deadline; the clock held at the slowest (shown as limited by compute) | `game::fleet` | threads and deadlines never change motion (rule 4, tested) |
-| Haze strength, our sky compositing shader | `game::sky::haze` (`render_sky.wgsl`, copied from Bevy) | |
+| Our sky compositing shader (far ground raymarched past the aerial-view table) | `game::sky::haze` (`render_sky.wgsl`, copied from Bevy) | |
 | Flight keys: throttle ramp (fine with Alt), reset confirmation | `game::state` (`throttle_after`, `reset_confirmed`) | the throttle bar sends `GameCommand::SetThrottle` |
 | Whether a vessel's engine runs now (display), the flame mark | `game::scene` (`engine_on`, `update_flames`) | a stored burn segment, or live flight with the throttle open |
 | Where files live | `game::persist` | `SUNSCATTER_HOME` override |
@@ -95,12 +95,12 @@ Everything drawn is derived from the current clock, never from values cached in 
 
 | Kind | Where | Examples |
 |---|---|---|
-| Unit and property | next to the code (`#[cfg(test)]`) | Kepler round trips, terrain winding, settings presets |
+| Unit and property | next to the code (`#[cfg(test)]`) | Kepler round trips, terrain winding, the look's parts |
 | Golden (bit-exact, both OSes) | `sim` | ephemeris generation, LEO coast hash, terrain sample hash |
 | Accuracy vs DE440 | `sim` | Earth, Mars and Moon residuals |
 | Invariance | `sim` | anchor choice; chunked = single pass; save/load |
 | Scenarios | `crates/sim/tests/` | pad → orbit → parachute; landing on a mountain versus the sea; contact (slopes that hold or tip, bounces, slides, touchdowns survived or not, lift-off, SAS within its authority, rest across save/load, warp and frame rate) |
 | Game rules | `game`, pure functions | `relations`, persistence, saves, tracking ids, map-view table (D054), zoom, fps |
-| End to end, visual | the demo (`SUNSCATTER_DEMO`) | every tier at seven views, benchmark tables |
+| End to end, visual | the demo (`SUNSCATTER_DEMO`) | the look at each view, the look's benchmark (each part's cost), the owner's slow view (`Plunge`), profiles with `SUNSCATTER_PROFILE=1` |
 
 Game rules (visibility, hover, camera limits, lighting) are written as pure functions with table tests, and Bevy systems stay thin wrappers around them.

@@ -10,10 +10,10 @@
 
 use crate::body_visual::{AtmosphereDef, ProfileDef};
 use crate::camera::{CameraRig, MainCamera};
-use crate::settings::{AtmosphereQuality, GraphicsSettings};
+use crate::look::Parts;
 use crate::state::SimState;
 use bevy::light::atmosphere::{Falloff, PhaseFunction, ScatteringMedium, ScatteringTerm};
-use bevy::light::{Atmosphere, AtmosphereEnvironmentMapLight, GeneratedEnvironmentMapLight};
+use bevy::light::Atmosphere;
 use bevy::pbr::resources::AtmosphereTransformsOffset;
 use bevy::pbr::{AtmosphereMode, AtmosphereSettings, ExtractedAtmosphere};
 use bevy::prelude::*;
@@ -186,7 +186,7 @@ type AtmosphereItem = (
 
 /// Keeps atmospheres at their bodies' camera-relative centres, with their
 /// ground on the reference ellipsoid below the camera, and draws only the
-/// [`active`] one (none with the atmosphere setting off).
+/// [`active`] one (none with the atmosphere off, in the benchmark).
 ///
 /// Bevy's atmosphere is a sphere. At the mean radius, ground on the
 /// ellipsoid sat kilometres above or below its "ground" (2 km above at the
@@ -195,7 +195,7 @@ type AtmosphereItem = (
 pub fn update(
     sim: Res<SimState>,
     rig: Res<CameraRig>,
-    settings: Res<GraphicsSettings>,
+    parts: Res<Parts>,
     mut commands: Commands,
     mut atmos: Query<AtmosphereItem>,
     mut drawn: Local<Option<Option<Entity>>>,
@@ -233,7 +233,7 @@ pub fn update(
             }
         }
     }
-    let on = settings.atmosphere != AtmosphereQuality::Off;
+    let on = parts.atmosphere;
     let sizes: Vec<(f64, f64)> = candidates.iter().map(|c| c.1).collect();
     let want = active(&sizes).filter(|_| on).map(|i| candidates[i].0);
     if *drawn != Some(want) {
@@ -248,91 +248,52 @@ pub fn update(
     }
 }
 
-/// Tunes the camera's atmosphere settings, or turns atmospheres off.
-///
-/// Off is done by removing the bodies' `Atmosphere` components, not the
-/// camera's `AtmosphereSettings`: Bevy 0.19's extraction only visits cameras
-/// that still have settings, so removing them leaves stale render state (a
-/// grey sky).
-pub fn apply_settings(settings: Res<GraphicsSettings>, mut commands: Commands, cams: Query<Entity, With<MainCamera>>) {
-    if !settings.is_changed() {
-        return;
-    }
-    // Which atmosphere is drawn (if any): `update`.
+/// The camera's atmosphere settings, once: aerial perspective to 400 km
+/// (the horizon from low altitude), up to 24 raymarching samples, and the
+/// adaptive mode ([`update_mode`]). Atmospheres are turned off by removing
+/// the bodies' `Atmosphere` components (`update`), never the camera's
+/// `AtmosphereSettings`: Bevy 0.19's extraction only visits cameras that
+/// still have settings, so removing them leaves stale render state (a grey
+/// sky).
+pub fn configure_camera(mut commands: Commands, cams: Query<Entity, With<MainCamera>>, mut done: Local<bool>) {
     for cam in &cams {
-        match settings.atmosphere {
-            AtmosphereQuality::Off => {
-                commands.entity(cam).insert(AtmosphereSettings::default());
-                continue;
-            }
-            AtmosphereQuality::Lut => {
-                commands.entity(cam).insert(AtmosphereSettings {
-                    // Aerial perspective reaches the horizon from low altitude.
-                    aerial_view_lut_max_distance: 4.0e5,
-                    rendering_method: AtmosphereMode::LookupTexture,
-                    ..default()
-                });
-            }
-            AtmosphereQuality::Raymarched => {
-                commands.entity(cam).insert(AtmosphereSettings {
-                    aerial_view_lut_max_distance: 4.0e5,
-                    sky_max_samples: 24,
-                    rendering_method: AtmosphereMode::Raymarched,
-                    ..default()
-                });
-            }
+        if !*done {
+            commands.entity(cam).insert(AtmosphereSettings {
+                aerial_view_lut_max_distance: 4.0e5,
+                sky_max_samples: 24,
+                rendering_method: AtmosphereMode::LookupTexture,
+                ..default()
+            });
+            *done = true;
         }
     }
 }
 
-/// Sky-light strength at a height above the ground, as a fraction of the
-/// atmosphere's thickness: full in the lower 60%, fading smoothly to zero at
-/// the top so it does not switch off abruptly when leaving the atmosphere.
-pub fn sky_light_fade(height_fraction: f64) -> f32 {
-    let t = ((height_fraction - 0.6) / 0.4).clamp(0.0, 1.0);
-    (1.0 - t * t * (3.0 - 2.0 * t)) as f32
-}
-
 /// Whether the camera's atmosphere is raymarched, at a camera `depth` in
 /// the nearest atmosphere (height above its ground as a fraction of its
-/// thickness; 1 or more: outside). "Raymarched" is adaptive: inside an
-/// atmosphere the lookup tables are accurate and much cheaper (~3 ms at the
-/// pad, 2026-09-26); from outside, their aerial perspective washes the
-/// ground out, so it raymarches there. Hazy atmospheres (Titan's, Venus's:
-/// `inside`) are raymarched inside too: their aerial-perspective table
-/// broke into coloured rings on the ground (2026-10-26).
-pub fn raymarch(quality: AtmosphereQuality, depth: f64, inside: RaymarchInside) -> bool {
-    quality == AtmosphereQuality::Raymarched && (depth >= 1.0 || inside.0)
+/// thickness; 1 or more: outside). Inside an atmosphere the lookup tables
+/// are accurate and much cheaper (~3 ms at the pad, 2026-09-26); from
+/// outside, their aerial perspective washes the ground out, so it
+/// raymarches there. Hazy atmospheres (Titan's, Venus's: `inside`) are
+/// raymarched inside too: their aerial-perspective table broke into
+/// coloured rings on the ground (2026-10-26). `on`: raymarching at all
+/// (off only in the benchmark).
+pub fn raymarch(on: bool, depth: f64, inside: RaymarchInside) -> bool {
+    on && (depth >= 1.0 || inside.0)
 }
 
-/// Sky-light cubemap size (px per face): only diffuse and blurry reflections
-/// use it, and it is regenerated and filtered every frame.
-const SKY_LIGHT_SIZE: u32 = 64;
-
-type SkyLightCamera = (
-    Entity,
-    Has<AtmosphereEnvironmentMapLight>,
-    Option<&'static GeneratedEnvironmentMapLight>,
-    Option<Mut<'static, AtmosphereSettings>>,
-);
-
-/// Sky light (ambient and reflections from Bevy's atmosphere environment
-/// map) only inside an atmosphere: from above it, the map would still show
-/// a lit sky and tint everything blue.
-pub fn update_sky_light(
-    settings: Res<GraphicsSettings>,
+/// Switches the camera between lookup tables and raymarching ([`raymarch`])
+/// by how deep it is in the nearest drawn atmosphere.
+pub fn update_mode(
+    parts: Res<Parts>,
     sim: Res<SimState>,
     rig: Res<CameraRig>,
-    mut commands: Commands,
-    mut cams: Query<SkyLightCamera, With<MainCamera>>,
+    mut cams: Query<&mut AtmosphereSettings, With<MainCamera>>,
     atmos: Query<(&BodyAtmosphere, Has<Atmosphere>)>,
-    mut stash: Local<Option<GeneratedEnvironmentMapLight>>,
 ) {
     let snap = sim.world.snapshot(sim.clock);
     // How deep the camera is in the nearest drawn atmosphere (fraction of
-    // its thickness above the ground; above 1: outside). An atmosphere not
-    // drawn (below an opaque deck: `update`) gives no sky light: Bevy would
-    // light the ground with the last drawn atmosphere's sky.
+    // its thickness above the ground; above 1: outside).
     let (depth, hazy) = atmos
         .iter()
         .filter(|(_, drawn)| *drawn)
@@ -342,51 +303,11 @@ pub fn update_sky_light(
             ((r - lo) / (hi - lo), a.2)
         })
         .fold((f64::INFINITY, RaymarchInside(false)), |a, b| if b.0 < a.0 { b } else { a });
-    let inside = settings.atmosphere != AtmosphereQuality::Off && settings.sky_light && depth < 1.0;
-    let fade = sky_light_fade(depth);
-    for (cam, has, generated, atmo) in &mut cams {
-        // Bevy adds a private cubemap component and a filtered
-        // `GeneratedEnvironmentMapLight` with the sky light, and removing the
-        // sky light leaves both, so the cubemap kept being filtered every
-        // frame (~3 ms). We take the generated light off with it and put it
-        // back later (Bevy won't recreate it while its private marker stays).
-        if let Some(g) = generated.filter(|g| inside && (g.intensity - fade).abs() > 1e-3) {
-            let mut g = g.clone();
-            g.intensity = fade;
-            commands.entity(cam).insert(g);
-        }
-        if inside && !has {
-            commands.entity(cam).insert(AtmosphereEnvironmentMapLight {
-                size: UVec2::splat(SKY_LIGHT_SIZE),
-                intensity: fade,
-                ..default()
-            });
-            if let Some(g) = stash.take() {
-                commands.entity(cam).insert(g);
-            }
-        } else if !inside && has {
-            // Bevy also derives an `EnvironmentMapLight` (the filtered sky)
-            // and leaves it behind: it kept lighting everything, night sides
-            // included, after leaving the atmosphere.
-            commands
-                .entity(cam)
-                .remove::<(AtmosphereEnvironmentMapLight, GeneratedEnvironmentMapLight, EnvironmentMapLight)>();
-            if let Some(g) = generated {
-                *stash = Some(g.clone());
-            }
-        }
-        // "Raymarched" is adaptive (`raymarch`), whether or not the sky light
-        // is on (it was tied to it from 2026-09-27, so the tiers without sky
-        // light raymarched at the pad too).
-        if let Some(mut a) = atmo.filter(|_| settings.atmosphere == AtmosphereQuality::Raymarched) {
-            let want = if raymarch(settings.atmosphere, depth, hazy) {
-                AtmosphereMode::Raymarched
-            } else {
-                AtmosphereMode::LookupTexture
-            };
-            if a.rendering_method as u32 != want as u32 {
-                a.rendering_method = want;
-            }
+    let want =
+        if raymarch(parts.raymarch, depth, hazy) { AtmosphereMode::Raymarched } else { AtmosphereMode::LookupTexture };
+    for mut a in &mut cams {
+        if a.rendering_method as u32 != want as u32 {
+            a.rendering_method = want;
         }
     }
 }
@@ -397,22 +318,21 @@ mod tests {
 
     #[test]
     fn raymarched_only_from_outside_the_atmosphere() {
-        // (quality, camera depth in the atmosphere, raymarched)
+        // (raymarching on, camera depth in the atmosphere, raymarched)
         let cases = [
-            (AtmosphereQuality::Raymarched, 0.0, false), // at the pad: lookup tables
-            (AtmosphereQuality::Raymarched, 0.99, false),
-            (AtmosphereQuality::Raymarched, 1.0, true), // the top of the atmosphere
-            (AtmosphereQuality::Raymarched, 3.0, true), // 300 km up: raymarched
-            (AtmosphereQuality::Raymarched, f64::INFINITY, true), // no atmosphere near
-            (AtmosphereQuality::Lut, 3.0, false),
-            (AtmosphereQuality::Off, 3.0, false),
+            (true, 0.0, false), // at the pad: lookup tables
+            (true, 0.99, false),
+            (true, 1.0, true),           // the top of the atmosphere
+            (true, 3.0, true),           // 300 km up: raymarched
+            (true, f64::INFINITY, true), // no atmosphere near
+            (false, 3.0, false),         // off in the benchmark
         ];
-        for (q, depth, want) in cases {
-            assert_eq!(raymarch(q, depth, RaymarchInside(false)), want, "{q:?} at {depth}");
+        for (on, depth, want) in cases {
+            assert_eq!(raymarch(on, depth, RaymarchInside(false)), want, "{on} at {depth}");
         }
         // A hazy atmosphere (Titan's) is raymarched at the ground too, if raymarching at all.
-        assert!(raymarch(AtmosphereQuality::Raymarched, 0.0, RaymarchInside(true)));
-        assert!(!raymarch(AtmosphereQuality::Lut, 0.0, RaymarchInside(true)));
+        assert!(raymarch(true, 0.0, RaymarchInside(true)));
+        assert!(!raymarch(false, 0.0, RaymarchInside(true)));
     }
 
     #[test]
@@ -468,15 +388,5 @@ mod tests {
         }
         // Between two bodies, the one the camera is deeper in, by size.
         assert_eq!(active(&[(2.0 * EARTH, EARTH), (1.5 * MARS, MARS)]), Some(1));
-    }
-
-    #[test]
-    fn sky_light_fades_out_towards_the_top() {
-        // (height as a fraction of the thickness, expected strength)
-        let cases = [(0.0, 1.0), (0.5, 1.0), (0.6, 1.0), (0.8, 0.5), (1.0, 0.0), (3.0, 0.0)];
-        for (h, expected) in cases {
-            assert!((sky_light_fade(h) - expected).abs() < 1e-6, "{h}");
-        }
-        assert!(sky_light_fade(0.7) > sky_light_fade(0.9));
     }
 }

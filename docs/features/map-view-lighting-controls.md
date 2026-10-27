@@ -174,7 +174,7 @@ Revert and Quit ask for confirmation. Esc again resumes. While paused, the camer
 ### Settings screen
 
 Tabs, all persisted in `settings.ron`, each with "Reset to defaults":
-- **Graphics:** tier buttons plus every toggle, as F3 has now, and the benchmark.
+- **Graphics:** removed 2026-10-26 (one look, no graphics settings: D073); the benchmark of the look's parts is on the Interface tab.
 - **Orbits:** line length (§5), per-body show/hide, "only the current system".
 - **Controls:** zoom speed, trackpad zoom, mouse sensitivity, invert, and a key reference.
 - **Interface:** UI scale, fps readout, HUD elements.

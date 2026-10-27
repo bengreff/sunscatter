@@ -7,13 +7,10 @@
 //! real directories.
 //!
 //! Settings are loaded at startup (defaults on a missing or unreadable file,
-//! with a warning) and written when they change, at most once per second and
-//! never while the benchmark has swapped them. The demo neither loads nor
-//! saves settings.
+//! with a warning) and written when they change, at most once per second. The
+//! demo neither loads nor saves settings.
 
-use crate::bench::Bench;
 use crate::interface::layout::InterfaceSettings;
-use crate::settings::GraphicsSettings;
 use crate::trajectory::settings::OrbitSettings;
 use bevy::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -66,36 +63,14 @@ impl Default for ControlsSettings {
     }
 }
 
-/// The graphics settings' version: a file saved with an older one gets the
-/// default graphics (save compatibility is not required, D063). 1: Minimal
-/// became the default tier (D073). 2: Minimal draws surface zones and the
-/// adaptive raymarched sky (crisp-surfaces.md). 3: Minimal draws planetshine
-/// (D055, solar-visuals.md).
-pub const GRAPHICS_VERSION: u32 = 3;
-
-/// The settings file.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+/// The settings file. There are no graphics settings (one look, D073):
+/// `graphics` and `graphics_version` in older files are ignored.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SettingsFile {
-    /// Missing in files from before versioning: 0.
-    #[serde(default)]
-    pub graphics_version: u32,
-    pub graphics: GraphicsSettings,
     pub controls: ControlsSettings,
     pub interface: InterfaceSettings,
     pub orbits: OrbitSettings,
-}
-
-impl Default for SettingsFile {
-    fn default() -> Self {
-        SettingsFile {
-            graphics_version: GRAPHICS_VERSION,
-            graphics: GraphicsSettings::default(),
-            controls: ControlsSettings::default(),
-            interface: InterfaceSettings::default(),
-            orbits: OrbitSettings::default(),
-        }
-    }
 }
 
 impl SettingsFile {
@@ -104,11 +79,7 @@ impl SettingsFile {
     }
 
     pub fn from_ron(text: &str) -> Result<Self, String> {
-        let mut s: Self = ron::from_str(text).map_err(|e| e.to_string())?;
-        if s.graphics_version < GRAPHICS_VERSION {
-            (s.graphics_version, s.graphics) = (GRAPHICS_VERSION, GraphicsSettings::default());
-        }
-        Ok(s)
+        ron::from_str(text).map_err(|e| e.to_string())
     }
 
     /// Reads `path`; `Ok(None)` if it does not exist.
@@ -153,8 +124,7 @@ impl Plugin for PersistPlugin {
         let dirs = Dirs::resolve();
         let enabled = std::env::var_os("SUNSCATTER_DEMO").is_none();
         let loaded = if enabled { load(&dirs.settings_file) } else { SettingsFile::default() };
-        app.insert_resource(loaded.graphics)
-            .insert_resource(loaded.controls)
+        app.insert_resource(loaded.controls)
             .insert_resource(loaded.interface.clone().sanitized())
             .insert_resource(loaded.orbits.clone())
             .insert_resource(Persist { dirs, enabled, saved: loaded, last_write: f64::NEG_INFINITY })
@@ -179,22 +149,14 @@ pub fn load(path: &Path) -> SettingsFile {
 
 fn save_settings(
     time: Res<Time>,
-    bench: Res<Bench>,
-    graphics: Res<GraphicsSettings>,
     controls: Res<ControlsSettings>,
     interface: Res<InterfaceSettings>,
     orbits: Res<OrbitSettings>,
     mut persist: ResMut<Persist>,
 ) {
-    let current = SettingsFile {
-        graphics_version: GRAPHICS_VERSION,
-        graphics: *graphics,
-        controls: *controls,
-        interface: interface.clone(),
-        orbits: orbits.clone(),
-    };
+    let current = SettingsFile { controls: *controls, interface: interface.clone(), orbits: orbits.clone() };
     let now = time.elapsed_secs_f64();
-    if !persist.enabled || bench.running() || current == persist.saved || now - persist.last_write < WRITE_INTERVAL {
+    if !persist.enabled || current == persist.saved || now - persist.last_write < WRITE_INTERVAL {
         return;
     }
     persist.last_write = now;
@@ -208,7 +170,6 @@ fn save_settings(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::settings::Tier;
     use crate::trajectory::settings::VesselLine;
 
     fn scratch(name: &str) -> PathBuf {
@@ -233,8 +194,6 @@ mod tests {
         let path = dir.join("settings.ron");
         assert_eq!(SettingsFile::read(&path), Ok(None));
         let s = SettingsFile {
-            graphics_version: GRAPHICS_VERSION,
-            graphics: GraphicsSettings { bloom: false, ..GraphicsSettings::preset(Tier::Ultra) },
             controls: ControlsSettings {
                 wheel_zoom: 1.2,
                 trackpad_lines_per_px: 0.1,
@@ -259,35 +218,25 @@ mod tests {
         let dir = scratch("corrupt");
         let path = dir.join("settings.ron");
         std::fs::create_dir_all(&dir).unwrap();
-        std::fs::write(&path, "(graphics: (tier: Some(Nonsense").unwrap();
+        std::fs::write(&path, "(controls: (invert_y: Nonsense").unwrap();
         assert_eq!(load(&path), SettingsFile::default());
         // Missing fields take their defaults (files from older builds).
         let partial = SettingsFile::from_ron("(controls: (trackpad_lines_per_px: 0.5))").unwrap();
-        assert_eq!(partial.graphics, GraphicsSettings::default());
         assert_eq!(partial.controls, ControlsSettings { trackpad_lines_per_px: 0.5, ..ControlsSettings::default() });
         // A renamed key from an older build is ignored, not an error.
         let old = SettingsFile::from_ron("(controls: (trackpad_zoom_speed: 0.25))").unwrap();
         assert_eq!(old.controls, ControlsSettings::default());
-        let partial =
-            SettingsFile::from_ron(&format!("(graphics_version: {GRAPHICS_VERSION}, graphics: (bloom: true))"));
-        assert_eq!(partial.unwrap().graphics, GraphicsSettings { bloom: true, ..GraphicsSettings::default() });
         let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
-    fn graphics_from_an_older_version_reset_to_the_default() {
-        // (file, expected tier)
-        let cases = [
-            ("(graphics: (tier: Some(Ultra)), controls: (invert_y: true))", Tier::Minimal),
-            ("(graphics_version: 0, graphics: (tier: Some(High)))", Tier::Minimal),
-            (&format!("(graphics_version: {GRAPHICS_VERSION}, graphics: (tier: Some(High)))") as &str, Tier::High),
-        ];
-        for (text, tier) in cases {
-            let s = SettingsFile::from_ron(text).unwrap();
-            assert_eq!(s.graphics.tier, Some(tier), "{text}");
-            assert_eq!(s.graphics_version, GRAPHICS_VERSION);
-        }
-        // Other settings are kept.
-        assert!(SettingsFile::from_ron(cases[0].0).unwrap().controls.invert_y);
+    fn graphics_settings_of_older_files_are_ignored() {
+        // Files from before the one look (D073) kept tiers and toggles.
+        let old = "(graphics_version: 3, graphics: (tier: Some(Ultra), bloom: true, msaa: X4, haze: 0.5, \
+                   starlight_exposure: false), controls: (invert_y: true))";
+        let s = SettingsFile::from_ron(old).unwrap();
+        assert!(s.controls.invert_y, "other settings are kept");
+        assert_eq!(s.interface, InterfaceSettings::default());
+        assert!(!SettingsFile::default().to_ron().contains("graphics"));
     }
 }

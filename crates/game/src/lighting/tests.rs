@@ -75,32 +75,31 @@ fn exposure_follows_the_starlight_at_the_camera() {
     let sun = luminous_power(3.828e26, 93.0);
     let e_ref = flux(sun, AU);
     let base = 14.5;
-    // (case, camera distance from the Sun in AU, follow, expected EV100)
+    // (case, camera distance from the Sun in AU, expected EV100)
     let cases = [
-        ("Earth: unchanged", 1.0, true, 14.5),
-        ("near Earth's orbit: within a hundredth of a stop", 1.0067, true, 14.48),
-        ("Jupiter at 5.2 AU: 1/27 of the light, 4.76 stops more", 5.2, true, 14.5 - 4.757),
-        ("Saturn at 9.5 AU: ~1 % of the light", 9.5, true, 14.5 - 6.496),
-        ("Neptune at 30 AU", 30.0, true, 14.5 - 9.814),
-        ("Mercury at 0.387 AU: 2.7 stops less", 0.387, true, 14.5 + 2.740),
-        ("past 128 AU: the darkest exposure", 500.0, true, 14.5 - 14.0),
-        ("grazing the Sun: the brightest", 0.01, true, 14.5 + 4.0),
-        ("off: fixed at Saturn", 9.5, false, 14.5),
+        ("Earth: unchanged", 1.0, 14.5),
+        ("near Earth's orbit: within a hundredth of a stop", 1.0067, 14.48),
+        ("Jupiter at 5.2 AU: 1/27 of the light, 4.76 stops more", 5.2, 14.5 - 4.757),
+        ("Saturn at 9.5 AU: ~1 % of the light", 9.5, 14.5 - 6.496),
+        ("Neptune at 30 AU", 30.0, 14.5 - 9.814),
+        ("Mercury at 0.387 AU: 2.7 stops less", 0.387, 14.5 + 2.740),
+        ("past 128 AU: the darkest exposure", 500.0, 14.5 - 14.0),
+        ("grazing the Sun: the brightest", 0.01, 14.5 + 4.0),
     ];
-    for (case, au, follow, want) in cases {
-        let ev = exposure_ev100(base, flux(sun, au * AU), e_ref, follow);
+    for (case, au, want) in cases {
+        let ev = exposure_ev100(base, flux(sun, au * AU), e_ref);
         assert!((f64::from(ev) - want).abs() < 0.01, "{case}: {ev}");
     }
     // A day side keeps its brightness on screen (lux x 2^-EV), whatever
     // the distance; a night side stays as many stops below it.
     let screen = |au: f64| {
         let e = flux(sun, au * AU);
-        e * 2f64.powf(-f64::from(exposure_ev100(base, e, e_ref, true)))
+        e * 2f64.powf(-f64::from(exposure_ev100(base, e, e_ref)))
     };
     assert!((screen(9.5) / screen(1.0) - 1.0).abs() < 1e-5);
     // The camera's flux is a distance, never the scene: no light, no change.
-    assert_eq!(exposure_ev100(base, 0.0, e_ref, true), base - 14.0);
-    assert_eq!(exposure_ev100(base, f64::NAN, e_ref, true), base);
+    assert_eq!(exposure_ev100(base, 0.0, e_ref), base - 14.0);
+    assert_eq!(exposure_ev100(base, f64::NAN, e_ref), base);
 }
 
 const JUP_R: f64 = 7.1492e7;

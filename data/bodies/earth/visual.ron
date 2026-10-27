@@ -10,7 +10,6 @@
     // Open ocean's water-leaving reflectance (π·Rrs for clear water: ~0.03 at
     // 443 nm, ~0.008 at 555 nm, ~0.003 at 670 nm).
     ocean: Some((
-        roughness: 0.12,
         albedo: (0.003, 0.008, 0.03),
         mask: Some("water.png"),
         // Over a bright sandy bottom the water-leaving reflectance rises

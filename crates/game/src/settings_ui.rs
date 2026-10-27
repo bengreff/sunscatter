@@ -1,12 +1,13 @@
 //! The settings screen (F3, or Settings in the pause menu) and the
-//! performance overlay (F4). Tabs: Graphics, Orbits, Controls, Interface;
-//! everything is saved in `settings.ron`, and each tab can be reset.
+//! performance overlay (F4). Tabs: Orbits, Controls, Interface; everything
+//! is saved in `settings.ron`, and each tab can be reset. There are no
+//! graphics settings: one look for everyone (`look`, D073); the Interface
+//! tab measures what its parts cost (`bench`).
 
 use crate::bench::{self, Bench};
 use crate::interface::layout::{self as layout, InterfaceSettings};
 use crate::interface::menus::MenuId;
 use crate::persist::ControlsSettings;
-use crate::settings::{AtmosphereQuality, GraphicsSettings, MsaaLevel, Tier};
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 use std::collections::VecDeque;
@@ -14,19 +15,16 @@ use std::collections::VecDeque;
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum SettingsTab {
     #[default]
-    Graphics,
     Orbits,
     Controls,
     Interface,
 }
 
 impl SettingsTab {
-    const ALL: [SettingsTab; 4] =
-        [SettingsTab::Graphics, SettingsTab::Orbits, SettingsTab::Controls, SettingsTab::Interface];
+    const ALL: [SettingsTab; 3] = [SettingsTab::Orbits, SettingsTab::Controls, SettingsTab::Interface];
 
     fn name(self) -> &'static str {
         match self {
-            SettingsTab::Graphics => "Graphics",
             SettingsTab::Orbits => "Orbits",
             SettingsTab::Controls => "Controls",
             SettingsTab::Interface => "Interface",
@@ -44,10 +42,8 @@ pub struct SettingsUi {
 }
 
 pub fn toggle(keys: Res<ButtonInput<KeyCode>>, time: Res<Time>, mut ui: ResMut<SettingsUi>) {
-    // F3 opens Settings on the Graphics tab.
     if keys.just_pressed(KeyCode::F3) {
         ui.open = !ui.open;
-        ui.tab = SettingsTab::Graphics;
     }
     if keys.just_pressed(KeyCode::F4) {
         ui.overlay = !ui.overlay;
@@ -62,7 +58,6 @@ pub fn toggle(keys: Res<ButtonInput<KeyCode>>, time: Res<Time>, mut ui: ResMut<S
 pub fn draw(
     mut contexts: EguiContexts,
     mut ui: ResMut<SettingsUi>,
-    mut settings: ResMut<GraphicsSettings>,
     mut controls: ResMut<ControlsSettings>,
     mut iface: ResMut<InterfaceSettings>,
     mut orbits: ResMut<crate::trajectory::settings::OrbitSettings>,
@@ -76,11 +71,10 @@ pub fn draw(
         let n = ui.frames.len().max(1) as f64;
         let avg = ui.frames.iter().sum::<f64>() / n;
         let worst = ui.frames.iter().copied().fold(0.0, f64::max);
-        let tier = settings.tier.map_or("Custom", Tier::name);
         egui::Area::new("perf".into()).anchor(egui::Align2::RIGHT_TOP, [-10.0, 10.0]).show(ctx, |ui_| {
             egui::Frame::popup(ui_.style()).show(ui_, |ui_| {
                 ui_.monospace(format!("{} fps  {:.2} ms (worst {:.1})", fps.text(), avg * 1e3, worst * 1e3));
-                ui_.monospace(format!("graphics: {tier}   terrain chunks: {}", terrain.drawn));
+                ui_.monospace(format!("terrain chunks: {}", terrain.drawn));
                 if bench.running() {
                     let (d, t) = bench.progress();
                     ui_.monospace(format!("benchmark {d}/{t}…"));
@@ -104,13 +98,7 @@ pub fn draw(
         let tab = ui.tab;
         egui::ScrollArea::vertical().max_height(560.0).show(ui_, |ui_| match tab {
             // Each tab edits a copy, written back only if it changed: a
-            // `&mut` through ResMut marks it changed every frame, which
-            // re-applied graphics settings every frame while open.
-            SettingsTab::Graphics => {
-                let mut g = *settings;
-                graphics_tab(ui_, &mut ui, &mut g, &mut bench);
-                settings.set_if_neq(g);
-            }
+            // `&mut` through ResMut marks it changed every frame.
             SettingsTab::Orbits => {
                 let eph = &sim.world.eph;
                 let bodies: Vec<_> = eph.bodies().map(|n| (n, eph.node(n).name.clone())).collect();
@@ -127,6 +115,8 @@ pub fn draw(
                 let mut i = iface.clone();
                 interface_tab(ui_, &mut i);
                 iface.set_if_neq(i);
+                ui_.separator();
+                performance(ui_, &mut ui, &mut bench);
             }
         });
     });
@@ -134,73 +124,27 @@ pub fn draw(
     Ok(())
 }
 
-fn graphics_tab(ui_: &mut egui::Ui, ui: &mut SettingsUi, settings: &mut GraphicsSettings, bench: &mut Bench) {
-    ui_.horizontal(|ui_| {
-        for t in Tier::ALL {
-            if ui_.selectable_label(settings.tier == Some(t), t.name()).clicked() {
-                *settings = settings.with_preset(t);
-            }
-        }
-    });
-    let mut s = *settings;
-    ui_.separator();
-    ui_.checkbox(&mut s.terrain, "Terrain elevation (LOD)");
-    ui_.add(egui::Slider::new(&mut s.terrain_error_px, 0.5..=16.0).text("terrain error (px)").logarithmic(true));
-    egui::ComboBox::from_label("Colour texture size").selected_text(format!("{}", s.texture_size)).show_ui(
-        ui_,
-        |ui_| {
-            for size in [1024, 2048, 4096, 8192] {
-                ui_.selectable_value(&mut s.texture_size, size, format!("{size}"));
-            }
-        },
-    );
-    ui_.checkbox(&mut s.zones, "Surface zones (crisp coasts, land and ice)");
-    ui_.checkbox(&mut s.detail, "Surface detail layer");
-    egui::ComboBox::from_label("Atmosphere").selected_text(format!("{:?}", s.atmosphere)).show_ui(ui_, |ui_| {
-        for a in [AtmosphereQuality::Off, AtmosphereQuality::Lut, AtmosphereQuality::Raymarched] {
-            ui_.selectable_value(&mut s.atmosphere, a, format!("{a:?}"));
-        }
-    });
-    ui_.add(egui::Slider::new(&mut s.haze, 0.0..=2.0).text("haze (1 = physical)"));
-    ui_.checkbox(&mut s.starlight_exposure, "Exposure follows the starlight (off: fixed, as at Earth)");
-    ui_.checkbox(&mut s.ocean_glint, "Ocean sun glint");
-    ui_.add(egui::Slider::new(&mut s.star_magnitude, 0.0..=8.0).text("faintest star (mag, 0 = none)"));
-    ui_.checkbox(&mut s.bloom, "Bloom");
-    ui_.checkbox(&mut s.flare, "Sun flare");
-    ui_.checkbox(&mut s.shadows, "Shadows");
-    ui_.checkbox(&mut s.earthshine, "Planetshine (Earthshine, moonlight)");
-    ui_.checkbox(&mut s.sky_light, "Sky light and reflections (costly at high resolution)");
-    egui::ComboBox::from_label("MSAA").selected_text(format!("{:?}", s.msaa)).show_ui(ui_, |ui_| {
-        for m in [MsaaLevel::Off, MsaaLevel::X2, MsaaLevel::X4] {
-            ui_.selectable_value(&mut s.msaa, m, format!("{m:?}"));
-        }
-    });
-    if s != *settings {
-        s.tier = s.matching_tier();
-        *settings = s;
-    }
-    ui_.separator();
+/// The performance overlay and the benchmark of the look's parts.
+fn performance(ui_: &mut egui::Ui, ui: &mut SettingsUi, bench: &mut Bench) {
     ui_.checkbox(&mut ui.overlay, "Performance overlay (F4)");
-    if !bench.running() && ui_.button("Measure all tiers and features from this view").clicked() {
-        bench.start("interactive", *settings);
+    if !bench.running() && ui_.button("Measure the look and what each part costs, from this view").clicked() {
+        bench.start("interactive");
     }
-    if !bench.results.is_empty() {
-        if ui_.button("Copy results as Markdown").clicked() {
-            ui_.ctx().copy_text(bench::markdown(bench));
+    if bench.results.is_empty() {
+        return;
+    }
+    if ui_.button("Copy results as Markdown").clicked() {
+        ui_.ctx().copy_text(bench::markdown(bench));
+    }
+    let base = bench::baseline(&bench.results).unwrap_or(0.0);
+    egui::Grid::new("bench").striped(true).show(ui_, |ui_| {
+        for r in &bench.results {
+            ui_.monospace(&r.label);
+            ui_.monospace(format!("{:.2} ms (p95 {:.2})", r.avg_ms, r.p95_ms));
+            ui_.monospace(format!("{:+.2}", base - r.avg_ms));
+            ui_.end_row();
         }
-        let base = bench::baseline(&bench.results).unwrap_or(0.0);
-        egui::Grid::new("bench").striped(true).show(ui_, |ui_| {
-            for r in &bench.results {
-                ui_.monospace(&r.label);
-                ui_.monospace(format!("{:.2} ms (p95 {:.2})", r.avg_ms, r.p95_ms));
-                ui_.monospace(format!("{:+.2}", r.avg_ms - base));
-                ui_.end_row();
-            }
-        });
-    }
-    if ui_.button("Reset to defaults").clicked() {
-        *settings = GraphicsSettings::default();
-    }
+    });
 }
 
 fn controls_tab(ui: &mut egui::Ui, c: &mut ControlsSettings) {

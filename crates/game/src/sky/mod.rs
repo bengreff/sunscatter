@@ -12,7 +12,6 @@ pub use stars::{setup as setup_stars, update as update_stars};
 
 use crate::camera::CameraRig;
 use crate::scene::BodyDefs;
-use crate::settings::GraphicsSettings;
 use crate::state::SimState;
 use bevy::asset::embedded_asset;
 use bevy::light::GlobalAmbientLight;
@@ -30,37 +29,28 @@ impl Plugin for SkyPlugin {
 }
 
 /// Ambient light: starlight everywhere (night sides get only that and
-/// planetshine, D055), plus a stand-in for sky light when the atmosphere's
-/// own is not drawn ([`sky_ambient`]). Bevy's ambient light is global; the
-/// terrain takes only its share ([`ambient_share`], `lighting`).
+/// planetshine, D055), plus a stand-in for the atmosphere's sky light
+/// ([`sky_ambient`]). Bevy's ambient light is global; the terrain takes
+/// only its share ([`ambient_share`], `lighting`).
 pub fn update_ambient(
     sim: Res<SimState>,
     rig: Res<CameraRig>,
     defs: Res<BodyDefs>,
-    settings: Res<GraphicsSettings>,
     mut ambient: ResMut<GlobalAmbientLight>,
 ) {
-    let target = NIGHT_AMBIENT + sky_ambient(&sim, &rig, &defs, &settings).0;
+    let target = NIGHT_AMBIENT + sky_ambient(&sim, &rig, &defs).0;
     if (ambient.brightness - target).abs() > 1e-4 * target.max(1e-3) {
         ambient.brightness = target;
     }
 }
 
 /// The daylight sky stand-in (Bevy units) around the camera, and the body
-/// whose air it is: zero with the atmosphere off-screen or with its sky
-/// light on (the atmosphere's environment map lights things then).
-pub fn sky_ambient(
-    sim: &SimState,
-    rig: &CameraRig,
-    defs: &BodyDefs,
-    settings: &GraphicsSettings,
-) -> (f32, Option<NodeId>) {
-    if settings.atmosphere == crate::settings::AtmosphereQuality::Off || !settings.sky_light {
-        let (day, body) = stars::daylight_of(sim, rig, defs);
-        (day * SKY_AMBIENT, body)
-    } else {
-        (0.0, None)
-    }
+/// whose air it is. Bevy's environment map from the atmosphere would be the
+/// sky light itself, but it is regenerated and filtered every frame (~3 ms
+/// at 1600×900, ~12 ms on a Retina window), so the look uses this.
+pub fn sky_ambient(sim: &SimState, rig: &CameraRig, defs: &BodyDefs) -> (f32, Option<NodeId>) {
+    let (day, body) = stars::daylight_of(sim, rig, defs);
+    (day * SKY_AMBIENT, body)
 }
 
 /// The share of the global ambient light a body's surface receives. The

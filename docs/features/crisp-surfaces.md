@@ -1,4 +1,6 @@
-# Crisp surfaces and a physical sky (Minimal tier)
+# Crisp surfaces and a physical sky (the one look)
+
+Since 2026-10-26 the Minimal tier is the one look and there are no graphics settings (D073); the tiers, toggles and presets named below no longer exist.
 
 **Status:** built 2026-10-25, not yet seen on screen (design the same day). From the owner's feedback ([record](../plans/interview-2026-10-25.md)); decision D073 (revised). What was built and the choices made: [Build notes](#build-notes-2026-10-25).
 
@@ -39,7 +41,7 @@ The owner's recipe: "an image download sharpened up (coastlines etc) with proced
 
 ### 2. Shader: crisp at every distance
 
-All of this is in `terrain.wgsl`, behind a `zones` graphics toggle. The toggle is on in Minimal, off in the other tiers (D073: they are not developed). Without a zone map, the current path is used.
+All of this is in `terrain.wgsl`, always drawn (the benchmark can turn it off: `look::Parts`). Without a zone map, the colour-map path is used.
 
 - **One warp.** A 2D domain-warp vector from 3D fBm of the body-fixed position, in units of a zone texel: amplitude ~0.6 texel in the first octave, halving per octave. Octaves are added until their wavelength drops under ~2 pixel footprints, and the last one fades in by footprint, so nothing shimmers. Both the zone and the sea lookups use the same warp, so coastlines and zone edges are fractal, line up, and keep gaining detail as the camera closes in.
 - **Coastline.** The warped, bilinear sea fraction is thresholded at 0.5 over one pixel (`fwidth`). That gives a hard, antialiased edge at every zoom, replacing the 0.3–0.7 smoothstep.
@@ -58,7 +60,7 @@ All of this is in `terrain.wgsl`, behind a `zones` graphics toggle. The toggle i
 ## Owners
 
 - `asset-tool::zones` (new): the classification. `game::terrain::zones` (new): loading the zone map, the zone-colour texture and the palette uniform. Also there: a CPU mirror of the shader's zone pick and coast step, which is tested (like `terrain::water`).
-- `game::body_visual`: the `zones` data. `game::settings`: the `zones` toggle and the Minimal preset.
+- `game::body_visual`: the `zones` data. `game::look`: the look (zones always on).
 
 ## Tests
 

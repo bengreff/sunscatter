@@ -215,12 +215,6 @@ The prototype showed no blocking issues and plenty of performance headroom: 11 v
 - The sim samples it deterministically.
 - Oceans are solid at sea level (D037).
 
-**D048: Graphics have five tiers: Minimal, Low, Medium, High, Ultra.** *Decided, 2026-09-26.*
-- Minimal has near-zero cost. Ultra looks like KSP1 with visual mods. Every tier is highly optimized.
-- Each feature can also be toggled on its own, and tiers are presets of those toggles.
-- All visuals are data-driven for any body.
-- Every feature's cost is measured.
-
 **D050: The tracking station is a separate screen that shows the map.** *Decided, 2026-09-26.*
 It lists tracked vessels (and later asteroids), lets you focus and switch to a vessel, and draws on ideas from KSP and v0.1's tracking station.
 
@@ -231,7 +225,7 @@ It lists tracked vessels (and later asteroids), lets you focus and switch to a v
 
 **D052: Rendering uses physical light units and Bevy's built-in atmosphere.** *Decided, 2026-09-26 (autonomous session; for the owner's review).*
 - Physical units: sunlight is about 126,600 lux at 1 AU, from the Sun's luminosity in data. How light reaches each object and how exposure works: D055.
-- Atmospheres use Bevy's Hillaire 2020 implementation (raymarched from Medium up), with scattering coefficients and scale heights as data. We work around its runtime-toggling bugs rather than maintain our own scattering, unless it proves insufficient.
+- Atmospheres use Bevy's Hillaire 2020 implementation (its lookup tables inside an atmosphere, raymarched from outside it), with scattering coefficients and scale heights as data. We work around its runtime-toggling bugs rather than maintain our own scattering, unless it proves insufficient.
 
 **D054: Map view is decided per object, by pixel size.** *Decided, 2026-09-26. Replaces D049 and D053.*
 - An object (body or vessel) is in map view when its sprite is under 1 px and its orbit radius is at least 1 px, with hysteresis. Sizes use one scale: pixels per metre at the camera's distance to its focus.
@@ -254,7 +248,7 @@ It lists tracked vessels (and later asteroids), lets you focus and switch to a v
 **D058: Visuals are made minimal and stable before anything else; what does not work is simplified, not debugged.** *Decided, 2026-09-26.*
 - If a visual feature misbehaves, replace it with something simpler that works instead of spending sessions debugging it.
 - The next chunk starts by fixing the visual bugs the owner still sees (haze, blur, flashing, dark horizon, navball flicker), under this rule.
-- Haze gets physical tuning plus a player setting for its strength.
+- Haze gets physical tuning (no setting: D073).
 
 **D059: Terrain detail below the heightmap's resolution is procedural and lives in `sim`.** *Decided, 2026-09-26.*
 Deterministic fractal detail shaped by the local slope and roughness of the real data, so physics, landing and rendering see the same surface (D047); matching detail in the colour.
@@ -307,16 +301,16 @@ Streamable HTTP on localhost, off by default. Agent commands have the origin of 
 **D070: The aerodynamics model's required reach.** *Decided, 2026-09-26 (owner).*
 Simplified is fine, as long as it models, semi-accurately: lift; rocket flight at low and high altitude at all speeds (subsonic, transonic, supersonic, hypersonic, rarefied); and entry from interplanetary velocities (to ~16 km/s). No flow-field solver. The model's limitations are recorded in [design/aero-thermal.md](design/aero-thermal.md).
 
-**D072: The 3D view renders at a scale of the window's resolution, 1× logical pixels by default.** *Decided, 2026-09-27 (owner).*
-A render-scale setting: by default the 3D scene renders at logical resolution (on Retina, a quarter of the physical pixels) and is scaled up; the UI stays at native resolution. "Native" is selectable.
+**D072: The 3D view renders at the window's full resolution.** *Decided, 2026-09-27 (owner); revised 2026-10-26 (owner: one look, no graphics settings, D073).*
+No render-scale setting: the 3D scene renders at the window's physical pixels (on Retina, every one), so it stays crisp, and the look is made cheap enough for that (D073's frame-rate rule).
 
-**D073: Graphics are simple, crisp and functional; only the minimal tier is developed.** *Decided, 2026-09-28 (owner); revised 2026-10-25 (owner).*
+**D073: Graphics are one look: simple, crisp and functional, with no graphics settings.** *Decided, 2026-09-28 (owner); revised 2026-10-25 and 2026-10-26 (owner). Replaces D048's five tiers.*
 - The owner's number-one rule: a 100% accurate spaceflight simulator. Cartoon looks are welcome as long as the physics is realistic.
 - Minimal means simple, never blurry: "sharp, crisp, clear surfaces, recognisably water or land or earth, just not necessarily needlessly complex" (2026-10-25).
 - Surfaces come from real data (satellite colour, elevation, the sea mask), sharpened by procedural algorithms: coastlines and zone edges stay crisp at every distance. Each zone (ocean, ice, forest, desert…) is drawn as one consistent procedural texture, not as a magnified photograph. Details: [crisp-surfaces.md](features/crisp-surfaces.md).
-- The sky is physical, from the atmosphere and the light: Bevy's scattering model (D052), raymarched from outside an atmosphere so the ground stays clear from orbit. Stars, sunlight from the Sun's direction, shadows.
-- The minimal tier is the default and the only one developed. The higher tiers stay in the code and are not worked on.
-- The minimal tier runs full screen at the display's frame rate on the reference Mac.
+- The sky is physical, from the atmosphere and the light: Bevy's scattering model (D052), raymarched from outside an atmosphere so the ground stays clear from orbit. Stars, every star's light, eclipses and planetshine (D055), shadows, a basic sun flare.
+- One look for everyone, no graphics settings (2026-10-26: "delete all graphics settings, there should just be one graphics setting … that is so well optimized it doesn't matter"). The tiers and their code are deleted. All visuals are data-driven for any body. What each part of the look costs is measured (the benchmark turns parts off, never the player).
+- The look runs full screen at the display's frame rate on the reference Mac, at full resolution (D072).
 
 **D074: The test craft is a finned rocket, stable nose-first.** *Decided, 2026-09-28 (owner).*
 Its shape makes it aerodynamically stable nose-first at every Mach number, on ascent and on entry. It is still a debug craft (D064): flown with debug mode on, so reaching orbit, heating and the parachute's landing speed are not design problems; a real staged rocket comes with the parts model.
@@ -373,7 +367,7 @@ Close the D070 gaps listed in `docs/design/aero-thermal.md`. Model laminar–tur
 - Bodies without global data get procedural surfaces from their measured statistics (albedo, colour, crater density), stated as such.
 
 **D087: Exposure follows the starlight at the camera.** *Default taken 2026-10-26 (owner away; reversible). Refines D055's fixed exposure.*
-- The camera's exposure is scaled by the stellar flux at the camera's position (a photographer setting exposure for the light where they are), never by the scene's luminance. Near Earth nothing changes; at Saturn (1 % of Earth's sunlight) a day side reads like Earth's, and night sides stay as dark relative to day sides as D055 requires. A setting can turn it off.
+- The camera's exposure is scaled by the stellar flux at the camera's position (a photographer setting exposure for the light where they are), never by the scene's luminance. Near Earth nothing changes; at Saturn (1 % of Earth's sunlight) a day side reads like Earth's, and night sides stay as dark relative to day sides as D055 requires. Always on (no settings, D073).
 
 **D090: Vessels feel the bodies' measured gravity fields, as spherical harmonics truncated by significance.** *Decided, 2026-10-26 (owner: "accurate gravity fields"). Refines D023 and motion-model §4.*
 - A body's field beyond its point mass is its published spherical-harmonic model (fully normalized C̄nm, S̄nm, with the model's reference radius and GM) in its own rotating frame, through its rotation model (`sim::gravity`, Pines' singularity-free recursion). A body without one keeps its J2 as the degree-2 zonal case of the same model. Every vessel force goes through it: coasts, limbo, live ticks, planned burns, the landing predictor, the bubble.

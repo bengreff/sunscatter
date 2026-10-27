@@ -1,4 +1,4 @@
-//! The gas of an atmosphere (D048 data-driven, D085): what the
+//! The gas of an atmosphere (data-driven, D073; D085): what the
 //! aerodynamics and heating need of it beyond γ and the molar mass (both
 //! data of the atmosphere): viscosity, Prandtl number and the equilibrium
 //! normal-shock density ratio at entry speeds. An atmosphere names its gas

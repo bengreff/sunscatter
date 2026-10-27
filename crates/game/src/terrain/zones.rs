@@ -63,8 +63,8 @@ pub fn octave_weight(wavelength_m: f32, footprint_m: f32) -> f32 {
     (wavelength_m / footprint_m.max(1e-6) - 2.0).clamp(0.0, 1.0)
 }
 
-/// The simple ground pattern near the ground (`terrain.wgsl`, the Minimal
-/// tier's depth cue, D073): its octaves (wavelengths 8 detail units,
+/// The simple ground pattern near the ground (`terrain.wgsl`, the look's
+/// depth cue, D073): its octaves (wavelengths 8 detail units,
 /// halving), and the broad patches' contrast in stops.
 #[cfg_attr(not(test), allow(dead_code))] // The shader's constants; a test pins them.
 pub const GROUND_OCTAVES: usize = 8;

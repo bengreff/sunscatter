@@ -1,5 +1,5 @@
 //! Per-body visual definitions, loaded from `data/bodies/<body>/visual.ron`
-//! (D048: every visual is data-driven). Physical data lives next to it in
+//! (D073: every visual is data-driven, for any body). Physical data lives next to it in
 //! `body.ron` and is read by the sim; rendering code never matches on names.
 
 use serde::Deserialize;
@@ -63,7 +63,6 @@ fn default_icon() -> [f32; 3] {
 /// Water at sea level (the physics treats it as solid ground, D037).
 #[derive(Clone, Debug, Deserialize)]
 pub struct OceanDef {
-    pub roughness: f32,
     /// Linear albedo of open water (water-leaving reflectance, without the
     /// surface's Fresnel reflection, which the lighting adds). The colour
     /// map under water is raised to at least this: Blue Marble's open ocean
@@ -175,16 +174,15 @@ impl Default for PatternDef {
     }
 }
 
-/// Close-range procedural detail layered over the colour map.
+/// Surface detail: the simple ground pattern's unit (`scale_m`, the
+/// detail uv's) and, where `strength` > 0, rock on steep slopes and snow
+/// above the snow line.
 #[derive(Clone, Debug, Deserialize)]
 pub struct DetailDef {
     /// Base feature size (m).
     pub scale_m: f32,
-    /// Brightness variation (0..1).
+    /// > 0: rock and snow are drawn (the value is not otherwise used).
     pub strength: f32,
-    /// Distance (m) over which the layer fades out (default 400 × scale).
-    #[serde(default)]
-    pub fade_m: Option<f32>,
     /// Colour on steep slopes.
     pub rock_color: [f32; 3],
     /// Snow above this height (m) at the equator, lower towards the poles.
