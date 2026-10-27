@@ -78,7 +78,10 @@ pub fn apply(def: &ShipDef, state: &mut ShipState, command: &ShipCommand, cx: Co
                 if !waiting && !super::propulsion::feeds_settled(def, state, i) {
                     state.runtime.engines[i].settling = Some(0.0);
                     let how = if super::rcs::can_push(def, state, d.data.dir) { "settling" } else { "waiting for" };
-                    let text = format!("{}: {how} its propellant before the start (ignite again to start now)", d.id);
+                    // From the sequence, the next stage order starts it
+                    // ([`next_stage`]).
+                    let again = if cx.sequence { "stage" } else { "ignite" };
+                    let text = format!("{}: {how} its propellant before the start ({again} again to start now)", d.id);
                     state.runtime.event(cx.at, text, false);
                     continue;
                 }
@@ -155,9 +158,32 @@ pub fn apply(def: &ShipDef, state: &mut ShipState, command: &ShipCommand, cx: Co
     }
 }
 
+/// Whether an engine named by `s` waits for its propellant to settle.
+fn settling(def: &ShipDef, state: &ShipState, s: &str) -> bool {
+    let waits = |i: usize| state.runtime.engines.get(i).is_some_and(|r| r.settling.is_some());
+    def.engines_of(s).into_iter().any(|i| waits(i) && state.engines[i].status == EngineStatus::Off)
+}
+
 /// Runs the next stage of the ship's own sequence: its commands (one naming
 /// what the craft lacks is skipped); `None` when the sequence is done.
+/// While an ignition of the last stage waits for its propellant to settle,
+/// the order starts it now instead (its hint says so) and the sequence
+/// stays: running on, the next stage's shutdown would cancel the start
+/// (review H4: Space while the second stage settled ran SECO).
 pub fn next_stage(def: &ShipDef, state: &mut ShipState, at: Epoch) -> Option<(String, Vec<Effect>)> {
+    let last = state.sequence.checked_sub(1).and_then(|k| state.stages.get(k as usize));
+    let waiting: Vec<ShipCommand> = last
+        .map(|st| st.actions.iter().filter(|a| matches!(a, ShipCommand::Ignite(s) if settling(def, state, s))))
+        .into_iter()
+        .flatten()
+        .cloned()
+        .collect();
+    if !waiting.is_empty() {
+        let name = format!("{}: start now", last.map_or("", |st| st.name.as_str()));
+        let cx = Context { at, sequence: true };
+        let effects = waiting.iter().flat_map(|a| apply(def, state, a, cx).unwrap_or_default()).collect();
+        return Some((name, effects));
+    }
     let stage = state.stages.get(state.sequence as usize)?.clone();
     state.sequence += 1;
     let cx = Context { at, sequence: true };
@@ -235,5 +261,40 @@ mod tests {
             matches!(state.engines[mvac].status, EngineStatus::Starting)
                 || state.runtime.engines[mvac].settling.is_some()
         );
+    }
+
+    /// The sequence's second-stage ignition on floating propellant waits
+    /// for it to settle; the next stage order starts it now (as its hint
+    /// says) instead of running SECO, which would cancel the start; then
+    /// the sequence runs on (review H4).
+    #[test]
+    fn staging_again_while_settling_starts_the_engine() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/craft/falcon9-crew");
+        let def = crate::craft::load_definition(&path).unwrap().ship.unwrap();
+        let mvac = def.engines.iter().position(|e| e.id == "s2.mvac").unwrap();
+        let at = Epoch::new(1_000_000_000, 0.0);
+        let mut state = ShipState::initial(&def);
+        state.clamped = false;
+        let ignition = (state.stages.iter())
+            .position(|st| st.actions.iter().any(|a| matches!(a, ShipCommand::Ignite(s) if s == "s2")))
+            .expect("the second stage's ignition");
+        state.sequence = ignition as u32;
+        // Floating: the liquids drifted off their outlets in free fall.
+        state.runtime.refit(&def);
+        for r in state.runtime.tanks.iter_mut() {
+            r.drift = 100.0;
+        }
+        let (name, _) = next_stage(&def, &mut state, at).unwrap();
+        println!("{name}: {:?}", state.runtime.events.last());
+        assert_eq!(state.engines[mvac].status, EngineStatus::Off);
+        assert!(state.runtime.engines[mvac].settling.is_some());
+        assert!(state.runtime.events.iter().any(|e| e.text.contains("stage again to start now")));
+        let (name, _) = next_stage(&def, &mut state, at).unwrap();
+        assert!(name.ends_with("start now"), "{name}");
+        assert_eq!(state.engines[mvac].status, EngineStatus::Starting);
+        assert_eq!(state.sequence as usize, ignition + 1, "the sequence waits");
+        let (name, _) = next_stage(&def, &mut state, at).unwrap();
+        assert!(!name.ends_with("start now"), "{name}");
+        assert_eq!(state.sequence as usize, ignition + 2);
     }
 }
