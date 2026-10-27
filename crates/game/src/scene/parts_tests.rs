@@ -75,6 +75,27 @@ fn a_hinge_turns_its_part_about_the_axis_through_its_point() {
     assert!((still.transform_point(Vec3::new(3.0, 2.0, 1.0)) - Vec3::new(3.0, 2.0, 1.0)).length() < 1e-6);
 }
 
+/// A configuration that deploys a part builds its shape deployed: drawn
+/// at its deployed angle it does not turn again; stowed in it, it turns
+/// back.
+#[test]
+fn a_deployed_configuration_draws_its_parts_where_they_were_built() {
+    let craft = rocket();
+    let def = craft.ship.as_deref().unwrap();
+    let m = &def.mechanisms[0].item;
+    assert_eq!((built_angle(m, false), built_angle(m, true)), (m.stowed_deg, m.deployed_deg));
+    let deployed = hinge(m.pos, m.axis, built_angle(m, true), m.deployed_deg);
+    assert!(deployed.rotation.angle_between(Quat::IDENTITY) < 1e-6);
+    let back = hinge(m.pos, m.axis, built_angle(m, true), m.stowed_deg);
+    let turned = (m.stowed_deg - m.deployed_deg).abs().to_radians() as f32;
+    assert!((back.rotation.angle_between(Quat::IDENTITY) - turned).abs() < 1e-4);
+    // The deployed configuration's mesh of a leg differs from the stowed one.
+    let legs: Vec<u32> = craft.parts.iter().filter(|p| p.name.starts_with("leg#")).map(|p| p.id).collect();
+    let open = sim::craft::craft_of(&craft.id.with_deployed(&legs));
+    let k = open.parts.iter().position(|p| p.id == legs[0]).unwrap();
+    assert!(part_mesh(&open, k).positions != part_mesh(&craft, k).positions);
+}
+
 #[test]
 fn a_flame_starts_at_the_nozzle_exit_and_grows_with_thrust() {
     // A bell from the gimbal point at z 0 down to z −1.5, thrust along +Z.

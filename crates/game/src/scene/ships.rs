@@ -75,8 +75,8 @@ pub struct Model {
 /// The drawings built so far.
 #[derive(Resource, Default)]
 pub struct ShipModels {
-    /// Each part's mesh by (base craft, part id).
-    parts: HashMap<(String, u32), Arc<RenderMesh>>,
+    /// Each part's mesh by (base craft, part id, deployed).
+    parts: HashMap<(String, u32, bool), Arc<RenderMesh>>,
     crafts: HashMap<String, Arc<Model>>,
     /// The unit flame cone and its material.
     flame: Option<(Handle<Mesh>, Handle<StandardMaterial>)>,
@@ -91,9 +91,11 @@ pub fn bevy_mesh(m: &RenderMesh) -> Mesh {
 }
 
 impl ShipModels {
-    /// Part `k`'s mesh of `craft` (kept per base craft and part id).
+    /// Part `k`'s mesh of `craft` (kept per base craft, part id and
+    /// whether the configuration deploys it: `base[#parts]@deployed`).
     pub fn part_mesh(&mut self, craft: &Craft, k: usize) -> Arc<RenderMesh> {
-        let key = (craft.id.base().to_string(), craft.parts[k].id);
+        let id = craft.parts[k].id;
+        let key = (craft.id.base().to_string(), id, craft.id.deployed().contains(&id));
         self.parts.entry(key).or_insert_with(|| Arc::new(parts::part_mesh(craft, k))).clone()
     }
 
@@ -119,6 +121,7 @@ impl ShipModels {
         let ids: Vec<u32> = craft.parts.iter().map(|p| p.id).collect();
         let colours: Vec<[f32; 3]> = (ids.iter())
             .map(|&id| match def.parts.iter().find(|p| p.part == id) {
+                Some(info) if info.ground => parts::GROUND,
                 Some(info) => parts::colour(&info.material, info.finish.as_deref(), m),
                 None => parts::UNKNOWN,
             })
@@ -304,7 +307,8 @@ pub fn update_parts(
         let (Some(k), Some(v)) = (group.mechanism, vessel(child_of.parent())) else { continue };
         let (Some(def), Some(state)) = (v.ship_def(), v.ship()) else { continue };
         let (Some(m), Some(s)) = (def.mechanisms.get(k), state.mechanisms.get(k)) else { continue };
-        let want = parts::hinge(m.item.pos, m.item.axis, m.item.stowed_deg, s.angle);
+        let built = parts::built_angle(&m.item, v.craft.id.deployed().contains(&m.part));
+        let want = parts::hinge(m.item.pos, m.item.axis, built, s.angle);
         if *t != want {
             *t = want;
         }

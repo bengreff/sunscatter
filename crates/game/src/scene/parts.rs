@@ -27,6 +27,9 @@ const TINTS: &[(&str, [f32; 3])] =
 
 /// What a part with no known look is drawn in (linear).
 pub const UNKNOWN: [f32; 3] = [0.5, 0.5, 0.52];
+/// Ground, not vehicle (the pad's launch mount, `PartInfo::ground`):
+/// concrete grey (linear).
+pub const GROUND: [f32; 3] = [0.32, 0.32, 0.3];
 
 /// The flat colour (linear RGB) of a part's outer surface, its `material`
 /// and `finish` (`PartInfo`): its visible albedo taken as one minus the
@@ -104,11 +107,22 @@ pub fn mechanisms(def: &ShipDef, part_ids: &[u32]) -> Vec<Option<usize>> {
     part_ids.iter().map(|&id| def.mechanisms.iter().position(|m| m.part == id)).collect()
 }
 
+/// The angle a part's shape was built at: deployed in a configuration that
+/// deploys it (`CraftId::deployed`, `CraftDef::deploy`), else stowed.
+pub fn built_angle(m: &sim::catalog::Mechanism, deployed: bool) -> f64 {
+    if deployed {
+        m.deployed_deg
+    } else {
+        m.stowed_deg
+    }
+}
+
 /// Where a part on a hinge is drawn (craft axes): turned about the axis
-/// through `pos` by its angle from as built (deg, right-handed).
-pub fn hinge(pos: DVec3, axis: DVec3, stowed_deg: f64, angle_deg: f64) -> Transform {
+/// through `pos` by its angle from the one its shape was built at (deg,
+/// right-handed; [`built_angle`]).
+pub fn hinge(pos: DVec3, axis: DVec3, built_deg: f64, angle_deg: f64) -> Transform {
     let axis = axis.try_normalize().unwrap_or(DVec3::Z).as_vec3();
-    let rotation = Quat::from_axis_angle(axis, (angle_deg - stowed_deg).to_radians() as f32);
+    let rotation = Quat::from_axis_angle(axis, (angle_deg - built_deg).to_radians() as f32);
     let p = pos.as_vec3();
     Transform { translation: p - rotation * p, rotation, scale: Vec3::ONE }
 }
