@@ -127,6 +127,18 @@ pub fn draw_fates(def: &ShipDef, state: &mut ShipState, seed: u64, launch: Epoch
     }
 }
 
+/// The fates drawn again with the save's `seed` (a new game's seed set on a
+/// vessel just created, D105 §6.3): each threshold from the seed, the
+/// launch epoch, its owner and mode; the hazards and counters stay. The
+/// seed is kept in the runtime, so a split's pieces carry it.
+pub fn reseed(state: &mut ShipState, seed: u64) {
+    state.runtime.seed = seed;
+    let Some(launch) = state.runtime.launch else { return };
+    for f in &mut state.fates {
+        f.threshold = fates::threshold(seed, launch, &f.owner, &f.mode);
+    }
+}
+
 /// An owner's event counter for a hazard: its part's engine starts, a
 /// valve's cycles, else its part's cycles.
 fn counter(def: &ShipDef, state: &ShipState, owner: &str, part: u32, hazard: Hazard) -> u32 {

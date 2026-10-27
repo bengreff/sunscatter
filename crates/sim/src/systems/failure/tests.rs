@@ -72,6 +72,26 @@ fn fates_are_drawn_once_from_the_launch() {
     assert_eq!(again, a);
 }
 
+/// The save's seed redraws the thresholds (the same seed the same bits),
+/// keeps the hazards, and stays in the runtime for a split's pieces.
+#[test]
+fn a_seed_redraws_the_fates() {
+    let def = falcon9();
+    let mut a = launched(&def);
+    a.fates[0].hazard = 0.25;
+    let mut b = a.clone();
+    reseed(&mut a, 42);
+    reseed(&mut b, 42);
+    assert_eq!(a, b);
+    assert_eq!((a.runtime.seed, a.fates[0].hazard), (42, 0.25));
+    let mut fresh = ShipState::initial(&def);
+    draw_fates(&def, &mut fresh, 42, t0());
+    assert!(a.fates.iter().zip(&fresh.fates).all(|(x, y)| x.threshold == y.threshold));
+    assert!(a.fates.iter().zip(&launched(&def).fates).all(|(x, y)| x.threshold != y.threshold));
+    let kept: Vec<u32> = def.parts.iter().filter(|p| p.id.starts_with("s1.")).map(|p| p.part).collect();
+    assert_eq!(a.partition(&kept, &def.subset(&kept)).runtime.seed, 42);
+}
+
 /// The same running from the same launch: the same hazards to the bit; a
 /// part beyond its rated burn time accumulates faster.
 #[test]

@@ -113,6 +113,20 @@ pub struct SimState {
     pub site: SiteClock,
     /// The origin's name.
     pub origin: String,
+    /// The game's seed, made once per new game and saved with it: the
+    /// failure fates of the vessels it creates are drawn from it (D105).
+    pub seed: u64,
+}
+
+/// A new game's seed: the wall clock and the process, mixed (tests: 0, so
+/// their fates are the same every run).
+fn new_game_seed() -> u64 {
+    if cfg!(test) {
+        return 0;
+    }
+    let nanos = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos() as u64);
+    let z = (nanos ^ (u64::from(std::process::id()) << 32)).wrapping_mul(0x9e37_79b9_7f4a_7c15);
+    z ^ (z >> 31)
 }
 
 /// How far the clock moves before the dominance radii are rebuilt (s).
@@ -161,6 +175,8 @@ impl SimState {
         let mut vessel_ids = VesselIds::default();
         let mut ship = Vessel::landed_at(&world, vessel_ids.allocate(), "Earth", PAD_LAT, PAD_LON, clock, craft);
         ship.set_clock_offset(&world, site.offset_at(&world, clock));
+        let seed = new_game_seed();
+        ship.seed_fates(seed);
         SimState {
             dominance: Dominance::new(&world.eph, clock),
             dominance_at: clock,
@@ -178,6 +194,7 @@ impl SimState {
             remote: RemoteControls::default(),
             site,
             origin,
+            seed,
         }
     }
 
@@ -292,7 +309,8 @@ impl SimState {
     /// (fuelled at its loading, crew aboard; D104).
     pub fn new_flight(&mut self, craft: &Craft) {
         let id = self.vessel_ids.allocate();
-        let ship = Vessel::landed_at(&self.world, id, "Earth", PAD_LAT, PAD_LON, self.clock, craft);
+        let mut ship = Vessel::landed_at(&self.world, id, "Earth", PAD_LAT, PAD_LON, self.clock, craft);
+        ship.seed_fates(self.seed);
         self.fleet[self.active] = self.synchronised(ship);
         self.controls = Controls { sas: true, ..Default::default() };
         self.warp = 0;

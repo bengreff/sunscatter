@@ -54,6 +54,15 @@ pub(super) struct GroundAt {
 }
 
 impl Vessel {
+    /// Gives a craft of parts the save's seed for its failure fates (D105
+    /// §6.3; a new game's, set on each vessel it creates): its fates are
+    /// drawn again from it. Nothing for a craft of one part.
+    pub fn seed_fates(&mut self, seed: u64) {
+        if let Some(state) = self.ship.as_mut() {
+            crate::systems::failure::reseed(state, seed);
+        }
+    }
+
     /// The parts with the engines' thrust `out` along `dir` (body axes; the
     /// runtime's realised direction if `None`) and the ambient pressure.
     fn gather(&self, out: &ShipThrust, dir: Option<DVec3>, ambient: f64) -> Gathered {

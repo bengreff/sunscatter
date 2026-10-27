@@ -61,6 +61,11 @@ pub struct SaveGame {
     /// Absent in older saves: then it is integrated.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub site_clock: Option<SiteClock>,
+    /// The game's seed, made once per new game: the failure fates of the
+    /// vessels it creates are drawn from it (D105 §6.3). Absent in older
+    /// saves: 0.
+    #[serde(default)]
+    pub seed: u64,
 }
 
 #[derive(Debug)]
@@ -119,6 +124,7 @@ impl SaveGame {
             active,
             controls,
             site_clock: None,
+            seed: 0,
         }
     }
 

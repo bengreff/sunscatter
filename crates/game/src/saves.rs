@@ -103,6 +103,7 @@ pub fn save(sim: &SimState, path: &Path) -> Result<(), SaveError> {
 pub fn capture(sim: &SimState) -> SaveGame {
     let mut save = SaveGame::capture(&sim.world, sim.clock, &sim.fleet, sim.vessel_ids, sim.active, sim.controls);
     save.site_clock = Some(sim.site);
+    save.seed = sim.seed;
     save
 }
 
@@ -132,6 +133,7 @@ pub fn restore(sim: &mut SimState, save: SaveGame) {
     sim.active = save.active;
     sim.clock = save.clock;
     sim.controls = save.controls;
+    sim.seed = save.seed;
     sim.warp = 0;
     sim.compute_limited = false;
     sim.refresh_dominance();
@@ -323,6 +325,7 @@ mod tests {
         sim.spawn_test_ships(2);
         sim.active = 1;
         sim.warp = 5;
+        sim.seed = 0x5eed;
         let path = save_path(&dir, "a");
         save(&sim, &path).unwrap();
         let expected = sim.fleet.clone();
@@ -334,6 +337,7 @@ mod tests {
         load(&mut other, &path).unwrap();
         assert_eq!(other.fleet, expected);
         assert_eq!((other.active, other.clock, other.warp), (1, clock, 0));
+        assert_eq!(other.seed, 0x5eed, "the game's seed (the fates') is saved");
 
         let list = list_saves(&dir);
         assert_eq!(list.len(), 1);
