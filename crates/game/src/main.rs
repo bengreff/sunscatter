@@ -36,6 +36,8 @@ mod rings;
 mod saves;
 mod scene;
 mod settings_ui;
+#[cfg(test)]
+mod shader_tests;
 mod ship_light;
 mod sky;
 mod staging;

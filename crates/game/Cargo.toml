@@ -28,5 +28,10 @@ ron = "0.12"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
 directories = "6.0.0"
 
+[dev-dependencies]
+# Composing and validating the shaders as Bevy does (`shader_tests`).
+naga_oil = "0.22"
+naga = { version = "29", features = ["wgsl-in", "msl-out"] }
+
 [lints]
 workspace = true
