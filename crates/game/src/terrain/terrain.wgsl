@@ -32,6 +32,7 @@
     pbr_types,
     lighting,
     shadows,
+    shadow_sampling,
     mesh_types,
     mesh_view_types,
     mesh_view_bindings::{view, lights},
@@ -562,6 +563,46 @@ fn slot_of_light(i: u32) -> i32 {
     return best;
 }
 
+// Bevy's shadow for directional light `i` at `p` (normal `n`, view depth
+// `view_z`): `shadows::fetch_directional_shadow`'s cascade, biases and
+// blend into the next cascade, with the view's filter, but without the
+// soft-shadow (PCSS) path, which the stars' lights never use, and with the
+// filter's taps written once: Bevy's version, inlined twice and with the
+// PCSS loops, takes registers from the whole shader even where no cascade
+// reaches (0.4 ms of the plunge's main pass, 2026-10-27).
+fn terrain_shadow(i: u32, p: vec3<f32>, n: vec3<f32>, view_z: f32, frag_coord: vec2<f32>) -> f32 {
+    let light = &lights.directional_lights[i];
+    let first = shadows::get_cascade_index(i, view_z);
+    if first >= (*light).num_cascades {
+        return 1.0;
+    }
+    // The next cascade's share where the two overlap.
+    var blend = 0.0;
+    if first + 1u < (*light).num_cascades {
+        let far = (*light).cascades[first].far_bound;
+        let near_next = (1.0 - (*light).cascades_overlap_proportion) * far;
+        blend = saturate((-view_z - near_next) / (far - near_next));
+    }
+    var shadow = 0.0;
+    var weight = 1.0 - blend;
+    for (var c = first; c <= first + 1u; c++) {
+        if weight > 0.0 {
+            let cascade = &(*light).cascades[c];
+            let offset = p + (*light).shadow_normal_bias * (*cascade).texel_size * n
+                + (*light).shadow_depth_bias * (*light).direction_to_light.xyz;
+            let local = shadows::world_to_directional_light_local(i, c, vec4(offset, 1.0));
+            var s = 1.0;
+            if local.w != 0.0 {
+                let layer = i32((*light).depth_texture_base_index + c);
+                s = shadow_sampling::sample_shadow_map(local.xy, local.z, layer, frag_coord, (*cascade).texel_size);
+            }
+            shadow += weight * s;
+        }
+        weight = blend;
+    }
+    return shadow;
+}
+
 // Bevy's directional light `i` on the terrain: `lighting::directional_light`'s
 // terms for one dielectric layer (Burley diffuse, GGX specular with the
 // multiscatter compensation, the light's colour, and with an atmosphere its
@@ -678,7 +719,7 @@ fn shade(color: vec3<f32>, perceptual_roughness: f32, p: vec3<f32>, n: vec3<f32>
         // Every terrain chunk receives shadows (none is a NotShadowReceiver).
         var shadow = 1.0;
         if (lights.directional_lights[i].flags & mesh_view_types::DIRECTIONAL_LIGHT_FLAGS_SHADOWS_ENABLED_BIT) != 0u {
-            shadow = shadows::fetch_directional_shadow(i, vec4(p, 1.0), n, view_z, frag_coord);
+            shadow = terrain_shadow(i, p, n, view_z, frag_coord);
         }
         let c = direct_light(i, p, N, V, NdotV, diffuse_color, F0, F_ab, roughness) * shadow * view.exposure;
         let slot = slot_of_light(i);
