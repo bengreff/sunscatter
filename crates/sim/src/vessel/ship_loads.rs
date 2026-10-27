@@ -30,6 +30,11 @@ pub(super) struct Gathered {
 }
 
 impl Gathered {
+    /// More forces on the parts (the grid fins').
+    pub fn push(&mut self, more: Vec<Push>) {
+        self.pushes.extend(more);
+    }
+
     pub fn bodies(&self) -> Bodies<'_> {
         Bodies {
             ids: &self.ids,
@@ -132,6 +137,28 @@ impl Vessel {
             }
         }
         g
+    }
+
+    /// The deployed grid fins' forces over a tick (`fins` with the `flow` at
+    /// them, at the deflections they held: `systems::fins`, the one model),
+    /// each at its fin on its part.
+    pub(super) fn fin_pushes(
+        &self,
+        fins: &[crate::systems::fins::Fin],
+        flow: Option<crate::systems::fins::FinFlow>,
+    ) -> Vec<Push> {
+        use crate::systems::fins;
+        let (Some(flow), Some((def, state))) = (flow, self.ship_parts()) else { return Vec::new() };
+        let design = self.craft.design();
+        let held = fins::held(state, fins);
+        (fins.iter().zip(held))
+            .filter_map(|(f, d)| {
+                let id = def.surfaces.get(f.surface)?.part;
+                let part = design.parts.iter().position(|p| p.id == id)?;
+                let (force, _) = fins::forces(std::slice::from_ref(f), &flow, DVec3::ZERO, &[d]);
+                Some(Push { part, force, at: f.at, torque: DVec3::ZERO })
+            })
+            .collect()
     }
 
     /// A tick held on the pad's clamps: the engines' `out` and the clamps'

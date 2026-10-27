@@ -336,6 +336,10 @@ fn an_overload_snaps_the_joint() {
         "{:?}",
         state.runtime.events
     );
+    // A leg hangs by its hinge and strut, not a ring: its load is shown,
+    // never judged (its feet's overload is the contact's).
+    let leg = &state.runtime.joints[joint(def, "s1.octaweb|s1.leg#1")];
+    assert!(leg.force.length() > 1e4 && leg.ratio == 0.0, "{leg:?}");
     // Snapped joints are not judged again.
     let again = step(def, &mut state, &b, &m, t0, false);
     assert!(again.iter().all(|e| !effects.contains(e)), "{again:?}");
