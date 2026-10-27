@@ -23,8 +23,8 @@ use bevy::prelude::*;
 use bevy::render::storage::ShaderBuffer;
 use bevy::tasks::{futures::check_ready, AsyncComputeTaskPool, Task};
 use glam::{DMat3, DVec3};
-use material::{TerrainExt, TerrainParams};
-pub use material::{TerrainFrame, TerrainMaterial};
+use material::TerrainExt;
+pub use material::{TerrainFrame, TerrainMaterial, TerrainParams};
 use mesh::{ChunkData, ChunkKey, HeightFn, Shape};
 
 use sim::frame::NodeId;
@@ -103,6 +103,8 @@ pub struct TerrainBody {
     /// [`upload_frames`] into `frame_buffer` (the material's storage buffer).
     pub frame: TerrainFrame,
     frame_buffer: Handle<ShaderBuffer>,
+    /// Some chunk of it is in sight this frame (`lod::chunk_in_sight`).
+    in_sight: bool,
     chunks: HashMap<ChunkKey, Chunk>,
     pending: HashMap<ChunkKey, Task<ChunkData>>,
     color_task: Option<Task<Maps>>,
@@ -125,7 +127,7 @@ pub struct TerrainBody {
 pub struct Terrain {
     pub bodies: Vec<TerrainBody>,
     frame: u32,
-    /// Chunks drawn last frame (for the overlay).
+    /// Chunks drawn last frame, those in sight (for the overlay).
     pub drawn: usize,
 }
 
@@ -249,6 +251,7 @@ pub fn setup(
             material,
             frame,
             frame_buffer,
+            in_sight: true,
             chunks: HashMap::new(),
             pending: HashMap::new(),
             color_task: None,
@@ -269,10 +272,11 @@ fn body_matrix(sim: &SimState, node: NodeId) -> DMat3 {
     crate::scene::body_matrix(p, sim.clock)
 }
 
-/// Writes each body's frame data into its storage buffer (the material
-/// itself is left alone: see `TerrainFrame`).
+/// Writes the frame data of each body in sight into its storage buffer
+/// (the material itself is left alone: see `TerrainFrame`; a body out of
+/// sight gets its data the frame it comes into sight).
 pub fn upload_frames(terrain: Res<Terrain>, mut buffers: ResMut<Assets<ShaderBuffer>>) {
-    for body in &terrain.bodies {
+    for body in terrain.bodies.iter().filter(|b| b.in_sight) {
         if let Some(mut b) = buffers.get_mut(&body.frame_buffer) {
             b.set_data(body.frame);
         }

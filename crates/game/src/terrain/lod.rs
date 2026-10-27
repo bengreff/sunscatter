@@ -52,6 +52,50 @@ pub fn shown_by(installed: u32, frame: u32) -> bool {
     installed < frame
 }
 
+/// What the camera sees, for culling chunks on the CPU: its forward
+/// direction and the cosine of the half-angle of a cone holding the whole
+/// view (the half-diagonal of the field of view, with a margin).
+#[derive(Clone, Copy, Debug)]
+pub struct Sight {
+    pub forward: DVec3,
+    pub cos_half: f64,
+    pub sin_half: f64,
+}
+
+impl Sight {
+    /// For a vertical field of view `fov` (rad) and aspect (width over
+    /// height), with a 10 % margin.
+    pub fn new(forward: DVec3, fov: f64, aspect: f64) -> Self {
+        let t = (fov / 2.0).tan();
+        let half = (t * (1.0 + aspect * aspect).sqrt()).atan() * 1.1;
+        let half = half.min(std::f64::consts::FRAC_PI_2);
+        Sight { forward, cos_half: half.cos(), sin_half: half.sin() }
+    }
+}
+
+/// Whether a chunk's bounding sphere (camera-relative `centre`, `radius`)
+/// can show: in the view cone and not wholly beyond the horizon (`horizon`:
+/// the farthest distance at which the body's surface can be seen). The
+/// others are hidden and not moved: their transforms changing every frame
+/// cost Bevy work for nothing (1,590 chunks selected, 149 in view, from
+/// 185 km, 2026-10-26).
+pub fn chunk_in_sight(centre: DVec3, radius: f64, horizon: f64, sight: &Sight) -> bool {
+    let d = centre.length();
+    if d <= radius {
+        return true;
+    }
+    if d - radius > horizon {
+        return false;
+    }
+    // The sphere meets the cone when its centre is within the cone widened
+    // by the sphere's angular radius.
+    let cos_c = centre.dot(sight.forward) / d;
+    let sin_r = (radius / d).min(1.0);
+    let cos_r = (1.0 - sin_r * sin_r).sqrt();
+    // cos(half + r) = cos half cos r − sin half sin r.
+    cos_c >= sight.cos_half * cos_r - sight.sin_half * sin_r
+}
+
 /// Why a chunk splits: `No`, `Always` (tessellation sag, not the camera),
 /// or `Measure(m)` with m > 1 the screen error over the threshold.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -159,6 +203,8 @@ pub fn update(
     mut chunks_q: Query<ChunkParts, ChunkFilter>,
 ) {
     let Some(view) = map::view(&cam) else { return };
+    let Ok((_, cam_t, _)) = cam.single() else { return };
+    let sight = Sight::new(cam_t.forward().as_vec3().as_dvec3(), view.fov(), view.aspect());
     terrain.frame += 1;
     let frame = terrain.frame;
     let snap = sim.world.snapshot(sim.clock);
@@ -210,13 +256,18 @@ pub fn update(
         let horizon = (h * h - r_min * r_min).max(0.0).sqrt() + (r_max * r_max - r_min * r_min).sqrt();
         let ctx = Ctx { cam_fixed, focal: view.focal(), threshold: f64::from(TERRAIN_ERROR_PX), horizon, frame };
         let selected = body.select(&ctx, &mut budget);
-        drawn += selected.len();
 
         let rot = DQuat::from_mat3(&m).as_quat();
+        let mut shown = 0;
         for (key, morph) in &selected {
             let c = &body.chunks[key];
+            let at = m * c.center + centre;
+            if !chunk_in_sight(at, c.radius, horizon, &sight) {
+                continue;
+            }
+            shown += 1;
             if let Ok((mut t, mut vis, mut tag)) = chunks_q.get_mut(c.entity) {
-                *t = Transform { translation: (m * c.center + centre).as_vec3(), rotation: rot, scale: Vec3::ONE };
+                *t = Transform { translation: at.as_vec3(), rotation: rot, scale: Vec3::ONE };
                 vis.set_if_neq(Visibility::Visible);
                 let q = (morph * MORPH_TAG_SCALE) as u32;
                 if tag.0 != q {
@@ -231,8 +282,11 @@ pub fn update(
             .filter(|(k, c)| k.level > 0 && c.last_used + EVICT_AFTER < frame)
             .map(|(k, _)| *k)
             .collect();
+        drawn += shown;
+        body.in_sight = shown > 0;
         for (k, c) in &body.chunks {
-            if c.last_used != frame || !selected.contains(k) {
+            let in_sight = || chunk_in_sight(m * c.center + centre, c.radius, horizon, &sight);
+            if c.last_used != frame || !selected.contains(k) || !in_sight() {
                 if let Ok((_, mut vis, _)) = chunks_q.get_mut(c.entity) {
                     vis.set_if_neq(Visibility::Hidden);
                 }
@@ -265,6 +319,25 @@ pub fn update(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn chunks_out_of_sight_are_culled() {
+        // Looking along −z with a 45° vertical field of view, 16:9.
+        let sight = Sight::new(DVec3::NEG_Z, std::f64::consts::FRAC_PI_4, 16.0 / 9.0);
+        // (case, centre, radius, horizon, in sight)
+        let cases = [
+            ("ahead", DVec3::new(0.0, 0.0, -1000.0), 10.0, 1e9, true),
+            ("behind", DVec3::new(0.0, 0.0, 1000.0), 10.0, 1e9, false),
+            ("in the corner", DVec3::new(0.6, 0.3, -1.0).normalize() * 1000.0, 10.0, 1e9, true),
+            ("just outside the side, but large", DVec3::new(1.2, 0.0, -1.0).normalize() * 1000.0, 600.0, 1e9, true),
+            ("well outside the side", DVec3::new(3.0, 0.0, -1.0).normalize() * 1000.0, 10.0, 1e9, false),
+            ("beyond the horizon", DVec3::new(0.0, 0.0, -5000.0), 10.0, 1000.0, false),
+            ("around the camera", DVec3::new(0.0, 0.0, 50.0), 100.0, 10.0, true),
+        ];
+        for (case, c, r, horizon, want) in cases {
+            assert_eq!(chunk_in_sight(c, r, horizon, &sight), want, "{case}");
+        }
+    }
 
     #[test]
     fn a_chunk_is_drawn_from_the_frame_after_it_is_installed() {
