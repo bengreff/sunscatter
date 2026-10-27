@@ -88,6 +88,10 @@ impl Default for CameraRig {
 #[derive(Component)]
 pub struct MainCamera;
 
+/// The far culling distance (m): beyond any body seen from the farthest
+/// zoom (Sedna's aphelion is ~940 AU).
+pub const FAR: f32 = 1.0e16;
+
 /// Exposure at 1 AU from the Sun: sunlit surfaces read well; night sides
 /// are dark. Elsewhere it follows the starlight at the camera (D087,
 /// `lighting::exposure_ev100`).
@@ -97,7 +101,9 @@ pub fn setup(mut commands: Commands, demo: Option<ResMut<crate::demo::Demo>>, mu
     let mut cam = commands.spawn((
         MainCamera,
         Camera3d::default(),
-        Projection::Perspective(PerspectiveProjection { near: 0.1, far: 1.0e13, ..default() }),
+        // Bevy's projection is infinite (reverse Z); `far` only culls. The
+        // farthest zoom (`max_distance`) frames bodies hundreds of AU out.
+        Projection::Perspective(PerspectiveProjection { near: 0.1, far: FAR, ..default() }),
         // Physical light units: sunlight ~128,000 lux, sunny-16 exposure.
         bevy::camera::Hdr,
         bevy::camera::Exposure { ev100: EV100 },
@@ -126,6 +132,7 @@ pub fn read_input(
     ctx: Res<InputContext>,
     sim: Res<SimState>,
     controls: Res<crate::persist::ControlsSettings>,
+    projection: Query<&Projection, With<MainCamera>>,
     mut rig: ResMut<CameraRig>,
 ) {
     if !egui.wants_any_pointer_input() {
@@ -139,12 +146,15 @@ pub fn read_input(
         if scroll.delta.y != 0.0 {
             // Trackpads report pixels, many per gesture: scale them to a
             // fraction of a wheel line each so zooming is controllable.
-            let lines = match scroll.unit {
-                MouseScrollUnit::Line => f64::from(scroll.delta.y),
-                MouseScrollUnit::Pixel => f64::from(scroll.delta.y) * controls.trackpad_lines_per_px,
-            };
+            let pixels = scroll.unit == MouseScrollUnit::Pixel;
+            let lines = scroll_lines(f64::from(scroll.delta.y), pixels, controls.trackpad_lines_per_px);
             let min = min_distance(rig.focus, focus_radius(&sim, rig.focus));
-            rig.distance = zoom(rig.distance, lines, controls.wheel_zoom).max(min);
+            let fov = projection.single().map_or(std::f64::consts::FRAC_PI_4, |p| match p {
+                Projection::Perspective(p) => f64::from(p.fov),
+                _ => std::f64::consts::FRAC_PI_4,
+            });
+            let max = max_distance(farthest_body(&sim, rig.focus), fov);
+            rig.distance = zoom(rig.distance, lines, controls.wheel_zoom, max).max(min);
         }
         // A rotation or zoom into a surface is refused: the camera stops.
         let new = (rig.yaw, rig.pitch, rig.distance);
@@ -174,6 +184,14 @@ pub fn read_input(
             focus_body_near_ship(&mut rig, &sim, body);
         }
     }
+}
+
+/// Distance from the focus to the farthest body now (m): what the farthest
+/// zoom must frame ([`max_distance`]).
+pub fn farthest_body(sim: &SimState, focus: Focus) -> f64 {
+    let (anchor, target, _) = focus_target(sim, focus);
+    let snap = sim.world.snapshot(sim.clock);
+    sim.world.eph.bodies().map(|b| (snap.relative_r(b, anchor) - target).length()).fold(0.0, f64::max)
 }
 
 /// Bounding radius of a craft about its centre of mass (m): its farthest

@@ -32,9 +32,9 @@ Out of scope: new content (craters, clouds), the burn planner.
 
 Zoom half as fast as now, for both the wheel and the trackpad.
 - Wheel: 1.15 → 1.072 per line.
-- Trackpad: 0.25 → 0.125 lines per pixel.
+- Trackpad: 0.25 → 0.125 lines per pixel; on 2026-10-26 the owner found it still five times too fast, so a trackpad pixel counts a fifth of the setting (`camera::rules::scroll_lines`).
 
-The speed is also a setting (§6), stored in `ControlsSettings`.
+The speed is also a setting (§6), stored in `ControlsSettings`. The farthest zoom frames the farthest body from the focus (`camera::rules::max_distance`, with a margin), so every body is within reach (Sedna, ~84 AU in 2030: ~250 AU).
 
 ## 2. Per-object map view (replaces the global map mode)
 

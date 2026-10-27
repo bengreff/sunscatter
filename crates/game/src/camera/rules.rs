@@ -4,9 +4,15 @@
 use super::Focus;
 use glam::DVec3;
 
-/// Closest and farthest camera distances from the focus (m).
+/// Closest camera distance from the focus (m). The farthest is not a
+/// constant: [`max_distance`] keeps every body within reach.
 pub const MIN_DISTANCE: f64 = 1.0;
-pub const MAX_DISTANCE: f64 = 5.0e12;
+/// The farthest zoom frames the farthest body with this margin.
+pub const MAX_ZOOM_MARGIN: f64 = 1.25;
+/// A trackpad pixel counts this share of the setting's wheel lines: the
+/// owner found trackpad zoom five times too fast (2026-10-26); the mouse
+/// wheel is unchanged.
+pub const TRACKPAD_SHARE: f64 = 0.2;
 /// Closest camera distance to a vessel, in its bounding radii.
 pub const VESSEL_MIN_RADII: f64 = 1.3;
 /// Closest camera distance to a body focus (its surface is handled by the
@@ -45,9 +51,27 @@ pub fn accept(old: f64, new: f64) -> bool {
 }
 
 /// The focus distance after zooming in by `lines` wheel lines, each a factor
-/// of `per_line`.
-pub fn zoom(distance: f64, lines: f64, per_line: f64) -> f64 {
-    (distance * per_line.powf(-lines)).clamp(MIN_DISTANCE, MAX_DISTANCE)
+/// of `per_line`, at most `max`.
+pub fn zoom(distance: f64, lines: f64, per_line: f64, max: f64) -> f64 {
+    (distance * per_line.powf(-lines)).clamp(MIN_DISTANCE, max.max(MIN_DISTANCE))
+}
+
+/// Wheel lines of a scroll: a wheel's lines as they come, a trackpad's
+/// pixels at `lines_per_px` (the setting) times [`TRACKPAD_SHARE`].
+pub fn scroll_lines(delta: f64, pixels: bool, lines_per_px: f64) -> f64 {
+    if pixels {
+        delta * lines_per_px * TRACKPAD_SHARE
+    } else {
+        delta
+    }
+}
+
+/// The farthest zoom: far enough to frame the body farthest from the focus,
+/// `farthest` metres away, inside a vertical field of view `fov` (rad), with
+/// [`MAX_ZOOM_MARGIN`]. Derived from the bodies, so a body added to the data
+/// (or a dwarf planet receding) stays within reach.
+pub fn max_distance(farthest: f64, fov: f64) -> f64 {
+    MAX_ZOOM_MARGIN * farthest / (0.5 * fov).tan()
 }
 
 /// The distance along the view ray to place the camera: `distance` if clear
@@ -208,13 +232,41 @@ mod tests {
             (1000.0, -1.0, 1.072, 1072.0),
             (1000.0, 0.0, 1.072, 1000.0),
             (1.2, 10.0, 1.072, MIN_DISTANCE),
-            (4.0e12, -10.0, 1.072, MAX_DISTANCE),
+            (4.0e12, -10.0, 1.072, 5.0e12),
         ];
         for (d, lines, per_line, expected) in cases {
-            assert!((zoom(d, lines, per_line) - expected).abs() < 1e-9 * expected, "{d} {lines}");
+            assert!((zoom(d, lines, per_line, 5.0e12) - expected).abs() < 1e-9 * expected, "{d} {lines}");
         }
         // Two lines at the new speed equal one at the old (1.15 per line).
-        assert!((zoom(1000.0, 2.0, 1.072) / (1000.0 / 1.15) - 1.0).abs() < 1e-3);
+        assert!((zoom(1000.0, 2.0, 1.072, 5.0e12) / (1000.0 / 1.15) - 1.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn a_trackpad_zooms_a_fifth_as_fast_and_a_wheel_as_before() {
+        // (delta, pixels, lines per px (the default), expected lines)
+        let cases =
+            [(1.0, false, 0.125, 1.0), (-3.0, false, 0.125, -3.0), (40.0, true, 0.125, 1.0), (-8.0, true, 0.125, -0.2)];
+        for (delta, pixels, per_px, expected) in cases {
+            assert!((scroll_lines(delta, pixels, per_px) - expected).abs() < 1e-12, "{delta} {pixels}");
+        }
+    }
+
+    /// The farthest zoom frames the farthest body: Sedna (about 84 AU from
+    /// Earth in 2030) needs ~250 AU at a 45° field of view, beyond the old
+    /// fixed 33 AU; Neptune's distance alone gave ~90 AU.
+    #[test]
+    fn the_farthest_zoom_frames_the_farthest_body() {
+        const AU: f64 = 1.495_978_707e11;
+        let fov = std::f64::consts::FRAC_PI_4;
+        // (farthest body (m), expected max distance in AU, roughly)
+        let cases = [(84.0 * AU, 253.0), (30.0 * AU, 90.5), (1.0 * AU, 3.0)];
+        for (farthest, expected) in cases {
+            let d = max_distance(farthest, fov);
+            assert!((d / AU / expected - 1.0).abs() < 0.01, "{} AU vs {expected}", d / AU);
+            // Framed: the body is inside the half field of view, with the margin.
+            assert!(farthest / d <= (0.5 * fov).tan() / MAX_ZOOM_MARGIN * 1.000_001);
+        }
+        assert_eq!(zoom(1e12, -1e6, 1.072, max_distance(84.0 * AU, fov)), max_distance(84.0 * AU, fov));
     }
 
     #[test]
