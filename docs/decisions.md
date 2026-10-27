@@ -310,7 +310,7 @@ No render-scale setting: the 3D scene renders at the window's physical pixels (o
 - Minimal means simple, never blurry: "sharp, crisp, clear surfaces, recognisably water or land or earth, just not necessarily needlessly complex" (2026-10-25).
 - Surfaces come from real data (satellite colour, elevation, the sea mask), sharpened by procedural algorithms: coastlines and zone edges stay crisp at every distance. Each zone (ocean, ice, forest, desert…) is drawn as one consistent procedural texture, not as a magnified photograph. Details: [crisp-surfaces.md](features/crisp-surfaces.md).
 - The sky is physical, from the atmosphere and the light: Bevy's scattering model (D052), raymarched from outside an atmosphere so the ground stays clear from orbit. Stars, every star's light, eclipses and planetshine (D055), shadows, a basic sun flare.
-- One look for everyone, no graphics settings (2026-10-26: "delete all graphics settings, there should just be one graphics setting … that is so well optimized it doesn't matter"). The tiers and their code are deleted. All visuals are data-driven for any body. What each part of the look costs is measured (the benchmark turns parts off, never the player).
+- One look for everyone, no graphics settings (2026-10-26: "delete all graphics settings, there should just be one graphics setting … that is so well optimized it doesn't matter"), apart from D109's toggles for heavy, non-vital visuals (exhaust, reentry glow, clouds). The tiers and their code are deleted. All visuals are data-driven for any body. What each part of the look costs is measured (the benchmark turns parts off, never the player).
 - The look runs full screen at the display's frame rate on the reference Mac, at full resolution (D072).
 
 **D074: The test craft is a finned rocket, stable nose-first.** *Decided, 2026-09-28 (owner).*
@@ -434,10 +434,50 @@ The owner's interview: [interview-2026-10-26-parts.md](plans/interview-2026-10-2
 
 **D107: The systems screen is a separate screen; flight keeps the essentials and a mini systems panel.** *Decided, 2026-10-26 (owner). Refines D080.*
 - "To truly control every bit of the craft you need a whole separate screen." Its main view is the craft, switchable by layer (physical, structural, thermal, electrical, plumbing, data, health); every part and component can be inspected and commanded there.
-- There the player defines **stages** and saves **functions**, and pins functions to a **mini systems panel** shown in flight, where they are activated by a click or a key. Space activates the next stage. Flight keeps D080's essentials.
+- There the player defines **stages** and saves **functions**, and pins functions to a **mini systems panel** shown in flight, where they are activated by a click (D111: the action-group bar above the navball, no craft-specific keys). Space activates the next stage. Flight keeps D080's essentials.
 
 **D108: The craft is flown by hand until scripting; scripting reads the information model.** *Decided, 2026-10-26 (owner).*
 The player flies everything by hand for now (including a booster landing). Scripting comes soon, integrated with the data model of D106, and commands go through one command type shared by the screens, the MCP server and scripts.
+
+**D109: Visuals come from physics or the simulation, never for their own sake.** *Decided, 2026-10-27 (owner). Revises D073.*
+- "All visuals are derived from either a truth about how physics works, simplified, or an element of the simulation."
+- The exterior camera is "a magical visualization", not a simulated camera: it does "only what is clearest and most efficient". A later on-board-cameras mode would simulate optics. The sun flare stays, for every light-producing body.
+- The graphics options are toggles for what is compute-heavy and not vital: **engine exhaust** (off: today's flame cone), **reentry glow** and **volumetric clouds** (off by default). Exhaust is a fast render model from the exhaust's state at the nozzle exit and the local air; the exit state comes from published engines for now, later from the owner's engine testbench (CRUCIBLE, `~/inquiry-project`). Reentry glow comes from the aero model's shock layer, and the model is improved where it cannot show it. Clouds come from a general per-body atmosphere model plus, for Earth, D113's weather.
+- Parachutes become meshes that collide with the craft (open).
+
+**D110: A craft's light is the craft's, never the camera's.** *Decided, 2026-10-27 (owner). Refines D055.*
+- Each star's light is taken at the craft and applied to the whole craft at once: bodies' eclipses ("orbital sunset would happen on the whole craft instantly") and the air along the line to the star. The craft also gets the sky light of the air around it, and planetshine "derived from the area reflecting light, intensity of light, and angle of the craft relative the reflecting surface" (no special cases).
+- Shadows come from bodies and craft: a craft's own parts, other craft nearby, the ground under it. They do not change when the camera moves or turns.
+
+**D111: The flight interface is the navball, a staging bar, part cards and flat task menus.** *Decided, 2026-10-27 (owner). Refines D080 and D107.*
+- **Navball:**
+  - The g-load replaces V/S, which moves to Landing. The g-load is the proper acceleration and its direction, against the limit in that direction (the crew's tolerance or the weakest structure, named).
+  - An altitude switch (sea level, or the lowest surface elevation where there is no sea, a reference level on giants; or terrain) that every altitude above the surface follows.
+  - An RCS button opens the RCS menu.
+  - The action-group bar sits above the ball: functions pinned in the systems screen, abort among them, with no craft-specific keys.
+- **Staging bar:** thin, at the right edge, next stage at the bottom.
+  - Each stage where it applies shows a bar per propellant (kg/kg, from the tanks it draws on), the burnout time of the first to run out, and Δv.
+  - The active stage also shows thrust, TWR, mass now and at burnout, and mean Isp.
+  - A switch under the bar chooses between the current air and vacuum.
+  - Estimates assume no further input.
+  - Each stage lists what it acts on as part-type icons. Stages can be reordered, deleted and their contents moved in flight.
+- **Part cards:** one per part, with the live essentials of that part on this ship now. A value that is not measured is a dash, whose tooltip after 2 s names the sensor that would measure it.
+  - Clicking the part on the ship opens the card near the part, draggable. Clicking its icon opens it stacked left of the staging bar.
+  - A line joins the card to the part or icon.
+- **Menus:** a button per menu along the top, keys 1–0.
+  - Each menu is one flat page for one task, with links into the systems screen for more. RCS opens only from the navball.
+  - Menus fit the screen and are never cut off.
+  - Notifications go to a scrollable corner window with links to their vessel or screen.
+- **Keys:** no function keys (they need fn on a Mac). The systems screen is on Tab. `,` at 1× pauses.
+- **Time warp** is limited once thrust is produced (engines, RCS, settling), not by where the throttle sits.
+
+**D112: A vessel is what is joined by structure or by data, and keeps its own controls.** *Decided, 2026-10-27 (owner).*
+- "A vessel is everything connected structurally, plus information being sent EITHER along a wire or wirelessly." Its RCS menu lists every thruster of the vessel, each selectable, all on by default.
+- Each vessel keeps its own controls (throttle, SAS, holds), and a script may fly a vessel that is not active. `[` and `]` step through the vessels, nearest first.
+
+**D113: Weather is deterministic from the seed, smooth and cheap.** *Decided, 2026-10-27 (owner).*
+- Earth's clouds move smoothly and follow large-scale weather trends. Any time and place can be queried cheaply from the save's seed, and the detail is fractal. No gameplay effect yet.
+- The atmosphere and weather model stays open to exotic conditions: the seasons of an eccentric orbit, or an atmosphere that freezes out.
 
 ## Open questions
 
