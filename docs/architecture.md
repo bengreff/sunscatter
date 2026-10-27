@@ -84,7 +84,8 @@ A short map to search before building anything: who owns what, the frame order, 
 | Advancing the fleet each frame: chunks of work on the compute pool, furthest-behind first, a frame deadline; the clock held at the slowest (shown as limited by compute) | `game::fleet` | threads and deadlines never change motion (rule 4, tested) |
 | Our sky compositing shader (far ground raymarched past the aerial-view table) | `game::sky::haze` (`render_sky.wgsl`, copied from Bevy) | |
 | Flight keys: throttle ramp (fine with Alt), reset confirmation | `game::state` (`throttle_after`, `reset_confirmed`) | the throttle bar sends `GameCommand::SetThrottle` |
-| Whether a vessel's engine runs now (display), the flame mark | `game::scene` (`engine_on`, `update_flames`) | a stored burn segment, or live flight with the throttle open |
+| Whether a vessel's engine runs now (display) | `game::scene` (`engine_on`) | a stored burn segment, or live flight with thrust at the pilot's throttle (`Vessel::engine_running`) |
+| Drawing ships (D073): a craft of parts part by part (each part's own closed surface, kept per base craft and part id; a flat colour from its finish's or bare material's solar absorptivity, `colour`; static parts merged by colour, a part on a mechanism turned about its hinge from the ship state, `hinge`), a flame per engine from its thrust (`Vessel::engine_thrusts`; `nozzle`, `flame`), the test craft as one mesh in the ship colour; one light buffer per ship | `game::scene::parts` (rules), `game::scene::ships` (`update_ships`, `update_parts`, `ShipModels`) | a piece after a split draws its parts' meshes |
 | Where files live | `game::persist` | `SUNSCATTER_HOME` override |
 | Number/unit formatting (distance, speed, duration) | `game::format` | |
 

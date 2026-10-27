@@ -43,6 +43,8 @@ mod sky;
 mod staging;
 mod state;
 mod terrain;
+#[cfg(test)]
+mod test_rocket;
 mod tour;
 mod tracking;
 mod trajectory;
@@ -156,8 +158,8 @@ fn main() {
                 scene::update_bodies,
                 atmosphere::update,
                 atmosphere::update_mode,
-                scene::update_ships,
-                (scene::update_flames, scene::update_canopies).after(scene::update_ships),
+                scene::ships::update_ships,
+                (scene::ships::update_parts, scene::update_canopies).after(scene::ships::update_ships),
                 (terrain::update, lighting::update_terrain, terrain::upload_frames).chain(),
                 lighting::update_exposure,
                 terrain::update_textures,
@@ -246,6 +248,7 @@ impl Plugin for GameState {
             .init_resource::<interface::help::Help>()
             .init_resource::<interface::toasts::Toasts>()
             .init_resource::<debris::Breakups>()
+            .init_resource::<scene::ShipModels>()
             .init_resource::<look::Parts>()
             .init_resource::<settings_ui::SettingsUi>()
             .init_resource::<bench::Bench>()

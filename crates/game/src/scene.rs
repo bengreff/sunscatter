@@ -2,16 +2,19 @@
 //! the per-body visual definitions, all placed camera-relative from f64
 //! simulation state every frame. Surfaces are drawn by `terrain`.
 
+pub mod parts;
+pub mod ships;
+
+pub use ships::{ShipModels, ShipVisual};
+
 use crate::atmosphere;
 use crate::body_visual::{self, BodyVisualDef};
 use crate::camera::CameraRig;
-use crate::ship_light::{ShipExt, ShipLight, ShipMaterial};
 use crate::state::SimState;
 use bevy::camera::visibility::NoFrustumCulling;
 use bevy::light::atmosphere::ScatteringMedium;
 use bevy::light::{CascadeShadowConfigBuilder, GlobalAmbientLight, NotShadowCaster};
 use bevy::prelude::*;
-use bevy::render::storage::ShaderBuffer;
 use glam::{DMat3, DQuat, DVec3};
 use sim::body::BodyPhysical;
 use sim::frame::{NodeId, Vec3 as FVec3};
@@ -22,14 +25,7 @@ use sim::world::World;
 pub struct BodyVisual(pub NodeId);
 
 #[derive(Component)]
-pub struct ShipVisual(pub usize);
-
-#[derive(Component)]
 pub struct SunLight;
-
-/// The engine-on mark behind vessel `.0`'s bell (a static flame, D073).
-#[derive(Component)]
-pub struct FlameVisual(pub usize);
 
 /// Vessel `.0`'s deployed parachute canopy (D073: a functional mark).
 #[derive(Component)]
@@ -37,9 +33,6 @@ pub struct CanopyVisual(pub usize);
 
 #[derive(Resource)]
 pub struct Assets3d {
-    ship_mesh: Handle<Mesh>,
-    flame_mesh: Handle<Mesh>,
-    flame_material: Handle<StandardMaterial>,
     canopy_mesh: Handle<Mesh>,
     canopy_material: Handle<StandardMaterial>,
 }
@@ -116,14 +109,6 @@ pub fn setup(
     commands.insert_resource(GlobalAmbientLight { brightness: 0.0, ..default() });
     commands.insert_resource(defs);
     commands.insert_resource(Assets3d {
-        ship_mesh: meshes.add(craft_mesh(&sim::craft::test_craft().mesh)),
-        flame_mesh: meshes.add(Cone { radius: FLAME_RADIUS, height: FLAME_LENGTH }),
-        flame_material: materials.add(StandardMaterial {
-            base_color: Color::srgb(1.0, 0.6, 0.2),
-            emissive: LinearRgba::rgb(40.0, 14.0, 3.0),
-            unlit: true,
-            ..default()
-        }),
         // A unit shallow cone, scaled per vessel by `canopy`.
         canopy_mesh: meshes.add(Cone { radius: 1.0, height: CANOPY_DEPTH }),
         canopy_material: materials.add(StandardMaterial {
@@ -133,14 +118,6 @@ pub fn setup(
             ..default()
         }),
     });
-}
-
-/// A Bevy mesh from a craft's render mesh (body axes, +Z the nose).
-fn craft_mesh(m: &sim::craft::RenderMesh) -> Mesh {
-    Mesh::new(bevy::mesh::PrimitiveTopology::TriangleList, bevy::asset::RenderAssetUsages::RENDER_WORLD)
-        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, m.positions.clone())
-        .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, m.normals.clone())
-        .with_inserted_indices(bevy::mesh::Indices::U32(m.indices.clone()))
 }
 
 /// Visual definitions of the bodies that have one, and which body lights
@@ -198,69 +175,16 @@ pub fn light_up(dir: Vec3) -> Vec3 {
     }
 }
 
-/// The flame mark: a cone this long and wide (m), starting this far behind
-/// the engine's mount point (the bell's throat) along the exhaust.
-const FLAME_LENGTH: f32 = 8.0;
-const FLAME_RADIUS: f32 = 0.7;
-const FLAME_START: f64 = 1.1;
-
 /// Whether vessel `i`'s engine is running now: a burn segment of its stored
-/// trajectory, or live flight with the throttle open (and propellant, or
-/// debug mode).
+/// trajectory, or live flight with an engine giving thrust at the pilot's
+/// throttle (`Vessel::engine_running`: propellant or debug mode; a craft of
+/// parts' running engines).
 pub fn engine_on(sim: &SimState, i: usize) -> bool {
     let v = &sim.fleet[i];
     if let Some(seg) = v.trajectory().and_then(|tr| tr.segment_at(sim.clock)) {
         return matches!(seg.kind, sim::vessel::SegmentKind::Burn(_));
     }
-    i == sim.active
-        && matches!(v.phase, sim::vessel::Phase::Powered { .. })
-        && sim.controls.throttle > 0.0
-        && (v.debug() || v.propellant() > 0.0)
-}
-
-/// Places the flame marks: shown behind the bell of every vessel whose
-/// engine runs, hidden otherwise.
-pub fn update_flames(
-    mut commands: Commands,
-    sim: Res<SimState>,
-    assets: Res<Assets3d>,
-    ships: Query<(&ShipVisual, &Transform), Without<FlameVisual>>,
-    mut flames: Query<(Entity, &FlameVisual, &mut Transform, &mut Visibility)>,
-) {
-    let mut seen = vec![false; sim.fleet.len()];
-    for (entity, flame, mut t, mut vis) in &mut flames {
-        let Some(vessel) = sim.fleet.get(flame.0) else {
-            commands.entity(entity).despawn();
-            continue;
-        };
-        seen[flame.0] = true;
-        let ship = ships.iter().find(|(s, _)| s.0 == flame.0).map(|(_, t)| *t);
-        let (Some(ship), true) = (ship, engine_on(&sim, flame.0)) else {
-            *vis = Visibility::Hidden;
-            continue;
-        };
-        let e = &vessel.craft.engine;
-        // The cone's axis is +Y with its apex up: point the apex down the exhaust.
-        let exhaust = -e.mount_dir;
-        let centre = e.mount_pos + exhaust * (FLAME_START + f64::from(FLAME_LENGTH) / 2.0);
-        let local = Transform {
-            translation: centre.as_vec3(),
-            rotation: Quat::from_rotation_arc(Vec3::Y, exhaust.as_vec3()),
-            scale: Vec3::ONE,
-        };
-        *t = ship * local;
-        *vis = Visibility::Visible;
-    }
-    for (i, _) in seen.iter().enumerate().filter(|(_, s)| !**s) {
-        commands.spawn((
-            FlameVisual(i),
-            Mesh3d(assets.flame_mesh.clone()),
-            MeshMaterial3d(assets.flame_material.clone()),
-            NotShadowCaster,
-            Transform::IDENTITY,
-            Visibility::Hidden,
-        ));
-    }
+    i == sim.active && matches!(v.phase, sim::vessel::Phase::Powered { .. }) && v.engine_running(&sim.controls)
 }
 
 /// Drag coefficient of a round canopy on its nominal area (Knacke,
@@ -300,7 +224,7 @@ pub fn update_canopies(
             continue;
         };
         seen[c.0] = true;
-        let ship = ships.iter().find(|(s, _)| s.0 == c.0).map(|(_, t)| *t);
+        let ship = ships.iter().find(|(s, _)| s.index == c.0).map(|(_, t)| *t);
         let live = matches!(vessel.phase, sim::vessel::Phase::Powered { .. });
         let (Some(ship), true) = (ship, live && vessel.chute.open()) else {
             *vis = Visibility::Hidden;
@@ -325,72 +249,6 @@ pub fn update_canopies(
             MeshMaterial3d(assets.canopy_material.clone()),
             Transform::IDENTITY,
             Visibility::Hidden,
-        ));
-    }
-}
-
-/// Ship base colours (sRGB) for other vessels and the active one.
-const SHIP_COLOR: [f32; 3] = [0.8, 0.8, 0.82];
-const ACTIVE_COLOR: [f32; 3] = [0.95, 0.85, 0.6];
-
-/// Places every ship and fills its light (`ship_light`: each star at the
-/// ship with its eclipses, near-field planetshine, D055).
-#[allow(clippy::too_many_arguments)]
-pub fn update_ships(
-    mut commands: Commands,
-    sim: Res<SimState>,
-    rig: Res<CameraRig>,
-    assets: Res<Assets3d>,
-    scene: Res<crate::lighting::LightScene>,
-    parts: Res<crate::look::Parts>,
-    mut materials: ResMut<Assets<ShipMaterial>>,
-    mut buffers: ResMut<Assets<ShaderBuffer>>,
-    mut ships: Query<(Entity, &ShipVisual, &mut Transform, &MeshMaterial3d<ShipMaterial>)>,
-) {
-    let snap = sim.world.snapshot(sim.clock);
-    let bodies = scene.spheres();
-    let star_dirs: Vec<DVec3> = scene.slots.iter().map(|&k| scene.stars[k].centre.normalize_or(DVec3::Z)).collect();
-    let mut seen = vec![false; sim.fleet.len()];
-    for (entity, ship, mut t, mat) in &mut ships {
-        let Some(vessel) = sim.fleet.get(ship.0) else {
-            commands.entity(entity).despawn();
-            continue;
-        };
-        seen[ship.0] = true;
-        let (anchor, r, _) = vessel.state_at(&sim.world, sim.clock);
-        let pos = snap.relative(anchor, rig.anchor).r + r - rig.cam_pos;
-        // The vessel's position is its centre of mass; the mesh is in the
-        // craft's body axes.
-        let q = vessel.attitude.q;
-        let origin = pos - q * vessel.mass_props().com;
-        *t = Transform { translation: origin.as_vec3(), rotation: q.as_quat(), scale: Vec3::ONE };
-        let mut light = crate::lighting::object_light(pos, &scene.stars, &scene.slots, &bodies);
-        if !parts.planetshine {
-            light.shines.clear();
-        }
-        let Some(m) = materials.get(&mat.0) else { continue };
-        if let Some(mut b) = buffers.get_mut(&m.extension.light) {
-            b.set_data(crate::ship_light::ship_light(&light, &star_dirs));
-        }
-        // The active ship's colour (changes only when the active one does).
-        let want: Color = Color::srgb_from_array(if ship.0 == sim.active { ACTIVE_COLOR } else { SHIP_COLOR });
-        if m.base.base_color != want {
-            if let Some(mut m) = materials.get_mut(&mat.0) {
-                m.base.base_color = want;
-            }
-        }
-    }
-    for (i, _) in seen.iter().enumerate().filter(|(_, s)| !**s) {
-        // Each ship has its own light buffer: its light depends on where it is.
-        let material = materials.add(ShipMaterial {
-            base: StandardMaterial { base_color: Color::srgb_from_array(SHIP_COLOR), ..default() },
-            extension: ShipExt { light: buffers.add(ShaderBuffer::from(ShipLight::default())) },
-        });
-        commands.spawn((
-            ShipVisual(i),
-            Mesh3d(assets.ship_mesh.clone()),
-            MeshMaterial3d(material),
-            Transform::IDENTITY,
         ));
     }
 }
