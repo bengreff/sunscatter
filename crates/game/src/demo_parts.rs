@@ -4,8 +4,8 @@
 //! tank selected; structural with the interstage; electrical with the
 //! capsule), then
 //! a scripted ascent through its sequence: ignition and liftoff (Space),
-//! full throttle with the attitude held directly along a gravity turn (as
-//! the main demo's magic hold), shots at max-Q, at MECO, at stage
+//! full throttle, a pitch kick and then SAS holding surface prograde (a
+//! gravity turn as a pilot flies it), shots at max-Q, at MECO, at stage
 //! separation, of the upper stage after its engine lights and of the
 //! booster after a switch to it. `SUNSCATTER_DEMO_STOP_AFTER=Pad` ends
 //! after the pad's shots. Every stage goes through `GameCommand::NextStage`,
@@ -20,7 +20,7 @@ use crate::state::SimState;
 use crate::systems_screen::{inspect::Selection, rules::Layer, SystemsScreen};
 use bevy::prelude::*;
 use glam::DVec3;
-use sim::vessel::{quat_z_to, Attitude, VesselId};
+use sim::vessel::{HoldMode, SpeedReference, VesselId};
 
 /// The pad's views: (shot, camera distance from the centre of mass (m),
 /// pitch (rad), yaw turned from the start (rad)).
@@ -39,11 +39,13 @@ const SYSTEMS_VIEWS: [(&str, Layer, Option<&str>); 4] = [
     ("parts_systems_structural", Layer::Structural, Some("s1.interstage")),
     ("parts_systems_electrical", Layer::Electrical, Some("dragon.capsule")),
 ];
-/// The turn: pitch from vertical (rad) grows as √(altitude / TURN_HEIGHT)
-/// up to TURN_MAX, from TURN_START metres up.
-const TURN_START: f64 = 500.0;
-const TURN_HEIGHT: f64 = 70_000.0;
-const TURN_MAX: f64 = 1.2;
+/// The gravity turn as a pilot flies it (RUNTIME's `falcon9_flight` test):
+/// SAS holds the attitude until KICK_AT seconds after liftoff, then a pitch
+/// kick of KICK (a share of the control authority) towards the east for
+/// KICK_FOR seconds, then SAS holds surface prograde.
+const KICK_AT: f64 = 10.0;
+const KICK_FOR: f64 = 2.5;
+const KICK: f64 = 0.04;
 /// MECO: the first stage's propellant down to this share (the booster's
 /// reserve), or this long after liftoff (Crew-2: T+2:36).
 const MECO_RESERVE: f64 = 0.08;
@@ -176,11 +178,7 @@ pub fn run(
         }
         Phase::Ignition => {}
         Phase::Ascent => {
-            let up = r.normalize();
-            let pitch = if alt < TURN_START { 0.0 } else { (TURN_MAX * (alt / TURN_HEIGHT).sqrt()).min(TURN_MAX) };
-            let dir = up * pitch.cos() + crate::demo_checks::horizontal(r, v) * pitch.sin();
-            let a = sim.active;
-            sim.fleet[a].set_attitude(Attitude { q: quat_z_to(dir.normalize()), omega: DVec3::ZERO });
+            fly_turn(&mut sim, since(&script), r, v);
             let snap = sim.world.snapshot(sim.clock);
             let q = sim::vessel::air_at(&sim.world, &snap, anchor, r, v)
                 .map_or(0.0, |a| 0.5 * a.rho * a.wind.length_squared());
@@ -258,6 +256,27 @@ pub fn run(
         }
         Phase::Booster(..) => {}
         Phase::Done => demo.next(Step::Done),
+    }
+}
+
+/// The ascent's controls at `t` seconds after liftoff ([`KICK_AT`]): the
+/// stack flies itself into a gravity turn with its angle of attack near
+/// zero. (Setting the attitude directly along a fixed turn, the main demo's
+/// magic hold, put it at 6–19° of α through max-Q and broke its Dragon
+/// ring: the loads were real for that flight.)
+fn fly_turn(sim: &mut SimState, t: f64, r: DVec3, v: DVec3) {
+    let q = sim.fleet[sim.active].attitude.q;
+    let c = &mut sim.controls;
+    c.rotate = DVec3::ZERO;
+    if t < KICK_AT {
+        (c.sas, c.hold) = (true, HoldMode::Stability);
+    } else if t < KICK_AT + KICK_FOR {
+        // Turning about up × east tips the nose east.
+        let axis = r.normalize().cross(crate::demo_checks::horizontal(r, v));
+        c.sas = false;
+        c.rotate = q.inverse() * axis.normalize_or_zero() * KICK;
+    } else {
+        (c.sas, c.hold, c.speed) = (true, HoldMode::Prograde, SpeedReference::Surface);
     }
 }
 
