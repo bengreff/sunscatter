@@ -40,11 +40,24 @@ impl Vessel {
         };
         let rot = world.source(body).and_then(|s| s.physical.as_ref()).expect("physical body").rotation;
         let propellant = self.propellant;
-        self.systems.advance(target, |e| {
+        let def = self.ship_def();
+        while let Some(e) = self.systems.next().filter(|e| e.seconds_since(target) <= 0.0) {
             let r = rot.to_inertial(fixed, e).raw();
             let q = (body_to_inertial(world, body, e) * att_fixed).normalize();
-            Vessel::systems_env(world, e, (body, r), q, propellant)
-        });
+            self.systems.step(&Vessel::systems_env(world, e, (body, r), q, propellant));
+            // A craft of parts' slow systems (its liquids warm on the pad).
+            let v = rot.omega(e).raw().cross(r);
+            let left = super::ship_tick::ship_lattice(
+                self.ship.as_mut(),
+                def.as_deref(),
+                world,
+                (e, (body, r, v), q),
+                Some(body),
+            );
+            if let Some(left) = left {
+                self.propellant = left;
+            }
+        }
     }
 }
 

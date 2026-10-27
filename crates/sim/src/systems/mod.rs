@@ -23,6 +23,7 @@
 pub mod command;
 pub mod data;
 pub mod mechanisms;
+pub mod plumbing;
 pub mod power;
 pub mod propulsion;
 pub mod runtime;

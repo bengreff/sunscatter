@@ -21,6 +21,7 @@
 //!   rated thrust; an engine that fails or stops first aborts the launch
 //!   (every engine shut down, the clamps kept).
 
+use super::plumbing::Feed;
 use crate::catalog::EngineData;
 use crate::craft::command::ShipCommand;
 use crate::craft::engine::{ShipThrust, P_SEA_LEVEL};
@@ -220,15 +221,51 @@ pub fn stop(def: &ShipDef, state: &mut ShipState, i: usize, why: Stop, at: Epoch
     state.runtime.event(at, format!("{}: {text}", def.engines[i].id), alarm);
 }
 
-/// Advances every engine over a tick (`env`): the transients, depletion,
-/// the run time; then the pad's armed release. Returns the effects the
-/// vessel acts on (the clamps' release).
-pub fn step(def: &ShipDef, state: &mut ShipState, env: &Env) -> Vec<Effect> {
+/// Advances every engine over a tick (`env`) with its tanks' conditions
+/// (`feeds`, `plumbing::feeds`): the transients, depletion, gas ingestion
+/// and cavitation, the run time; then the pad's armed release. Returns the
+/// effects the vessel acts on (the clamps' release).
+pub fn step(def: &ShipDef, state: &mut ShipState, env: &Env, feeds: &[Feed]) -> Vec<Effect> {
     state.runtime.refit(def);
     for i in 0..def.engines.len() {
+        if !env.debug && inlet_trouble(def, state, i, env, feeds) {
+            continue;
+        }
         step_engine(def, state, i, env);
     }
     release(def, state, env.at)
+}
+
+/// An engine starting or running on a tank whose outlet is not covered
+/// ingests gas; below its suction pressure it cavitates (D105 §6.2,
+/// falcon9.md §3.4–3.5): a start is aborted (the ignition spent, it may try
+/// again once settled), a running engine is cut by its controller (benign:
+/// restartable). Returns whether the engine stopped.
+fn inlet_trouble(def: &ShipDef, state: &mut ShipState, i: usize, env: &Env, feeds: &[Feed]) -> bool {
+    let d = &def.engines[i];
+    let status = state.engines[i].status;
+    if !matches!(status, EngineStatus::Starting | EngineStatus::Running) {
+        return false;
+    }
+    let level = state.runtime.engines[i].level;
+    let mut trouble = None;
+    for (list, need) in d.feeds.iter().zip([d.data.npsp_ox, d.data.npsp_fuel]) {
+        let Some(t) = first(list, state, false) else { continue };
+        let Some(f) = feeds.get(t) else { continue };
+        if !f.covered {
+            trouble = Some(format!("gas ingestion: {} not settled", def.tanks[t].id));
+        } else if need > 0.0 && f.npsp(level, d.data.pos) < need {
+            let npsp = f.npsp(level, d.data.pos) / 1e3;
+            trouble = Some(format!("cavitation: NPSP {npsp:.0} kPa from {} < {:.0} kPa", def.tanks[t].id, need / 1e3));
+        }
+        if trouble.is_some() {
+            break;
+        }
+    }
+    let Some(why) = trouble else { return false };
+    let stop_as = if status == EngineStatus::Starting { Stop::Abort(why) } else { Stop::Flameout(why) };
+    stop(def, state, i, stop_as, env.at);
+    true
 }
 
 fn step_engine(def: &ShipDef, state: &mut ShipState, i: usize, env: &Env) {

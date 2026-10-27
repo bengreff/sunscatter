@@ -39,8 +39,11 @@ pub(super) struct TickMotion {
     pub v1: DVec3,
     /// Angular velocity at the tick's start (inertial).
     pub omega0: DVec3,
-    /// Ambient pressure (Pa).
+    /// Ambient pressure (Pa), sunlight (W/m², body axes) and the air's
+    /// temperature (K, in an atmosphere).
     pub p: f64,
+    pub sun: DVec3,
+    pub air_k: Option<f64>,
     /// The air's loads over it (at its start's attitude) and the ground
     /// under it, for the joints (`ship_loads`).
     pub air: Option<super::aerothermal::AeroLoads>,
@@ -130,7 +133,10 @@ impl Vessel {
                 }
             }
             let (alpha, bodies) = (DVec3::ZERO, Some(loads.bodies()));
-            let env = sys::TickEnv { at, dt: TICK, p, throttle: controls.throttle, accel, omega, alpha, debug, bodies };
+            let sun = q.inverse() * crate::light::sunlight(world, &snap, anchor, r);
+            let air_k = super::aerothermal::air_at(world, &snap, anchor, r, v).map(|a| a.temperature);
+            let (throttle, com) = (controls.throttle, props.com);
+            let env = sys::TickEnv { at, dt: TICK, p, throttle, accel, omega, alpha, com, sun, air_k, debug, bodies };
             effects.extend(sys::tick(&def, state, &env, &out.draws, &[]));
             self.propellant = state.consumables(&def);
             self.advance_grounded(world, at.add_seconds(TICK));
@@ -139,6 +145,16 @@ impl Vessel {
                 self.wake(world);
                 return;
             }
+        }
+    }
+
+    /// After a coast: a craft of parts' contents are its ship state's (it
+    /// vents on the lattice; the segment carries the mass it started with),
+    /// any other craft's tanks follow the segment's mass.
+    pub(super) fn contents_after_coast(&mut self) {
+        match (self.ship_def(), self.ship.as_ref()) {
+            (Some(def), Some(ship)) => self.propellant = ship.consumables(&def),
+            _ => self.sync_ship_to_propellant(),
         }
     }
 
@@ -162,7 +178,7 @@ impl Vessel {
         let omega = self.attitude.body_rate();
         let alpha = (omega - q.inverse() * m.omega0) / m.dt;
         let rcs_kg = rcs.dot(tick.rcs_flow) * m.dt;
-        let (debug, p) = (self.debug, m.p);
+        let (debug, p, com) = (self.debug, m.p, self.mass_props().com);
         // The joints' loads: the engines as the tick flew them (the state at
         // its start), the air, the ground at its end.
         let loads = self.ship_parts().map(|(def, state)| {
@@ -176,8 +192,37 @@ impl Vessel {
             per_block[i] = rcs_kg * share;
         }
         let bodies = loads.as_ref().map(|g| g.bodies());
-        let env = sys::TickEnv { at, dt: m.dt, p, throttle, accel, omega, alpha, debug, bodies };
+        let (sun, air_k) = (m.sun, m.air_k);
+        let env = sys::TickEnv { at, dt: m.dt, p, throttle, accel, omega, alpha, com, sun, air_k, debug, bodies };
         let effects = sys::tick(&def, state, &env, &tick.draws, &per_block);
         (state.consumables(&def), effects)
     }
+}
+
+/// A craft of parts' slow systems at lattice epoch `e` (`systems::ship::
+/// lattice`: boil-off and venting, its liquids warming, settled or
+/// floating), at `(anchor, r, v)` with attitude `q`: standing on `grounded`
+/// the ground holds its liquids down (proper acceleration ω×(ω×r) − g);
+/// coasting they float. Returns the consumables left (kg), if a ship.
+pub(super) fn ship_lattice(
+    ship: Option<&mut crate::craft::state::ShipState>,
+    def: Option<&crate::craft::ship::ShipDef>,
+    world: &World,
+    (e, (anchor, r, v), q): (Epoch, (NodeId, DVec3, DVec3), glam::DQuat),
+    grounded: Option<NodeId>,
+) -> Option<f64> {
+    let (state, def) = (ship?, def?);
+    let snap = world.snapshot(e);
+    let sun = q.inverse() * crate::light::sunlight(world, &snap, anchor, r);
+    let air_k = super::aerothermal::air_at(world, &snap, anchor, r, v).map(|a| a.temperature);
+    let accel = match grounded {
+        Some(body) => {
+            let rot = world.source(body).and_then(|s| s.physical.as_ref()).expect("physical body").rotation;
+            let w = rot.omega(e).raw();
+            q.inverse() * (w.cross(w.cross(r)) - gravity(world, e, anchor, r, v))
+        }
+        None => DVec3::ZERO,
+    };
+    sys::lattice(def, state, e, &crate::systems::plumbing::Surroundings { sun, air_k }, accel);
+    Some(state.consumables(def))
 }

@@ -80,7 +80,10 @@ fn a_craft_of_parts_lifts_off_on_its_engines() {
     v.advance(&w, t0().add_seconds(5.0), &full(1.0), usize::MAX);
     let s = v.ship().unwrap();
     let (fuel, ox) = (start.tanks[0].liquid - s.tanks[0].liquid, start.tanks[1].liquid - s.tanks[1].liquid);
-    assert!(fuel > 0.0 && (ox / fuel - 2.4).abs() < 1e-9, "by the mixture ratio: {ox} / {fuel}");
+    // By the mixture ratio, but for the LOX vapour its ullage vents: loaded
+    // at 3 bar of helium over LOX at 90 K (1 bar of vapour), the tank sits
+    // over its 3 bar relief pressure (`systems::plumbing`).
+    assert!(fuel > 0.0 && (ox / fuel - 2.4).abs() < 0.01, "by the mixture ratio: {ox} / {fuel}");
     // Four engines' flow at full throttle for the ticks since ignition, less
     // half the 1 s start (the smooth step's mean) and its first tick.
     let mdot = 4.0 * 100.0e3 / (320.0 * G0);

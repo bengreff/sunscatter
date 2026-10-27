@@ -7,7 +7,7 @@
 //! ([`super::propulsion::output`]); this step takes the state to the tick's
 //! end. Pure: the vessel gathers [`TickEnv`] and acts on the effects.
 
-use super::propulsion;
+use super::{plumbing, propulsion};
 use crate::catalog::Propellant;
 use crate::craft::ship::{Feed, ShipDef};
 use crate::craft::state::{Effect, ShipState};
@@ -30,6 +30,12 @@ pub struct TickEnv<'a> {
     pub accel: DVec3,
     pub omega: DVec3,
     pub alpha: DVec3,
+    /// The centre of mass (body axes).
+    pub com: DVec3,
+    /// Sunlight at the vessel (W/m², along the light, body axes) and the
+    /// air's temperature, if in an atmosphere (K).
+    pub sun: DVec3,
+    pub air_k: Option<f64>,
     /// Debug mode (D064).
     pub debug: bool,
     /// The parts and the forces on them over the tick, for the joints
@@ -42,6 +48,7 @@ pub struct TickEnv<'a> {
 /// thruster block fired. Returns the effects the vessel acts on.
 pub fn tick(def: &ShipDef, state: &mut ShipState, env: &TickEnv, draws: &[f64], rcs: &[f64]) -> Vec<Effect> {
     state.runtime.refit(def);
+    let before = plumbing::ullages(def, state);
     if !env.debug {
         for (s, d) in state.tanks.iter_mut().zip(draws) {
             s.liquid = (s.liquid - d * env.dt).max(0.0);
@@ -53,8 +60,17 @@ pub fn tick(def: &ShipDef, state: &mut ShipState, env: &TickEnv, draws: &[f64], 
     super::mechanisms::step(def, state, env.dt);
     let r = &mut state.runtime;
     (r.accel, r.omega, r.alpha) = (env.accel, env.omega, env.alpha);
+    let a = plumbing::accels(def, state, env.com, env.accel, env.omega, env.alpha);
+    plumbing::fast(def, state, &before, &a, env.dt);
+    // The slow part covers the time since it last stepped (the lattice's,
+    // before the vessel went live), else the tick.
+    let end = env.at.add_seconds(env.dt);
+    let since = state.runtime.stepped.map_or(env.dt, |s| end.seconds_since(s).max(0.0));
+    plumbing::slow(def, state, &plumbing::Surroundings { sun: env.sun, air_k: env.air_k }, since);
+    state.runtime.stepped = Some(end);
+    let feeds = plumbing::feeds(def, state, &a);
     let penv = propulsion::Env { at: env.at, dt: env.dt, throttle: env.throttle, debug: env.debug };
-    let mut effects = propulsion::step(def, state, &penv);
+    let mut effects = propulsion::step(def, state, &penv, &feeds);
     if let Some(b) = &env.bodies {
         let m = super::structure::Motion { com: DVec3::ZERO, accel: env.accel, omega: env.omega, alpha: env.alpha };
         effects.extend(super::structure::step(def, state, b, &m, env.at, env.debug));
@@ -105,4 +121,25 @@ pub fn block_fed(feed: &Feed, state: &ShipState) -> bool {
 /// in its tail-off, a mechanism moving, the clamps' release armed.
 pub fn busy(state: &ShipState) -> bool {
     propulsion::active(state) || super::mechanisms::moving(state) || state.runtime.release_armed
+}
+
+/// The ship's slow systems on the lattice (coasting or standing): the
+/// plumbing's heat, relief and boil-off, the bottles' and ullages' heat
+/// exchange, the liquids' moving or dispersing in free fall, from where
+/// they last stepped to `at`, under the proper acceleration `accel` (body
+/// axes). Returns the mass vented overboard (kg).
+pub fn lattice(def: &ShipDef, state: &mut ShipState, at: Epoch, env: &plumbing::Surroundings, accel: DVec3) -> f64 {
+    state.runtime.refit(def);
+    let dt = state.runtime.stepped.map_or(0.0, |s| at.seconds_since(s));
+    if state.runtime.stepped.is_none() || dt > 0.0 {
+        state.runtime.stepped = Some(at);
+    }
+    if dt <= 0.0 {
+        return 0.0;
+    }
+    let before = plumbing::ullages(def, state);
+    let a = plumbing::accels(def, state, DVec3::ZERO, accel, DVec3::ZERO, DVec3::ZERO);
+    let vented = plumbing::slow(def, state, env, dt);
+    plumbing::fast(def, state, &before, &a, dt);
+    vented
 }

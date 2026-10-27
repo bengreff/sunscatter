@@ -358,20 +358,34 @@ impl ShipState {
             .sum()
     }
 
+    /// The pressurant in the tanks' ullages (kg): the gas the bottles let
+    /// in stays aboard until it is vented (`sim::systems::plumbing`).
+    pub fn ullage_gas(&self, def: &ShipDef) -> f64 {
+        (self.tanks.iter().zip(&def.tanks))
+            .map(|(s, t)| s.ullage_moles * fluids().gas(&t.load.pressurant).map_or(0.0, |g| g.molar_mass))
+            .sum()
+    }
+
     /// Everything the vessel carries that it can spend (kg): what its
-    /// `propellant` is.
+    /// `propellant` is (the liquids, the bottles' gas and the ullages').
     pub fn consumables(&self, def: &ShipDef) -> f64 {
-        self.liquid() + self.gas(def)
+        self.liquid() + self.gas(def) + self.ullage_gas(def)
     }
 
     /// Each tank's region, capacity and liquid, and each bottle's gas at its
     /// place: what `MassModel::with_contents` takes.
     pub fn contents(&self, def: &ShipDef) -> Contents {
         let slugs = self.tanks.iter().zip(&def.tanks).map(|(s, t)| (t.region, t.capacity, s.liquid)).collect();
-        let points = (self.bottles.iter().zip(&def.bottles))
-            .map(|(s, b)| (b.pos, s.moles * fluids().gas(&b.gas).map_or(0.0, |g| g.molar_mass)))
-            .collect();
-        (slugs, points)
+        let bottles = (self.bottles.iter().zip(&def.bottles))
+            .map(|(s, b)| (b.pos, s.moles * fluids().gas(&b.gas).map_or(0.0, |g| g.molar_mass)));
+        // An ullage's gas at the top of its tank's liquid region.
+        let ullages = (self.tanks.iter().zip(&def.tanks)).map(|(s, t)| {
+            (
+                t.region.base + t.region.axis,
+                s.ullage_moles * fluids().gas(&t.load.pressurant).map_or(0.0, |g| g.molar_mass),
+            )
+        });
+        (slugs, bottles.chain(ullages).collect())
     }
 
     /// Scales every tank's liquid and bottle's gas so the consumables total
@@ -388,6 +402,9 @@ impl ShipState {
         }
         for b in &mut self.bottles {
             b.moles *= f;
+        }
+        for t in &mut self.tanks {
+            t.ullage_moles *= f;
         }
     }
 

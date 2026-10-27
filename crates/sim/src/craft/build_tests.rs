@@ -235,6 +235,11 @@ fn mass_properties_of_a_draining_multi_tank_craft() {
         }
         let gas = state.gas(&ship);
         bodies.push(MassProps { mass: gas, com: ship.bottles[0].pos, inertia: DMat3::ZERO });
+        // Each ullage's pressurant at the top of its tank's liquid region.
+        for (t, s) in ship.tanks.iter().zip(&state.tanks) {
+            let mass = s.ullage_moles * crate::fluids::fluids().gas(&t.load.pressurant).unwrap().molar_mass;
+            bodies.push(MassProps { mass, com: t.region.base + t.region.axis, inertia: DMat3::ZERO });
+        }
         let mass: f64 = bodies.iter().map(|b| b.mass).sum();
         let com = bodies.iter().map(|b| b.com * b.mass).sum::<DVec3>() / mass;
         let inertia = bodies.iter().fold(DMat3::ZERO, |i, b| i + b.inertia + parallel_axis(b.mass, b.com - com));

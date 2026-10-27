@@ -118,6 +118,10 @@ pub struct Runtime {
     /// drawn with (D105 §6.3).
     pub seed: u64,
     pub launch: Option<Epoch>,
+    /// Where the slow systems (the plumbing's heat, relief and boil-off)
+    /// last stepped to.
+    #[serde(default)]
+    pub stepped: Option<Epoch>,
     pub events: Vec<Event>,
     /// Whether the plumbing regulates the tanks' pressures (its regulator
     /// sets it when it runs). Until it does, the structure takes each tank's

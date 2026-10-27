@@ -306,6 +306,7 @@ impl Vessel {
         let heat = |law: &BurnLaw| engine.heat(law.thrust, engine.mdot_max() * law.thrust / engine.thrust_vac);
         self.thermal.record_burns(&trajectory.segments, reach, heat);
         let propellant_at = |e: Epoch| (trajectory.mass_at(e).unwrap_or(mass_now) - dry).max(0.0);
+        let ship_def = self.craft.design().ship.clone();
         let mut t = self.time;
         let mut stopped = false;
         let mut settled = None;
@@ -332,8 +333,10 @@ impl Vessel {
                     break;
                 }
                 t = e;
-                let (anchor, r, _) = trajectory.eval(e).expect("the lattice epoch is in the trajectory");
+                let (anchor, r, v) = trajectory.eval(e).expect("the lattice epoch is in the trajectory");
                 self.systems.step(&Vessel::systems_env(world, e, (anchor, r), self.attitude.q, propellant_at(e)));
+                let at = (e, (anchor, r, v), self.attitude.q);
+                super::ship_tick::ship_lattice(self.ship.as_mut(), ship_def.as_deref(), world, at, None);
                 budget.charge(SYSTEMS_UNITS);
                 continue;
             }
@@ -399,7 +402,7 @@ impl Vessel {
         let last = trajectory.last();
         let near_surface = matches!(last.end, Some(SegmentEnd { kind: EndKind::Surface { .. }, .. })) && at_end;
         self.time = reach;
-        self.sync_ship_to_propellant();
+        self.contents_after_coast();
         if !stopped && settled.is_none() && (entry.is_some() || near_surface) {
             // In an atmosphere or close to a surface: flown in live ticks.
             self.thermal_to_now(world);
