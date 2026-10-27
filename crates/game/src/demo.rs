@@ -99,11 +99,11 @@ pub struct Demo {
     perf: PerfSample,
     capture: Option<Capture>,
     /// A benchmark was started and its results are pending.
-    benching: bool,
+    pub(crate) benching: bool,
     /// End the demo after this step (`SUNSCATTER_DEMO_STOP_AFTER`, e.g. `Pad`).
     stop_after: Option<String>,
-    /// Run the graphics benchmark (off with `SUNSCATTER_DEMO_NO_BENCH`).
-    bench: bool,
+    /// Run the look's benchmark (off with `SUNSCATTER_DEMO_NO_BENCH`).
+    pub(crate) bench: bool,
 }
 
 /// Frame statistics for one warp level of the performance stage.

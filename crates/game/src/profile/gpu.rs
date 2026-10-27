@@ -1,7 +1,10 @@
 //! GPU time per render pass group, from timestamp queries written between
-//! Bevy's passes (on Metal only between passes: wgpu offers timestamps on
-//! command encoders, `TIMESTAMP_QUERY_INSIDE_ENCODERS`, not inside passes,
-//! so Bevy's own pass diagnostics give CPU times only there).
+//! Bevy's passes, on adapters whose timestamps are ordered with the work
+//! (Vulkan, DX12: `TIMESTAMP_QUERY_INSIDE_PASSES`). Not on Metal: wgpu
+//! offers timestamps there between passes only by sampling a dummy blit
+//! encoder's boundary, which Apple's GPUs run alongside the render passes,
+//! so the times were meaningless (2026-10-26: 2.8 ms reported in 38 ms
+//! frames). There, the benchmark (`bench`) gives each part's cost.
 //!
 //! Markers, in submission order: the frame's start (before the cameras),
 //! then in the 3D camera's schedule before the opaque pass, after it, after
@@ -222,14 +225,17 @@ fn set_of(world: &World, schedule: impl ScheduleLabel, suffix: &str) -> Option<I
         .and_then(|(_, sys, _)| sys.default_system_sets().first().copied())
 }
 
-/// Installs the markers in the render app, if the adapter supports
-/// timestamps between passes; `sink` stays `None` otherwise.
+/// Installs the markers in the render app, if the adapter's timestamps
+/// are ordered with the work (see the module's doc); `sink` stays `None`
+/// otherwise.
 pub fn install(app: &mut App, sink: GpuSink) {
     let Some(render_app) = app.get_sub_app_mut(RenderApp) else { return };
-    let need = wgpu::Features::TIMESTAMP_QUERY | wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS;
+    let need = wgpu::Features::TIMESTAMP_QUERY
+        | wgpu::Features::TIMESTAMP_QUERY_INSIDE_ENCODERS
+        | wgpu::Features::TIMESTAMP_QUERY_INSIDE_PASSES;
     let device = render_app.world().resource::<RenderDevice>().clone();
     if !device.features().contains(need) {
-        warn!("profile: the adapter has no timestamp queries between passes; GPU times are not measured");
+        info!("profile: GPU times per pass are not measured on this adapter (see profile::gpu); the benchmark gives each part's cost");
         return;
     }
     if let Ok(mut g) = sink.0.lock() {

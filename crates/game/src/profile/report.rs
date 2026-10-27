@@ -237,7 +237,10 @@ pub fn format(w: &Window) -> String {
             let _ = writeln!(out, "GPU {total:.2} ms: {}", parts.join(" | "));
         }
         None => {
-            let _ = writeln!(out, "GPU: no timestamp queries on this adapter");
+            let _ = writeln!(
+                out,
+                "GPU: not measured per pass on this adapter (Metal); when GPU-bound the render thread waits for it (submit, camera_driver); the benchmark (bench_*.md) gives each part's cost"
+            );
         }
     }
     let c = &w.counts;
@@ -417,6 +420,6 @@ mod tests {
         assert!(s.iter().any(|(k, v)| k == "  OPAQUE" && v == "20.00 ms"), "{s:?}");
         assert!(s.iter().any(|(k, _)| k == "  terrain::lod::update"), "{s:?}");
         let none = Window { gpu: None, ..w };
-        assert!(format(&none).contains("GPU: no timestamp queries"));
+        assert!(format(&none).contains("GPU: not measured per pass"));
     }
 }

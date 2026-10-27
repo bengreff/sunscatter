@@ -6,8 +6,9 @@
 //! camera looking down past it so Earth fills the screen. A second vessel
 //! is spawned there and made active for [`PLUNGE_SECONDS`] at 1×, with a
 //! screenshot and the frame times (and, with `SUNSCATTER_PROFILE=1`, a
-//! profile labelled `plunge`); then the orbiting ship is active again and
-//! the plunging one deleted. `SUNSCATTER_DEMO_ONLY=Plunge` measures the pad
+//! profile labelled `plunge`), then, with the clock held, the look's
+//! benchmark there (`bench_plunge.md`: what each part costs in this view);
+//! then the orbiting ship is active again and the plunging one deleted. `SUNSCATTER_DEMO_ONLY=Plunge` measures the pad
 //! first (looking up past the ship, the owner's 120 fps view), then this
 //! view, and ends the demo.
 
@@ -55,6 +56,8 @@ pub struct Plunge {
     back: Option<(sim::vessel::VesselId, sim::vessel::VesselId)>,
     /// `SUNSCATTER_DEMO_ONLY=Plunge`: the pad was measured first.
     pad_done: bool,
+    /// The benchmark ran in this view.
+    benched: bool,
     frames: u32,
     real: f64,
     worst: f64,
@@ -70,6 +73,7 @@ pub fn run(
     mut pause: ResMut<SimPause>,
     mut iface: ResMut<InterfaceSettings>,
     mut profile: ResMut<crate::profile::Profile>,
+    mut bench: ResMut<crate::bench::Bench>,
     mut cmds: MessageWriter<GameCommand>,
     mut commands: Commands,
     mut state: Local<Plunge>,
@@ -109,7 +113,7 @@ pub fn run(
         sim.fleet.push(vessel);
         cmds.write(GameCommand::Switch(id));
         state.back = Some((ship, id));
-        (state.frames, state.real, state.worst) = (0, 0.0, 0.0);
+        (state.frames, state.real, state.worst, state.benched) = (0, 0.0, 0.0, false);
         sim.warp = 0;
         pause.0 = false;
         iface.menus.show_only(None, &[]);
@@ -127,20 +131,32 @@ pub fn run(
         demo.shot_taken = true;
         demo.shot(&mut commands, "plunge");
     }
-    state.frames += 1;
-    state.real += dt;
-    state.worst = state.worst.max(dt);
-    if demo.timer < PLUNGE_SETTLE + PLUNGE_SECONDS {
+    if !state.benched {
+        state.frames += 1;
+        state.real += dt;
+        state.worst = state.worst.max(dt);
+        if demo.timer < PLUNGE_SETTLE + PLUNGE_SECONDS {
+            return;
+        }
+        let (_, r, _) = sim.ship().state(&sim.world);
+        info!(
+            "demo perf: plunge (185 km, falling, Earth filling the view): {:.0} fps avg, worst frame {:.1} ms, now {:.0} km up",
+            f64::from(state.frames) / state.real,
+            state.worst * 1e3,
+            (r.length() - re) / 1e3
+        );
+        profile.cut();
+        state.benched = true;
+        if demo.bench {
+            // The clock is held while it runs (`demo::run`): the view stays put.
+            bench.start("plunge");
+            demo.benching = true;
+            return;
+        }
+    }
+    if demo.benching {
         return;
     }
-    let (_, r, _) = sim.ship().state(&sim.world);
-    info!(
-        "demo perf: plunge (185 km, falling, Earth filling the view): {:.0} fps avg, worst frame {:.1} ms, now {:.0} km up",
-        f64::from(state.frames) / state.real,
-        state.worst * 1e3,
-        (r.length() - re) / 1e3
-    );
-    profile.cut();
     let (ship, plunging) = state.back.take().expect("started");
     cmds.write(GameCommand::Switch(ship));
     cmds.write(GameCommand::Delete(plunging));
