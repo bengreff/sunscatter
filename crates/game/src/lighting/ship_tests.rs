@@ -3,7 +3,7 @@
 //! fraction of the sunlight and bluish only on the sides away from the Sun.
 
 use super::color::{reflector_tint, star_tint};
-use super::rules::{disc_irradiance, luminous_power, object_light, star_slots, Sphere, Star};
+use super::rules::{luminous_power, object_light, star_slots, Sphere, Star};
 use crate::state::SimState;
 use glam::DVec3;
 
@@ -48,13 +48,13 @@ fn scene(
 /// planetshine).
 fn faces(stars: &[Star], bodies: &[Sphere], n: DVec3, to_sun: DVec3) -> ([f64; 3], [f64; 3]) {
     let slots = star_slots(stars, DVec3::ZERO);
-    let o = object_light(DVec3::ZERO, stars, &slots, bodies);
+    let o = object_light(DVec3::ZERO, stars, &slots, bodies, &[]);
     let sun = stars[slots[0]].lux_at(DVec3::ZERO) * o.scale[0] * n.dot(to_sun).max(0.0);
     let mut shine = [0.0; 3];
     for s in &o.shines {
-        let e = disc_irradiance(n.dot(s.dir), s.sin2);
+        let e = s.irradiance(n);
         for k in 0..3 {
-            shine[k] += s.radiance[k] * e;
+            shine[k] += e[k];
         }
     }
     ([sun; 3], shine)

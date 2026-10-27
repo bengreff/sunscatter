@@ -12,6 +12,7 @@
 pub mod color;
 pub mod haze;
 pub mod rules;
+pub mod shadows;
 #[cfg(test)]
 mod ship_tests;
 #[cfg(test)]
@@ -50,6 +51,9 @@ pub struct LightScene {
     pub stars: Vec<Star>,
     pub slots: Vec<usize>,
     pub bodies: Vec<(NodeId, Sphere)>,
+    /// The bodies with an atmosphere: the index of its data in
+    /// `BodyDefs::defs`, the body's centre and mean radius.
+    pub airs: Vec<(usize, DVec3, f64)>,
 }
 
 impl LightScene {
@@ -68,6 +72,15 @@ impl LightScene {
     pub fn body(&self, node: NodeId) -> Option<BodyLight> {
         let i = self.index(node)?;
         Some(body_light(i, &self.spheres(), &self.stars, &self.slots))
+    }
+
+    /// The atmospheres with their data ([`haze::Air`]).
+    pub fn airs<'a>(&self, defs: &'a BodyDefs) -> Vec<haze::Air<'a>> {
+        (self.airs.iter())
+            .filter_map(|&(i, centre, radius)| {
+                Some(haze::Air { centre, radius, def: defs.defs.get(i)?.1.atmosphere.as_ref()? })
+            })
+            .collect()
     }
 
     /// The total stellar flux at the camera (lux, no eclipses: D087).
@@ -117,6 +130,13 @@ pub fn update_scene(sim: Res<SimState>, rig: Res<CameraRig>, defs: Res<BodyDefs>
             (*n, sphere)
         })
         .collect();
+    scene.airs = (defs.defs.iter().enumerate())
+        .filter(|(_, (_, d))| d.atmosphere.is_some())
+        .filter_map(|(i, (n, _))| {
+            let p = sim.world.source(*n)?.physical.as_ref()?;
+            Some((i, rel(*n), (2.0 * p.radius_eq + p.radius_polar) / 3.0))
+        })
+        .collect();
 }
 
 /// The Lambert albedo a body reflects other bodies' light with
@@ -137,7 +157,11 @@ pub struct StarLight(pub usize);
 /// without a star this frame gives none.
 pub fn update_lights(
     scene: Res<LightScene>,
-    mut lights: Query<(&StarLight, &mut Transform, &mut DirectionalLight, &mut bevy::light::SunDisk)>,
+    mut lights: Query<
+        (&StarLight, &mut Transform, &mut DirectionalLight, &mut bevy::light::SunDisk),
+        Without<shadows::CraftShadowLight>,
+    >,
+    mut craft_shadow: Query<&mut Transform, With<shadows::CraftShadowLight>>,
 ) {
     for (slot, mut t, mut l, mut disc) in &mut lights {
         let Some(s) = scene.slots.get(slot.0).map(|&k| scene.stars[k]) else {
@@ -152,6 +176,12 @@ pub fn update_lights(
         l.color = Color::linear_rgb(r, g, b);
         disc.angular_size = (2.0 * (s.radius / s.centre.length().max(s.radius)).asin()) as f32;
         disc.intensity = 1.0;
+        // The craft's shadows are cast along the brightest star's light.
+        if slot.0 == 0 {
+            for mut c in &mut craft_shadow {
+                *c = *t;
+            }
+        }
     }
 }
 
@@ -277,6 +307,12 @@ pub struct LightingPlugin;
 impl Plugin for LightingPlugin {
     fn build(&self, app: &mut App) {
         bevy::shader::load_shader_library!(app, "light.wgsl");
-        app.init_resource::<LightScene>();
+        app.init_resource::<LightScene>().init_resource::<shadows::CraftGroups>();
+        app.add_systems(
+            PostUpdate,
+            shadows::fit_cascades
+                .after(bevy::light::SimulationLightSystems::UpdateDirectionalLightCascades)
+                .before(bevy::light::SimulationLightSystems::UpdateLightFrusta),
+        );
     }
 }

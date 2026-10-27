@@ -106,6 +106,7 @@ pub fn setup(
             Transform::IDENTITY,
         ));
     }
+    crate::lighting::shadows::spawn_light(&mut commands);
     commands.insert_resource(GlobalAmbientLight { brightness: 0.0, ..default() });
     commands.insert_resource(defs);
     commands.insert_resource(Assets3d {

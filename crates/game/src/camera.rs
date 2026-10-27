@@ -123,10 +123,13 @@ pub fn setup(
         // Physical light units: sunlight ~128,000 lux, sunny-16 exposure.
         bevy::camera::Hdr,
         bevy::camera::Exposure { ev100: EV100 },
+        // The craft layer too, so the craft shadow light's cascades are
+        // drawn for this view (`lighting::shadows`).
+        bevy::camera::visibility::RenderLayers::from_layers(&[0, crate::lighting::shadows::CRAFT_LAYER]),
         Transform::IDENTITY,
     ));
-    // The interface draws over this camera's view (main.rs turns off
-    // bevy_egui's automatic choice); a body tour shoots without it.
+    // The interface draws over this camera's view (`tour::install` turns
+    // off bevy_egui's automatic choice); a body tour shoots without it.
     if tour.is_none() {
         cam.insert(bevy_egui::PrimaryEguiContext);
     }

@@ -12,6 +12,7 @@ use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::prelude::*;
 use bevy::render::render_resource::{AsBindGroup, ShaderType};
 use bevy::shader::ShaderRef;
+use glam::DVec3;
 use serde::Deserialize;
 use sim::frame::NodeId;
 
@@ -182,11 +183,18 @@ pub(super) fn daylight_of(sim: &SimState, rig: &CameraRig, defs: &BodyDefs) -> (
             let p = sim.world.source(*node)?.physical.as_ref()?;
             let to_cam = rig.cam_pos - snap.relative_r(*node, rig.anchor);
             let alt = to_cam.length() - p.radius_eq;
-            let thickness = (a.rayleigh_scale_height_m as f64).max(1.0);
-            let air = (-alt.max(0.0) / thickness).exp();
-            let sin_elev = to_cam.normalize().dot(sun_pos.normalize());
-            let sun_up = ((sin_elev + 0.1) / 0.15).clamp(0.0, 1.0);
-            Some(((air.min(1.0) * sun_up) as f32, *node))
+            Some((daylight_from(to_cam, alt, f64::from(a.rayleigh_scale_height_m), sun_pos), *node))
         })
         .fold((0.0, None), |best, (v, n)| if v > best.0 { (v, Some(n)) } else { best })
+}
+
+/// The daylight sky stand-in (0..1) at a point `up` from a body's centre,
+/// `alt` above it, in air of Rayleigh scale height `scale_h`, with the
+/// star towards `to_sun`: the air's density there times how far the star
+/// is up (fading in from 6° below the horizon to 3° above).
+pub(crate) fn daylight_from(up: DVec3, alt: f64, scale_h: f64, to_sun: DVec3) -> f32 {
+    let air = (-alt.max(0.0) / scale_h.max(1.0)).exp();
+    let sin_elev = up.normalize_or_zero().dot(to_sun.normalize_or_zero());
+    let sun_up = ((sin_elev + 0.1) / 0.15).clamp(0.0, 1.0);
+    (air.min(1.0) * sun_up) as f32
 }

@@ -88,7 +88,7 @@ pub fn apply(
     parts: Res<Parts>,
     mut commands: Commands,
     cams: Query<Entity, With<crate::camera::MainCamera>>,
-    mut lights: Query<(&mut DirectionalLight, &crate::lighting::StarLight)>,
+    mut lights: Query<(&mut DirectionalLight, Option<&crate::lighting::StarLight>)>,
     mut done: Local<bool>,
 ) {
     if *done && !parts.is_changed() {
@@ -98,9 +98,10 @@ pub fn apply(
     for cam in &cams {
         commands.entity(cam).insert(if parts.msaa { Msaa::Sample2 } else { Msaa::Off });
     }
-    // Shadow maps (ships, nearby ground) from the brightest star only.
+    // Shadow maps from the brightest star only: its light's (the nearby
+    // ground) and the craft shadow light's (craft, `lighting::shadows`).
     for (mut l, slot) in &mut lights {
-        l.shadow_maps_enabled = parts.shadows && slot.0 == 0;
+        l.shadow_maps_enabled = parts.shadows && slot.is_none_or(|s| s.0 == 0);
     }
 }
 

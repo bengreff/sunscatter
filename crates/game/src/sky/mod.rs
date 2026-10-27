@@ -52,6 +52,20 @@ pub fn sky_ambient(sim: &SimState, rig: &CameraRig, defs: &BodyDefs) -> (f32, Op
     (day * SKY_AMBIENT, body)
 }
 
+/// The sky's light around a craft at `at` (camera-relative; Bevy's
+/// ambient units, a radiance): starlight, plus the daylight sky stand-in of
+/// the air the craft is in (D110: its own air, never the camera's).
+pub fn sky_radiance_at(at: glam::DVec3, scene: &crate::lighting::LightScene, defs: &BodyDefs) -> f32 {
+    let Some(sun) = scene.slots.first().map(|&k| scene.stars[k].centre) else { return NIGHT_AMBIENT };
+    let day = (scene.airs(defs).iter())
+        .map(|a| {
+            let up = at - a.centre;
+            stars::daylight_from(up, up.length() - a.radius, f64::from(a.def.rayleigh_scale_height_m), sun - at)
+        })
+        .fold(0.0, f32::max);
+    NIGHT_AMBIENT + day * SKY_AMBIENT
+}
+
 /// The share of the global ambient light a body's surface receives. The
 /// sky stand-in is the sky around the camera, so only the body whose air
 /// that is gets it; every other body (the Moon seen from the pad) gets

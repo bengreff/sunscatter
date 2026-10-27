@@ -1,10 +1,15 @@
-// Ships (ship_light.rs): Bevy's standard material, lit like the terrain
-// (D055): each Bevy directional light (one per slotted star, carrying its
-// flux at the camera) rescaled by the share the ship receives (its flux
-// here, its eclipses), Bevy's ambient term, planetshine from each
-// reflector as a lit disc (right in the near field: a ship in low orbit is
-// lit by the Earth below it on every side that sees it), and the
-// starlight without a light slot.
+// Ships (ship_light.rs): Bevy's standard material, each craft lit as one
+// at its own position (D110): each Bevy directional light (one per slotted
+// star, carrying its flux at the camera) rescaled by the share the craft
+// receives (its flux here, its eclipses) and filtered by the air on the
+// craft's line to the star (this shader is built without Bevy's
+// per-fragment atmosphere: ShipExt::specialize), planetshine from the
+// patches of each reflector the craft sees (lighting::rules::
+// shine_patches), the sky
+// light of the craft's own air, and the starlight without a light slot.
+// The brightest star's shadow comes from the craft's own cascade of the
+// craft shadow light (lighting::shadows: fitted to the craft, so it does
+// not change with the camera), never from the camera-fitted cascades.
 #import bevy_pbr::{
     pbr_fragment::pbr_input_from_standard_material,
     pbr_functions::{alpha_discard, main_pass_post_lighting_processing},
@@ -14,7 +19,6 @@
     shadows,
     mesh_types,
     mesh_view_types,
-    ambient::ambient_light,
     mesh_view_bindings::{view, lights},
 }
 #ifdef PREPASS_PIPELINE
@@ -26,37 +30,44 @@
 const PI: f32 = 3.14159265;
 const MAX_STARS: i32 = 4;
 const MAX_SHINES: i32 = 2;
+const SHINE_PATCHES: i32 = 32;
 
 // ship_light::ShipLight.
 struct ShipLight {
     // Per slot: xyz the direction to its star, w the share of its light here.
     stars: array<vec4<f32>, 4>,
-    // Per reflector: xyz the direction to its lit disc, w sin² of its angular radius.
-    shine_dir: array<vec4<f32>, 2>,
-    // rgb its mean radiance (lux/sr); w 0 when there is none.
-    shine_radiance: array<vec4<f32>, 2>,
-    // x: starlight without a slot (lux, sphere-averaged).
+    // Per slot: rgb the air's transmittance on the craft's line to the star.
+    star_air: array<vec4<f32>, 4>,
+    // Planetshine: per reflector, its patches (xyz the direction scaled by
+    // the irradiance a face turned to it takes).
+    shine: array<vec4<f32>, 64>,
+    // Per reflector: rgb its light's colour; w 0 when there is none.
+    shine_tint: array<vec4<f32>, 2>,
+    // x: starlight without a slot (lux, sphere-averaged); y: the sky's
+    // radiance around the craft; z: the craft's cascade of the craft shadow
+    // light (-1: none).
     ambient: vec4<f32>,
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(100) var<storage, read> ship: ShipLight;
 
-// Irradiance per unit radiance from a uniformly bright disc of angular
-// radius asin(√sin2) at an angle of cosine cos_n from the normal, the part
-// below the horizon cut off (lighting::rules::disc_irradiance, mirrored).
-fn disc_irradiance(cos_n: f32, sin2: f32) -> f32 {
-    let c = clamp(cos_n, -1.0, 1.0);
-    if sin2 <= 0.0 {
-        return 0.0;
+// The planetshine irradiance on a surface of normal n: each patch of each
+// reflector by the cosine law (lighting::rules::ShinePatches::irradiance,
+// mirrored).
+fn shine_irradiance(n: vec3<f32>) -> vec3<f32> {
+    var e = vec3(0.0);
+    for (var m = 0; m < MAX_SHINES; m++) {
+        let tint = ship.shine_tint[m];
+        if tint.w <= 0.0 {
+            continue;
+        }
+        var sum = 0.0;
+        for (var p = 0; p < SHINE_PATCHES; p++) {
+            sum += max(dot(n, ship.shine[m * SHINE_PATCHES + p].xyz), 0.0);
+        }
+        e += tint.rgb * sum;
     }
-    if c * c >= sin2 {
-        return PI * sin2 * max(c, 0.0);
-    }
-    let sin_n = sqrt(max(1.0 - c * c, 1e-12));
-    let x = sqrt(max(1.0 / min(sin2, 1.0) - 1.0, 0.0));
-    let y = clamp(-x * c / sin_n, -1.0, 1.0);
-    let s = sin_n * sqrt(1.0 - y * y);
-    return max((c * acos(y) - x * s) * sin2 + atan(s / max(x, 1e-12)), 0.0);
+    return e;
 }
 
 #ifndef PREPASS_PIPELINE
@@ -79,6 +90,27 @@ fn slot_of_light(i: u32) -> i32 {
     return best;
 }
 
+// The craft shadow light: the one that gives no light but casts shadows.
+fn is_craft_shadow_light(i: u32) -> bool {
+    let l = lights.directional_lights[i];
+    return (l.flags & mesh_view_types::DIRECTIONAL_LIGHT_FLAGS_SHADOWS_ENABLED_BIT) != 0u
+        && dot(l.color.rgb, l.color.rgb) == 0.0;
+}
+
+// The brightest star's shadow on this fragment, from the craft's cascade.
+fn craft_shadow(in: pbr_types::PbrInput) -> f32 {
+    let cascade = i32(ship.ambient.z);
+    if cascade < 0 || (in.flags & mesh_types::MESH_FLAGS_SHADOW_RECEIVER_BIT) == 0u {
+        return 1.0;
+    }
+    for (var j = 0u; j < lights.n_directional_lights; j++) {
+        if is_craft_shadow_light(j) {
+            return shadows::sample_directional_cascade(j, u32(cascade), in.world_position, in.world_normal, in.frag_coord.xy);
+        }
+    }
+    return 1.0;
+}
+
 fn shade(in: pbr_types::PbrInput) -> vec3<f32> {
     let base = in.material.base_color;
     let metallic = in.material.metallic;
@@ -97,34 +129,21 @@ fn shade(in: pbr_types::PbrInput) -> vec3<f32> {
     input.F0_dielectric = pbr_functions::calculate_F0_dielectric(in.material.reflectance);
     input.F0_metallic = base.rgb;
     input.F_ab = lighting::F_AB(perceptual_roughness, NdotV);
-    let view_z = dot(vec4(
-        view.view_from_world[0].z,
-        view.view_from_world[1].z,
-        view.view_from_world[2].z,
-        view.view_from_world[3].z
-    ), in.world_position);
     var lit = vec3(0.0);
+    let shadow0 = craft_shadow(in);
     for (var i = 0u; i < lights.n_directional_lights; i++) {
-        var shadow = 1.0;
-        if (in.flags & mesh_types::MESH_FLAGS_SHADOW_RECEIVER_BIT) != 0u
-                && (lights.directional_lights[i].flags & mesh_view_types::DIRECTIONAL_LIGHT_FLAGS_SHADOWS_ENABLED_BIT) != 0u {
-            shadow = shadows::fetch_directional_shadow(i, in.world_position, in.world_normal, view_z, in.frag_coord.xy);
-        }
-        lit += lighting::directional_light(i, &input, true) * shadow * ship.stars[slot_of_light(i)].w;
-    }
-    let f0 = mix(input.F0_dielectric, input.F0_metallic, metallic);
-    lit += ambient_light(in.world_position, in.N, in.V, NdotV, input.diffuse_color, f0, perceptual_roughness, in.diffuse_occlusion);
-    // Planetshine: each reflector's lit disc, diffuse.
-    for (var m = 0; m < MAX_SHINES; m++) {
-        let r = ship.shine_radiance[m];
-        if r.w <= 0.0 {
+        if is_craft_shadow_light(i) {
             continue;
         }
-        let d = ship.shine_dir[m];
-        lit += input.diffuse_color * r.rgb * disc_irradiance(dot(in.N, d.xyz), d.w) / PI;
+        let slot = slot_of_light(i);
+        let shadow = select(1.0, shadow0, slot == 0);
+        lit += lighting::directional_light(i, &input, true) * shadow * ship.stars[slot].w * ship.star_air[slot].rgb;
     }
-    // Starlight without a light slot, sphere-averaged.
-    lit += input.diffuse_color * ship.ambient.x / PI;
+    // Planetshine, diffuse.
+    lit += input.diffuse_color * shine_irradiance(in.N) / PI;
+    // The sky around the craft (a uniform radiance) and the starlight
+    // without a light slot, sphere-averaged.
+    lit += input.diffuse_color * (ship.ambient.y + ship.ambient.x / PI);
     return lit * view.exposure;
 }
 #endif

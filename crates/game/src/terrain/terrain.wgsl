@@ -716,6 +716,11 @@ fn shade(color: vec3<f32>, perceptual_roughness: f32, p: vec3<f32>, n: vec3<f32>
         view.view_from_world[3].z
     ), vec4(p, 1.0));
     for (var i = 0u; i < lights.n_directional_lights; i++) {
+        // The craft shadow light gives no light (lighting::shadows).
+        let lc = lights.directional_lights[i].color.rgb;
+        if dot(lc, lc) == 0.0 {
+            continue;
+        }
         // Every terrain chunk receives shadows (none is a NotShadowReceiver).
         var shadow = 1.0;
         if (lights.directional_lights[i].flags & mesh_view_types::DIRECTIONAL_LIGHT_FLAGS_SHADOWS_ENABLED_BIT) != 0u {

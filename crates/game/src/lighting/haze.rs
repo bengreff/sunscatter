@@ -168,20 +168,121 @@ pub fn haze_exposure_share(h: &HazeLight) -> f64 {
 /// The spherical-shell air mass towards zenith cosine `mu` (radius over
 /// scale height `r_over_h`; 1 overhead, ~38 at the horizon for Earth's
 /// 8 km): `terrain.wgsl`'s `star_lighting` mirrors it.
+#[cfg_attr(not(test), allow(dead_code))] // the CPU mirror of terrain.wgsl's `star_lighting`
 pub fn air_mass(r_over_h: f64, mu: f64) -> f64 {
     let mu = mu.clamp(-1.0, 1.0);
     (r_over_h * r_over_h * mu * mu + 2.0 * r_over_h + 1.0).sqrt() - r_over_h * mu
 }
 
-/// The direct beam's transmittance per channel from a camera `above_m` over
-/// a body's mean radius towards a star at zenith cosine `mu`: the vertical
-/// optical depth above it ([`haze_above`], every layer of the atmosphere's
-/// data) times the air mass. A star below the horizon is the eclipse
-/// rule's to hide.
+/// The direct beam's transmittance per channel from `above_m` over a
+/// body's mean radius towards a star at zenith cosine `mu`
+/// ([`ray_transmittance`]).
 pub fn direct_transmittance(def: &crate::body_visual::AtmosphereDef, radius: f64, above_m: f64, mu: f64) -> [f64; 3] {
-    let h = haze_above(def, radius, above_m);
-    let m = air_mass(f64::from(h.r_over_h), mu);
-    h.tau.map(|t| (-f64::from(t) * m).exp())
+    ray_transmittance(def, radius, radius + above_m, mu)
+}
+
+/// A profile's density at height `h` (m) relative to its densest: the
+/// shape whose column `share_above` integrates (an exponential's from the
+/// ground; a tent's triangle, its column half its width).
+fn density(profile: crate::body_visual::ProfileDef, h: f64) -> f64 {
+    use crate::body_visual::ProfileDef;
+    match profile {
+        ProfileDef::Exponential { scale_height_m } => (-h.max(0.0) / f64::from(scale_height_m)).exp(),
+        ProfileDef::Tent { center_m, width_m } => {
+            (1.0 - (h - f64::from(center_m)).abs() / (f64::from(width_m) / 2.0)).max(0.0)
+        }
+    }
+}
+
+/// The extinction (m⁻¹, per channel) at height `h`: every term of the
+/// atmosphere's data, as [`haze_above`] sums their columns.
+fn extinction(def: &crate::body_visual::AtmosphereDef, h: f64) -> [f64; 3] {
+    use crate::body_visual::ProfileDef;
+    let mut e = [0.0; 3];
+    let mut add = |s: [f32; 3], a: [f32; 3], profile: ProfileDef| {
+        let n = density(profile, h);
+        for c in 0..3 {
+            e[c] += (f64::from(s[c]) + f64::from(a[c])) * n;
+        }
+    };
+    add(def.rayleigh_scattering, [0.0; 3], ProfileDef::Exponential { scale_height_m: def.rayleigh_scale_height_m });
+    add(def.mie_scattering, def.mie_absorption, ProfileDef::Exponential { scale_height_m: def.mie_scale_height_m });
+    if let Some(o) = &def.ozone {
+        add([0.0; 3], o.absorption, ProfileDef::Tent { center_m: o.center_m, width_m: o.width_m });
+    }
+    for l in &def.layers {
+        add(l.scattering, l.absorption, l.profile);
+    }
+    e
+}
+
+/// Samples per half of a ray's path through the air.
+const RAY_STEPS: usize = 64;
+
+/// The direct beam's transmittance per channel along a ray from `r0` (m
+/// from the body's centre) at zenith cosine `mu`, through the atmosphere
+/// `def` of a body of mean radius `radius`: the extinction integrated from
+/// where the ray enters the air (or starts in it) to where it leaves,
+/// through its lowest point, so a ship above the air sees the Sun set
+/// through the limb (reddened, then gone). Samples crowd towards the
+/// lowest point, where the air is densest. A ray towards the ground is
+/// taken as grazing it: what the body covers is the eclipse rule's.
+pub fn ray_transmittance(def: &crate::body_visual::AtmosphereDef, radius: f64, r0: f64, mu: f64) -> [f64; 3] {
+    let top = radius + f64::from(def.thickness_m);
+    let mu = mu.clamp(-1.0, 1.0);
+    let disc = top * top - r0 * r0 * (1.0 - mu * mu);
+    if disc <= 0.0 || (r0 >= top && mu >= 0.0) {
+        return [1.0; 3];
+    }
+    let root = disc.sqrt();
+    let (s0, s1) = if r0 >= top { (-r0 * mu - root, -r0 * mu + root) } else { (0.0, -r0 * mu + root) };
+    let low = (-r0 * mu).clamp(s0, s1);
+    let height = |s: f64| (r0 * r0 + s * s + 2.0 * r0 * s * mu).max(0.0).sqrt() - radius;
+    let mut tau = [0.0; 3];
+    for (from, to) in [(low, s0), (low, s1)] {
+        let len = to - from;
+        if len.abs() <= 0.0 {
+            continue;
+        }
+        // s = from + len u², ds = 2 len u du: midpoints in u.
+        for i in 0..RAY_STEPS {
+            let u = (i as f64 + 0.5) / RAY_STEPS as f64;
+            let e = extinction(def, height(from + len * u * u));
+            let ds = 2.0 * len.abs() * u / RAY_STEPS as f64;
+            for c in 0..3 {
+                tau[c] += e[c] * ds;
+            }
+        }
+    }
+    tau.map(|t| (-t).exp())
+}
+
+/// A body's atmosphere where it is: centre (camera-relative), mean radius
+/// and data.
+#[derive(Clone, Copy, Debug)]
+pub struct Air<'a> {
+    pub centre: glam::DVec3,
+    pub radius: f64,
+    pub def: &'a crate::body_visual::AtmosphereDef,
+}
+
+/// The transmittance per channel of every atmosphere on the line from
+/// `at` towards `dir` (unit): a star's light at a craft, applied to the
+/// whole craft at once (D110).
+pub fn air_along(at: glam::DVec3, dir: glam::DVec3, airs: &[Air]) -> [f64; 3] {
+    let mut t = [1.0; 3];
+    for a in airs {
+        let r = at - a.centre;
+        let r0 = r.length();
+        if r0 <= 0.0 {
+            continue;
+        }
+        let k = ray_transmittance(a.def, a.radius, r0, (r / r0).dot(dir));
+        for c in 0..3 {
+            t[c] *= k[c];
+        }
+    }
+    t
 }
 
 #[cfg(test)]
@@ -205,6 +306,29 @@ mod tests {
         // Red gets through best near the horizon (the sunset's colour).
         let low = direct_transmittance(&earth, r, 0.0, 0.05);
         assert!(low[0] > low[1] && low[1] > low[2], "{low:?}");
+        // A ship at 262 km seeing the Sun set through the limb: the ray's
+        // lowest point (tangent height) sets the light: clear at 100 km; at
+        // 30 km through the ozone, whose Chappuis band takes the green (the
+        // blue band above an orbital sunset); red and dim at 5; darkest
+        // grazing the ground.
+        let r0 = r + 262_000.0;
+        let mu_at = |tangent: f64| -(1.0 - ((r + tangent) / r0).powi(2)).sqrt();
+        let through = |tangent: f64| ray_transmittance(&earth, r, r0, mu_at(tangent));
+        let (t100, t30, t5, t0) = (through(100_000.0), through(30_000.0), through(5_000.0), through(0.0));
+        assert!(t100[2] > 0.999, "{t100:?}");
+        assert!(t30[1] > 0.3 && t30[1] < 0.95 && t30[2] > t30[1], "{t30:?}");
+        assert!(t5[0] > t5[1] && t5[1] > t5[2] && t5[1] < 0.3, "{t5:?}");
+        assert!(t0[1] < t5[1], "{t0:?}");
+        // Leaving the air the other way, or above it looking up: nothing lost.
+        assert_eq!(ray_transmittance(&earth, r, r0, 0.3), [1.0; 3]);
+        // Grazing the ground from above the air, the ray crosses the air
+        // twice as far as a horizontal ray from the ground leaving it:
+        // twice the optical depth (no step size shows).
+        let from_ground = ray_transmittance(&earth, r, r, 0.0);
+        for c in 0..3 {
+            let (whole, half) = (-t0[c].ln(), -from_ground[c].ln());
+            assert!((whole / (2.0 * half) - 1.0).abs() < 0.02, "{c}: {whole} vs 2 × {half}");
+        }
         // The air mass: 1 overhead, ~38 at the horizon for R/H = 800.
         assert!((air_mass(800.0, 1.0) - 1.0).abs() < 1e-3);
         assert!((air_mass(800.0, 0.0) - 40.0).abs() < 1.0);

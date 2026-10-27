@@ -3,8 +3,9 @@
 //! (`super::parts`: a craft of catalog parts by part, static parts merged
 //! by colour, moving parts turned from the ship state; the test craft as
 //! one mesh in the ship colour), a flame per engine sized by its thrust,
-//! and the ship's light (`ship_light`: every star with its eclipses,
-//! near-field planetshine, D055) in one buffer its materials share.
+//! and the ship's light (`ship_light`: every star with its eclipses and
+//! the air on the way, planetshine, its own sky and shadow cascade, D110)
+//! in one buffer its materials share.
 //!
 //! Drawings are built once per craft id (a piece after a split gets its own
 //! from the meshes of its parts, kept per base craft and part id) and a
@@ -14,6 +15,7 @@ use super::parts::{self, Group, Nozzle};
 use crate::camera::CameraRig;
 use crate::ship_light::{ShipExt, ShipLight, ShipMaterial};
 use crate::state::SimState;
+use bevy::camera::visibility::RenderLayers;
 use bevy::light::NotShadowCaster;
 use bevy::prelude::*;
 use bevy::render::storage::ShaderBuffer;
@@ -39,6 +41,8 @@ const POD_EXIT: f64 = 0.3;
 pub struct ShipVisual {
     pub index: usize,
     pub craft: String,
+    /// The drawing's bounding sphere (centre in body axes, radius; m).
+    bound: (Vec3, f32),
 }
 
 /// A drawn group of a vessel's parts; a mechanism (an index into the ship
@@ -72,6 +76,25 @@ struct Drawn {
 pub struct Model {
     groups: Vec<Drawn>,
     flames: Vec<(Option<usize>, Nozzle, bool)>,
+    /// The bounding sphere (centre in body axes, radius; m), with room for
+    /// the mechanisms (legs, fins) to swing out.
+    bound: (Vec3, f32),
+}
+
+/// Room for parts on mechanisms around the drawing's bounding sphere.
+const BOUND_MARGIN: f32 = 1.25;
+
+/// The bounding sphere of meshes (centre of their box, farthest vertex)
+/// grown by [`BOUND_MARGIN`].
+fn bound<'a>(meshes: impl Iterator<Item = &'a RenderMesh> + Clone) -> (Vec3, f32) {
+    let points = || meshes.clone().flat_map(|m| m.positions.iter().map(|p| Vec3::from_array(*p)));
+    let (lo, hi) = points().fold((Vec3::splat(f32::MAX), Vec3::splat(f32::MIN)), |(lo, hi), p| (lo.min(p), hi.max(p)));
+    if lo.x > hi.x {
+        return (Vec3::ZERO, 1.0);
+    }
+    let centre = 0.5 * (lo + hi);
+    let radius = points().map(|p| (p - centre).length()).fold(0.0, f32::max);
+    (centre, radius * BOUND_MARGIN)
 }
 
 /// The drawings built so far.
@@ -132,7 +155,8 @@ impl ShipModels {
             let exhaust = -e.mount.dir.normalize_or(DVec3::Z);
             let nozzle = Nozzle { exit: e.mount.pos + exhaust * TEST_FLAME_START, exhaust, radius: TEST_FLAME_RADIUS };
             let plain = Drawn { mesh: meshes.add(bevy_mesh(&craft.mesh)), colour: None, mechanism: None };
-            return Model { groups: vec![plain], flames: vec![(None, nozzle, false)] };
+            let bound = bound(std::iter::once(&craft.mesh));
+            return Model { groups: vec![plain], flames: vec![(None, nozzle, false)], bound };
         };
         let ids: Vec<u32> = craft.parts.iter().map(|p| p.id).collect();
         let colours = parts::part_colours(craft, def, sim::materials::materials());
@@ -163,7 +187,8 @@ impl ShipModels {
                 (Some(i), nozzle, e.main)
             })
             .collect();
-        Model { groups, flames }
+        let bound = bound(part_meshes.iter().map(|m| m.as_ref()));
+        Model { groups, flames, bound }
     }
 }
 
@@ -206,7 +231,11 @@ fn spawn(
     // by its materials.
     let light = buffers.add(ShaderBuffer::from(ShipLight::default()));
     let root = commands
-        .spawn((ShipVisual { index, craft: craft.id.0.clone() }, Transform::IDENTITY, Visibility::Visible))
+        .spawn((
+            ShipVisual { index, craft: craft.id.0.clone(), bound: model.bound },
+            Transform::IDENTITY,
+            Visibility::Visible,
+        ))
         .id();
     for Drawn { mesh, colour, mechanism } in &model.groups {
         let base_color = match colour {
@@ -221,6 +250,9 @@ fn spawn(
             ShipGroup { mechanism: *mechanism, plain: colour.is_none() },
             Mesh3d(mesh.clone()),
             MeshMaterial3d(material),
+            // Drawn by the camera, and cast into the craft's shadow
+            // cascades (`lighting::shadows`).
+            RenderLayers::from_layers(&[0, crate::lighting::shadows::CRAFT_LAYER]),
             Transform::IDENTITY,
             ChildOf(root),
         ));
@@ -246,19 +278,25 @@ pub fn update_ships(
     sim: Res<SimState>,
     rig: Res<CameraRig>,
     scene: Res<crate::lighting::LightScene>,
+    defs: Res<crate::scene::BodyDefs>,
     look: Res<crate::look::Parts>,
     mut models: ResMut<ShipModels>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut ship_materials: ResMut<Assets<ShipMaterial>>,
     mut flame_materials: ResMut<Assets<StandardMaterial>>,
     mut buffers: ResMut<Assets<ShaderBuffer>>,
+    mut craft_groups: ResMut<crate::lighting::shadows::CraftGroups>,
     mut ships: Query<(Entity, &ShipVisual, &mut Transform, &Children)>,
     groups: Query<(&ShipGroup, &MeshMaterial3d<ShipMaterial>)>,
 ) {
     let snap = sim.world.snapshot(sim.clock);
     let bodies = scene.spheres();
+    let airs = scene.airs(&defs);
     let star_dirs: Vec<DVec3> = scene.slots.iter().map(|&k| scene.stars[k].centre.normalize_or(DVec3::Z)).collect();
     let mut seen = vec![false; sim.fleet.len()];
+    // Each ship's light buffer, light and bounding sphere: the light is
+    // written once the craft are grouped into shadow cascades.
+    let mut lit: Vec<(Handle<ShaderBuffer>, ShipLight, (DVec3, f64))> = Vec::new();
     for (entity, ship, mut t, children) in &mut ships {
         let vessel = sim.fleet.get(ship.index).filter(|v| v.craft.id.0 == ship.craft);
         let Some(vessel) = vessel.filter(|_| !seen[ship.index]) else {
@@ -273,20 +311,20 @@ pub fn update_ships(
         let q = vessel.attitude.q;
         let origin = pos - q * vessel.mass_props().com;
         *t = Transform { translation: origin.as_vec3(), rotation: q.as_quat(), scale: Vec3::ONE };
-        let mut light = crate::lighting::object_light(pos, &scene.stars, &scene.slots, &bodies);
+        let mut light = crate::lighting::object_light(pos, &scene.stars, &scene.slots, &bodies, &airs);
         if !look.planetshine {
             light.shines.clear();
         }
-        let data = crate::ship_light::ship_light(&light, &star_dirs);
+        let sky = crate::sky::sky_radiance_at(pos, &scene, &defs);
+        let data = crate::ship_light::ship_light(&light, &star_dirs, sky);
+        let centre = origin + q * ship.bound.0.as_dvec3();
         let want = Color::srgb_from_array(if ship.index == sim.active { ACTIVE_COLOR } else { SHIP_COLOR });
         let mut light_done = false;
         for child in children.iter() {
             let Ok((group, mat)) = groups.get(child) else { continue };
             let Some(m) = ship_materials.get(&mat.0) else { continue };
             if !light_done {
-                if let Some(mut b) = buffers.get_mut(&m.extension.light) {
-                    b.set_data(data);
-                }
+                lit.push((m.extension.light.clone(), data, (centre, f64::from(ship.bound.1))));
                 light_done = true;
             }
             // The test craft's colour changes only when the active ship does.
@@ -295,6 +333,15 @@ pub fn update_ships(
                     m.base.base_color = want;
                 }
             }
+        }
+    }
+    let spheres: Vec<(DVec3, f64)> = lit.iter().map(|l| l.2).collect();
+    let (shadow_groups, of) = crate::lighting::shadows::group(&spheres);
+    craft_groups.0 = shadow_groups;
+    for ((buffer, mut data, _), group) in lit.into_iter().zip(of) {
+        data.ambient.z = group.map_or(-1.0, |g| g as f32);
+        if let Some(mut b) = buffers.get_mut(&buffer) {
+            b.set_data(data);
         }
     }
     for (i, _) in seen.iter().enumerate().filter(|(_, s)| !**s) {
