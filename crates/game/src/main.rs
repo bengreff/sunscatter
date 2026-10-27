@@ -30,6 +30,7 @@ mod persist;
 mod planner;
 mod profile;
 mod relations;
+mod render_scale;
 mod rendezvous;
 mod rings;
 mod saves;
@@ -210,6 +211,7 @@ fn body_plugins() -> (
     rings::RingsPlugin,
     clouds::CloudsPlugin,
     ship_light::ShipLightPlugin,
+    render_scale::RenderScalePlugin,
 ) {
     (
         lighting::LightingPlugin,
@@ -219,6 +221,7 @@ fn body_plugins() -> (
         rings::RingsPlugin,
         clouds::CloudsPlugin,
         ship_light::ShipLightPlugin,
+        render_scale::RenderScalePlugin,
     )
 }
 

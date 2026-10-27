@@ -302,8 +302,8 @@ Streamable HTTP on localhost, off by default. Agent commands have the origin of 
 **D070: The aerodynamics model's required reach.** *Decided, 2026-09-26 (owner).*
 Simplified is fine, as long as it models, semi-accurately: lift; rocket flight at low and high altitude at all speeds (subsonic, transonic, supersonic, hypersonic, rarefied); and entry from interplanetary velocities (to ~16 km/s). No flow-field solver. The model's limitations are recorded in [design/aero-thermal.md](design/aero-thermal.md).
 
-**D072: The 3D view renders at the window's full resolution.** *Decided, 2026-09-27 (owner); revised 2026-10-26 (owner: one look, no graphics settings, D073).*
-No render-scale setting: the 3D scene renders at the window's physical pixels (on Retina, every one), so it stays crisp, and the look is made cheap enough for that (D073's frame-rate rule).
+**D072: The 3D view renders at the window's full resolution whenever the frame fits.** *Decided, 2026-09-27 (owner); revised 2026-10-26 (owner: one look, no graphics settings, D073; the policy by measurement).*
+No render-scale setting: the 3D scene renders at the window's physical pixels (on Retina, every one) while the frame fits the display's refresh. Where the GPU cannot keep up, the main pass renders at a lower internal resolution, in steps down to half of it (a Retina display's logical resolution), upscaled before tonemapping with a sharp filter, and the full resolution comes back as soon as there is room (`game::render_scale`). The interface is always drawn at full resolution. The look is made cheap enough that this is rare (D073's frame-rate rule).
 
 **D073: Graphics are one look: simple, crisp and functional, with no graphics settings.** *Decided, 2026-09-28 (owner); revised 2026-10-25 and 2026-10-26 (owner). Replaces D048's five tiers.*
 - The owner's number-one rule: a 100% accurate spaceflight simulator. Cartoon looks are welcome as long as the physics is realistic.

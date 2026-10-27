@@ -37,6 +37,9 @@ pub struct Parts {
     pub stars: bool,
     pub planetshine: bool,
     pub flare: bool,
+    /// The 3D view at the resolution the policy picks (`render_scale`);
+    /// off: at half of it (the benchmark's row for the policy's floor).
+    pub native: bool,
 }
 
 impl Default for Parts {
@@ -53,6 +56,7 @@ impl Default for Parts {
             stars: true,
             planetshine: true,
             flare: true,
+            native: true,
         }
     }
 }
@@ -73,6 +77,7 @@ impl Parts {
             ("stars", Parts { stars: false, ..on }),
             ("planetshine", Parts { planetshine: false, ..on }),
             ("flare", Parts { flare: false, ..on }),
+            ("full resolution (half)", Parts { native: false, ..on }),
         ]
     }
 }
@@ -107,7 +112,7 @@ mod tests {
     fn the_benchmark_turns_off_one_part_at_a_time() {
         let on = Parts::default();
         let parts = Parts::each_off();
-        assert_eq!(parts.len(), 11);
+        assert_eq!(parts.len(), 12);
         for (name, p) in &parts {
             // Exactly one part differs from the look.
             let flags = |p: &Parts| {
@@ -123,6 +128,7 @@ mod tests {
                     p.stars,
                     p.planetshine,
                     p.flare,
+                    p.native,
                 ]
             };
             let off = flags(p).iter().zip(flags(&on)).filter(|(a, b)| **a != *b).count();

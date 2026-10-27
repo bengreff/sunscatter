@@ -35,8 +35,10 @@ fn vertex(v: Vertex) -> VertexOut {
     let world = view.world_position + v.position * 1.0e11;
     var clip = view.clip_from_world * vec4(world, 1.0);
     let radius = v.color.a * params.px_scale;
-    clip.x += v.uv.x * radius * 2.0 / view.viewport.z * clip.w;
-    clip.y += v.uv.y * radius * 2.0 / view.viewport.w * clip.w;
+    // In the pixels the main pass renders (render_scale), so a star stays
+    // at least a pixel there.
+    clip.x += v.uv.x * radius * 2.0 / view.main_pass_viewport.z * clip.w;
+    clip.y += v.uv.y * radius * 2.0 / view.main_pass_viewport.w * clip.w;
     var out: VertexOut;
     out.clip = clip;
     out.uv = v.uv;

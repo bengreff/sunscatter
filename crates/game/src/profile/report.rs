@@ -180,6 +180,8 @@ pub struct Counts {
     pub chunk_build_ms_per_s: f64,
     /// The fleet's advance (ms per frame, `SimState::sim_ms`).
     pub sim_ms: f64,
+    /// The 3D view's internal scale (`render_scale`; 1: full resolution).
+    pub render_scale: f64,
 }
 
 /// Everything one report shows.
@@ -258,8 +260,8 @@ pub fn format(w: &Window) -> String {
     );
     let _ = writeln!(
         out,
-        "background: terrain chunks built {:.0}/s, {:.0} ms CPU per s",
-        c.chunk_builds_per_s, c.chunk_build_ms_per_s
+        "background: terrain chunks built {:.0}/s, {:.0} ms CPU per s | render scale {:.2}",
+        c.chunk_builds_per_s, c.chunk_build_ms_per_s, c.render_scale
     );
     let sched: Vec<String> =
         rows_of(&w.spans, Kind::Schedule, f).iter().take(12).map(|r| format!("{} {:.2}", r.name, r.ms)).collect();

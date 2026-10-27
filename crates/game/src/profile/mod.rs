@@ -168,6 +168,7 @@ fn add(sum: &mut Counts, c: &Counts) {
     sum.egui_primitives += c.egui_primitives;
     sum.egui_vertices += c.egui_vertices;
     sum.sim_ms += c.sim_ms;
+    sum.render_scale += c.render_scale;
 }
 
 fn mean(sum: &Counts, n: f64) -> Counts {
@@ -182,6 +183,7 @@ fn mean(sum: &Counts, n: f64) -> Counts {
         egui_primitives: sum.egui_primitives / n,
         egui_vertices: sum.egui_vertices / n,
         sim_ms: sum.sim_ms / n,
+        render_scale: sum.render_scale / n,
         ..Counts::default()
     }
 }
@@ -199,6 +201,7 @@ fn measure(
     chunks: Query<(&ViewVisibility, &crate::terrain::TerrainChunk)>,
     meshes: Query<&ViewVisibility, With<Mesh3d>>,
     egui: Query<&bevy_egui::EguiRenderOutput>,
+    scale: Res<crate::render_scale::RenderScale>,
 ) {
     let now = time.elapsed_secs_f64();
     if profile.start.is_nan() {
@@ -210,7 +213,8 @@ fn measure(
         return;
     }
     profile.dts.push(time.delta_secs_f64());
-    let c = frame_counts(&terrain, &chunks, &meshes, &lines, &egui, sim.sim_ms);
+    let mut c = frame_counts(&terrain, &chunks, &meshes, &lines, &egui, sim.sim_ms);
+    c.render_scale = f64::from(scale.scale());
     add(&mut profile.sums, &c);
     let seconds = now - profile.start;
     if seconds < PERIOD && !profile.cut {
