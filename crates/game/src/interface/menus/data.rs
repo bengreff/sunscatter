@@ -229,6 +229,9 @@ pub struct Diagnostics {
     pub plot_frame: String,
     pub fps: String,
     pub vessels: usize,
+    /// The profiler's latest summary (`profile::report::summary`; empty
+    /// when it is off).
+    pub profile: Vec<(String, String)>,
 }
 
 /// What the snapshot is gathered from.
@@ -263,6 +266,7 @@ pub fn update(
     ui: Res<crate::hud::UiState>,
     fps: Res<crate::hud::FpsMeter>,
     station: Res<crate::tracking::TrackingStation>,
+    profile: Res<crate::profile::Profile>,
     mut data: ResMut<FlightData>,
     mut last: Local<f64>,
 ) {
@@ -284,7 +288,9 @@ pub fn update(
         plot_frame: ui.plot_frame,
         fps: fps.text(),
     };
-    data.set_if_neq(gather(&sources));
+    let mut d = gather(&sources);
+    d.diagnostics.profile.clone_from(&profile.summary);
+    data.set_if_neq(d);
 }
 
 /// The snapshot for the active vessel now.
@@ -316,6 +322,7 @@ pub fn gather(s: &Sources) -> FlightData {
             },
             fps: s.fps.clone(),
             vessels: sim.fleet.len(),
+            profile: Vec::new(),
         },
         ..landing(s)
     }

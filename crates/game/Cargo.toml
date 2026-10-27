@@ -16,8 +16,12 @@ dev = ["bevy/dynamic_linking"]
 sim = { path = "../sim" }
 mcp = { path = "../mcp" }
 serde_json = "1"
-bevy = "0.19.1"
+# `trace`: per-system spans, read by the profiler (`game::profile`,
+# SUNSCATTER_PROFILE=1); filtered out at the source otherwise.
+bevy = { version = "0.19.1", features = ["trace"] }
 bevy_egui = "0.42"
+# Timestamp queries for the profiler's GPU times (the version Bevy uses).
+wgpu = { version = "29.0.3", default-features = false }
 glam.workspace = true
 serde.workspace = true
 ron = "0.12"

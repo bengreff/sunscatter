@@ -13,7 +13,6 @@
 
 use crate::bench::{self, Bench};
 use crate::camera::{self, CameraRig, Focus};
-use crate::hud::{PlotFrame, UiState};
 use crate::interface::layout::InterfaceSettings;
 use crate::interface::menus::MenuId;
 use crate::settings::{GraphicsSettings, Tier};
@@ -42,6 +41,8 @@ pub(crate) enum Step {
     Coast,
     Circularize,
     Orbit,
+    /// The owner's slow view: falling from 185 km, looking down (`demo_views`).
+    Plunge,
     /// Earth from low orbit, looking down past the ship: land and water crisp (D073).
     OrbitDown,
     Map,
@@ -160,7 +161,7 @@ impl Demo {
         commands.spawn(shot).observe(save_to_disk(path));
     }
 
-    fn next(&mut self, step: Step) {
+    pub(crate) fn next(&mut self, step: Step) {
         info!("demo step {:?} -> {:?}", self.step, step);
         let stop = self.stop_after.as_deref().is_some_and(|s| s.eq_ignore_ascii_case(&format!("{:?}", self.step)));
         self.step = if stop { Step::Done } else { step };
@@ -232,7 +233,6 @@ pub fn run(
     demo: Option<ResMut<Demo>>,
     mut sim: ResMut<SimState>,
     mut rig: ResMut<CameraRig>,
-    mut ui: ResMut<UiState>,
     mut settings: ResMut<GraphicsSettings>,
     mut bench: ResMut<Bench>,
     mut pause: ResMut<SimPause>,
@@ -406,10 +406,11 @@ pub fn run(
                 bench.start("orbit", *settings);
                 demo.benching = true;
             } else {
-                (rig.distance, rig.pitch) = (60.0, 1.2);
-                demo.next(Step::OrbitDown);
+                demo.next(Step::Plunge);
             }
         }
+        // Run by `demo_views::run`.
+        Step::Plunge => {}
         Step::OrbitDown => {
             if !demo.shot_taken {
                 demo.shot_taken = true;
@@ -417,7 +418,6 @@ pub fn run(
                 demo.capture("orbit_down");
             } else {
                 iface.menus.show_only(Some(MenuId::Orbital), &["elements"]);
-                ui.plot_frame = PlotFrame::EarthInertial;
                 (rig.distance, rig.pitch) = (2.5e7, 0.9);
                 demo.next(Step::Map);
             }

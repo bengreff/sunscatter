@@ -15,6 +15,7 @@ mod comms;
 mod debris;
 mod demo;
 mod demo_checks;
+mod demo_views;
 mod fleet;
 mod format;
 mod hud;
@@ -26,6 +27,7 @@ mod map_view;
 mod navball;
 mod persist;
 mod planner;
+mod profile;
 mod relations;
 mod rendezvous;
 mod rings;
@@ -68,6 +70,7 @@ fn default_plugins(demo_mode: bool, offscreen: bool) -> bevy::app::PluginGroupBu
             ..default()
         })
         .set(TaskPoolPlugin { task_pool_options: fleet::task_pools() })
+        .set(bevy::log::LogPlugin { filter: profile::log_filter(), custom_layer: profile::layer, ..default() })
 }
 
 fn main() {
@@ -88,7 +91,7 @@ fn main() {
         .add_plugins(GameState)
         // After the settings defaults: replaces them with the saved settings.
         .add_plugins(persist::PersistPlugin)
-        .add_plugins((navball::NavballPlugin, interface::menus::view::MenusPlugin))
+        .add_plugins((navball::NavballPlugin, interface::menus::view::MenusPlugin, profile::ProfilePlugin))
         .configure_sets(Update, (Stage::Input, Stage::Simulate, Stage::Camera, Stage::Scene).chain())
         .add_systems(Startup, (scene::setup, terrain::setup, sky::setup_stars, camera::setup).chain())
         .add_systems(
@@ -191,7 +194,7 @@ fn main() {
                 .after(hud::draw),
         );
     if demo_mode {
-        app.add_plugins(demo_checks::DemoChecksPlugin);
+        app.add_plugins((demo_checks::DemoChecksPlugin, demo_views::DemoViewsPlugin));
     }
     app.run();
 }

@@ -58,6 +58,7 @@ A short map to search before building anything: who owns what, the frame order, 
 | Navball cluster (D080): the ball (`ball`), the ORBIT/SURFACE/TARGET switch, essentials, SAS and hold buttons, the throttle bar (`rules::throttle_from_bar`), the state line (`game::hud::state_word`) | `game::navball` (rules in `navball::rules`) | |
 | A vessel's state at the clock (for drawing) | `sim::vessel::Vessel::state_at` | never integrates (rule 4) |
 | Fps readout (0.5 s windows) | `game::hud::FpsMeter` | |
+| Profiler (`SUNSCATTER_PROFILE=1`): CPU per system, schedule and thread from Bevy's `trace` spans (`spans`), GPU per pass group from timestamps between passes (`gpu`), counts that drive the cost; the ranked report every 5 s (terminal, `profile.log`, Utilities ▸ Diagnostics) | `game::profile` (rules in `profile::report`) | off: the spans are filtered at their source |
 | Terrain meshes and LOD, geomorphing | `game::terrain` (`lod`, `mesh`) | heights via `sim` |
 | Terrain look: colour map, water mask, ground textures, waves | `game::terrain` (`material`, `water`, `ground`, `terrain.wgsl`) | textures in `data/textures/terrain` (CC0) |
 | Surface zones (D073): classification of the real maps into each body's zone list (`zones.png`) | `asset-tool::zones` | the list is body data in `visual.ron` |

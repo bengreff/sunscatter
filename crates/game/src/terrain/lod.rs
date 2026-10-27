@@ -1,7 +1,7 @@
 //! Quadtree LOD selection, chunk building and placement.
 
 use super::material::{ATTRIBUTE_MORPH, MORPH_TAG_SCALE};
-use super::mesh::{self, ChunkData, ChunkKey, GRID};
+use super::mesh::{ChunkData, ChunkKey, GRID};
 use super::{body_matrix, Chunk, Terrain, TerrainBody, TerrainChunk, TerrainMaterial};
 use super::{EVICT_AFTER, MAX_IN_FLIGHT, MAX_LEVEL, SPAWNS_PER_FRAME};
 use crate::camera::{CameraRig, MainCamera};
@@ -87,7 +87,7 @@ impl TerrainBody {
         }
         *budget -= 1;
         let shape = self.shape.clone();
-        self.pending.insert(key, AsyncComputeTaskPool::get().spawn(async move { mesh::build(key, &shape) }));
+        self.pending.insert(key, AsyncComputeTaskPool::get().spawn(async move { super::build_counted(key, &shape) }));
     }
 
     fn wants_split(&self, key: ChunkKey, c: &Chunk, ctx: &Ctx) -> Split {
@@ -174,7 +174,8 @@ pub fn update(
             body.shape.height = if settings.terrain { body.heights.clone() } else { None };
             for key in ChunkKey::roots() {
                 let shape = body.shape.clone();
-                body.pending.insert(key, AsyncComputeTaskPool::get().spawn(async move { mesh::build(key, &shape) }));
+                body.pending
+                    .insert(key, AsyncComputeTaskPool::get().spawn(async move { super::build_counted(key, &shape) }));
             }
         }
         // Install finished chunks.
@@ -183,9 +184,10 @@ pub fn update(
         for (k, d) in done {
             body.pending.remove(&k);
             let (center, radius, max_height) = (d.center, d.radius, d.max_height);
+            let triangles = (d.indices.len() / 3) as u32;
             let entity = commands
                 .spawn((
-                    TerrainChunk,
+                    TerrainChunk { triangles },
                     // Planet-sized casters would stretch the shadow cascades
                     // over thousands of km; the terrain only receives.
                     NotShadowCaster,

@@ -28,11 +28,33 @@ use mesh::{ChunkData, ChunkKey, HeightFn, Shape};
 
 use sim::frame::NodeId;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-/// Marks a terrain chunk entity.
+/// Marks a terrain chunk entity, with its triangle count (the profiler's).
 #[derive(Component)]
-pub struct TerrainChunk;
+pub struct TerrainChunk {
+    pub triangles: u32,
+}
+
+/// Chunks built on the background threads, and the time they took (ns),
+/// since the last [`take_build_stats`] (the profiler's).
+static BUILT: AtomicU64 = AtomicU64::new(0);
+static BUILD_NS: AtomicU64 = AtomicU64::new(0);
+
+/// Builds a chunk, counting it for the profiler.
+fn build_counted(key: ChunkKey, shape: &Shape) -> ChunkData {
+    let start = std::time::Instant::now();
+    let d = mesh::build(key, shape);
+    BUILT.fetch_add(1, Ordering::Relaxed);
+    BUILD_NS.fetch_add(start.elapsed().as_nanos() as u64, Ordering::Relaxed);
+    d
+}
+
+/// (chunks built, ns spent) since the last call.
+pub fn take_build_stats() -> (u64, u64) {
+    (BUILT.swap(0, Ordering::Relaxed), BUILD_NS.swap(0, Ordering::Relaxed))
+}
 
 /// Deepest quadtree level (Earth: ~5 m between vertices).
 const MAX_LEVEL: u8 = 19;

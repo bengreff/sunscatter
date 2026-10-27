@@ -118,6 +118,12 @@ fn diagnostics(d: &FlightData) -> Section {
     s.row("PLOT FRAME", format!("{} (Tab)", g.plot_frame));
     s.row("FPS", &g.fps);
     s.row("VESSELS", g.vessels.to_string());
+    if g.profile.is_empty() {
+        s.note("profiler off (SUNSCATTER_PROFILE=1)", Tone::Dim);
+    }
+    for (k, v) in &g.profile {
+        s.row(k, v);
+    }
     s
 }
 
