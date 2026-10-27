@@ -603,6 +603,11 @@ impl Dynamics for Forces<'_, '_> {
     fn accel_rate(&self, t: f64, r: DVec3, v: DVec3) -> (DVec3, f64) {
         self.snaps.with(self.t0.add_seconds(t), |snap| self.accel_rate_with(snap, t, r, v))
     }
+
+    /// Steps that resolve the gravity fields (D090).
+    fn max_step(&self, t: f64, r: DVec3, v: DVec3) -> f64 {
+        self.snaps.with(self.t0.add_seconds(t), |snap| self.context(t).max_step(snap, r, v))
+    }
 }
 
 impl Forces<'_, '_> {

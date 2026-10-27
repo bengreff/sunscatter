@@ -97,6 +97,13 @@ impl Dynamics for Forces<'_, '_> {
         let e = self.run.t0.add_seconds(t);
         self.snaps.with(e, |snap| self.model.accel(snap, self.run, self.active, t, r, v))
     }
+
+    /// Steps that resolve the gravity fields (D090).
+    fn max_step(&self, t: f64, r: DVec3, v: DVec3) -> f64 {
+        let (world, anchor, active) = (self.model.world, self.run.anchor, self.active);
+        let ctx = ForceContext { world, anchor, active, drag: None, thrust: DVec3::ZERO };
+        self.snaps.with(self.run.t0.add_seconds(t), |snap| ctx.max_step(snap, r, v))
+    }
 }
 
 impl<'a> Model<'a> {

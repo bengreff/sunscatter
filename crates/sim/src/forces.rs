@@ -141,29 +141,34 @@ impl ActiveSources {
 
 /// The degree of source `i`'s gravity field a vessel at `r` (relative to
 /// `anchor`) includes (D090): where the bounds of every degree above it,
-/// summed, could reach a hundredth of the cutoff ([`field_threshold`]). For
-/// the anchor's own field that is the field at the vessel; for another
-/// body's, like the cut rule for pulls, its change over the anchor-vessel
-/// segment (`ρ = |r|`, at least `d` from the body), bounded by
-/// [`crate::gravity::Field::included_degree`]'s tidal form; where the
-/// segment reaches the body, the field at the vessel. With a zero cutoff,
-/// every degree of the data.
+/// summed, could reach a hundredth of the cutoff at the vessel
+/// ([`field_threshold`], [`crate::gravity::Field::included_degree`]). The
+/// field acts on the vessel only (the anchor's acceleration is its
+/// ephemeris'), so leaving a degree out errs by that degree at the vessel,
+/// whatever the anchor: the rule depends on the vessel's distance from the
+/// body alone (rule 1). With a zero cutoff, every degree of the data.
 pub fn field_degree(world: &World, snap: &Snapshot, anchor: NodeId, r: DVec3, i: usize) -> u16 {
     let s = &world.sources[i];
     let Some(f) = s.physical.as_ref().and_then(|p| p.gravity.as_deref()) else { return 0 };
-    let gm = f.gm.unwrap_or(s.gm);
-    let threshold = field_threshold(world);
     let r_s = if s.node == anchor { DVec3::ZERO } else { snap.relative_r(s.node, anchor) };
-    let dist = (r - r_s).length();
-    let rho = r.length();
-    let d_min = dist.max(r_s.length()) - rho;
-    let degree = if s.node == anchor || d_min <= 0.0 {
-        f.included_degree(gm, dist, threshold, None)
-    } else {
-        f.included_degree(gm, d_min, threshold, Some(rho))
-    };
+    let degree = f.included_degree(f.gm.unwrap_or(s.gm), (r - r_s).length(), field_threshold(world));
     degree as u16
 }
+
+/// Half-wavelengths of a field's highest included degree an integration
+/// step may span ([`ForceContext::max_step`]). Measured (`examples/
+/// gravity_convergence`, `GRAVITY_COAST=1 GRAVITY_HCAP`): at 3 a coast at
+/// the coasts' tolerance reproduces the tightly integrated truncated field
+/// to within 10 % of its truncation error or 1.3 m a day (LEO degrees
+/// 30–160, low lunar orbits degrees 30–300); at 6 the high degrees alias
+/// (1.3 km a day at degree 40 in LEO, where degree 10 errs by 350 m);
+/// uncapped, degree 60 in LEO errs by 700 m a day against its 8 m.
+pub const FIELD_STEP: f64 = 3.0;
+
+/// A field's degrees whose summed bounds stay under this (m/s²) move a
+/// step's position by less than the coasts' tolerance (0.1 m) even over the
+/// longest step (3 h): they do not cap the step ([`ForceContext::max_step`]).
+pub const FIELD_STEP_ACCEL: f64 = 1e-9;
 
 /// The acceleration a body's neglected field degrees may reach at a vessel
 /// (m/s²): a hundredth of the cutoff, as for the other model
@@ -214,6 +219,33 @@ impl ForceContext<'_> {
     /// [`Self::accel_with`].
     pub fn accel_rate(&self, snap: &Snapshot, r: DVec3, v: DVec3) -> (DVec3, f64) {
         self.eval(snap, r, v, true)
+    }
+
+    /// The longest integration step that resolves the gravity fields
+    /// included here (D090): [`FIELD_STEP`] half-wavelengths of each field's
+    /// highest degree that can move a step's position by the coasts'
+    /// tolerance ([`FIELD_STEP_ACCEL`]), at the vessel's speed over that
+    /// body's rotating surface, `FIELD_STEP · π d / (N v)`. Longer steps
+    /// alias the high degrees, which the error control does not see.
+    pub fn max_step(&self, snap: &Snapshot, r: DVec3, v: DVec3) -> f64 {
+        let mut cap = f64::INFINITY;
+        for a in self.active.0.iter().filter(|a| a.degree >= 2) {
+            let s = &self.world.sources[a.source];
+            let Some(p) = &s.physical else { continue };
+            let Some(f) = p.gravity.as_deref() else { continue };
+            let dist = (r - snap.relative_r(s.node, self.anchor)).length();
+            let n = f.included_degree(f.gm.unwrap_or(s.gm), dist, FIELD_STEP_ACCEL).min(usize::from(a.degree));
+            if n < 2 {
+                continue;
+            }
+            let k = snap.relative(s.node, self.anchor);
+            let d = r - k.r;
+            let speed = (v - k.v - p.rotation.omega(snap.t).raw().cross(d)).length();
+            if speed > 0.0 {
+                cap = cap.min(FIELD_STEP * crate::math::PI * dist / (n as f64 * speed));
+            }
+        }
+        cap
     }
 
     fn eval(&self, snap: &Snapshot, r: DVec3, v: DVec3, rate: bool) -> (DVec3, f64) {

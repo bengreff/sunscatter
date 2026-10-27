@@ -228,10 +228,12 @@ impl Dop853 {
 
     /// One accepted step, as [`super::Dopri5::step`].
     pub fn step<D: Dynamics>(&self, dyn_: &D, st: &mut StepState, t_limit: f64) -> Result<StepSample, NonFinite> {
+        let cap = dyn_.max_step(st.t, st.r.value(), st.v.value());
         loop {
             let remaining = t_limit - st.t;
-            let clamped = st.h >= remaining;
-            let h = if clamped { remaining } else { st.h };
+            let free = st.h.min(cap);
+            let clamped = free >= remaining;
+            let h = if clamped { remaining } else { free };
             let (dr, dv, a1, err, (dx, x_rate)) = self.attempt(dyn_, st, h);
             if !err.is_finite() || !(dr.is_finite() && dv.is_finite() && a1.is_finite()) {
                 return Err(NonFinite);

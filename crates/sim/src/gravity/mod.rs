@@ -19,8 +19,8 @@
 //! lumped per order before the order's trigonometric polynomials (Holmes &
 //! Featherstone 2002, J. Geodesy 76, 279). No division by `cos φ`, so the poles
 //! are ordinary points; every quantity is a polynomial in the direction
-//! cosines, so there is no trigonometry at all (rule 2). Sums run from the
-//! highest degree and order down (smallest first) in a fixed order.
+//! cosines, so there is no trigonometry at all (rule 2). Sums run in a fixed
+//! order (orders from the highest down, degrees up within each).
 //!
 //! **One owner** (rule 5): every vessel force from a body's figure goes
 //! through [`Field`]; a body with only `j2` in its `body.ron` has the
@@ -30,12 +30,12 @@
 //! is because the shipped ephemeris must regenerate bit for bit; it is tested
 //! against this model.
 //!
-//! **Truncation** ([`Field::included_degree`]): a vessel includes degree `n`
-//! of a body only where the sum of the acceleration bounds of all the degrees
-//! above could exceed a threshold (the world cutoff times
-//! [`crate::world::FAINT_ERROR_FRACTION`], as the former J2 rule), so a far
-//! vessel pays for nothing and a low one for every degree the data has. The
-//! bound is rigorous ([`Field::bound`]).
+//! **Truncation** ([`Field::included_degree`], `forces::field_degree`): a
+//! vessel includes degree `n` of a body only where the sum of the
+//! acceleration bounds of all the degrees above could exceed a threshold at
+//! the vessel (the world cutoff times [`crate::world::FAINT_ERROR_FRACTION`],
+//! as the former J2 rule), so a far vessel pays for nothing and a low one
+//! for every degree the data has. The bound is rigorous ([`Field::bound`]).
 
 pub mod file;
 mod pines;
@@ -64,9 +64,6 @@ struct Term {
     /// `C̄nm`, `S̄nm` times `Nnm / Nn,m+1` (the `∂/∂u` term).
     fc: f64,
     fs: f64,
-    /// `C̄nm`, `S̄nm` times `Nnm / Nn+1,m+1` (the radial term).
-    gc: f64,
-    gs: f64,
 }
 
 /// A body's gravity field beyond its point mass (see the module docs).
@@ -89,7 +86,7 @@ pub struct Field {
     /// coefficients' frame (`None`: the same).
     to_field: Option<DMat3>,
     /// Start of column `m` in `terms` (entry `n` at `columns[m] + n − m`),
-    /// for `m = 0..=max_order + 1`, each to degree `degree + 1`.
+    /// for `m = 0..=max_order + 1`, each to degree `degree`.
     columns: Vec<usize>,
     terms: Vec<Term>,
     /// `P̄'mm = ρ diag[m] P̄'m−1,m−1`.
@@ -152,7 +149,7 @@ impl Field {
         let mut terms = Vec::new();
         for m in 0..=max_order + 1 {
             columns.push(terms.len());
-            for n in m..=degree + 1 {
+            for n in m..=degree {
                 terms.push(recursion(n, m));
             }
         }
@@ -176,8 +173,8 @@ impl Field {
             if t.c != 0.0 || t.s != 0.0 {
                 return Err(format!("coefficient ({}, {}) given twice", k.n, k.m));
             }
-            let (f, g) = (ratio_f(k.n, k.m), ratio_g(k.n, k.m));
-            *t = Term { c: k.c, s: k.s, fc: f * k.c, fs: f * k.s, gc: g * k.c, gs: g * k.s, ..*t };
+            let f = ratio_f(k.n, k.m);
+            *t = Term { c: k.c, s: k.s, fc: f * k.c, fs: f * k.s, ..*t };
             norm2[k.n] += k.c * k.c + k.s * k.s;
         }
         for n in 2..=degree {
@@ -226,15 +223,7 @@ impl Field {
     /// The lowest degree `N` such that the bounds of every degree above it,
     /// summed, stay at or under `threshold` at distance `r` (0: the field is
     /// negligible there). With a zero threshold, the data's degree.
-    ///
-    /// With `tidal = Some(ℓ)` it bounds instead the field's change over a
-    /// segment of length `ℓ` at least `r` from the centre (the vessel
-    /// against its anchor): `ℓ` times the Hessian, at most
-    /// `(2n+3) √((n+2)/(2n+1)) · B_n(r) / r` for degree `n` (the bound of
-    /// [`Self::bound`] applied to each component of the acceleration, a
-    /// degree-`(n+1)` harmonic whose coefficients' squares sum to
-    /// `(n+1)(2n+1) ‖c_n‖²`).
-    pub fn included_degree(&self, gm: f64, r: f64, threshold: f64, tidal: Option<f64>) -> usize {
+    pub fn included_degree(&self, gm: f64, r: f64, threshold: f64) -> usize {
         if threshold <= 0.0 {
             return self.degree;
         }
@@ -242,18 +231,11 @@ impl Field {
         // of the total (J2's, at most ~1e-2 m/s²), far below any threshold.
         let rho = self.radius / r;
         let g = gm / (r * r);
-        let term = |n: usize, p: f64| {
-            let b = g * p * self.strength[n];
-            match tidal {
-                Some(len) => b * len / r * (2 * n + 3) as f64 * ((n + 2) as f64 / (2 * n + 1) as f64).sqrt(),
-                None => b,
-            }
-        };
         let mut total = 0.0;
         let mut p = rho;
         for n in 2..=self.degree {
             p *= rho;
-            total += term(n, p);
+            total += g * p * self.strength[n];
         }
         if total <= threshold {
             return 0;
@@ -262,7 +244,7 @@ impl Field {
         let mut p = rho;
         for n in 2..=self.degree {
             p *= rho;
-            rest -= term(n, p);
+            rest -= g * p * self.strength[n];
             if rest <= threshold {
                 return n;
             }
@@ -347,10 +329,4 @@ fn diagonal(m: usize) -> f64 {
 fn ratio_f(n: usize, m: usize) -> f64 {
     let half = if m == 0 { 0.5 } else { 1.0 };
     (half * ((n - m) * (n + m + 1)) as f64).sqrt()
-}
-
-/// `N_nm / N_n+1,m+1 = √((2 − δm0)/2 · (2n+1)/(2n+3) · (n+m+1)(n+m+2))`.
-fn ratio_g(n: usize, m: usize) -> f64 {
-    let half = if m == 0 { 0.5 } else { 1.0 };
-    (half * (2 * n + 1) as f64 / (2 * n + 3) as f64 * ((n + m + 1) * (n + m + 2)) as f64).sqrt()
 }

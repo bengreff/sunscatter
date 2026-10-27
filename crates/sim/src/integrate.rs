@@ -81,6 +81,15 @@ pub trait Dynamics {
     fn accel_rate(&self, t: f64, r: DVec3, v: DVec3) -> (DVec3, f64) {
         (self.accel(t, r, v), 0.0)
     }
+
+    /// The longest step the forces allow from `(t, r, v)` (s): forces that
+    /// vary faster than the error control can see (a gravity field's high
+    /// degrees, which it would alias) cap it. A function of the step's
+    /// start, so chunked integration still equals a single pass. None by
+    /// default.
+    fn max_step(&self, _t: f64, _r: DVec3, _v: DVec3) -> f64 {
+        f64::INFINITY
+    }
 }
 
 impl<F: Fn(f64, DVec3, DVec3) -> DVec3> Dynamics for F {
@@ -182,10 +191,12 @@ impl Dopri5 {
     /// past `t_limit`. Returns the new endpoint sample, or [`NonFinite`] (with
     /// `st` unchanged) when the step cannot be computed.
     pub fn step<D: Dynamics>(&self, dyn_: &D, st: &mut StepState, t_limit: f64) -> Result<StepSample, NonFinite> {
+        let cap = dyn_.max_step(st.t, st.r.value(), st.v.value());
         loop {
             let remaining = t_limit - st.t;
-            let clamped = st.h >= remaining;
-            let h = if clamped { remaining } else { st.h };
+            let free = st.h.min(cap);
+            let clamped = free >= remaining;
+            let h = if clamped { remaining } else { free };
             let (dr, dv, a1, err, (dx, x_rate)) = self.attempt(dyn_, st, h);
             // A NaN error compares false everywhere: without this the step
             // size grows and the step is retried forever.

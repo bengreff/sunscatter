@@ -205,20 +205,13 @@ fn the_degree_bound_holds_and_sets_the_included_degree() {
     }
     for r in [1.01 * R, 2.0 * R, 10.0 * R] {
         let threshold = 1e-9;
-        let n = field.included_degree(GM, r, threshold, None);
+        let n = field.included_degree(GM, r, threshold);
         let tail: f64 = (n + 1..=30).map(|k| field.bound(GM, k, r)).sum();
         assert!(tail <= threshold * (1.0 + 1e-9), "r {r:e}: degree {n}, tail {tail:e}");
         assert!(n == 0 || field.bound(GM, n, r) + tail > threshold);
     }
-    assert_eq!(field.included_degree(GM, 1e12, 0.0, None), 30, "a zero threshold keeps everything");
-    assert_eq!(field.included_degree(GM, 1e12, 1e-14, None), 0, "far away nothing");
-    // The tidal form: the change over a segment is under ℓ times the
-    // Hessian bound (sampled along a segment).
-    let one = single(4);
-    let (p, q) = (DVec3::new(2.0 * R, 0.3 * R, 0.5 * R), DVec3::new(2.0 * R, 0.4 * R, 0.6 * R));
-    let change = (one.accel_in_field_frame(GM, p, 4).0 - one.accel_in_field_frame(GM, q, 4).0).length();
-    let hessian = field.bound(GM, 4, 2.0 * R) / (2.0 * R) * 11.0 * (6.0f64 / 9.0).sqrt();
-    assert!(change <= hessian * (p - q).length(), "{change:e} > {:e}", hessian * (p - q).length());
+    assert_eq!(field.included_degree(GM, 1e12, 0.0), 30, "a zero threshold keeps everything");
+    assert_eq!(field.included_degree(GM, 1e12, 1e-14), 0, "far away nothing");
 }
 
 #[test]
