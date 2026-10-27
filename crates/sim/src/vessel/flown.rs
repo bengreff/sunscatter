@@ -143,7 +143,7 @@ impl Flight {
                     thrust: law.thrust,
                     max_angle: c.engine.gimbal,
                 };
-                let act = Actuators { torque: c.torque, gimbal: Some(gimbal) };
+                let act = Actuators { torque: c.torque, gimbal: Some(gimbal), limits: None };
                 let aim = Aim::Direction { dir, axis: c.engine.mount_dir, key: AimKey::BURN };
                 let controls = Controls { sas: true, ..Controls::default() };
                 let (next, body_dir) =

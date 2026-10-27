@@ -185,7 +185,7 @@ impl Vessel {
     pub(super) fn actuators(
         &self,
         controls: &super::Controls,
-        p: f64,
+        (p, q): (f64, f64),
         dt: f64,
         props: &MassProps,
     ) -> (EngineOutput, Actuators, Option<ShipTick>) {
@@ -202,7 +202,7 @@ impl Vessel {
             // The RCS draws on the main propellant: dry, only the gimbal turns.
             let rcs_fed = self.debug || self.propellant > 0.0;
             let torque = if rcs_fed { self.craft.torque } else { DVec3::ZERO };
-            return (out, Actuators { torque, gimbal: Some(gimbal) }, None);
+            return (out, Actuators { torque, gimbal: Some(gimbal), limits: None }, None);
         };
         let t = propulsion::output(def, state, p, dt, self.debug);
         let gimbal = Gimbal { lever: t.pos - props.com, dir: t.dir, thrust: t.thrust, max_angle: t.gimbal };
@@ -220,8 +220,9 @@ impl Vessel {
         let want = (controls.translate.clamp(DVec3::splat(-1.0), DVec3::splat(1.0)) + propulsion::ullage(def, state))
             .clamp_length_max(1.0);
         let push = crate::systems::rcs::translate(def, state, props.com, want, self.debug);
+        let limits = Some(limits(def, state, &t, dt, q));
         let tick = ShipTick { draws: t.draws, heat: t.heat, rcs_flow, blocks, push };
-        (out, Actuators { torque, gimbal: Some(gimbal) }, Some(tick))
+        (out, Actuators { torque, gimbal: Some(gimbal), limits }, Some(tick))
     }
 
     /// Applies a ship command now, at the vessel's time
@@ -329,6 +330,31 @@ impl Vessel {
             }
         }
         b.destroyed.sort_by_key(|d| d.0);
+    }
+}
+
+/// The fastest turn SAS commands a craft of parts (rad/s): 10°/s up to a
+/// dynamic pressure of 1 kPa, then falling as 1/q (a turn at max-Q would
+/// load the stack with its angle of attack), never under 0.5°/s.
+pub fn turn_cap(q: f64) -> f64 {
+    let deg = crate::math::PI / 180.0;
+    (10.0 * deg * (1_000.0 / q.max(1_000.0))).max(0.5 * deg)
+}
+
+/// A craft of parts' attitude limits over a tick of `dt` at dynamic
+/// pressure `q`: the running engines' gimbal actuators at the slowest one's
+/// rate (falcon9.md §2: the Merlins' 20°/s, the MVac's 10°/s) from where
+/// the gimbal holds now, and the turn cap.
+fn limits(def: &ShipDef, state: &ShipState, t: &ShipThrust, dt: f64, q: f64) -> super::attitude::Limits {
+    let rate = (def.engines.iter().zip(&t.per_engine))
+        .filter(|(e, &f)| f > 0.0 && e.data.gimbal_rate_dps > 0.0)
+        .map(|(e, _)| e.data.gimbal_rate_dps)
+        .fold(f64::INFINITY, f64::min);
+    let step = if rate.is_finite() { rate * crate::math::PI / 180.0 * dt } else { f64::INFINITY };
+    super::attitude::Limits {
+        gimbal_from: state.runtime.thrust_dir.unwrap_or(t.dir),
+        gimbal_step: step,
+        max_rate: turn_cap(q),
     }
 }
 

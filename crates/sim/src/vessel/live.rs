@@ -436,11 +436,13 @@ impl Vessel {
         let drag = DragModel { cd_area, mass: props.mass };
         let sun_body = self.attitude.q.inverse() * crate::light::sunlight(world, &snap, anchor, r);
         let att0 = self.attitude.q;
-        let (out, act, ship) = self.actuators(controls, p, dt, &props);
+        let q = air.as_ref().map_or(0.0, Air::q);
+        let (out, act, ship) = self.actuators(controls, (p, q), dt, &props);
         let before = (self.attitude, self.control);
         let aim = self.aim(world, &snap, (anchor, r, v), controls);
         let mut cmd = attitude::command(&self.attitude, &props.inertia, &mut self.control, controls, &act, &aim, dt);
         let lift = super::ship_tick::with_push(ship.as_ref(), &mut cmd, lift, self.attitude.q, props.mass);
+        self.hold_gimbal(&cmd);
         let compensate = self.bubble.member;
         Some(TickStart {
             anchor,

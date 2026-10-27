@@ -131,7 +131,14 @@ pub struct Actuators {
     /// Attitude-control authority per body axis (N·m).
     pub torque: DVec3,
     pub gimbal: Option<Gimbal>,
+    /// A craft of parts' real actuators and a large craft's gentler hold
+    /// (`None`: the test craft's ideal ones).
+    pub limits: Option<Limits>,
 }
+
+mod limits;
+pub use limits::Limits;
+use limits::{alpha_along, hold_omega, target_free, LINEAR_ERROR};
 
 /// SAS natural frequency for attitude hold (rad/s), critically damped.
 const HOLD_OMEGA: f64 = 1.0;
@@ -199,19 +206,23 @@ pub struct Command {
 /// rad/s): pointing within 10 µrad is exact for every purpose.
 const TRACK_SNAP: f64 = 1e-5;
 
-/// The rate (body axes) at which a hold closes an attitude error `e`
-/// (rotation vector, body axes): `ω/2·|e|` near the target (critically
-/// damped with the gain `2ω`), at most `√(α·|e|)` far from it so the
-/// rotation can stop in time braking at half the angular acceleration
-/// `alpha`.
-fn closing_rate(e: DVec3, alpha: f64) -> DVec3 {
+/// The rate (body axes) at which a hold of natural frequency `omega`
+/// closes an attitude error `e` (rotation vector, body axes): `ω/2·|e|`
+/// near the target (critically damped with the gain `2ω`), at most
+/// `√(α·|e|)` far from it so the rotation can stop in time braking at half
+/// the angular acceleration `alpha`. A slew to a far target (an error over
+/// [`LINEAR_ERROR`]) goes no faster than `max_rate`, or the linear rate at
+/// that error if higher: small errors are always closed at full bandwidth
+/// (an unstable stack in the air needs it).
+fn closing_rate(e: DVec3, alpha: f64, omega: f64, max_rate: f64) -> DVec3 {
     let m = e.length();
     if m == 0.0 {
         return DVec3::ZERO;
     }
-    let linear = 0.5 * HOLD_OMEGA * m;
+    let linear = 0.5 * omega * m;
     let rate = if alpha > 0.0 { linear.min((alpha * m).sqrt()) } else { linear };
-    e * (rate / m)
+    let cap = max_rate.max(0.5 * omega * LINEAR_ERROR);
+    e * (rate.min(cap) / m)
 }
 
 /// The command for a tick of `dt`: the pilot's rotation input (a fraction
@@ -261,20 +272,36 @@ pub fn command(
                 (Some(target), att.q.inverse() * rate)
             }
         };
-        let wanted = match target {
-            Some(target) => {
+        let diag = DVec3::new(inertia.x_axis.x, inertia.y_axis.y, inertia.z_axis.z);
+        let alpha = DVec3::select(auth.cmpgt(DVec3::ZERO), auth / diag, DVec3::splat(f64::INFINITY));
+        let alpha = alpha.min_element();
+        let alpha = if alpha.is_finite() { alpha } else { 0.0 };
+        let wanted = match (target, act.limits) {
+            (Some(target), None) => {
                 let e = rotvec_of(att.q.inverse() * target);
-                let diag = DVec3::new(inertia.x_axis.x, inertia.y_axis.y, inertia.z_axis.z);
-                let alpha = DVec3::select(auth.cmpgt(DVec3::ZERO), auth / diag, DVec3::splat(f64::INFINITY));
-                let alpha = alpha.min_element();
-                let alpha = if alpha.is_finite() { alpha } else { 0.0 };
-                *inertia * ((w_target + closing_rate(e, alpha) - w) * (2.0 * HOLD_OMEGA)) + gyro
+                *inertia * ((w_target + closing_rate(e, alpha, HOLD_OMEGA, f64::INFINITY) - w) * (2.0 * HOLD_OMEGA))
+                    + gyro
             }
-            None => *inertia * (-w / dt) + gyro,
+            // A craft of parts: its angular acceleration along the error
+            // (a stack's weak roll authority does not slow its pitch).
+            (Some(target), Some(l)) => {
+                let e = rotvec_of(att.q.inverse() * target);
+                let a = alpha_along(inertia, auth, e);
+                let omega = hold_omega(Some(&l), a);
+                *inertia * ((w_target + closing_rate(e, a, omega, l.max_rate) - w) * (2.0 * omega)) + gyro
+            }
+            // Damping: the test craft stops its rotation in a tick; a
+            // craft of parts damps it at its hold's frequency.
+            (None, Some(l)) => *inertia * (-w * (2.0 * hold_omega(Some(&l), alpha_along(inertia, auth, w)))) + gyro,
+            (None, None) => *inertia * (-w / dt) + gyro,
         };
         let u = DVec3::select(auth.cmpgt(DVec3::ZERO), wanted / auth, DVec3::ZERO);
         let worst = u.abs().max_element();
-        if worst > 1.0 {
+        if worst > 1.0 && act.limits.is_some() {
+            // Each axis saturates on its own (a craft's authorities differ
+            // by orders of magnitude: roll's must not throttle pitch).
+            (u.clamp(DVec3::splat(-1.0), DVec3::splat(1.0)), true)
+        } else if worst > 1.0 {
             (u / worst, true)
         } else {
             (u, false)
@@ -285,11 +312,15 @@ pub fn command(
         control.settled = None;
         (controls.rotate.clamp(DVec3::splat(-1.0), DVec3::splat(1.0)), true)
     };
-    let (thrust_dir, thrust_torque) = match act.gimbal {
-        Some(g) => g.deflect(u * gimbal_axes),
-        None => (DVec3::Z, DVec3::ZERO),
+    let (thrust_dir, thrust_torque) = match (act.gimbal, act.limits) {
+        (Some(g), Some(l)) => limits::deflect_from(&g, u * gimbal_axes, l.gimbal_from, l.gimbal_step),
+        (Some(g), None) => g.deflect(u * gimbal_axes),
+        (None, _) => (DVec3::Z, DVec3::ZERO),
     };
     let rcs = DVec3::select(act.torque.cmpgt(DVec3::ZERO), u.abs(), DVec3::ZERO);
+    // A craft of parts' gentle damping does not stop the rotation in a tick:
+    // its hold starts once the rotation has (nearly) stopped.
+    let saturated = saturated || (act.limits.is_some() && target_free(control, sas) && w.length() > 1e-4);
     Command { torque: u * act.torque + thrust_torque, thrust_dir, rcs, sas, saturated, snap_to }
 }
 
@@ -409,7 +440,7 @@ pub fn advance_coast(
         control.tracking = false;
         control.settled = None;
     }
-    let act = Actuators { torque, gimbal: None };
+    let act = Actuators { torque, gimbal: None, limits: None };
     // After free rotation (or a stability hold at rest), ticks resume at
     // the last lattice point before the vessel's time: only the controls
     // change that, at a frame. A followed hold's base is at most a follow
@@ -502,7 +533,7 @@ mod tests {
     }
 
     fn rcs() -> Actuators {
-        Actuators { torque: DVec3::new(40e3, 40e3, 20e3), gimbal: None }
+        Actuators { torque: DVec3::new(40e3, 40e3, 20e3), gimbal: None, limits: None }
     }
 
     #[test]

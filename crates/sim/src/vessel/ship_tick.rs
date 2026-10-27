@@ -72,6 +72,16 @@ pub(super) fn with_push(
     }
 }
 
+impl Vessel {
+    /// Where a craft of parts' gimbal holds the thrust after a tick's
+    /// command (its actuators start the next tick from it).
+    pub(super) fn hold_gimbal(&mut self, cmd: &super::attitude::Command) {
+        if let Some(s) = self.ship.as_mut() {
+            s.runtime.thrust_dir = Some(cmd.thrust_dir);
+        }
+    }
+}
+
 /// The gravitational acceleration (relative to `anchor`) at `r` at `t`.
 fn gravity(world: &World, t: Epoch, anchor: NodeId, r: DVec3, v: DVec3) -> DVec3 {
     let snap = world.snapshot(t);

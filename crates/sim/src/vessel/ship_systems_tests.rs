@@ -273,3 +273,64 @@ fn a_restart_after_a_coast_settles_first_and_ingests_gas_when_forced() {
     assert!(events.iter().any(|e| e.contains("start aborted: gas ingestion")), "{events:?}");
     assert_eq!((s.engines[i].status, s.engines[i].ignitions), (EngineStatus::Off, 2));
 }
+
+/// A diagnostic gravity turn (run by hand): pitched by the pilot at T+12 s
+/// for 4 s, then held surface-prograde with SAS, printed every 5 s: angle of
+/// attack, the worst joint, the gimbal's deflection.
+#[test]
+#[ignore]
+fn falcon9_gravity_turn_profile() {
+    use super::hold::{HoldMode, SpeedReference};
+    let w = world();
+    let mut v = falcon9(&w);
+    v.order_at(t0(), OrderKind::Stage).unwrap();
+    v.order_at(t0(), OrderKind::Stage).unwrap();
+    v.advance(&w, t0().add_seconds(2.1), &full(), usize::MAX);
+    let plan = v.plan_breakup().expect("the mount separates");
+    let mut ids = VesselIds::default();
+    ids.allocate();
+    v.split(&w, &plan, &plan.crafts(), &mut ids);
+    let start = v.time;
+    let earth = w.find("Earth").unwrap().node;
+    let mut worst_all: f64 = 0.0;
+    for k in 1..=40 {
+        let t = start.add_seconds(2.5 * k as f64);
+        let s = t.seconds_since(start);
+        let controls = if (10.0..12.5).contains(&s) {
+            Controls { throttle: 1.0, sas: false, rotate: DVec3::new(0.04, 0.0, 0.0), ..Default::default() }
+        } else if s >= 12.5 {
+            Controls {
+                throttle: 1.0,
+                sas: true,
+                hold: HoldMode::Prograde,
+                speed: SpeedReference::Surface,
+                ..Default::default()
+            }
+        } else {
+            full()
+        };
+        v.advance(&w, t, &controls, usize::MAX);
+        if v.plan_breakup().is_some() {
+            println!("broke up at T+{s}: {:?}", v.ship_events().iter().rev().take(2).collect::<Vec<_>>());
+            break;
+        }
+        let (anchor, r, vel) = v.state(&w);
+        let rot = w.source(earth).and_then(|s| s.physical.as_ref()).unwrap().rotation;
+        let surf = vel - rot.omega(v.time).raw().cross(r);
+        let nose = v.attitude.nose();
+        let alpha = crate::math::acos(nose.dot(surf.normalize()).clamp(-1.0, 1.0)).to_degrees();
+        let pitch = crate::math::acos(nose.dot(r.normalize()).clamp(-1.0, 1.0)).to_degrees();
+        let st = v.ship().unwrap();
+        let worst = st.runtime.joints.iter().map(|j| j.ratio).fold(0.0, f64::max);
+        worst_all = worst_all.max(worst);
+        let gimbal =
+            st.runtime.thrust_dir.map_or(0.0, |d| crate::math::acos(d.normalize().z.clamp(-1.0, 1.0)).to_degrees());
+        let alt = crate::forces::altitude_above(&w, &w.snapshot(v.time), anchor, anchor, r).0;
+        println!(
+            "T+{s:>5.1} alt {alt:>6.0} m surf {:>6.1} m/s pitch {pitch:>5.1}° α {alpha:>5.2}° gimbal {gimbal:>4.2}° ω {:.4} worst joint {worst:.2}",
+            surf.length(),
+            v.attitude.omega.length()
+        );
+    }
+    println!("worst joint over the flight {worst_all:.2}");
+}
