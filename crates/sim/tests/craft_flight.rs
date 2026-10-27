@@ -47,6 +47,7 @@ const FULL: Controls = Controls {
     reference: None,
     target: None,
     translate: DVec3::ZERO,
+    rcs: sim::systems::rcs::RcsMode { on: false, only: sim::systems::rcs::RcsOnly::Both, fine: false },
 };
 
 #[test]

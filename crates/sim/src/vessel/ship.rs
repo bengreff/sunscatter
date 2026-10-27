@@ -58,6 +58,13 @@ impl Vessel {
         self.ship.as_ref()
     }
 
+    /// What its RCS can do now (`systems::rcs::authority`; a craft of
+    /// catalog parts).
+    pub fn rcs_authority(&self) -> Option<crate::systems::rcs::Authority> {
+        let (def, state) = self.ship_parts()?;
+        Some(crate::systems::rcs::authority(def, state, &self.mass_props(), self.debug))
+    }
+
     /// Whether the pad's hold-down clamps hold it (a hold-down joint
     /// intact): it stays on the pad, fixed to the ground, until they release.
     pub fn clamped(&self) -> bool {
@@ -213,8 +220,13 @@ impl Vessel {
         };
         let t = propulsion::output(def, state, p, dt, self.debug);
         let gimbal = Gimbal { lever: t.pos - props.com, dir: t.dir, thrust: t.thrust, max_angle: t.gimbal };
+        // The thrusters turn the craft unless the pilot's RCS mode keeps
+        // them from it (`systems::rcs::thrusters_turn`).
+        let turn = crate::systems::rcs::thrusters_turn(controls);
         let fed: Vec<bool> = (0..def.thrusters.len())
-            .map(|i| state.thrusters[i].enabled && (self.debug || crate::systems::ship::block_ready(def, state, i)))
+            .map(|i| {
+                turn && state.thrusters[i].enabled && (self.debug || crate::systems::ship::block_ready(def, state, i))
+            })
             .collect();
         let (torque, rcs_flow) = def.rcs_authority(props.com, &fed);
         // Deployed grid fins in the air add their authority.

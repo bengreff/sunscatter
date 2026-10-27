@@ -353,3 +353,37 @@ fn the_falcon_9_stages_separate_without_touching() {
     assert!(gap > 200.0, "{gap}");
     assert!(fleet[0].clear_of.is_empty() && fleet[1].clear_of.is_empty(), "clear of each other");
 }
+
+/// The pilot's RCS mode (D111): off, the rotation keys do not fire the
+/// thrusters (no torque without them on the pad) and the translation keys
+/// nothing; SAS's holds still use them. On, both do. The RCS menu's
+/// authority is the same thrusters' (`rcs::authority`).
+#[test]
+fn the_pilots_rcs_mode_gates_the_thrusters() {
+    use crate::systems::rcs::{self, RcsMode};
+    let w = world();
+    let mut v = on_the_pad(&w);
+    let def = v.ship_def().unwrap();
+    for i in 0..def.thrusters.len() {
+        v.ship.as_mut().unwrap().thrusters[i].enabled = true;
+    }
+    let props = v.mass_props();
+    let dir = (rcs::DIRECTIONS.iter().position(|d| rcs::can_push(&def, v.ship().unwrap(), *d)))
+        .expect("a direction the thrusters push");
+    let tick = |c: Controls| {
+        let c = rcs::pilot(&c);
+        let (_, act, ship) = v.actuators(&c, (0.0, None), 0.02, &props);
+        (act.torque, ship.unwrap().push.force)
+    };
+    let on = RcsMode { on: true, ..RcsMode::default() };
+    let rotate = Controls { rotate: DVec3::X, ..Controls::default() };
+    let translate = Controls { translate: rcs::DIRECTIONS[dir], ..Controls::default() };
+    let sas = Controls { sas: true, ..Controls::default() };
+    assert_eq!(tick(rotate).0, DVec3::ZERO, "off: the keys do not fire them");
+    assert!(tick(Controls { rcs: on, ..rotate }).0.x > 0.0, "on: they do");
+    assert!(tick(sas).0.x > 0.0, "SAS's holds use them");
+    assert_eq!(tick(translate).1, DVec3::ZERO);
+    assert!(tick(Controls { rcs: on, ..translate }).1.dot(rcs::DIRECTIONS[dir]) > 0.0);
+    let a = v.rcs_authority().unwrap();
+    assert!(a.translate[dir].0 > 0.0 && a.rotate.x > 0.0, "{a:?}");
+}

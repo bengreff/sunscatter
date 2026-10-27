@@ -120,6 +120,9 @@ pub struct Controls {
     /// parts' thrusters push along it (`systems::rcs`; settling burns).
     #[serde(default)]
     pub translate: DVec3,
+    /// The pilot's RCS mode (D111, `systems::rcs::pilot`).
+    #[serde(default)]
+    pub rcs: crate::systems::rcs::RcsMode,
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]

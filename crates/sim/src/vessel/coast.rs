@@ -142,9 +142,11 @@ impl Vessel {
         }
         let mut budget = Budget::new(budget);
         self.systems.start_at(self.time);
-        // A wreck has no engine or controls.
+        // A wreck has no engine or controls; the pilot's RCS mode gates and
+        // scales the inputs (`systems::rcs::pilot`).
         let cut = Controls::default();
-        let controls = if self.destroyed.is_some() { &cut } else { controls };
+        let pilot = crate::systems::rcs::pilot(controls);
+        let controls = if self.destroyed.is_some() { &cut } else { &pilot };
         let live_at_start = matches!(self.phase, Phase::Powered { .. });
         loop {
             // Broken up, or in a bubble waiting for a split (D082): nothing
