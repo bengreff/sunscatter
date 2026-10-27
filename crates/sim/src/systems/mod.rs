@@ -23,6 +23,7 @@
 pub mod command;
 pub mod crew;
 pub mod data;
+pub mod estimate;
 pub mod failure;
 pub mod fins;
 pub mod mechanisms;
