@@ -352,16 +352,51 @@ struct ZoneOut {
     tone: f32,
 }
 
+// The sea's coverage at `uv`: near, the exact bilinear coverage of a gather
+// thresholded at 0.5 over one pixel (zones::coast_step); far, the filtered
+// coverage. Derivatives as in `zone_surface`.
+fn sea_cover(uv: vec2<f32>, dx: vec2<f32>, dy: vec2<f32>, dx0: vec2<f32>, dy0: vec2<f32>) -> f32 {
+    if terrain.flags.w == 0u {
+        return 0.0;
+    }
+    let ws = vec2<f32>(textureDimensions(water_map, 0));
+    let wjx = dx * ws;
+    let wjy = dy * ws;
+    let wfar = smoothstep(0.5, 1.0, max(length(dx0 * ws), length(dy0 * ws)));
+    var near_sea = 0.0;
+    if wfar < 1.0 {
+        let t = uv * ws - 0.5;
+        let i = floor(t);
+        let f = t - i;
+        let g = textureGather(0, water_map, water_sampler, (i + 1.0) / ws);
+        let raw = dot(g, gather_w(f));
+        let grad = px_gradient(vec2(dot(g, gather_dwx(f)), dot(g, gather_dwy(f))), wjx, wjy);
+        near_sea = clamp(0.5 + (raw - 0.5) / max(grad, 1e-6), 0.0, 1.0);
+    }
+    var far_sea = 0.0;
+    if wfar > 0.0 {
+        far_sea = textureSampleGrad(water_map, water_sampler, uv, dx0, dy0).r;
+    }
+    return mix(near_sea, far_sea, wfar);
+}
+
+// Above this sea coverage the land under a pixel is not seen (it weighs
+// under 0.2 % in the colour): its pattern is not computed.
+const SEA_HIDES_LAND: f32 = 0.998;
+
 // The zone surface at warped texture coordinates `uv` (derivatives dx, dy),
 // body-fixed position `p` (m) and pixel footprint `foot` (m).
 // `dx`, `dy`: the warped coordinates' derivatives (the edges'
 // antialiasing); `dx0`, `dy0`: the unwarped ones (how many texels a pixel
 // covers, and the filtered lookups), continuous where the warp stops.
-fn zone_surface(uv: vec2<f32>, dx: vec2<f32>, dy: vec2<f32>, dx0: vec2<f32>, dy0: vec2<f32>, p: vec3<f32>, foot: f32) -> ZoneOut {
+// `edge`: the point is near a zone edge or the coast (zones::edge_mask);
+// elsewhere the 4 texels around it hold one zone, `id` (the zone map's
+// value at the point), so it is drawn without looking them up.
+fn zone_surface(uv: vec2<f32>, dx: vec2<f32>, dy: vec2<f32>, dx0: vec2<f32>, dy0: vec2<f32>, p: vec3<f32>, foot: f32, edge: bool, id: u32) -> ZoneOut {
     var o = ZoneOut(vec3(0.0), 0.0, 0.0, 1.0, 0.0);
+    // The sea first: land fully under it needs no pattern.
+    o.sea = sea_cover(uv, dx, dy, dx0, dy0);
     let zs = vec2<f32>(textureDimensions(zone_map, 0));
-    let jx = dx * zs;
-    let jy = dy * zs;
     // Near: pixels smaller than half a zone texel; far: a texel or more.
     let far = smoothstep(0.5, 1.0, max(length(dx0 * zs), length(dy0 * zs)));
     // Fully near (a pixel under half a zone texel), the far colour is not
@@ -373,45 +408,6 @@ fn zone_surface(uv: vec2<f32>, dx: vec2<f32>, dy: vec2<f32>, dx0: vec2<f32>, dy0
     o.shallow = far_c.a;
     var near = vec3(0.0);
     if far < 1.0 {
-        let t = uv * zs - 0.5;
-        let i = floor(t);
-        let f = t - i;
-        // The 4 texels around the point, in gather order (longitude wraps,
-        // latitude clamps; zones::texel_block).
-        let n = vec2<i32>(textureDimensions(zone_map, 0));
-        let x0 = ((i32(i.x) % n.x) + n.x) % n.x;
-        let x1 = (x0 + 1) % n.x;
-        let y0 = clamp(i32(i.y), 0, n.y - 1);
-        let y1 = clamp(i32(i.y) + 1, 0, n.y - 1);
-        let g = vec4(
-            textureLoad(zone_map, vec2(x0, y1), 0).r,
-            textureLoad(zone_map, vec2(x1, y1), 0).r,
-            textureLoad(zone_map, vec2(x1, y0), 0).r,
-            textureLoad(zone_map, vec2(x0, y0), 0).r,
-        );
-        // The zone indices, without the edge flag (zones::EDGE_BIT).
-        let ids = vec4<u32>(g * 255.0 + 0.5) & vec4(0x7fu);
-        let w = gather_w(f);
-        // Each zone's summed weight; the largest wins (zones::pick).
-        let s = vec4(dot(w, eq4(ids, ids.x)), dot(w, eq4(ids, ids.y)), dot(w, eq4(ids, ids.z)), dot(w, eq4(ids, ids.w)));
-        var win = ids.x;
-        var sw = s.x;
-        if s.y > sw { win = ids.y; sw = s.y; }
-        if s.z > sw { win = ids.z; sw = s.z; }
-        if s.w > sw { win = ids.w; sw = s.w; }
-        var run = win;
-        var sr = -1.0;
-        if ids.x != win && s.x > sr { run = ids.x; sr = s.x; }
-        if ids.y != win && s.y > sr { run = ids.y; sr = s.y; }
-        if ids.z != win && s.z > sr { run = ids.z; sr = s.z; }
-        if ids.w != win && s.w > sr { run = ids.w; sr = s.w; }
-        // The edge (margin 0) antialiased over one pixel (zones::edge_coverage).
-        var cov = 1.0;
-        if run != win {
-            let d = eq4(ids, win) - eq4(ids, run);
-            let g = vec2(dot(d, gather_dwx(f)), dot(d, gather_dwy(f)));
-            cov = clamp(0.5 + (sw - sr) / max(px_gradient(g, jx, jy), 1e-6), 0.5, 1.0);
-        }
         // The satellite tint, baked in the far texture: its base level over
         // the palette, both bilinear, so it varies smoothly.
         let base4 = textureSampleLevel(zone_far, color_sampler, uv, 0.0);
@@ -419,39 +415,62 @@ fn zone_surface(uv: vec2<f32>, dx: vec2<f32>, dy: vec2<f32>, dx0: vec2<f32>, dy0
         if far <= 0.0 {
             o.shallow = base4.a;
         }
-        let pal = zone_col(ids.x).rgb * w.x + zone_col(ids.y).rgb * w.y + zone_col(ids.z).rgb * w.z + zone_col(ids.w).rgb * w.w;
-        let tint = base / max(pal, vec3(1e-5));
+        var win = id;
+        var run = id;
+        var cov = 1.0;
+        var tint = base / max(zone_col(id).rgb, vec3(1e-5));
+        if edge {
+            let t = uv * zs - 0.5;
+            let i = floor(t);
+            let f = t - i;
+            // The 4 texels around the point, in gather order (longitude wraps,
+            // latitude clamps; zones::texel_block).
+            let n = vec2<i32>(textureDimensions(zone_map, 0));
+            let x0 = ((i32(i.x) % n.x) + n.x) % n.x;
+            let x1 = (x0 + 1) % n.x;
+            let y0 = clamp(i32(i.y), 0, n.y - 1);
+            let y1 = clamp(i32(i.y) + 1, 0, n.y - 1);
+            let g = vec4(
+                textureLoad(zone_map, vec2(x0, y1), 0).r,
+                textureLoad(zone_map, vec2(x1, y1), 0).r,
+                textureLoad(zone_map, vec2(x1, y0), 0).r,
+                textureLoad(zone_map, vec2(x0, y0), 0).r,
+            );
+            // The zone indices, without the edge flag (zones::EDGE_BIT).
+            let ids = vec4<u32>(g * 255.0 + 0.5) & vec4(0x7fu);
+            let w = gather_w(f);
+            // Each zone's summed weight; the largest wins (zones::pick).
+            let s = vec4(dot(w, eq4(ids, ids.x)), dot(w, eq4(ids, ids.y)), dot(w, eq4(ids, ids.z)), dot(w, eq4(ids, ids.w)));
+            win = ids.x;
+            var sw = s.x;
+            if s.y > sw { win = ids.y; sw = s.y; }
+            if s.z > sw { win = ids.z; sw = s.z; }
+            if s.w > sw { win = ids.w; sw = s.w; }
+            run = win;
+            var sr = -1.0;
+            if ids.x != win && s.x > sr { run = ids.x; sr = s.x; }
+            if ids.y != win && s.y > sr { run = ids.y; sr = s.y; }
+            if ids.z != win && s.z > sr { run = ids.z; sr = s.z; }
+            if ids.w != win && s.w > sr { run = ids.w; sr = s.w; }
+            // The edge (margin 0) antialiased over one pixel (zones::edge_coverage).
+            if run != win {
+                let d = eq4(ids, win) - eq4(ids, run);
+                let g = vec2(dot(d, gather_dwx(f)), dot(d, gather_dwy(f)));
+                cov = clamp(0.5 + (sw - sr) / max(px_gradient(g, dx * zs, dy * zs), 1e-6), 0.5, 1.0);
+            }
+            let pal = zone_col(ids.x).rgb * w.x + zone_col(ids.y).rgb * w.y + zone_col(ids.z).rgb * w.z + zone_col(ids.w).rgb * w.w;
+            tint = base / max(pal, vec3(1e-5));
+        }
         let pat = terrain.zone_pattern[min(win, 15u)];
-        o.tone = zone_tone(p, pat.x, foot);
+        if o.sea < SEA_HIDES_LAND {
+            o.tone = zone_tone(p, pat.x, foot);
+        }
         let cw = zone_col(win);
         let cr = zone_col(run);
         near = mix(cr.rgb, cw.rgb, cov) * tint * (1.0 + pat.y * o.tone);
         o.lake = (cw.w * cov + cr.w * (1.0 - cov)) * (1.0 - far);
     }
     o.land = mix(near, far_c.rgb, far);
-    // The sea: near, the exact bilinear coverage of a gather thresholded at
-    // 0.5 over one pixel (zones::coast_step); far, the filtered coverage.
-    if terrain.flags.w != 0u {
-        let ws = vec2<f32>(textureDimensions(water_map, 0));
-        let wjx = dx * ws;
-        let wjy = dy * ws;
-        let wfar = smoothstep(0.5, 1.0, max(length(dx0 * ws), length(dy0 * ws)));
-        var near_sea = 0.0;
-        if wfar < 1.0 {
-            let t = uv * ws - 0.5;
-            let i = floor(t);
-            let f = t - i;
-            let g = textureGather(0, water_map, water_sampler, (i + 1.0) / ws);
-            let raw = dot(g, gather_w(f));
-            let grad = px_gradient(vec2(dot(g, gather_dwx(f)), dot(g, gather_dwy(f))), wjx, wjy);
-            near_sea = clamp(0.5 + (raw - 0.5) / max(grad, 1e-6), 0.0, 1.0);
-        }
-        var far_sea = 0.0;
-        if wfar > 0.0 {
-            far_sea = textureSampleGrad(water_map, water_sampler, uv, dx0, dy0).r;
-        }
-        o.sea = mix(near_sea, far_sea, wfar);
-    }
     return o;
 }
 
@@ -734,7 +753,8 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
         }
         let dxw = vec2(wrap_d(dpdx(uv_w.x)), dpdx(uv_w.y));
         let dyw = vec2(wrap_d(dpdy(uv_w.x)), dpdy(uv_w.y));
-        let z = zone_surface(uv_w, dxw, dyw, dx, dy, fixed, foot);
+        let id = u32(flag * 255.0 + 0.5) & 0x7fu;
+        let z = zone_surface(uv_w, dxw, dyw, dx, dy, fixed, foot, near_edge, id);
         color = z.land;
         water = max(z.sea, z.lake);
         // Open water, lighter over a shallow sea floor (lakes stay deep).
