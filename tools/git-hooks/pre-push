@@ -8,7 +8,8 @@
 # only changed files are rewritten, so builds stay incremental) and built
 # in `target/prepush/target`. The checks are CI's (`.github/workflows/ci.yml`):
 # format, file sizes, decision references, clippy and tests (--no-fail-fast)
-# for sim and the tools; clippy and tests for game when the push touches it.
+# for sim and the tools; clippy and tests for game when the push touches it
+# or what it depends on (sim, mcp, data/, the manifests).
 # Pushes that change only docs skip cargo. Bypass in an emergency with
 # `git push --no-verify` (CI still runs).
 set -uo pipefail
@@ -44,7 +45,9 @@ check() {
     log="$CARGO_TARGET_DIR/test.log"
     cargo test -q -p sim -p asset-tool -p mcp --locked --no-fail-fast >"$log" 2>&1 \
       || { grep -E "FAILED|panicked at|^error" "$log" | head -20 >&2; exit 1; }
-    if grep -q '^crates/game/' <<<"$files"; then
+    # game depends on sim and mcp and reads data/: a change to any of them
+    # can fail CI's game job (2026-10-27: a sim-only push would have).
+    if grep -qE '^(crates/(game|sim|mcp)/|data/|Cargo\.(toml|lock))' <<<"$files"; then
       cargo clippy -q -p game --all-targets --locked -- -D warnings || exit 1
       cargo test -q -p game --locked --no-fail-fast >"$log" 2>&1 \
         || { grep -E "FAILED|panicked at|^error" "$log" | head -20 >&2; exit 1; }
