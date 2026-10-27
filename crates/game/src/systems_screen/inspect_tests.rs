@@ -29,7 +29,8 @@ fn a_tank_part_shows_its_joint_ratings_condition_and_both_compartments() {
     let g = details(def, &state, &facts, Selection::Part(id), &Known::default());
     assert_eq!(titles(&g), ["PART tank", "JOINT separation", "RATINGS", "CONDITION", "TANK tank:fuel", "TANK tank:ox"]);
     assert_eq!(value(&g, "JOINT separation", "kind"), "separation system");
-    assert_eq!(value(&g, "JOINT separation", "load"), "not simulated yet (RUNTIME)");
+    // Known (perfect knowledge here) and unloaded on the pad's state.
+    assert_eq!(value(&g, "JOINT separation", "load"), "0 % of its ultimate");
     assert_eq!(value(&g, "TANK tank:ox", "fluid"), "LOX");
     assert!(value(&g, "TANK tank:fuel", "liquid").ends_with("(90.0 %)"));
     // Loaded at 3 bar: the gas law on the state gives it back.

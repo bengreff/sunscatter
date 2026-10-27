@@ -158,7 +158,12 @@ fn part_groups(def: &ShipDef, state: &ShipState, id: u32, f: Option<&PartFacts>,
         if j.radius > 0.0 {
             g.row("axial capacity", kilonewtons(j.allowable * 2.0 * std::f64::consts::PI * j.radius));
         }
-        g.row("load", "not simulated yet (RUNTIME)");
+        // RUNTIME's load at the last live tick, where a strain gauge measures it.
+        let load = match j.ratio {
+            Some(r) => format!("{:.0} % of its ultimate", r * 100.0),
+            None => crate::format::DASH.to_string(),
+        };
+        g.row("load", load);
         out.push(g);
     }
     out.push(ratings(&info.ratings));

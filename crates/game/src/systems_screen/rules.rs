@@ -59,8 +59,9 @@ impl Layer {
         match self {
             Layer::Physical => "Parts by their outer material or paint.",
             Layer::Structural => {
-                "Joints by kind: integral white, bolted grey, separation amber, hold-down concrete. \
-                 Loads against capacity are not simulated yet (RUNTIME)."
+                "Each part by the joint to its parent: its load over its ultimate where a strain gauge measures \
+                 it (green to red; debug mode: everywhere), else its kind: integral white, bolted grey, \
+                 separation amber, hold-down concrete."
             }
             Layer::Thermal => {
                 "Each part's skin cell or interior node nearest its limit, blue cold, red at it, where a \
@@ -104,6 +105,10 @@ pub struct JointFact {
     /// Line load it carries (N/m) and its ring's radius (m).
     pub allowable: f64,
     pub radius: f64,
+    /// Its load at the last live tick over its allowable at temperature (1:
+    /// the ultimate load; RUNTIME's structure), where the craft measures it
+    /// (a strain gauge, D106).
+    pub ratio: Option<f64>,
 }
 
 /// What the screen knows of one part.
@@ -182,6 +187,9 @@ pub fn facts(
                 intact: state.joints.get(i).is_none_or(|s| s.intact),
                 allowable: j.allowable,
                 radius: j.radius,
+                ratio: (state.runtime.joints.get(i))
+                    .filter(|_| known.knows(Quantity::JointLoad(i as u32)))
+                    .map(|r| r.ratio),
             });
             let tanks = (def.tanks.iter().zip(&state.tanks).enumerate())
                 .filter(|(_, (d, _))| d.part == id)
@@ -266,6 +274,12 @@ pub fn fluid_colour(fluid: &str) -> [f32; 3] {
     }
 }
 
+/// A joint's load over its ultimate: green unloaded, yellow at half, red at
+/// it and beyond.
+pub fn load_colour(ratio: f64) -> [f32; 3] {
+    ramp(&[[0.12, 0.75, 0.25], [0.9, 0.8, 0.1], [0.9, 0.08, 0.04]], ratio)
+}
+
 /// A part's health: green sound, yellow at half its damage, red failed
 /// (damage at one or integrity gone).
 pub fn health_colour(integrity: f64, damage: f64) -> [f32; 3] {
@@ -281,6 +295,10 @@ pub fn colour(layer: Layer, f: &PartFacts, selected: bool) -> [f32; 3] {
             _ if f.ground => crate::scene::parts::GROUND,
             None => [0.85, 0.85, 0.88],
             Some((_, false)) => GHOST,
+            // A measured load: green unloaded, yellow at half, red at the ultimate.
+            Some(_) if f.joint.as_ref().and_then(|j| j.ratio).is_some() => {
+                load_colour(f.joint.as_ref().and_then(|j| j.ratio).unwrap_or(0.0))
+            }
             Some((JointClass::Integral, _)) => [0.8, 0.8, 0.82],
             Some((JointClass::Bolted, _)) => [0.35, 0.37, 0.4],
             Some((JointClass::Separation, _)) => [1.0, 0.6, 0.1],

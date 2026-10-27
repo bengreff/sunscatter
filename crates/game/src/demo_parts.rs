@@ -25,7 +25,8 @@ use sim::vessel::{quat_z_to, Attitude, VesselId};
 /// The pad's views: (shot, camera distance from the centre of mass (m),
 /// pitch (rad), yaw turned from the start (rad)).
 const PAD_VIEWS: [(&str, f64, f64, f64); 4] = [
-    ("parts_pad_side", 120.0, 0.05, 0.0),
+    // Far enough that the base stands clear of the navball cluster.
+    ("parts_pad_side", 170.0, 0.05, 0.0),
     ("parts_pad_three_quarter", 150.0, 0.45, 0.8),
     ("parts_pad_low", 45.0, -0.05, 2.2),
     ("parts_pad_top", 110.0, 1.45, 0.0),
@@ -162,7 +163,7 @@ pub fn run(
             }
             sim.controls.throttle = 1.0;
             cmds.write(GameCommand::NextStage);
-            (rig.distance, rig.pitch) = (120.0, 0.1);
+            (rig.distance, rig.pitch) = (180.0, 0.05);
             script.phase = Phase::Ignition;
             (demo.timer, script.resume_at) = (0.0, 0.0);
         }

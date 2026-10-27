@@ -83,7 +83,9 @@ fn temperatures_go_to_their_parts_nearest_their_limits() {
 #[test]
 fn layer_colours_table() {
     let base = PartFacts { material: [0.8, 0.8, 0.8], integrity: 1.0, ..Default::default() };
-    let joint = |class, intact| Some(JointFact { name: "j".into(), class, intact, allowable: 1.0, radius: 1.0 });
+    let joint =
+        |class, intact| Some(JointFact { name: "j".into(), class, intact, allowable: 1.0, radius: 1.0, ratio: None });
+    let loaded = |ratio| Some(JointFact { ratio: Some(ratio), ..joint(JointClass::Bolted, true).unwrap() });
     let lox_half = PartFacts { tanks: vec![("LOX".into(), Some(50.0), 100.0)], ..base.clone() };
     let lox_full = PartFacts { tanks: vec![("LOX".into(), Some(100.0), 100.0)], ..base.clone() };
     // (layer, facts, colour)
@@ -93,6 +95,8 @@ fn layer_colours_table() {
         (Layer::Structural, PartFacts { joint: joint(JointClass::Separation, true), ..base.clone() }, [1.0, 0.6, 0.1]),
         (Layer::Structural, PartFacts { joint: joint(JointClass::Separation, false), ..base.clone() }, GHOST),
         (Layer::Structural, PartFacts { ground: true, ..base.clone() }, crate::scene::parts::GROUND),
+        (Layer::Structural, PartFacts { joint: loaded(0.0), ..base.clone() }, [0.12, 0.75, 0.25]),
+        (Layer::Structural, PartFacts { joint: loaded(1.2), ..base.clone() }, [0.9, 0.08, 0.04]),
         (Layer::Plumbing, base.clone(), GHOST),
         (Layer::Plumbing, PartFacts { plumbing: true, ..base.clone() }, [0.55, 0.57, 0.6]),
         (Layer::Plumbing, lox_full, [0.45, 0.7, 1.0]),
