@@ -35,9 +35,14 @@
     mesh_types,
     mesh_view_types,
     mesh_view_bindings::{view, lights},
+    mesh_view_bindings as view_bindings,
+    pbr_bindings,
     mesh_functions,
     view_transformations::position_world_to_clip,
 }
+#ifdef ATMOSPHERE
+#import bevy_pbr::atmosphere::functions::{calculate_visible_sun_ratio, clamp_to_surface}
+#endif
 #endif
 
 // What changes every frame (material::TerrainFrame), in a storage buffer so
@@ -257,14 +262,9 @@ const OCTAVE_TURN: mat3x3<f32> = mat3x3<f32>(
     vec3<f32>(-0.60, -0.48, 0.64),
 );
 
-// One fBm octave: the hashed noise for the first, coarsest one (no period
-// at all), the lattice texture for the rest.
-fn octave_noise2(k: i32, q: vec3<f32>) -> vec2<f32> {
-    if k == 0 {
-        return vnoise2(q);
-    }
-    return lattice_noise2(q);
-}
+// The fBm below takes its first, coarsest octave from the hashed noise (no
+// period at all) and the rest from the lattice texture; the first is out of
+// the loop, so the loop holds only the texture's fetch.
 
 // The domain warp (zone texels): 3D fBm of the body-fixed position `p`
 // (m), wavelengths `lam0`, lam0/2, ..., each octave fading by footprint.
@@ -276,15 +276,20 @@ fn zone_warp(p: vec3<f32>, lam0: f32, foot: f32) -> vec2<f32> {
     var lam = lam0;
     var amp = WARP_AMP;
     var q = p / lam0;
-    for (var k = 0; k < WARP_OCTAVES; k++) {
+    let wt0 = octave_weight(lam, foot);
+    if wt0 <= 0.0 || lam < WARP_MIN_M {
+        return w;
+    }
+    w = amp * wt0 * vnoise2(q);
+    for (var k = 1; k < WARP_OCTAVES; k++) {
+        lam *= 0.5;
+        amp *= 0.5;
+        q = OCTAVE_TURN * q * 2.0;
         let wt = octave_weight(lam, foot);
         if wt <= 0.0 || lam < WARP_MIN_M {
             break;
         }
-        w += amp * wt * octave_noise2(k, q + f32(k) * vec3(17.31, 5.17, 11.73));
-        lam *= 0.5;
-        amp *= 0.5;
-        q = OCTAVE_TURN * q * 2.0;
+        w += amp * wt * lattice_noise2(q + f32(k) * vec3(17.31, 5.17, 11.73));
     }
     return w;
 }
@@ -299,15 +304,21 @@ fn zone_tone(p: vec3<f32>, scale: f32, foot: f32) -> f32 {
     var lam = scale;
     var amp = 0.5;
     var q = p / scale;
-    for (var k = 0; k < TONE_OCTAVES; k++) {
+    let offset = vec3(3.7, 41.3, 23.9);
+    let wt0 = octave_weight(lam, foot);
+    if wt0 <= 0.0 || lam < TONE_MIN_M {
+        return t;
+    }
+    t = amp * wt0 * vnoise2(q + offset).x;
+    for (var k = 1; k < TONE_OCTAVES; k++) {
+        lam *= 0.5;
+        amp *= 0.5;
+        q = OCTAVE_TURN * q * 2.0;
         let wt = octave_weight(lam, foot);
         if wt <= 0.0 || lam < TONE_MIN_M {
             break;
         }
-        t += amp * wt * octave_noise2(k, q + vec3(3.7, 41.3, 23.9) + f32(k) * vec3(7.13, 13.7, 3.31)).x;
-        lam *= 0.5;
-        amp *= 0.5;
-        q = OCTAVE_TURN * q * 2.0;
+        t += amp * wt * lattice_noise2(q + offset + f32(k) * vec3(7.13, 13.7, 3.31)).x;
     }
     return t;
 }
@@ -551,39 +562,56 @@ fn slot_of_light(i: u32) -> i32 {
     return best;
 }
 
-// Bevy's lighting input for this fragment, as `apply_pbr_lighting` builds
-// it (base layer; the terrain has no clearcoat or anisotropy), so each
-// directional light's share of its output can be found and rescaled.
-fn lighting_input_of(in: pbr_types::PbrInput) -> lighting::LightingInput {
-    let base = in.material.base_color;
-    let metallic = in.material.metallic;
-    let perceptual_roughness = in.material.perceptual_roughness;
-    let NdotV = max(dot(in.N, in.V), 0.0001);
-    var input: lighting::LightingInput;
-    input.layers[lighting::LAYER_BASE].NdotV = NdotV;
-    input.layers[lighting::LAYER_BASE].N = in.N;
-    input.layers[lighting::LAYER_BASE].R = reflect(-in.V, in.N);
-    input.layers[lighting::LAYER_BASE].perceptual_roughness = perceptual_roughness;
-    input.layers[lighting::LAYER_BASE].roughness = lighting::perceptualRoughnessToRoughness(perceptual_roughness);
-    input.P = in.world_position.xyz;
-    input.V = in.V;
-    input.diffuse_color = pbr_functions::calculate_diffuse_color(base.rgb, metallic, in.material.specular_transmission, in.material.diffuse_transmission);
-    input.metallic = metallic;
-    input.F0_dielectric = pbr_functions::calculate_F0_dielectric(in.material.reflectance);
-    input.F0_metallic = base.rgb;
-    input.F_ab = lighting::F_AB(perceptual_roughness, NdotV);
-    return input;
+// Bevy's directional light `i` on the terrain: `lighting::directional_light`'s
+// terms for one dielectric layer (Burley diffuse, GGX specular with the
+// multiscatter compensation, the light's colour, and with an atmosphere its
+// transmittance and the sun's visible part), written out with scalars: built
+// through Bevy's `LightingInput` and `PbrInput` they took most of the
+// shader's registers, and with them the zones' speed (2026-10-27: 3.8 ms of
+// the plunge's 8.5 ms main pass was the lighting).
+fn direct_light(
+    i: u32, p: vec3<f32>, N: vec3<f32>, V: vec3<f32>, NdotV: f32, diffuse_color: vec3<f32>,
+    F0: vec3<f32>, F_ab: vec2<f32>, roughness: f32,
+) -> vec3<f32> {
+    let light = &lights.directional_lights[i];
+    let L = (*light).direction_to_light.xyz;
+    let H = normalize(L + V);
+    let NdotL = saturate(dot(N, L));
+    let NdotH = saturate(dot(N, H));
+    let LdotH = saturate(dot(L, H));
+    // Fd_Burley.
+    let f90 = 0.5 + 2.0 * roughness * LdotH * LdotH;
+    let burley = lighting::F_Schlick(1.0, f90, NdotL) * lighting::F_Schlick(1.0, f90, NdotV) * (1.0 / PI);
+    // specular(): D, V, F and the multiscatter compensation.
+    let D = lighting::D_GGX(roughness, NdotH);
+    let Vis = lighting::V_SmithGGXCorrelated(roughness, NdotV, NdotL);
+    let F = lighting::fresnel(F0, LdotH);
+    let Fr = (D * Vis) * F * (1.0 + F0 * (1.0 / (F_ab.x + F_ab.y) - 1.0));
+    var color = (diffuse_color * burley + Fr) * NdotL * (*light).color.rgb;
+#ifdef ATMOSPHERE
+    let atmosphere = view_bindings::atmosphere;
+    let P_as = (atmosphere.world_to_atmosphere * vec4(p, 1.0)).xyz;
+    let P_clamped = clamp_to_surface(atmosphere, P_as);
+    let r = length(P_clamped);
+    let mu_light = dot(L, normalize(P_clamped));
+    color *= lighting::sample_transmittance_lut(r, mu_light)
+        * calculate_visible_sun_ratio(atmosphere, r, mu_light, (*light).sun_disk_angular_size);
+#endif
+    return color;
 }
 
-// The terrain's lighting, Bevy's PBR terms evaluated once (2026-10-26:
-// `apply_pbr_lighting` and then this took every light and shadow twice):
-// every star at its own flux, eclipses, ring shadow and elevation (D055),
-// each Bevy directional light (one per slotted star, carrying its flux at
-// the camera) rescaled by its star's factor here; Bevy's ambient term (the
-// sky stand-in) by the flux-weighted mean of the factors. Then, under a
-// haze, each star's diffuse light; planetshine from each reflector; and
-// the starlight without a slot as ambient.
-fn shade(in: pbr_types::PbrInput, color: vec3<f32>, p: vec3<f32>, n: vec3<f32>) -> vec3<f32> {
+// The terrain's lighting, Bevy's StandardMaterial terms (its uniform's
+// reflectance and metallic, the roughness given), evaluated once
+// (2026-10-26: `apply_pbr_lighting` and then this took every light and
+// shadow twice): every star at its own flux, eclipses, ring shadow and
+// elevation (D055), each Bevy directional light (one per slotted star,
+// carrying its flux at the camera) rescaled by its star's factor here;
+// Bevy's ambient term (the sky stand-in, this body's share of it) by the
+// flux-weighted mean of the factors. Then, under a haze, each star's
+// diffuse light; planetshine from each reflector; and the starlight
+// without a slot as ambient. `n`: the mesh's normal; `N`: the shading
+// normal (the sphere's under water).
+fn shade(color: vec3<f32>, perceptual_roughness: f32, p: vec3<f32>, n: vec3<f32>, N: vec3<f32>, frag_coord: vec2<f32>) -> vec3<f32> {
     let foot = length(fwidth(p));
     let up_here = normalize(p - frame_data.center.xyz);
     // Each slot's factor, by name (a dynamically indexed local array can spill).
@@ -630,22 +658,29 @@ fn shade(in: pbr_types::PbrInput, color: vec3<f32>, p: vec3<f32>, n: vec3<f32>) 
         sky_num += f * e_cam;
         sky_den += e_cam;
     }
+    // The material's terms, as `pbr_input_from_standard_material` and
+    // `apply_pbr_lighting` derive them (no transmission, one layer).
+    let metallic = pbr_bindings::material.metallic;
+    let V = normalize(view.world_position.xyz - p);
+    let NdotV = max(dot(N, V), 0.0001);
+    let roughness = lighting::perceptualRoughnessToRoughness(perceptual_roughness);
+    let diffuse_color = pbr_functions::calculate_diffuse_color(color, metallic, 0.0, 0.0);
+    let F0 = pbr_functions::calculate_F0(color, metallic, pbr_bindings::material.reflectance);
+    let F_ab = lighting::F_AB(perceptual_roughness, NdotV);
     // Bevy's directional lights, one by one, as apply_pbr_lighting adds them.
-    var input = lighting_input_of(in);
-    let NdotV = input.layers[lighting::LAYER_BASE].NdotV;
     let view_z = dot(vec4(
         view.view_from_world[0].z,
         view.view_from_world[1].z,
         view.view_from_world[2].z,
         view.view_from_world[3].z
-    ), in.world_position);
+    ), vec4(p, 1.0));
     for (var i = 0u; i < lights.n_directional_lights; i++) {
+        // Every terrain chunk receives shadows (none is a NotShadowReceiver).
         var shadow = 1.0;
-        if (in.flags & mesh_types::MESH_FLAGS_SHADOW_RECEIVER_BIT) != 0u
-                && (lights.directional_lights[i].flags & mesh_view_types::DIRECTIONAL_LIGHT_FLAGS_SHADOWS_ENABLED_BIT) != 0u {
-            shadow = shadows::fetch_directional_shadow(i, in.world_position, in.world_normal, view_z, in.frag_coord.xy);
+        if (lights.directional_lights[i].flags & mesh_view_types::DIRECTIONAL_LIGHT_FLAGS_SHADOWS_ENABLED_BIT) != 0u {
+            shadow = shadows::fetch_directional_shadow(i, vec4(p, 1.0), n, view_z, frag_coord);
         }
-        let c = lighting::directional_light(i, &input, true) * shadow * view.exposure;
+        let c = direct_light(i, p, N, V, NdotV, diffuse_color, F0, F_ab, roughness) * shadow * view.exposure;
         let slot = slot_of_light(i);
         lit += c * select(select(select(f3, f2, slot == 2), f1, slot == 1), f0, slot == 0);
     }
@@ -653,11 +688,10 @@ fn shade(in: pbr_types::PbrInput, color: vec3<f32>, p: vec3<f32>, n: vec3<f32>) 
     if sky_den > 0.0 {
         sky = sky_num / sky_den;
     }
-    // Bevy's ambient term (no environment map, no clustered lights here).
-    let spec0 = mix(input.F0_dielectric, input.F0_metallic, input.metallic);
+    // Bevy's ambient term (no environment map, no clustered lights here);
+    // the daylight sky stand-in lights only the body whose air the camera is in.
     let amb = ambient_light(
-        in.world_position, in.N, in.V, NdotV, input.diffuse_color, spec0,
-        input.layers[lighting::LAYER_BASE].perceptual_roughness, in.diffuse_occlusion,
+        vec4(p, 1.0), N, V, NdotV, diffuse_color, F0, perceptual_roughness, vec3(frame_data.ambient.x),
     );
     lit += amb * view.exposure * sky;
     // Planetshine: a Lambert term from each reflecting body.
@@ -703,10 +737,6 @@ fn lighting_luminance(c: vec3<f32>) -> f32 {
 
 @fragment
 fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> FragmentOutput {
-    var pbr_input = pbr_input_from_standard_material(in, is_front);
-    // The daylight sky stand-in lights only the body whose air the camera is in.
-    pbr_input.diffuse_occlusion *= frame_data.ambient.x;
-
     let rel = in.world_position.xyz - frame_data.center.xyz;
     let fixed = vec3(dot(frame_data.fixed_x.xyz, rel), dot(frame_data.fixed_y.xyz, rel), dot(frame_data.fixed_z.xyz, rel));
     let dir = normalize(fixed);
@@ -796,7 +826,6 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     }
 
     let dist = length(in.world_position.xyz);
-    var n_out = normalize(pbr_input.N);
     // A simple ground texture for depth perception near the ground
     // (zones::ground_* mirror the rules, D073): lighter and darker patches
     // at 8 scales, 320 m down to 2.5 m on Earth (detail units / 0.125,
@@ -831,16 +860,17 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
             color *= exp2((fine + GROUND_PATCH_STOPS * patches) * near * (1.0 - water));
         }
     }
-    // Water lies at sea level: shade it with the sphere's normal at this
-    // fragment, not the mesh normal. On a coarse chunk the mesh normal is
-    // interpolated across triangles kilometres wide, and the sharp sun glint
-    // took their shape (grey and white triangles that jumped as the LOD
-    // changed while zooming).
+    // The shading normal: water lies at sea level, so it is shaded with the
+    // sphere's normal at this fragment, not the mesh normal. On a coarse
+    // chunk the mesh normal is interpolated across triangles kilometres
+    // wide, and the sharp sun glint took their shape (grey and white
+    // triangles that jumped as the LOD changed while zooming).
+    let n_mesh = normalize(in.world_normal);
+    var n_out = n_mesh;
     if water > 0.0 {
         let sphere_n = normalize(in.world_position.xyz - frame_data.center.xyz);
         n_out = normalize(mix(n_out, sphere_n, water));
     }
-    pbr_input.N = n_out;
 
     if zones_on {
         color = mix(color, water_color, water);
@@ -849,17 +879,20 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
         color = mix(color, max(color, terrain.ocean.rgb), water);
     }
 
+#ifdef PREPASS_PIPELINE
+    var pbr_input = pbr_input_from_standard_material(in, is_front);
+    pbr_input.N = n_out;
     pbr_input.material.base_color = vec4(color, 1.0);
     pbr_input.material.perceptual_roughness = roughness;
-    pbr_input.material.base_color = alpha_discard(pbr_input.material, pbr_input.material.base_color);
-
-#ifdef PREPASS_PIPELINE
     let out = deferred_output(in, pbr_input);
 #else
     var out: FragmentOutput;
-    out.color = vec4(shade(pbr_input, color, in.world_position.xyz, normalize(in.world_normal)), 1.0);
+    out.color = vec4(shade(color, roughness, in.world_position.xyz, n_mesh, n_out, in.position.xy), 1.0);
     out.color = vec4(deck_fog(out.color.rgb, in.world_position.xyz), out.color.a);
-    out.color = main_pass_post_lighting_processing(pbr_input, out.color);
+    var post = pbr_types::pbr_input_new();
+    post.world_position = in.world_position;
+    post.frag_coord = in.position;
+    out.color = main_pass_post_lighting_processing(post, out.color);
 #endif
     return out;
 }

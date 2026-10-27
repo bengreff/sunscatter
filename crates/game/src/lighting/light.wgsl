@@ -45,14 +45,19 @@ fn disc_overlap(r1: f32, r2: f32, d: f32) -> f32 {
 // Fraction of the star's disc (`star`: centre, radius) visible from `p`
 // past `occluders` (centre, radius; w = 0 unused): their hidden areas add
 // up. The separation is atan2(|a × b|, a · b): acos loses ~3e-4 rad in f32
-// near zero, a third of the Sun's radius seen from Jupiter.
+// near zero, a third of the Sun's radius seen from Jupiter. An occluder
+// whose disc is clear of the star's (the separation's cosine at most that
+// of the radii's sum) hides nothing, found without the inverse trig (it is
+// every pixel's case, and asin and atan2 are long on a GPU).
 fn eclipse(p: vec3<f32>, star: vec4<f32>, occluders: array<vec4<f32>, 4>) -> f32 {
     let to_star = star.xyz - p;
     let ds = length(to_star);
     if star.w <= 0.0 || ds <= star.w {
         return 1.0;
     }
-    let s_ang = asin(clamp(star.w / ds, 0.0, 1.0));
+    let ss = clamp(star.w / ds, 0.0, 1.0);
+    let cs = sqrt(1.0 - ss * ss);
+    let b = to_star / ds;
     var hidden = 0.0;
     for (var i = 0; i < MAX_OCCLUDERS; i++) {
         let o = occluders[i];
@@ -61,11 +66,17 @@ fn eclipse(p: vec3<f32>, star: vec4<f32>, occluders: array<vec4<f32>, 4>) -> f32
         if o.w <= 0.0 || dc <= o.w || dc >= ds || dot(to_c, to_star) <= 0.0 {
             continue;
         }
-        let o_ang = asin(clamp(o.w / dc, 0.0, 1.0));
+        let so = clamp(o.w / dc, 0.0, 1.0);
         let a = to_c / dc;
-        let b = to_star / ds;
+        if dot(a, b) <= cs * sqrt(1.0 - so * so) - ss * so {
+            continue;
+        }
         let sep = atan2(length(cross(a, b)), dot(a, b));
-        hidden += disc_overlap(s_ang, o_ang, sep);
+        hidden += disc_overlap(asin(ss), asin(so), sep);
     }
+    if hidden <= 0.0 {
+        return 1.0;
+    }
+    let s_ang = asin(ss);
     return clamp(1.0 - hidden / (PI * s_ang * s_ang), 0.0, 1.0);
 }
