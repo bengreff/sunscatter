@@ -5,11 +5,13 @@
 use crate::atmosphere;
 use crate::body_visual::{self, BodyVisualDef};
 use crate::camera::CameraRig;
+use crate::ship_light::{ShipExt, ShipLight, ShipMaterial};
 use crate::state::SimState;
 use bevy::camera::visibility::NoFrustumCulling;
 use bevy::light::atmosphere::ScatteringMedium;
 use bevy::light::{CascadeShadowConfigBuilder, GlobalAmbientLight, NotShadowCaster};
 use bevy::prelude::*;
+use bevy::render::storage::ShaderBuffer;
 use glam::{DMat3, DQuat, DVec3};
 use sim::body::BodyPhysical;
 use sim::frame::{NodeId, Vec3 as FVec3};
@@ -331,6 +333,8 @@ pub fn update_canopies(
 const SHIP_COLOR: [f32; 3] = [0.8, 0.8, 0.82];
 const ACTIVE_COLOR: [f32; 3] = [0.95, 0.85, 0.6];
 
+/// Places every ship and fills its light (`ship_light`: each star at the
+/// ship with its eclipses, near-field planetshine, D055).
 #[allow(clippy::too_many_arguments)]
 pub fn update_ships(
     mut commands: Commands,
@@ -339,11 +343,13 @@ pub fn update_ships(
     assets: Res<Assets3d>,
     scene: Res<crate::lighting::LightScene>,
     parts: Res<crate::look::Parts>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-    mut ships: Query<(Entity, &ShipVisual, &mut Transform, &MeshMaterial3d<StandardMaterial>)>,
+    mut materials: ResMut<Assets<ShipMaterial>>,
+    mut buffers: ResMut<Assets<ShaderBuffer>>,
+    mut ships: Query<(Entity, &ShipVisual, &mut Transform, &MeshMaterial3d<ShipMaterial>)>,
 ) {
     let snap = sim.world.snapshot(sim.clock);
     let bodies = scene.spheres();
+    let star_dirs: Vec<DVec3> = scene.slots.iter().map(|&k| scene.stars[k].centre.normalize_or(DVec3::Z)).collect();
     let mut seen = vec![false; sim.fleet.len()];
     for (entity, ship, mut t, mat) in &mut ships {
         let Some(vessel) = sim.fleet.get(ship.0) else {
@@ -358,36 +364,28 @@ pub fn update_ships(
         let q = vessel.attitude.q;
         let origin = pos - q * vessel.mass_props().com;
         *t = Transform { translation: origin.as_vec3(), rotation: q.as_quat(), scale: Vec3::ONE };
-        // Per-ship light (D055): the shared sunlight dimmed where a body
-        // hides the Sun, plus planetshine as a diffuse glow where it does
-        // (in sunlight the sky light and sunlight already dominate, and a
-        // uniform glow would light every face).
-        let light = crate::lighting::object_light(pos, &scene.stars, &scene.slots, &bodies);
-        let visible = light.visible;
-        let shine =
-            if parts.planetshine { crate::lighting::rules::luminance(light.shine) * (1.0 - visible) } else { 0.0 };
-        let [r0, g0, b0] = if ship.0 == sim.active { ACTIVE_COLOR } else { SHIP_COLOR };
-        let LinearRgba { red: r0, green: g0, blue: b0, .. } = Color::srgb(r0, g0, b0).to_linear();
-        let k = visible as f32;
-        let glow = (shine / std::f64::consts::PI) as f32;
-        if let Some(m) = materials.get(&mat.0) {
-            let want_base = LinearRgba::rgb(r0 * k, g0 * k, b0 * k);
-            let want_glow = LinearRgba::rgb(r0 * glow, g0 * glow, b0 * glow);
-            let base = m.base_color.to_linear();
-            let close =
-                |a: LinearRgba, b: LinearRgba| (a.red - b.red).abs() + (a.green - b.green).abs() < 1e-3 * (1.0 + b.red);
-            if !close(base, want_base) || !close(m.emissive, want_glow) {
-                if let Some(mut m) = materials.get_mut(&mat.0) {
-                    m.base_color = want_base.into();
-                    m.emissive = want_glow;
-                }
+        let mut light = crate::lighting::object_light(pos, &scene.stars, &scene.slots, &bodies);
+        if !parts.planetshine {
+            light.shines.clear();
+        }
+        let Some(m) = materials.get(&mat.0) else { continue };
+        if let Some(mut b) = buffers.get_mut(&m.extension.light) {
+            b.set_data(crate::ship_light::ship_light(&light, &star_dirs));
+        }
+        // The active ship's colour (changes only when the active one does).
+        let want: Color = Color::srgb_from_array(if ship.0 == sim.active { ACTIVE_COLOR } else { SHIP_COLOR });
+        if m.base.base_color != want {
+            if let Some(mut m) = materials.get_mut(&mat.0) {
+                m.base.base_color = want;
             }
         }
     }
     for (i, _) in seen.iter().enumerate().filter(|(_, s)| !**s) {
-        // Each ship gets its own material: its light depends on where it is.
-        let [r0, g0, b0] = SHIP_COLOR;
-        let material = materials.add(StandardMaterial { base_color: Color::srgb(r0, g0, b0), ..default() });
+        // Each ship has its own light buffer: its light depends on where it is.
+        let material = materials.add(ShipMaterial {
+            base: StandardMaterial { base_color: Color::srgb_from_array(SHIP_COLOR), ..default() },
+            extension: ShipExt { light: buffers.add(ShaderBuffer::from(ShipLight::default())) },
+        });
         commands.spawn((
             ShipVisual(i),
             Mesh3d(assets.ship_mesh.clone()),

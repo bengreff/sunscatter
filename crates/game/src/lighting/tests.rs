@@ -258,13 +258,137 @@ fn a_moon_eclipsed_from_one_star_but_not_the_other() {
     let occ = [(p.centre, p.radius)];
     assert_eq!(eclipse_factor(m.centre, stars[0].centre, stars[0].radius, &occ), 0.0);
     assert_eq!(eclipse_factor(m.centre, stars[1].centre, stars[1].radius, &occ), 1.0);
-    // A small object at the moon keeps B's share of the drawn light.
-    let o = object_light(m.centre + DVec3::Z * 2e6, &stars, &slots, &bodies);
-    let (ea, eb) = (stars[0].lux_at(m.centre), stars[1].lux_at(m.centre));
-    assert!((o.visible - eb / (ea + eb)).abs() < 1e-3, "{}", o.visible);
-    // With one star the share is that star's eclipse factor.
-    let one = object_light(m.centre + DVec3::Z * 2e6, &stars[..1], &[0], &bodies);
-    assert!(one.visible < 1e-9, "{}", one.visible);
+    // A small object at the moon: A's light hidden, B's at its flux there.
+    let at = m.centre + DVec3::Z * 2e6;
+    let o = object_light(at, &stars, &slots, &bodies);
+    for (k, &s) in slots.iter().enumerate() {
+        let want = if s == 0 { 0.0 } else { stars[s].lux_at(at) / stars[s].lux_at(DVec3::ZERO) };
+        assert!((o.scale[k] - want).abs() < 1e-9, "slot {k}: {}", o.scale[k]);
+    }
+}
+
+/// A Sun-like star 1 AU along +x from a planet of Earth's size at the
+/// origin, with Earth's Lambert albedo (1.5 × 0.434), grey.
+fn sun_and_earth() -> (Star, Sphere) {
+    let sun = Star { centre: DVec3::X * AU, radius: SUN_R, lm: luminous_power(3.828e26, 93.0), tint: [1.0; 3] };
+    let earth = Sphere { centre: DVec3::ZERO, radius: EARTH_R, albedo: 1.5 * 0.434, tint: [1.0; 3] };
+    (sun, earth)
+}
+
+/// The irradiance from `body` on a surface of normal `n` at `at`, brute
+/// force: every direction in which the body is seen, each point a Lambert
+/// reflector of every star (the reference for `shine_disc`).
+fn brute_shine(at: DVec3, body: Sphere, stars: &[Star], n: DVec3) -> f64 {
+    let c = body.centre - at;
+    let d = c.length();
+    let cos_t = (1.0 - (body.radius / d).powi(2)).sqrt();
+    let (axis, k) = (c / d, 400usize);
+    let (e1, e2) = (axis.any_orthonormal_vector(), axis.cross(axis.any_orthonormal_vector()));
+    let mut e = 0.0;
+    for i in 0..k {
+        for j in 0..k {
+            // Midpoints in (cos, azimuth), equal solid angles.
+            let z = 1.0 - (1.0 - cos_t) * (i as f64 + 0.5) / k as f64;
+            let phi = 2.0 * PI * (j as f64 + 0.5) / k as f64;
+            let w = axis * z + (e1 * phi.cos() + e2 * phi.sin()) * (1.0 - z * z).sqrt();
+            let b = w.dot(c);
+            let t = b - (body.radius * body.radius - (d * d - b * b)).max(0.0).sqrt();
+            let m = (w * t - c) / body.radius;
+            let l: f64 = stars
+                .iter()
+                .map(|s| {
+                    s.lux_at(body.centre) * body.albedo / PI * m.dot((s.centre - body.centre).normalize()).max(0.0)
+                })
+                .sum();
+            e += l * w.dot(n).max(0.0) * 2.0 * PI * (1.0 - cos_t) / (k * k) as f64;
+        }
+    }
+    e
+}
+
+fn disc_e(at: DVec3, body: Sphere, stars: &[Star], n: DVec3) -> f64 {
+    shine_disc(at, body, stars).map_or(0.0, |s| s.radiance[1] * disc_irradiance(s.dir.dot(n), s.sin2))
+}
+
+#[test]
+fn the_disc_irradiance_of_a_uniform_sphere() {
+    // (cos of the angle between the normal and the disc's centre, sin² of
+    // its angular radius, irradiance per unit radiance)
+    let cases = [
+        (1.0, 0.01, PI * 0.01),       // a small disc, faced: π sin²σ
+        (0.5, 0.01, PI * 0.01 * 0.5), // cosine law while above the horizon
+        (-0.5, 0.01, 0.0),            // below it
+        (1.0, 1.0, PI),               // on the surface, facing it: the whole hemisphere
+        (0.0, 1.0, PI / 2.0),         // on the surface, a wall: half of it
+        (-1.0, 1.0, 0.0),             // facing away
+    ];
+    for (c, s2, want) in cases {
+        assert!((disc_irradiance(c, s2) - want).abs() < 1e-9, "{c} {s2}: {}", disc_irradiance(c, s2));
+    }
+    // Continuous across the horizon.
+    let s2: f64 = 0.25;
+    let edge = s2.sqrt();
+    assert!((disc_irradiance(edge + 1e-7, s2) - disc_irradiance(edge - 1e-7, s2)).abs() < 1e-5);
+}
+
+#[test]
+fn planetshine_far_away_is_the_point_sources() {
+    let (sun, earth) = sun_and_earth();
+    for deg in [0.0f64, 60.0, 120.0] {
+        let a = deg.to_radians();
+        let at = DVec3::new(a.cos(), a.sin(), 0.0) * 300.0 * EARTH_R;
+        let towards = (earth.centre - at).normalize();
+        let e = disc_e(at, earth, &[sun], towards);
+        let want = planetshine(at, earth.centre, earth.radius, earth.albedo, sun.lux_at(earth.centre), DVec3::X);
+        assert!((e / want - 1.0).abs() < 0.05, "{deg}°: {e} vs {want}");
+        // Any other face by the cosine law, as for a point source.
+        let n = (towards + DVec3::Z).normalize();
+        assert!((disc_e(at, earth, &[sun], n) / (want * n.dot(towards)) - 1.0).abs() < 0.05, "{deg}°");
+    }
+}
+
+#[test]
+fn planetshine_in_low_orbit_fills_half_the_sky() {
+    let (sun, earth) = sun_and_earth();
+    let stars = [sun];
+    let e_sun = sun.lux_at(earth.centre);
+    // Just above the subsolar point, a face turned down takes the whole
+    // lit ground's light: albedo × E (the ground's own reflection).
+    let skim = DVec3::X * (EARTH_R * 1.0001);
+    let down = disc_e(skim, earth, &stars, DVec3::NEG_X);
+    assert!((down / (earth.albedo * e_sun) - 1.0).abs() < 0.03, "{down} vs {}", earth.albedo * e_sun);
+    assert!(disc_e(skim, earth, &stars, DVec3::X) < 1e-9 * e_sun, "a face turned up takes none");
+    // 400 km up, over the subsolar point and over the terminator: the disc
+    // model against the brute-force integral, for faces down, sideways and
+    // in between; a point source would give a sideways face nothing.
+    for at in [DVec3::X * (EARTH_R + 4.0e5), DVec3::Y * (EARTH_R + 4.0e5)] {
+        let down = -at.normalize();
+        for n in [down, (down + DVec3::Z).normalize(), DVec3::Z] {
+            let (model, truth) = (disc_e(at, earth, &stars, n), brute_shine(at, earth, &stars, n));
+            assert!(
+                (model - truth).abs() < 0.2 * truth.max(0.02 * e_sun * earth.albedo),
+                "{at} {n}: {model} vs {truth}"
+            );
+        }
+    }
+    let sideways = disc_e(DVec3::X * (EARTH_R + 4.0e5), earth, &stars, DVec3::Z);
+    assert!(sideways > 0.1 * earth.albedo * e_sun, "{sideways}");
+    // Nothing from the night side.
+    assert!(shine_disc(DVec3::NEG_X * (EARTH_R + 4.0e5), earth, &stars).is_none_or(|s| s.radiance[1] < 1e-9 * e_sun));
+}
+
+#[test]
+fn a_ship_in_low_orbit_gets_earthshine_in_sunlight_too() {
+    let (sun, earth) = sun_and_earth();
+    let stars = [Star { centre: sun.centre - DVec3::X * (EARTH_R + 4.0e5), ..sun }];
+    let earth = Sphere { centre: DVec3::NEG_X * (EARTH_R + 4.0e5), ..earth };
+    // The camera (origin) is at the ship, in sunlight over the subsolar point.
+    let o = object_light(DVec3::ZERO, &stars, &[0], &[earth]);
+    assert!((o.scale[0] - 1.0).abs() < 1e-6, "full sunlight: {:?}", o.scale);
+    let e_sun = stars[0].lux_at(DVec3::ZERO);
+    let s = o.shines[0];
+    let facing = s.radiance[1] * disc_irradiance(s.dir.dot(DVec3::NEG_X), s.sin2);
+    assert!(facing > 0.25 * e_sun, "the side facing Earth: {facing} of {e_sun}");
 }
 
 #[test]
@@ -332,7 +456,7 @@ fn no_nan_at_zero_distance_or_zero_light() {
     let dark = body_light(0, &bodies, &[], &[]);
     assert!(dark.scale.is_empty() && dark.shines.is_empty() && dark.occluders.is_empty() && dark.ambient == 0.0);
     let o = object_light(DVec3::ZERO, &[], &[], &bodies);
-    assert_eq!(o.visible, 1.0);
+    assert!(o.scale.is_empty() && o.shines.is_empty());
     // A body at the camera, a body inside a star, a point-sized body, a
     // dark star, the camera inside a star.
     let at_cam = Sphere { centre: DVec3::ZERO, ..bodies[1] };
@@ -349,7 +473,8 @@ fn no_nan_at_zero_distance_or_zero_light() {
         assert!(l.ambient.is_finite());
         assert!(l.shines.iter().all(|s| s.1.iter().all(|c| c.is_finite())), "{i}");
         let o = object_light(set[i].centre, &odd, &slots, &set);
-        assert!(o.visible.is_finite() && o.shine.iter().all(|c| c.is_finite()), "{i}: {o:?}");
+        let shines = o.shines.iter().flat_map(|d| [d.sin2, d.dir.length()].into_iter().chain(d.radiance));
+        assert!(o.scale.iter().copied().chain(shines).all(f64::is_finite), "{i}: {o:?}");
     }
     for j in 0..set.len() {
         for s in &odd {

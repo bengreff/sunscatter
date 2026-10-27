@@ -149,11 +149,12 @@ fn performance(ui_: &mut egui::Ui, ui: &mut SettingsUi, bench: &mut Bench) {
 
 fn controls_tab(ui: &mut egui::Ui, c: &mut ControlsSettings) {
     ui.add(egui::Slider::new(&mut c.wheel_zoom, 1.01..=1.3).text("zoom per wheel line"));
-    ui.add(
-        egui::Slider::new(&mut c.trackpad_lines_per_px, 0.02..=0.5)
-            .logarithmic(true)
-            .text("trackpad zoom (lines per px)"),
+    // What a trackpad pixel zooms, as `camera::scroll_lines` applies it.
+    let trackpad = format!(
+        "trackpad zoom ({:.3} wheel lines per px)",
+        crate::camera::scroll_lines(1.0, true, c.trackpad_lines_per_px)
     );
+    ui.add(egui::Slider::new(&mut c.trackpad_lines_per_px, 0.02..=0.5).logarithmic(true).text(trackpad));
     ui.add(
         egui::Slider::new(&mut c.mouse_sensitivity, 0.001..=0.02).logarithmic(true).text("camera drag (rad per px)"),
     );

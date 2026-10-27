@@ -225,47 +225,166 @@ pub fn body_light(i: usize, bodies: &[Sphere], stars: &[Star], slots: &[usize]) 
             }
         })
         .collect();
-    let ambient = (0..stars.len()).filter(|k| !slots.contains(k)).map(|k| stars[k].lux_at(me.centre) / 4.0).sum();
+    let ambient = unslotted(me.centre, stars, slots);
+    let shines = shine_sources(me.centre, Some(i), bodies, stars);
+    BodyLight { scale, occluders: occluders(i, bodies, stars, slots), shines, ambient }
+}
+
+/// Starlight without a light slot at `at` (a fifth star): lux,
+/// sphere-averaged (E/4), drawn as ambient.
+fn unslotted(at: DVec3, stars: &[Star], slots: &[usize]) -> f64 {
+    (0..stars.len()).filter(|k| !slots.contains(k)).map(|k| stars[k].lux_at(at) / 4.0).sum()
+}
+
+/// The significance rule for planetshine, one for every lit thing: the
+/// bodies (but `skip`, the receiver itself) whose reflected light at `at`
+/// is at least [`MIN_SHINE`], brightest first (far-field estimate,
+/// [`shine_from`]), ties by index, at most [`MAX_SHINES`].
+pub fn shine_sources(at: DVec3, skip: Option<usize>, bodies: &[Sphere], stars: &[Star]) -> Vec<(usize, [f64; 3])> {
     let mut shines: Vec<(usize, [f64; 3])> = (0..bodies.len())
-        .filter(|&j| j != i)
-        .map(|j| (j, shine_from(me.centre, bodies[j], stars)))
+        .filter(|&j| Some(j) != skip)
+        .map(|j| (j, shine_from(at, bodies[j], stars)))
         .filter(|(_, rgb)| luminance(*rgb) > MIN_SHINE)
         .collect();
     shines.sort_by(|a, b| luminance(b.1).total_cmp(&luminance(a.1)).then(a.0.cmp(&b.0)));
     shines.truncate(MAX_SHINES);
-    BodyLight { scale, occluders: occluders(i, bodies, stars, slots), shines, ambient }
+    shines
 }
 
-/// Light at a small object (a ship) at `at`, lit by the slotted stars'
-/// lights: the share of their flux there that is not eclipsed (each
-/// star's visible fraction weighted by its flux: exact for one star; a
-/// standard material takes one factor for all its lights), and the sum of
-/// every body's planetshine (rgb lux).
+/// Directions to the visible part of a sphere sampled for [`shine_disc`].
+const DISC_SAMPLES: usize = 256;
+
+/// One body's reflected light at a small object, as a uniformly bright
+/// disc: the direction to the radiance-weighted centre of what is seen of
+/// it, its angular radius (as sin²), and its mean radiance (rgb, lux per
+/// steradian) over the whole disc, dark parts included.
 #[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ShineDisc {
+    pub dir: DVec3,
+    pub sin2: f64,
+    pub radiance: [f64; 3],
+}
+
+/// sin² of a disc's angular radius, and its sampled directions with their
+/// radiance.
+type DiscSamples = (f64, Vec<(DVec3, [f64; 3])>);
+
+/// Each point of what is seen of `body` from `at` (directions sampled
+/// over the disc, a Fibonacci spiral): the direction, and the radiance of a
+/// Lambert reflector lit by every star (rgb, lux per steradian).
+fn disc_samples(at: DVec3, body: Sphere, stars: &[Star]) -> Option<DiscSamples> {
+    let c = body.centre - at;
+    let d = c.length();
+    if d <= body.radius || body.radius <= 0.0 {
+        return None;
+    }
+    let axis = c / d;
+    let sin2 = (body.radius / d).powi(2);
+    let cos_t = (1.0 - sin2).max(0.0).sqrt();
+    let e1 = axis.any_orthonormal_vector();
+    let e2 = axis.cross(e1);
+    let lit: Vec<(DVec3, [f64; 3])> = stars
+        .iter()
+        .filter_map(|s| {
+            let to = (s.centre - body.centre).try_normalize()?;
+            let e = s.lux_at(body.centre);
+            Some((to, [0, 1, 2].map(|k| e * s.tint[k] * body.tint[k] * body.albedo / PI)))
+        })
+        .collect();
+    let golden = PI * (3.0 - 5f64.sqrt());
+    let samples = (0..DISC_SAMPLES)
+        .map(|i| {
+            let z = 1.0 - (1.0 - cos_t) * (i as f64 + 0.5) / DISC_SAMPLES as f64;
+            let rho = (1.0 - z * z).max(0.0).sqrt();
+            let phi = golden * i as f64;
+            let w = axis * z + (e1 * phi.cos() + e2 * phi.sin()) * rho;
+            // The nearer point the ray meets, and its outward normal.
+            let b = w.dot(c);
+            let t = b - (body.radius * body.radius - (d * d - b * b)).max(0.0).sqrt();
+            let m = (w * t - c) / body.radius;
+            let mut radiance = [0.0; 3];
+            for (to, l) in &lit {
+                let mu = m.dot(*to).max(0.0);
+                for k in 0..3 {
+                    radiance[k] += l[k] * mu;
+                }
+            }
+            (w, radiance)
+        })
+        .collect();
+    Some((sin2, samples))
+}
+
+/// Planetshine on a small object at `at` from `body`, near or far
+/// ([`ShineDisc`]): in low orbit the lit Earth fills most of half the sky
+/// and lights faces turned well away from it, which the far-field
+/// E·p·(R/d)² of a point source cannot give; far away it tends to
+/// [`planetshine`]. `None` inside the body or when nothing of it is lit.
+pub fn shine_disc(at: DVec3, body: Sphere, stars: &[Star]) -> Option<ShineDisc> {
+    let (sin2, samples) = disc_samples(at, body, stars)?;
+    let mut centre = DVec3::ZERO;
+    let mut mean = [0.0; 3];
+    for (w, l) in &samples {
+        centre += *w * luminance(*l);
+        for k in 0..3 {
+            mean[k] += l[k] / samples.len() as f64;
+        }
+    }
+    let dir = centre.try_normalize()?;
+    Some(ShineDisc { dir, sin2, radiance: mean })
+}
+
+/// The irradiance, per unit radiance, on a surface whose normal makes an
+/// angle of cosine `cos_n` with the centre of a uniformly bright disc of
+/// angular radius asin(√`sin2`), the part below the surface's horizon cut
+/// off (Snyder 1996; Lagarde & de Rousiers 2014, "Moving Frostbite to
+/// PBR", eq. 19). `ship.wgsl` mirrors it.
+#[cfg_attr(not(test), allow(dead_code))] // the CPU mirror of ship.wgsl's
+pub fn disc_irradiance(cos_n: f64, sin2: f64) -> f64 {
+    let cos_n = cos_n.clamp(-1.0, 1.0);
+    if sin2 <= 0.0 {
+        return 0.0;
+    }
+    if cos_n * cos_n >= sin2 {
+        return PI * sin2 * cos_n.max(0.0);
+    }
+    let sin_n = (1.0 - cos_n * cos_n).max(1e-12).sqrt();
+    let x = (1.0 / sin2.min(1.0) - 1.0).max(0.0).sqrt();
+    let y = (-x * cos_n / sin_n).clamp(-1.0, 1.0);
+    let s = sin_n * (1.0 - y * y).sqrt();
+    ((cos_n * y.acos() - x * s) * sin2 + (s / x.max(1e-12)).atan()).max(0.0)
+}
+
+/// Light at a small object (a ship) at `at`: per light slot, the share of
+/// the slot's light (its flux at the camera) the object receives there,
+/// eclipses included; planetshine from the significant reflectors
+/// ([`shine_sources`]), each as a disc ([`shine_disc`]: right in the near
+/// field); and the starlight without a slot, sphere-averaged.
+#[derive(Clone, Debug, PartialEq)]
 pub struct ObjectLight {
-    pub visible: f64,
-    pub shine: [f64; 3],
+    pub scale: Vec<f64>,
+    pub shines: Vec<ShineDisc>,
+    pub ambient: f64,
 }
 
 /// [`ObjectLight`] at `at` among `bodies`, with `slots` of `stars` drawn
 /// as lights.
 pub fn object_light(at: DVec3, stars: &[Star], slots: &[usize], bodies: &[Sphere]) -> ObjectLight {
     let occluders: Vec<(DVec3, f64)> = bodies.iter().map(|b| (b.centre, b.radius)).collect();
-    let (mut lit, mut total) = (0.0, 0.0);
-    for &k in slots {
-        let e = stars[k].lux_at(at);
-        total += e;
-        lit += e * eclipse_factor(at, stars[k].centre, stars[k].radius, &occluders);
-    }
-    let visible = if total > 0.0 { lit / total } else { 1.0 };
-    let mut shine = [0.0; 3];
-    for b in bodies {
-        let rgb = shine_from(at, *b, stars);
-        for c in 0..3 {
-            shine[c] += rgb[c];
-        }
-    }
-    ObjectLight { visible, shine }
+    let scale = slots
+        .iter()
+        .map(|&k| {
+            let at_cam = stars[k].lux_at(DVec3::ZERO);
+            if at_cam > 0.0 {
+                stars[k].lux_at(at) / at_cam * eclipse_factor(at, stars[k].centre, stars[k].radius, &occluders)
+            } else {
+                0.0
+            }
+        })
+        .collect();
+    let shines =
+        shine_sources(at, None, bodies, stars).iter().filter_map(|&(j, _)| shine_disc(at, bodies[j], stars)).collect();
+    ObjectLight { scale, shines, ambient: unslotted(at, stars, slots) }
 }
 
 /// The astronomical unit (m, IAU 2012).

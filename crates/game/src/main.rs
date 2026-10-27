@@ -35,6 +35,7 @@ mod rings;
 mod saves;
 mod scene;
 mod settings_ui;
+mod ship_light;
 mod sky;
 mod staging;
 mod state;
@@ -199,8 +200,8 @@ fn main() {
     app.run();
 }
 
-/// The bodies' rendering: lighting, terrain, sky, atmospheres, rings,
-/// cloud decks.
+/// The bodies' and ships' rendering: lighting, terrain, sky, atmospheres,
+/// rings, cloud decks, ships' light.
 fn body_plugins() -> (
     lighting::LightingPlugin,
     terrain::TerrainPlugin,
@@ -208,6 +209,7 @@ fn body_plugins() -> (
     atmosphere::AtmosphereFixPlugin,
     rings::RingsPlugin,
     clouds::CloudsPlugin,
+    ship_light::ShipLightPlugin,
 ) {
     (
         lighting::LightingPlugin,
@@ -216,6 +218,7 @@ fn body_plugins() -> (
         atmosphere::AtmosphereFixPlugin,
         rings::RingsPlugin,
         clouds::CloudsPlugin,
+        ship_light::ShipLightPlugin,
     )
 }
 
