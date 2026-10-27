@@ -489,3 +489,120 @@ fn the_booster_lands_on_one_engine() {
     let e9 = def.engines.iter().position(|e| e.id == "s1.merlin.9").unwrap();
     assert_eq!(v.ship().unwrap().engines[e9].ignitions, 2, "one relight used");
 }
+
+/// Boil-off over a day on rails (D081; ship-model.md §5.10): the second
+/// stage with Dragon coasting a day in a 400 km orbit. Its densified LOX
+/// warms in the sunlight its wetted wall absorbs (and stays below its
+/// saturation at 4 bar: it does not boil, falcon9.md §3.6); the same stage
+/// with its LOX already at saturation at its relief pressure boils off what
+/// the sunlight brings, vented. Advanced in one jump or in uneven frames,
+/// the vessel is the same bits.
+#[test]
+fn a_day_on_rails_warms_and_boils_off_the_same_in_any_frames() {
+    let w = world();
+    let earth = w.find("Earth").unwrap();
+    let (r, vel) =
+        crate::kepler::Elements { a: 6_778_137.0, e: 0.0005, i: 0.9, raan: 1.0, argp: 0.5, mean_anomaly: 0.0 }
+            .to_state(earth.gm);
+    let craft = craft_of(&CraftId("falcon9-crew#0-11".into()));
+    let def = craft.ship.clone().unwrap();
+    let lox = def.tanks.iter().position(|t| t.id == "s2.tank:lox").unwrap();
+    let day = t0().add_seconds(86_400.0);
+    for saturated in [false, true] {
+        let mut v = Vessel::coasting(&w, VesselId(1), t0(), earth.node, r, vel, &craft);
+        if saturated {
+            let s = v.ship.as_mut().unwrap();
+            let l = crate::systems::plumbing::liquid_of(&def.tanks[lox]).unwrap();
+            s.tanks[lox].liquid_k = l.saturation_temperature(def.tanks[lox].pressure);
+            s.tanks[lox].ullage_moles = 0.0;
+            v.propellant = s.consumables(&def);
+        }
+        let (k0, m0) = (v.ship().unwrap().tanks[lox].liquid_k, v.mass());
+        let mut frames = v.clone();
+        v.advance(&w, day, &Controls::default(), usize::MAX);
+        let mut t = frames.time;
+        let mut k = 0;
+        while t < day {
+            k += 1;
+            t = t.add_seconds(if k % 3 == 0 { 777.7 } else { 1_234.5 });
+            if t > day {
+                t = day;
+            }
+            frames.advance(&w, t, &Controls::default(), usize::MAX);
+        }
+        assert_eq!(frames, v, "saturated {saturated}");
+        let s = v.ship().unwrap();
+        let (dk, vented) = (s.tanks[lox].liquid_k - k0, s.runtime.tanks[lox].vented);
+        println!(
+            "saturated {saturated}: LOX {k0:.1} K → {:+.2} K, vented {vented:.1} kg, mass {:+.1} kg",
+            dk,
+            v.mass() - m0
+        );
+        if saturated {
+            assert!(vented > 1.0 && dk.abs() < 0.5, "boils at its saturation: {vented} kg");
+            let all: f64 = s.runtime.tanks.iter().map(|t| t.vented).sum();
+            assert!((m0 - v.mass() - all).abs() < 1e-6 * m0, "the vessel loses what its tanks vent: {all} kg");
+        } else {
+            // It vents only a little pressurant as the warming liquid
+            // squeezes its ullage.
+            assert!(dk > 0.1 && vented < 5.0, "warms, does not boil: {dk} K, {vented} kg");
+        }
+    }
+}
+
+/// The same flight at 1× (60 fps frames) and in one jump, bit for bit, with
+/// a failure firing identically (D105 §6.3, rule 4): the Falcon 9 from the
+/// pad by its sequence's orders, one Merlin's in-flight-shutdown fate made
+/// near (its 2.2e-3/h hazard reaches a threshold of 1e-6 in ~1.6 s of
+/// running, 3e-6 in ~4.9 s). Near, it fails while the engines spool up on
+/// the pad: the release is aborted, the clamps held. Later, it shuts down
+/// benignly after liftoff and the stack flies on eight (engine out). Both
+/// at the same tick in frames and in one jump.
+#[test]
+fn a_failure_fires_the_same_in_frames_and_in_one_jump() {
+    let w = world();
+    for (threshold, airborne) in [(1e-6, false), (3e-6, true)] {
+        let mut v = falcon9(&w);
+        let s = v.ship.as_mut().unwrap();
+        let fate =
+            s.fates.iter_mut().find(|f| f.owner == "s1.merlin.3" && f.mode == "in-flight shutdown").expect("its fate");
+        fate.threshold = threshold;
+        v.order_at(t0().add_seconds(0.5), OrderKind::Stage).unwrap();
+        v.order_at(t0().add_seconds(0.5), OrderKind::Stage).unwrap();
+        let mut frames = v.clone();
+        let end = t0().add_seconds(8.0);
+        let mut ids = VesselIds::default();
+        ids.allocate();
+        let fly = |v: &mut Vessel, until: Epoch, ids: &mut VesselIds| loop {
+            v.advance(&w, until, &full(), usize::MAX);
+            match v.plan_breakup() {
+                Some(plan) => {
+                    v.split(&w, &plan, &plan.crafts(), ids);
+                }
+                None => return,
+            }
+        };
+        fly(&mut v, end, &mut ids.clone());
+        let mut t = frames.time;
+        while t < end {
+            let next = t.add_seconds(1.0 / 60.0);
+            t = if next < end { next } else { end };
+            fly(&mut frames, t, &mut ids.clone());
+        }
+        assert_eq!(frames, v);
+        let def = v.ship_def().unwrap();
+        let e3 = def.engines.iter().position(|e| e.id == "s1.merlin.3").unwrap();
+        let s = v.ship().unwrap();
+        let events: Vec<String> = v.ship_events().iter().map(|e| e.text.clone()).collect();
+        assert_eq!(s.engines[e3].status, EngineStatus::Failed, "{events:?}");
+        let running = (def.engines.iter().zip(&s.engines))
+            .filter(|(d, e)| d.id.starts_with("s1.merlin") && e.status == EngineStatus::Running)
+            .count();
+        if airborne {
+            assert!(!v.clamped() && running == 8, "engine out: the other eight run ({running}); {events:?}");
+        } else {
+            assert!(v.clamped() && running == 0, "a pad abort: {events:?}");
+            assert!(events.iter().any(|e| e.starts_with("Pad abort: s1.merlin.3")));
+        }
+    }
+}
