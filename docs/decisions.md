@@ -255,7 +255,7 @@ Deterministic fractal detail shaped by the local slope and roughness of the real
 
 **D060: The next theme is ultra realism, with ships as abstracted blobs.** *Decided, 2026-09-26.*
 - Every feature: the data model first, then the user interface.
-- No ship internals or part definitions yet (they will be very complex under the realism standard). A **test craft** stands in: one placeholder part for the whole ship with one state, fuel, thrust and Isp (temperatures per cell, D065); shaped like a ship (a 3D model), fixed landing gear allowed as geometry; crewed, minimal simple resources, no life support, no staging (D064).
+- Before parts (D100), a **test craft** stood in, and it stays as the debug craft: one placeholder part for the whole ship with one state, fuel, thrust and Isp (temperatures per cell, D065); shaped like a ship (a 3D model), fixed landing gear allowed as geometry; crewed, minimal simple resources, no life support, no staging (D064).
 - Order: visual fixes (D058), a foundation pass (the high-severity code-review items), the test craft's data model, relativity and light, aero/heating/hitbox (D061), then the UI (burn planner, powered Moon landing, rendezvous), then the MCP server (D063).
 
 **D061: Aerodynamics, heating and collision act on cells of the ship's 3D model.** *Direction, 2026-09-26.*
@@ -375,10 +375,62 @@ Close the D070 gaps listed in `docs/design/aero-thermal.md`. Model laminar–tur
 - **Data** in `data/bodies/<body>/gravity.ron` (D051), generated from the public models and truncated to the degree the game's lowest orbits need (measured; sources, degrees and frames in [solar-system.md](features/solar-system.md)).
 - The proper-time potential includes the field to the same degree (J2 is ~3e-13 of the rate in LEO).
 
+## Ships: parts, systems, failures (2026-10-26 evening interview)
+
+The owner's interview: [interview-2026-10-26-parts.md](plans/interview-2026-10-26-parts.md). The design: [design/ship-model.md](design/ship-model.md). Numbers D091–D099 are left to the evening's other workstreams.
+
+**D100: Ships are parts, components and layers; the first vehicle is Falcon 9 Block 5 with Crew Dragon.** *Decided, 2026-10-26 (owner). Details D018, D033.*
+- A **part** is a physical object with a shape, a place and mounting points (a tank, an engine, a grid fin, the capsule). A **component** is equipment inside a part's volume, with mass, volume, power and heat but no outer shape (a helium bottle, a battery, a flight computer, a sensor, a valve, a seat). A **layer** is a network, not placed as a part: structure (joints), plumbing, electrical, data, thermal, mechanisms.
+- The first vehicle is the Falcon 9 Block 5 with Crew Dragon, every part and component adjustable and interchangeable. The goal is a whole Crew mission (launch, booster landing, ISS docking, entry, splashdown); the first step is the complete Falcon 9 in the part system, its controls and systems at the proper realism, flyable by the owner.
+- The test craft stays as the debug craft (a craft of one part).
+
+**D101: Every part comes from a generator; real hardware is a catalog entry; properties are derived and published numbers override them.** *Decided, 2026-10-26 (owner).*
+- A generator turns parameters into a part or component (shape, mounts, mass, tanks, ports, functions, ratings, failure modes). A catalog entry is a generator, its parameters, its published numbers (each with a source), ratings, era and cost. The catalog holds a large variety of real systems and later goes beyond them; players make their own parts (their own parameter sets now, their own generators later).
+- Parameters, including technology progression, are tuned so procedural parts are realistic; "truly published numbers overrule procedural numbers, for example thrust or battery capacity", so overrides are minimal and most things are derived: "build to minimize contradiction". A gap between a published number and what the generator can reach is reported, not hidden.
+- In the career a player's part takes its properties from the generators' physics; free numbers are for sandbox only, marked unverified.
+
+**D102: Craft are built in code for now: craft files with mounting points, shapes from a modelling tool, a visual editor later.** *Decided, 2026-10-26 (owner). Refines D036.*
+- A craft file lists parts with their parameters, attached through **defined mounting points** ("rather than just anything touching is attached"), with patterns for symmetric copies; components placed in parts; layer connections; joints; the stage sequence and saved functions. Coordinates stay valid for placement. MCP tools let the player's agent build and check craft.
+- A part's shape can come from a simple 3D modelling tool: Blender's glTF (`.glb`), mounting points as named empties, part data as custom properties; the physics uses the same shape. A visual editor comes later.
+
+**D103: Craft are rigid until they break; mechanisms move; nothing wobbles.** *Decided, 2026-10-26 (owner). Refines D032.*
+- "No bending … the crafts should be rigid until they break, with potentially LIMITED give implemented as a specified allowance in specific scenarios. Don't even touch wobbly rockets, instead just find where they break and model the effects of the minimal structural vibrations." Every live tick each joint's load is computed exactly for the rigid body (the subtree beyond it accelerated by it, against its external forces) and checked against its capacity at temperature.
+- Cables bend, intentionally dynamic parts move (legs, fins, hinges, actuators), springs bounce, liquids slosh. Structural vibration is an environment that damages parts (D105), never a deformation.
+
+**D104: Internal systems run as behaviour, abstracted but not too far.** *Decided, 2026-10-26 (owner).*
+- **Plumbing:** a lumped network: tank and pressurant pressures, propellant temperature and density, boil-off, line losses, pump inlet pressure (cavitation), settled or floating propellant (ullage), slosh.
+- **Engines from published data before the engine designer** (D020): start sequence with limited ignitions and a transient, the steady map (thrust, Isp, mixture ratio against throttle, inlet conditions and ambient pressure), throttle limits, shutdown, gimbal, heat. No flow inside the engine at runtime: what happens there fails statistically.
+- **RCS** thrusters are placed components whose torques come from the geometry (for craft of parts; the test craft keeps D078's couples).
+- **Power** flows in watts over buses (voltage derived): batteries with charge, temperature and internal resistance, solar cells per skin cell, loads with priorities and shedding.
+- **Crew and life support:** the cabin's air, consumables, suits, the crew's acceleration and landing-load limits; radiation dose later.
+- **Ground:** the launch pad and its hold-down clamps are in scope; the countdown later, abstracted as a time and funds sink. Nothing else on the ground ("no cars driving around the launch site").
+- A controllable craft stays fully simulated until it is destroyed (the booster after separation, D083).
+
+**D105: Failures come from the simulation where it knows, from statistics only where appropriate, and never when unsure.** *Decided, 2026-10-26 (owner).*
+- "Anything that would cause a failure in real life that we have the data for and that is within simulated ranges should actually cause the failure. If the simulator is not sure, don't trigger the failure."
+- **Physical triggers** fire deterministically: a joint over its ultimate load snaps, a tank over its burst pressure bursts, a part at its destruction temperature is destroyed, between its rated and destruction temperatures heat accumulates as damage over time, an engine on floating propellant ingests gas, below its suction pressure it cavitates. **Accumulated damage:** vibration against the qualification level (Miner's rule), time at temperature, cycles.
+- **Statistical** modes only for what is not simulated inside a part (turbomachinery, valves, electronics), from the part's data or else its class's historical rate, at the low end of the rate's range.
+- **Fates:** each statistical mode draws its threshold once from the save's seed, the launch time and the part; it fails when its accumulated hazard (which depends on the conditions it saw) reaches it. The same ascent from the same launch time gives the same outcome; a different ascent can differ; reloading never re-rolls; warp never matters (rule 4).
+- **Ratings** shown for comparison: a reliability score (1–10), rated life to a 50 % chance of a defect, rated and destruction temperatures, time at temperature, rated and ultimate loads, burst pressure, vibration qualification, rated burn time. Quality is a parameter: a better part costs more and rates higher.
+- **Modes have outcomes:** something snapping is not something melting. Each mode of each kind has its outcome (a split, a destroyed part, an explosion, a benign shutdown, a stuck valve…). Explosions release the energy of what was released and damage their neighbours, so failures cascade; no fire.
+- **History:** every part keeps its history across flights, and it moves its hazards. Debug mode (D064) turns all failures off.
+
+**D106: Information comes from sensors; the interface never shows something wrong.** *Decided, 2026-10-26 (owner).*
+- What the ship cannot measure is shown as a dash ("If you do not have a sensor in your fuel tank, you don't know how much fuel is in there"; sensors are simple components). Values are shown to the precision the sensors give ("You can't get your velocity to 50 decimal places"); the errors themselves are simplified.
+- The mechanisms by which the data reaches the player are simulated: sensors, power, data paths, light delay, occlusion, relays and signal strength (D068).
+- Scripting (D035, D043) reads the same knowledge. Debug mode gives perfect information instantly.
+
+**D107: The systems screen is a separate screen; flight keeps the essentials and a mini systems panel.** *Decided, 2026-10-26 (owner). Refines D080.*
+- "To truly control every bit of the craft you need a whole separate screen." Its main view is the craft, switchable by layer (physical, structural, thermal, electrical, plumbing, data, health); every part and component can be inspected and commanded there.
+- There the player defines **stages** and saves **functions**, and pins functions to a **mini systems panel** shown in flight, where they are activated by a click or a key. Space activates the next stage. Flight keeps D080's essentials.
+
+**D108: The craft is flown by hand until scripting; scripting reads the information model.** *Decided, 2026-10-26 (owner).*
+The player flies everything by hand for now (including a booster landing). Scripting comes soon, integrated with the data model of D106, and commands go through one command type shared by the screens, the MCP server and scripts.
+
 ## Open questions
 
 1. What kind of organization the player leads (D027).
-2. Details of the ship model: structural solver, the cell model for aero, heat and radiation (D018, D032, D033, D061).
+2. Radiation in the ship model (dose, single-event upsets), and how the career's knowledge of a design's reliability grows (D105).
 3. The crew model.
 4. The colony design (D019).
 5. Which model the player's AI agent uses and what it costs the player (D044).
