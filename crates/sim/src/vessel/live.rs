@@ -27,7 +27,7 @@
 //! bounces, tumbles) until it comes to rest.
 
 use super::aerothermal::{self, air_at, AeroTick, Air, LEAVE_ATMOSPHERE};
-use super::attitude::{self, Actuators, Command, Gimbal};
+use super::attitude::{self, Command};
 use super::coast_tolerance;
 use super::{Attitude, AttitudeControl, Controls, Destruction, FlightPlan, Phase, Vessel, TICK};
 use crate::chute;
@@ -89,6 +89,8 @@ pub(super) struct TickStart<'d> {
     sun_body: DVec3,
     att0: DQuat,
     out: EngineOutput,
+    /// A craft of parts: what the tick draws from each tank and bottle.
+    ship: Option<super::ship::ShipTick>,
     pub(super) cmd: Command,
     /// Attitude and control before the command (restored if the tick fails).
     pub(super) before: (Attitude, AttitudeControl),
@@ -409,7 +411,6 @@ impl Vessel {
             return None;
         }
         let props = self.mass_props();
-        let engine = self.craft.engine;
         let p = ambient_pressure(world, &snap, anchor, r);
         let air = air_at(world, &snap, anchor, r, v);
         if self.destroyed.is_none() {
@@ -428,16 +429,7 @@ impl Vessel {
         let drag = DragModel { cd_area, mass: props.mass };
         let sun_body = self.attitude.q.inverse() * crate::light::sunlight(world, &snap, anchor, r);
         let att0 = self.attitude.q;
-        let out = engine.tick_output(controls.throttle, p, self.propellant, dt, self.debug);
-        let gimbal = Gimbal {
-            lever: engine.mount_pos - props.com,
-            dir: engine.mount_dir,
-            thrust: out.thrust,
-            max_angle: engine.gimbal,
-        };
-        // The RCS draws on the main propellant: dry, only the gimbal turns.
-        let rcs_fed = self.debug || self.propellant > 0.0;
-        let act = Actuators { torque: if rcs_fed { self.craft.torque } else { DVec3::ZERO }, gimbal: Some(gimbal) };
+        let (out, act, ship) = self.actuators(controls.throttle, p, dt, &props);
         let before = (self.attitude, self.control);
         let aim = self.aim(world, &snap, (anchor, r, v), controls);
         let cmd = attitude::command(&self.attitude, &props.inertia, &mut self.control, controls, &act, &aim, dt);
@@ -461,6 +453,7 @@ impl Vessel {
             sun_body,
             att0,
             out,
+            ship,
             cmd,
             before,
         })
@@ -519,14 +512,20 @@ impl Vessel {
             out,
             att0,
             sun_body,
+            ship,
             ..
         } = s;
         let TickEnd { r: r1, lo, v: v1, touching, delta } = end;
-        let engine = self.craft.engine;
-        let engine_heat = engine.heat(out.thrust, out.mdot);
-        let mdot = out.mdot + cmd.rcs.dot(self.craft.rcs_flow);
-        let mdot = mdot + self.systems.consumables.boil_off;
-        let propellant = if self.debug { self.propellant } else { (self.propellant - mdot * dt).max(0.0) };
+        let (engine_heat, propellant) = match &ship {
+            Some(tick) => (tick.heat, self.consume(tick, cmd.rcs, dt)),
+            None => {
+                let engine = self.craft.engine;
+                let mdot = out.mdot + cmd.rcs.dot(self.craft.rcs_flow);
+                let mdot = mdot + self.systems.consumables.boil_off;
+                let left = if self.debug { self.propellant } else { (self.propellant - mdot * dt).max(0.0) };
+                (engine.heat(out.thrust, out.mdot), left)
+            }
+        };
         let heat_tick = aero.as_ref().zip(air.as_ref());
         aerothermal::live_step(design, &mut self.thermal, heat_tick, att0, sun_body, engine_heat, propellant, dt);
         self.propellant = propellant;

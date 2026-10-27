@@ -98,7 +98,12 @@ impl Vessel {
             return;
         }
         let epoch = self.time;
-        let b = self.breakup.get_or_insert_with(|| super::Breakup { epoch, destroyed: vec![], torn: vec![] });
+        let b = self.breakup.get_or_insert_with(|| super::Breakup {
+            epoch,
+            destroyed: vec![],
+            torn: vec![],
+            separated: vec![],
+        });
         if !b.destroyed.iter().any(|d| d.0 == part) {
             b.destroyed.push((part, cause));
         }

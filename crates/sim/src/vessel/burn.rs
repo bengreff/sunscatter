@@ -200,6 +200,9 @@ pub enum PlanError {
     Started,
     /// A changed burn ignites before the vessel's current time.
     InThePast,
+    /// A craft of catalog parts flies planned burns once its systems run
+    /// on rails (each engine's feed, transients and failures: RUNTIME).
+    PartsUnsupported,
 }
 
 impl FlightPlan {

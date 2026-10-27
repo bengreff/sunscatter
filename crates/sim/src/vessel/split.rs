@@ -53,6 +53,10 @@ pub struct Breakup {
     pub destroyed: Vec<(u32, Destruction)>,
     /// Torn parts and the load (N) that tore them.
     pub torn: Vec<(u32, f64)>,
+    /// Parts separated from their parents by command (a separation
+    /// system fired: `crate::craft::command::ShipCommand::Separate`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub separated: Vec<u32>,
 }
 
 /// The pieces a split makes, the vessel's own first.
@@ -88,7 +92,8 @@ impl SplitPlan {
 }
 
 /// The chute state of a piece without the parachutes: none left to open.
-const LOST_CHUTE: ChuteState = ChuteState { armed: false, drogue: CanopyState::Released, main: CanopyState::Released };
+pub(super) const LOST_CHUTE: ChuteState =
+    ChuteState { armed: false, drogue: CanopyState::Released, main: CanopyState::Released };
 
 impl Vessel {
     /// The breakup found at the last live tick, waiting for [`Self::split`]
@@ -120,7 +125,8 @@ impl Vessel {
     /// The pieces of the pending breakup, if any.
     pub fn plan_breakup(&self) -> Option<SplitPlan> {
         let b = self.breakup.as_ref()?;
-        let torn: Vec<u32> = b.torn.iter().map(|t| t.0).collect();
+        let mut torn: Vec<u32> = b.torn.iter().map(|t| t.0).collect();
+        torn.extend(&b.separated);
         Some(self.pieces_of(&torn, &b.destroyed))
     }
 
@@ -205,11 +211,21 @@ impl Vessel {
         for (k, craft) in crafts.iter().enumerate() {
             let design = craft.design().clone();
             let mut piece = self.clone();
-            let params = craft.params();
-            piece.propellant = (fill * params.mass.capacity).min(params.mass.capacity);
-            let offset = q * (params.mass.at(piece.propellant).com - props.com);
+            piece.craft = craft.params();
+            let capacity = piece.craft.mass.capacity;
+            match (&self.ship, &craft.ship) {
+                // A craft of parts: each tank and bottle goes with its part.
+                (Some(state), Some(def)) => {
+                    let ids: Vec<u32> = design.parts.iter().map(|p| p.id).collect();
+                    let mine = state.partition(&ids);
+                    piece.propellant = mine.consumables(def);
+                    piece.ship = Some(mine);
+                    piece.sync_engine();
+                }
+                _ => piece.propellant = (fill * capacity).min(capacity),
+            }
+            let offset = q * (piece.mass_props().com - props.com);
             let state = (anchor, r + offset, v + omega.cross(offset));
-            piece.craft = params;
             piece.phase = Phase::Powered { anchor: state.0, r: state.1, v: state.2 };
             piece.tick_accel = None;
             piece.rest_ticks = 0;

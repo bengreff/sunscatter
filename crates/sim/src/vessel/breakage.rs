@@ -43,7 +43,12 @@ impl Vessel {
             self.check_overheat();
             return;
         }
-        let mut b = self.breakup.take().unwrap_or(Breakup { epoch: self.time, destroyed: vec![], torn: vec![] });
+        let mut b = self.breakup.take().unwrap_or(Breakup {
+            epoch: self.time,
+            destroyed: vec![],
+            torn: vec![],
+            separated: vec![],
+        });
         b.epoch = self.time;
         let st = &self.thermal.state;
         let hot = |part: u32, at: Overheat, temperature: f64, b: &mut Breakup| {
@@ -87,7 +92,12 @@ impl Vessel {
             return;
         }
         let part = design.cell_part[self.craft.contacts[im.point as usize].cell as usize];
-        let b = self.breakup.get_or_insert_with(|| Breakup { epoch: self.time, destroyed: vec![], torn: vec![] });
+        let b = self.breakup.get_or_insert_with(|| Breakup {
+            epoch: self.time,
+            destroyed: vec![],
+            torn: vec![],
+            separated: vec![],
+        });
         if !b.destroyed.iter().any(|d| d.0 == part) {
             b.destroyed.push((part, cause));
         }

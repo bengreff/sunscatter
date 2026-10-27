@@ -389,6 +389,7 @@ impl Vessel {
         let last = trajectory.last();
         let near_surface = matches!(last.end, Some(SegmentEnd { kind: EndKind::Surface { .. }, .. })) && at_end;
         self.time = reach;
+        self.sync_ship_to_propellant();
         if !stopped && settled.is_none() && (entry.is_some() || near_surface) {
             // In an atmosphere or close to a surface: flown in live ticks.
             self.thermal_to_now(world);

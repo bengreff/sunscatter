@@ -41,6 +41,7 @@ mod burn;
 mod clock;
 mod coast;
 mod coast_heat;
+mod create;
 pub mod debris;
 mod flown;
 mod hold;
@@ -50,6 +51,7 @@ use live::{attitude_mode, Checked};
 pub mod limbo;
 pub mod pointing;
 mod segment;
+mod ship;
 pub mod split;
 mod systems;
 mod trajectory;
@@ -74,10 +76,9 @@ pub use segment::{coast_tolerance, CoastStart, EndKind, Sample, Segment, Segment
 pub use split::{Breakup, SplitPlan};
 pub use trajectory::Trajectory;
 
-use crate::craft::{Craft, CraftParams, MassProps};
+use crate::craft::{CraftParams, MassProps};
 use crate::forces::{ambient_pressure, DragModel};
 use crate::frame::{BodyFixed, NodeId, Vec3};
-use crate::math;
 use crate::time::Epoch;
 use crate::world::World;
 use glam::{DMat3, DQuat, DVec3};
@@ -233,6 +234,10 @@ pub struct Vessel {
     /// Held live in a 10 km bubble (D082, [`bubble`]).
     #[serde(default, skip_serializing_if = "crate::proximity::BubbleState::is_idle")]
     bubble: crate::proximity::BubbleState,
+    /// A craft of catalog parts: its tanks, engines and systems
+    /// ([`crate::craft::state`]); `propellant` is their consumables' total.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    ship: Option<crate::craft::state::ShipState>,
 }
 
 /// Rotation matrix taking body-fixed axes of `body` to inertial axes at `t`.
@@ -243,94 +248,6 @@ fn body_to_inertial(world: &World, body: NodeId, t: Epoch) -> DQuat {
 }
 
 impl Vessel {
-    /// A vessel standing upright on a body's surface at latitude/longitude (deg).
-    pub fn landed_at(
-        world: &World,
-        id: VesselId,
-        body: &str,
-        lat_deg: f64,
-        lon_deg: f64,
-        t: Epoch,
-        craft: &Craft,
-    ) -> Self {
-        let src = world.find(body).expect("known body");
-        let p = src.physical.as_ref().expect("physical body");
-        let deg = math::PI / 180.0;
-        let crew = craft.spec.crew;
-        let (cells, nodes) = (craft.design().cells.len(), craft.design().nodes());
-        let craft = craft.params();
-        let fixed = p.ground_point(lat_deg * deg, lon_deg * deg, craft.contact_height(craft.initial_propellant));
-        let att_fixed = quat_z_to(fixed.raw().normalize());
-        let mut v = Vessel {
-            id,
-            propellant: craft.initial_propellant,
-            craft,
-            phase: Phase::Landed { body: src.node, fixed, att_fixed },
-            time: t,
-            attitude: Attitude { q: DQuat::IDENTITY, omega: DVec3::ZERO },
-            chute: Default::default(),
-            crew,
-            debug: false,
-            plan: FlightPlan::default(),
-            tick_accel: None,
-            control: AttitudeControl::default(),
-            rest_ticks: 0,
-            destroyed: None,
-            rest_mode: None,
-            checked: Checked(true),
-            clock: ShipClock::at(t, 0.0),
-            thermal: VesselThermal::uniform(cells, nodes, aerothermal::INITIAL_K, t),
-            limbo: Default::default(),
-            repoint: false,
-            systems: crate::systems::Systems::starting(t),
-            breakup: None,
-            bubble: Default::default(),
-        };
-        v.sync_landed_attitude(world);
-        if !v.holds_where_landed(world) {
-            v.wake(world);
-        }
-        v
-    }
-
-    /// A vessel coasting from `(r, v)` relative to `anchor` at `t`.
-    pub fn coasting(world: &World, id: VesselId, t: Epoch, anchor: NodeId, r: DVec3, v: DVec3, craft: &Craft) -> Self {
-        let crew = craft.spec.crew;
-        let (cells, nodes) = (craft.design().cells.len(), craft.design().nodes());
-        let craft = craft.params();
-        let mut vessel = Vessel {
-            id,
-            propellant: craft.initial_propellant,
-            craft,
-            phase: Phase::Powered { anchor, r, v },
-            time: t,
-            attitude: Attitude { q: quat_z_to(r.normalize()), omega: DVec3::ZERO },
-            chute: Default::default(),
-            crew,
-            debug: false,
-            plan: FlightPlan::default(),
-            tick_accel: None,
-            control: AttitudeControl::default(),
-            rest_ticks: 0,
-            destroyed: None,
-            rest_mode: None,
-            checked: Checked(true),
-            clock: ShipClock::at(t, 0.0),
-            thermal: VesselThermal::uniform(cells, nodes, aerothermal::INITIAL_K, t),
-            limbo: Default::default(),
-            repoint: false,
-            systems: crate::systems::Systems::starting(t),
-            breakup: None,
-            bubble: Default::default(),
-        };
-        // In air that needs it, it is flown live (the live boundary).
-        let boundary = vessel.limbo.boundary;
-        if limbo::may_coast(&boundary, world, &world.snapshot(t), anchor, (r, v), aerothermal::LEAVE_ATMOSPHERE) {
-            vessel.start_coast(world);
-        }
-        vessel
-    }
-
     /// The vessel's stable identity.
     pub fn id(&self) -> VesselId {
         self.id
@@ -405,12 +322,18 @@ impl Vessel {
 
     /// Mass, centre of mass (body axes) and inertia at the vessel's time.
     pub fn mass_props(&self) -> MassProps {
-        self.craft.mass.at(self.propellant)
+        match self.ship_parts() {
+            Some((def, state)) => {
+                let (slugs, points) = state.contents(def);
+                self.craft.mass.with_contents(&slugs, &points)
+            }
+            None => self.craft.mass.at(self.propellant),
+        }
     }
 
     /// Height of the centre of mass above the ground when standing (m).
     pub fn contact_height(&self) -> f64 {
-        self.craft.contact_height(self.propellant)
+        self.mass_props().com.z - self.craft.bottom_z
     }
 
     /// Debug mode (D064): infinite propellant, no overheating, infinite
@@ -450,6 +373,7 @@ impl Vessel {
     /// from now with the new mass.
     pub fn set_propellant(&mut self, world: &World, kg: f64) {
         self.propellant = kg.clamp(0.0, self.craft.mass.capacity);
+        self.sync_ship_to_propellant();
         if matches!(self.phase, Phase::Coasting { .. }) {
             self.start_coast(world);
         }
@@ -458,6 +382,9 @@ impl Vessel {
     /// Whether the engine runs with these controls (a throttle, and
     /// propellant or debug mode).
     pub fn engine_running(&self, controls: &Controls) -> bool {
+        if let Some(thrust) = self.ship_thrust(controls.throttle, 0.0) {
+            return thrust.thrust > 0.0;
+        }
         let engine = &self.craft.engine;
         engine.thrust_vac > 0.0 && engine.setting(controls.throttle) > 0.0 && (self.debug || self.propellant > 0.0)
     }
@@ -467,6 +394,9 @@ impl Vessel {
     pub fn thrust_accel(&self, world: &World, throttle: f64) -> DVec3 {
         let (anchor, r, _) = self.state(world);
         let p = ambient_pressure(world, &world.snapshot(self.time), anchor, r);
+        if let Some(t) = self.ship_thrust(throttle, p) {
+            return self.attitude.q * t.dir * (t.thrust / self.mass());
+        }
         let out = self.craft.engine.tick_output(throttle, p, self.propellant, TICK, self.debug);
         self.attitude.q * self.craft.engine.mount_dir * (out.thrust / self.mass())
     }
@@ -492,6 +422,9 @@ impl Vessel {
         let changed = self.plan.first_difference(&plan);
         if changed == usize::MAX {
             return Ok(());
+        }
+        if self.ship.is_some() && !plan.burns.is_empty() {
+            return Err(PlanError::PartsUnsupported);
         }
         let started = match &self.phase {
             Phase::Coasting { trajectory } => trajectory.burns_started(),
@@ -681,5 +614,7 @@ impl Vessel {
     }
 }
 
+#[cfg(test)]
+mod ship_tests;
 #[cfg(test)]
 mod tests;
