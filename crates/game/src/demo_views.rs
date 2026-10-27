@@ -10,7 +10,9 @@
 //! benchmark there (`bench_plunge.md`: what each part costs in this view);
 //! then the orbiting ship is active again and the plunging one deleted. `SUNSCATTER_DEMO_ONLY=Plunge` measures the pad
 //! first (looking up past the ship, the owner's 120 fps view), then this
-//! view, and ends the demo.
+//! view, and ends the demo. `SUNSCATTER_PLUNGE_OVER=<lat>,<lon>[,<km>]` puts
+//! the plunge over another ground point (the demo's is mostly sea), and
+//! lower if asked.
 
 use crate::camera::{CameraRig, Focus};
 use crate::commands::GameCommand;
@@ -31,12 +33,15 @@ pub const PLUNGE_SECONDS: f64 = 6.0;
 pub const PLUNGE_SETTLE: f64 = 2.0;
 
 /// The plunging vessel's state relative to Earth's centre, above the point
-/// under `r` (the ship's position): `PLUNGE_ALTITUDE` up, falling.
-pub fn plunge_state(r: DVec3, v: DVec3, radius_eq: f64) -> (DVec3, DVec3) {
+/// under `r` (the ship's position): `altitude` above `radius` (the
+/// owner's view: [`PLUNGE_ALTITUDE`] above the equatorial radius), falling
+/// at [`PLUNGE_FALL`] (slower lower down: the same time to the ground).
+pub fn plunge_state(r: DVec3, v: DVec3, radius: f64, altitude: f64) -> (DVec3, DVec3) {
     let up = r.normalize();
     let h = v.reject_from(up);
     let side = if h.length() > 1e-6 * v.length() { h.normalize() } else { up.any_orthonormal_vector() };
-    (up * (radius_eq + PLUNGE_ALTITUDE), -up * PLUNGE_FALL + side * PLUNGE_DRIFT)
+    let fall = PLUNGE_FALL * (altitude / PLUNGE_ALTITUDE).min(1.0);
+    (up * (radius + altitude), -up * fall + side * PLUNGE_DRIFT)
 }
 
 /// The demo's extra views (added in demo mode).
@@ -105,8 +110,20 @@ pub fn run(
         // Spawn above the ship's ground point and make it active.
         let (anchor, r, v) = sim.ship().state(&sim.world);
         let snap = sim.world.snapshot(sim.clock);
-        let r_earth = snap.relative_r(anchor, earth.node) + r;
-        let (r0, v0) = plunge_state(r_earth, v, re);
+        let mut r_earth = snap.relative_r(anchor, earth.node) + r;
+        let (mut radius, mut altitude) = (re, PLUNGE_ALTITUDE);
+        if let Some(at) = std::env::var("SUNSCATTER_PLUNGE_OVER").ok().and_then(|s| parse_plunge_at(&s)) {
+            // Over a chosen ground point instead (body-fixed, then turned
+            // with Earth), its altitude above the ground there if given.
+            let p = earth.physical.as_ref().expect("Earth is physical");
+            let fixed = DVec3::new(at.lat.cos() * at.lon.cos(), at.lat.cos() * at.lon.sin(), at.lat.sin());
+            r_earth = crate::scene::body_matrix(p, sim.clock) * fixed * r_earth.length();
+            if let Some(a) = at.altitude {
+                radius = p.ellipsoid_radius(at.lat.sin()) + p.surface_height_latlon(at.lat, at.lon);
+                altitude = a;
+            }
+        }
+        let (r0, v0) = plunge_state(r_earth, v, radius, altitude);
         let id = sim.vessel_ids.allocate();
         let mut vessel = Vessel::coasting(&sim.world, id, sim.clock, earth.node, r0, v0, sim::craft::test_craft());
         vessel.set_attitude(Attitude { q: quat_z_to(-v0.normalize()), omega: DVec3::ZERO });
@@ -121,7 +138,7 @@ pub fn run(
         rig.focus = Focus::Ship;
         (rig.distance, rig.pitch) = (60.0, 1.2);
         profile.restart("plunge: 185 km, falling 2.3 km/s, looking down");
-        info!("demo plunge: vessel at {:.0} km, falling at {PLUNGE_FALL} m/s", PLUNGE_ALTITUDE / 1e3);
+        info!("demo plunge: vessel {:.1} km up, falling at {:.0} m/s", altitude / 1e3, -v0.dot(r0.normalize()));
         return;
     }
     if demo.timer < PLUNGE_SETTLE {
@@ -171,6 +188,29 @@ pub fn offscreen_size() -> (u32, u32) {
     std::env::var("SUNSCATTER_DEMO_SIZE").ok().and_then(|s| parse_size(&s)).unwrap_or((1600, 900))
 }
 
+/// Where the plunge is, from `SUNSCATTER_PLUNGE_OVER=<lat>,<lon>[,<km>]`
+/// (degrees; km above the ground there): a developer's measure of other
+/// ground (land, mountains, many zone edges; close up).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PlungeAt {
+    /// Radians.
+    pub lat: f64,
+    pub lon: f64,
+    /// Metres above the ground; none: the owner's view's height.
+    pub altitude: Option<f64>,
+}
+
+pub fn parse_plunge_at(s: &str) -> Option<PlungeAt> {
+    let v: Vec<f64> = s.split(',').map(|x| x.trim().parse().ok()).collect::<Option<_>>()?;
+    let (lat, lon) = (*v.first()?, *v.get(1)?);
+    let altitude = v.get(2).map(|km| km * 1e3);
+    let ok = v.len() <= 3
+        && (-90.0..=90.0).contains(&lat)
+        && (-180.0..=360.0).contains(&lon)
+        && altitude.is_none_or(|a| a > 0.0);
+    ok.then(|| PlungeAt { lat: lat.to_radians(), lon: lon.to_radians(), altitude })
+}
+
 /// "WxH" → (W, H), both positive.
 pub fn parse_size(s: &str) -> Option<(u32, u32)> {
     let (w, h) = s.trim().split_once(['x', 'X'])?;
@@ -199,15 +239,31 @@ mod tests {
         let re = 6_378_137.0;
         let r = DVec3::new(0.3, -0.8, 0.5).normalize() * (re + 300_000.0);
         let v = r.normalize().any_orthonormal_vector() * 7_700.0;
-        let (r0, v0) = plunge_state(r, v, re);
+        let (r0, v0) = plunge_state(r, v, re, PLUNGE_ALTITUDE);
         assert!((r0.length() - re - PLUNGE_ALTITUDE).abs() < 1e-6);
         assert!((r0.normalize() - r.normalize()).length() < 1e-12, "above the same ground point");
         let radial = v0.dot(r0.normalize());
         assert!((radial + PLUNGE_FALL).abs() < 1e-9, "{radial}");
         assert!((v0.reject_from(r0.normalize()).length() - PLUNGE_DRIFT).abs() < 1e-9);
         // A radial ship velocity still gives a horizontal drift.
-        let (_, v1) = plunge_state(r, r.normalize() * 10.0, re);
+        let (_, v1) = plunge_state(r, r.normalize() * 10.0, re, PLUNGE_ALTITUDE);
         assert!((v1.reject_from(r.normalize()).length() - PLUNGE_DRIFT).abs() < 1e-9);
+        // Lower down, slower: the same time to the ground.
+        let (r2, v2) = plunge_state(r, v, re, 2_000.0);
+        assert!((r2.length() - re - 2_000.0).abs() < 1e-6);
+        let fall = -v2.dot(r2.normalize());
+        assert!((2_000.0 / fall - PLUNGE_ALTITUDE / PLUNGE_FALL).abs() < 1e-9, "{fall}");
+    }
+
+    #[test]
+    fn plunge_points() {
+        let at = parse_plunge_at("-15, -68").expect("parses");
+        assert!((at.lat.to_degrees() + 15.0).abs() < 1e-12 && (at.lon.to_degrees() + 68.0).abs() < 1e-12);
+        assert_eq!(at.altitude, None);
+        assert_eq!(parse_plunge_at("-15,-68,2").and_then(|a| a.altitude), Some(2_000.0));
+        for bad in ["91,0", "10", "a,b", "", "1,2,0", "1,2,3,4"] {
+            assert_eq!(parse_plunge_at(bad), None, "{bad}");
+        }
     }
 
     #[test]
