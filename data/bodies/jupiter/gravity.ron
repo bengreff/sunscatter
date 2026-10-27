@@ -1,0 +1,27 @@
+// Jupiter's gravity field beyond its point mass (D090), read by sim::gravity::file.
+// Written by `cargo run -p ephem-tool --release -- gravity`; do not edit by hand.
+// Durante et al. 2020, GRL 47, e2019GL086572, doi:10.1029/2019GL086572 (Juno perijoves 1-17;
+// J2 includes the permanent tide). The zonals J2-J12; the degree-2 tesserals (~1e-9, within
+// ~2 sigma of zero) are left out, which keeps the field zonal.
+// Source: https://atmos.nmsu.edu/PDS/data/jnogrv_0002/DATA/SHADR/GRV_JUGR_SHA_JUP_U_DUR2020_20200203_V01.TAB
+// Degree 12 of the source's 12.
+// Frame: zonal: only the pole of body.ron is used.
+(
+    model: "Durante2020",
+    radius: 71492000.0,
+    gm: Some(1.266865341e17),
+    normalized: false,
+    coefficients: [
+        (2, 0, -1.46965735e-2, 0e0),
+        (3, 0, 4.5e-8, 0e0),
+        (4, 0, 5.866085e-4, 0e0),
+        (5, 0, 7.23e-8, 0e0),
+        (6, 0, -3.42007e-5, 0e0),
+        (7, 0, -1.2e-7, 0e0),
+        (8, 0, 2.422e-6, 0e0),
+        (9, 0, 1.13e-7, 0e0),
+        (10, 0, -1.81e-7, 0e0),
+        (11, 0, -1.6e-8, 0e0),
+        (12, 0, -6.2e-8, 0e0),
+    ],
+)

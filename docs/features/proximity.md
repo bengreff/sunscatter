@@ -58,7 +58,7 @@ A craft held live by a bubble refuses rails warp like any live craft; for the ac
 | Pressed together at 0.02 m/s² | depth 0.0696 mm, constant to 1e-7 m; relative motion < 3e-5 m/s |
 | In a bubble in low orbit, 0.5 m/s | they join at the first epoch, touch from 17.2 s, separate at 0.12 m/s, intact |
 | 12 m/s (over the 8 m/s limit) | both test craft destroyed by impact; in debug mode neither; 8-part stress craft each lose the parts hit |
-| A minute in a bubble without touching, against the craft's own coast | 0.72 mm at 400 km, 0.28 mm at 2,000 km: the live tick's force evaluation against the coast's (a vessel held live alone differs by the same bits; the coast against a bare coast by nothing measurable), a steady ~4e-7 m/s², not the bubble |
+| A minute in a bubble without touching, against the craft's own coast | 0.72 mm at 400 km, 0.28 mm at 2,000 km: the live tick's force evaluation against the coast's (a vessel held live alone differs by the same bits; the coast against a bare coast by nothing measurable), a steady ~4e-7 m/s², not the bubble. With Earth's gravity field to degree 30 (D090), 1.12 mm at 400 km and 0.14 mm at 2,000 km |
 | Relative position of two members 10 km apart after 60 s | 0.6 µm (low orbit), 14 µm (1 AU), 0.10 mm (30 AU) |
 | Cost, two 300-part stress craft touching in low orbit plus the leader (`examples/bench_bubble`, release, the reference Mac loaded by other agents) | full pair search 0.40 ms; points within 3 cm (46 + 46) found in 0.47 ms once a tick; forces 5.9 µs a substep; **a frame of the three craft 1.26 ms per 20 ms tick while touching**, 0.64 ms apart: within the live tick budget at 1× and 4× |
 

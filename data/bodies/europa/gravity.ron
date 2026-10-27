@@ -1,0 +1,16 @@
+// Europa's gravity field beyond its point mass (D090), read by sim::gravity::file.
+// Written by `cargo run -p ephem-tool --release -- gravity`; do not edit by hand.
+// Gomez Casajus et al. 2021, Icarus 358, 114187, doi:10.1016/j.icarus.2020.114187, Table 2,
+// SOL-B (Galileo flybys reanalysed; J2/C22 = 10/3 imposed, as Anderson et al. 1998 did).
+// Degree 2 of the source's 2.
+// Frame: body.ron's IAU frame (synchronous: x near the mean sub-planet point, as the solution's).
+(
+    model: "GomezCasajus2021",
+    radius: 1565000.0,
+    gm: None,
+    normalized: false,
+    coefficients: [
+        (2, 0, -4.6139e-4, 0e0),
+        (2, 2, 1.3842e-4, 0e0),
+    ],
+)

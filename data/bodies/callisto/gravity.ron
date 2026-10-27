@@ -1,0 +1,16 @@
+// Callisto's gravity field beyond its point mass (D090), read by sim::gravity::file.
+// Written by `cargo run -p ephem-tool --release -- gravity`; do not edit by hand.
+// Anderson et al. 2001, Icarus 153, 157, doi:10.1006/icar.2001.6664 (Galileo flybys; J2/C22 = 10/3
+// imposed), as tabulated by Schubert et al. 2004 (Jupiter, CUP, ch. 13, Table 13.1).
+// Degree 2 of the source's 2.
+// Frame: body.ron's IAU frame (synchronous: x near the mean sub-planet point, as the solution's).
+(
+    model: "Anderson2001",
+    radius: 2410300.0,
+    gm: Some(7179292000000.0),
+    normalized: false,
+    coefficients: [
+        (2, 0, -3.27e-5, 0e0),
+        (2, 2, 1.02e-5, 0e0),
+    ],
+)

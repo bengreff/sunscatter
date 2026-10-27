@@ -20,10 +20,19 @@
 //! 3. Runs `sim::sol::generate_sol` and writes `sol-2030.bin`, printing the
 //!    per-node report and the errors against DE440 and Horizons.
 //!
+//! `gravity [--external data/external/gravity] [--out data/bodies] [--only BODY] [--degree N]`
+//! writes each body's gravity field (D090) from the published models
+//! (`gravity_specs`: sources, degrees, frames) into `<out>/<body>/gravity.ron`;
+//! `--degree` overrides the shipped degree (convergence studies, into a
+//! scratch `--out` holding the bodies' `body.ron`).
+//!
 //! Download the kernel first:
 //! `curl -L -o data/external/de440s.bsp https://naif.jpl.nasa.gov/pub/naif/generic_kernels/spk/planets/de440s.bsp`
 
 mod fit;
+mod gravity;
+mod gravity_moons;
+mod gravity_specs;
 mod horizons;
 mod sol;
 
@@ -43,9 +52,15 @@ fn main() {
             let fit_rounds = flag("--fit-rounds").map_or(3, |n| n.parse().expect("--fit-rounds must be a count"));
             sol::run(&sol::Options { bsp: &bsp, years, extras: &extras, out: &out, bodies: &bodies, fit_rounds });
         }
+        Some("gravity") => {
+            let external = PathBuf::from(flag("--external").unwrap_or_else(|| "data/external/gravity".into()));
+            let out = PathBuf::from(flag("--out").unwrap_or_else(|| "data/bodies".into()));
+            let degree = flag("--degree").map(|n| n.parse().expect("--degree must be a count"));
+            gravity::run(&external, &out, flag("--only").as_deref(), degree);
+        }
         _ => {
             eprintln!(
-                "usage: ephem-tool fetch | sol [--bsp PATH] [--years N] [--out DIR] [--bodies DIR] [--extras all|none|gr|j2] [--fit-rounds N]"
+                "usage: ephem-tool fetch | sol [--bsp PATH] [--years N] [--out DIR] [--bodies DIR] [--extras all|none|gr|j2] [--fit-rounds N] | gravity [--external DIR] [--out DIR] [--only BODY] [--degree N]"
             );
             std::process::exit(2);
         }

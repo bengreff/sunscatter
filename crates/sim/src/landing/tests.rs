@@ -94,17 +94,34 @@ fn a_vertical_drop_on_the_moon_is_free_fall() {
     let src = w.find("Moon").unwrap();
     let r0 = start.r.length();
     // Uniform gravity at the mean height of the fall (the drop is 0.06 % of
-    // the radius; the rotation and the Earth's tide move it by centimetres).
-    let g = src.gm / (r0 - h / 2.0).powi(2);
+    // the radius; the rotation and the Earth's tide move it by centimetres):
+    // the Moon's field there (D090), split into its vertical part and the
+    // sideways pull of its anomalies (~1e-3 m/s²).
+    let mid = start.r * (1.0 - h / (2.0 * r0));
+    let snap = w.snapshot(start.t);
+    let active = ActiveSources::select(&w, &snap, start.anchor, mid);
+    let ctx = crate::forces::ForceContext {
+        world: &w,
+        anchor: start.anchor,
+        active: &active,
+        drag: None,
+        thrust: DVec3::ZERO,
+    };
+    let gravity = ctx.accel_with(&snap, mid, DVec3::ZERO);
+    let up = start.r.normalize();
+    let g = -gravity.dot(up);
     let t = hit.t.seconds_since(start.t);
     assert!((t / (2.0 * h / g).sqrt() - 1.0).abs() < 2e-4, "{t} s from {h} m");
     assert!((hit.speed / (2.0 * g * h).sqrt() - 1.0).abs() < 2e-4, "{}", hit.speed);
-    assert!(hit.v_horizontal < 0.05 && hit.v_vertical < 0.0, "{hit:?}");
-    // Straight down: the ground point is the one under the start.
+    let sideways = (gravity + up * g).length();
+    assert!(hit.v_horizontal < sideways * t + 0.05 && hit.v_vertical < 0.0, "{hit:?}");
+    // Straight down but for the field's sideways pull: the ground point is
+    // the one under the start, moved by ½ g_h t².
     let p = src.physical.as_ref().unwrap();
     let under = p.rotation.to_fixed(Vec3::from_raw(start.r), start.t).raw();
     let (lat, lon) = crate::terrain::lat_lon(under);
-    assert!((lat - hit.lat).abs() * p.radius_eq < 0.2 && (lon - hit.lon).abs() * p.radius_eq < 0.2);
+    let moved = ((lat - hit.lat).powi(2) + ((lon - hit.lon) * lat.cos()).powi(2)).sqrt() * p.radius_eq;
+    assert!((moved - 0.5 * sideways * t * t).abs() < 0.2, "{moved} m against {} m", 0.5 * sideways * t * t);
 }
 
 #[test]

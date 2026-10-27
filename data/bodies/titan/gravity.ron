@@ -1,0 +1,22 @@
+// Titan's gravity field beyond its point mass (D090), read by sim::gravity::file.
+// Written by `cargo run -p ephem-tool --release -- gravity`; do not edit by hand.
+// Durante et al. 2019, Icarus 326, 123, doi:10.1016/j.icarus.2019.03.003, Table 2 (Cassini, all
+// flybys; degree 5, no hydrostatic constraint): degrees 2 and 3; degrees 4 and 5 are mostly
+// within their uncertainties and left out.
+// Degree 3 of the source's 3.
+// Frame: body.ron's IAU frame (synchronous: x near the mean sub-planet point, as the solution's).
+(
+    model: "Durante2019",
+    radius: 2575000.0,
+    gm: Some(8978138300000.0),
+    normalized: false,
+    coefficients: [
+        (2, 0, -3.3089e-5, 0e0),
+        (2, 1, 5.13e-7, 6.12e-7),
+        (2, 2, 1.0385e-5, -6.4e-8),
+        (3, 0, 1.79e-7, 0e0),
+        (3, 1, 1.481e-6, 8.11e-7),
+        (3, 2, 1.83e-7, -2.7e-8),
+        (3, 3, -2.22e-7, -2.26e-7),
+    ],
+)

@@ -1,0 +1,18 @@
+// Enceladus's gravity field beyond its point mass (D090), read by sim::gravity::file.
+// Written by `cargo run -p ephem-tool --release -- gravity`; do not edit by hand.
+// Iess et al. 2014, Science 344, 78, doi:10.1126/science.1250551, Table S3, SOL1 (Cassini flybys
+// E9, E12, E19); R 254.2 km as Park et al. 2024 and McKinnon 2015 state it.
+// Degree 3 of the source's 3.
+// Frame: body.ron's IAU frame (synchronous: x near the mean sub-planet point, as the solution's).
+(
+    model: "Iess2014",
+    radius: 254200.0,
+    gm: Some(7210443000.0),
+    normalized: false,
+    coefficients: [
+        (2, 0, -5.4352e-3, 0e0),
+        (2, 1, 9.2e-6, 3.98e-5),
+        (2, 2, 1.5498e-3, 2.26e-5),
+        (3, 0, 1.153e-4, 0e0),
+    ],
+)

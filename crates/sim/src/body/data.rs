@@ -347,9 +347,15 @@ mod tests {
             // The Moon's file now also carries the IAU periodic terms (below).
             let r = def.physical.rotation;
             let rotation = Rotation { librations: r.librations, n_librations: r.n_librations, ..legacy(name).rotation };
-            let expected = BodyPhysical { rails_floor: floor, atmosphere, rotation, ..legacy(name) };
+            // The gravity field comes from gravity.ron where the body has one.
+            let gravity = def.physical.gravity.clone();
+            let expected = BodyPhysical { rails_floor: floor, atmosphere, rotation, gravity, ..legacy(name) };
             assert_eq!(def.physical, expected, "{name}");
         }
+        let model = |name: &str| load_default(name).physical.gravity.map(|g| g.model.clone());
+        assert_eq!(model("earth").as_deref(), Some("GGM05C"));
+        assert_eq!(model("moon").as_deref(), Some("GRGM1200A"));
+        assert_eq!(model("sun"), None, "no J2, no field");
         let earth = load_default("earth");
         assert_eq!(earth.anchor_zone, Some(AnchorZone { enter: 1.4e9, exit: 1.6e9 }));
         assert_eq!(load_default("moon").anchor_zone, Some(AnchorZone { enter: 6.0e7, exit: 7.0e7 }));

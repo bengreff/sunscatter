@@ -102,12 +102,33 @@ fn drag_decay_matches_king_hele_and_an_iss_like_ballistic_number() {
         }
         sum / n as f64
     };
-    let a0 = mean_r(&s);
+    // The same orbit without drag, through the same gravity: its mean
+    // radius moves too (Earth's field, D090, raises and lowers it by tens of
+    // metres over days), so the decay is the difference between the two.
     let days = 3.0;
+    let mut bare = Segment::new(
+        &w,
+        t0(),
+        CoastStart {
+            anchor: earth.node,
+            r,
+            v,
+            drag: None,
+            contact_height: 0.0,
+            horizon: 1e9,
+            fixed_anchor: false,
+            proper_time: 0.0,
+        },
+    );
+    bare.extend_until(&w, days * DAY + period, usize::MAX);
+    let bare_r =
+        |t: f64| (0..36).map(|k| bare.eval(t + period * k as f64 / 36.0).unwrap().1.length()).sum::<f64>() / 36.0;
+    let a0 = mean_r(&s);
+    let gap0 = bare_r(0.0) - a0;
     s.advance(&w, t0().add_seconds(days * DAY), &controls, usize::MAX);
     assert!(s.segment().unwrap().limbo().unwrap().pointing.is_known(), "held: the attitude is known");
     let a1 = mean_r(&s);
-    let measured = (a0 - a1) / (days * DAY);
+    let measured = (bare_r(days * DAY) - a1 - gap0) / (days * DAY);
     // King-Hele (Satellite Orbits in an Atmosphere, 1987; Vallado eq. 9-49
     // for e = 0): da/dt = −F·ρ·√(μa)·C_D·A/m, F = (1 − ωr/v)² for the air
     // turning with Earth under a prograde equatorial orbit.

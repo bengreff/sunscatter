@@ -1,0 +1,21 @@
+// Saturn's gravity field beyond its point mass (D090), read by sim::gravity::file.
+// Written by `cargo run -p ephem-tool --release -- gravity`; do not edit by hand.
+// Iess et al. 2019, Science 364, eaat2965, doi:10.1126/science.aat2965 (Cassini Grand Finale):
+// J2 16290.573, J4 -935.314, J6 86.340, J8 -14.624, J10 4.672 (1e-6, R 60,330 km) as quoted by
+// Fortney et al. 2023, Saturn's Interior After the Cassini Grand Finale, arXiv:2304.09215, Table
+// 4.1. The odd zonals (~1e-7) are left out.
+// Degree 10 of the source's 10.
+// Frame: zonal: only the pole of body.ron is used.
+(
+    model: "Iess2019",
+    radius: 60330000.0,
+    gm: None,
+    normalized: false,
+    coefficients: [
+        (2, 0, -1.6290573e-2, 0e0),
+        (4, 0, 9.35314e-4, 0e0),
+        (6, 0, -8.634e-5, 0e0),
+        (8, 0, 1.4624e-5, 0e0),
+        (10, 0, -4.672e-6, 0e0),
+    ],
+)

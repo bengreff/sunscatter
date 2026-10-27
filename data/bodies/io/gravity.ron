@@ -1,0 +1,17 @@
+// Io's gravity field beyond its point mass (D090), read by sim::gravity::file.
+// Written by `cargo run -p ephem-tool --release -- gravity`; do not edit by hand.
+// Park et al. 2025, Nature 638, 69, doi:10.1038/s41586-024-08442-5, Extended Data Table 1 (Juno
+// and Galileo; no hydrostatic constraint; J2 and C22 include the permanent tide).
+// Degree 2 of the source's 2.
+// Frame: body.ron's IAU frame (synchronous: x near the mean sub-planet point, as the solution's).
+(
+    model: "Park2025",
+    radius: 1829400.0,
+    gm: Some(5959894800000.0),
+    normalized: false,
+    coefficients: [
+        (2, 0, -1.8346e-3, 0e0),
+        (2, 1, 0e0, -4e-6),
+        (2, 2, 5.496e-4, 5e-7),
+    ],
+)

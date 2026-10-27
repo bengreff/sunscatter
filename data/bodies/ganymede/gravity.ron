@@ -1,0 +1,33 @@
+// Ganymede's gravity field beyond its point mass (D090), read by sim::gravity::file.
+// Written by `cargo run -p ephem-tool --release -- gravity`; do not edit by hand.
+// Gomez Casajus et al. 2022, GRL 49, e2022GL099475, doi:10.1029/2022GL099475 (Juno's 2021
+// flyby and Galileo; degree 5, no hydrostatic constraint): the data set doi:10.5281/zenodo.6949645,
+// SOI_gravity_field.txt (fully normalized, R 2631.2 km).
+// Degree 5 of the source's 5.
+// Frame: body.ron's IAU frame (synchronous: x near the mean sub-planet point, as the solution's).
+(
+    model: "GomezCasajus2022",
+    radius: 2631200.0,
+    gm: None,
+    normalized: true,
+    coefficients: [
+        (2, 0, -5.948166672982249e-5, 0e0),
+        (2, 1, -3.376656360991323e-6, -6.198605016943528e-6),
+        (2, 2, 6.128512804347833e-5, 1.719778241510138e-6),
+        (3, 0, 5.516019563935706e-8, 0e0),
+        (3, 1, -4.969821745652446e-7, -3.388234871569233e-6),
+        (3, 2, -2.471188520778999e-6, -2.631456832761436e-6),
+        (3, 3, 1.861910193237492e-6, 6.252561114408979e-6),
+        (4, 0, -9.040863626893271e-7, 0e0),
+        (4, 1, -1.97971372279629e-7, -8.428043988647186e-7),
+        (4, 2, -6.637786140450445e-7, -1.324113927222187e-6),
+        (4, 3, -2.334828330766576e-6, 4.558173462251096e-7),
+        (4, 4, 1.118029420047734e-6, 7.808563741354416e-7),
+        (5, 0, -4.378039311621959e-7, 0e0),
+        (5, 1, 3.416987791621206e-7, 4.322974722792315e-9),
+        (5, 2, -2.217219743375731e-7, -3.777319461161418e-7),
+        (5, 3, -1.765682886830437e-6, 5.742255184900602e-8),
+        (5, 4, -1.264081055558542e-7, 1.763636474322547e-6),
+        (5, 5, 1.253876417049197e-6, 3.604329783440386e-7),
+    ],
+)

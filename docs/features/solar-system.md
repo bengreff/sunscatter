@@ -64,9 +64,88 @@ What got it back (all decided from the vessel's position, the same for every anc
 - **Per-step searches skip far bodies** (`World::may_reach`): contact, atmosphere entry and ambient pressure test a moon system by its barycenter and extent, and a body or system that keeps farther from the Sun than the vessel by its least distance from the Sun over the window (`Cluster::star_distance`, `Source::faint_min_distance`), so far moons and dwarf planets are never evaluated (was ~2 µs a step).
 - **Faint bodies left out where they cannot matter** (`World::counts_in`): a dwarf planet or a dwarf's system (under 1e-8 of the system's GM) whose pull on the vessel and on the anchor is provably under a hundredth of the cutoff (1e-14 m/s²) is not summed; its uncancelled pull on the anchor is the error, inside D023's budget. Near Earth that is every dwarf but Ceres and Pluto. Faint nodes and moon systems are evaluated lazily by snapshots (the planets, Earth and the Moon eagerly).
 - **The active set without evaluating far moons** (`World::may_be_active`, `may_be_active_all`): a closed system's member is tested only where `2 GM ρ / d³` (ρ the vessel's offset from the anchor, d the least distance from the anchor–vessel segment to the system) could reach the cutoff; the set is the one the exact test over every source gives. (Testing only the sources that count, tried first, left a source counted but cut for part of a step when its cluster closed: 2 km in a year.)
-- **Cheaper loops:** the gravity loop skips a closed system's members at once (`World::counted`), positions relative to the anchor reuse the anchor's walk to the root (`Snapshot::path_to`, bit-identical), clusters far from the Sun close by the bound above without a walk, and another body's J2 is applied only where its field's change over the anchor–vessel segment (`60 |J2| GM R² ρ / d⁵`) reaches a hundredth of the cutoff (the anchor's own always): far away the vessel and the anchor feel the same J2 pull, which the anchor's ephemeris leaves out too (the Moon's J2 at LEO: ~1e-19 m/s² tidal).
+- **Cheaper loops:** the gravity loop skips a closed system's members at once (`World::counted`), positions relative to the anchor reuse the anchor's walk to the root (`Snapshot::path_to`, bit-identical), clusters far from the Sun close by the bound above without a walk, and a body's gravity field is evaluated only to the degree that can matter at the vessel ([Gravity fields](#gravity-fields-d090), which replaced the J2 rule of the time).
 
 Golden LEO coast hash 0x52e3680dc0baea81 (the faint bodies and far J2 terms now left out).
+
+## Gravity fields (D090)
+
+**Status: playable.** Vessels feel each body's measured gravity field beyond its point mass (`sim::gravity`), through every force path (coasts, limbo, live ticks, planned burns, the landing predictor, the bubble).
+
+**Model.** Fully normalized spherical harmonics (geodesy 4π, no Condon–Shortley phase) with each model's reference radius and GM, in the body's rotating frame (`body.ron`'s rotation, `Rotation::matrix`), evaluated by Pines' singularity-free recursion in direction cosines (normalized as Lundberg & Schutz 1988 and Eckman et al. 2014; the radius ratio folded into the column recursion and the degree sums lumped per order as Holmes & Featherstone 2002; the radial term from `A(n+1,m+1) = (n+m+1) A(n,m) + u A(n,m+1)`, so no column runs past the field's degree). No trigonometry, no division by the cosine of the latitude (the poles are ordinary points), a fixed summation order. A zonal field needs only the pole. A body without a published field has the degree-2 zonal case of its `body.ron` J2. Checked against independent evaluations to 2.0e-14 relative at worst (pyshtools 4.14 at degrees 12 and 300; within 0.1° of a pole, where pyshtools is off by 1e-12, a 40-digit mpmath sum and pyshtools through rotated coefficients), and the shipped files against pyshtools reading the published files directly (Earth, the Moon, Jupiter, to 1e-12; `tests/gravity_fields.rs`).
+
+**Truncation** (`Field::included_degree`, `forces::field_degree`): a vessel includes a body's degrees up to where the rigorous bounds of all higher degrees, `(GM/r²)(R/r)ⁿ (2n+1) √(n+1) ‖cₙ‖` from the addition theorem, sum to under a hundredth of the cutoff (1e-14 m/s²) at the vessel. The field acts on the vessel only (the anchor's acceleration is its ephemeris'), so the rule depends on the vessel's distance from the body alone, never on the anchor. The degree only grows within a segment and is stored with it (`forces::Active`). Near a body every shipped degree is in (LEO, low lunar orbits); at GEO Earth's degree 10, near the Moon Earth's 3; a heliocentric vessel none.
+
+**Steps that resolve the field** (`ForceContext::max_step` through `Dynamics::max_step`): a step spans at most three half-wavelengths of the highest degree that can move a step's position by the coasts' tolerance (bounds over 1e-9 m/s²), `3 π d / (N v)` at the vessel's speed over the body's turning surface. Without it the error control does not see the high degrees and aliases them: at the coasts' tolerance degree 60 in LEO erred by 700 m a day against its 8 m truncation error (degree 10: 350 m), and the Earth- and barycentre-anchored coasts drifted 13 m apart in 6 h.
+
+### Data (`data/bodies/<body>/gravity.ron`, 556 kB)
+
+Written by `cargo run -p ephem-tool --release -- gravity` from the raw files in `data/external/gravity/` (each file's header gives its URL), truncated, with the model's GM and reference radius (the harmonics scale with the model's GM; the point mass is the ephemeris'):
+
+| Body | Model (source) | Shipped / available degree | Frame |
+|---|---|---|---|
+| Earth | GGM05C (Ries et al. 2016, doi:10.5880/icgem.2016.002; CSR, GRACE + GOCE + DTU13; zero-tide) | 30 / 360 | ITRF taken as the body-fixed frame of the IAU rotation (below) |
+| Moon | GRGM1200A (Lemoine et al. 2014, GRL 41, 3382; PDS) | 100 / 1200 | DE430 principal axes, rotated from our mean-Earth frame by Rz(67.573″) Ry(78.580″) Rx(0.285″) (Williams, Boggs & Folkner 2013, JPL IOM 335-JW,DB,WF-20130722-016) |
+| Mars | MRO120F (Konopliv et al. 2020, GRL 47, e2020GL090568; PDS; GM of the Mars system as the ephemeris' Mars) | 50 / 120 | Konopliv's frame, within ~25 m at the surface of IAU 2015's (its nutation and seasonal spin terms, < 0.5″, left out) |
+| Venus | MGNP180U (Konopliv, Banerdt & Sjogren 1999, Icarus 139, 3; PDS) | 40 / 180 | the IAU frame of the Magellan era, the same as `body.ron`'s |
+| Mercury | HgM008 (Genova et al. 2019, GRL 46, 3625; PDS) | 40 / 100 | the model's rotation (pole 281.0082°, 61.4164°; W 329.75° + 6.138505441°/d), turned into ours at 2030: 0.088° in longitude, drifting 0.1° by 2080 |
+| Jupiter | Durante et al. 2020 (GRL 47, e2019GL086572; Juno, PDS) | J2–J12 / 12 (zonals; the degree-2 tesserals, ~1e-9 and within ~2σ of zero, left out) | the pole only |
+| Saturn | Iess et al. 2019 (Science 364, eaat2965; Cassini Grand Finale), J2–J10 even, as tabulated by Fortney et al. 2023 (arXiv:2304.09215) | 10 (zonal; the odd zonals, ~1e-7, left out) | the pole only |
+| Io | Park et al. 2025 (Nature 638, 69; Juno + Galileo): J2, C21, S21, C22, S22 | 2 | `body.ron`'s IAU frame (synchronous, x near the sub-Jupiter point, as the solution's) |
+| Europa | Gomez Casajus et al. 2021 (Icarus 358, 114187), SOL-B (J2/C22 = 10/3 imposed, as Anderson et al. 1998) | 2 | as Io |
+| Ganymede | Gomez Casajus et al. 2022 (GRL 49, e2022GL099475; Juno's flyby; doi:10.5281/zenodo.6949645) | 5 / 5 | as Io |
+| Callisto | Anderson et al. 2001 (Icarus 153, 157) as tabulated by Schubert et al. 2004 | 2 | as Io |
+| Titan | Durante et al. 2019 (Icarus 326, 123), Table 2 | 3 / 5 (degrees 4–5 mostly within their uncertainties) | as Io |
+| Enceladus | Iess et al. 2014 (Science 344, 78), SOL1: J2, C21, S21, C22, S22, J3 | 3 | as Io |
+| Ceres | CERES18D (Konopliv, Dawn, PDS SBN DWNCGRS_2 v4; Konopliv et al. 2018, Icarus 299, 411) | 18 / 18 | the model's rotation turned into IAU 2015's at 2030 (0.36° in longitude; the rates differ by 3.5e-5°/day, 0.64° by 2080) |
+
+Every other body keeps its `body.ron` J2. Vesta is not one of our bodies. `body.ron`'s `j2` stays what the ephemeris generator uses (the shipped ephemeris regenerates bit for bit); Earth's differs from GGM05C's by 8e-6 relative.
+
+**Frames, the errors stated.** *Earth:* our rotation is IAU 2015's (the pole's linear precession, W linear in TDB): no nutation (≤ 17″ in longitude, 9″ in obliquity), no polar motion (≤ 0.5″) and no UT1. Against precession and GMST with ΔT ≈ 70 s, our Greenwich is 0.047° west of the real one in 2000, 0.091° in 2030, 0.12° by 2080 (10–14 km at the surface; 0.0042° per second of ΔT): the tesseral field turns with it, which moves the GEO stable points by that much. Terrain and launch sites share it (not this workstream's to fix). *Moon:* the IAU series realises the mean-Earth frame to ~150 m (NAIF: 72 m mean, 155 m amplitude against DE440's); GRAIL's principal-axis frame is ~860 m from it and is rotated in. *Synchronous moons:* the published J2/C22 are about the mean sub-planet direction, which the IAU prime meridians approximate to within their libration (≲ 1°).
+
+### Convergence: how many degrees (`examples/gravity_convergence`)
+
+A day in each body's lowest common orbit through the body alone (its point mass and field, its rotation), integrated tightly (1 µm a step) at each degree against the highest available; worst position difference over the day:
+
+| Orbit | Degree → worst difference in a day |
+|---|---|
+| Earth 400 km, 51.6° | 10: 346 m · 20: 154 m · **30: 70 m** · 40: 60 m · 60: 8 m · 100: 1.0 m · 120: 0.2 m (vs 160) |
+| Earth 200 km, 51.6° | 10: 492 m · **30: 134 m** · 60: 32 m · 100: 13 m · 120: 4 m |
+| GEO, 10 days | 2: 3,962 m · 3: 84 m · 6: 0.66 m · 8: 0.02 m (the rule includes 10) |
+| Moon 100 km, polar | 30: 719 m · 50: 449 m · 70: 41 m · **100: 2.4 m** · 150: 0.08 m (vs 300) |
+| Moon 50 km, polar | 70: 353 m · **100: 50 m** · 150: 5 m · 200: 0.9 m (vs 400) |
+| Moon 20 km, polar | **100: 398 m** · 150: 113 m · 200: 40 m · 250: 22 m (vs 400; GRAIL's own high degrees matter here) |
+| Mars 250 km, polar | 30: 486 m · 40: 229 m · **50: 48 m** · 70: 7.5 m (vs 120) |
+| Venus 200 km | 30: 494 m · **40: 87 m** · 70: 41 m · 100: 5 m (vs 180) |
+| Mercury 200 km | 30: 178 m · **40: 35 m** · 50: 19 m · 70: 0.9 m (vs 100) |
+| Ceres 385 km (Dawn's LAMO) | 10: 7.4 m · 14: 0.8 m (**18** shipped) |
+
+At the coasts' tolerance with the step cap (`GRAVITY_COAST=1 GRAVITY_HCAP=3`) the errors are these to within 10 % or 1.3 m; with J2 alone a LEO day errs by ~900 m. **The shipped degrees** bring a day in the lowest common orbit to tens of metres, a few times the coasts' own error (~10 m a day in LEO): below the drag model's uncertainty wherever Earth's dropped degrees matter (km a day at 400 km), and to metres in lunar orbits from 100 km. Each doubling of the degree costs ~8× (evaluations go as N², steps as N), so the next steps (Earth 60, the Moon 150) are a budget decision ([below](#cost)).
+
+### Validation (`tests/gravity_fields.rs`, `examples/lunar_orbits`)
+
+- **The Apollo subsatellites.** PFS-2 (released 1972-04-24 into 91 × 130 km at 169.3°) hit the Moon after 35 days, its periapsis having fallen to ~10 km, risen to ~50 km and fallen again; PFS-1 (103 × 136 km at 151.3°) was at 52 × 186 km 13 months later and lasted about a year and a half (NSSDC; Bell 2006, NASA Science). The same orbits in 2030 from eight node longitudes and start dates: **PFS-2-like orbits crash after 33–54 days**, with the same dip and recovery (the test's: 35.9 days; with the Moon's J2 alone the orbit stays up); **PFS-1-like orbits: seven of eight are up after 400 days** (periapsis 21–55 km at worst), one crashes after 333 days (the test: above 70 km for 60 days).
+- **Frozen inclinations.** Circular at 100 km for 150 days from three node longitudes: 27°, 50°, 76°, 86° stay up (periapsis at worst 37–73 km); polar falls to 14–20 km, about 0.5 km a day (Lunar Prospector and LRO maneuvered every few weeks to keep theirs); 63° crashes after 81–103 days, 11° after 17–49 (Bell 2006; Ely 2005).
+- **Geostationary drift.** At rest over 30°E and 120°E the longitude accelerates at +0.00183 and −0.00200°/day² toward 75°E (−3 a_E/a: +0.00178, −0.00199; J22 alone ±0.00170; Soop: at most ~0.002); over 75°E, 255°E (105°W) and 165°E (unstable) under 2e-4 (the Sun and the Moon's).
+- **Sun-synchronous:** 700 km at the J2 inclination (98.19°) precesses 0.9811°/day against the Sun's 0.9856.
+- **Mars's frozen orbit:** MRO's 255 × 320 km polar orbit started at J3's frozen eccentricity with its periapsis over the south pole stays near it (its mean eccentricity vector moves 0.28 e in ten days) where one a quarter turn away circulates (1.43 e).
+- **Invariance:** a low lunar orbit (50 km, polar, degree 100) anchored at the Moon and at the Earth–Moon barycentre agrees to 6 cm over 4 h (the barycentre's precision at 3.8e8 m), and chunked = single pass bit for bit; LEO anchored at Earth and at the barycentre, the cut-against-full-model year, the perturbed coast's anchors (7e-5 m) and the golden coast all pass with the fields.
+
+### Cost
+
+Coasts (DOP853 at the coasts' tolerance, the step cap), release, M2 Pro shared with other agents (load 5–7), `examples/bench_gravity` before the fields (8943203) and now:
+
+| Orbit (fields included) | Before: µs a step × steps a day | Now | Per simulated day |
+|---|---|---|---|
+| LEO 400 km (Earth 30, Moon 2) | 10.6 × 215 | 26.5 × 303 | 2.3 → 8.0 ms |
+| LEO 200 km | 12.9 × 225 | 28.9 × 318 | 2.9 → 9.2 ms |
+| GEO (Earth 10, Moon 2) | 11.0 × 19 | 16.4 × 19 | 0.21 → 0.31 ms |
+| Low lunar orbit, 100 km (Moon 100, Earth 3) | 13.5 × 143 | 122 × 823 | 1.9 → 100 ms |
+| Low lunar orbit, 50 km | 12.3 × 149 | 137 × 1,101 | 1.8 → 151 ms |
+| Mars 250 km (Mars 50) | 8.8 × 159 | 43.6 × 441 | 1.4 → 19 ms |
+| Heliocentric, 1.3 AU (none) | 8.5 × 8 | 9.2 × 8 | unchanged |
+
+One evaluation costs ~1.6 ns a term (`(N+1)(N+2)/2` terms): Earth's degree 30 ~1.2 µs, the Moon's 100 ~8.4 µs, 150 ~17 µs. **Budgets at 1,000,000× (D081)**, 11.6 simulated days a real second: a LEO craft needs ~93 ms of compute a second (27 before), so 50 of them ~4.6 s on the 7 compute threads, within D081's reach; a craft in a 100 km lunar orbit ~1.2 s, and one vessel is advanced by one thread at a time, so with ~8 ms of a frame for it the clock holds at ~4×10⁵× while one is there (shown as limited by compute). Raising Earth to 60 (8 m a day at 400 km) would cost ~4× in LEO; the Moon at 150 (5 m a day at 50 km) ~2.7× in lunar orbit.
 
 ## Choices
 
@@ -78,8 +157,10 @@ Golden LEO coast hash 0x52e3680dc0baea81 (the faint bodies and far J2 terms now 
 
 - `sim/tests/sol_ephemeris.rs`: planets and every moon system equal regeneration bit for bit; DE440 and Horizons bounds (a drift rate per body); the 50-year window; all 44 bodies with physical data; the file under 20 MB.
 - `sim/tests/ephemeris_generation.rs`: a planet–moon pair in its barycenter's frame under the star's tide matches one full integration to 0.3 m (golden hash of the packed output: tides, J2–J6, free segments, quantization).
-- `sim::gen::nbody`: zonal terms against the potential; `sim::ephem::io`: packed tables round-trip; `sim::ephem`: lazy snapshots equal eager ones; `sim::world`: clusters (roles, opening, point-mass error under 1e-14 m/s²).
+- `sim::gravity::zonal`: the generator's J2–J6 against the potential and against the field model; `sim::ephem::io`: packed tables round-trip; `sim::ephem`: lazy snapshots equal eager ones; `sim::world`: clusters (roles, opening, point-mass error under 1e-14 m/s²).
 - Updated for the new data: the golden LEO coast hash; the gravity-source tests (dwarf planets massless in the cut-versus-full test, Ceres sitting just under the cutoff there; 5 m for the closed systems' quadrupoles; the Pluto flyby's error ratio 2e-3); the playtest save re-stamped to the new ephemeris id.
+
+- `sim::gravity` (unit) and `sim/tests/gravity_fields.rs`: the evaluation against pyshtools and mpmath, the gradient of the potential, the bound, the shipped files against the published ones, the subsatellites, GEO drift, sun-synchronous precession, Mars's frozen orbit, a low lunar orbit's anchor and chunking invariance (the frozen-inclination sweep is `--ignored`: 34 s in release).
 
 ## The 1,000-year problem (for the owner)
 
@@ -105,3 +186,4 @@ D005 asks for about 1,000 years; the shipped window is 2030–2080. Nothing here
 - Sourced upper atmospheres of Venus and Mars (above). Gas giants: no surface or atmosphere model (vessels pass through).
 - C¹ table fits (anchor zones for moons and planets beyond Earth; free segments for planets).
 - 1,000 years: [the options above](#the-1000-year-problem-for-the-owner), for the owner.
+- Gravity fields: the degrees are a budget decision (Earth 60, the Moon 150 or more for orbits under 50 km; [Cost](#cost)); the ephemeris generator keeps `body.ron`'s J2–J6 (regenerating the moon systems with the fields' zonals would align them); Earth's rotation model lacks nutation, polar motion and UT1 (0.09° in longitude in 2030); tides, Mars's seasonal J3 and the Love-number terms are not modelled; Uranus's and Neptune's J4, the mid-sized Saturnian moons' and Vesta's fields are not shipped.
