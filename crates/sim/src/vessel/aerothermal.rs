@@ -331,6 +331,17 @@ pub fn in_atmosphere(world: &World, snap: &Snapshot, anchor: NodeId, r: DVec3, m
     })
 }
 
+/// The air's loads on a craft over a tick (body axes; [`AeroTick::loads`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct AeroLoads {
+    /// The hull's force and its moment about the body origin.
+    pub force: DVec3,
+    pub moment: DVec3,
+    /// The parachute's force and mount, if deployed.
+    pub chute: Option<(DVec3, DVec3)>,
+    pub flow: Flow,
+}
+
 /// The aerodynamics of one live tick: the air frozen at the tick's start.
 pub struct AeroTick<'a> {
     design: &'a CraftDesign,
@@ -431,6 +442,19 @@ impl<'a> AeroTick<'a> {
             torque += (mount - self.com).cross(flow.dir * (self.q * cd_area));
         }
         (f, torque, flow)
+    }
+
+    /// The air's loads at attitude `q` for the structure (body axes): the
+    /// hull's force and its moment about the body origin, the parachute's
+    /// force and mount (if deployed), and the flow.
+    pub fn loads(&self, q: DQuat) -> AeroLoads {
+        let flow = self.flow(q.normalize());
+        let (force, moment) = match &self.layer {
+            Some(layer) => aero::aero_forces_layer(&self.design.bake, &flow, self.design.cd0, layer),
+            None => aero::aero_forces(&self.design.bake, &flow, self.design.cd0),
+        };
+        let chute = self.chute.map(|(cd_area, mount)| (flow.dir * (self.q * cd_area), mount));
+        AeroLoads { force, moment, chute, flow }
     }
 
     /// Aerodynamic torque about the centre of mass (body axes) at `q`.

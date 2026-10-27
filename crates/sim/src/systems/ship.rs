@@ -17,7 +17,7 @@ use glam::DVec3;
 
 /// What a tick's systems read.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct TickEnv {
+pub struct TickEnv<'a> {
     /// The tick's start and length (s).
     pub at: Epoch,
     pub dt: f64,
@@ -32,6 +32,9 @@ pub struct TickEnv {
     pub alpha: DVec3,
     /// Debug mode (D064).
     pub debug: bool,
+    /// The parts and the forces on them over the tick, for the joints
+    /// (`None`: no structure step, as for a vessel that does not move).
+    pub bodies: Option<super::structure::Bodies<'a>>,
 }
 
 /// Runs a tick (see the module): `draws` is what the engines drew from each
@@ -51,7 +54,12 @@ pub fn tick(def: &ShipDef, state: &mut ShipState, env: &TickEnv, draws: &[f64], 
     let r = &mut state.runtime;
     (r.accel, r.omega, r.alpha) = (env.accel, env.omega, env.alpha);
     let penv = propulsion::Env { at: env.at, dt: env.dt, throttle: env.throttle, debug: env.debug };
-    propulsion::step(def, state, &penv)
+    let mut effects = propulsion::step(def, state, &penv);
+    if let Some(b) = &env.bodies {
+        let m = super::structure::Motion { com: DVec3::ZERO, accel: env.accel, omega: env.omega, alpha: env.alpha };
+        effects.extend(super::structure::step(def, state, b, &m, env.at, env.debug));
+    }
+    effects
 }
 
 /// Draws `kg` for thruster block `i` from its feed: a bottle's gas, or its

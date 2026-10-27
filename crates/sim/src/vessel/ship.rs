@@ -274,8 +274,17 @@ impl Vessel {
                 _ => None,
             })
             .collect();
+        // A joint that snapped tears its child's side off (no separation
+        // system fires).
+        let torn: Vec<(u32, f64)> = effects
+            .iter()
+            .filter_map(|e| match e {
+                Effect::Snap(child, load) => parts.iter().position(|p| p.id == *child).map(|i| (i as u32, *load)),
+                _ => None,
+            })
+            .collect();
         let moved = self.deployed_parts() != self.craft.id.deployed();
-        if separated.is_empty() && !moved {
+        if separated.is_empty() && torn.is_empty() && !moved {
             return;
         }
         let epoch = self.time;
@@ -286,6 +295,7 @@ impl Vessel {
             separated: Vec::new(),
         });
         b.separated.extend(separated);
+        b.torn.extend(torn);
     }
 }
 

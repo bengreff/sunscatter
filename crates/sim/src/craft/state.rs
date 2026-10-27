@@ -207,6 +207,10 @@ pub type Contents = (Vec<(Tank, f64, f64)>, Vec<(DVec3, f64)>);
 pub enum Effect {
     /// Separate at the joint whose child part is this (`Part::id`).
     Separate(u32),
+    /// The joint whose child part is this (`Part::id`) snapped under a load
+    /// (N): the child's side tears off with what hangs from it (no
+    /// separation system fires; `sim::systems::structure`).
+    Snap(u32, f64),
     ReleaseClamps,
     ArmChutes,
 }

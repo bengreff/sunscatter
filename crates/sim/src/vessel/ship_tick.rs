@@ -18,6 +18,7 @@
 //!   its rate, then `systems::ship::tick`.
 
 use super::ship::ShipTick;
+use super::ship_loads::GroundAt;
 use super::{Controls, Phase, Vessel, TICK};
 use crate::craft::assembly::JointKind;
 use crate::craft::state::Effect;
@@ -40,6 +41,10 @@ pub(super) struct TickMotion {
     pub omega0: DVec3,
     /// Ambient pressure (Pa).
     pub p: f64,
+    /// The air's loads over it (at its start's attitude) and the ground
+    /// under it, for the joints (`ship_loads`).
+    pub air: Option<super::aerothermal::AeroLoads>,
+    pub ground: Option<NodeId>,
 }
 
 /// The gravitational acceleration (relative to `anchor`) at `r` at `t`.
@@ -99,12 +104,13 @@ impl Vessel {
             let props = self.mass_props();
             let (debug, at) = (self.debug, self.time);
             let def = self.ship_def().expect("a craft of parts");
-            let state = self.ship.as_mut().expect("a craft of parts");
-            let out = propulsion::output(&def, state, p, TICK, debug);
+            let out = propulsion::output(&def, self.ship.as_ref().expect("a craft of parts"), p, TICK, debug);
             // The clamps hold the vehicle (all but the mount) still on the
             // ground: their force on it is m·a_proper less the thrust.
             let mount: f64 = def.parts.iter().filter(|x| x.ground).map(|x| x.mass).sum();
             let on_vehicle = accel * (props.mass - mount) - out.dir * out.thrust;
+            let loads = self.gather_held(&out, on_vehicle, p);
+            let state = self.ship.as_mut().expect("a craft of parts");
             let mut effects = Vec::new();
             for (j, d) in def.joints.iter().enumerate().filter(|(_, d)| d.kind == JointKind::HoldDown) {
                 let capacity = d.allowable * 2.0 * crate::math::PI * d.radius;
@@ -123,8 +129,8 @@ impl Vessel {
                     );
                 }
             }
-            let env =
-                sys::TickEnv { at, dt: TICK, p, throttle: controls.throttle, accel, omega, alpha: DVec3::ZERO, debug };
+            let (alpha, bodies) = (DVec3::ZERO, Some(loads.bodies()));
+            let env = sys::TickEnv { at, dt: TICK, p, throttle: controls.throttle, accel, omega, alpha, debug, bodies };
             effects.extend(sys::tick(&def, state, &env, &out.draws, &[]));
             self.propellant = state.consumables(&def);
             self.advance_grounded(world, at.add_seconds(TICK));
@@ -157,12 +163,20 @@ impl Vessel {
         let alpha = (omega - q.inverse() * m.omega0) / m.dt;
         let rcs_kg = rcs.dot(tick.rcs_flow) * m.dt;
         let (debug, p) = (self.debug, m.p);
+        // The joints' loads: the engines as the tick flew them (the state at
+        // its start), the air, the ground at its end.
+        let loads = self.ship_parts().map(|(def, state)| {
+            let out = propulsion::output(def, state, p, m.dt, debug);
+            let ground = m.ground.map(|body| GroundAt { anchor: m.anchor, body, r: m.r1, v: m.v1 });
+            self.gather_live(world, &out, m.air.as_ref(), ground.as_ref(), p)
+        });
         let (Some(def), Some(state)) = (self.ship_def(), self.ship.as_mut()) else { return (self.propellant, vec![]) };
         let mut per_block = vec![0.0; def.thrusters.len()];
         for &(i, share) in &tick.blocks {
             per_block[i] = rcs_kg * share;
         }
-        let env = sys::TickEnv { at, dt: m.dt, p, throttle, accel, omega, alpha, debug };
+        let bodies = loads.as_ref().map(|g| g.bodies());
+        let env = sys::TickEnv { at, dt: m.dt, p, throttle, accel, omega, alpha, debug, bodies };
         let effects = sys::tick(&def, state, &env, &tick.draws, &per_block);
         (state.consumables(&def), effects)
     }

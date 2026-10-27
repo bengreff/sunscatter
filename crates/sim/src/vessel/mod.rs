@@ -52,6 +52,7 @@ pub mod limbo;
 pub mod pointing;
 mod segment;
 mod ship;
+mod ship_loads;
 mod ship_tick;
 pub mod split;
 mod systems;
@@ -629,6 +630,8 @@ impl Vessel {
     }
 }
 
+#[cfg(test)]
+mod ship_loads_tests;
 #[cfg(test)]
 mod ship_systems_tests;
 #[cfg(test)]

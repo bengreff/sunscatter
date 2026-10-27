@@ -529,7 +529,9 @@ impl Vessel {
         let TickEnd { r: r1, lo, v: v1, touching, delta } = end;
         let (engine_heat, propellant, effects) = match &ship {
             Some(tick) => {
-                let m = super::ship_tick::TickMotion { anchor, dt, r0: r, r1, v0: v, v1, omega0: before.0.omega, p };
+                let air = aero.as_ref().map(|a| a.loads(att0));
+                let (omega0, ground) = (before.0.omega, contact_body);
+                let m = super::ship_tick::TickMotion { anchor, dt, r0: r, r1, v0: v, v1, omega0, p, air, ground };
                 let (left, effects) = self.ship_after_tick(world, tick, cmd.rcs, &m, controls.throttle);
                 (tick.heat, left, effects)
             }

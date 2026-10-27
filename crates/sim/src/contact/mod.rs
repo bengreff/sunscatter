@@ -410,6 +410,17 @@ pub fn normal_loads(ground: &Ground, pose: &Pose, points: &[ContactPoint], c: &C
     out
 }
 
+/// The ground's normal force on each of `points` (N, inertial; zero off
+/// the ground) in a substep of `dt`: [`normal_loads`] with its direction,
+/// for the loads the structure carries (`sim::systems::structure`).
+pub fn normal_forces(ground: &Ground, pose: &Pose, points: &[ContactPoint], c: &ContactFile, dt: f64) -> Vec<DVec3> {
+    let mut out = vec![DVec3::ZERO; points.len()];
+    for (i, touch, f_n) in pressing(ground, pose, points, c, dt) {
+        out[i] = touch.n * f_n;
+    }
+    out
+}
+
 /// Contact force and torque on `pose` from `points` touching `ground`, for
 /// a substep of `dt` (friction is capped to what it can stop in `dt`).
 pub fn forces(

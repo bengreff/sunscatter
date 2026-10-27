@@ -27,6 +27,7 @@ pub mod power;
 pub mod propulsion;
 pub mod runtime;
 pub mod ship;
+pub mod structure;
 
 pub use data::{Knowledge, Quantity, Reading};
 pub use power::{Power, PowerSpec};
