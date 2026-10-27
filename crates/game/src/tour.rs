@@ -318,10 +318,16 @@ fn event(sim: &SimState, star: NodeId, moon: NodeId, view: View, t0: Epoch) -> O
 /// Sets the tour up if `SUNSCATTER_TOUR` asks for one (with a demo
 /// directory); returns whether it did. The shots show the bodies without
 /// the interface (no egui context).
+///
+/// Either way bevy_egui's automatic choice of camera is off: the interface
+/// belongs to the main camera (`camera::setup` gives it the primary egui
+/// context, except on a tour). Left automatic, bevy_egui took the first
+/// camera spawned, and the systems screen's own camera sometimes came first,
+/// which hid every menu, the navball and the HUD (2026-10-27).
 pub fn install(app: &mut App, demo: bool) -> bool {
+    app.insert_resource(bevy_egui::EguiGlobalSettings { auto_create_primary_context: false, ..default() });
     let Some(tour) = Tour::from_env(demo) else { return false };
     app.insert_resource(tour);
-    app.insert_resource(bevy_egui::EguiGlobalSettings { auto_create_primary_context: false, ..default() });
     true
 }
 

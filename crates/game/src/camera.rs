@@ -108,7 +108,12 @@ pub const FAR: f32 = 1.0e16;
 /// `lighting::exposure_ev100`).
 pub const EV100: f32 = 14.5;
 
-pub fn setup(mut commands: Commands, demo: Option<ResMut<crate::demo::Demo>>, mut images: ResMut<Assets<Image>>) {
+pub fn setup(
+    mut commands: Commands,
+    demo: Option<ResMut<crate::demo::Demo>>,
+    tour: Option<Res<crate::tour::Tour>>,
+    mut images: ResMut<Assets<Image>>,
+) {
     let mut cam = commands.spawn((
         MainCamera,
         Camera3d::default(),
@@ -120,6 +125,11 @@ pub fn setup(mut commands: Commands, demo: Option<ResMut<crate::demo::Demo>>, mu
         bevy::camera::Exposure { ev100: EV100 },
         Transform::IDENTITY,
     ));
+    // The interface draws over this camera's view (main.rs turns off
+    // bevy_egui's automatic choice); a body tour shoots without it.
+    if tour.is_none() {
+        cam.insert(bevy_egui::PrimaryEguiContext);
+    }
     if let Some(mut demo) = demo {
         if std::env::var_os("SUNSCATTER_DEMO_OFFSCREEN").is_some() {
             use bevy::render::render_resource::TextureFormat;
