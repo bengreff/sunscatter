@@ -476,7 +476,14 @@ pub fn part_masses(def: &ShipDef, state: &ShipState, b: &Bodies) -> Vec<MassProp
 /// `Runtime::pressure_regulated`) the ullage holds at least its loading
 /// (flight) pressure.
 pub fn section_gauge(def: &ShipDef, state: &ShipState, j: &JointDef, accel: DVec3, ambient: f64) -> f64 {
-    let mut gauge: f64 = 0.0;
+    gauge_at(&gauge_terms(def, state, j, accel, ambient), 1.0)
+}
+
+/// [`section_gauge`] as the acceleration scales: per compartment the joint
+/// cuts, its ullage less `ambient` and its head under `accel` (Pa); at
+/// `k`·`accel` the gauge is [`gauge_at`]`(terms, k)`.
+pub fn gauge_terms(def: &ShipDef, state: &ShipState, j: &JointDef, accel: DVec3, ambient: f64) -> Vec<(f64, f64)> {
+    let mut terms = Vec::new();
     for (t, s) in def.tanks.iter().zip(&state.tanks) {
         if !(t.part == j.parent || t.part == j.child) {
             continue;
@@ -493,9 +500,52 @@ pub fn section_gauge(def: &ShipDef, state: &ShipState, j: &JointDef, accel: DVec
         // the tank is loaded at and its regulator holds.
         let ullage = plumbing::pressure(t, s);
         let ullage = if state.runtime.pressure_regulated { ullage } else { ullage.max(t.load.pressure) };
-        gauge = gauge.max(ullage + head - ambient);
+        terms.push((ullage - ambient, head));
     }
-    gauge
+    terms
+}
+
+/// The gauge of [`gauge_terms`] at `k` times their acceleration: the
+/// largest compartment's, never below zero.
+pub fn gauge_at(terms: &[(f64, f64)], k: f64) -> f64 {
+    terms.iter().map(|&(c, h)| c + h * k).fold(0.0, f64::max)
+}
+
+/// The proper acceleration's own scale the structure's limit is sought to
+/// (m/s²: 100 g). No craft holds more; a limit beyond it is not shown.
+pub const LIMIT_SEARCH: f64 = 100.0 * crate::vessel::G0;
+
+/// The least scale `k` in (0, `max`] of a joint's load as it stands at
+/// which `ratio_at(k)` (its load over its ultimate at `k` times the load)
+/// reaches 1: doubling from 1/1024 to bracket it, then halving the bracket
+/// to a part in 10⁴ (already there at 1/1024: that). `None` if it is not
+/// reached by `max` (a joint without capacity data never is).
+pub fn ultimate_scale(ratio_at: impl Fn(f64) -> f64, max: f64) -> Option<f64> {
+    let mut k = 1.0 / 1024.0;
+    if ratio_at(k) >= 1.0 {
+        return Some(k);
+    }
+    let mut lo = k;
+    loop {
+        k *= 2.0;
+        if k > max {
+            return None;
+        }
+        if ratio_at(k) >= 1.0 {
+            break;
+        }
+        lo = k;
+    }
+    let mut hi = k;
+    while hi - lo > 1e-4 * hi {
+        let mid = 0.5 * (lo + hi);
+        if ratio_at(mid) >= 1.0 {
+            hi = mid;
+        } else {
+            lo = mid;
+        }
+    }
+    Some(hi)
 }
 
 /// The temperature factor of a joint: the weaker of its two parts'
@@ -553,17 +603,25 @@ pub fn step(def: &ShipDef, state: &mut ShipState, b: &Bodies, m: &Motion, at: Ep
         }
         let (force, about_origin) = loads[c];
         let moment = moment_about(force, about_origin, d.pos);
-        let gauge = section_gauge(def, state, d, motion.accel, b.ambient);
-        let sec = section(force, moment, d.normal, d.radius, gauge);
+        let terms = gauge_terms(def, state, d, motion.accel, b.ambient);
         let factor = joint_factor(def, d, |id| index(id).and_then(|k| b.kelvin.get(k).copied()));
-        let buckling = if d.buckling > 0.0 { pressurised_buckling(d.buckling, d.radius, gauge) } else { 0.0 };
         // A part on a mechanism hangs by its hinge and actuator (a leg's
         // A-frame and strut, a grid fin's hinge), not a ring: no data.
         let hinged = def.mechanisms.iter().any(|m| m.part == d.child);
-        let cap = if hinged { Capacity::default() } else { Capacity::of(d.allowable, buckling, factor) };
-        let r = ratio(&sec, &cap);
+        // The section and its ratio with the load as it stands scaled by k
+        // (the liquids' heads with it): k = 1 now.
+        let scaled = |k: f64| {
+            let gauge = gauge_at(&terms, k);
+            let sec = section(force * k, moment * k, d.normal, d.radius, gauge);
+            let buckling = if d.buckling > 0.0 { pressurised_buckling(d.buckling, d.radius, gauge) } else { 0.0 };
+            let cap = if hinged { Capacity::default() } else { Capacity::of(d.allowable, buckling, factor) };
+            (sec, ratio(&sec, &cap))
+        };
+        let (sec, r) = scaled(1.0);
+        let a = motion.accel.length();
+        let to_ultimate = (a > 1e-3).then(|| ultimate_scale(|k| scaled(k).1, LIMIT_SEARCH / a)).flatten();
         if let Some(run) = state.runtime.joints.get_mut(j) {
-            (run.force, run.moment, run.ratio) = (force, moment, r);
+            (run.force, run.moment, run.ratio, run.to_ultimate) = (force, moment, r, to_ultimate);
         }
         if let Some(p) = state.parts.iter_mut().find(|p| p.part == d.child) {
             p.history.peak_load = p.history.peak_load.max(r);

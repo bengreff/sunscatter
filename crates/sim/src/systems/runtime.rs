@@ -59,6 +59,12 @@ pub struct JointRun {
     /// The equivalent line load over the allowable at temperature (1 is the
     /// ultimate load).
     pub ratio: f64,
+    /// The factor the load as it stands (every force on the craft, and so
+    /// its proper acceleration, scaled together) could grow by before the
+    /// joint reaches its ultimate load (`structure::ultimate_scale`; `None`:
+    /// no capacity data, no acceleration, or over 100 g).
+    #[serde(default)]
+    pub to_ultimate: Option<f64>,
 }
 
 /// What an order does when its epoch comes.

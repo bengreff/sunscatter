@@ -137,8 +137,28 @@ pub fn crew_axes(accel: DVec3) -> [f64; 3] {
     [accel.z.max(0.0), (-accel.z).max(0.0), accel.truncate().length()]
 }
 
+/// The acceleration (m/s²) along `dir` (body axes; only its direction
+/// counts) at which the crew reach a limit, and the axis ([`AXES`]): on
+/// each axis the direction has a share of, the limit for how long the
+/// level now has been held on it (`held`, [`CrewRun::held`]: its last
+/// window; nothing over the axis's lowest limit held, the sustained limit)
+/// over that share; the lowest. `None` for no direction.
+pub fn limit_along(dir: DVec3, held: &[Vec<(f64, f64)>]) -> Option<(f64, usize)> {
+    if dir.length() <= 0.0 {
+        return None;
+    }
+    let share = crew_axes(dir / dir.length());
+    (0..AXES.len())
+        .filter(|&k| share[k] > 1e-9)
+        .map(|k| {
+            let seconds = held.get(k).and_then(|w| w.last()).map_or(f64::INFINITY, |w| w.0);
+            (limit(k, seconds) / share[k], k)
+        })
+        .min_by(|a, b| a.0.total_cmp(&b.0))
+}
+
 /// The cabin's crew (seats) and life support (the ship's first).
-fn crew_of(def: &ShipDef) -> u32 {
+pub fn crew_of(def: &ShipDef) -> u32 {
     def.seats.iter().map(|s| s.item).sum()
 }
 
@@ -261,6 +281,34 @@ mod tests {
         hold(&mut w, 30.0, 1.0, 0.1);
         hold(&mut w, 30.2, 1.0, 0.1);
         assert_eq!(w, vec![(2.0, 30.0)]);
+    }
+
+    /// The limit along a direction (table): eyeballs in and out at their
+    /// sustained limits with nothing held, the limit for the time held once
+    /// a level is, sideways at its own, and a diagonal at the lower of its
+    /// shares' limits over the share.
+    #[test]
+    fn limit_along_a_direction() {
+        let none: Vec<Vec<(f64, f64)>> = Vec::new();
+        let held = vec![vec![(5.0, 120.0)], Vec::new(), Vec::new()];
+        let d = std::f64::consts::FRAC_1_SQRT_2;
+        // (direction, held, limit m/s², axis)
+        let table = [
+            (DVec3::Z, &none, 73.5, 0),
+            (DVec3::Z * 3.0, &none, 73.5, 0),
+            (-DVec3::Z, &none, 39.2, 1),
+            (DVec3::X, &none, 39.2, 2),
+            (DVec3::Z, &held, 157.0, 0),
+            // Diagonal: sideways' 39.2 over its share √½ (55.4) is under
+            // eyeballs in's 73.5/√½.
+            (DVec3::new(d, 0.0, d), &none, 39.2 / d, 2),
+        ];
+        for (dir, held, want, axis) in table {
+            let (a, k) = limit_along(dir, held).expect("a direction");
+            assert!((a - want).abs() < 1e-9, "{dir}: {a} vs {want}");
+            assert_eq!(k, axis, "{dir}");
+        }
+        assert_eq!(limit_along(DVec3::ZERO, &none), None);
     }
 
     /// A full ascent at 50 Hz (the review's case: a window a tick while the

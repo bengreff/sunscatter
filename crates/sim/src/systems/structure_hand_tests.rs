@@ -115,3 +115,30 @@ fn capacity_and_ratio_table() {
         assert!((ratio(&sec, &cap) - expect).abs() < 1e-12, "{sec:?} {cap:?}: {}", ratio(&sec, &cap));
     }
 }
+
+/// The scale at which a ratio reaches 1 (table): linear, with an offset
+/// (a pressure's), never reached within the search, already over.
+#[test]
+fn the_scale_to_the_ultimate_load() {
+    type Case<'a> = (&'a dyn Fn(f64) -> f64, f64, Option<f64>);
+    let cases: [Case; 5] = [
+        (&|k| 0.25 * k, 100.0, Some(4.0)),
+        (&|k| 0.5 + 0.1 * k, 100.0, Some(5.0)),
+        (&|_| 0.0, 100.0, None),
+        (&|k| 0.01 * k, 50.0, None),
+        (&|_| 2.0, 100.0, Some(1.0 / 1024.0)),
+    ];
+    for (i, (f, max, want)) in cases.into_iter().enumerate() {
+        let got = ultimate_scale(f, max);
+        match (got, want) {
+            (Some(g), Some(w)) => assert!((g / w - 1.0).abs() < 2e-4 && f(g) >= 1.0, "case {i}: {g} vs {w}"),
+            _ => assert_eq!(got, want, "case {i}"),
+        }
+    }
+    // The gauge's terms: the largest compartment's ullage plus its head
+    // scaled, never below zero.
+    assert_eq!(gauge_at(&[], 3.0), 0.0);
+    assert_eq!(gauge_at(&[(2e5, 1e4), (1e5, 1e5)], 1.0), 2.1e5);
+    assert_eq!(gauge_at(&[(2e5, 1e4), (1e5, 1e5)], 2.0), 3e5);
+    assert_eq!(gauge_at(&[(-5e4, 1e4)], 1.0), 0.0);
+}

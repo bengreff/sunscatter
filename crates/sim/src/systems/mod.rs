@@ -26,6 +26,7 @@ pub mod data;
 pub mod estimate;
 pub mod failure;
 pub mod fins;
+pub mod g_limit;
 pub mod mechanisms;
 pub mod plumbing;
 pub mod power;

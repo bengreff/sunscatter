@@ -345,6 +345,47 @@ fn an_overload_snaps_the_joint() {
     assert!(again.iter().all(|e| !effects.contains(e)), "{again:?}");
 }
 
+/// The g-limit's scale (`JointRun::to_ultimate`): at lift-off the weakest
+/// joint's, and the forces scaled by it bring that joint to its ultimate
+/// load (just under: not yet; just over: there).
+#[test]
+fn the_scale_to_the_ultimate_is_where_the_weakest_joint_fails() {
+    let craft = falcon9();
+    let def = craft.ship.as_ref().unwrap();
+    let (ids, parents, kelvin) = bodies_of(&craft);
+    let run = |scale: f64| {
+        let pushes = merlins(&craft, 845e3 * scale);
+        let b = Bodies {
+            ids: &ids,
+            parents: &parents,
+            dry: &craft.part_mass,
+            kelvin: &kelvin,
+            pushes: &pushes,
+            ambient: 101_325.0,
+            hottest: &kelvin,
+            q: 0.0,
+            mach: 0.0,
+        };
+        let mut state = ShipState::initial(def);
+        step(def, &mut state, &b, &Motion::default(), Epoch::new(1_000_000_000, 0.0), true);
+        state
+    };
+    let now = run(1.0);
+    let (j, k) = (now.runtime.joints.iter().enumerate())
+        .filter_map(|(j, r)| r.to_ultimate.map(|k| (j, k)))
+        .min_by(|a, b| a.1.total_cmp(&b.1))
+        .expect("a joint with data");
+    // The first stage's tank on the octaweb (its compression grows with the
+    // thrust, its ullage pressure does not) at ~3.4× the lift-off's 1.5 g.
+    println!("weakest at lift-off: {} at {k:.2}× ({:.1} g)", def.joints[j].name, k * 1.5);
+    assert_eq!(def.joints[j].name, "s1.tank|s1.octaweb");
+    assert!(k > 2.0 && k < 22.0, "{k}");
+    assert!(run(k * 0.995).runtime.joints[j].ratio < 1.0);
+    assert!(run(k * 1.005).runtime.joints[j].ratio >= 1.0);
+    // A leg (no capacity data) never limits.
+    assert_eq!(now.runtime.joints[joint(def, "s1.octaweb|s1.leg#1")].to_ultimate, None);
+}
+
 #[test]
 fn pressure_raises_the_buckling_load() {
     // x = 0.605·γ·p·R/n0: the second stage's 73 kN/m at 3.5 bar is x ≈ 1.7.
