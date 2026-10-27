@@ -55,23 +55,34 @@ const CABIN_TAU: f64 = 7_200.0;
 pub struct CrewRun {
     /// Per axis ([`AXES`]): the windows ending now, each (its length s,
     /// the least acceleration over it m/s²), longest first with rising
-    /// levels: every level held for its time ([`hold`]).
+    /// levels: every level over the axis's lowest limit held for its time,
+    /// to within [`MERGE`] ([`hold`]).
     pub held: Vec<Vec<(f64, f64)>>,
     pub injuries: Vec<Injury>,
 }
 
+/// A new window whose level is within this factor of the last one's merges
+/// into it: held over the longer time at the lower level, under-counted by
+/// at most 1 % (D105: not sure, don't fail). A slowly rising acceleration
+/// then adds a window per percent, not one per tick.
+pub const MERGE: f64 = 1.01;
+
 /// The windows an acceleration `a` held over `dt` adds to `w` (see
 /// [`CrewRun::held`]): each window grows by `dt` and its least level is at
-/// most `a`; a new window of `dt` at `a` starts; windows of the same level
-/// merge into the longest, and levels under a hundredth of a g go.
-pub fn hold(w: &mut Vec<(f64, f64)>, a: f64, dt: f64) {
+/// most `a`; a new window of `dt` at `a` starts unless within [`MERGE`] of
+/// the last; windows of the same level merge into the longest, and levels
+/// at or under `floor` go (an axis's lowest limit: a window's level only
+/// falls, so it can never be over).
+pub fn hold(w: &mut Vec<(f64, f64)>, a: f64, dt: f64, floor: f64) {
     for x in w.iter_mut() {
         x.0 += dt;
         x.1 = x.1.min(a);
     }
-    w.push((dt, a));
+    if !w.last().is_some_and(|x| a <= x.1 * MERGE) {
+        w.push((dt, a));
+    }
     w.dedup_by(|later, earlier| later.1 <= earlier.1);
-    w.retain(|x| x.1 > 0.1);
+    w.retain(|x| x.1 > floor);
 }
 
 /// An exposure over a limit.
@@ -96,6 +107,11 @@ const LIMITS: [&[(f64, f64)]; 3] = [
     &[(0.5, 216.0), (5.0, 147.0), (120.0, 58.8), (400.0, 39.2)],
     &[(0.5, 81.4), (5.0, 62.8), (1200.0, 39.2)],
 ];
+
+/// The lowest limit along axis `k` (m/s², the longest duration's).
+pub fn floor(k: usize) -> f64 {
+    LIMITS[k][LIMITS[k].len() - 1].1
+}
 
 /// The limit (m/s²) for an acceleration held `seconds` along axis `k`:
 /// log-linear in the duration between the table's points, held at its ends.
@@ -195,7 +211,7 @@ pub fn step(def: &ShipDef, state: &mut ShipState, accel: Option<DVec3>, outside:
     let now = crew_axes(a);
     let mut hurt = Vec::new();
     for k in 0..AXES.len() {
-        hold(&mut run.held[k], now[k], dt);
+        hold(&mut run.held[k], now[k], dt, floor(k));
         let already = run.injuries.iter().any(|i| i.axis == AXES[k] && at.seconds_since(i.at) < 10.0);
         let over = run.held[k].iter().find(|&&(secs, level)| secs >= 0.5 && level > limit(k, secs));
         if let Some(&(seconds, level)) = over.filter(|_| !already) {
@@ -230,17 +246,59 @@ mod tests {
     fn windows_of_levels() {
         let mut w = Vec::new();
         for _ in 0..10 {
-            hold(&mut w, 15.0, 1.0);
+            hold(&mut w, 15.0, 1.0, 0.1);
         }
         assert_eq!(w, vec![(10.0, 15.0)]);
         for _ in 0..5 {
-            hold(&mut w, 40.0, 1.0);
+            hold(&mut w, 40.0, 1.0, 0.1);
         }
         assert_eq!(w, vec![(15.0, 15.0), (5.0, 40.0)]);
-        hold(&mut w, 20.0, 1.0);
+        hold(&mut w, 20.0, 1.0, 0.1);
         assert_eq!(w, vec![(16.0, 15.0), (6.0, 20.0)]);
-        hold(&mut w, 0.0, 1.0);
+        hold(&mut w, 0.0, 1.0, 0.1);
         assert!(w.is_empty());
+        // Within 1 % of the last level: merged (held longer at the lower).
+        hold(&mut w, 30.0, 1.0, 0.1);
+        hold(&mut w, 30.2, 1.0, 0.1);
+        assert_eq!(w, vec![(2.0, 30.0)]);
+    }
+
+    /// A full ascent at 50 Hz (the review's case: a window a tick while the
+    /// acceleration rises, 14,886 by the MVac's depletion): the booster's
+    /// 162 s to ~5.6 g and the second stage's 397 s to ~6.2 g eyeballs in,
+    /// with a little sideways. The windows stay few and nobody is hurt; a
+    /// rise to 10 g over 80 s, then held, still hurts the crew (over the
+    /// limit's 8.8 g for 160 s) with the windows still few.
+    #[test]
+    fn a_full_ascent_keeps_few_windows() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/craft/falcon9-crew");
+        let def = crate::craft::load_definition(&path).unwrap().ship.unwrap();
+        let mut s = ShipState::initial(&def);
+        let t0 = Epoch::new(845_000_000, 0.0);
+        let dt = 0.02;
+        let burns = [(7.6e6, 549e3, 2_540.0, 162.0), (981e3, 116e3, 252.0, 397.0)];
+        let mut most = 0;
+        let mut t = 0.0;
+        for (thrust, m0, mdot, seconds) in burns {
+            for k in 0..(seconds / dt) as u32 {
+                let a = thrust / (m0 - mdot * dt * f64::from(k));
+                let side = 0.3 * crate::math::sin(0.01 * f64::from(k));
+                step(&def, &mut s, Some(DVec3::new(side, 0.0, a)), 293.0, dt, t0.add_seconds(t));
+                most = s.runtime.crew.held.iter().map(Vec::len).fold(most, usize::max);
+                t += dt;
+            }
+        }
+        println!("ascent: at most {most} windows on an axis");
+        assert!(s.runtime.crew.injuries.is_empty(), "{:?}", s.runtime.crew.injuries);
+        assert!(most < 50, "{most} windows");
+        for k in 0..12_000 {
+            let a = (f64::from(k) * dt + 20.0).min(100.0);
+            step(&def, &mut s, Some(DVec3::Z * a), 293.0, dt, t0.add_seconds(t));
+            most = s.runtime.crew.held.iter().map(Vec::len).fold(most, usize::max);
+            t += dt;
+        }
+        assert!(!s.runtime.crew.injuries.is_empty());
+        assert!(most < 50, "{most} windows");
     }
 
     #[test]
