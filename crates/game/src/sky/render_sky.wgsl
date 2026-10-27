@@ -12,10 +12,14 @@ enable dual_source_blending;
 //   the ground, where the air is (`raymarch_from_space`), instead of 24
 //   even steps over the whole segment, most of them in near vacuum (14 ms
 //   of a 38 ms frame at 3024×1964 from 185 km, 2026-10-26); and the LUTs
-//   are not sampled where the raymarch replaces them.
+//   are not sampled where the raymarch replaces them;
+// - from outside, that in-scatter is looked up in the table from space our
+//   `aerial_view_lut.wgsl` fills (screen direction × altitude of the
+//   ground hit, `ground_from_space`), raymarched per pixel only near the
+//   limb, where the table's texels around a pixel look past the hit.
 // sunscatter sky override
 #import bevy_pbr::atmosphere::{
-    bindings::{view, settings, atmosphere},
+    bindings::{view, settings, atmosphere, aerial_view_lut, atmosphere_lut_sampler},
     functions::{
         sample_transmittance_lut, sample_transmittance_lut_segment,
         sample_sky_view_lut, direction_world_to_atmosphere,
@@ -74,6 +78,45 @@ fn raymarch_from_space(pos: vec3<f32>, ray_dir: vec3<f32>, t_ground: f32) -> Ray
     return result;
 }
 
+// The table from space (`aerial_view_lut.wgsl`): the texture coordinate of
+// altitude `h` (m) along its slices, the inverse of its quadratic
+// `space_slice_altitude`.
+fn space_slice_coord(h: f32, n: f32, thickness: f32) -> f32 {
+    let u = sqrt(clamp(h / thickness, 0.0, 1.0));
+    return (u * (n - 1.0) + 0.5) / n;
+}
+
+// The ground's aerial perspective from outside the atmosphere at distance
+// `t` along this pixel's ray: the in-scatter from the table (the slices
+// around the hit's altitude, the texels around the pixel), the
+// transmittance from the transmittance table (the ray back from the ground
+// leaves the atmosphere without meeting it again). Raymarched instead where
+// a texel around the pixel looks past the slice below the hit (near the
+// limb): its ray's distance from the centre (`b`) can differ from the
+// pixel's by the texel's angle times sqrt(r² − b²).
+fn ground_from_space(pos: vec3<f32>, ray_dir: vec3<f32>, t: f32, uv: vec2<f32>) -> RaymarchResult {
+    let thickness = atmosphere.outer_radius - atmosphere.inner_radius;
+    let n = f32(settings.aerial_view_lut_size.z);
+    let hit = pos + ray_dir * t;
+    let r_hit = clamp(length(hit), atmosphere.inner_radius, atmosphere.outer_radius);
+    let w = space_slice_coord(r_hit - atmosphere.inner_radius, n, thickness);
+    let u_lo = floor(w * n - 0.5) / (n - 1.0);
+    let r_lo = atmosphere.inner_radius + thickness * u_lo * u_lo;
+    let size = vec2<f32>(settings.aerial_view_lut_size.xy);
+    let texel = vec2(2.0 / (size.x * view.clip_from_view[0][0]), 2.0 / (size.y * view.clip_from_view[1][1]));
+    let pos_r2 = dot(pos, pos);
+    let b = length(cross(pos, ray_dir));
+    let margin = 1.5 * sqrt(max(pos_r2 - b * b, 0.0)) * length(texel);
+    if b + margin > r_lo {
+        return raymarch_from_space(pos, ray_dir, t);
+    }
+    var result: RaymarchResult;
+    let lut = textureSampleLevel(aerial_view_lut, atmosphere_lut_sampler, vec3(uv, w), 0.0).rgb;
+    result.inscattering = exp(lut);
+    result.transmittance = sample_transmittance_lut(r_hit, dot(-ray_dir, hit) / length(hit));
+    return result;
+}
+
 struct RenderSkyOutput {
 #ifdef DUAL_SOURCE_BLENDING
     @location(0) @blend_src(0) inscattering: vec4<f32>,
@@ -114,7 +157,7 @@ fn main(in: FullscreenVertexOutput) -> RenderSkyOutput {
     } else {
         let t = ndc_to_camera_dist(vec3(uv_to_ndc(in.uv), depth));
         if should_raymarch && r > atmosphere.outer_radius {
-            let result = raymarch_from_space(world_pos, ray_dir_ws, t);
+            let result = ground_from_space(world_pos, ray_dir_ws, t, in.uv);
             inscattering = result.inscattering;
             transmittance = result.transmittance;
         } else if should_raymarch || t > settings.aerial_view_lut_max_distance {

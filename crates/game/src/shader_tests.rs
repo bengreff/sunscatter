@@ -134,7 +134,9 @@ fn mesh_defs() -> HashMap<String, ShaderDefValue> {
 }
 
 /// Composes `file` (relative to the game's src), validates it and writes
-/// it as Metal shading language; the module, for layout checks.
+/// it as Metal shading language; the module, for layout checks. With
+/// `SUNSCATTER_DUMP_MSL=<dir>` the Metal source is saved there (to read
+/// what a shader compiles to).
 fn compile(c: &mut Composer, file: &str, defs: &HashMap<String, ShaderDefValue>) -> naga::Module {
     let path = game_src().join(file);
     let source = std::fs::read_to_string(&path).expect("shader source");
@@ -151,8 +153,12 @@ fn compile(c: &mut Composer, file: &str, defs: &HashMap<String, ShaderDefValue>)
         .validate(&module)
         .unwrap_or_else(|e| panic!("{file} does not validate: {:?}", e.into_inner()));
     let options = naga::back::msl::Options { lang_version: (2, 4), ..Default::default() };
-    naga::back::msl::write_string(&module, &info, &options, &naga::back::msl::PipelineOptions::default())
-        .unwrap_or_else(|e| panic!("{file} does not compile to MSL: {e:?}"));
+    let (msl, _) =
+        naga::back::msl::write_string(&module, &info, &options, &naga::back::msl::PipelineOptions::default())
+            .unwrap_or_else(|e| panic!("{file} does not compile to MSL: {e:?}"));
+    if let Ok(dir) = std::env::var("SUNSCATTER_DUMP_MSL") {
+        let _ = std::fs::write(Path::new(&dir).join(file.replace('/', "_") + ".metal"), msl);
+    }
     module
 }
 
@@ -179,6 +185,7 @@ fn every_shader_composes_validates_and_compiles_for_metal() {
         "clouds.wgsl",
         "sky/stars.wgsl",
         "sky/render_sky.wgsl",
+        "sky/aerial_view_lut.wgsl",
         "upscale.wgsl",
     ] {
         compile(&mut c, file, &defs);

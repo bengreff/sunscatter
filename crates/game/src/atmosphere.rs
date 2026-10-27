@@ -282,6 +282,21 @@ pub fn raymarch(on: bool, depth: f64, inside: RaymarchInside) -> bool {
     on && (depth >= 1.0 || inside.0)
 }
 
+/// The aerial-view table's size (screen x, y, slices). Inside an
+/// atmosphere, Bevy's: distance slices from the camera. From outside it
+/// (`depth` ≥ 1) and raymarched, the table from space (`sky/
+/// aerial_view_lut.wgsl`): altitude slices, and enough screen texels that
+/// only a thin band along the limb is raymarched per pixel (the band is
+/// where a texel's ray can pass a slice the pixel's ray reaches: ~1.5
+/// texels of a ray's sweep across the slices, `render_sky.wgsl`).
+pub fn aerial_table_size(raymarched: bool, depth: f64) -> UVec3 {
+    if raymarched && depth >= 1.0 {
+        UVec3::new(256, 160, 32)
+    } else {
+        AtmosphereSettings::default().aerial_view_lut_size
+    }
+}
+
 /// Switches the camera between lookup tables and raymarching ([`raymarch`])
 /// by how deep it is in the nearest drawn atmosphere.
 pub fn update_mode(
@@ -303,11 +318,15 @@ pub fn update_mode(
             ((r - lo) / (hi - lo), a.2)
         })
         .fold((f64::INFINITY, RaymarchInside(false)), |a, b| if b.0 < a.0 { b } else { a });
-    let want =
-        if raymarch(parts.raymarch, depth, hazy) { AtmosphereMode::Raymarched } else { AtmosphereMode::LookupTexture };
+    let raymarched = raymarch(parts.raymarch, depth, hazy);
+    let want = if raymarched { AtmosphereMode::Raymarched } else { AtmosphereMode::LookupTexture };
+    let size = aerial_table_size(raymarched, depth);
     for mut a in &mut cams {
         if a.rendering_method as u32 != want as u32 {
             a.rendering_method = want;
+        }
+        if a.aerial_view_lut_size != size {
+            a.aerial_view_lut_size = size;
         }
     }
 }
@@ -333,6 +352,21 @@ mod tests {
         // A hazy atmosphere (Titan's) is raymarched at the ground too, if raymarching at all.
         assert!(raymarch(true, 0.0, RaymarchInside(true)));
         assert!(!raymarch(false, 0.0, RaymarchInside(true)));
+    }
+
+    #[test]
+    fn the_table_from_space_only_outside_and_raymarched() {
+        let bevy = AtmosphereSettings::default().aerial_view_lut_size;
+        // (raymarched, camera depth, the table from space)
+        let cases = [(true, 3.0, true), (true, 1.0, true), (true, 0.5, false), (false, 3.0, false)];
+        for (raymarched, depth, space) in cases {
+            let size = aerial_table_size(raymarched, depth);
+            assert_eq!(size != bevy, space, "{raymarched} at {depth}");
+        }
+        // From space: altitude slices, and screen texels small enough that
+        // the raymarched band along the limb stays thin.
+        let space = aerial_table_size(true, 2.0);
+        assert!(space.x >= 192 && space.y >= 128 && space.z >= 16, "{space}");
     }
 
     #[test]
