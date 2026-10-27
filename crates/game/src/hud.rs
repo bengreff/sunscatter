@@ -295,13 +295,20 @@ pub fn draw_body_menu(
     Ok(())
 }
 
+/// Held by the pad's clamps (D104): `Some(engines lit)`.
+pub type Pad = Option<bool>;
+
 /// The flight state under the navball, and whether it is an alert: a
-/// wreck's cause (at once, while it still moves), LANDED, POWERED (only a
-/// running engine: live, or a planned burn on rails), ON PARACHUTE, or
-/// FLIGHT (gliding, falling or coasting with the engine off).
-pub fn state_word(destroyed: Option<String>, landed: bool, engine: bool, chute: bool) -> (String, bool) {
+/// wreck's cause (at once, while it still moves), CLAMPED on the pad (with
+/// its engines lit or not: the release waits for their rated thrust),
+/// LANDED, POWERED (only a running engine: live, or a planned burn on
+/// rails), ON PARACHUTE, or FLIGHT (gliding, falling or coasting with the
+/// engine off).
+pub fn state_word(destroyed: Option<String>, pad: Pad, landed: bool, engine: bool, chute: bool) -> (String, bool) {
     match (destroyed, landed, engine, chute) {
         (Some(cause), ..) => (format!("{cause} (R R to reset)"), true),
+        (None, ..) if pad == Some(true) => ("CLAMPED · ENGINES LIT".into(), false),
+        (None, ..) if pad == Some(false) => ("CLAMPED".into(), false),
         (None, true, ..) => ("LANDED".into(), false),
         (None, false, true, _) => ("POWERED".into(), false),
         (None, false, false, true) => ("ON PARACHUTE".into(), false),
@@ -318,7 +325,12 @@ pub fn state_line(sim: &SimState) -> (String, bool) {
         _ => None,
     };
     let landed = matches!(ship.phase, Phase::Landed { .. });
-    state_word(destroyed, landed, crate::scene::engine_on(sim, sim.active), ship.chute.open())
+    let lit = |s: &sim::craft::state::ShipState| {
+        use sim::craft::state::EngineStatus::{Running, Starting};
+        s.engines.iter().any(|e| matches!(e.status, Starting | Running))
+    };
+    let pad = ship.clamped().then(|| ship.ship().is_some_and(lit));
+    state_word(destroyed, pad, landed, crate::scene::engine_on(sim, sim.active), ship.chute.open())
 }
 
 #[cfg(test)]
@@ -328,18 +340,20 @@ mod tests {
     #[test]
     fn the_state_line_is_powered_only_with_the_engine_running() {
         let wreck = || Some("CRASHED at 40 m/s".to_string());
-        // (destroyed, landed, engine, chute, expected, alert)
+        // (destroyed, pad, landed, engine, chute, expected, alert)
         let table = [
-            (None, false, true, false, "POWERED", false),
-            (None, false, true, true, "POWERED", false),
-            (None, false, false, true, "ON PARACHUTE", false),
-            (None, false, false, false, "FLIGHT", false),
-            (None, true, false, false, "LANDED", false),
-            (wreck(), false, false, true, "CRASHED at 40 m/s (R R to reset)", true),
-            (wreck(), true, false, false, "CRASHED at 40 m/s (R R to reset)", true),
+            (None, None, false, true, false, "POWERED", false),
+            (None, None, false, true, true, "POWERED", false),
+            (None, None, false, false, true, "ON PARACHUTE", false),
+            (None, None, false, false, false, "FLIGHT", false),
+            (None, None, true, false, false, "LANDED", false),
+            (None, Some(false), true, false, false, "CLAMPED", false),
+            (None, Some(true), true, false, false, "CLAMPED · ENGINES LIT", false),
+            (wreck(), None, false, false, true, "CRASHED at 40 m/s (R R to reset)", true),
+            (wreck(), Some(true), true, false, false, "CRASHED at 40 m/s (R R to reset)", true),
         ];
-        for (destroyed, landed, engine, chute, want, alert) in table {
-            assert_eq!(state_word(destroyed, landed, engine, chute), (want.to_string(), alert));
+        for (destroyed, pad, landed, engine, chute, want, alert) in table {
+            assert_eq!(state_word(destroyed, pad, landed, engine, chute), (want.to_string(), alert));
         }
     }
 
