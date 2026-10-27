@@ -56,6 +56,8 @@ pub struct ShipGroup {
 pub struct Flame {
     engine: Option<usize>,
     nozzle: Nozzle,
+    /// A main engine: its flame follows the gimbal.
+    main: bool,
 }
 
 /// A drawn group: its mesh, colour (linear; `None`: the ship colour) and
@@ -69,7 +71,7 @@ struct Drawn {
 /// A craft's drawing.
 pub struct Model {
     groups: Vec<Drawn>,
-    flames: Vec<(Option<usize>, Nozzle)>,
+    flames: Vec<(Option<usize>, Nozzle, bool)>,
 }
 
 /// The drawings built so far.
@@ -130,7 +132,7 @@ impl ShipModels {
             let exhaust = -e.mount.dir.normalize_or(DVec3::Z);
             let nozzle = Nozzle { exit: e.mount.pos + exhaust * TEST_FLAME_START, exhaust, radius: TEST_FLAME_RADIUS };
             let plain = Drawn { mesh: meshes.add(bevy_mesh(&craft.mesh)), colour: None, mechanism: None };
-            return Model { groups: vec![plain], flames: vec![(None, nozzle)] };
+            return Model { groups: vec![plain], flames: vec![(None, nozzle, false)] };
         };
         let ids: Vec<u32> = craft.parts.iter().map(|p| p.id).collect();
         let colours = parts::part_colours(craft, def, sim::materials::materials());
@@ -158,7 +160,7 @@ impl ShipModels {
                         Nozzle { exit: e.data.pos + exhaust * POD_EXIT, exhaust, radius }
                     }
                 };
-                (Some(i), nozzle)
+                (Some(i), nozzle, e.main)
             })
             .collect();
         Model { groups, flames }
@@ -223,9 +225,9 @@ fn spawn(
             ChildOf(root),
         ));
     }
-    for (engine, nozzle) in &model.flames {
+    for (engine, nozzle, main) in &model.flames {
         commands.spawn((
-            Flame { engine: *engine, nozzle: *nozzle },
+            Flame { engine: *engine, nozzle: *nozzle, main: *main },
             Mesh3d(cone.clone()),
             MeshMaterial3d(glow.clone()),
             NotShadowCaster,
@@ -344,7 +346,8 @@ pub fn update_parts(
         let shown = fraction > 0.0;
         vis.set_if_neq(if shown { Visibility::Visible } else { Visibility::Hidden });
         if shown {
-            *t = parts::flame(&flame.nozzle, fraction);
+            let steered = v.ship().and_then(|s| s.runtime.thrust_dir).filter(|_| flame.main);
+            *t = parts::flame(&parts::gimballed(&flame.nozzle, steered), fraction);
         }
     }
 }

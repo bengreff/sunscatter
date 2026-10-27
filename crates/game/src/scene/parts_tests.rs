@@ -171,3 +171,13 @@ fn flames_are_each_engines_share_of_its_full_thrust() {
     assert_eq!(got, [1.0, 0.5, 1.0, 0.0]);
     assert!(engine_fractions(def, &[]).is_empty());
 }
+
+#[test]
+fn a_main_engines_flame_follows_the_gimbal() {
+    let n = Nozzle { exit: DVec3::new(0.0, 0.0, -1.5), exhaust: -DVec3::Z, radius: 0.4 };
+    let tilted = DVec3::new(0.05, 0.0, 1.0);
+    let g = gimballed(&n, Some(tilted));
+    assert!((g.exhaust + tilted.normalize()).length() < 1e-12 && g.exit == n.exit && g.radius == n.radius);
+    assert_eq!(gimballed(&n, None), n);
+    assert_eq!(gimballed(&n, Some(DVec3::ZERO)), n, "no direction yet");
+}

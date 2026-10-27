@@ -173,7 +173,9 @@ fn a_new_flight_and_a_reset_bring_the_chosen_craft_to_the_pad() {
     assert_eq!(sim.ship().craft.id, rocket.id);
     assert!(sim.ship().id() != first && matches!(sim.ship().phase, Phase::Landed { .. }));
     let def = sim.ship().ship_def().unwrap();
-    assert!((sim.ship().propellant() - def.loaded()).abs() < 1e-6, "fuelled at its loading");
+    let tanks = &sim.ship().ship().unwrap().tanks;
+    let loaded = def.tanks.iter().zip(tanks).all(|(d, s)| (s.liquid - d.capacity * d.load.fill).abs() < 1e-9);
+    assert!(loaded, "every tank fuelled at its loading");
     assert_eq!(sim.ship().crew(), 1);
     let before = sim.ship().id();
     sim.reset();

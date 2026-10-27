@@ -158,6 +158,16 @@ pub fn nozzle(pos: DVec3, dir: DVec3, exit_area: f64, mesh: &RenderMesh) -> Nozz
     Nozzle { exit: pos + exhaust * reach, exhaust, radius: (exit_area.max(0.0) / std::f64::consts::PI).sqrt() }
 }
 
+/// A main engine's nozzle turned to the engines' realised thrust direction
+/// after the gimbal (`thrust_dir`, craft axes: RUNTIME's, all main engines
+/// deflecting together), so the flames show SAS steering; as built without one.
+pub fn gimballed(n: &Nozzle, thrust_dir: Option<DVec3>) -> Nozzle {
+    match thrust_dir.and_then(|d| d.try_normalize()) {
+        Some(d) => Nozzle { exhaust: -d, ..*n },
+        None => *n,
+    }
+}
+
 /// Flame length per exit diameter at full thrust (a mark, not a plume model).
 pub const FLAME_DIAMETERS: f64 = 8.0;
 
