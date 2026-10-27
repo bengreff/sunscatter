@@ -165,9 +165,50 @@ pub fn haze_exposure_share(h: &HazeLight) -> f64 {
     (0..3).map(|c| w[c] * ((-f64::from(h.tau[c])).exp() + f64::from(h.diffuse[c]))).sum()
 }
 
+/// The spherical-shell air mass towards zenith cosine `mu` (radius over
+/// scale height `r_over_h`; 1 overhead, ~38 at the horizon for Earth's
+/// 8 km): `terrain.wgsl`'s `star_lighting` mirrors it.
+pub fn air_mass(r_over_h: f64, mu: f64) -> f64 {
+    let mu = mu.clamp(-1.0, 1.0);
+    (r_over_h * r_over_h * mu * mu + 2.0 * r_over_h + 1.0).sqrt() - r_over_h * mu
+}
+
+/// The direct beam's transmittance per channel from a camera `above_m` over
+/// a body's mean radius towards a star at zenith cosine `mu`: the vertical
+/// optical depth above it ([`haze_above`], every layer of the atmosphere's
+/// data) times the air mass. A star below the horizon is the eclipse
+/// rule's to hide.
+pub fn direct_transmittance(def: &crate::body_visual::AtmosphereDef, radius: f64, above_m: f64, mu: f64) -> [f64; 3] {
+    let h = haze_above(def, radius, above_m);
+    let m = air_mass(f64::from(h.r_over_h), mu);
+    h.tau.map(|t| (-f64::from(t) * m).exp())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_direct_beam_through_the_air() {
+        let earth = crate::body_visual::load("Earth").and_then(|d| d.atmosphere).expect("Earth");
+        let r = 6.371e6;
+        // (case, height, zenith cosine, green transmittance range)
+        let cases = [
+            ("noon at sea level: ~0.85", 0.0, 1.0, (0.75, 0.95)),
+            ("the Sun 5° up: much less", 0.0, 0.087, (0.05, 0.5)),
+            ("at 185 km: none lost", 185_000.0, 0.0, (0.999, 1.0)),
+        ];
+        for (case, h, mu, (lo, hi)) in cases {
+            let t = direct_transmittance(&earth, r, h, mu);
+            assert!(t[1] >= lo && t[1] <= hi, "{case}: {t:?}");
+        }
+        // Red gets through best near the horizon (the sunset's colour).
+        let low = direct_transmittance(&earth, r, 0.0, 0.05);
+        assert!(low[0] > low[1] && low[1] > low[2], "{low:?}");
+        // The air mass: 1 overhead, ~38 at the horizon for R/H = 800.
+        assert!((air_mass(800.0, 1.0) - 1.0).abs() < 1e-3);
+        assert!((air_mass(800.0, 0.0) - 40.0).abs() < 1.0);
+    }
 
     #[test]
     fn haze_light_from_the_atmosphere_data() {

@@ -202,6 +202,33 @@ impl LightUniform {
     }
 }
 
+/// The air around the camera: the atmosphere it is in (its data, the
+/// body's radius, the camera's height over it, and the local up), if any.
+pub fn air_at_camera<'a>(
+    sim: &SimState,
+    rig: &CameraRig,
+    defs: &'a BodyDefs,
+) -> Option<(&'a crate::body_visual::AtmosphereDef, f64, f64, DVec3)> {
+    let snap = sim.world.snapshot(sim.clock);
+    defs.defs.iter().find_map(|(node, def)| {
+        let a = def.atmosphere.as_ref()?;
+        let p = sim.world.source(*node)?.physical.as_ref()?;
+        let to_cam = rig.cam_pos - snap.relative_r(*node, rig.anchor);
+        let h = to_cam.length() - p.radius_eq;
+        (h < f64::from(a.thickness_m)).then(|| (a, p.radius_eq, h, to_cam.normalize_or(DVec3::Z)))
+    })
+}
+
+/// The light the exposure is set for (lux, D087): every star's flux at the
+/// camera, and under a haze (`raymarch_inside`) only what reaches it
+/// through the column above.
+pub fn exposure_lux(sim: &SimState, rig: &CameraRig, defs: &BodyDefs, scene: &LightScene) -> f64 {
+    let haze = air_at_camera(sim, rig, defs)
+        .filter(|(a, ..)| a.raymarch_inside)
+        .map(|(a, r, h, _)| haze_exposure_share(&haze_above(a, r, h)));
+    scene.lux_at_camera() * haze.unwrap_or(1.0)
+}
+
 /// Sets the camera's exposure from the starlight at the camera (D087).
 pub fn update_exposure(
     sim: Res<SimState>,
@@ -213,15 +240,7 @@ pub fn update_exposure(
     if scene.stars.is_empty() {
         return;
     }
-    let snap = sim.world.snapshot(sim.clock);
-    // Under a haze, the light that reaches the camera through it.
-    let haze = defs.defs.iter().find_map(|(node, def)| {
-        let a = def.atmosphere.as_ref().filter(|a| a.raymarch_inside)?;
-        let p = sim.world.source(*node)?.physical.as_ref()?;
-        let h = (rig.cam_pos - snap.relative_r(*node, rig.anchor)).length() - p.radius_eq;
-        (h < f64::from(a.thickness_m)).then(|| haze_exposure_share(&haze_above(a, p.radius_eq, h)))
-    });
-    let e_cam = scene.lux_at_camera() * haze.unwrap_or(1.0);
+    let e_cam = exposure_lux(&sim, &rig, &defs, &scene);
     let ev100 = exposure_ev100(crate::camera::EV100, e_cam, reference_lux());
     for mut e in &mut cams {
         if (e.ev100 - ev100).abs() > 1e-4 {
