@@ -46,6 +46,12 @@ pub struct BodyVisualDef {
     /// Icon colour in map mode.
     #[serde(default = "default_icon")]
     pub icon_color: [f32; 3],
+    /// The colour of the whole sunlit disc as seen from space (sRGB), what
+    /// its planetshine is tinted with; `None`: `base_color`. Earth's drawn
+    /// colour is its deep ocean's, ten times bluer than red, while the
+    /// light the whole Earth reflects is only mildly blue.
+    #[serde(default)]
+    pub shine_color: Option<[f32; 3]>,
 }
 
 fn default_roughness() -> f32 {

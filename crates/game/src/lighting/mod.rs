@@ -13,6 +13,8 @@ pub mod color;
 pub mod haze;
 pub mod rules;
 #[cfg(test)]
+mod ship_tests;
+#[cfg(test)]
 mod tests;
 
 pub use haze::{haze_above, haze_exposure_share, haze_light};
@@ -110,7 +112,7 @@ pub fn update_scene(sim: Res<SimState>, rig: Res<CameraRig>, defs: Res<BodyDefs>
                 centre: rel(*n),
                 radius: radius(*n),
                 albedo: reflector_albedo(d.albedo, d.geometric_albedo),
-                tint: color::reflector_tint(d.base_color),
+                tint: color::reflector_tint(d.shine_color.unwrap_or(d.base_color)),
             };
             (*n, sphere)
         })
