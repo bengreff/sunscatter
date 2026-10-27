@@ -45,6 +45,9 @@ pub struct PartInfo {
     pub derived: f64,
     /// Published minus derived dry mass (kg) and the reason, if published.
     pub unmodelled: Option<(f64, String)>,
+    /// Its outer surface's material and finish (`data/materials.ron` ids).
+    pub material: String,
+    pub finish: Option<String>,
     pub ratings: Ratings,
     pub failures: Vec<FailureMode>,
 }
@@ -327,6 +330,12 @@ impl ShipDef {
             }
         }
         (plus.min(minus), flow)
+    }
+
+    /// Whether a command names something this craft has (each engine
+    /// selector, valve, mechanism, joint, thruster block or component).
+    pub fn check(&self, command: &super::command::ShipCommand) -> Result<(), String> {
+        super::layers::check(self, command)
     }
 
     /// The index of the part with craft-file id `id`.

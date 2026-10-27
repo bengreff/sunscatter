@@ -76,7 +76,9 @@ pub fn build(file: &AssemblyFile, catalog: &Catalog, ctx: &Ctx) -> Result<Assemb
     let mut errors = Vec::new();
     let mut primitives = Vec::new();
     let parts = place_parts(file, catalog, ctx, &mut primitives, &mut errors);
+    let mut parts = parts;
     let components = place_components(file, catalog, ctx, &parts, &primitives, &mut errors);
+    let checked = mass_checks(file, &mut parts, &components, &mut errors);
     if !errors.is_empty() {
         return Err(errors);
     }
@@ -87,7 +89,8 @@ pub fn build(file: &AssemblyFile, catalog: &Catalog, ctx: &Ctx) -> Result<Assemb
     if !errors.is_empty() {
         return Err(errors);
     }
-    let report = report(&parts, &components, &ship, &primitives);
+    let mut report = report(&parts, &components, &ship, &primitives);
+    report.contradictions.extend(checked);
     let def = assemble(file, &parts, &components, primitives, ship);
     Ok(Assembly { def, report })
 }
@@ -256,6 +259,50 @@ fn place_components(
     out
 }
 
+/// Each published group mass (a stage, a spacecraft) against the derived
+/// total of the parts it names with their components: the gap becomes the
+/// carrying part's unmodelled mass with the check's reason (reported with
+/// the entry's own); a gap beyond the tolerance is also a contradiction.
+fn mass_checks(
+    file: &AssemblyFile,
+    parts: &mut [Placed],
+    components: &[PlacedComponent],
+    errors: &mut Vec<String>,
+) -> Vec<String> {
+    let mut contradictions = Vec::new();
+    for c in &file.checks {
+        let named = |p: &Placed| c.parts.iter().any(|s| super::command::matches(s, &p.id));
+        let hosted =
+            |i: usize| components.iter().filter(|x| x.part == i as u32).map(|x| x.built.generated.mass).sum::<f64>();
+        let total: f64 =
+            (parts.iter().enumerate()).filter(|(_, p)| named(p)).map(|(i, p)| p.built.generated.mass + hosted(i)).sum();
+        let Some(carry) = parts.iter().position(|p| p.id == c.carry && named(p)) else {
+            errors.push(format!("check {:?}: it names no part {:?} to carry the gap", c.name, c.carry));
+            continue;
+        };
+        let (published, source) = (c.dry_mass.0, &c.dry_mass.1);
+        let gap = published - total;
+        let built = &mut parts[carry].built;
+        if built.generated.mass + gap < 0.0 || !published.is_finite() {
+            errors.push(format!("check {:?}: {published} kg is less than its parts without {:?}", c.name, c.carry));
+            continue;
+        }
+        built.generated.mass += gap;
+        let reason = format!("{}: {} (published {published} kg: {source})", c.name, c.reason);
+        built.unmodelled = Some(match built.unmodelled.take() {
+            Some((g, r)) => (g + gap, format!("{r}; {reason}")),
+            None => (gap, reason),
+        });
+        if gap.abs() > crate::catalog::TOLERANCE * published {
+            contradictions.push(format!(
+                "{}: derived {total:.0} kg, published {published} kg ({source}); {gap:+.0} kg carried by {}",
+                c.name, c.carry
+            ));
+        }
+    }
+    contradictions
+}
+
 /// Parts, components and their functions into the ship definition.
 fn describe(parts: &[Placed], components: &[PlacedComponent], ship: &mut ShipDef) {
     for (i, p) in parts.iter().enumerate() {
@@ -268,6 +315,8 @@ fn describe(parts: &[Placed], components: &[PlacedComponent], ship: &mut ShipDef
             mass: g.mass,
             derived: g.derived_mass(),
             unmodelled: p.built.unmodelled.clone(),
+            material: g.material.clone(),
+            finish: g.finish.clone(),
             ratings: p.built.ratings,
             failures: Vec::new(),
         });

@@ -16,7 +16,7 @@ use super::attitude::{Actuators, Gimbal};
 use super::split::{Breakup, LOST_CHUTE};
 use super::{Vessel, TICK};
 use crate::catalog::Propellant;
-use crate::craft::command::ShipCommand;
+use crate::craft::command::{ShipCommand, Stage};
 use crate::craft::engine::{file_of, ship_thrust, ShipThrust};
 use crate::craft::parts::combine_engines;
 use crate::craft::ship::{Feed, ShipDef};
@@ -98,6 +98,35 @@ impl Vessel {
     pub(super) fn ship_thrust(&self, throttle: f64, p: f64) -> Option<ShipThrust> {
         let (def, state) = self.ship_parts()?;
         Some(ship_thrust(def, state, throttle, p, TICK, self.debug))
+    }
+
+    /// Each engine's thrust (N, aligned with the ship definition's engines)
+    /// at the pilot's `throttle` and ambient pressure `p`: what each flame
+    /// is drawn from (`craft::engine::ship_thrust`, the one rule).
+    pub fn engine_thrusts(&self, throttle: f64, p: f64) -> Option<Vec<f64>> {
+        self.ship_thrust(throttle, p).map(|t| t.per_engine)
+    }
+
+    /// Replaces the stage sequence (the systems screen, D107): every
+    /// command must name something this craft has, else nothing changes and
+    /// the errors are returned. The sequence's position stays (at most the
+    /// new length).
+    pub fn set_stages(&mut self, stages: Vec<Stage>) -> Result<(), Vec<String>> {
+        let def = self.ship_def().ok_or_else(|| vec!["not a craft of parts".to_string()])?;
+        check_stages(&def, &stages)?;
+        let state = self.ship.as_mut().ok_or_else(|| vec!["no ship state".to_string()])?;
+        state.sequence = state.sequence.min(stages.len() as u32);
+        state.stages = stages;
+        Ok(())
+    }
+
+    /// Replaces the saved functions (and what is pinned), checked as
+    /// [`Self::set_stages`].
+    pub fn set_functions(&mut self, functions: Vec<Stage>) -> Result<(), Vec<String>> {
+        let def = self.ship_def().ok_or_else(|| vec!["not a craft of parts".to_string()])?;
+        check_stages(&def, &functions)?;
+        self.ship.as_mut().ok_or_else(|| vec!["no ship state".to_string()])?.functions = functions;
+        Ok(())
     }
 
     /// A tick's engine output and attitude actuators, and for a craft of
@@ -200,6 +229,18 @@ impl Vessel {
         });
         b.separated.extend(separated);
         let _ = world;
+    }
+}
+
+/// Every command of `stages` checked against the craft; the errors by stage.
+fn check_stages(def: &ShipDef, stages: &[Stage]) -> Result<(), Vec<String>> {
+    let errors: Vec<String> = (stages.iter())
+        .flat_map(|s| s.actions.iter().filter_map(move |a| def.check(a).err().map(|e| format!("{:?}: {e}", s.name))))
+        .collect();
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors)
     }
 }
 

@@ -345,6 +345,10 @@ pub struct Generated {
     /// Derived values of the outputs a published number may override
     /// (thrust, Isp, capacity …), before any is applied.
     pub outputs: Vec<(String, f64)>,
+    /// The outer surface's material and finish (ids in `data/materials.ron`;
+    /// a component has none: empty).
+    pub material: String,
+    pub finish: Option<String>,
     pub tanks: Vec<TankSpec>,
     pub ports: Vec<Port>,
     pub functions: Vec<Function>,

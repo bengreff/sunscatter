@@ -58,6 +58,16 @@ fn a_craft_of_parts_lifts_off_on_its_engines() {
     let (name, _) = v.next_stage(&w).unwrap();
     assert_eq!(name, "Ignition");
     assert!(v.ship().unwrap().engines.iter().all(|e| e.status == EngineStatus::Running));
+    // Each engine's thrust for its flame, from the same rule as the tick.
+    let each = v.engine_thrusts(1.0, 0.0).unwrap();
+    assert_eq!(each, vec![100.0e3; 4]);
+    // The sequence and functions are the vessel's: edited, checked.
+    use crate::craft::command::{ShipCommand, Stage};
+    let stage = |action: ShipCommand| Stage { name: "x".into(), key: None, actions: vec![action], pinned: true };
+    let bad = v.set_functions(vec![stage(ShipCommand::Separate("no such joint".into()))]).unwrap_err();
+    assert!(bad[0].contains("names no joint"), "{bad:?}");
+    v.set_functions(vec![stage(ShipCommand::Deploy("leg#*".into()))]).unwrap();
+    assert!(v.ship().unwrap().functions[0].pinned);
     let (height0, m0) = (v.contact_height(), v.mass());
     v.advance(&w, t0().add_seconds(5.0), &full(1.0), usize::MAX);
     let s = v.ship().unwrap();

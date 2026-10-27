@@ -15,7 +15,7 @@
 //! engines start and stop at once, valves and mechanisms move at once; the
 //! transients are the systems').
 
-use super::command::{matches, ShipCommand};
+use super::command::{matches, ShipCommand, Stage};
 use super::file::Tank;
 use super::ship::ShipDef;
 use crate::catalog::Igniter;
@@ -187,6 +187,12 @@ pub struct ShipState {
     /// The next stage of the sequence.
     #[serde(default)]
     pub sequence: u32,
+    /// The stage sequence and the saved functions (D107: the vessel's, not
+    /// settings; the craft file's at load, edited in the systems screen).
+    #[serde(default)]
+    pub stages: Vec<Stage>,
+    #[serde(default)]
+    pub functions: Vec<Stage>,
 }
 
 /// Each tank's region, capacity and liquid (kg), each bottle's place and
@@ -284,13 +290,30 @@ impl ShipState {
             fates: Vec::new(),
             clamped: false,
             sequence: 0,
+            stages: def.sequence.clone(),
+            functions: def.functions.clone(),
         }
     }
 
-    /// The state of the piece holding the parts `kept` (`Part::id`s): every
-    /// entry of those parts, in order; joints within the piece; the cabin
-    /// if its part is kept. The sequence's position and the clamps stay.
-    pub fn partition(&self, kept: &[u32]) -> ShipState {
+    /// The state of the piece holding the parts `kept` (`Part::id`s, its
+    /// definition `piece`): every entry of those parts, in order; joints
+    /// within the piece; the cabin if its part is kept; the clamps as they
+    /// were. Its stages and functions keep the commands that name something
+    /// the piece has (and those that name nothing: the clamps, the chutes),
+    /// stages and functions left empty go, and the sequence's position
+    /// counts the stages kept before it.
+    pub fn partition(&self, kept: &[u32], piece: &ShipDef) -> ShipState {
+        let mine = |list: &[Stage]| -> Vec<Option<Stage>> {
+            (list.iter())
+                .map(|s| {
+                    let actions: Vec<ShipCommand> =
+                        s.actions.iter().filter(|a| piece.check(a).is_ok()).cloned().collect();
+                    (!actions.is_empty()).then(|| Stage { actions, ..s.clone() })
+                })
+                .collect()
+        };
+        let stages = mine(&self.stages);
+        let sequence = stages.iter().take(self.sequence as usize).flatten().count() as u32;
         fn by<T: Clone>(items: &[T], part: impl Fn(&T) -> u32, kept: &[u32]) -> Vec<T> {
             items.iter().filter(|x| kept.contains(&part(x))).cloned().collect()
         }
@@ -308,7 +331,9 @@ impl ShipState {
             cabin: self.cabin.clone().filter(|c| kept.contains(&c.part)),
             fates: by(&self.fates, |x| x.part, kept),
             clamped: self.clamped,
-            sequence: self.sequence,
+            sequence,
+            stages: stages.into_iter().flatten().collect(),
+            functions: mine(&self.functions).into_iter().flatten().collect(),
         }
     }
 
@@ -472,11 +497,11 @@ impl ShipState {
         }
     }
 
-    /// Runs the next stage of the sequence: each of its commands' plain
-    /// effect (a command naming what this piece lacks is skipped). `None`
-    /// when the sequence is done.
+    /// Runs the next stage of the sequence (the state's own): each of its
+    /// commands' plain effect (a command naming what this craft lacks is
+    /// skipped). `None` when the sequence is done.
     pub fn next_stage(&mut self, def: &ShipDef) -> Option<(String, Vec<Effect>)> {
-        let stage = def.sequence.get(self.sequence as usize)?;
+        let stage = self.stages.get(self.sequence as usize)?.clone();
         self.sequence += 1;
         let mut effects = Vec::new();
         for a in &stage.actions {

@@ -26,6 +26,14 @@ impl Wall {
         }
     }
 
+    /// The outer material's id.
+    pub fn outer(&self) -> &str {
+        match self {
+            Wall::Solid { material, .. } => material,
+            Wall::Sandwich { face, .. } => face,
+        }
+    }
+
     /// Total thickness (m).
     pub fn thickness(&self) -> f64 {
         match *self {

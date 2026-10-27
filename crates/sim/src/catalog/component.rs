@@ -227,6 +227,8 @@ impl ComponentParams {
             mass: 0.0,
             derived: Vec::new(),
             outputs: Vec::new(),
+            material: String::new(),
+            finish: None,
             tanks: Vec::new(),
             ports: Vec::new(),
             functions: Vec::new(),

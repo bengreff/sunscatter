@@ -4,10 +4,11 @@
 //! covers the profile's lateral area. Stack mounts sit at the first and
 //! last points where the radius is not zero.
 
-use super::output::{Function, Generated, Kind};
+use super::output::{Actuator, Function, Generated, Kind, Mechanism};
 use super::structure::{radial_mounts, stack_mount, RadialSet};
 use super::wall::{self, Wall, ROOM_K};
 use super::{settable, Ctx};
+use glam::DVec3;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -30,6 +31,21 @@ pub struct RevolutionParams {
     /// Stretches the profile along z.
     #[serde(default = "one")]
     pub scale_z: f64,
+    /// A hinge it opens on (a nosecone).
+    #[serde(default)]
+    pub hinge: Option<Hinge>,
+}
+
+/// A hinge: point and axis (the part's frame), the open angle (deg), rate
+/// and drive.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Hinge {
+    pub pos: DVec3,
+    pub axis: DVec3,
+    pub open_deg: f64,
+    pub rate_dps: f64,
+    pub actuator: Actuator,
 }
 
 fn one() -> f64 {
@@ -79,9 +95,25 @@ impl RevolutionParams {
             mass: derived.iter().map(|d| d.1).sum(),
             derived,
             outputs: Vec::new(),
+            material: self.wall.outer().into(),
+            finish: self.finish.clone(),
             tanks: Vec::new(),
             ports: Vec::new(),
-            functions: if self.control { vec![Function::Control] } else { Vec::new() },
+            functions: (self.control.then_some(Function::Control).into_iter())
+                .chain(self.hinge.map(|h| {
+                    Function::Mechanism(Mechanism {
+                        pos: h.pos,
+                        axis: h.axis.normalize(),
+                        stowed_deg: 0.0,
+                        deployed_deg: h.open_deg,
+                        rate_dps: h.rate_dps,
+                        actuator: h.actuator,
+                        retractable: true,
+                        foot: None,
+                        stroke: 0.0,
+                    })
+                }))
+                .collect(),
             power: 0.0,
             specific_heat: self.wall.specific_heat(m)?,
             max_k: self.wall.service_k(m)?,

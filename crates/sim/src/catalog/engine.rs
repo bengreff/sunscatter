@@ -252,6 +252,8 @@ impl EngineParams {
             mass,
             derived,
             outputs: self.outputs(),
+            material: self.nozzle_material.clone(),
+            finish: None,
             tanks: Vec::new(),
             ports: vec![port("ox_in", &self.oxidizer), port("fuel_in", &self.fuel)],
             functions: vec![Function::Engine(data)],

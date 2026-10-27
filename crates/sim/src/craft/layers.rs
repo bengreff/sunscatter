@@ -112,7 +112,7 @@ pub(super) fn connect(
     ship.functions = file.functions.clone();
     for stage in file.sequence.iter().chain(&file.functions) {
         for command in &stage.actions {
-            if let Err(e) = check(ship, command) {
+            if let Err(e) = ship.check(command) {
                 errors.push(format!("{:?}: {e}", stage.name));
             }
         }
@@ -242,8 +242,8 @@ fn members(selectors: &[String], owners: &[Owner], what: &str, errors: &mut Vec<
     out
 }
 
-/// Whether a command names something the craft has.
-pub fn check(ship: &ShipDef, command: &ShipCommand) -> Result<(), String> {
+/// Whether a command names something the craft has (`ShipDef::check`).
+pub(super) fn check(ship: &ShipDef, command: &ShipCommand) -> Result<(), String> {
     let some = |found: bool, what: &str| if found { Ok(()) } else { Err(format!("{command:?} names no {what}")) };
     fn named<'a>(s: &str, mut ids: impl Iterator<Item = &'a String>) -> bool {
         ids.any(|id| matches(s, id))

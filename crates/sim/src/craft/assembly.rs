@@ -56,6 +56,11 @@ pub struct AssemblyFile {
     pub sequence: Vec<Stage>,
     #[serde(default)]
     pub functions: Vec<Stage>,
+    /// Published dry masses of groups of parts (a stage, a spacecraft):
+    /// the build reports each against the derived total and carries the
+    /// gap as one part's unmodelled mass.
+    #[serde(default)]
+    pub checks: Vec<MassCheck>,
     /// Whole-craft data the cells and the contact still take per craft.
     pub aero: AeroFile,
     pub thermal: ThermalLimits,
@@ -217,6 +222,20 @@ pub struct LinkDecl {
     pub to: Vec<String>,
 }
 
+/// A published dry mass of the parts `parts` names (selectors; with their
+/// components), against what they derive: the gap is `carry`'s unmodelled
+/// mass, for `reason` (D101: reported, never hidden).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MassCheck {
+    pub name: String,
+    pub parts: Vec<String>,
+    /// kg and its source.
+    pub dry_mass: (f64, String),
+    pub carry: String,
+    pub reason: String,
+}
+
 /// How a tank is loaded: `tank` is `part:compartment` (a component tank's
 /// compartment is `main`).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -259,16 +278,18 @@ pub fn port_ref(s: &str) -> Result<(&str, &str), String> {
     s.rsplit_once(':').ok_or_else(|| format!("{s:?} is not a port reference (`part:port`)"))
 }
 
-/// Expands a `#*` reference over the copies of `ids` (in order); anything
-/// else stays itself.
+/// Expands a `#*` or `.*` reference over the `ids` it names (in order);
+/// anything else stays itself.
 pub fn expand<'a>(reference: &str, ids: impl Iterator<Item = &'a str> + Clone) -> Vec<String> {
     let (owner, port) = match reference.rsplit_once(':') {
         Some((o, p)) => (o, Some(p)),
         None => (reference, None),
     };
-    let Some(base) = owner.strip_suffix("#*") else { return vec![reference.to_string()] };
+    if !(owner.ends_with("#*") || owner.ends_with(".*")) {
+        return vec![reference.to_string()];
+    }
     let with = |id: &str| port.map_or(id.to_string(), |p| format!("{id}:{p}"));
-    ids.filter(|id| id.strip_prefix(base).is_some_and(|r| r.starts_with('#'))).map(with).collect()
+    ids.filter(|id| super::command::matches(owner, id)).map(with).collect()
 }
 
 #[cfg(test)]
@@ -285,6 +306,11 @@ mod tests {
         let out = expand("s1.merlin#*:ox_in", ids.iter().copied());
         assert_eq!(out, ["s1.merlin#1:ox_in", "s1.merlin#2:ox_in", "s1.merlin#10:ox_in"]);
         assert_eq!(expand("s1.tank:lox.outlet", ids.iter().copied()), ["s1.tank:lox.outlet"]);
+        let dotted = ["s1.merlin.1", "s1.merlin.2", "s1.tank"];
+        assert_eq!(
+            expand("s1.merlin.*:fuel_in", dotted.iter().copied()),
+            ["s1.merlin.1:fuel_in", "s1.merlin.2:fuel_in"]
+        );
         let radial = Pattern::Radial { count: 4, start_deg: 45.0 };
         assert_eq!((radial.angle_deg(1), radial.angle_deg(4)), (45.0, 315.0));
     }

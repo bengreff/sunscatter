@@ -134,6 +134,9 @@ pub struct ShipThrust {
     pub heat: f64,
     /// Each tank's draw (kg/s).
     pub draws: Vec<f64>,
+    /// Each engine's thrust (N; aligned with `ShipDef::engines`): what a
+    /// flame is drawn from.
+    pub per_engine: Vec<f64>,
 }
 
 /// The engine file of one engine of a craft of parts (its gimbal point and
@@ -200,7 +203,12 @@ pub fn ship_thrust(
             }
         })
         .collect();
-    let mut out = ShipThrust { draws: vec![0.0; def.tanks.len()], gimbal: f64::INFINITY, ..ShipThrust::default() };
+    let mut out = ShipThrust {
+        draws: vec![0.0; def.tanks.len()],
+        per_engine: vec![0.0; def.engines.len()],
+        gimbal: f64::INFINITY,
+        ..ShipThrust::default()
+    };
     let (mut pos, mut dir) = (DVec3::ZERO, DVec3::ZERO);
     for (i, engine, o, tanks) in running {
         let f = tanks.iter().flatten().map(|&t| supply[t]).fold(1.0, f64::min);
@@ -211,6 +219,7 @@ pub fn ship_thrust(
                 out.draws[*t] += mdot * share;
             }
         }
+        out.per_engine[i] = thrust;
         out.thrust += thrust;
         out.mdot += mdot;
         out.heat += engine.heat(thrust, mdot);

@@ -217,7 +217,7 @@ impl Vessel {
                 // A craft of parts: each tank and bottle goes with its part.
                 (Some(state), Some(def)) => {
                     let ids: Vec<u32> = design.parts.iter().map(|p| p.id).collect();
-                    let mine = state.partition(&ids);
+                    let mine = state.partition(&ids, def);
                     piece.propellant = mine.consumables(def);
                     piece.ship = Some(mine);
                     piece.sync_engine();

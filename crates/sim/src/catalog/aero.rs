@@ -34,6 +34,8 @@ fn part(primitives: Vec<crate::craft::Primitive>, mounts: Vec<MountPoint>, deriv
         mass: derived.iter().map(|d| d.1).sum(),
         derived,
         outputs: Vec::new(),
+        material: String::new(),
+        finish: None,
         tanks: Vec::new(),
         ports: Vec::new(),
         functions: Vec::new(),
@@ -83,6 +85,7 @@ impl FinParams {
         }));
         g.specific_heat = self.wall.specific_heat(ctx.materials)?;
         g.max_k = self.wall.service_k(ctx.materials)?;
+        (g.material, g.finish) = (self.wall.outer().into(), self.finish.clone());
         Ok(g)
     }
 }
@@ -157,6 +160,7 @@ impl GridFinParams {
         }));
         g.specific_heat = m.specific_heat;
         g.max_k = m.service_k;
+        (g.material, g.finish) = (self.material.clone(), self.finish.clone());
         Ok(g)
     }
 }
@@ -216,6 +220,7 @@ impl LegParams {
         }));
         g.specific_heat = self.wall.specific_heat(ctx.materials)?;
         g.max_k = self.wall.service_k(ctx.materials)?;
+        (g.material, g.finish) = (self.wall.outer().into(), self.finish.clone());
         Ok(g)
     }
 }

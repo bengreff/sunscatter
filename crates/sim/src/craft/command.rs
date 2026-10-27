@@ -50,6 +50,9 @@ pub struct Stage {
     #[serde(default)]
     pub key: Option<String>,
     pub actions: Vec<ShipCommand>,
+    /// Shown on the mini systems panel in flight (D107).
+    #[serde(default)]
+    pub pinned: bool,
 }
 
 impl ShipCommand {
@@ -74,11 +77,15 @@ impl ShipCommand {
 }
 
 /// Whether `selector` names `id`: equal, or `base#*` for any copy `base#k`
-/// of a pattern, or a prefix ending in `.` for everything under it
-/// (`s1.` is every part and component whose id starts with `s1.`).
+/// of a pattern, `base.*` for any `base.x`, or a prefix ending in `.` for
+/// everything under it (`s1.` is every part and component whose id starts
+/// with `s1.`).
 pub fn matches(selector: &str, id: &str) -> bool {
     if let Some(base) = selector.strip_suffix("#*") {
         return id.strip_prefix(base).is_some_and(|rest| rest.starts_with('#'));
+    }
+    if let Some(base) = selector.strip_suffix(".*") {
+        return id.strip_prefix(base).is_some_and(|rest| rest.len() > 1 && rest.starts_with('.'));
     }
     if selector.ends_with('.') {
         return id.starts_with(selector);
@@ -102,6 +109,9 @@ mod tests {
             ("s1.", "s1.leg#2", true),
             ("s1.", "s2.tank", false),
             ("s2.tank", "s2.tank", true),
+            ("s1.merlin.*", "s1.merlin.9", true),
+            ("s1.merlin.*", "s1.merlin", false),
+            ("s1.merlin.*", "s1.merlins.1", false),
         ];
         for (selector, id, want) in cases {
             assert_eq!(matches(selector, id), want, "{selector} vs {id}");
@@ -113,6 +123,7 @@ mod tests {
         let stage = Stage {
             name: "Ignition".into(),
             key: Some("1".into()),
+            pinned: true,
             actions: vec![
                 ShipCommand::Ignite("s1.merlin#*".into()),
                 ShipCommand::Throttle("s1".into(), 0.6),
