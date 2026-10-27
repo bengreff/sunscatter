@@ -26,17 +26,41 @@ use std::collections::{HashMap, VecDeque};
 
 /// The internal scales tried, from full resolution down to half.
 pub const STEPS: [f32; 6] = [1.0, 0.9, 0.8, 0.7, 0.6, 0.5];
-/// A frame "misses" when it takes this many display periods.
-const MISS: f64 = 1.4;
+/// A frame "misses" when it takes this many display periods: the policy
+/// aims at the refresh itself (D072), with room for a frame's jitter (at
+/// 120 Hz, frames over 9.6 ms miss).
+const MISS: f64 = 1.15;
 /// The share of missed frames over [`WINDOW`] seconds that steps down.
 const MISS_SHARE: f64 = 0.25;
 const WINDOW: f64 = 0.5;
+/// A step down "helps" when the mean frame time falls by this share; a
+/// finer step "costs nothing" when it rises by no more than this.
+const HELPS: f64 = 0.05;
 /// Seconds without a miss before trying the next finer step, at first and
 /// at most (the wait doubles after each failed try).
 const WAIT: f64 = 3.0;
 const MAX_WAIT: f64 = 60.0;
+/// While frames miss at a step below which pixels do not help, seconds
+/// between tries of the next finer step (doubling after each that costs).
+const PROBE: f64 = 1.0;
 
-/// The resolution policy's state: a pure rule over frame times.
+/// A change being judged, from step `from` with mean frame time `before`.
+#[derive(Clone, Copy, Debug)]
+enum Trial {
+    /// A step down: kept only if it helps.
+    Down { from: usize, before: f64 },
+    /// A finer step after a calm while: kept unless frames miss again.
+    Calm { from: usize },
+    /// A finer step while frames miss but coarser ones do not help: kept
+    /// if it costs nothing (the frame is limited by something else than
+    /// pixels, so full resolution comes back).
+    Probe { from: usize, before: f64 },
+}
+
+/// The resolution policy's state: a pure rule over frame times. Full
+/// resolution while frames fit the refresh; a step down only while frames
+/// miss and only if it makes them faster; back up a step as soon as it
+/// fits again, or as soon as the finer step costs nothing.
 #[derive(Clone, Debug)]
 pub struct Controller {
     pub step: usize,
@@ -45,16 +69,14 @@ pub struct Controller {
     now: f64,
     last_change: f64,
     last_miss: f64,
+    /// Calm seconds before the next finer try.
     wait: f64,
-    /// A finer step being tried since this time.
-    trying: Option<f64>,
-    /// After stepping down: the step and mean frame time before, to check
-    /// that the frame got faster (if not, the frame is not limited by
-    /// pixels).
-    before: Option<(usize, f64)>,
-    /// No stepping down before this time (the frame was found limited by
-    /// something else than pixels).
-    no_down_until: f64,
+    /// Seconds between probes while missing.
+    probe: f64,
+    trial: Option<Trial>,
+    /// No stepping below this step before this time: stepping below it did
+    /// not make frames faster.
+    floor: Option<(usize, f64)>,
 }
 
 impl Default for Controller {
@@ -66,9 +88,9 @@ impl Default for Controller {
             last_change: 0.0,
             last_miss: 0.0,
             wait: WAIT,
-            trying: None,
-            before: None,
-            no_down_until: 0.0,
+            probe: PROBE,
+            trial: None,
+            floor: None,
         }
     }
 }
@@ -84,10 +106,17 @@ impl Controller {
         WINDOW / n
     }
 
-    fn change(&mut self, step: usize) {
+    fn change(&mut self, step: usize, trial: Option<Trial>) -> Option<f32> {
         self.step = step;
         self.last_change = self.now;
         self.recent.clear();
+        self.trial = trial;
+        Some(self.scale())
+    }
+
+    /// Whether stepping below the current step is allowed now.
+    fn may_step_down(&self) -> bool {
+        self.step + 1 < STEPS.len() && !self.floor.is_some_and(|(f, until)| self.step >= f && self.now < until)
     }
 
     /// One frame of `dt` seconds on a display refreshing every `period`
@@ -110,39 +139,55 @@ impl Controller {
             return None;
         }
         let share = self.recent.iter().filter(|(_, m)| *m).count() as f64 / self.recent.len().max(1) as f64;
-        // A step down that did not make frames faster: pixels are not what
-        // limits them (the CPU is); back to full resolution for a long while.
-        if let Some((_, dt_before)) = self.before.take() {
-            if self.mean_dt() > 0.95 * dt_before {
-                self.change(0);
-                self.trying = None;
-                self.no_down_until = self.now + MAX_WAIT;
-                return Some(self.scale());
+        let missing = share >= MISS_SHARE;
+        let mean = self.mean_dt();
+        match self.trial {
+            Some(Trial::Down { from, before }) => {
+                if mean > (1.0 - HELPS) * before {
+                    // Not faster: pixels are not what limits frames here.
+                    self.floor = Some((from, self.now + MAX_WAIT));
+                    return self.change(from, None);
+                }
+                self.trial = None;
             }
+            Some(Trial::Probe { from, before }) => {
+                if mean > (1.0 + HELPS) * before {
+                    self.probe = (self.probe * 2.0).min(MAX_WAIT);
+                    return self.change(from, None);
+                }
+                // The finer step costs nothing: keep it, and the floor with it.
+                self.probe = PROBE;
+                self.floor = Some((self.step, self.now + MAX_WAIT));
+                self.trial = None;
+            }
+            Some(Trial::Calm { from }) => {
+                if missing {
+                    self.wait = (self.wait * 2.0).min(MAX_WAIT);
+                    return self.change(from, None);
+                }
+                if since > 2.0 * WINDOW {
+                    // The finer step held.
+                    self.wait = WAIT;
+                    self.trial = None;
+                }
+                return None;
+            }
+            None => {}
         }
-        if share >= MISS_SHARE && self.now >= self.no_down_until {
-            if self.trying.take().is_some() {
-                self.wait = (self.wait * 2.0).min(MAX_WAIT);
+        if missing {
+            if self.may_step_down() {
+                let from = self.step;
+                return self.change(from + 1, Some(Trial::Down { from, before: mean }));
             }
-            if self.step + 1 < STEPS.len() {
-                self.before = Some((self.step, self.mean_dt()));
-                self.change(self.step + 1);
-                return Some(self.scale());
-            }
-            return None;
-        }
-        if let Some(t) = self.trying {
-            if self.now - t > 2.0 * WINDOW {
-                // The finer step held.
-                self.trying = None;
-                self.wait = WAIT;
+            if self.step > 0 && since >= self.probe {
+                let from = self.step;
+                return self.change(from - 1, Some(Trial::Probe { from, before: mean }));
             }
             return None;
         }
         if self.step > 0 && self.now - self.last_miss >= self.wait && since >= self.wait {
-            self.change(self.step - 1);
-            self.trying = Some(self.now);
-            return Some(self.scale());
+            let from = self.step;
+            return self.change(from - 1, Some(Trial::Calm { from }));
         }
         None
     }
@@ -372,7 +417,7 @@ mod tests {
     fn full_resolution_while_the_frame_fits() {
         let mut c = Controller::default();
         assert_eq!(run(&mut c, P, 30.0), 1.0);
-        assert_eq!(run(&mut c, 1.2 * P, 30.0), 1.0, "a little slow is not a miss");
+        assert_eq!(run(&mut c, 1.1 * P, 30.0), 1.0, "a frame's jitter is not a miss");
     }
 
     #[test]
@@ -427,7 +472,42 @@ mod tests {
             t += dt;
         }
         assert!(c.scale() < 1.0);
-        assert_eq!(run(&mut c, 3.0 * P, 5.0), 1.0, "CPU-bound now: full resolution again");
+        assert_eq!(run(&mut c, 3.0 * P, 10.0), 1.0, "CPU-bound now: full resolution again");
+    }
+
+    #[test]
+    fn a_step_that_does_not_help_goes_back_one_step_not_to_full_resolution() {
+        // GPU-bound down to 0.7, then limited at 1.6 periods by the CPU.
+        let frame = |s: f32| (3.0 * f64::from(s).powi(2)).max(1.6) * P;
+        let mut c = Controller::default();
+        let (mut t, mut at_07, mut after_3) = (0.0, 0.0, 0.0);
+        while t < 30.0 {
+            let dt = frame(c.scale());
+            c.update(dt, P);
+            t += dt;
+            if t > 3.0 {
+                after_3 += dt;
+                if c.scale() == 0.7 {
+                    at_07 += dt;
+                }
+                assert!(c.scale() < 0.95, "never back to full resolution: {} at {t:.1} s", c.scale());
+            }
+        }
+        assert!(at_07 > 0.8 * after_3, "{at_07:.1} of {after_3:.1} s at 0.7");
+    }
+
+    #[test]
+    fn it_aims_at_the_refresh() {
+        // 100 fps on a 120 Hz display misses (D072: the frame fits the
+        // refresh); a step down that brings it there is kept.
+        let mut c = Controller::default();
+        let mut t = 0.0;
+        while t < 10.0 {
+            let dt = (0.1 + 1.1 * f64::from(c.scale()).powi(2)) * P;
+            c.update(dt, P);
+            t += dt;
+        }
+        assert!(c.scale() < 1.0 && c.scale() >= 0.8, "{}", c.scale());
     }
 
     #[test]
