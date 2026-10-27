@@ -34,6 +34,9 @@ pub(super) struct ShipTick {
     /// firing, with their shares of it.
     pub rcs_flow: DVec3,
     pub blocks: Vec<(usize, f64)>,
+    /// The translating thrusters (the pilot's translation and the engines'
+    /// settling): force, torque and each block's flow.
+    pub push: crate::systems::rcs::Push,
 }
 
 impl Vessel {
@@ -124,6 +127,12 @@ impl Vessel {
         self.ship.as_ref().is_some_and(crate::systems::ship::busy)
     }
 
+    /// Whether a craft of parts needs live ticks with `controls`: its
+    /// systems busy, or the pilot translating on its thrusters.
+    pub(super) fn ship_wants_ticks(&self, controls: &super::Controls) -> bool {
+        self.ship_needs_ticks() || (self.ship.is_some() && controls.translate != DVec3::ZERO)
+    }
+
     /// Each engine's thrust (N, aligned with the ship definition's engines)
     /// now at ambient pressure `p`: what each flame is drawn from
     /// (`systems::propulsion::output`, the one rule; the throttle argument
@@ -175,11 +184,12 @@ impl Vessel {
     /// parts what it draws.
     pub(super) fn actuators(
         &self,
-        throttle: f64,
+        controls: &super::Controls,
         p: f64,
         dt: f64,
         props: &MassProps,
     ) -> (EngineOutput, Actuators, Option<ShipTick>) {
+        let throttle = controls.throttle;
         let Some((def, state)) = self.ship_parts() else {
             let engine = self.craft.engine;
             let out = engine.tick_output(throttle, p, self.propellant, dt, self.debug);
@@ -207,7 +217,10 @@ impl Vessel {
         let total: f64 = weights.iter().map(|w| w.1).sum();
         let blocks = weights.into_iter().map(|(i, w)| (i, w / total)).collect();
         let out = EngineOutput { thrust: t.thrust, mdot: t.mdot };
-        let tick = ShipTick { draws: t.draws, heat: t.heat, rcs_flow, blocks };
+        let want = (controls.translate.clamp(DVec3::splat(-1.0), DVec3::splat(1.0)) + propulsion::ullage(def, state))
+            .clamp_length_max(1.0);
+        let push = crate::systems::rcs::translate(def, state, props.com, want, self.debug);
+        let tick = ShipTick { draws: t.draws, heat: t.heat, rcs_flow, blocks, push };
         (out, Actuators { torque, gimbal: Some(gimbal) }, Some(tick))
     }
 
