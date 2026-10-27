@@ -1,0 +1,6 @@
+// Catalog entry (D101; sim::catalog). Numbers from docs/features/falcon9.md
+// (DATA): P published, E estimate, D derived, U unknown (proposed value).
+(
+    id: "dragon-seat", name: "Crew Dragon seat", era: 2019, provisional: true,
+    generator: Component(envelope: Box(0.6, 0.6, 0.9), equipment: Seat(crew: 1, mass: 25.0)),   // E
+)

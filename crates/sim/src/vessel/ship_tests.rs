@@ -155,3 +155,115 @@ fn saves_round_trip_and_frames_equal_one_jump() {
     }
     assert_eq!(frames, v);
 }
+
+/// The Falcon 9 Crew on LC-39A: it stands on the launch mount's posts,
+/// fuelled; the sequence's ignition starts the nine Merlins and the clamps
+/// hold it welded to the ground; their release leaves the mount as ground
+/// (no vessel) and at full throttle (7.6 MN against ~5.5 MN of weight) it
+/// lifts off, the booster's LOX and RP-1 going down by the mixture ratio.
+#[test]
+fn the_falcon_9_stands_on_the_pad_and_lifts_off() {
+    let w = world();
+    let t = std::time::Instant::now();
+    let craft = craft_of(&CraftId("falcon9-crew".into()));
+    craft.design();
+    let (cells, nodes) = (craft.cells.cells.len(), craft.design().nodes());
+    println!("built in {:.1} s: {} parts, {cells} cells, {nodes} nodes", t.elapsed().as_secs_f64(), craft.parts.len());
+    let mut v = Vessel::landed_at(&w, VesselId(1), "Earth", 28.6084, -80.6043, t0(), &craft);
+    assert!(matches!(v.phase, Phase::Landed { .. }), "it stands on the pad");
+    assert!(v.clamped());
+    let def = v.ship_def().unwrap();
+    let pad: f64 = v.craft.design().parts.iter().filter(|p| p.name.starts_with("pad.")).map(|p| p.dry_mass).sum();
+    println!("mass {:.0} kg with the mount's {pad:.0} kg, centre of mass {:.2} m up", v.mass(), v.contact_height());
+    assert!(((v.mass() - pad) / 560_200.0 - 1.0).abs() < 0.01);
+    assert_eq!(v.craft.engine.thrust_vac, 9.0 * 914.0e3, "the readouts' engine: the nine Merlins");
+    assert_eq!(v.next_stage(&w).unwrap().0, "Ignition");
+    v.advance(&w, t0().add_seconds(2.0), &full(1.0), usize::MAX);
+    assert!(matches!(v.phase, Phase::Landed { .. }), "held by the clamps");
+    // Liftoff: the clamps let go; the mount stays behind as ground.
+    assert_eq!(v.next_stage(&w).unwrap().0, "Liftoff");
+    assert!(!v.clamped());
+    let plan = v.plan_breakup().expect("the mount separates");
+    assert_eq!(plan.pieces.len(), 2);
+    let mut ids = VesselIds::default();
+    ids.allocate();
+    assert!(v.split(&w, &plan, &plan.crafts(), &mut ids).is_empty(), "the mount is no vessel");
+    assert!(v.craft.design().parts.iter().all(|p| !p.name.starts_with("pad.")));
+    let start = v.ship().unwrap().clone();
+    let t = std::time::Instant::now();
+    let end = v.time.add_seconds(4.0);
+    v.advance(&w, end, &full(1.0), usize::MAX);
+    println!("4 s of flight in {:.2} s", t.elapsed().as_secs_f64());
+    let s = v.ship().unwrap();
+    let drop = |i: usize| start.tanks[i].liquid - s.tanks[i].liquid;
+    let def = v.ship_def().unwrap_or(def);
+    let lox = def.tanks.iter().position(|t| t.id == "s1.tank:lox").unwrap();
+    let rp1 = def.tanks.iter().position(|t| t.id == "s1.tank:rp1").unwrap();
+    assert!((drop(lox) / drop(rp1) - 2.33).abs() < 1e-9);
+    let others: f64 = (0..def.tanks.len()).filter(|&i| i != lox && i != rp1).map(drop).sum();
+    assert_eq!(others, 0.0, "the upper stage and Dragon keep theirs");
+    let (anchor, r, _) = v.state(&w);
+    let up = crate::forces::altitude_above(&w, &w.snapshot(v.time), anchor, anchor, r).0;
+    println!("{up:.1} m up after 4 s");
+    assert!(up > v.contact_height() + 5.0, "{up}");
+    // MECO and stage separation: the booster leaves as a vessel with its
+    // engines, fins, legs and functions; the upper stack keeps the rest.
+    assert_eq!(v.next_stage(&w).unwrap().0, "MECO");
+    assert_eq!(v.next_stage(&w).unwrap().0, "Stage separation");
+    let plan = v.plan_breakup().expect("the stages separate");
+    let mass = v.mass();
+    let (_, r0, v0) = v.state(&w);
+    let pieces = v.split(&w, &plan, &plan.crafts(), &mut ids);
+    assert_eq!(pieces.len(), 1);
+    let booster = &pieces[0];
+    let total = v.mass() + booster.mass();
+    assert!((total - mass).abs() < 1e-6 * mass, "{total} vs {mass}");
+    let momentum = (v.state(&w).2 - v0) * v.mass() + (booster.state(&w).2 - v0) * booster.mass();
+    let com = (v.state(&w).1 - r0) * v.mass() + (booster.state(&w).1 - r0) * booster.mass();
+    assert!(momentum.length() < 1e-6 * mass && com.length() < 1e-6 * mass);
+    let names = |x: &Vessel| x.ship().unwrap().functions.iter().map(|f| f.name.clone()).collect::<Vec<_>>();
+    assert!(names(booster).contains(&"Landing legs".to_string()) && !names(booster).contains(&"Nosecone".to_string()));
+    assert!(names(&v).contains(&"Nosecone".to_string()) && !names(&v).contains(&"Grid fins".to_string()));
+    assert_eq!(booster.ship().unwrap().engines.len(), 9);
+    assert!(booster.controllable(), "the booster can be flown");
+    assert_eq!(v.craft.engine.thrust_vac, 981.0e3, "the readouts' engine: the MVac");
+    assert_eq!(v.next_stage(&w).unwrap().0, "Second stage ignition");
+    // Saved and loaded, both pieces are the same.
+    let fleet = vec![v.clone(), booster.clone()];
+    let text = SaveGame::capture(&w, v.time, &fleet, ids, 0, full(1.0)).to_ron();
+    assert_eq!(SaveGame::from_ron(&text).unwrap().vessels, fleet);
+}
+
+/// Deploying the legs in flight gives the vessel its legs-out shape (a
+/// craft of its own, `base#parts@legs`): the feet are contact points, the
+/// centre of mass and the angular momentum stay, the ship state is kept.
+#[test]
+fn deploying_the_legs_reshapes_the_vessel() {
+    let w = world();
+    let earth = w.find("Earth").unwrap();
+    let (r, vel) =
+        Elements { a: 6_778_137.0, e: 0.001, i: 0.9, raan: 1.0, argp: 0.5, mean_anomaly: 0.0 }.to_state(earth.gm);
+    let mut v = Vessel::coasting(&w, VesselId(1), t0(), earth.node, r, vel, &rocket());
+    v.set_attitude(Attitude { q: v.attitude.q, omega: DVec3::new(0.02, 0.0, 0.01) });
+    v.advance(&w, t0().add_seconds(5.0), &Controls::default(), usize::MAX);
+    use crate::craft::command::ShipCommand;
+    v.command(&w, &ShipCommand::Deploy("leg#*".into())).unwrap();
+    let plan = v.plan_breakup().expect("a new shape to build");
+    assert_eq!(plan.pieces.len(), 1);
+    assert!(plan.ids[0].0.starts_with("test-rocket#0-10@"), "{}", plan.ids[0].0);
+    let before = v.clone();
+    let spin = |x: &Vessel| {
+        let rot = glam::DMat3::from_quat(x.attitude.q);
+        rot * x.mass_props().inertia * rot.transpose() * x.attitude.omega
+    };
+    assert!(v.split(&w, &plan, &plan.crafts(), &mut VesselIds::default()).is_empty());
+    assert_eq!(v.craft.id, plan.ids[0]);
+    let feet = v.craft.contacts.iter().filter(|c| c.kind == crate::craft::ContactKind::Foot).count();
+    assert_eq!(feet, 4);
+    let ((_, r0, v0), (_, r1, v1)) = (before.state(&w), v.state(&w));
+    assert!((r1 - r0).length() < 1e-9 && (v1 - v0).length() < 1e-12, "the centre of mass stays");
+    assert!((spin(&v) - spin(&before)).length() < 1e-9 * spin(&before).length(), "angular momentum stays");
+    assert!(v.mass_props().inertia.x_axis.x > before.mass_props().inertia.x_axis.x, "legs out: more inertia");
+    assert_eq!(v.ship(), before.ship());
+    assert_eq!(v.deployed_parts(), plan.ids[0].deployed());
+}

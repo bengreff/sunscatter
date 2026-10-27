@@ -183,6 +183,8 @@ pub enum JointKind {
     /// A separation system: its kind, the impulse it gives (N·s) and its
     /// capacity as a share of the weaker side's wall (≤ 1).
     Separation { system: SeparationSystem, impulse: f64, strength: f64 },
+    /// The pad's hold-down clamps: released by `ShipCommand::ReleaseClamps`.
+    HoldDown,
 }
 
 /// A declared joint between two attached parts.

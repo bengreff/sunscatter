@@ -1,0 +1,7 @@
+// Catalog entry (D101; sim::catalog). Provisional: public numbers from memory,
+// to be replaced by docs/features/falcon9.md (DATA) as it lands.
+(
+    id: "gps-receiver", name: "GPS receiver", era: 2010, provisional: true,
+    generator: Component(envelope: Box(0.15, 0.15, 0.08), power: 10.0,
+        equipment: Sensor(quantity: "position", accuracy: 3.0, rate_hz: 10.0, mass: 2.0)),
+)

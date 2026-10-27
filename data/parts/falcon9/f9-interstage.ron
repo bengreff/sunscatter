@@ -1,0 +1,13 @@
+// Catalog entry (D101; sim::catalog). Numbers from docs/features/falcon9.md
+// (DATA): P published, E estimate, D derived, U unknown (proposed value).
+(
+    id: "f9-interstage", name: "Falcon 9 interstage", era: 2018, provisional: true,
+    generator: Shell(
+        // z 39.77–46.40 (D); CFRP faces on aluminium honeycomb (P), thicknesses E.
+        radius_low: 1.83, radius_high: 1.83, length: 6.63,
+        wall: Sandwich(face: "cfrp", face_thickness: 0.0015, core: "al-honeycomb", core_thickness: 0.025),
+        finish: "black-paint",
+        // Grid fins hinged at z 44.6 (E), aligned with the legs.
+        radial: [(name: "gridfin", z: 4.83, count: 4, start_deg: 0.0)],
+    ),
+)

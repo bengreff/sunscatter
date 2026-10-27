@@ -1,0 +1,15 @@
+// Catalog entry (D101; sim::catalog). Numbers from docs/features/falcon9.md
+// (DATA): P published, E estimate, D derived, U unknown (proposed value).
+(
+    id: "lc39a-hold-down", name: "LC-39A launch mount and its hold-down clamps", era: 2017, provisional: true,
+    generator: Pad(
+        // Four hydraulic clamps at the first stage's base (P: hold-down by
+        // hydraulic clamps, released at T−0; E: four), aligned with the legs.
+        // The posts stand the stage over the flame trench. While the clamps
+        // hold, the vehicle stays welded to the ground (it does not lift
+        // whatever its thrust); released, the mount stays as ground. Its
+        // mass: its steel (E).
+        size: 3.66, posts: 4, ring_radius: 1.6, post_radius: 0.25, height: 3.0,
+        material: "stainless-301", mass: 5.0e4,
+    ),
+)

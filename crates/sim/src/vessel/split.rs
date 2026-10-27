@@ -167,10 +167,12 @@ impl Vessel {
         SplitPlan { pieces: intact, ids, destroyed: causes }
     }
 
-    /// The craft id of the piece made of `parts` (indices into the parts).
+    /// The craft id of the piece made of `parts` (indices into the parts),
+    /// with those of its parts whose mechanisms are deployed.
     fn piece_id(&self, design: &CraftDesign, parts: &[u32]) -> CraftId {
         let ids: Vec<u32> = parts.iter().map(|&p| design.parts[p as usize].id).collect();
-        CraftId::piece(self.craft.id.base(), &ids)
+        let deployed: Vec<u32> = self.deployed_parts().into_iter().filter(|p| ids.contains(p)).collect();
+        CraftId::piece(self.craft.id.base(), &ids).with_deployed(&deployed)
     }
 
     /// Splits the vessel by `plan` with the pieces' `crafts` (in the plan's
@@ -186,7 +188,9 @@ impl Vessel {
     ) -> Vec<Vessel> {
         assert_eq!(plan.pieces.len(), crafts.len(), "one craft per piece");
         self.breakup = None;
-        if plan.pieces.len() < 2 {
+        // One piece of another craft: the same parts, mechanisms moved.
+        let reconfigure = plan.pieces.len() == 1 && crafts[0].id != self.craft.id;
+        if plan.pieces.len() < 2 && !reconfigure {
             return Vec::new();
         }
         if matches!(self.phase, Phase::Landed { .. } | Phase::Crashed { .. }) {
@@ -209,6 +213,12 @@ impl Vessel {
         let mut crew = self.crew;
         let mut pieces: Vec<Vessel> = Vec::new();
         for (k, craft) in crafts.iter().enumerate() {
+            // Ground (the pad's mount left behind when the clamps release)
+            // stays with the ground: it is not a vessel.
+            let ground = craft.ship.as_ref().is_some_and(|s| !s.parts.is_empty() && s.parts.iter().all(|p| p.ground));
+            if k > 0 && ground {
+                continue;
+            }
             let design = craft.design().clone();
             let mut piece = self.clone();
             piece.craft = craft.params();
@@ -224,8 +234,16 @@ impl Vessel {
                 }
                 _ => piece.propellant = (fill * capacity).min(capacity),
             }
-            let offset = q * (piece.mass_props().com - props.com);
+            // A reconfiguration moves parts about the centre of mass, which
+            // stays; the angular momentum stays with the new inertia.
+            let offset = if reconfigure { DVec3::ZERO } else { q * (piece.mass_props().com - props.com) };
             let state = (anchor, r + offset, v + omega.cross(offset));
+            if reconfigure {
+                let rot = glam::DMat3::from_quat(q);
+                let world = |i: glam::DMat3| rot * i * rot.transpose();
+                let spin = world(props.inertia) * omega;
+                piece.attitude.omega = world(piece.mass_props().inertia).inverse() * spin;
+            }
             piece.phase = Phase::Powered { anchor: state.0, r: state.1, v: state.2 };
             piece.tick_accel = None;
             piece.rest_ticks = 0;

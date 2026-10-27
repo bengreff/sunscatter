@@ -1,0 +1,15 @@
+// Catalog entry (D101; sim::catalog). Numbers from docs/features/falcon9.md
+// (DATA): P published, E estimate, D derived, U unknown (proposed value).
+(
+    id: "f9-s1-tank", name: "Falcon 9 first stage tanks (RP-1 below, LOX above, common dome)", era: 2018, provisional: true,
+    generator: Tank(
+        // Barrels 4.30–19.12 (RP-1) and 19.12–39.77 (LOX) in falcon9.md's z; √2:1 domes (U).
+        radius: 1.83, barrel: 35.47, domes: Elliptical(0.7071),
+        compartments: [("rp1", "RP-1"), ("lox", "LOX")], split: 0.4178,
+        material: "al-li-2195", finish: "white-paint",       // P: 2195-T8 barrels and domes
+        pressure: 4.0e5, safety_factor: 1.4,                 // U: MEOP 4.0 bar; E: design factor 1.4
+        axial_load: 6.0e6, min_gauge: 0.003,                 // D: 6 MN limit (RP-1 barrel); E 3 mm
+        ullage: 0.02,                                        // E
+    ),
+    ratings: (vibration_grms: 9.0, vibration_s: 300.0),
+)

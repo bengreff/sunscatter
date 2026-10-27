@@ -1,0 +1,8 @@
+// Catalog entry (D101; sim::catalog). Provisional: public numbers from memory,
+// to be replaced by docs/features/falcon9.md (DATA) as it lands.
+(
+    id: "f9-flight-computer", name: "Falcon 9 flight computer (triplex)", era: 2010, provisional: true,
+    generator: Component(envelope: Box(0.4, 0.3, 0.2), power: 150.0, control: true,
+        equipment: Computer(channels: 3, mass: 15.0)),
+    failures: [(mode: "channel", hazard: PerHour(1.0e-4), outcome: Lost, source: "class estimate, low bound; provisional")],
+)

@@ -317,6 +317,7 @@ fn describe(parts: &[Placed], components: &[PlacedComponent], ship: &mut ShipDef
             unmodelled: p.built.unmodelled.clone(),
             material: g.material.clone(),
             finish: g.finish.clone(),
+            ground: g.functions.iter().any(|f| matches!(f, Function::Pad)),
             ratings: p.built.ratings,
             failures: Vec::new(),
         });
@@ -408,7 +409,8 @@ fn functions(id: &str, owner: &str, part: u32, pose: &Pose, fs: &[Function], mai
             | Function::Solar(_)
             | Function::LifeSupport(_)
             | Function::Docking(..)
-            | Function::Control => {}
+            | Function::Control
+            | Function::Pad => {}
         }
     }
 }
@@ -423,17 +425,18 @@ fn tanks(
     ship: &mut ShipDef,
     errors: &mut Vec<String>,
 ) {
-    let owners = (parts.iter().enumerate().map(|(i, p)| (&p.id, i as u32, &p.pose, &p.built.generated)))
-        .chain(components.iter().map(|c| (&c.id, c.part, &c.pose, &c.built.generated)));
-    for (owner, part, pose, g) in owners {
+    let owners = (parts.iter().enumerate().map(|(i, p)| (&p.id, i as u32, &p.pose, &p.built.generated, true)))
+        .chain(components.iter().map(|c| (&c.id, c.part, &c.pose, &c.built.generated, false)));
+    for (owner, part, pose, g, of_part) in owners {
         for t in &g.tanks {
             let id = format!("{owner}:{}", t.name);
             let base = pose.point(t.base);
             let axis = pose.dir(t.axis).normalize();
             let height = t.volume / (math::PI * t.radius * t.radius);
-            // Components of the same part whose centre is in the compartment.
+            // Components of the same part whose centre is in a part's
+            // compartment (a component's own tank holds nothing else).
             let displaced: f64 = (components.iter())
-                .filter(|c| c.part == part && c.id != *owner)
+                .filter(|c| of_part && c.part == part)
                 .filter(|c| {
                     let along = (c.pose.pos - base).dot(axis);
                     let across = (c.pose.pos - base - axis * along).length();

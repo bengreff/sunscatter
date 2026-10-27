@@ -325,6 +325,9 @@ pub enum Function {
     Docking(String, f64),
     /// Makes the craft commandable (a crew cabin or a flight computer, D083).
     Control,
+    /// Ground structure, not the vehicle's: the launch pad's mount that holds
+    /// it until the clamps release (D104), anchored to the ground.
+    Pad,
 }
 
 /// A generated part or component, in its own frame.

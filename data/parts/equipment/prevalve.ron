@@ -1,0 +1,7 @@
+// Catalog entry (D101; sim::catalog). Provisional: public numbers from memory,
+// to be replaced by docs/features/falcon9.md (DATA) as it lands.
+(
+    id: "prevalve", name: "Main propellant prevalve (300 mm)", era: 2010, provisional: true,
+    generator: Component(envelope: Box(0.45, 0.45, 0.35), power: 5.0,
+        equipment: Valve(kind: Isolation, diameter: 0.3, open: true, cycles: 200.0, mass: 30.0)),
+)

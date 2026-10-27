@@ -505,7 +505,10 @@ impl Vessel {
         let changed = self.rest_mode.is_some_and(|m| m != mode);
         self.rest_mode = Some(mode);
         let holds = std::mem::replace(&mut self.checked, Checked(true)).0 || self.holds_where_landed(world);
-        if self.engine_running(controls) || controls.rotate != DVec3::ZERO || changed || !holds {
+        // Held by the pad's clamps, it stays put whatever runs (the mount is
+        // anchored to the ground until the clamps release).
+        let free = !self.clamped();
+        if free && (self.engine_running(controls) || controls.rotate != DVec3::ZERO || changed || !holds) {
             self.wake(world);
             return;
         }

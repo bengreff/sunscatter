@@ -48,6 +48,8 @@ pub struct PartInfo {
     /// Its outer surface's material and finish (`data/materials.ron` ids).
     pub material: String,
     pub finish: Option<String>,
+    /// Ground, not vehicle: the pad's mount (`Function::Pad`).
+    pub ground: bool,
     pub ratings: Ratings,
     pub failures: Vec<FailureMode>,
 }

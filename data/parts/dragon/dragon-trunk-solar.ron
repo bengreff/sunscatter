@@ -1,0 +1,6 @@
+// Catalog entry (D101; sim::catalog). Numbers from docs/features/falcon9.md
+// (DATA): P published, E estimate, D derived, U unknown (proposed value).
+(
+    id: "dragon-trunk-solar", name: "Crew Dragon trunk solar array (body-mounted cells)", era: 2019, provisional: true,
+    generator: Component(envelope: Box(0.3, 0.3, 0.1), equipment: Solar(area: 5.0, efficiency: 0.29, mass: 20.0)),   // E: 1.5–2 kW
+)

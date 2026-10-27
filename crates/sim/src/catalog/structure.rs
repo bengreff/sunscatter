@@ -356,14 +356,17 @@ pub struct ThrustParams {
     #[serde(default)]
     pub ring_start_deg: f64,
     pub centre: bool,
-    /// Height of the engines' gimbal points (m above the bottom face).
+    /// Height of the engines' gimbal points (m above the bottom face), and
+    /// how much lower the centre engine sits.
     #[serde(default)]
     pub engine_z: f64,
+    #[serde(default)]
+    pub centre_drop: f64,
     #[serde(default)]
     pub radial: Vec<RadialSet>,
 }
 
-settable!(ThrustParams { radius, length, ring, ring_radius, ring_start_deg, engine_z });
+settable!(ThrustParams { radius, length, ring, ring_radius, ring_start_deg, engine_z, centre_drop });
 
 impl ThrustParams {
     pub fn generate(&self, ctx: &Ctx) -> Result<Generated, String> {
@@ -391,7 +394,7 @@ impl ThrustParams {
             allowable: 0.0,
         };
         if self.centre {
-            mounts.push(engine(1, DVec3::ZERO));
+            mounts.push(engine(1, -DVec3::Z * self.centre_drop));
         }
         let first = usize::from(self.centre) + 1;
         for k in 0..self.ring as usize {
@@ -415,6 +418,73 @@ impl ThrustParams {
             power: 0.0,
             specific_heat: self.wall.specific_heat(ctx.materials)?,
             max_k: self.wall.service_k(ctx.materials)?,
+        })
+    }
+}
+
+/// The launch pad's mount (D104: the pad and its hold-down clamps are in
+/// scope): posts under a stack mount that takes the first stage's base, so
+/// the vehicle stands on it as on the real mount, its engines over the
+/// flame trench. It is ground, not vehicle (`Function::Pad`): a joint of
+/// kind `HoldDown` holds the vehicle until the clamps release, and its mass
+/// is the share of the pad it is anchored to (it does not lift).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PadParams {
+    /// Diameter of the stack mount it takes (m).
+    pub size: f64,
+    pub posts: u32,
+    pub ring_radius: f64,
+    pub post_radius: f64,
+    /// Below the mount (m): the posts stand on the ground there.
+    pub height: f64,
+    #[serde(default)]
+    pub start_deg: f64,
+    pub material: String,
+    /// The anchored share of the pad (kg).
+    pub mass: f64,
+}
+
+settable!(PadParams { size, posts, ring_radius, post_radius, height, start_deg, mass });
+
+impl PadParams {
+    pub fn generate(&self, ctx: &Ctx) -> Result<Generated, String> {
+        if !(self.size > 0.0 && self.posts > 0 && self.post_radius > 0.0 && self.height > 0.0 && self.mass > 0.0) {
+            return Err("pad: size, posts, post radius, height and mass must be positive".into());
+        }
+        let m = ctx.materials.get(&self.material)?;
+        let skin = Wall::Solid { material: self.material.clone(), thickness: 0.02 }.skin(ctx.materials, None)?;
+        let primitives = (0..self.posts)
+            .map(|k| {
+                let a = (self.start_deg + 360.0 * k as f64 / self.posts as f64) * math::PI / 180.0;
+                let at = DVec3::new(math::cos(a), math::sin(a), 0.0) * self.ring_radius;
+                let shape = wall::along_z(-self.height, 0.0, self.post_radius, self.post_radius);
+                let shape = match shape {
+                    crate::craft::Shape::Cylinder { base, axis, radius } => {
+                        crate::craft::Shape::Cylinder { base: base + at, axis, radius }
+                    }
+                    other => other,
+                };
+                wall::primitive("hold-down post", shape, skin)
+            })
+            .collect();
+        let derived = vec![("the pad's anchored share (estimate)".to_string(), self.mass)];
+        Ok(Generated {
+            kind: Kind::Part,
+            primitives,
+            envelope: None,
+            mounts: vec![stack_mount("top", 0.0, 1.0, self.size, f64::INFINITY)],
+            mass: self.mass,
+            derived,
+            outputs: Vec::new(),
+            material: self.material.clone(),
+            finish: None,
+            tanks: Vec::new(),
+            ports: Vec::new(),
+            functions: vec![super::output::Function::Pad],
+            power: 0.0,
+            specific_heat: m.specific_heat,
+            max_k: m.service_k,
         })
     }
 }

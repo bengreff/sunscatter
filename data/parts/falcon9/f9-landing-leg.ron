@@ -1,0 +1,15 @@
+// Catalog entry (D101; sim::catalog). Numbers from docs/features/falcon9.md
+// (DATA): P published, E estimate, D derived, U unknown (proposed value).
+(
+    id: "f9-landing-leg", name: "Falcon 9 landing leg", era: 2018, provisional: true,
+    generator: Leg(
+        // 8.2 m (D), deployed 120° (E: 30° below horizontal), span 18 m (P); CFRP and honeycomb (P).
+        length: 8.2, depth: 0.4, width: 0.5,
+        wall: Sandwich(face: "cfrp", face_thickness: 0.003, core: "al-honeycomb", core_thickness: 0.04),
+        foot_radius: 0.5, foot_mass: 40.0, deployed_deg: 120.0, deploy_rate_dps: 40.0,
+        actuator: Pneumatic,                                 // P: helium pneumatics
+        stroke: 0.4,                                         // U: crush core
+    ),
+    published: { "dry_mass": (500.0, "P: under 2,100 kg for four (SpaceX via Light Metal Age), falcon9.md §1.2") },
+    unmodelled: "hinges, the telescoping strut and its pneumatics, fittings",
+)

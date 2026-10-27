@@ -1,0 +1,226 @@
+// Falcon 9 Block 5 with Crew Dragon (D100): a craft of catalog parts
+// (docs/design/ship-model.md §3.4, docs/features/parts.md) from the data
+// sheet docs/features/falcon9.md (DATA; every number tagged P/E/D/U there;
+// the entries in data/parts carry the tags).
+//
+// Body axes: +Z up the stack; the origin is the capsule's shoulder (the top
+// of its heat shield), falcon9.md's z 61.35 (its z is up from the outer
+// nozzle exits). +X is falcon9.md's 45° (so the legs, grid fins and
+// hold-down points, at its 45° + 90°k, are on our axes). The root is the
+// capsule: it stays the vessel at every separation; the booster and the
+// second stage leave as vessels of their own; the pad's mount stays on the
+// ground when the clamps release.
+//
+// Stack (falcon9.md z): nine Merlins 0 (centre −0.25), octaweb 1.0–4.30,
+// first stage tanks 4.30–39.77, interstage 39.77–46.40 (the MVac inside it
+// down to 41.2), second stage aft skirt 46.40–47.99, tanks 47.99–57.01, the
+// Dragon ring to 57.30, trunk 57.30–61.00, heat shield 60.90, capsule to
+// 64.30, nosecone to 65.40. The launch mount's posts stand 3 m under the
+// octaweb.
+(
+    name: "Falcon 9 Block 5 · Crew Dragon",
+    crew: 4,
+    parts: [
+        (id: "dragon.capsule", entry: "crew-dragon-capsule"),
+        (id: "dragon.nose", entry: "crew-dragon-nosecone", mount: (on: "dragon.capsule", at: "top", via: "bottom")),
+        (id: "dragon.shield", entry: "crew-dragon-heat-shield", mount: (on: "dragon.capsule", at: "bottom", via: "top")),
+        (id: "dragon.trunk", entry: "crew-dragon-trunk", mount: (on: "dragon.shield", at: "trunk", via: "top")),
+        (id: "dragon.fin", entry: "crew-dragon-trunk-fin", pattern: List(4), mount: (on: "dragon.trunk", at: "fin_#", via: "root")),
+        (id: "s2.ring", entry: "f9-dragon-ring", mount: (on: "dragon.trunk", at: "bottom", via: "top")),
+        (id: "s2.tank", entry: "f9-s2-tank", mount: (on: "s2.ring", at: "bottom", via: "top")),
+        (id: "s2.skirt", entry: "f9-s2-aft-skirt", mount: (on: "s2.tank", at: "bottom", via: "top")),
+        (id: "s2.mvac", entry: "merlin-1d-vac", mount: (on: "s2.skirt", at: "engine_1", via: "mount")),
+        (id: "s1.interstage", entry: "f9-interstage", mount: (on: "s2.skirt", at: "bottom", via: "top")),
+        // Grid fins stowed tips up along the interstage (to ~46.1).
+        (id: "s1.gridfin", entry: "f9-grid-fin", pattern: List(4), mount: (on: "s1.interstage", at: "gridfin_#", via: "root")),
+        (id: "s1.tank", entry: "f9-s1-tank", mount: (on: "s1.interstage", at: "bottom", via: "top")),
+        (id: "s1.octaweb", entry: "f9-octaweb", mount: (on: "s1.tank", at: "bottom", via: "top")),
+        // E9 is the centre engine; E1…E8 the ring from falcon9.md's 0°. E1,
+        // E5 and E9 carry three relights besides the pad start (E).
+        (id: "s1.merlin.9", entry: "merlin-1d", set: {"ignitions": 4.0}, mount: (on: "s1.octaweb", at: "engine_1", via: "mount")),
+        (id: "s1.merlin.1", entry: "merlin-1d", set: {"ignitions": 4.0}, mount: (on: "s1.octaweb", at: "engine_2", via: "mount")),
+        (id: "s1.merlin.2", entry: "merlin-1d", mount: (on: "s1.octaweb", at: "engine_3", via: "mount")),
+        (id: "s1.merlin.3", entry: "merlin-1d", mount: (on: "s1.octaweb", at: "engine_4", via: "mount")),
+        (id: "s1.merlin.4", entry: "merlin-1d", mount: (on: "s1.octaweb", at: "engine_5", via: "mount")),
+        (id: "s1.merlin.5", entry: "merlin-1d", set: {"ignitions": 4.0}, mount: (on: "s1.octaweb", at: "engine_6", via: "mount")),
+        (id: "s1.merlin.6", entry: "merlin-1d", mount: (on: "s1.octaweb", at: "engine_7", via: "mount")),
+        (id: "s1.merlin.7", entry: "merlin-1d", mount: (on: "s1.octaweb", at: "engine_8", via: "mount")),
+        (id: "s1.merlin.8", entry: "merlin-1d", mount: (on: "s1.octaweb", at: "engine_9", via: "mount")),
+        // Landing legs stowed up along the first stage (hinge z 1.5).
+        (id: "s1.leg", entry: "f9-landing-leg", pattern: List(4), mount: (on: "s1.octaweb", at: "leg_#", via: "root")),
+        // The pad's launch mount (ground, not vehicle): released at T−0.
+        (id: "pad.mount", entry: "lc39a-hold-down", mount: (on: "s1.octaweb", at: "bottom", via: "top")),
+    ],
+    components: [
+        // Crew Dragon (capsule frame: z 0 at the shoulder).
+        (id: "dragon.nto", entry: "dragon-tank-nto", pattern: Radial(count: 2, start_deg: 45.0), in: "dragon.capsule", pos: (1.3, 0.0, 0.55)),
+        (id: "dragon.mmh", entry: "dragon-tank-mmh", pattern: Radial(count: 2, start_deg: 135.0), in: "dragon.capsule", pos: (1.3, 0.0, 0.55)),
+        (id: "dragon.helium", entry: "dragon-helium-copv", pattern: Radial(count: 2, start_deg: 0.0), in: "dragon.capsule", pos: (1.2, 0.0, 0.4)),
+        (id: "dragon.superdraco", entry: "superdraco-pod", pattern: Radial(count: 4, start_deg: 0.0), in: "dragon.capsule", pos: (1.4, 0.0, 1.25)),
+        (id: "dragon.draco", entry: "draco-cluster", pattern: Radial(count: 4, start_deg: 45.0), in: "dragon.capsule", pos: (1.6, 0.0, 0.35)),
+        (id: "dragon.draco-forward", entry: "draco-forward", in: "dragon.capsule", pos: (0.0, 0.0, 2.75)),
+        (id: "dragon.seat", entry: "dragon-seat", pattern: Radial(count: 4, start_deg: 0.0), in: "dragon.capsule", pos: (0.5, 0.0, 0.8)),
+        (id: "dragon.eclss", entry: "dragon-eclss", in: "dragon.capsule", pos: (0.0, 0.0, 0.3)),
+        (id: "dragon.battery", entry: "dragon-battery", pattern: Radial(count: 4, start_deg: 22.5), in: "dragon.capsule", pos: (1.0, 0.0, 0.3)),
+        (id: "dragon.computer", entry: "dragon-flight-computer", in: "dragon.capsule", pos: (0.6, 0.0, 2.0)),
+        (id: "dragon.imu", entry: "imu", in: "dragon.capsule", pos: (-0.6, 0.0, 2.0)),
+        (id: "dragon.gps", entry: "gps-receiver", in: "dragon.capsule", pos: (0.0, 0.6, 2.0)),
+        (id: "dragon.star", entry: "star-tracker", in: "dragon.capsule", pos: (0.0, -0.6, 2.0)),
+        (id: "dragon.windows", entry: "mass-item", set: {"mass": 60.0}, in: "dragon.capsule", pos: (1.2, 0.0, 1.5)),
+        (id: "dragon.docking", entry: "dragon-docking-adapter", in: "dragon.capsule", pos: (0.0, 0.0, 2.6)),
+        (id: "dragon.chutes", entry: "dragon-parachutes", in: "dragon.capsule", pos: (0.6, 0.0, 2.3)),
+        // Four crew in suits (~100 kg each) and ~300 kg of cargo (E).
+        (id: "dragon.crew-and-cargo", entry: "mass-item", set: {"mass": 700.0}, in: "dragon.capsule", pos: (0.0, 0.0, 1.0)),
+        (id: "dragon.solar", entry: "dragon-trunk-solar", in: "dragon.trunk", pos: (1.7, 0.0, 1.8)),
+        // Second stage (tank frame: z 0 at falcon9.md's 47.99).
+        (id: "s2.helium", entry: "f9-s2-helium-copv", pattern: Radial(count: 3, start_deg: 0.0), in: "s2.tank", pos: (0.9, 0.0, 6.0)),
+        (id: "s2.transfer-tube", entry: "f9-s2-transfer-tube", in: "s2.tank", pos: (0.0, 0.0, 1.76)),
+        (id: "s2.computer", entry: "f9-flight-computer", in: "s2.tank", pos: (1.4, 0.0, 8.6)),
+        (id: "s2.battery", entry: "f9-battery", in: "s2.tank", pos: (-1.4, 0.0, 8.6)),
+        (id: "s2.imu", entry: "imu", in: "s2.tank", pos: (0.0, 1.4, 8.6)),
+        (id: "s2.gps", entry: "gps-receiver", in: "s2.tank", pos: (0.0, -1.4, 8.6)),
+        (id: "s2.avionics", entry: "mass-item", set: {"mass": 150.0}, in: "s2.tank", pos: (1.0, 1.0, 8.6)),
+        (id: "s2.nitrogen", entry: "f9-nitrogen-copv", in: "s2.skirt", pos: (0.0, -1.1, 0.8)),
+        (id: "s2.coldgas", entry: "f9-s2-cold-gas", pattern: Radial(count: 2, start_deg: 45.0), in: "s2.skirt", pos: (1.6, 0.0, 0.6)),
+        (id: "s2.lox-valve", entry: "prevalve", in: "s2.skirt", pos: (0.8, 0.8, 1.2)),
+        (id: "s2.rp1-valve", entry: "prevalve", in: "s2.skirt", pos: (-0.8, 0.8, 1.2)),
+        // First stage (interstage frame: z 0 at 39.77; tank frame at 4.30; octaweb at 1.0).
+        (id: "s1.coldgas", entry: "f9-cold-gas-pod", pattern: Radial(count: 2, start_deg: 45.0), in: "s1.interstage", pos: (1.6, 0.0, 6.03)),
+        (id: "s1.nitrogen", entry: "f9-nitrogen-copv", pattern: Radial(count: 2, start_deg: 135.0), in: "s1.interstage", pos: (1.0, 0.0, 3.0)),
+        (id: "s1.computer", entry: "f9-flight-computer", in: "s1.interstage", pos: (1.0, 0.0, 3.23)),
+        (id: "s1.battery", entry: "f9-battery", in: "s1.interstage", pos: (0.0, 1.0, 3.23)),
+        (id: "s1.imu", entry: "imu", in: "s1.interstage", pos: (0.0, -1.0, 3.23)),
+        (id: "s1.gps", entry: "gps-receiver", in: "s1.interstage", pos: (-1.0, 0.0, 3.23)),
+        (id: "s1.avionics", entry: "mass-item", set: {"mass": 400.0}, in: "s1.interstage", pos: (-1.0, 1.0, 3.23)),
+        (id: "s1.separation", entry: "mass-item", set: {"mass": 450.0}, in: "s1.interstage", pos: (1.5, 0.0, 6.4)),
+        (id: "s1.helium", entry: "f9-helium-copv", pattern: Radial(count: 6, start_deg: 0.0), in: "s1.tank", pos: (1.05, 0.0, 27.0)),
+        (id: "s1.downcomer", entry: "f9-lox-downcomer", in: "s1.tank", pos: (0.0, 0.0, 7.4)),
+        (id: "s1.raceway", entry: "mass-item", set: {"mass": 250.0}, in: "s1.tank", pos: (1.75, 0.0, 17.0)),
+        (id: "s1.lox-valve", entry: "prevalve", in: "s1.octaweb", pos: (0.6, 0.6, 2.8)),
+        (id: "s1.rp1-valve", entry: "prevalve", in: "s1.octaweb", pos: (-0.6, 0.6, 2.8)),
+        (id: "s1.heat-shield", entry: "mass-item", set: {"mass": 500.0}, in: "s1.octaweb", pos: (0.0, 0.0, 0.1)),
+        (id: "s1.manifolds", entry: "mass-item", set: {"mass": 600.0}, in: "s1.octaweb", pos: (0.0, 0.9, 2.5)),
+    ],
+    joints: [
+        // Three latches and four pneumatic pushers plus a centre one (P), ~0.5 m/s (E).
+        (name: "stage separation", between: ("s2.skirt", "s1.interstage"),
+         kind: Separation(system: Pneumatic, impulse: 2.5e4, strength: 0.8)),
+        (name: "dragon separation", between: ("s2.ring", "dragon.trunk"),
+         kind: Separation(system: Clamp, impulse: 2.0e3, strength: 0.8)),
+        (name: "hold-down clamps", between: ("s1.octaweb", "pad.mount"), kind: HoldDown),
+    ],
+    plumbing: [
+        // First stage: the LOX downcomer through the RP-1 tank to a 9-way manifold.
+        (from: "s1.tank:lox.outlet", to: "s1.lox-valve:in", diameter: 0.45, length: 15.0),
+        (from: "s1.lox-valve:out", to: "s1.merlin.*:ox_in", diameter: 0.10, length: 2.0),
+        (from: "s1.tank:rp1.outlet", to: "s1.rp1-valve:in", diameter: 0.30, length: 1.0),
+        (from: "s1.rp1-valve:out", to: "s1.merlin.*:fuel_in", diameter: 0.10, length: 1.5),
+        (from: "s1.helium#*:out", to: "s1.tank:lox.press", diameter: 0.02, length: 3.0),
+        (from: "s1.helium#*:out", to: "s1.tank:rp1.press", diameter: 0.02, length: 25.0),
+        (from: "s1.nitrogen#*:out", to: "s1.coldgas#*:in", diameter: 0.02, length: 4.0),
+        // Second stage.
+        (from: "s2.tank:lox.outlet", to: "s2.lox-valve:in", diameter: 0.35, length: 5.0),
+        (from: "s2.lox-valve:out", to: "s2.mvac:ox_in", diameter: 0.25, length: 1.0),
+        (from: "s2.tank:rp1.outlet", to: "s2.rp1-valve:in", diameter: 0.20, length: 1.0),
+        (from: "s2.rp1-valve:out", to: "s2.mvac:fuel_in", diameter: 0.20, length: 1.0),
+        (from: "s2.helium#*:out", to: "s2.tank:lox.press", diameter: 0.02, length: 2.0),
+        (from: "s2.helium#*:out", to: "s2.tank:rp1.press", diameter: 0.02, length: 6.0),
+        (from: "s2.nitrogen:out", to: "s2.coldgas#*:in", diameter: 0.02, length: 2.0),
+        // Crew Dragon: both tanks of each propellant feed every SuperDraco and Draco.
+        (from: "dragon.nto#1:main.outlet", to: "dragon.superdraco#*:ox_in", diameter: 0.05, length: 2.0),
+        (from: "dragon.nto#2:main.outlet", to: "dragon.superdraco#*:ox_in", diameter: 0.05, length: 2.0),
+        (from: "dragon.mmh#1:main.outlet", to: "dragon.superdraco#*:fuel_in", diameter: 0.05, length: 2.0),
+        (from: "dragon.mmh#2:main.outlet", to: "dragon.superdraco#*:fuel_in", diameter: 0.05, length: 2.0),
+        (from: "dragon.nto#1:main.outlet", to: "dragon.draco#*:ox_in", diameter: 0.01, length: 3.0),
+        (from: "dragon.nto#2:main.outlet", to: "dragon.draco#*:ox_in", diameter: 0.01, length: 3.0),
+        (from: "dragon.mmh#1:main.outlet", to: "dragon.draco#*:fuel_in", diameter: 0.01, length: 3.0),
+        (from: "dragon.mmh#2:main.outlet", to: "dragon.draco#*:fuel_in", diameter: 0.01, length: 3.0),
+        (from: "dragon.nto#1:main.outlet", to: "dragon.draco-forward:ox_in", diameter: 0.01, length: 3.0),
+        (from: "dragon.mmh#1:main.outlet", to: "dragon.draco-forward:fuel_in", diameter: 0.01, length: 3.0),
+        (from: "dragon.helium#*:out", to: "dragon.nto#1:main.press", diameter: 0.01, length: 1.5),
+        (from: "dragon.helium#*:out", to: "dragon.nto#2:main.press", diameter: 0.01, length: 1.5),
+        (from: "dragon.helium#*:out", to: "dragon.mmh#1:main.press", diameter: 0.01, length: 1.5),
+        (from: "dragon.helium#*:out", to: "dragon.mmh#2:main.press", diameter: 0.01, length: 1.5),
+    ],
+    electrical: [
+        (name: "s1.bus", voltage: 28.0,
+         members: ["s1.battery", "s1.computer", "s1.imu", "s1.gps", "s1.lox-valve", "s1.rp1-valve", "s1.coldgas#*"]),
+        (name: "s2.bus", voltage: 28.0,
+         members: ["s2.battery", "s2.computer", "s2.imu", "s2.gps", "s2.lox-valve", "s2.rp1-valve", "s2.coldgas#*"]),
+        (name: "dragon.bus", voltage: 120.0,
+         members: ["dragon.battery#*", "dragon.solar", "dragon.computer", "dragon.imu", "dragon.gps", "dragon.star",
+                   "dragon.eclss", "dragon.docking", "dragon.superdraco#*", "dragon.draco#*", "dragon.draco-forward"]),
+    ],
+    data: [
+        (from: "s1.computer", to: ["s1.imu", "s1.gps", "s1.merlin.*", "s1.gridfin#*", "s1.leg#*", "s1.coldgas#*", "s1.lox-valve", "s1.rp1-valve"]),
+        (from: "s2.computer", to: ["s2.imu", "s2.gps", "s2.mvac", "s2.coldgas#*", "s2.lox-valve", "s2.rp1-valve"]),
+        (from: "dragon.computer", to: ["dragon.imu", "dragon.gps", "dragon.star", "dragon.superdraco#*", "dragon.draco#*",
+                                       "dragon.draco-forward", "dragon.chutes", "dragon.nose", "dragon.docking", "dragon.eclss"]),
+    ],
+    // Densified propellants (P: LOX 66.5 K, RP-1 266.5 K); 3.5 bar flight ullage (E).
+    loading: [
+        (tank: "s1.tank:lox", temperature_k: 66.5, pressure: 3.5e5, pressurant: "helium"),
+        (tank: "s1.tank:rp1", temperature_k: 266.5, pressure: 3.5e5, pressurant: "helium"),
+        (tank: "s2.tank:lox", temperature_k: 66.5, pressure: 3.5e5, pressurant: "helium"),
+        (tank: "s2.tank:rp1", temperature_k: 266.5, pressure: 3.5e5, pressurant: "helium"),
+        (tank: "dragon.nto#1:main", temperature_k: 293.0, pressure: 1.7e6, pressurant: "helium"),
+        (tank: "dragon.nto#2:main", temperature_k: 293.0, pressure: 1.7e6, pressurant: "helium"),
+        (tank: "dragon.mmh#1:main", temperature_k: 293.0, pressure: 1.7e6, pressurant: "helium"),
+        (tank: "dragon.mmh#2:main", temperature_k: 293.0, pressure: 1.7e6, pressurant: "helium"),
+    ],
+    groups: {
+        "s1": ["s1.merlin.*"],
+        "s1.three": ["s1.merlin.9", "s1.merlin.1", "s1.merlin.5"],
+        "s1.one": ["s1.merlin.9"],
+        "s2": ["s2.mvac"],
+        "superdraco": ["dragon.superdraco#*"],
+    },
+    sequence: [
+        (name: "Ignition", actions: [Ignite("s1")]),
+        (name: "Liftoff", actions: [ReleaseClamps]),
+        (name: "MECO", actions: [Shutdown("s1")]),
+        (name: "Stage separation", actions: [Separate("stage separation"), Rcs("s1.coldgas#*", true)]),
+        (name: "Second stage ignition", actions: [Select("s2"), Ignite("s2")]),
+        (name: "SECO", actions: [Shutdown("s2")]),
+        (name: "Dragon separation", actions: [Separate("dragon separation"), Rcs("dragon.draco#*", true), Rcs("dragon.draco-forward", true)]),
+    ],
+    functions: [
+        (name: "Booster: three engines", key: "3", pinned: true, actions: [Select("s1.three"), Ignite("s1.three")]),
+        (name: "Booster: one engine", key: "1", pinned: true, actions: [Select("s1.one"), Ignite("s1.one")]),
+        (name: "Booster: engines off", key: "0", pinned: true, actions: [Shutdown("s1")]),
+        (name: "Grid fins", key: "G", pinned: true, actions: [Deploy("s1.gridfin#*")]),
+        (name: "Landing legs", key: "L", pinned: true, actions: [Deploy("s1.leg#*")]),
+        (name: "Parachutes", key: "C", actions: [ArmChutes]),
+        (name: "Nosecone", key: "N", actions: [Deploy("dragon.nose")]),
+        (name: "Launch abort", key: "A", actions: [Separate("dragon separation"), Select("superdraco"), Ignite("superdraco")]),
+    ],
+    checks: [
+        (name: "Falcon 9 first stage dry mass (Block 5, legs and grid fins)", parts: ["s1."],
+         dry_mass: (25600.0, "E: falcon9.md §1.2 (27,200 kg burnout less residuals)"), carry: "s1.tank",
+         reason: "brackets, ring frames, fasteners, harness runs and coatings the generators do not derive (falcon9.md §1.2)"),
+        (name: "Falcon 9 second stage dry mass", parts: ["s2."],
+         dry_mass: (4000.0, "E: falcon9.md §1.4"), carry: "s2.tank",
+         reason: "stringers, rings, fittings and harness the generators do not derive"),
+        (name: "Crew Dragon capsule, crew and cargo", parts: ["dragon.capsule", "dragon.nose", "dragon.shield"],
+         dry_mass: (8400.0, "P: capsule dry 7,700 kg (FAA), E: crew 400 kg and cargo 300 kg; falcon9.md §1.7"),
+         carry: "dragon.capsule", reason: "pressure vessel, internal structure, wiring and equipment not listed"),
+        (name: "Crew Dragon trunk", parts: ["dragon.trunk", "dragon.fin#*"],
+         dry_mass: (2600.0, "D: falcon9.md §1.6 (NASA Demo-2 masses)"), carry: "dragon.trunk",
+         reason: "radiators, rings, the claw, wiring"),
+    ],
+    aero: (cd0: 0.3, roughness: 2.0e-5),
+    thermal: (
+        skin_max_k: 1100.0, internal_max_k: 400.0,
+        node_size: 1.0, interior_specific_heat: 900.0, propellant_specific_heat: 1700.0,
+        interior_conductivity: 5.0, internal_coupling: 2.0,
+    ),
+    impact: (max_speed: 8.0),
+    // On the pad: ~1,560 t (with the mount's share of the pad) on the posts'
+    // bottoms (hull points); landing: the legs' feet on their crush cores.
+    contact: (
+        foot: (stiffness: 2.0e6, damping: 5.0e5, stroke: 0.4, friction: 0.8),
+        hull: (stiffness: 5.0e7, damping: 2.0e6, friction: 0.5),
+        stick_speed: 0.05,
+    ),
+    antenna: (gain_dbi: 6.0, power_w: 20.0),
+)

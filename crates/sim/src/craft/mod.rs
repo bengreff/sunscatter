@@ -12,8 +12,11 @@ pub mod build;
 pub(crate) mod build_tests;
 pub mod cells;
 pub mod command;
+mod configure;
 pub mod design;
 pub mod engine;
+#[cfg(test)]
+mod falcon9_tests;
 pub mod file;
 mod layers;
 pub mod mass;

@@ -1,0 +1,13 @@
+// Catalog entry (D101; sim::catalog). Numbers from docs/features/falcon9.md
+// (DATA): P published, E estimate, D derived, U unknown (proposed value).
+(
+    id: "crew-dragon-heat-shield", name: "Crew Dragon PICA-X heat shield", era: 2019, provisional: true,
+    generator: Revolution(
+        // A spherical cap R 4.7 m to the shoulder at r 1.98 m (E); PICA-X 60 mm (U).
+        profile: [(0.0, 0.0), (0.20, 1.36), (0.45, 1.98)],
+        wall: Solid(material: "pica-x", thickness: 0.06),
+        inner_mass: 590.0,                                    // D/E: carrier structure and fittings
+        // The trunk's ring ("the claw") 0.1 m above the shield's centre.
+        stack: [(name: "trunk", z: 0.10, radius: 1.95, normal: -1.0)],
+    ),
+)

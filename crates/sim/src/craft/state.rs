@@ -288,7 +288,7 @@ impl ShipState {
                 k: 295.0,
             }),
             fates: Vec::new(),
-            clamped: false,
+            clamped: def.joints.iter().any(|j| j.kind == super::assembly::JointKind::HoldDown),
             sequence: 0,
             stages: def.sequence.clone(),
             functions: def.functions.clone(),
@@ -470,8 +470,16 @@ impl ShipState {
                 Ok(vec![Effect::Separate(def.joints[j].child)])
             }
             ShipCommand::ReleaseClamps => {
+                // Every hold-down joint lets go: the vehicle leaves the pad's mount.
                 self.clamped = false;
-                Ok(vec![Effect::ReleaseClamps])
+                let mut effects = vec![Effect::ReleaseClamps];
+                for (j, d) in def.joints.iter().enumerate() {
+                    if d.kind == super::assembly::JointKind::HoldDown && self.joints[j].intact {
+                        self.joints[j].intact = false;
+                        effects.push(Effect::Separate(d.child));
+                    }
+                }
+                Ok(effects)
             }
             ShipCommand::ArmChutes => Ok(vec![Effect::ArmChutes]),
             ShipCommand::Rcs(s, on) => {

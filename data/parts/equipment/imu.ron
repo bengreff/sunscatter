@@ -1,0 +1,7 @@
+// Catalog entry (D101; sim::catalog). Provisional: public numbers from memory,
+// to be replaced by docs/features/falcon9.md (DATA) as it lands.
+(
+    id: "imu", name: "Inertial measurement unit", era: 2010, provisional: true,
+    generator: Component(envelope: Box(0.2, 0.2, 0.15), power: 30.0,
+        equipment: Sensor(quantity: "attitude", accuracy: 1.0e-4, rate_hz: 400.0, mass: 5.0)),
+)

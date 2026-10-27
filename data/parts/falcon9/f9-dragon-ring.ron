@@ -1,0 +1,7 @@
+// Catalog entry (D101; sim::catalog). Numbers from docs/features/falcon9.md
+// (DATA): P published, E estimate, D derived, U unknown (proposed value).
+(
+    id: "f9-dragon-ring", name: "Falcon 9 Dragon interface ring", era: 2018, provisional: true,
+    generator: Shell(radius_low: 1.83, radius_high: 1.83, length: 0.29,
+        wall: Solid(material: "al-2219", thickness: 0.004), finish: "white-paint"),
+)

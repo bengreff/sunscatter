@@ -1,0 +1,14 @@
+// Catalog entry (D101; sim::catalog). Numbers from docs/features/falcon9.md
+// (DATA): P published, E estimate, D derived, U unknown (proposed value).
+(
+    id: "f9-s2-tank", name: "Falcon 9 second stage tanks (RP-1 below, LOX above, common dome)", era: 2018, provisional: true,
+    generator: Tank(
+        // Barrels 47.99–51.51 (RP-1) and 51.51–55.72 (LOX); forward skirt to 57.01 (D).
+        radius: 1.83, barrel: 7.73, domes: Elliptical(0.7071),
+        compartments: [("rp1", "RP-1"), ("lox", "LOX")], split: 0.4554,
+        skirt_high: 1.29,
+        material: "al-li-2195", finish: "white-paint",
+        pressure: 4.0e5, safety_factor: 1.4, axial_load: 6.0e5, min_gauge: 0.003,   // D: Dragon at 4.5 g
+        ullage: 0.02,
+    ),
+)

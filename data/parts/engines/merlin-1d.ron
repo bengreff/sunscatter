@@ -1,0 +1,31 @@
+// Catalog entry (D101; sim::catalog). Numbers from docs/features/falcon9.md
+// (DATA): P published, E estimate, D derived, U unknown (proposed value).
+(
+    id: "merlin-1d", name: "Merlin 1D (Block 5, sea level)", era: 2018, provisional: true,
+    generator: Engine(
+        cycle: GasGenerator, oxidizer: "LOX", fuel: "RP-1",
+        mixture_ratio: 2.33,                          // D: the stage's loaded ratio (falcon9.md §2.1)
+        throttle_min: 0.40, gimbal_deg: 5.0, gimbal_rate_dps: 20.0,   // P (40 %), E (±5°), U (20 °/s)
+        // The pad start uses the ground's TEA-TEB; E1, E5, E9 carry three relights (set in the craft).
+        ignitions: 1, igniter: TeaTeb, start_time: 2.0,               // E: T−3 s to health check
+        shutdown_impulse: 2.1e5,                       // U: 0.25 s at full thrust
+        npsp_ox: 1.7e5, npsp_fuel: 1.0e5,              // U: class values
+        nozzle_heat_fraction: 0.0,                     // D: regeneratively cooled to the exit
+        throat_diameter: 0.233, exit_diameter: 0.93,   // D: Aₑ = 0.681 m², ε 16 (P)
+        nozzle_length: 1.04, powerhead_length: 1.30, powerhead_radius: 0.45,   // D, E
+        nozzle_material: "copper-narloy-z", nozzle_thickness: 0.003,
+        thrust_to_weight: 198.0,                       // D: 914 kN / (470 kg · g₀)
+    ),
+    published: {
+        "thrust_sl": (845.0e3, "P: SpaceX, 190,000 lbf (Falcon User's Guide 2021 §2.2), falcon9.md §2.1"),
+        "thrust_vac": (914.0e3, "P: SpaceX May 2016, 205,500 lbf, falcon9.md §2.1"),
+        "isp_vac": (311.0, "P: SpaceX web page 2013, falcon9.md §2.1"),
+        "dry_mass": (470.0, "E: Tom Mueller 2015, 1,030 lb with TVC actuators, falcon9.md §2.1"),
+    },
+    ratings: (reliability: 8.0, life: Starts(30.0), burn_time: 1800.0),
+    failures: [
+        (mode: "turbopump", hazard: PerHour(0.02), outcome: Uncontained, source: "class estimate, low bound (falcon9.md §6 to follow)"),
+        (mode: "controller shutdown", hazard: PerHour(0.1), outcome: BenignShutdown, source: "class estimate, low bound; CRS-1 engine-out (P)"),
+        (mode: "ignition", hazard: PerStart(0.001), outcome: IgnitionFailure, source: "class estimate, low bound"),
+    ],
+)

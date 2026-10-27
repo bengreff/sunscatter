@@ -34,6 +34,20 @@ pub struct RevolutionParams {
     /// A hinge it opens on (a nosecone).
     #[serde(default)]
     pub hinge: Option<Hinge>,
+    /// Stack mounts besides the profile's ends (a ring a trunk attaches to).
+    #[serde(default)]
+    pub stack: Vec<StackSpec>,
+}
+
+/// A stack mount at height `z` of diameter 2·`radius`, facing `normal`
+/// (±1 along +Z).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StackSpec {
+    pub name: String,
+    pub z: f64,
+    pub radius: f64,
+    pub normal: f64,
 }
 
 /// A hinge: point and axis (the part's frame), the open angle (deg), rate
@@ -87,6 +101,9 @@ impl RevolutionParams {
             a.1 + (b.1 - a.1) * ((z - a.0) / (b.0 - a.0)).clamp(0.0, 1.0)
         };
         mounts.extend(radial_mounts(&self.radial, radius, allowable));
+        for s in &self.stack {
+            mounts.push(stack_mount(&s.name, s.z * self.scale_z, s.normal.signum(), 2.0 * s.radius, allowable));
+        }
         Ok(Generated {
             kind: Kind::Part,
             primitives,

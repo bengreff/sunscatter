@@ -1,0 +1,12 @@
+// Catalog entry (D101; sim::catalog). Numbers from docs/features/falcon9.md
+// (DATA): P published, E estimate, D derived, U unknown (proposed value).
+(
+    id: "crew-dragon-capsule", name: "Crew Dragon pressure vessel and backshell", era: 2019, provisional: true,
+    generator: Revolution(
+        // falcon9.md §1.5's profile from the shoulder (z 0.45 there) to the nosecone ring.
+        profile: [(0.0, 1.98), (0.10, 1.98), (2.95, 0.94)],
+        wall: Solid(material: "silicone-ablator", thickness: 0.010),        // E: backshell ablator ~10 mm
+        inner_mass: 2500.0,                                                 // E: welded aluminium pressure vessel, structure
+        control: true,
+    ),
+)

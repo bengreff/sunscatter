@@ -1,0 +1,19 @@
+// Catalog entry (D101; sim::catalog). Numbers from docs/features/falcon9.md
+// (DATA): P published, E estimate, D derived, U unknown (proposed value).
+(
+    id: "f9-s2-cold-gas", name: "Falcon 9 second stage nitrogen thruster pod", era: 2018, provisional: true,
+    generator: Component(
+        envelope: Box(0.3, 0.3, 0.3), power: 15.0,
+        equipment: Thrusters(
+            thrust: 200.0, isp: 70.0, enabled: true, mass: 30.0,      // U: 200 N (falcon9.md §2.4)
+            propellant: ColdGas("nitrogen"),
+            // Placed with +X outward: tangential both ways (roll), inward, aft-firing (settling).
+            nozzles: [
+                (pos: (0.0, 0.0, 0.0), dir: (0.0, 1.0, 0.0)),
+                (pos: (0.0, 0.0, 0.0), dir: (0.0, -1.0, 0.0)),
+                (pos: (0.0, 0.0, 0.0), dir: (-1.0, 0.0, 0.0)),
+                (pos: (0.0, 0.0, 0.0), dir: (0.0, 0.0, 1.0)),
+            ],
+        ),
+    ),
+)

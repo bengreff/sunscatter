@@ -1,0 +1,19 @@
+// Catalog entry (D101; sim::catalog). Numbers from docs/features/falcon9.md
+// (DATA): P published, E estimate, D derived, U unknown (proposed value).
+(
+    id: "draco-cluster", name: "Draco thrusters, a cluster of three (lower sidewall)", era: 2012, provisional: true,
+    generator: Component(
+        envelope: Box(0.3, 0.3, 0.3), power: 10.0,
+        equipment: Thrusters(
+            thrust: 400.0, isp: 300.0, enabled: false, mass: 9.0,
+            propellant: Biprop(oxidizer: "NTO", fuel: "MMH", mixture_ratio: 1.63),
+            // Placed with +X outward: tangential both ways (roll, yaw) and inward.
+            nozzles: [
+                (pos: (0.0, 0.0, 0.0), dir: (0.0, 1.0, 0.0)),
+                (pos: (0.0, 0.0, 0.0), dir: (0.0, -1.0, 0.0)),
+                (pos: (0.0, 0.0, 0.0), dir: (-1.0, 0.0, 0.0)),
+            ],
+        ),
+    ),
+    published: { "thrust": (400.0, "P: SpaceX, 90 lbf; falcon9.md §2.3"), "isp": (300.0, "P: SpaceX 2009; falcon9.md §2.3") },
+)

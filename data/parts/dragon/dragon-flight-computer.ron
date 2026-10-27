@@ -1,0 +1,7 @@
+// Catalog entry (D101; sim::catalog). Numbers from docs/features/falcon9.md
+// (DATA): P published, E estimate, D derived, U unknown (proposed value).
+(
+    id: "dragon-flight-computer", name: "Crew Dragon flight computers (triplex)", era: 2019, provisional: true,
+    generator: Component(envelope: Box(0.5, 0.4, 0.3), power: 300.0, control: true,
+        equipment: Computer(channels: 3, mass: 100.0)),                        // E: avionics and displays
+)

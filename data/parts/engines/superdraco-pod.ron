@@ -1,0 +1,30 @@
+// Catalog entry (D101; sim::catalog). Numbers from docs/features/falcon9.md
+// (DATA): P published, E estimate, D derived, U unknown (proposed value).
+(
+    id: "superdraco-pod", name: "SuperDraco pod (two engines)", era: 2020, provisional: true,
+    generator: Component(
+        envelope: Box(0.4, 0.6, 0.9), power: 20.0,
+        equipment: Engines(
+            engine: (
+                cycle: PressureFed, oxidizer: "NTO", fuel: "MMH", mixture_ratio: 1.63,   // D (§1.5)
+                throttle_min: 0.2, gimbal_deg: 0.0, ignitions: 1, igniter: Hypergolic,  // P 20–100 %
+                start_time: 0.1,                                                      // P: 100 ms
+                throat_diameter: 0.08, exit_diameter: 0.25, nozzle_length: 0.3,
+                powerhead_length: 0.3, powerhead_radius: 0.1,
+                nozzle_material: "inconel-718", nozzle_thickness: 0.003,
+                thrust_to_weight: 180.0,                                              // U: ~40 kg each
+            ),
+            // Canted 15° outward (U): the force pushes the capsule up and in.
+            nozzles: [
+                (pos: (0.0, 0.15, -0.3), dir: (-0.2588, 0.0, 0.9659)),
+                (pos: (0.0, -0.15, -0.3), dir: (-0.2588, 0.0, 0.9659)),
+            ],
+            housing: 20.0,
+        ),
+    ),
+    published: {
+        "thrust_sl": (71.0e3, "P: SpaceX 2014, 16,000 lbf, falcon9.md §2.3"),
+        "thrust_vac": (73.0e3, "E: sea-level thrust over the 235 s / 241 s Isp ratio; falcon9.md §2.3"),
+        "isp_vac": (241.0, "E: 235 s at sea level (unsourced), vacuum estimate; falcon9.md §2.3"),
+    },
+)

@@ -41,8 +41,8 @@ pub use output::{
     LifeSupport, Mechanism, MountKind, MountPoint, Nozzle, Port, PortKind, Propellant, Sensor, Solar, TankSpec,
     Thrusters, Valve, ValveKind,
 };
-pub use revolution::RevolutionParams;
-pub use structure::{Dome, ShellParams, TankParams, ThrustParams};
+pub use revolution::{Hinge, RevolutionParams, StackSpec};
+pub use structure::{Dome, PadParams, RadialSet, ShellParams, TankParams, ThrustParams};
 pub use wall::Wall;
 
 use crate::body::DataError;
@@ -183,6 +183,8 @@ pub enum Generator {
     Revolution(RevolutionParams),
     /// Box or cylinder equipment inside a part.
     Component(ComponentParams),
+    /// The launch pad's mount the vehicle stands on until the clamps release.
+    Pad(PadParams),
 }
 
 /// What generators read.
@@ -266,6 +268,7 @@ impl Generator {
             Generator::Leg(p) => p.set(key, value),
             Generator::Revolution(p) => p.set(key, value),
             Generator::Component(p) => p.set(key, value),
+            Generator::Pad(p) => p.set(key, value),
         }
     }
 
@@ -280,6 +283,7 @@ impl Generator {
             Generator::Leg(p) => p.generate(ctx),
             Generator::Revolution(p) => p.generate(ctx),
             Generator::Component(p) => p.generate(ctx, published),
+            Generator::Pad(p) => p.generate(ctx),
         }
     }
 }

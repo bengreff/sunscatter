@@ -1,0 +1,7 @@
+// Catalog entry (D101; sim::catalog). Numbers from docs/features/falcon9.md
+// (DATA): P published, E estimate, D derived, U unknown (proposed value).
+(
+    id: "dragon-helium-copv", name: "Dragon helium pressurant COPV", era: 2019, provisional: true,
+    generator: Component(envelope: Sphere(0.288),                         // U: 0.1 m³ at ~4,500 psi (E)
+        equipment: Bottle(gas: "helium", pressure: 3.1e7, temperature_k: 293.0, safety_factor: 1.5, performance: 2.5e5)),
+)

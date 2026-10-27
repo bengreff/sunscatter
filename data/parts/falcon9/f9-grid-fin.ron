@@ -1,0 +1,11 @@
+// Catalog entry (D101; sim::catalog). Numbers from docs/features/falcon9.md
+// (DATA): P published, E estimate, D derived, U unknown (proposed value).
+(
+    id: "f9-grid-fin", name: "Falcon 9 titanium grid fin", era: 2018, provisional: true,
+    generator: GridFin(
+        // 1.5 m span × 1.2 m (E), lattice ~0.2 m deep (E), cells ~0.12 m (E); cast titanium (P).
+        span: 1.5, width: 1.2, depth: 0.2, cell: 0.12, web: 0.006, material: "ti-6al-4v",
+        deflection_deg: 20.0, rate_dps: 30.0, deploy_rate_dps: 45.0, deployed_deg: 90.0,   // U, E
+        actuator: Hydraulic,                                                              // P
+    ),
+)

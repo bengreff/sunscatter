@@ -1,0 +1,12 @@
+// Catalog entry (D101; sim::catalog). Numbers from docs/features/falcon9.md
+// (DATA): P published, E estimate, D derived, U unknown (proposed value).
+(
+    id: "crew-dragon-trunk", name: "Crew Dragon trunk", era: 2019, provisional: true,
+    generator: Shell(
+        // 3.7 m (E), Ø 3.66 at the base to ~3.9 m at the top (E); half solar cells, half radiator (P).
+        radius_low: 1.83, radius_high: 1.95, length: 3.7,
+        wall: Sandwich(face: "cfrp", face_thickness: 0.0015, core: "al-honeycomb", core_thickness: 0.025),
+        finish: "solar-cells",
+        radial: [(name: "fin", z: 0.6, count: 4, start_deg: 0.0)],
+    ),
+)

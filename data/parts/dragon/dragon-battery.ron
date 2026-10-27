@@ -1,0 +1,8 @@
+// Catalog entry (D101; sim::catalog). Numbers from docs/features/falcon9.md
+// (DATA): P published, E estimate, D derived, U unknown (proposed value).
+(
+    id: "dragon-battery", name: "Crew Dragon lithium-polymer battery", era: 2019, provisional: true,
+    generator: Component(envelope: Box(0.5, 0.4, 0.3),
+        equipment: Battery(capacity_wh: 7500.0, voltage: 120.0, specific_energy: 150.0, internal_resistance: 0.05, max_power: 5000.0),
+        max_k: 330.0),
+)

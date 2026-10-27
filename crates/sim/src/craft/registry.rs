@@ -26,20 +26,15 @@ use std::sync::{Arc, Mutex, OnceLock};
 impl CraftId {
     /// The craft this one is a piece of (itself for a whole craft).
     pub fn base(&self) -> &str {
-        self.0.split('#').next().unwrap_or("")
+        self.0.split(['#', '@']).next().unwrap_or("")
     }
 
     /// The parts of the base craft this piece holds (their ids, ascending);
     /// `None` for a whole craft.
     pub fn parts(&self) -> Option<Vec<u32>> {
-        let (_, list) = self.0.split_once('#')?;
-        let mut out = Vec::new();
-        for range in list.split(',').filter(|r| !r.is_empty()) {
-            let (a, b) = range.split_once('-').unwrap_or((range, range));
-            let (a, b): (u32, u32) = (a.parse().ok()?, b.parse().ok()?);
-            out.extend(a..=b);
-        }
-        Some(out)
+        let plain = self.0.split('@').next().unwrap_or("");
+        let (_, list) = plain.split_once('#')?;
+        super::configure::ranges(list)
     }
 
     /// The piece of craft `base` holding the parts with ids `parts`.
@@ -85,12 +80,22 @@ pub fn definition(id: &CraftId) -> Result<CraftDef, String> {
     } else {
         super::load_definition(&super::default_craft_dir().join(base)).map_err(|e| e.to_string())?
     };
-    let Some(ids) = id.parts() else { return Ok(whole) };
-    let local: Option<Vec<u32>> =
-        ids.iter().map(|&p| whole.parts.iter().position(|q| q.id == p).map(|i| i as u32)).collect();
-    match local {
-        Some(local) if !local.is_empty() => Ok(whole.subset(&local)),
-        _ => Err(format!("craft {:?}: parts not in {base:?}", id.0)),
+    let piece = match id.parts() {
+        None => whole,
+        Some(ids) => {
+            let local: Option<Vec<u32>> =
+                ids.iter().map(|&p| whole.parts.iter().position(|q| q.id == p).map(|i| i as u32)).collect();
+            match local {
+                Some(local) if !local.is_empty() => whole.subset(&local),
+                _ => return Err(format!("craft {:?}: parts not in {base:?}", id.0)),
+            }
+        }
+    };
+    let deployed = id.deployed();
+    if deployed.is_empty() {
+        Ok(piece)
+    } else {
+        piece.deploy(&deployed).map_err(|e| format!("craft {:?}: {e}", id.0))
     }
 }
 

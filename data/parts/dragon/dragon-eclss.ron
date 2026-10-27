@@ -1,0 +1,7 @@
+// Catalog entry (D101; sim::catalog). Numbers from docs/features/falcon9.md
+// (DATA): P published, E estimate, D derived, U unknown (proposed value).
+(
+    id: "dragon-eclss", name: "Crew Dragon life support", era: 2019, provisional: true,
+    generator: Component(envelope: Box(1.0, 0.8, 0.6), power: 600.0,
+        equipment: LifeSupport(co2_removal: 4.0, o2_supply: 3.4, cabin_volume: 9.3, mass: 300.0)),   // P 9.3 m³, E mass
+)

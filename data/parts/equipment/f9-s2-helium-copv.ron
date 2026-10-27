@@ -1,0 +1,10 @@
+// Catalog entry (D101; sim::catalog). Numbers from docs/features/falcon9.md
+// (DATA): P published, E estimate, D derived, U unknown (proposed value).
+(
+    id: "f9-s2-helium-copv", name: "Falcon 9 second stage helium COPV (in the LOX)", era: 2018, provisional: true,
+    generator: Component(
+        // 3 × ~0.19 m³ (P three, D volume), 5,500 psi (E).
+        envelope: Cylinder(0.25, 0.97),
+        equipment: Bottle(gas: "helium", pressure: 3.79e7, temperature_k: 66.5, safety_factor: 1.5, performance: 2.5e5),
+    ),
+)

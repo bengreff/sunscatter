@@ -1,0 +1,25 @@
+// Catalog entry (D101; sim::catalog). Numbers from docs/features/falcon9.md
+// (DATA): P published, E estimate, D derived, U unknown (proposed value).
+(
+    id: "merlin-1d-vac", name: "Merlin Vacuum (MVac D)", era: 2018, provisional: true,
+    generator: Engine(
+        cycle: GasGenerator, oxidizer: "LOX", fuel: "RP-1",
+        mixture_ratio: 2.58,                           // D: the stage's loaded ratio (§2.2)
+        // Isp at sea level from the 7.03 m² exit (D): it is not run there.
+        performance: (thrust_vac: 981.0e3, isp_vac: 348.0, isp_sl: 95.3),
+        throttle_min: 0.64, gimbal_deg: 5.0, gimbal_rate_dps: 10.0,   // P (64 %), U (±5°, 10 °/s)
+        ignitions: 3, igniter: TeaTeb, start_time: 3.0,               // E (≥3 on a standard stage), E (3 s)
+        npsp_ox: 1.7e5, npsp_fuel: 1.0e5,
+        nozzle_heat_fraction: 0.010,                   // E: D077, the niobium extension near 1,400–1,600 K
+        throat_diameter: 0.233, exit_diameter: 3.0,    // D: ε 165 (P) on the Merlin 1D throat
+        nozzle_length: 4.13, powerhead_length: 1.30, powerhead_radius: 0.45,
+        nozzle_material: "copper-narloy-z", nozzle_thickness: 0.003,
+        extension: (material: "niobium-c103", thickness: 0.001, finish: "silicide-coating", start: 0.25),
+        thrust_to_weight: 154.0,                       // D: 981 kN / (650 kg · g₀)
+    ),
+    published: {
+        "thrust_vac": (981.0e3, "P: Falcon User's Guide Table 2-1, 220,500 lbf, falcon9.md §2.2"),
+        "isp_vac": (348.0, "P: SpaceX web page, falcon9.md §2.2"),
+    },
+    ratings: (reliability: 8.0, life: Starts(4.0), burn_time: 600.0),
+)

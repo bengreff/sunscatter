@@ -197,10 +197,14 @@ impl LegParams {
             return Err("leg: length, depth, width and foot radius must be positive".into());
         }
         let skin = self.wall.skin(ctx.materials, wall::finish(ctx.materials, &self.finish)?)?;
-        let strut = Shape::Box { center: DVec3::new(d / 2.0, 0.0, l / 2.0), half: DVec3::new(d, w, l) / 2.0 };
+        // A round strut (it turns through any angle when deployed) of the
+        // section's mean width; the foot pad's axis is vertical once deployed.
+        let r = 0.25 * (d + w);
+        let strut = Shape::Strut { from: DVec3::new(d / 2.0, 0.0, 0.0), to: DVec3::new(d / 2.0, 0.0, l), radius: r };
         let foot_at = DVec3::new(d / 2.0, 0.0, l);
-        let foot = Shape::Cylinder { base: foot_at, axis: DVec3::X * (d / 2.0).max(0.1), radius: self.foot_radius };
-        let area = 2.0 * (d + w) * l;
+        let up = crate::math::rotate_axis(DVec3::Z, DVec3::Y, -self.deployed_deg * crate::math::PI / 180.0);
+        let foot = Shape::Cylinder { base: foot_at, axis: up * 0.15, radius: self.foot_radius };
+        let area = crate::math::TAU * r * l;
         let derived = vec![
             ("strut".to_string(), area * self.wall.areal_mass(ctx.materials)?),
             ("foot".to_string(), self.foot_mass),

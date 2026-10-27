@@ -1,0 +1,8 @@
+// Catalog entry (D101; sim::catalog). Numbers from docs/features/falcon9.md
+// (DATA): P published, E estimate, D derived, U unknown (proposed value).
+(
+    id: "crew-dragon-trunk-fin", name: "Crew Dragon trunk fin", era: 2019, provisional: true,
+    generator: Fin(root_chord: 1.0, tip_chord: 0.5, span: 0.45,
+        wall: Sandwich(face: "cfrp", face_thickness: 0.001, core: "al-honeycomb", core_thickness: 0.03),
+        finish: "white-paint"),
+)

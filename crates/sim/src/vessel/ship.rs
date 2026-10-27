@@ -52,6 +52,14 @@ impl Vessel {
         self.ship.as_ref()
     }
 
+    /// Whether the pad's hold-down clamps hold it (a hold-down joint
+    /// intact): it stays landed, welded to the ground, until they release.
+    pub fn clamped(&self) -> bool {
+        let Some((def, state)) = self.ship_parts() else { return false };
+        let hold = |j: &crate::craft::ship::JointDef| j.kind == crate::craft::assembly::JointKind::HoldDown;
+        state.clamped && def.joints.iter().zip(&state.joints).any(|(d, s)| hold(d) && s.intact)
+    }
+
     /// The ship definition (a craft of catalog parts).
     pub fn ship_def(&self) -> Option<Arc<ShipDef>> {
         self.craft.design().ship.clone()
@@ -207,7 +215,25 @@ impl Vessel {
         Some((name, effects))
     }
 
-    fn after_command(&mut self, world: &World, effects: &[Effect]) {
+    /// The part ids whose mechanisms are deployed now (at their deployed
+    /// angle): the configuration the vessel's shape is built in
+    /// (`CraftId::deployed`).
+    pub fn deployed_parts(&self) -> Vec<u32> {
+        let Some((def, state)) = self.ship_parts() else { return Vec::new() };
+        let mut out: Vec<u32> = (def.mechanisms.iter().zip(&state.mechanisms))
+            .filter(|(d, s)| d.item.deployed_deg != d.item.stowed_deg && s.angle == d.item.deployed_deg)
+            .map(|(d, _)| d.part)
+            .collect();
+        out.sort_unstable();
+        out.dedup();
+        out
+    }
+
+    /// After commands: the readouts' engine; separations, and a shape whose
+    /// mechanisms moved (legs out, grid fins in the flow), become the
+    /// breakup the game applies (`plan_breakup`: the pieces, or one piece
+    /// in its new configuration).
+    fn after_command(&mut self, _world: &World, effects: &[Effect]) {
         self.sync_engine();
         let parts = &self.craft.design().parts;
         let separated: Vec<u32> = effects
@@ -217,7 +243,8 @@ impl Vessel {
                 _ => None,
             })
             .collect();
-        if separated.is_empty() {
+        let moved = self.deployed_parts() != self.craft.id.deployed();
+        if separated.is_empty() && !moved {
             return;
         }
         let epoch = self.time;
@@ -228,7 +255,6 @@ impl Vessel {
             separated: Vec::new(),
         });
         b.separated.extend(separated);
-        let _ = world;
     }
 }
 

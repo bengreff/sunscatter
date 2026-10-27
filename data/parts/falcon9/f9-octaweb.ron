@@ -1,0 +1,12 @@
+// Catalog entry (D101; sim::catalog). Numbers from docs/features/falcon9.md
+// (DATA): P published, E estimate, D derived, U unknown (proposed value).
+(
+    id: "f9-octaweb", name: "Falcon 9 octaweb and engine section", era: 2018, provisional: true,
+    generator: ThrustStructure(
+        // z 1.0–4.30; gimbal plane z 2.34 (centre engine 0.25 m lower); ring of 8 at r 1.29 (D).
+        radius: 1.83, length: 3.3, wall: Solid(material: "al-7075", thickness: 0.008), finish: "black-paint",
+        ring: 8, ring_radius: 1.29, ring_start_deg: -45.0, centre: true, engine_z: 1.34, centre_drop: 0.25,
+        // Legs hinge at z 1.5 (E), aligned with the hold-down points.
+        radial: [(name: "leg", z: 0.5, count: 4, start_deg: 0.0)],
+    ),
+)

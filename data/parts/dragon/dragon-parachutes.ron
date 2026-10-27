@@ -1,0 +1,16 @@
+// Catalog entry (D101; sim::catalog). Numbers from docs/features/falcon9.md
+// (DATA): P published, E estimate, D derived, U unknown (proposed value).
+(
+    id: "dragon-parachutes", name: "Crew Dragon parachutes (2 drogues Ø 5.8 m, 4 mains Ø 35.4 m)", era: 2019, provisional: true,
+    generator: Component(envelope: Box(1.0, 0.8, 0.6),
+        equipment: Chute(mass: 400.0, spec: (                                   // E mass; P diameters (FAA)
+            mount: (0.0, 0.0, 0.3),
+            // Cd·A: drogues ~0.55 × their area; mains for ~7 m/s at ~9.5 t. Opening loads U.
+            drogue: (cd_area: 29.0, diameter: 5.8, fill_constant: 10.0, reefing: [(cd_fraction: 0.4, until: 6.0)],
+                     deploy_max_q: 9.5e3, max_load: 3.0e5),
+            main: (cd_area: 2900.0, diameter: 35.4, fill_constant: 7.0,
+                   reefing: [(cd_fraction: 0.1, until: 6.0), (cd_fraction: 0.3, until: 12.0)],
+                   deploy_max_q: 2.0e3, max_load: 1.5e6),
+            main_height: 1800.0,
+        ))),
+)

@@ -1,0 +1,9 @@
+// Catalog entry (D101; sim::catalog). Provisional: public numbers from memory,
+// to be replaced by docs/features/falcon9.md (DATA) as it lands.
+(
+    id: "f9-s2-nitrogen-copv", name: "Falcon 9 second stage nitrogen COPV", era: 2015, provisional: true,
+    generator: Component(
+        envelope: Sphere(0.25),
+        equipment: Bottle(gas: "nitrogen", pressure: 3.0e7, temperature_k: 293.0, safety_factor: 1.5, performance: 2.5e5),
+    ),
+)
