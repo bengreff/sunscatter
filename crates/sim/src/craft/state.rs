@@ -193,6 +193,9 @@ pub struct ShipState {
     pub stages: Vec<Stage>,
     #[serde(default)]
     pub functions: Vec<Stage>,
+    /// The systems' own state (`sim::systems::runtime`, RUNTIME).
+    #[serde(default)]
+    pub runtime: crate::systems::Runtime,
 }
 
 /// Each tank's region, capacity and liquid (kg), each bottle's place and
@@ -292,6 +295,7 @@ impl ShipState {
             sequence: 0,
             stages: def.sequence.clone(),
             functions: def.functions.clone(),
+            runtime: crate::systems::Runtime::initial(def),
         }
     }
 
@@ -334,6 +338,7 @@ impl ShipState {
             sequence,
             stages: stages.into_iter().flatten().collect(),
             functions: mine(&self.functions).into_iter().flatten().collect(),
+            runtime: self.runtime.partition(kept),
         }
     }
 

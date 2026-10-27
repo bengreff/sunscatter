@@ -52,6 +52,7 @@ pub mod limbo;
 pub mod pointing;
 mod segment;
 mod ship;
+mod ship_tick;
 pub mod split;
 mod systems;
 mod trajectory;
@@ -387,8 +388,8 @@ impl Vessel {
     /// Whether the engine runs with these controls (a throttle, and
     /// propellant or debug mode).
     pub fn engine_running(&self, controls: &Controls) -> bool {
-        if let Some(thrust) = self.ship_thrust(controls.throttle, 0.0) {
-            return thrust.thrust > 0.0;
+        if let Some(on) = self.ship_engines_on() {
+            return on;
         }
         let engine = &self.craft.engine;
         engine.thrust_vac > 0.0 && engine.setting(controls.throttle) > 0.0 && (self.debug || self.propellant > 0.0)
@@ -510,6 +511,12 @@ impl Vessel {
         let changed = self.rest_mode.is_some_and(|m| m != mode);
         self.rest_mode = Some(mode);
         let holds = std::mem::replace(&mut self.checked, Checked(true)).0 || self.holds_where_landed(world);
+        // Held by the clamps with its systems busy (engines spooling, the
+        // release armed): ticks in place (`ship_tick`).
+        if self.clamped() && self.ship_needs_ticks() {
+            self.advance_held(world, target, controls);
+            return;
+        }
         // Held by the pad's clamps, it stays put whatever runs (the mount is
         // anchored to the ground until the clamps release).
         let free = !self.clamped();
@@ -622,6 +629,8 @@ impl Vessel {
     }
 }
 
+#[cfg(test)]
+mod ship_systems_tests;
 #[cfg(test)]
 mod ship_tests;
 #[cfg(test)]

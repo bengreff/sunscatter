@@ -88,6 +88,8 @@ pub(super) struct TickStart<'d> {
     lift: DVec3,
     sun_body: DVec3,
     att0: DQuat,
+    /// Ambient pressure (Pa).
+    p: f64,
     out: EngineOutput,
     /// A craft of parts: what the tick draws from each tank and bottle.
     ship: Option<super::ship::ShipTick>,
@@ -351,6 +353,11 @@ impl Vessel {
 
     pub(super) fn advance_powered(&mut self, world: &World, target: crate::time::Epoch, controls: &Controls) {
         while self.time.add_seconds(TICK) <= target {
+            // Orders due by this tick's start (a craft of parts).
+            self.apply_orders(world);
+            if self.breakup.is_some() {
+                return;
+            }
             let design = self.craft.design().clone();
             let until = self.time.add_seconds(TICK);
             let Some(start) = self.begin_tick(world, controls, &design, (TICK, until)) else {
@@ -402,7 +409,7 @@ impl Vessel {
         (dt, until): (f64, Epoch),
     ) -> Option<TickStart<'d>> {
         let Phase::Powered { anchor, r, v } = self.phase else { unreachable!() };
-        let engine_on = self.engine_running(controls);
+        let engine_on = self.engine_running(controls) || self.ship_needs_ticks();
         let near = self.nearest_surface(world, anchor, r);
         let live = self.live_height();
         let contact_body = near.filter(|&(_, h)| h <= live).map(|(b, _)| b);
@@ -452,6 +459,7 @@ impl Vessel {
             lift,
             sun_body,
             att0,
+            p,
             out,
             ship,
             cmd,
@@ -500,8 +508,11 @@ impl Vessel {
     pub(super) fn finish_tick(&mut self, world: &World, s: TickStart, end: TickEnd, controls: &Controls) -> bool {
         let TickStart {
             anchor,
+            r,
             v,
             dt,
+            p,
+            before,
             until,
             engine_on,
             contact_body,
@@ -516,14 +527,18 @@ impl Vessel {
             ..
         } = s;
         let TickEnd { r: r1, lo, v: v1, touching, delta } = end;
-        let (engine_heat, propellant) = match &ship {
-            Some(tick) => (tick.heat, self.consume(tick, cmd.rcs, dt)),
+        let (engine_heat, propellant, effects) = match &ship {
+            Some(tick) => {
+                let m = super::ship_tick::TickMotion { anchor, dt, r0: r, r1, v0: v, v1, omega0: before.0.omega, p };
+                let (left, effects) = self.ship_after_tick(world, tick, cmd.rcs, &m, controls.throttle);
+                (tick.heat, left, effects)
+            }
             None => {
                 let engine = self.craft.engine;
                 let mdot = out.mdot + cmd.rcs.dot(self.craft.rcs_flow);
                 let mdot = mdot + self.systems.consumables.boil_off;
                 let left = if self.debug { self.propellant } else { (self.propellant - mdot * dt).max(0.0) };
-                (engine.heat(out.thrust, out.mdot), left)
+                (engine.heat(out.thrust, out.mdot), left, Vec::new())
             }
         };
         let heat_tick = aero.as_ref().zip(air.as_ref());
@@ -536,6 +551,9 @@ impl Vessel {
             self.bubble.lo = lo;
         }
         self.tick_accel = Some((v1 - v) / dt);
+        if ship.is_some() {
+            self.after_command(world, &effects);
+        }
         let flow = aero.as_ref().map(|a| a.flow(att0));
         self.check_limits(world, flow.as_ref(), contact_body.map(|b| (anchor, b)));
         self.systems_after_tick(world);

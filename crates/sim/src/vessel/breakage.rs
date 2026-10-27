@@ -43,6 +43,9 @@ impl Vessel {
             self.check_overheat();
             return;
         }
+        // A breakup already pending this tick (a separation, a new shape)
+        // stays, whatever else breaks.
+        let pending = self.breakup.is_some();
         let mut b = self.breakup.take().unwrap_or(Breakup {
             epoch: self.time,
             destroyed: vec![],
@@ -77,7 +80,7 @@ impl Vessel {
             }
         }
         b.destroyed.sort_by_key(|d| d.0);
-        if !(b.destroyed.is_empty() && b.torn.is_empty()) {
+        if pending || !(b.destroyed.is_empty() && b.torn.is_empty()) {
             self.breakup = Some(b);
         }
     }

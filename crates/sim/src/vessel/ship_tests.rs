@@ -40,8 +40,8 @@ fn full(throttle: f64) -> Controls {
 }
 
 /// On the pad: tanks at their loading, nothing running, standing on its
-/// lowest points. The sequence's ignition starts the four engines; at full
-/// throttle it lifts off, each tank drained by its share of the mixture
+/// lowest points. The sequence's ignition starts the four engines (a 1 s
+/// start transient, `systems::propulsion`); at full throttle it lifts off, each tank drained by its share of the mixture
 /// ratio, the vessel's propellant the ship's consumables, its centre of
 /// mass moving as the tanks drain unequally.
 #[test]
@@ -51,12 +51,21 @@ fn a_craft_of_parts_lifts_off_on_its_engines() {
     assert!(matches!(v.phase, Phase::Landed { .. }), "it stands on the pad");
     let def = v.ship_def().unwrap();
     let start = v.ship().unwrap().clone();
-    assert_eq!(start, ShipState::initial(&def));
+    let mut loaded = ShipState::initial(&def);
+    loaded.runtime.launch = Some(t0());
+    assert_eq!(start, loaded);
     assert!((v.propellant() - start.consumables(&def)).abs() < 1e-9);
     let com0 = v.mass_props().com;
+    let (height0, m0) = (v.contact_height(), v.mass());
     assert!(!v.engine_running(&full(1.0)), "engines off");
     let (name, _) = v.next_stage(&w).unwrap();
     assert_eq!(name, "Ignition");
+    assert!(v.ship().unwrap().engines.iter().all(|e| e.status == EngineStatus::Starting));
+    assert_eq!(v.engine_thrusts(1.0, 0.0).unwrap(), vec![0.0; 4], "nothing yet");
+    v.advance(&w, t0().add_seconds(0.5), &full(1.0), usize::MAX);
+    let half = v.engine_thrusts(1.0, 0.0).unwrap()[0];
+    assert!(half > 40.0e3 && half < 60.0e3, "half way up its start: {half}");
+    v.advance(&w, t0().add_seconds(1.05), &full(1.0), usize::MAX);
     assert!(v.ship().unwrap().engines.iter().all(|e| e.status == EngineStatus::Running));
     // Each engine's thrust for its flame, from the same rule as the tick.
     let each = v.engine_thrusts(1.0, 0.0).unwrap();
@@ -68,14 +77,14 @@ fn a_craft_of_parts_lifts_off_on_its_engines() {
     assert!(bad[0].contains("names no joint"), "{bad:?}");
     v.set_functions(vec![stage(ShipCommand::Deploy("leg#*".into()))]).unwrap();
     assert!(v.ship().unwrap().functions[0].pinned);
-    let (height0, m0) = (v.contact_height(), v.mass());
     v.advance(&w, t0().add_seconds(5.0), &full(1.0), usize::MAX);
     let s = v.ship().unwrap();
     let (fuel, ox) = (start.tanks[0].liquid - s.tanks[0].liquid, start.tanks[1].liquid - s.tanks[1].liquid);
     assert!(fuel > 0.0 && (ox / fuel - 2.4).abs() < 1e-9, "by the mixture ratio: {ox} / {fuel}");
-    // Four engines' flow at full throttle for the ticks since ignition.
+    // Four engines' flow at full throttle for the ticks since ignition, less
+    // half the 1 s start (the smooth step's mean) and its first tick.
     let mdot = 4.0 * 100.0e3 / (320.0 * G0);
-    assert!(((fuel + ox) / mdot - 5.0).abs() < 0.03, "{} s of burn", (fuel + ox) / mdot);
+    assert!(((fuel + ox) / mdot - 4.5).abs() < 0.05, "{} s of burn", (fuel + ox) / mdot);
     let spent = m0 - v.mass();
     assert!(spent >= fuel + ox - 1e-6 && spent < fuel + ox + 1.0, "the thrusters' gas at most: {spent}");
     assert!((v.propellant() - s.consumables(&def)).abs() < 1e-9);
@@ -187,10 +196,15 @@ fn the_falcon_9_stands_on_the_pad_and_lifts_off() {
             .collect()
     };
     assert_eq!(merlins(&v), [3, 3, 0, 0, 0, 3, 0, 0, 0], "E9, E1…E8");
+    let loaded = v.propellant();
     v.advance(&w, t0().add_seconds(2.0), &full(1.0), usize::MAX);
     assert!(matches!(v.phase, Phase::Landed { .. }), "held by the clamps");
-    // Liftoff: the clamps let go; the mount stays behind as ground.
+    assert!(v.propellant() < loaded - 2_000.0, "the engines burn on the pad: {}", loaded - v.propellant());
+    // Liftoff, the real pad's rule: armed, the clamps let go at the first
+    // tick all nine deliver their rated thrust; the mount stays as ground.
     assert_eq!(v.next_stage(&w).unwrap().0, "Liftoff");
+    assert!(v.clamped(), "armed, not yet released");
+    v.advance(&w, v.time.add_seconds(0.1), &full(1.0), usize::MAX);
     assert!(!v.clamped());
     let plan = v.plan_breakup().expect("the mount separates");
     assert_eq!(plan.pieces.len(), 2);
@@ -257,6 +271,8 @@ fn deploying_the_legs_reshapes_the_vessel() {
     v.advance(&w, t0().add_seconds(5.0), &Controls::default(), usize::MAX);
     use crate::craft::command::ShipCommand;
     v.command(&w, &ShipCommand::Deploy("leg#*".into())).unwrap();
+    assert!(v.plan_breakup().is_none(), "the legs take their time");
+    v.advance(&w, v.time.add_seconds(10.0), &Controls::default(), usize::MAX);
     let plan = v.plan_breakup().expect("a new shape to build");
     assert_eq!(plan.pieces.len(), 1);
     assert!(plan.ids[0].0.starts_with("test-rocket#0-10@"), "{}", plan.ids[0].0);

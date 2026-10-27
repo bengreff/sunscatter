@@ -1,28 +1,25 @@
 //! A vessel of a craft of catalog parts (D100, D104; ship-model.md §5.1,
 //! §5.3): its ship state, the mass properties from every tank's own fill,
-//! each engine at its own mount with its own Isp, throttle range and feed
-//! (thrust and moments summed, `craft::engine::ship_thrust`), the RCS's
-//! authority from its thrusters' geometry about the centre of mass, the
-//! consumption from each tank and bottle, commands and the stage sequence,
-//! and a separation at a joint (a breakup the game applies as any other).
+//! each engine at its own mount from its own state and level
+//! (`systems::propulsion`, the one engine model), the RCS's authority from
+//! its thrusters' geometry about the centre of mass, commands and the stage
+//! sequence (applied at a tick: [`super::ship_tick`]), and a separation at a
+//! joint (a breakup the game applies as any other).
 //!
 //! The vessel's `propellant` is the ship state's consumables (liquid and
-//! gas): coasts, predictions and saves see the same mass (a coast changes
-//! it only through its continuous laws; the tanks keep their shares,
-//! `ShipState::scale_to`). The pilot's throttle and the readouts' engine
-//! (`CraftParams::engine`) are the selected main engines'.
+//! gas): coasts, predictions and saves see the same mass. The readouts'
+//! engine (`CraftParams::engine`) is the selected main engines'.
 
 use super::attitude::{Actuators, Gimbal};
 use super::split::{Breakup, LOST_CHUTE};
 use super::{Vessel, TICK};
-use crate::catalog::Propellant;
 use crate::craft::command::{ShipCommand, Stage};
-use crate::craft::engine::{file_of, ship_thrust, ShipThrust};
+use crate::craft::engine::{file_of, ShipThrust};
 use crate::craft::parts::combine_engines;
-use crate::craft::ship::{Feed, ShipDef};
+use crate::craft::ship::ShipDef;
 use crate::craft::state::{Effect, ShipState};
 use crate::craft::{Engine, EngineOutput, MassProps};
-use crate::fluids::fluids;
+use crate::systems::{command, propulsion, ship::block_fed, OrderKind};
 use crate::world::World;
 use glam::DVec3;
 use std::sync::Arc;
@@ -53,7 +50,7 @@ impl Vessel {
     }
 
     /// Whether the pad's hold-down clamps hold it (a hold-down joint
-    /// intact): it stays landed, welded to the ground, until they release.
+    /// intact): it stays on the pad, fixed to the ground, until they release.
     pub fn clamped(&self) -> bool {
         let Some((def, state)) = self.ship_parts() else { return false };
         let hold = |j: &crate::craft::ship::JointDef| j.kind == crate::craft::assembly::JointKind::HoldDown;
@@ -67,10 +64,12 @@ impl Vessel {
 
     /// Starts the ship state of a craft of catalog parts: tanks at their
     /// loading, the readouts' engine the selected one; without parachutes
-    /// there are none to open.
+    /// there are none to open. The failure fates are drawn from its launch
+    /// (its creation epoch).
     pub(super) fn init_ship(&mut self) {
         let Some(def) = self.ship_def() else { return };
-        let state = ShipState::initial(&def);
+        let mut state = ShipState::initial(&def);
+        state.runtime.launch = Some(self.time);
         self.propellant = state.consumables(&def);
         self.ship = Some(state);
         self.sync_engine();
@@ -92,8 +91,8 @@ impl Vessel {
         self.craft.engine = Engine::from_file(&combine_engines(&files));
     }
 
-    /// The tanks and bottles at `self.propellant` in total (after a coast's
-    /// continuous laws or a set propellant).
+    /// The tanks and bottles at `self.propellant` in total (after a set
+    /// propellant).
     pub(super) fn sync_ship_to_propellant(&mut self) {
         let Some(def) = self.ship_def() else { return };
         if let Some(state) = self.ship.as_mut() {
@@ -101,18 +100,37 @@ impl Vessel {
         }
     }
 
-    /// The running engines' output at `throttle` and ambient pressure `p`
-    /// over a tick (a craft of catalog parts).
-    pub(super) fn ship_thrust(&self, throttle: f64, p: f64) -> Option<ShipThrust> {
+    /// The engines' output now at ambient pressure `p` over a tick (a craft
+    /// of catalog parts): from each engine's state and level (the pilot's
+    /// throttle acts through the engines' next step, `systems::propulsion`).
+    pub(super) fn ship_thrust(&self, _throttle: f64, p: f64) -> Option<ShipThrust> {
         let (def, state) = self.ship_parts()?;
-        Some(ship_thrust(def, state, throttle, p, TICK, self.debug))
+        Some(propulsion::output(def, state, p, TICK, self.debug))
+    }
+
+    /// Whether a craft of parts has an engine starting, running or in its
+    /// tail-off (`None`: not a craft of parts).
+    pub(super) fn ship_engines_on(&self) -> Option<bool> {
+        self.ship_parts().map(|(_, s)| propulsion::active(s))
+    }
+
+    /// Whether the ship's systems need live ticks now (an engine active, a
+    /// mechanism moving, the clamps' release armed).
+    pub(super) fn ship_needs_ticks(&self) -> bool {
+        self.ship.as_ref().is_some_and(crate::systems::ship::busy)
     }
 
     /// Each engine's thrust (N, aligned with the ship definition's engines)
-    /// at the pilot's `throttle` and ambient pressure `p`: what each flame
-    /// is drawn from (`craft::engine::ship_thrust`, the one rule).
+    /// now at ambient pressure `p`: what each flame is drawn from
+    /// (`systems::propulsion::output`, the one rule; the throttle argument
+    /// is kept for the callers and unused: an engine's level is its state).
     pub fn engine_thrusts(&self, throttle: f64, p: f64) -> Option<Vec<f64>> {
         self.ship_thrust(throttle, p).map(|t| t.per_engine)
+    }
+
+    /// The ship's event log (failures, aborts, stages; newest last).
+    pub fn ship_events(&self) -> &[crate::systems::Event] {
+        self.ship.as_ref().map_or(&[], |s| &s.runtime.events)
     }
 
     /// Replaces the stage sequence (the systems screen, D107): every
@@ -160,7 +178,7 @@ impl Vessel {
             let torque = if rcs_fed { self.craft.torque } else { DVec3::ZERO };
             return (out, Actuators { torque, gimbal: Some(gimbal) }, None);
         };
-        let t = ship_thrust(def, state, throttle, p, dt, self.debug);
+        let t = propulsion::output(def, state, p, dt, self.debug);
         let gimbal = Gimbal { lever: t.pos - props.com, dir: t.dir, thrust: t.thrust, max_angle: t.gimbal };
         let fed: Vec<bool> = (def.thrusters.iter().zip(&state.thrusters))
             .map(|(d, s)| s.enabled && (self.debug || block_fed(&d.feed, state)))
@@ -177,42 +195,43 @@ impl Vessel {
         (out, Actuators { torque, gimbal: Some(gimbal) }, Some(tick))
     }
 
-    /// Draws a tick's engines and RCS (`rcs`: the command's use per axis)
-    /// from the tanks and bottles; returns the consumables left (kg).
-    pub(super) fn consume(&mut self, tick: &ShipTick, rcs: DVec3, dt: f64) -> f64 {
-        let Some(def) = self.ship_def() else { return self.propellant };
-        let debug = self.debug;
-        let Some(state) = self.ship.as_mut() else { return self.propellant };
-        if !debug {
-            for (s, d) in state.tanks.iter_mut().zip(&tick.draws) {
-                s.liquid = (s.liquid - d * dt).max(0.0);
-            }
-            let rcs_kg = rcs.dot(tick.rcs_flow) * dt;
-            for &(i, share) in &tick.blocks {
-                draw_block(&def, state, i, rcs_kg * share);
-            }
-        }
-        state.consumables(&def)
-    }
-
-    /// Applies a ship command now (`crate::craft::state::ShipState::apply`):
-    /// a separation becomes the breakup the game applies (each piece a
-    /// vessel), the readouts' engine follows the selection; the effects
-    /// the caller acts on (the parachutes' arming) are returned.
-    pub fn command(&mut self, world: &World, command: &ShipCommand) -> Result<Vec<Effect>, String> {
+    /// Applies a ship command now, at the vessel's time
+    /// (`systems::command::apply`: an ignition starts the engine's start
+    /// sequence, a deployment moves the mechanism at its rate): a
+    /// separation becomes the breakup the game applies (each piece a
+    /// vessel), the readouts' engine follows the selection; the effects the
+    /// caller acts on (the parachutes' arming) are returned. To apply a
+    /// command at an epoch (deterministic, with light delay), use
+    /// [`Self::order_at`].
+    pub fn command(&mut self, world: &World, cmd: &ShipCommand) -> Result<Vec<Effect>, String> {
         let def = self.ship_def().ok_or("not a craft of parts")?;
-        let effects = self.ship.as_mut().ok_or("no ship state")?.apply(&def, command)?;
+        let at = self.time;
+        let state = self.ship.as_mut().ok_or("no ship state")?;
+        let effects = command::apply(&def, state, cmd, command::Context { at, sequence: false })?;
         self.after_command(world, &effects);
         Ok(effects)
     }
 
-    /// Runs the next stage of the craft's sequence (Space): its name and
-    /// effects, or `None` when the sequence is done.
+    /// Runs the next stage of the craft's sequence now (Space): its name and
+    /// effects, or `None` when the sequence is done. Its clamp release waits
+    /// for every lit engine's rated thrust (`systems::command`).
     pub fn next_stage(&mut self, world: &World) -> Option<(String, Vec<Effect>)> {
         let def = self.ship_def()?;
-        let (name, effects) = self.ship.as_mut()?.next_stage(&def)?;
+        let at = self.time;
+        let (name, effects) = command::next_stage(&def, self.ship.as_mut()?, at)?;
         self.after_command(world, &effects);
         Some((name, effects))
+    }
+
+    /// Queues an order for epoch `at` (D067: from aboard, now; from mission
+    /// control, now plus the light time): it is applied at the first tick
+    /// (or, coasting or landed, exactly) at or after `at`, so the same
+    /// orders give the same flight whatever the frames. An epoch before the
+    /// vessel's time is applied at its next tick.
+    pub fn order_at(&mut self, at: crate::time::Epoch, kind: OrderKind) -> Result<(), String> {
+        let state = self.ship.as_mut().ok_or("not a craft of parts")?;
+        state.runtime.order(at, kind);
+        Ok(())
     }
 
     /// The part ids whose mechanisms are deployed now (at their deployed
@@ -229,11 +248,11 @@ impl Vessel {
         out
     }
 
-    /// After commands: the readouts' engine; separations, and a shape whose
-    /// mechanisms moved (legs out, grid fins in the flow), become the
-    /// breakup the game applies (`plan_breakup`: the pieces, or one piece
-    /// in its new configuration).
-    fn after_command(&mut self, _world: &World, effects: &[Effect]) {
+    /// After commands or a tick: the readouts' engine; separations, and a
+    /// shape whose mechanisms reached or left their deployed angle (legs
+    /// out, grid fins in the flow), become the breakup the game applies
+    /// (`plan_breakup`: the pieces, or one piece in its new configuration).
+    pub(super) fn after_command(&mut self, _world: &World, effects: &[Effect]) {
         self.sync_engine();
         let parts = &self.craft.design().parts;
         let separated: Vec<u32> = effects
@@ -267,41 +286,5 @@ fn check_stages(def: &ShipDef, stages: &[Stage]) -> Result<(), Vec<String>> {
         Ok(())
     } else {
         Err(errors)
-    }
-}
-
-/// Whether a thruster block's feed holds anything.
-fn block_fed(feed: &Feed, state: &ShipState) -> bool {
-    match feed {
-        Feed::Bottles(b) => b.iter().any(|&i| state.bottles[i as usize].moles > 0.0),
-        Feed::Tanks([o, f]) => {
-            let any = |l: &[u32]| l.iter().any(|&i| state.tanks[i as usize].liquid > 0.0);
-            any(o) && any(f)
-        }
-    }
-}
-
-/// Draws `kg` for thruster block `i` from its feed: a bottle's gas, or its
-/// tanks by the mixture ratio (the first holding any).
-fn draw_block(def: &ShipDef, state: &mut ShipState, i: usize, kg: f64) {
-    let t = &def.thrusters[i];
-    match (&t.feed, &t.propellant) {
-        (Feed::Bottles(b), Propellant::ColdGas(gas)) => {
-            let molar = fluids().gas(gas).map_or(1.0, |g| g.molar_mass);
-            if let Some(&j) = b.iter().find(|&&j| state.bottles[j as usize].moles > 0.0) {
-                let s = &mut state.bottles[j as usize];
-                s.moles = (s.moles - kg / molar).max(0.0);
-            }
-        }
-        (Feed::Tanks([o, f]), Propellant::Biprop { mixture_ratio, .. }) => {
-            let mr = *mixture_ratio;
-            for (list, share) in [(o, mr / (1.0 + mr)), (f, 1.0 / (1.0 + mr))] {
-                if let Some(&j) = list.iter().find(|&&j| state.tanks[j as usize].liquid > 0.0) {
-                    let s = &mut state.tanks[j as usize];
-                    s.liquid = (s.liquid - kg * share).max(0.0);
-                }
-            }
-        }
-        _ => {}
     }
 }

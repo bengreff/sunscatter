@@ -152,16 +152,26 @@ impl Vessel {
             if self.breakup.is_some() || self.bubble.waiting {
                 return (self.time, budget.spent);
             }
+            // A craft of parts' orders due now; while it advances continuously
+            // it stops at the next one's epoch (`ship_tick`).
+            self.apply_orders(world);
+            if self.breakup.is_some() {
+                return (self.time, budget.spent);
+            }
+            let step = match self.order_stop() {
+                Some(e) if e < target => e,
+                _ => target,
+            };
             let before = (self.time, std::mem::discriminant(&self.phase));
             // A coast restarted at its own time (a new attitude regime) moved
             // on; one that reached the live boundary stops there.
             let (mut restarted, mut went_live) = (false, false);
             match &self.phase {
-                Phase::Landed { .. } => self.advance_landed(world, target, controls),
-                Phase::Crashed { .. } => self.advance_grounded(world, target),
-                Phase::Powered { .. } => self.advance_powered(world, target, controls),
+                Phase::Landed { .. } => self.advance_landed(world, step, controls),
+                Phase::Crashed { .. } => self.advance_grounded(world, step),
+                Phase::Powered { .. } => self.advance_powered(world, step, controls),
                 Phase::Coasting { .. } => {
-                    let c = self.advance_coasting(world, target, controls, &mut budget);
+                    let c = self.advance_coasting(world, step, controls, &mut budget);
                     (restarted, went_live) = (c.progressed, c.entered);
                 }
             }
@@ -205,7 +215,7 @@ impl Vessel {
         controls: &Controls,
         budget: &mut Budget,
     ) -> Coasted {
-        if self.engine_running(controls) {
+        if self.engine_running(controls) || self.ship_needs_ticks() {
             self.thermal_to_now(world);
             let (anchor, r, v) = self.state(world);
             self.phase = Phase::Powered { anchor, r, v };

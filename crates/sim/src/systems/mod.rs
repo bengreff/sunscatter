@@ -20,9 +20,15 @@
 //! Placeholders until parts carry systems (D060): [`Power`] (a solar
 //! panel, a battery, constant loads) and [`Consumables`] (boil-off).
 
+pub mod command;
+pub mod mechanisms;
 pub mod power;
+pub mod propulsion;
+pub mod runtime;
+pub mod ship;
 
 pub use power::{Power, PowerSpec};
+pub use runtime::{Event, Order, OrderKind, Runtime};
 
 use crate::time::Epoch;
 use glam::{DQuat, DVec3};
