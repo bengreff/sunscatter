@@ -8,7 +8,8 @@ use crate::forces::{ambient_pressure, ActiveSources, DragModel, ForceContext};
 use crate::frame::NodeId;
 use crate::integrate::{hermite5, Dopri5, Dynamics, StepSample, Tolerance};
 use crate::time::Epoch;
-use crate::vessel::{air_at, quat_z_to, AeroTick};
+use crate::vessel::limbo::{may_coast, LiveBoundary};
+use crate::vessel::{air_at, quat_z_to, AeroTick, LEAVE_ATMOSPHERE};
 use crate::world::World;
 use glam::{DQuat, DVec3};
 
@@ -57,6 +58,8 @@ pub(super) enum End {
     Stopped {
         t: f64,
     },
+    /// The air became clear for coasting (runs with an exit).
+    Clear,
     Horizon,
     Steps,
     Failed,
@@ -77,6 +80,8 @@ pub(super) struct Model<'a> {
     attitude: AssumedAttitude,
     chute: crate::chute::ChuteState,
     infinite: bool,
+    /// End a run where the vessel could coast again by this hand-over rule.
+    exit: Option<LiveBoundary>,
 }
 
 /// The dynamics of one run.
@@ -104,7 +109,23 @@ impl<'a> Model<'a> {
             attitude: start.attitude,
             chute: start.chute,
             infinite: start.infinite,
+            exit: None,
         }
+    }
+
+    /// The same model, ending each run where the air is clear for coasting
+    /// by `boundary` (the vessel's live boundary with its hysteresis,
+    /// [`may_coast`]).
+    pub fn until_clear(self, boundary: LiveBoundary) -> Self {
+        Model { exit: Some(boundary), ..self }
+    }
+
+    /// Whether the sample is in air clear for coasting (with an exit).
+    fn clear(&self, run: &Run, s: &StepSample) -> bool {
+        self.exit.as_ref().is_some_and(|b| {
+            let snap = self.world.snapshot(run.t0.add_seconds(s.t));
+            may_coast(b, self.world, &snap, run.anchor, (s.r, s.v), LEAVE_ATMOSPHERE)
+        })
     }
 
     /// Propellant at local time `t` of a run.
@@ -267,6 +288,9 @@ impl<'a> Model<'a> {
                 }
             }
             samples.push(new);
+            if self.clear(run, &new) {
+                return Flight { samples, end: End::Clear };
+            }
             let grew = snaps.with(run.t0.add_seconds(st.t), |s| active.grow(world, s, run.anchor, new.r));
             if grew {
                 let f = Forces { model: self, run, snaps: &snaps, active: &active };

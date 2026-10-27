@@ -307,12 +307,19 @@ fn relative_to(sim: &SimState, seg: &Segment, t: f64, body: NodeId) -> Option<(D
 }
 
 /// The segments whose apsides and lines are shown for vessel `i`: its
-/// stored trajectory, or (the active vessel flying live) the background
-/// prediction.
+/// stored trajectory, or for the active vessel the background prediction
+/// where the stored trajectory does not give the path (`Prediction`).
 pub fn vessel_segments<'a>(sim: &'a SimState, pred: &'a Prediction, i: usize) -> Vec<&'a Segment> {
-    match sim.fleet[i].trajectory() {
+    let vessel = &sim.fleet[i];
+    let active = i == sim.active;
+    match vessel.trajectory() {
+        // Coasting into air that needs live flight: the stored segments, the
+        // last one cut at its entry, and the path through the air (D089).
+        Some(tr) if active && pred.after == Some((vessel.id(), tr.last().t0)) && !pred.segments.is_empty() => {
+            tr.segments[..tr.segments.len() - 1].iter().chain(&pred.segments).collect()
+        }
         Some(tr) => tr.segments.iter().collect(),
-        None if i == sim.active => pred.segment.iter().collect(),
+        None if active => pred.segments.iter().collect(),
         None => Vec::new(),
     }
 }

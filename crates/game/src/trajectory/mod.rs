@@ -7,6 +7,7 @@ pub mod apsides;
 pub mod clip;
 pub mod line;
 pub mod lines;
+pub mod predict;
 pub mod settings;
 
 pub use lines::draw;

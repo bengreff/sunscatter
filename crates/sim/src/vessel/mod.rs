@@ -54,7 +54,9 @@ pub mod split;
 mod systems;
 mod trajectory;
 
-pub use aerothermal::{air_at, coast_sunlight, in_atmosphere, AeroTick, Air, VesselThermal, LATTICE, MAX_SKIP};
+pub use aerothermal::{
+    air_at, coast_sunlight, in_atmosphere, AeroTick, Air, VesselThermal, LATTICE, LEAVE_ATMOSPHERE, MAX_SKIP,
+};
 pub use coast::{solve_units, POINT_UNITS, STEP_UNITS, SYSTEMS_UNITS};
 pub use coast_heat::{coast_air, coast_suns, CoastSun};
 
@@ -645,7 +647,13 @@ impl Vessel {
     /// The coast that would follow if thrust stopped now (for predictions
     /// while powered). Not integrated yet; the caller extends it.
     pub fn coast_from_now(&self, world: &World) -> Segment {
-        let (anchor, r, v) = self.state(world);
+        self.coast_from(world, self.time, self.state(world), self.mass())
+    }
+
+    /// The coast this vessel would fly from `(anchor, r, v)` at `t` with
+    /// `mass` (for predictions: after a path through the air). Not
+    /// integrated yet; the caller extends it.
+    pub fn coast_from(&self, world: &World, t: Epoch, (anchor, r, v): (NodeId, DVec3, DVec3), mass: f64) -> Segment {
         let start = CoastStart {
             anchor,
             r,
@@ -656,7 +664,7 @@ impl Vessel {
             fixed_anchor: false,
             proper_time: self.clock.offset,
         };
-        Segment::new_limbo(world, self.time, start, self.mass(), self.limbo_model(pointing::Pointing::Mean))
+        Segment::new_limbo(world, t, start, mass, self.limbo_model(pointing::Pointing::Mean))
     }
 
     /// The current segment (coast or planned burn), if on rails.

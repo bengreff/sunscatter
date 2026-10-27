@@ -183,7 +183,7 @@ pub fn answer(
     args: &Value,
     sim: &SimState,
     comms: &Comms,
-    prediction: Option<&sim::vessel::Segment>,
+    prediction: &crate::state::Prediction,
 ) -> (ToolResult, Vec<Effect>) {
     match run(tool, args, sim, comms, prediction) {
         Ok((v, effects)) => (ToolResult::Ok(v), effects),
@@ -196,7 +196,7 @@ fn run(
     args: &Value,
     sim: &SimState,
     comms: &Comms,
-    prediction: Option<&sim::vessel::Segment>,
+    prediction: &crate::state::Prediction,
 ) -> Result<(Value, Vec<Effect>), String> {
     let eph = &sim.world.eph;
     let name = |n: sim::frame::NodeId| eph.node(n).name.clone();
@@ -239,12 +239,9 @@ fn run(
                 return Err(format!("no signal from vessel {}", id.0));
             }
             let n = args.get("points").and_then(Value::as_u64).unwrap_or(100).clamp(2, 1000) as usize;
-            // Every stored segment from now: coasts and planned burns.
-            let segs: Vec<&sim::vessel::Segment> = match sim.fleet[i].trajectory() {
-                Some(tr) => tr.segments.iter().collect(),
-                None if i == sim.active => prediction.into_iter().collect(),
-                None => Vec::new(),
-            };
+            // The line's segments from now: coasts and planned burns, and the
+            // prediction where they do not give the path (D089).
+            let segs = crate::trajectory::apsides::vessel_segments(sim, prediction, i);
             let last = segs.last().ok_or("the vessel has no predicted path")?;
             let (t0, t1) = (sim.clock, last.t0.add_seconds(last.computed_until()));
             let span = t1.seconds_since(t0);
@@ -313,7 +310,7 @@ fn get_vessel(
     args: &Value,
     sim: &SimState,
     comms: &Comms,
-    prediction: Option<&sim::vessel::Segment>,
+    prediction: &crate::state::Prediction,
 ) -> Result<(Value, Vec<Effect>), String> {
     let name = |n: sim::frame::NodeId| sim.world.eph.node(n).name.clone();
     let id = vessel_id(args)?;
@@ -329,12 +326,9 @@ fn get_vessel(
     let (rel, v_rel) = (comms::retarded(r - k.r, vel - k.v, signal.delay), vel - k.v);
     let orbit = crate::relations::orbit_about(&sim.world, sim.clock, anchor, r, vel, body);
     let radius = sim.world.source(body).and_then(|s| s.physical.as_ref()).map_or(0.0, |p| p.radius_eq);
-    // Apsides from the predicted trajectory (D076), not the conic.
-    let segs: Vec<&sim::vessel::Segment> = match v.trajectory() {
-        Some(tr) => tr.segments.iter().collect(),
-        None if i == sim.active => prediction.into_iter().collect(),
-        None => Vec::new(),
-    };
+    // Apsides from the predicted trajectory (D076), not the conic: the
+    // line's segments (D089).
+    let segs = crate::trajectory::apsides::vessel_segments(sim, prediction, i);
     let aps = crate::trajectory::apsides::of_segments(sim, &segs);
     let (ap, pe) = aps.next_after(sim.clock);
     let upcoming: Vec<Value> = aps
@@ -502,7 +496,7 @@ pub fn serve(
     }
     let Some((server, _, _)) = &state.server else { return };
     for call in server.poll() {
-        let (result, effects) = answer(&call.tool, &call.arguments, &sim, &comms, pred.segment.as_ref());
+        let (result, effects) = answer(&call.tool, &call.arguments, &sim, &comms, &pred);
         for e in effects {
             match e {
                 Effect::Command(c) => {
@@ -547,14 +541,16 @@ mod tests {
         for t in tools() {
             assert_eq!(t.input_schema["type"], "object", "{}", t.name);
             // Every tool answers something (an error for missing arguments).
-            let _ = answer(&t.name, &json!({}), &sim, &comms, None);
+            let _ = answer(&t.name, &json!({}), &sim, &comms, &Default::default());
         }
     }
 
     #[test]
     fn state_lists_every_vessel() {
         let (sim, comms) = setup();
-        let (ToolResult::Ok(v), effects) = answer("get_state", &json!({}), &sim, &comms, None) else { panic!() };
+        let (ToolResult::Ok(v), effects) = answer("get_state", &json!({}), &sim, &comms, &Default::default()) else {
+            panic!()
+        };
         assert!(effects.is_empty());
         assert_eq!(v["vessels"].as_array().unwrap().len(), sim.fleet.len());
         assert_eq!(v["active_vessel"], sim.ship().id().0);
@@ -565,10 +561,10 @@ mod tests {
         let (sim, mut comms) = setup();
         let id = sim.fleet[1].id();
         comms.signals.insert(id, None);
-        let (r, _) = answer("get_vessel", &json!({"id": id.0}), &sim, &comms, None);
+        let (r, _) = answer("get_vessel", &json!({"id": id.0}), &sim, &comms, &Default::default());
         assert!(matches!(r, ToolResult::Err(e) if e.contains("no signal")));
         comms.signals.insert(id, Some(comms::Signal { delay: 0.01, rate: 1e6, via: vec![] }));
-        let (r, _) = answer("get_vessel", &json!({"id": id.0}), &sim, &comms, None);
+        let (r, _) = answer("get_vessel", &json!({"id": id.0}), &sim, &comms, &Default::default());
         let ToolResult::Ok(v) = r else { panic!("{r:?}") };
         assert_eq!(v["about"], "Earth");
         assert!(v["altitude_m"].as_f64().unwrap() > 300_000.0);
@@ -581,28 +577,28 @@ mod tests {
         comms.location = Location::Site(0);
         comms.signals.insert(id, Some(comms::Signal { delay: 0.02, rate: 1e6, via: vec![] }));
         let args = json!({"id": id.0, "burns": [{"in_s": 600.0, "prograde": 100.0}]});
-        let (r, e) = answer("set_plan", &args, &sim, &comms, None);
+        let (r, e) = answer("set_plan", &args, &sim, &comms, &Default::default());
         assert!(matches!(r, ToolResult::Ok(_)), "{r:?}");
         assert!(matches!(&e[..], [Effect::Send { delay, command: GameCommand::SetPlan { .. } }] if *delay == 0.02));
         comms.signals.insert(id, None);
-        let (r, _) = answer("set_plan", &args, &sim, &comms, None);
+        let (r, _) = answer("set_plan", &args, &sim, &comms, &Default::default());
         assert!(matches!(r, ToolResult::Err(e) if e.contains("no signal")));
     }
 
     #[test]
     fn actions_become_commands_and_controls_need_the_crew() {
         let (sim, mut comms) = setup();
-        let (_, e) = answer("set_warp", &json!({"level": 5}), &sim, &comms, None);
+        let (_, e) = answer("set_warp", &json!({"level": 5}), &sim, &comms, &Default::default());
         assert_eq!(e, vec![Effect::Command(GameCommand::SetWarp(5))]);
-        let (r, _) = answer("set_warp", &json!({"level": 99}), &sim, &comms, None);
+        let (r, _) = answer("set_warp", &json!({"level": 99}), &sim, &comms, &Default::default());
         assert!(matches!(r, ToolResult::Err(_)));
         comms.location = Location::Site(0);
-        let (r, _) = answer("set_controls", &json!({"throttle": 1.0}), &sim, &comms, None);
+        let (r, _) = answer("set_controls", &json!({"throttle": 1.0}), &sim, &comms, &Default::default());
         assert!(matches!(r, ToolResult::Err(e) if e.contains("not aboard")));
         comms.location = Location::Vessel(sim.ship().id());
-        let (_, e) = answer("set_controls", &json!({"throttle": 0.5, "sas": false}), &sim, &comms, None);
+        let (_, e) = answer("set_controls", &json!({"throttle": 0.5, "sas": false}), &sim, &comms, &Default::default());
         assert_eq!(e, vec![Effect::Controls { throttle: Some(0.5), sas: Some(false) }]);
-        let (_, e) = answer("set_controls", &json!({"hold": "retrograde"}), &sim, &comms, None);
+        let (_, e) = answer("set_controls", &json!({"hold": "retrograde"}), &sim, &comms, &Default::default());
         assert_eq!(
             e,
             vec![
@@ -610,7 +606,7 @@ mod tests {
                 Effect::Command(GameCommand::SetHold(HoldMode::Retrograde))
             ]
         );
-        let (r, _) = answer("set_controls", &json!({"hold": "sideways"}), &sim, &comms, None);
+        let (r, _) = answer("set_controls", &json!({"hold": "sideways"}), &sim, &comms, &Default::default());
         assert!(matches!(r, ToolResult::Err(e) if e.contains("unknown hold")));
     }
 }

@@ -34,6 +34,7 @@ use crate::world::World;
 use glam::DVec3;
 
 mod events;
+mod recorded;
 
 /// Integration tolerance for coasts and low-thrust burns, per step of
 /// [`Dop853`] (position 10 cm and velocity 10 µm/s absolute, 1e-10
@@ -120,8 +121,10 @@ pub struct Segment {
     pub(super) plan_index: usize,
     /// Where the segment first descends into an atmosphere from above
     /// (local time, body): a vessel is flown live from there
-    /// ([`super::aerothermal`]); the rest of the segment is a prediction
-    /// (with the attitude-independent drag), kept for display.
+    /// ([`super::aerothermal`]); the rest of the segment is a rough
+    /// prediction (with the attitude-independent drag). The orbit line
+    /// draws the path from here with the vessel's own force model instead
+    /// (`crate::landing::air_path`, D089).
     #[serde(default)]
     pub entry: Option<(f64, NodeId)>,
     /// A burn's attitude, flown with it.

@@ -32,7 +32,8 @@ use crate::forces::ambient_pressure;
 use crate::frame::{BodyFixed, NodeId, Vec3};
 use crate::integrate::{hermite5, StepSample};
 use crate::time::Epoch;
-use crate::vessel::{Phase, SegmentKind, Vessel};
+use crate::vessel::limbo::LiveBoundary;
+use crate::vessel::{EndKind, Phase, Segment, SegmentKind, Vessel};
 use crate::world::World;
 use glam::{DQuat, DVec3};
 use model::{End, Model, Run};
@@ -225,6 +226,44 @@ pub fn predict_impact(world: &World, craft: &CraftParams, start: &LandingStart, 
         _ => None,
     };
     Descent { start: *start, samples: flight.samples, impact }
+}
+
+/// A vessel's path through air that needs live flight, for its orbit line
+/// (D089): the vessel's own force model, as [`predict_impact`].
+#[derive(Clone, Debug, PartialEq)]
+pub struct AirPath {
+    /// The path, a finished segment the line samples (rule 4).
+    pub segment: Segment,
+    /// It ends where the air is clear for coasting again: a coast follows
+    /// from its last sample.
+    pub cleared: bool,
+}
+
+/// The path from `start` through the air by the vessel's own force model
+/// (drag and lift from its aerodynamic bake against the air turning with
+/// the body, at the assumed attitude), until the lowest contact point meets
+/// a surface, or the air is clear for coasting by `boundary` (the vessel's
+/// own hand-over rule, `vessel::limbo::may_coast`), or `limits` run out.
+/// The ship clock is held at `proper_time` along it.
+pub fn air_path(
+    world: &World,
+    craft: &CraftParams,
+    start: &LandingStart,
+    boundary: LiveBoundary,
+    limits: Limits,
+    proper_time: f64,
+) -> AirPath {
+    let model = Model::new(world, craft, start).until_clear(boundary);
+    let flight = model.fly(&Run::from_start(start, start.throttle), false, limits.horizon, limits.max_steps);
+    let (end, cleared) = match flight.end {
+        End::Surface { body, .. } => (EndKind::Surface { body }, false),
+        End::Clear => (EndKind::Horizon, true),
+        End::Failed => (EndKind::Failed, false),
+        _ => (EndKind::Horizon, false),
+    };
+    let mass = craft.mass.at(start.propellant).mass;
+    let segment = Segment::recorded(world, start.t, start.anchor, &flight.samples, end, mass, proper_time);
+    AirPath { segment, cleared }
 }
 
 /// When to start braking.

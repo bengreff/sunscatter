@@ -517,13 +517,19 @@ pub fn below_rails_floor(world: &World, t: Epoch, anchor: NodeId, r: DVec3) -> O
     })
 }
 
-/// The predicted trajectory while powered (the stored segment is used
-/// directly while coasting). Computed on a background task and swapped in
-/// atomically when complete, so the drawn line never flickers.
+/// The active vessel's predicted path where its stored trajectory does not
+/// give it (`trajectory::predict`, D089): all of it while the vessel flies
+/// live; from the entry on while it coasts into air that needs live flight
+/// (its stored segment is cut there). Computed on a background task and
+/// swapped in atomically when complete, so the drawn line never flickers.
 #[derive(Resource, Default)]
 pub struct Prediction {
-    pub segment: Option<Segment>,
-    task: Option<Task<Segment>>,
+    /// The predicted segments, in time order.
+    pub segments: Vec<Segment>,
+    /// While coasting: the vessel and the start of the stored segment the
+    /// prediction takes over from (at its entry).
+    pub after: Option<(VesselId, Epoch)>,
+    task: Option<Task<trajectory::predict::Path>>,
     since_last: f64,
 }
 
@@ -534,26 +540,24 @@ pub fn update_prediction(
     mut pred: ResMut<Prediction>,
 ) {
     if let Some(task) = pred.task.as_mut() {
-        if let Some(seg) = check_ready(task) {
-            pred.segment = Some(seg);
+        if let Some(path) = check_ready(task) {
+            (pred.segments, pred.after) = (path.segments, path.after);
             pred.task = None;
         }
     }
     let ship = sim.ship();
-    if !matches!(ship.phase, Phase::Powered { .. }) {
-        pred.segment = None;
+    if !trajectory::predict::needed(ship) {
+        (pred.segments, pred.after) = (Vec::new(), None);
         return;
     }
     pred.since_last += time.delta_secs_f64();
     if pred.task.is_none() && pred.since_last > 0.25 {
         pred.since_last = 0.0;
-        let world = sim.world.clone();
-        let mut seg = ship.coast_from_now(&world);
-        let orbits = orbits.clone();
-        pred.task = Some(AsyncComputeTaskPool::get().spawn(async move {
-            trajectory::extend_to_line_end(&world, &mut seg, &orbits, 40_000);
-            seg
-        }));
+        let (world, vessel, controls, orbits) = (sim.world.clone(), ship.clone(), sim.controls, orbits.clone());
+        pred.task = Some(
+            AsyncComputeTaskPool::get()
+                .spawn(async move { trajectory::predict::path(&world, &vessel, &controls, &orbits) }),
+        );
     }
 }
 
