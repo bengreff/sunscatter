@@ -151,7 +151,10 @@ pub fn update(
     let craft = sim::craft::craft_of(&vessel.craft.id);
     if view.craft.as_deref() != Some(craft.id.0.as_str()) {
         rebuild(&mut commands, &mut view, &craft, &mut models, &mut meshes, &mut materials);
-        screen.selected = None;
+        // A part keeps its selection through a new configuration (its id
+        // stays); a component's index may name another after a split.
+        let kept = |s: &Selection| matches!(s, Selection::Part(id) if craft.parts.iter().any(|p| p.id == *id));
+        screen.selected = screen.selected.filter(kept);
     }
     // What each part is now, and its colour in the layer shown.
     let colours = parts::part_colours(&craft, &def, sim::materials::materials());
