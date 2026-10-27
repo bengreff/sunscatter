@@ -102,6 +102,15 @@ pub fn switch_to(sim: &mut SimState, rig: &mut CameraRig, pred: &mut Prediction,
     rig.focus = Focus::Ship;
 }
 
+/// What the pilot is told on leaving vessel `left` for another, if anything:
+/// a craft of parts left with engines lit keeps them burning at their
+/// minimum (the throttle is the active vessel's: the others fly at 0).
+pub fn left_lit_notice(left: &sim::vessel::Vessel) -> Option<String> {
+    let lit = left.ship().is_some_and(|s| !sim::systems::propulsion::lit(s).is_empty());
+    let id = left.id().0;
+    lit.then(|| format!("Vessel {id} left with its engines lit: they burn at their minimum (throttle 0) until cut"))
+}
+
 /// Removes a non-active vessel ("delete debris").
 pub fn delete_vessel(sim: &mut SimState, tracked: &mut Tracked, rig: &mut CameraRig, id: VesselId) -> bool {
     let Some(i) = sim.index_of(id) else { return false };
@@ -471,6 +480,20 @@ mod tests {
         assert_eq!(&planets[..4], &["Mercury", "Venus", "Earth", "Mars"]);
     }
 
+    /// A craft of parts left with its engines lit is named on the switch
+    /// (review: it kept them at their minimum, unsaid).
+    #[test]
+    fn leaving_a_craft_with_engines_lit_says_so() {
+        let mut sim = SimState::with_craft(&crate::test_rocket::rocket());
+        let a = sim.active;
+        assert_eq!(left_lit_notice(sim.ship()), None, "nothing lit");
+        let s = &mut sim;
+        s.fleet[a].next_stage(&s.world).expect("the ignition");
+        let id = sim.ship().id().0;
+        let want = format!("Vessel {id} left with its engines lit: they burn at their minimum (throttle 0) until cut");
+        assert_eq!(left_lit_notice(sim.ship()), Some(want));
+    }
+
     #[test]
     fn switching_and_deleting_follow_ids() {
         let mut sim = SimState::new();
@@ -482,6 +505,7 @@ mod tests {
         assert_eq!(sim.active, 2);
         assert_eq!(sim.controls.throttle, 0.0);
         assert!(sim.controls.sas);
+        assert_eq!(left_lit_notice(&sim.fleet[0]), None, "the test craft: no engines of parts");
         rig.focus = Focus::Vessel(ids[3]);
         tracked.set_tracked(ids[0], false);
         assert!(!delete_vessel(&mut sim, &mut tracked, &mut rig, ids[2]), "the active vessel cannot be deleted");

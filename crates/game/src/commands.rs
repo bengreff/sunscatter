@@ -169,7 +169,12 @@ pub fn apply(
         match &c {
             GameCommand::SetWarp(level) => sim.warp = (*level).min(WARP_LEVELS.len() - 1),
             GameCommand::Switch(i) => {
+                let left = sim.active;
                 tracking::switch_to(&mut sim, &mut rig, &mut pred, *i);
+                if let Some(text) = (sim.active != left).then(|| tracking::left_lit_notice(&sim.fleet[left])).flatten()
+                {
+                    toasts.push(now, text, true);
+                }
                 // Leaving the station restores the flight camera: follow the
                 // new vessel.
                 ts.follow_active_on_leave();
