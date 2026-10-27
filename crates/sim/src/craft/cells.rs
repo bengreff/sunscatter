@@ -37,11 +37,15 @@ pub struct CellOptions {
     pub curvature_weight: f64,
     /// Farthest a joint between primitives is bridged (m).
     pub joint_reach: f64,
+    /// Around each foot's contact point, the cells its foot covers (m): no
+    /// hull point there (a leg's end touches through its foot, its stroke
+    /// and crush core, not before them). Zero for the test craft (one part).
+    pub foot_reach: f64,
 }
 
 impl Default for CellOptions {
     fn default() -> Self {
-        CellOptions { target: 512, cell_area: CELL_AREA, curvature_weight: 4.0, joint_reach: 0.3 }
+        CellOptions { target: 512, cell_area: CELL_AREA, curvature_weight: 4.0, joint_reach: 0.3, foot_reach: 0.0 }
     }
 }
 
@@ -58,7 +62,7 @@ impl CellOptions {
     /// 300-part stress craft (1,351 m²) has 4,503; a one-part piece of
     /// debris (a panel, 0.5 m²) a few.
     pub fn for_parts(parts: usize) -> Self {
-        CellOptions { target: CELLS_PER_PART * parts, ..CellOptions::default() }
+        CellOptions { target: CELLS_PER_PART * parts, foot_reach: FOOT_REACH, ..CellOptions::default() }
     }
 }
 
@@ -306,7 +310,7 @@ pub fn build_cells(s: &Surface, primitives: &[Primitive], default_skin: &Skin, o
         })
         .collect();
     link_neighbours(s, &tris, &tri_cell, primitives, default_skin, opts, &mut cells);
-    let contacts = find_contacts(primitives, &mut cells);
+    let contacts = find_contacts(primitives, &mut cells, opts.foot_reach);
     Cells { cells, tri_cell, contacts }
 }
 
@@ -397,10 +401,13 @@ fn link_neighbours(
     }
 }
 
+/// A craft of parts' foot reach (m): a leg's end around its pad.
+pub const FOOT_REACH: f64 = 0.6;
+
 /// Contact points: one per foot, then the cells whose centroids are on the
 /// convex hull of all centroids and feet (found as the extreme point along
 /// many directions). Marks the cells.
-fn find_contacts(primitives: &[Primitive], cells: &mut [Cell]) -> Vec<ContactPoint> {
+fn find_contacts(primitives: &[Primitive], cells: &mut [Cell], foot_reach: f64) -> Vec<ContactPoint> {
     let mut contacts = Vec::new();
     for (p, prim) in primitives.iter().enumerate().filter(|(_, p)| p.foot) {
         let pos = foot_point(&prim.shape);
@@ -421,7 +428,9 @@ fn find_contacts(primitives: &[Primitive], cells: &mut [Cell]) -> Vec<ContactPoi
         }
     }
     let feet: Vec<DVec3> = contacts.iter().map(|c| c.pos).collect();
-    let is_foot = |c: &Cell| primitives[c.primitive as usize].foot;
+    let is_foot = |c: &Cell| {
+        primitives[c.primitive as usize].foot || feet.iter().any(|f| (c.centroid - *f).length() < foot_reach)
+    };
     let mut hull = vec![false; cells.len()];
     for d in sphere_directions(HULL_DIRECTIONS) {
         let foot_best = feet.iter().map(|f| f.dot(d)).fold(f64::MIN, f64::max);

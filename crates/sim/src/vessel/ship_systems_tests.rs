@@ -424,11 +424,8 @@ fn booster_grid_fin_descent_profile() {
 /// within the engine's 40–100 %), SAS on retrograde, then holding upright:
 /// it touches down on its four legs, intact, and comes to rest. It cannot
 /// hover (40 % of a Merlin is more than its weight: falcon9.md §4.4), so
-/// the engine is cut at touchdown. Ignored until the structure's leg joints
-/// carry a landing (their ring-bending ultimate of ~128 kN snaps them at
-/// touchdown; the dynamics land it at 1.1 m/s).
+/// the engine is cut at touchdown, on its feet's crush cores.
 #[test]
-#[ignore]
 fn the_booster_lands_on_one_engine() {
     use super::hold::{HoldMode, SpeedReference};
     let w = world();
