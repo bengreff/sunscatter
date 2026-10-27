@@ -46,6 +46,7 @@ const FULL: Controls = Controls {
     speed: SpeedReference::Orbit,
     reference: None,
     target: None,
+    translate: DVec3::ZERO,
 };
 
 #[test]

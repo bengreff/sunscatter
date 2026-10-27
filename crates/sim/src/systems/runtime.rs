@@ -41,6 +41,10 @@ pub struct EngineRun {
     /// Why it stopped or failed last, for the player.
     #[serde(default)]
     pub reason: Option<String>,
+    /// Waiting to start while its propellant settles (seconds waited): its
+    /// start sequence fires the thrusters that push along its thrust.
+    #[serde(default)]
+    pub settling: Option<f64>,
 }
 
 /// A joint's load at the last live tick.

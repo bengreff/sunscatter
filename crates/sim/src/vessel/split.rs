@@ -228,7 +228,11 @@ impl Vessel {
                 // A craft of parts: each tank and bottle goes with its part.
                 (Some(state), Some(def)) => {
                     let ids: Vec<u32> = design.parts.iter().map(|p| p.id).collect();
-                    let mine = state.partition(&ids, def);
+                    let mut mine = state.partition(&ids, def);
+                    // Orders were sent to the vessel, which keeps the first piece.
+                    if k > 0 {
+                        mine.runtime.orders.clear();
+                    }
                     piece.propellant = mine.consumables(def);
                     piece.ship = Some(mine);
                     piece.sync_engine();
@@ -317,6 +321,7 @@ fn push_apart(pieces: &mut [Vessel], old: &CraftDesign, separated: &[u32], q: gl
             if let Phase::Powered { v, .. } = &mut pieces[k].phase {
                 *v += push * (sign / m);
             }
+            pieces[k].jolt(push * (sign / m));
         }
     }
 }

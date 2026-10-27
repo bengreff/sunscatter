@@ -215,7 +215,7 @@ impl Vessel {
         controls: &Controls,
         budget: &mut Budget,
     ) -> Coasted {
-        if self.engine_running(controls) || self.ship_needs_ticks() {
+        if self.engine_running(controls) || self.ship_wants_ticks(controls) {
             self.thermal_to_now(world);
             let (anchor, r, v) = self.state(world);
             self.phase = Phase::Powered { anchor, r, v };

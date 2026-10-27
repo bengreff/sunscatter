@@ -26,6 +26,7 @@ pub mod mechanisms;
 pub mod plumbing;
 pub mod power;
 pub mod propulsion;
+pub mod rcs;
 pub mod runtime;
 pub mod ship;
 pub mod structure;

@@ -16,6 +16,12 @@
 //!   from the first of its feed tanks holding liquid; tanks that cannot
 //!   supply a tick share out what they hold; an engine whose tanks run dry
 //!   flames out (not a failure).
+//! * **Settling before a start** (falcon9.md §3.5): an engine commanded to
+//!   start on floating propellant waits (up to [`SETTLE_LIMIT`]) while the
+//!   thrusters that push along its thrust fire (a second stage's nitrogen
+//!   pods), or drag settles it, and starts once its tanks' outlets are
+//!   covered; commanded again it starts at once, and ingests gas if it is
+//!   still floating.
 //! * **The pad's rule** (falcon9.md §1.2, §4.2): an armed release lets the
 //!   clamps go at the first tick every engine it waits for runs at its
 //!   rated thrust; an engine that fails or stops first aborts the launch
@@ -84,11 +90,82 @@ pub fn lit(state: &ShipState) -> Vec<u32> {
         .collect()
 }
 
-/// Whether any engine is doing something (starting, running or in its
-/// tail-off): the vessel flies live ticks.
+/// Whether any engine is doing something (settling its propellant to
+/// start, starting, running or in its tail-off): the vessel flies live
+/// ticks.
 pub fn active(state: &ShipState) -> bool {
     (state.engines.iter())
         .any(|e| matches!(e.status, EngineStatus::Starting | EngineStatus::Running | EngineStatus::ShuttingDown))
+        || state.runtime.engines.iter().any(|r| r.settling.is_some())
+}
+
+/// The longest an engine's start sequence waits for its propellant to
+/// settle (s): then it gives up (its ignition kept).
+pub const SETTLE_LIMIT: f64 = 120.0;
+
+/// Whether engine `i`'s feed tanks' outlets are covered by settled liquid.
+pub fn feeds_settled(def: &ShipDef, state: &ShipState, i: usize) -> bool {
+    def.engines[i].feeds.iter().all(|list| {
+        first(list, state, false).is_none_or(|t| {
+            let g = super::plumbing::geometry(&def.tanks[t], &state.tanks[t]);
+            let run = state.runtime.tanks.get(t).cloned().unwrap_or_default();
+            super::plumbing::covered(&run, &g, state.tanks[t].liquid)
+        })
+    })
+}
+
+/// Lights engine `i` (off, an ignition available): its start begins, one
+/// of its charges spent (none on the pad's ground supply, none for a
+/// hypergolic engine).
+pub fn light(def: &ShipDef, state: &mut ShipState, i: usize) {
+    let (d, ground) = (&def.engines[i], state.clamped);
+    let e = &mut state.engines[i];
+    e.status = EngineStatus::Starting;
+    e.timer = 0.0;
+    e.selected = true;
+    if !ground && d.data.igniter != crate::catalog::Igniter::Hypergolic && e.ignitions != u32::MAX && e.ignitions > 0 {
+        e.ignitions -= 1;
+    }
+    let run = &mut state.runtime.engines[i];
+    run.reason = None;
+    run.settling = None;
+    if let Some(p) = state.parts.iter_mut().find(|p| p.part == d.part) {
+        p.history.starts += 1;
+    }
+}
+
+/// The direction (body axes) the waiting engines' start sequences want the
+/// thrusters to push (their thrust's), if any engine is settling.
+pub fn ullage(def: &ShipDef, state: &ShipState) -> DVec3 {
+    let want: DVec3 = (def.engines.iter().zip(&state.runtime.engines))
+        .filter(|(_, r)| r.settling.is_some())
+        .map(|(d, _)| d.data.dir.normalize())
+        .sum();
+    if want.length() > 0.0 {
+        want.normalize()
+    } else {
+        DVec3::ZERO
+    }
+}
+
+/// Engines waiting for their propellant: start once it is settled, give up
+/// after [`SETTLE_LIMIT`].
+fn settle_or_start(def: &ShipDef, state: &mut ShipState, env: &Env) {
+    for i in 0..def.engines.len() {
+        let Some(waited) = state.runtime.engines.get(i).and_then(|r| r.settling) else { continue };
+        if state.engines[i].status != EngineStatus::Off {
+            state.runtime.engines[i].settling = None;
+        } else if feeds_settled(def, state, i) || env.debug {
+            light(def, state, i);
+            state.runtime.event(env.at, format!("{}: settled after {waited:.1} s, starting", def.engines[i].id), false);
+        } else if waited + env.dt > SETTLE_LIMIT {
+            state.runtime.engines[i].settling = None;
+            let text = format!("{}: start abandoned, its propellant would not settle", def.engines[i].id);
+            state.runtime.event(env.at, text, true);
+        } else {
+            state.runtime.engines[i].settling = Some(waited + env.dt);
+        }
+    }
 }
 
 /// The first tank of a feed list holding liquid (any, when `infinite`).
@@ -227,6 +304,7 @@ pub fn stop(def: &ShipDef, state: &mut ShipState, i: usize, why: Stop, at: Epoch
 /// effects the vessel acts on (the clamps' release).
 pub fn step(def: &ShipDef, state: &mut ShipState, env: &Env, feeds: &[Feed]) -> Vec<Effect> {
     state.runtime.refit(def);
+    settle_or_start(def, state, env);
     for i in 0..def.engines.len() {
         if !env.debug && inlet_trouble(def, state, i, env, feeds) {
             continue;

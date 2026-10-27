@@ -116,6 +116,10 @@ pub struct Controls {
     /// What the target modes aim at.
     #[serde(default)]
     pub target: Option<TargetState>,
+    /// Translation command in body axes (each in [-1, 1]): a craft of
+    /// parts' thrusters push along it (`systems::rcs`; settling burns).
+    #[serde(default)]
+    pub translate: DVec3,
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]

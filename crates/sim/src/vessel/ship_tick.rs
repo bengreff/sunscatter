@@ -53,6 +53,25 @@ pub(super) struct TickMotion {
     pub thrust_dir: DVec3,
 }
 
+/// A craft of parts' translating thrusters over a tick (`systems::rcs`):
+/// their torque added to the command's, their force (body axes) to the
+/// tick's constant acceleration `lift` (inertial; attitude `q`, `mass`).
+pub(super) fn with_push(
+    ship: Option<&ShipTick>,
+    cmd: &mut super::attitude::Command,
+    lift: DVec3,
+    q: glam::DQuat,
+    mass: f64,
+) -> DVec3 {
+    match ship {
+        Some(t) => {
+            cmd.torque += t.push.torque;
+            lift + q * t.push.force / mass
+        }
+        None => lift,
+    }
+}
+
 /// The gravitational acceleration (relative to `anchor`) at `r` at `t`.
 fn gravity(world: &World, t: Epoch, anchor: NodeId, r: DVec3, v: DVec3) -> DVec3 {
     let snap = world.snapshot(t);
@@ -151,6 +170,20 @@ impl Vessel {
         }
     }
 
+    /// The tanks' liquids after the structure was jolted by `dv` (inertial,
+    /// a separation system's push): they keep their velocity, so each moves
+    /// against its tank by the push along the tank's axis (the pushers
+    /// settle the stage they push forward, and float the one pushed back).
+    pub(super) fn jolt(&mut self, dv: DVec3) {
+        let Some(def) = self.ship_def() else { return };
+        let body = self.attitude.q.inverse() * dv;
+        let Some(state) = self.ship.as_mut() else { return };
+        state.runtime.refit(&def);
+        for (t, run) in def.tanks.iter().zip(state.runtime.tanks.iter_mut()) {
+            run.drift_speed -= body.dot(t.region.axis.normalize());
+        }
+    }
+
     /// After a coast: a craft of parts' contents are its ship state's (it
     /// vents on the lattice; the segment carries the mass it started with),
     /// any other craft's tanks follow the segment's mass.
@@ -193,6 +226,9 @@ impl Vessel {
         let mut per_block = vec![0.0; def.thrusters.len()];
         for &(i, share) in &tick.blocks {
             per_block[i] = rcs_kg * share;
+        }
+        for (b, f) in per_block.iter_mut().zip(&tick.push.flows) {
+            *b += f * m.dt;
         }
         let bodies = loads.as_ref().map(|g| g.bodies());
         let (sun, air_k) = (m.sun, m.air_k);

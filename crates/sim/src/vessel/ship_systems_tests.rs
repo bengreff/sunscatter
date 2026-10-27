@@ -140,3 +140,136 @@ fn orders_at_epochs_fly_the_same_in_frames_and_in_one_jump() {
     assert!(s.engines.iter().all(|e| e.status == EngineStatus::Off), "shut down by the delayed order");
     assert!(s.engines.iter().all(|e| e.throttle == 0.6));
 }
+
+/// The engines' draw is the tanks' loss (the invariant): ten seconds after
+/// liftoff at full thrust the nine Merlins have drawn 9 × 299.7 kg/s from
+/// the first stage's tanks by their mixture ratio, nothing else; at that
+/// rate its 411 t last ~152 s (falcon9.md §4.3: "152 s at full flow empties
+/// the stage").
+#[test]
+fn the_first_stage_draws_its_engines_flow_and_nothing_else() {
+    let w = world();
+    let mut v = falcon9(&w);
+    v.order_at(t0(), OrderKind::Stage).unwrap();
+    v.order_at(t0(), OrderKind::Stage).unwrap();
+    v.advance(&w, t0().add_seconds(2.1), &full(), usize::MAX);
+    let plan = v.plan_breakup().expect("the mount separates");
+    let mut ids = VesselIds::default();
+    ids.allocate();
+    v.split(&w, &plan, &plan.crafts(), &mut ids);
+    let def = v.ship_def().unwrap();
+    let tank = |id: &str| def.tanks.iter().position(|t| t.id == id).unwrap();
+    let (lox, rp1) = (tank("s1.tank:lox"), tank("s1.tank:rp1"));
+    let before = v.ship().unwrap().clone();
+    let start = v.time;
+    v.advance(&w, start.add_seconds(10.0), &full(), usize::MAX);
+    let s = v.ship().unwrap();
+    let drawn = |i: usize| before.tanks[i].liquid - s.tanks[i].liquid;
+    let flow = 9.0 * 914.0e3 / (311.0 * G0);
+    let seconds = v.time.seconds_since(start);
+    println!("{:.0} kg in {seconds:.2} s: {:.1} kg/s", drawn(lox) + drawn(rp1), (drawn(lox) + drawn(rp1)) / seconds);
+    assert!(((drawn(lox) + drawn(rp1)) / (flow * seconds) - 1.0).abs() < 0.005);
+    assert!((drawn(lox) / drawn(rp1) - 2.33).abs() < 1e-6, "by the mixture ratio");
+    let others: f64 = (0..def.tanks.len()).filter(|&i| i != lox && i != rp1).map(|i| drawn(i).abs()).sum();
+    assert!(others < 1.0, "the other tanks keep theirs: {others} kg");
+    let load = before.tanks[lox].liquid + before.tanks[rp1].liquid;
+    assert!((load / flow - 152.0).abs() < 3.0, "a full-flow burn of {} s", load / flow);
+}
+
+/// A diagnostic flight (run by hand): the Falcon 9 from the pad at full
+/// throttle, held vertical, printed every 10 s.
+#[test]
+#[ignore]
+fn falcon9_ascent_profile() {
+    let w = world();
+    let mut v = falcon9(&w);
+    v.order_at(t0(), OrderKind::Stage).unwrap();
+    v.order_at(t0(), OrderKind::Stage).unwrap();
+    v.advance(&w, t0().add_seconds(2.1), &full(), usize::MAX);
+    let plan = v.plan_breakup().expect("the mount separates");
+    let mut ids = VesselIds::default();
+    ids.allocate();
+    v.split(&w, &plan, &plan.crafts(), &mut ids);
+    let def = v.ship_def().unwrap();
+    let s1: Vec<usize> = (0..def.tanks.len()).filter(|&i| def.tanks[i].id.starts_with("s1.")).collect();
+    let s1_load: f64 = s1.iter().map(|&i| v.ship().unwrap().tanks[i].liquid).sum();
+    let start = v.time;
+    for k in 1..=16 {
+        v.advance(&w, start.add_seconds(10.0 * k as f64), &full(), usize::MAX);
+        let (anchor, r, vel) = v.state(&w);
+        let alt = crate::forces::altitude_above(&w, &w.snapshot(v.time), anchor, anchor, r).0;
+        let s = v.ship().unwrap();
+        let left: f64 = s1.iter().map(|&i| s.tanks[i].liquid).sum();
+        let worst = s.runtime.joints.iter().map(|j| j.ratio).fold(0.0, f64::max);
+        println!(
+            "T+{:>3.0} s alt {:>7.0} m speed {:>6.1} m/s mass {:>7.0} kg s1 {:>5.1} % drawn {:>7.0} kg worst joint {:.2} accel {:.1}",
+            v.time.seconds_since(start),
+            alt,
+            vel.length(),
+            v.mass(),
+            100.0 * left / s1_load,
+            s1_load - left,
+            worst,
+            s.runtime.accel.length()
+        );
+        if v.plan_breakup().is_some() {
+            println!("broke up: {:?}", v.ship_events().iter().rev().take(3).collect::<Vec<_>>());
+            break;
+        }
+    }
+}
+
+/// The second stage with Dragon in orbit after its first burn (tanks at
+/// 10 %, ullages held at 3.5 bar), coasting 20 minutes: its propellant
+/// floats. Commanded to start, the MVac's start sequence fires the two
+/// nitrogen pods' aft nozzles until the propellant is settled, then lights
+/// and runs; commanded twice (start now), it lights into floating
+/// propellant and the start is aborted by gas ingestion, its ignition spent.
+#[test]
+fn a_restart_after_a_coast_settles_first_and_ingests_gas_when_forced() {
+    let w = world();
+    let earth = w.find("Earth").unwrap();
+    let (r, vel) = crate::kepler::Elements { a: 6_578_137.0, e: 0.0, i: 0.9, raan: 1.0, argp: 0.5, mean_anomaly: 0.0 }
+        .to_state(earth.gm);
+    let craft = craft_of(&CraftId("falcon9-crew#0-11".into()));
+    let fresh = || {
+        let mut v = Vessel::coasting(&w, VesselId(1), t0(), earth.node, r, vel, &craft);
+        let def = v.ship_def().unwrap();
+        let s = v.ship.as_mut().unwrap();
+        for (t, st) in def.tanks.iter().zip(s.tanks.iter_mut()).filter(|(t, _)| t.id.starts_with("s2.")) {
+            st.liquid *= 0.1;
+            let g = crate::systems::plumbing::geometry(t, st);
+            st.ullage_moles = crate::fluids::moles(t.load.pressure, g.ullage, st.ullage_k);
+        }
+        v.propellant = s.consumables(&def);
+        v
+    };
+    let ignite = ShipCommand::Ignite("s2".into());
+    let mvac = |v: &Vessel| v.ship_def().unwrap().engines.iter().position(|e| e.id == "s2.mvac").unwrap();
+    // Settled by the start sequence.
+    let mut v = fresh();
+    let coast = t0().add_seconds(1_200.0);
+    v.advance(&w, coast, &Controls::default(), usize::MAX);
+    let i = mvac(&v);
+    assert!(!crate::systems::propulsion::feeds_settled(&v.ship_def().unwrap(), v.ship().unwrap(), i), "floating");
+    let n2 = |v: &Vessel| v.ship().unwrap().bottles.iter().map(|b| b.moles).sum::<f64>();
+    let gas0 = n2(&v);
+    v.order_at(coast, OrderKind::Command(ignite.clone())).unwrap();
+    v.advance(&w, coast.add_seconds(30.0), &full(), usize::MAX);
+    let events: Vec<String> = v.ship_events().iter().map(|e| e.text.clone()).collect();
+    println!("{events:#?}");
+    assert!(events.iter().any(|e| e.contains("settled after")), "{events:?}");
+    assert_eq!(v.ship().unwrap().engines[i].status, EngineStatus::Running);
+    assert_eq!(v.ship().unwrap().engines[i].ignitions, 2, "one charge spent");
+    assert!(n2(&v) < gas0, "the pods fired");
+    // Forced: lit into floating propellant.
+    let mut v = fresh();
+    v.advance(&w, coast, &Controls::default(), usize::MAX);
+    v.order_at(coast, OrderKind::Command(ignite.clone())).unwrap();
+    v.order_at(coast, OrderKind::Command(ignite)).unwrap();
+    v.advance(&w, coast.add_seconds(5.0), &full(), usize::MAX);
+    let s = v.ship().unwrap();
+    let events: Vec<String> = v.ship_events().iter().map(|e| e.text.clone()).collect();
+    assert!(events.iter().any(|e| e.contains("start aborted: gas ingestion")), "{events:?}");
+    assert_eq!((s.engines[i].status, s.engines[i].ignitions), (EngineStatus::Off, 2));
+}

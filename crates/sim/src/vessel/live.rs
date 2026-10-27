@@ -409,7 +409,7 @@ impl Vessel {
         (dt, until): (f64, Epoch),
     ) -> Option<TickStart<'d>> {
         let Phase::Powered { anchor, r, v } = self.phase else { unreachable!() };
-        let engine_on = self.engine_running(controls) || self.ship_needs_ticks();
+        let engine_on = self.engine_running(controls) || self.ship_wants_ticks(controls);
         let near = self.nearest_surface(world, anchor, r);
         let live = self.live_height();
         let contact_body = near.filter(|&(_, h)| h <= live).map(|(b, _)| b);
@@ -436,10 +436,11 @@ impl Vessel {
         let drag = DragModel { cd_area, mass: props.mass };
         let sun_body = self.attitude.q.inverse() * crate::light::sunlight(world, &snap, anchor, r);
         let att0 = self.attitude.q;
-        let (out, act, ship) = self.actuators(controls.throttle, p, dt, &props);
+        let (out, act, ship) = self.actuators(controls, p, dt, &props);
         let before = (self.attitude, self.control);
         let aim = self.aim(world, &snap, (anchor, r, v), controls);
-        let cmd = attitude::command(&self.attitude, &props.inertia, &mut self.control, controls, &act, &aim, dt);
+        let mut cmd = attitude::command(&self.attitude, &props.inertia, &mut self.control, controls, &act, &aim, dt);
+        let lift = super::ship_tick::with_push(ship.as_ref(), &mut cmd, lift, self.attitude.q, props.mass);
         let compensate = self.bubble.member;
         Some(TickStart {
             anchor,

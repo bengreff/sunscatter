@@ -1,7 +1,8 @@
 //! Ship commands as the systems carry them out (D104, D107, D108;
 //! ship-model.md §5.0, §5.3, §8): an ignition starts an engine's start
 //! sequence (one of its igniter charges, or the ground's supply while the
-//! pad's clamps hold it), a shutdown its tail-off, a deployment moves a
+//! pad's clamps hold it; on floating propellant it first waits for it to
+//! settle, `systems::propulsion`), a shutdown its tail-off, a deployment moves a
 //! mechanism at its actuator's rate, and the sequence's clamp release is
 //! armed until every ignited engine delivers its rated thrust (the real
 //! pad's rule); a release commanded by hand lets go at once. Everything
@@ -54,16 +55,20 @@ pub fn apply(def: &ShipDef, state: &mut ShipState, command: &ShipCommand, cx: Co
                     state.runtime.event(cx.at, format!("{}: no ignition left", d.id), true);
                     continue;
                 }
-                e.status = EngineStatus::Starting;
-                e.timer = 0.0;
                 e.selected = true;
-                if !ground && d.data.igniter != Igniter::Hypergolic && e.ignitions != u32::MAX {
-                    e.ignitions -= 1;
+                // Floating propellant: the start sequence waits for it to
+                // settle (its acceleration history says when), firing the
+                // thrusters that push along the engine's thrust if it has
+                // any; commanded again while it waits, it starts at once.
+                let waiting = state.runtime.engines[i].settling.is_some();
+                if !waiting && !super::propulsion::feeds_settled(def, state, i) {
+                    state.runtime.engines[i].settling = Some(0.0);
+                    let how = if super::rcs::can_push(def, state, d.data.dir) { "settling" } else { "waiting for" };
+                    let text = format!("{}: {how} its propellant before the start (ignite again to start now)", d.id);
+                    state.runtime.event(cx.at, text, false);
+                    continue;
                 }
-                state.runtime.engines[i].reason = None;
-                if let Some(p) = state.parts.iter_mut().find(|p| p.part == d.part) {
-                    p.history.starts += 1;
-                }
+                super::propulsion::light(def, state, i);
             }
             Ok(Vec::new())
         }
@@ -73,6 +78,7 @@ pub fn apply(def: &ShipDef, state: &mut ShipState, command: &ShipCommand, cx: Co
                 return none();
             }
             for i in picked {
+                state.runtime.engines[i].settling = None;
                 let e = &mut state.engines[i];
                 if matches!(e.status, EngineStatus::Starting | EngineStatus::Running) {
                     e.status = EngineStatus::ShuttingDown;
