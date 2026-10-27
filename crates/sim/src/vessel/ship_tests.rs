@@ -178,6 +178,15 @@ fn the_falcon_9_stands_on_the_pad_and_lifts_off() {
     assert!(((v.mass() - pad) / 560_200.0 - 1.0).abs() < 0.01);
     assert_eq!(v.craft.engine.thrust_vac, 9.0 * 914.0e3, "the readouts' engine: the nine Merlins");
     assert_eq!(v.next_stage(&w).unwrap().0, "Ignition");
+    // Lit from the ground's supply: E1, E5 and E9 keep their three relights.
+    let merlins = |x: &Vessel| -> Vec<u32> {
+        let def = x.ship_def().unwrap();
+        (def.engines.iter().zip(&x.ship().unwrap().engines))
+            .filter(|(d, _)| d.owner.starts_with("s1.merlin"))
+            .map(|(_, e)| e.ignitions)
+            .collect()
+    };
+    assert_eq!(merlins(&v), [3, 3, 0, 0, 0, 3, 0, 0, 0], "E9, E1…E8");
     v.advance(&w, t0().add_seconds(2.0), &full(1.0), usize::MAX);
     assert!(matches!(v.phase, Phase::Landed { .. }), "held by the clamps");
     // Liftoff: the clamps let go; the mount stays behind as ground.
@@ -266,4 +275,62 @@ fn deploying_the_legs_reshapes_the_vessel() {
     assert!(v.mass_props().inertia.x_axis.x > before.mass_props().inertia.x_axis.x, "legs out: more inertia");
     assert_eq!(v.ship(), before.ship());
     assert_eq!(v.deployed_parts(), plan.ids[0].deployed());
+}
+
+/// Stage separation at MECO (~75 km, ~2 km/s): the pushers part the stages
+/// at ~0.5 m/s, the MVac starts with its nozzle still in the interstage,
+/// and the two fly on in one bubble: the pieces of the split do not touch
+/// while they overlap, neither is wrecked, and they are hundreds of metres
+/// apart after ten seconds.
+#[test]
+fn the_falcon_9_stages_separate_without_touching() {
+    use crate::craft::command::ShipCommand;
+    let w = world();
+    let whole = crate::craft::registry::definition(&CraftId("falcon9-crew".into())).unwrap();
+    let flying: Vec<u32> = whole.parts.iter().filter(|p| !p.name.starts_with("pad.")).map(|p| p.id).collect();
+    let craft = craft_of(&CraftId::piece("falcon9-crew", &flying));
+    let earth = w.find("Earth").unwrap();
+    let up = DVec3::new(0.3, -0.5, 0.81).normalize();
+    let east = DVec3::Z.cross(up).normalize();
+    let r = up * (6_378_137.0 + 75_000.0);
+    let vel = (east * 0.866 + up * 0.5) * 2_000.0;
+    let mut v = Vessel::coasting(&w, VesselId(1), t0(), earth.node, r, vel, &craft);
+    v.set_attitude(Attitude { q: crate::vessel::quat_z_to(vel.normalize()), omega: DVec3::ZERO });
+    // At MECO the booster keeps ~7 % of its load for its return (falcon9.md §4.3).
+    let def = v.ship_def().unwrap();
+    let ship = v.ship.as_mut().unwrap();
+    for (t, d) in ship.tanks.iter_mut().zip(&def.tanks) {
+        if d.id.starts_with("s1.") {
+            t.liquid *= 0.07;
+        }
+    }
+    v.propellant = ship.consumables(&def);
+    v.command(&w, &ShipCommand::Separate("stage separation".into())).unwrap();
+    let plan = v.plan_breakup().unwrap();
+    let mut ids = VesselIds::default();
+    ids.allocate();
+    let booster = v.split(&w, &plan, &plan.crafts(), &mut ids).remove(0);
+    let rel = booster.state(&w).2 - v.state(&w).2;
+    println!("parting at {:.2} m/s", rel.length());
+    assert!((rel.length() - 0.5).abs() < 0.15, "{}", rel.length());
+    assert!(rel.dot(v.attitude.q * DVec3::Z) < 0.0, "the booster pushed back");
+    v.command(&w, &ShipCommand::Select("s2".into())).unwrap();
+    v.command(&w, &ShipCommand::Ignite("s2".into())).unwrap();
+    let mut fleet = vec![v, booster];
+    let controls = |i: usize| Controls { throttle: if i == 0 { 1.0 } else { 0.0 }, sas: true, ..Default::default() };
+    let start = fleet[0].time;
+    for k in 1..=100 {
+        let target = start.add_seconds(0.1 * f64::from(k));
+        crate::vessel::bubble::advance(&w, &mut fleet, &controls, target);
+        for (i, x) in fleet.iter_mut().enumerate() {
+            x.advance(&w, target, &controls(i), usize::MAX);
+        }
+    }
+    for x in &fleet {
+        assert!(x.destruction().is_none() && x.breakup().is_none(), "{:?}", x.destruction());
+    }
+    let gap = (fleet[0].state(&w).1 - fleet[1].state(&w).1).length();
+    println!("{gap:.0} m apart after 10 s");
+    assert!(gap > 200.0, "{gap}");
+    assert!(fleet[0].clear_of.is_empty() && fleet[1].clear_of.is_empty(), "clear of each other");
 }

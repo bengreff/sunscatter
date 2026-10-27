@@ -36,13 +36,13 @@
         (id: "s1.tank", entry: "f9-s1-tank", mount: (on: "s1.interstage", at: "bottom", via: "top")),
         (id: "s1.octaweb", entry: "f9-octaweb", mount: (on: "s1.tank", at: "bottom", via: "top")),
         // E9 is the centre engine; E1…E8 the ring from falcon9.md's 0°. E1,
-        // E5 and E9 carry three relights besides the pad start (E).
-        (id: "s1.merlin.9", entry: "merlin-1d", set: {"ignitions": 4.0}, mount: (on: "s1.octaweb", at: "engine_1", via: "mount")),
-        (id: "s1.merlin.1", entry: "merlin-1d", set: {"ignitions": 4.0}, mount: (on: "s1.octaweb", at: "engine_2", via: "mount")),
+        // E5 and E9 carry three relights; the pad start is the ground's (E).
+        (id: "s1.merlin.9", entry: "merlin-1d", set: {"ignitions": 3.0}, mount: (on: "s1.octaweb", at: "engine_1", via: "mount")),
+        (id: "s1.merlin.1", entry: "merlin-1d", set: {"ignitions": 3.0}, mount: (on: "s1.octaweb", at: "engine_2", via: "mount")),
         (id: "s1.merlin.2", entry: "merlin-1d", mount: (on: "s1.octaweb", at: "engine_3", via: "mount")),
         (id: "s1.merlin.3", entry: "merlin-1d", mount: (on: "s1.octaweb", at: "engine_4", via: "mount")),
         (id: "s1.merlin.4", entry: "merlin-1d", mount: (on: "s1.octaweb", at: "engine_5", via: "mount")),
-        (id: "s1.merlin.5", entry: "merlin-1d", set: {"ignitions": 4.0}, mount: (on: "s1.octaweb", at: "engine_6", via: "mount")),
+        (id: "s1.merlin.5", entry: "merlin-1d", set: {"ignitions": 3.0}, mount: (on: "s1.octaweb", at: "engine_6", via: "mount")),
         (id: "s1.merlin.6", entry: "merlin-1d", mount: (on: "s1.octaweb", at: "engine_7", via: "mount")),
         (id: "s1.merlin.7", entry: "merlin-1d", mount: (on: "s1.octaweb", at: "engine_8", via: "mount")),
         (id: "s1.merlin.8", entry: "merlin-1d", mount: (on: "s1.octaweb", at: "engine_9", via: "mount")),
@@ -105,9 +105,10 @@
         (id: "s1.manifolds", entry: "mass-item", set: {"mass": 600.0}, in: "s1.octaweb", pos: (0.0, 0.9, 2.5)),
     ],
     joints: [
-        // Three latches and four pneumatic pushers plus a centre one (P), ~0.5 m/s (E).
+        // Three latches and four pneumatic pushers plus a centre one (P): ~0.5 m/s
+        // between ~50 t and ~124 t at MECO (E, falcon9.md §1.3): 18 kN·s.
         (name: "stage separation", between: ("s2.skirt", "s1.interstage"),
-         kind: Separation(system: Pneumatic, impulse: 2.5e4, strength: 0.8)),
+         kind: Separation(system: Pneumatic, impulse: 1.8e4, strength: 0.8)),
         (name: "dragon separation", between: ("s2.ring", "dragon.trunk"),
          kind: Separation(system: Clamp, impulse: 2.0e3, strength: 0.8)),
         (name: "hold-down clamps", between: ("s1.octaweb", "pad.mount"), kind: HoldDown),

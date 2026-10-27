@@ -238,6 +238,11 @@ pub struct Vessel {
     /// ([`crate::craft::state`]); `propellant` is their consumables' total.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     ship: Option<crate::craft::state::ShipState>,
+    /// The other pieces of the split this vessel came from, while they
+    /// still overlap it: no craft contact between them until they are
+    /// clear (a stage's engine starts inside the interstage it leaves).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    clear_of: Vec<VesselId>,
 }
 
 /// Rotation matrix taking body-fixed axes of `body` to inertial axes at `t`.

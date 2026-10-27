@@ -156,6 +156,9 @@ pub struct JointDef {
     /// Line load it carries at room temperature (N/m): the weaker wall's,
     /// a separation system's share of it.
     pub allowable: f64,
+    /// From the parent towards the child (craft axes, unit): the way a
+    /// separation system pushes the child.
+    pub normal: DVec3,
 }
 
 /// A plumbing line.

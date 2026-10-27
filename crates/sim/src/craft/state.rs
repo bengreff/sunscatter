@@ -390,6 +390,10 @@ impl ShipState {
         let ids = |list: &mut dyn Iterator<Item = &String>, s: &str| -> Vec<usize> {
             list.enumerate().filter(|(_, id)| matches(s, id)).map(|(i, _)| i).collect()
         };
+        // On the pad the clamps' ground supply lights the engines (Falcon 9's
+        // TEA-TEB on the pad: falcon9.md §2.1); in flight each start uses one
+        // of the engine's own ignitions.
+        let ground = self.clamped;
         match command {
             ShipCommand::Ignite(s)
             | ShipCommand::Shutdown(s)
@@ -407,11 +411,13 @@ impl ShipState {
                 for &i in &picked {
                     let e = &mut self.engines[i];
                     match command {
-                        ShipCommand::Ignite(_) if matches!(e.status, EngineStatus::Off) && e.ignitions > 0 => {
+                        ShipCommand::Ignite(_)
+                            if matches!(e.status, EngineStatus::Off) && (ground || e.ignitions > 0) =>
+                        {
                             e.status = EngineStatus::Running;
                             e.timer = 0.0;
                             e.selected = true;
-                            if e.ignitions != u32::MAX {
+                            if !ground && e.ignitions != u32::MAX {
                                 e.ignitions -= 1;
                             }
                         }

@@ -200,6 +200,7 @@ fn joints(file: &AssemblyFile, parts: &[Placed], ship: &mut ShipDef, errors: &mu
             kind: JointKind::Bolted,
             radius: size / 2.0,
             allowable,
+            normal: p.normal.normalize_or(glam::DVec3::Z),
         });
     }
     for decl in &file.joints {

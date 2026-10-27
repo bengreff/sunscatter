@@ -33,8 +33,9 @@
 //! * **Phase**: live stays live, a coast restarts as coasts from the split
 //!   epoch, a landed or crashed vessel is woken into live ticks.
 
-use super::{AttitudeControl, Destruction, Phase, Vessel, VesselIds, VesselThermal};
+use super::{AttitudeControl, Destruction, Phase, Vessel, VesselId, VesselIds, VesselThermal};
 use crate::chute::{CanopyState, ChuteState};
+use crate::craft::assembly::JointKind;
 use crate::craft::parts::components;
 use crate::craft::{registry, Craft, CraftDesign, CraftId};
 use crate::thermal::ThermalState;
@@ -187,7 +188,7 @@ impl Vessel {
         ids: &mut VesselIds,
     ) -> Vec<Vessel> {
         assert_eq!(plan.pieces.len(), crafts.len(), "one craft per piece");
-        self.breakup = None;
+        let pending = self.breakup.take();
         // One piece of another craft: the same parts, mechanisms moved.
         let reconfigure = plan.pieces.len() == 1 && crafts[0].id != self.craft.id;
         if plan.pieces.len() < 2 && !reconfigure {
@@ -270,14 +271,53 @@ impl Vessel {
             if let Some(cause) = plan.destroyed[k] {
                 piece.destroy(cause);
             }
-            if coasting {
-                piece.start_coast_from(world, state);
-            }
             pieces.push(piece);
+        }
+        if !reconfigure {
+            let separated = pending.map_or_else(Vec::new, |b| b.separated);
+            push_apart(&mut pieces, &old, &separated, q);
+            // Pieces of one split overlap where they parted (an engine in
+            // the interstage it leaves): no contact between them until clear.
+            let all: Vec<VesselId> = pieces.iter().map(|p| p.id).collect();
+            for p in &mut pieces {
+                p.clear_of = all.iter().copied().filter(|&x| x != p.id).collect();
+            }
+        }
+        if coasting {
+            for p in &mut pieces {
+                let Phase::Powered { anchor, r, v } = p.phase else { continue };
+                p.start_coast_from(world, (anchor, r, v));
+            }
         }
         let rest = pieces.split_off(1);
         *self = pieces.pop().expect("the vessel's piece");
         rest
+    }
+}
+
+/// Each separation system that fired (the joints of the `separated` parts,
+/// indices into the craft `old`'s parts) gives its impulse along its
+/// normal: the child's piece pushed on, the parent's back, equal and
+/// opposite (momentum exact).
+fn push_apart(pieces: &mut [Vessel], old: &CraftDesign, separated: &[u32], q: glam::DQuat) {
+    let Some(ship) = &old.ship else { return };
+    let holder =
+        |pieces: &[Vessel], id: u32| pieces.iter().position(|p| p.craft.design().parts.iter().any(|x| x.id == id));
+    for &c in separated {
+        let child = old.parts[c as usize].id;
+        let Some(joint) = ship.joints.iter().find(|j| j.child == child) else { continue };
+        let JointKind::Separation { impulse, .. } = joint.kind else { continue };
+        let (Some(a), Some(b)) = (holder(pieces, joint.parent), holder(pieces, child)) else { continue };
+        if a == b {
+            continue;
+        }
+        let push = q * joint.normal * impulse;
+        for (k, sign) in [(a, -1.0), (b, 1.0)] {
+            let m = pieces[k].mass();
+            if let Phase::Powered { v, .. } = &mut pieces[k].phase {
+                *v += push * (sign / m);
+            }
+        }
     }
 }
 

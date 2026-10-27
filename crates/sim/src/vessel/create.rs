@@ -45,6 +45,7 @@ impl Vessel {
             breakup: None,
             bubble: Default::default(),
             ship: None,
+            clear_of: Vec::new(),
         };
         vessel.init_ship();
         vessel

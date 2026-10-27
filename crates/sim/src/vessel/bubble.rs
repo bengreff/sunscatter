@@ -531,14 +531,29 @@ fn together(
     };
     let mut ok = true;
     // The points that can touch this tick, pair by pair (a, b ascending).
+    // Pieces of one split overlapping at its start (an engine inside the
+    // interstage it leaves) do not touch until they are clear.
     let mut near: Vec<(usize, usize, Near)> = Vec::new();
+    let mut cleared: Vec<(usize, usize)> = Vec::new();
     let mut origin = (subs[0].r, subs[0].lo());
+    let parting = |a: usize, b: usize| {
+        let (va, vb) = (&shared[idx[a]], &shared[idx[b]]);
+        va.clear_of.contains(&vb.id) || vb.clear_of.contains(&va.id)
+    };
     for a in 0..n {
         for b in a + 1..n {
             let (ba, bb) = (body(a, &subs, origin, 0), body(b, &subs, origin, 0));
             let margin = tick_margin(&ba, &bb);
-            if proximity::sphere_gap(&ba, &bb) < margin {
-                near.push((a, b, proximity::near_points(&ba, &bb, margin)));
+            let close = proximity::sphere_gap(&ba, &bb) < margin;
+            let points = close.then(|| proximity::near_points(&ba, &bb, margin));
+            if parting(a, b) {
+                match &points {
+                    Some(p) if !proximity::contact::touches_near(&ba, &bb, p).is_empty() => continue,
+                    _ => cleared.push((a, b)),
+                }
+            }
+            if let Some(p) = points {
+                near.push((a, b, p));
             }
         }
     }
@@ -577,6 +592,11 @@ fn together(
             (fleet[i].attitude, fleet[i].control) = starts[k].before;
         }
         return false;
+    }
+    for &(a, b) in &cleared {
+        let (ia, ib) = (fleet[idx[a]].id, fleet[idx[b]].id);
+        fleet[idx[a]].clear_of.retain(|&x| x != ib);
+        fleet[idx[b]].clear_of.retain(|&x| x != ia);
     }
     for ((k, &i), (start, (end, att, impact))) in idx.iter().enumerate().zip(starts.into_iter().zip(ends)) {
         let v = &mut fleet[i];
