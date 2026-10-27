@@ -97,6 +97,7 @@ pub fn apply(def: &ShipDef, state: &mut ShipState, command: &ShipCommand, cx: Co
             }
             for i in picked {
                 let m = &def.mechanisms[i].item;
+                let before = state.mechanisms[i].target;
                 let now = &mut state.mechanisms[i];
                 now.target = match command {
                     ShipCommand::Deploy(_) => m.deployed_deg,
@@ -107,6 +108,14 @@ pub fn apply(def: &ShipDef, state: &mut ShipState, command: &ShipCommand, cx: Co
                     }
                     _ => unreachable!(),
                 };
+                // A movement begun is a cycle of its actuator (its failure
+                // modes count them, `systems::failure`).
+                if now.target != before {
+                    let part = def.mechanisms[i].part;
+                    if let Some(p) = state.parts.iter_mut().find(|p| p.part == part) {
+                        p.history.cycles += 1;
+                    }
+                }
             }
             Ok(Vec::new())
         }

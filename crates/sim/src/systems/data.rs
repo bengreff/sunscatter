@@ -186,9 +186,11 @@ pub fn knowledge(def: &ShipDef, state: &ShipState, debug: bool) -> Knowledge {
     }
     let mut k = Knowledge::default();
     let intact = |part: u32| state.parts.iter().find(|p| p.part == part).is_none_or(|p| p.integrity > 0.0);
+    // Switched on, its part intact, its function not lost (a failure).
     let on = |id: &str, part: u32| {
         let i = def.components.iter().position(|c| c.id == id);
-        intact(part) && i.is_none_or(|i| state.power.get(i).is_none_or(|s| s.on))
+        let lost = state.runtime.lost.iter().any(|l| l.owner == id);
+        intact(part) && !lost && i.is_none_or(|i| state.power.get(i).is_none_or(|s| s.on))
     };
     // Computers that work, and what they are linked to.
     let linked = |id: &str| {
@@ -314,5 +316,13 @@ mod tests {
         let k = knowledge(&def, &state, false);
         assert!(!k.knows(Quantity::Position) && !k.knows(Quantity::Attitude));
         assert!(knowledge(&def, &state, true).knows(Quantity::Position));
+        // Lost sensors (failures) measure nothing.
+        let mut state = ShipState::initial(&def);
+        for id in ["s1.gps#1", "s1.gps#2", "s2.gps#1", "s2.gps#2", "dragon.gps#1", "dragon.gps#2"] {
+            let part = def.sensors.iter().find(|s| s.id == id).unwrap().part;
+            state.runtime.lost.push(crate::systems::runtime::Lost { part, owner: id.into(), why: "test".into() });
+        }
+        let k = knowledge(&def, &state, false);
+        assert!(!k.knows(Quantity::Position) && k.knows(Quantity::Attitude));
     }
 }

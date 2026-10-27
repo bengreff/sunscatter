@@ -19,10 +19,23 @@ pub fn travel(angle: f64, target: f64, rate: f64, dt: f64) -> f64 {
     }
 }
 
-/// Moves every mechanism for `dt` seconds.
+/// Whether mechanism `i`'s actuator is lost (`Runtime::lost`: its pump,
+/// its drive): it stays where it is.
+pub fn stuck(def: &ShipDef, state: &ShipState, i: usize) -> bool {
+    let m = &def.mechanisms[i];
+    state.runtime.lost.iter().any(|l| l.part == m.part || l.owner == m.id)
+}
+
+/// Moves every mechanism for `dt` seconds (a lost one stays).
 pub fn step(def: &ShipDef, state: &mut ShipState, dt: f64) {
-    for (d, s) in def.mechanisms.iter().zip(state.mechanisms.iter_mut()) {
-        s.angle = travel(s.angle, s.target, d.item.rate_dps, dt);
+    for i in 0..def.mechanisms.len() {
+        if stuck(def, state, i) {
+            let s = &mut state.mechanisms[i];
+            s.target = s.angle;
+            continue;
+        }
+        let s = &mut state.mechanisms[i];
+        s.angle = travel(s.angle, s.target, def.mechanisms[i].item.rate_dps, dt);
     }
 }
 
@@ -57,5 +70,33 @@ mod tests {
             n += 1;
         }
         assert!(n == 150 || n == 151, "{n}");
+    }
+
+    /// The Falcon 9's grid fins deploy at 45°/s, each deployment a cycle of
+    /// its actuator; a fin whose pump is lost (CRS-16) stays stowed.
+    #[test]
+    fn grid_fins_deploy_unless_their_pump_is_lost() {
+        use crate::craft::command::ShipCommand;
+        use crate::systems::command::{apply, Context};
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/craft/falcon9-crew");
+        let def = crate::craft::load_definition(&path).unwrap().ship.unwrap();
+        let mut state = ShipState::initial(&def);
+        let fin = |id: &str| def.mechanisms.iter().position(|m| m.id == id).unwrap();
+        let (two, three) = (fin("s1.gridfin#2"), fin("s1.gridfin#3"));
+        let lost = crate::systems::runtime::Lost {
+            part: def.mechanisms[two].part,
+            owner: "s1.gridfin#2".into(),
+            why: "pump".into(),
+        };
+        state.runtime.lost.push(lost);
+        let at = crate::time::Epoch::new(1_000_000_000, 0.0);
+        apply(&def, &mut state, &ShipCommand::Deploy("s1.gridfin#*".into()), Context { at, sequence: false }).unwrap();
+        for _ in 0..150 {
+            step(&def, &mut state, 0.02);
+        }
+        assert_eq!((state.mechanisms[three].angle, state.mechanisms[two].angle), (90.0, 0.0));
+        let cycles = |m: usize| state.parts.iter().find(|p| p.part == def.mechanisms[m].part).unwrap().history.cycles;
+        assert_eq!(cycles(three), 1);
+        assert!(!moving(&state), "nothing left moving");
     }
 }
