@@ -119,6 +119,13 @@ pub struct Runtime {
     pub seed: u64,
     pub launch: Option<Epoch>,
     pub events: Vec<Event>,
+    /// Whether the plumbing regulates the tanks' pressures (its regulator
+    /// sets it when it runs). Until it does, the structure takes each tank's
+    /// flight (loading) pressure as its stabilising pressure at the least: a
+    /// pressure that falls only because nothing re-pressurises the tank is
+    /// not one to break a joint on (D105).
+    #[serde(default)]
+    pub pressure_regulated: bool,
 }
 
 impl Runtime {

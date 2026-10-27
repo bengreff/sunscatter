@@ -373,6 +373,8 @@ pub fn ullage_pressure(t: &TankDef, s: &TankState) -> f64 {
 /// either part that the joint's plane cuts holds its ullage pressure plus
 /// the head of its liquid above the cut under `accel` (body axes, proper),
 /// less `ambient`; zero if none does (an unpressurised skirt or interstage).
+/// Until the plumbing regulates the pressures (`Runtime::pressure_regulated`)
+/// the ullage holds at least its loading (flight) pressure.
 pub fn section_gauge(def: &ShipDef, state: &ShipState, j: &JointDef, accel: DVec3, ambient: f64) -> f64 {
     let mut gauge: f64 = 0.0;
     for (t, s) in def.tanks.iter().zip(&state.tanks) {
@@ -391,7 +393,11 @@ pub fn section_gauge(def: &ShipDef, state: &ShipState, j: &JointDef, accel: DVec
         let level = len * (s.liquid / t.capacity.max(1e-9)).min(1.0);
         let rho = fluids().liquid(&t.fluid).map_or(1000.0, |l| l.density(s.liquid_k));
         let head = rho * accel.dot(u).max(0.0) * (level - x).max(0.0);
-        gauge = gauge.max(ullage_pressure(t, s) + head - ambient);
+        // Unregulated (no pressurisation modelled yet): at least the flight
+        // pressure the tank is loaded at and its regulator would hold.
+        let ullage = ullage_pressure(t, s);
+        let ullage = if state.runtime.pressure_regulated { ullage } else { ullage.max(t.load.pressure) };
+        gauge = gauge.max(ullage + head - ambient);
     }
     gauge
 }

@@ -150,6 +150,41 @@ fn near_meco_the_upper_stack_is_heaviest() {
     assert!(bare.compression > d.buckling, "{} against {}", bare.compression, d.buckling);
 }
 
+/// Until the plumbing regulates the tanks' pressures, a draining first
+/// stage keeps its flight pressure's relief: near MECO with its loaded gas
+/// only (0.07 bar in its 95 % ullage) its joints stay well under their
+/// ultimate; regulated, the real pressure counts (and without its
+/// pressurant the aft joint is near buckling).
+#[test]
+fn an_unregulated_tank_keeps_its_flight_pressure() {
+    let craft = falcon9();
+    let def = craft.ship.as_ref().unwrap();
+    let mut state = ShipState::initial(def);
+    for (t, s) in def.tanks.iter().zip(state.tanks.iter_mut()) {
+        if t.id.starts_with("s1.") {
+            s.liquid *= 0.05;
+        }
+    }
+    let (ids, parents, kelvin) = bodies_of(&craft);
+    let pushes = merlins(&craft, 914e3);
+    let b =
+        Bodies { ids: &ids, parents: &parents, dry: &craft.part_mass, kelvin: &kelvin, pushes: &pushes, ambient: 0.0 };
+    let total: f64 = part_masses(def, &state, &b).iter().map(|m| m.mass).sum();
+    let m = Motion { accel: DVec3::Z * (9.0 * 914e3 / total), ..Motion::default() };
+    let t0 = Epoch::new(1_000_000_000, 0.0);
+    let ratio = |state: &ShipState, name: &str| state.runtime.joints[joint(def, name)].ratio;
+    assert!(!state.runtime.pressure_regulated);
+    assert!(step(def, &mut state, &b, &m, t0, false).is_empty());
+    for name in ["s1.interstage|s1.tank", "s1.tank|s1.octaweb"] {
+        assert!(ratio(&state, name) < 0.5, "{name}: {}", ratio(&state, name));
+    }
+    let mut regulated = ShipState::initial(def);
+    regulated.tanks = state.tanks.clone();
+    regulated.runtime.pressure_regulated = true;
+    step(def, &mut regulated, &b, &m, t0, true);
+    assert!(ratio(&regulated, "s1.tank|s1.octaweb") > 0.75, "{}", ratio(&regulated, "s1.tank|s1.octaweb"));
+}
+
 /// Over its ultimate a joint snaps (once), logged as an alarm; in debug
 /// mode nothing snaps.
 #[test]
