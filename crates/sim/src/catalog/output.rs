@@ -48,6 +48,12 @@ pub struct MountPoint {
     /// zero where the part takes no stack load): a joint's capacity is the
     /// weaker side's.
     pub allowable: f64,
+    /// Compressive line load (N/m, ultimate, room temperature) at which the
+    /// wall buckles there, where the generator sized it for an axial load
+    /// (a tank's barrel and skirts: NASA SP-8007 with its knockdown); zero
+    /// where it did not (the allowable stands in compression too).
+    #[serde(default)]
+    pub buckling: f64,
 }
 
 /// A tank compartment: its volume, the fluid it was designed for, where its

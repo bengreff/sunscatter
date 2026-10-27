@@ -80,6 +80,40 @@ fn the_falcon_9_legs_deploy_to_their_feet() {
     }
 }
 
+/// The joints' data the structure checks (ship-model.md §5.6): each centre
+/// where its mounts meet (the stage separation plane at falcon9.md's z
+/// 46.40), the tanks' ends buckling at their sizing load's ultimate (SF ×
+/// the axial load over the circumference), no capacity through an
+/// ablator (the capsule's backshell and the heat shield are not its
+/// structure), and the separation systems' share of both.
+#[test]
+fn the_falcon_9_joints_for_the_structure() {
+    let a = load_assembly(&default_craft_dir().join("falcon9-crew")).unwrap();
+    let ship = a.def.ship.clone().unwrap();
+    let joint = |name: &str| ship.joints.iter().find(|j| j.name == name).unwrap_or_else(|| panic!("{name}"));
+    // The body origin is falcon9.md's z 61.35.
+    let sep = joint("stage separation");
+    assert!((sep.pos - glam::DVec3::Z * (46.40 - 61.35)).length() < 1e-9, "{:?}", sep.pos);
+    // The second stage's tank: 1.4 × 600 kN over 2π·1.83 m, as sized (its
+    // 3 mm minimum gauge a little over); the forward skirt (the Dragon
+    // ring's side) and the aft end alike.
+    let n = 1.4 * 6.0e5 / (crate::math::TAU * 1.83);
+    for name in ["s2.ring|s2.tank", "s2.tank|s2.skirt"] {
+        let b = joint(name).buckling;
+        assert!(b >= n && b < 1.03 * n, "{name}: {b} against {n}");
+    }
+    // The first stage's: 6 MN.
+    let b = joint("s1.tank|s1.octaweb").buckling;
+    assert!((b / (1.4 * 6.0e6 / (crate::math::TAU * 1.83)) - 1.0).abs() < 0.02, "{b}");
+    // Walls not sized for compression give none; the separation systems
+    // carry 80 % of both.
+    assert_eq!(joint("dragon.shield|dragon.trunk").buckling, 0.0);
+    assert!(sep.buckling == 0.0 && sep.allowable > 0.0);
+    assert_eq!(joint("dragon.capsule|dragon.shield").allowable, 0.0, "ablator on both sides");
+    let trunk = joint("dragon.shield|dragon.trunk");
+    assert!(trunk.allowable > 1e6, "the trunk's own wall: {}", trunk.allowable);
+}
+
 /// Built twice from its files, the same bits: the definition, the craft
 /// (surface, cells, mass model) and its design.
 #[test]

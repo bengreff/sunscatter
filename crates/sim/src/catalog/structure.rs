@@ -65,6 +65,7 @@ pub fn radial_mounts(sets: &[RadialSet], radius: impl Fn(f64) -> f64, allowable:
                 size: 0.0,
                 kind: MountKind::Radial,
                 allowable,
+                buckling: 0.0,
             });
         }
     }
@@ -81,6 +82,7 @@ pub fn stack_mount(name: &str, z: f64, normal: f64, size: f64, allowable: f64) -
         size,
         kind: MountKind::Stack,
         allowable,
+        buckling: 0.0,
     }
 }
 
@@ -262,9 +264,12 @@ impl TankParams {
         }
         let allowable =
             Wall::Solid { material: self.material.clone(), thickness: skirt_t }.allowable(ctx.materials, ROOM_K)?;
+        // Sized for the axial load: the ends buckle at the ultimate of it
+        // (SF × the load), by the sizing's own rule.
+        let buckling = if self.axial_load > 0.0 { KNOCKDOWN * 0.605 * m.modulus * skirt_t * skirt_t / r } else { 0.0 };
         let mounts = vec![
-            stack_mount("bottom", 0.0, -1.0, 2.0 * r, allowable),
-            stack_mount("top", top, 1.0, 2.0 * r, allowable),
+            MountPoint { buckling, ..stack_mount("bottom", 0.0, -1.0, 2.0 * r, allowable) },
+            MountPoint { buckling, ..stack_mount("top", top, 1.0, 2.0 * r, allowable) },
         ];
         Ok(Generated {
             kind: Kind::Part,
@@ -392,6 +397,7 @@ impl ThrustParams {
             size: 0.0,
             kind: MountKind::Engine,
             allowable: 0.0,
+            buckling: 0.0,
         };
         if self.centre {
             mounts.push(engine(1, -DVec3::Z * self.centre_drop));

@@ -156,9 +156,16 @@ pub struct JointDef {
     /// Line load it carries at room temperature (N/m): the weaker wall's,
     /// a separation system's share of it.
     pub allowable: f64,
+    /// Compressive line load at which it buckles at room temperature (N/m;
+    /// zero: not given, the allowable stands), with the same shares.
+    #[serde(default)]
+    pub buckling: f64,
     /// From the parent towards the child (craft axes, unit): the way a
     /// separation system pushes the child.
     pub normal: DVec3,
+    /// The joint's centre (craft axes): where the mounts meet.
+    #[serde(default)]
+    pub pos: DVec3,
 }
 
 /// A plumbing line.

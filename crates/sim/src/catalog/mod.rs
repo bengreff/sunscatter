@@ -42,8 +42,8 @@ pub use output::{
     Thrusters, Valve, ValveKind,
 };
 pub use revolution::{Hinge, RevolutionParams, StackSpec};
-pub use structure::{Dome, PadParams, RadialSet, ShellParams, TankParams, ThrustParams};
-pub use wall::Wall;
+pub use structure::{Dome, PadParams, RadialSet, ShellParams, TankParams, ThrustParams, KNOCKDOWN};
+pub use wall::{Wall, ROOM_K};
 
 use crate::body::DataError;
 use crate::fluids::Fluids;

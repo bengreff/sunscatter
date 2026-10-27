@@ -3,7 +3,7 @@
 //! of revolution parts are made of.
 
 use crate::craft::{Primitive, Shape, Skin};
-use crate::materials::{Finish, Material, Materials};
+use crate::materials::{Finish, Material, MaterialKind, Materials};
 use crate::math;
 use glam::DVec3;
 use serde::{Deserialize, Serialize};
@@ -67,9 +67,14 @@ impl Wall {
     }
 
     /// The line load (N/m) the wall carries at its ultimate strength at
-    /// temperature `t` (a sandwich's two faces).
+    /// temperature `t` (a sandwich's two faces). An ablator or a core
+    /// carries no stack load (a capsule's backshell, a heat shield: the
+    /// structure behind them is not the wall): zero.
     pub fn allowable(&self, m: &Materials, t: f64) -> Result<f64, String> {
         let (outer, _) = self.materials(m)?;
+        if matches!(outer.kind, MaterialKind::Ablator | MaterialKind::Core) {
+            return Ok(0.0);
+        }
         let carrying = match *self {
             Wall::Solid { thickness, .. } => thickness,
             Wall::Sandwich { face_thickness, .. } => 2.0 * face_thickness,

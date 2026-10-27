@@ -58,9 +58,12 @@ pub(super) struct Placed {
     pub pose: Pose,
     pub parent: Option<u32>,
     /// The mounts used to attach it: (parent's allowable, child's, size),
-    /// and the joint's normal from the parent towards it (craft axes).
+    /// their buckling line loads, the joint's normal from the parent
+    /// towards it and its centre (craft axes).
     pub joint: (f64, f64, f64),
+    pub buckling: (f64, f64),
     pub normal: DVec3,
+    pub at: DVec3,
     pub primitives: Vec<u32>,
 }
 
@@ -160,7 +163,8 @@ fn place_parts(
                     Frame { pos: q.pose.point(pm.pos), normal: q.pose.dir(pm.normal), roll: q.pose.dir(pm.roll) };
                 let child = Frame { pos: cm.pos, normal: cm.normal, roll: cm.roll };
                 let pose = place::attach(parent_frame, child, m.roll_deg);
-                (pose, Some(parent), (pm.allowable, cm.allowable, pm.size.max(cm.size)), parent_frame.normal)
+                let joint = (pm.allowable, cm.allowable, pm.size.max(cm.size));
+                (pose, Some(parent), joint, (pm.buckling, cm.buckling), parent_frame.normal, parent_frame.pos)
             } else if let Some(a) = &p.at {
                 let turn =
                     Pose { rot: place::about_z(p.pattern.map_or(0.0, |pat| pat.angle_deg(k))), pos: DVec3::ZERO };
@@ -180,16 +184,16 @@ fn place_parts(
                     }
                 };
                 let away = parent.map_or(DVec3::Z, |i| (local.pos - out[i as usize].pose.pos).normalize_or(DVec3::Z));
-                (local, parent, (0.0, 0.0, 0.0), away)
+                (local, parent, (0.0, 0.0, 0.0), (0.0, 0.0), away, local.pos)
             } else if first {
-                (Pose::IDENTITY, None, (0.0, 0.0, 0.0), DVec3::Z)
+                (Pose::IDENTITY, None, (0.0, 0.0, 0.0), (0.0, 0.0), DVec3::Z, DVec3::ZERO)
             } else {
                 errors.push(err(
                     "is not attached: a part attaches through a mounting point (touching is not attaching)".into(),
                 ));
                 continue;
             };
-            let (pose, parent, joint, normal) = placement;
+            let (pose, parent, joint, buckling, normal, at) = placement;
             let mut own = Vec::new();
             for prim in &built.generated.primitives {
                 match pose.shape(&prim.shape) {
@@ -200,7 +204,8 @@ fn place_parts(
                     Err(e) => errors.push(err(e)),
                 }
             }
-            out.push(Placed { id, entry: p.entry.clone(), built, pose, parent, joint, normal, primitives: own });
+            let entry = p.entry.clone();
+            out.push(Placed { id, entry, built, pose, parent, joint, buckling, normal, at, primitives: own });
         }
     }
     out

@@ -193,6 +193,13 @@ fn joints(file: &AssemblyFile, parts: &[Placed], ship: &mut ShipDef, errors: &mu
             (true, true) => pa.min(ca),
             _ => pa.max(ca),
         };
+        // The sides that carry the load: the weaker's buckling, where given.
+        let (pb, cb) = p.buckling;
+        let buckling = [(pa, pb), (ca, cb)]
+            .iter()
+            .filter(|(a, b)| *a > 0.0 && *b > 0.0)
+            .map(|x| x.1)
+            .fold(0.0, |m: f64, b| if m > 0.0 { m.min(b) } else { b });
         ship.joints.push(JointDef {
             name: format!("{}|{}", parts[parent as usize].id, p.id),
             parent,
@@ -200,7 +207,9 @@ fn joints(file: &AssemblyFile, parts: &[Placed], ship: &mut ShipDef, errors: &mu
             kind: JointKind::Bolted,
             radius: size / 2.0,
             allowable,
+            buckling,
             normal: p.normal.normalize_or(glam::DVec3::Z),
+            pos: p.at,
         });
     }
     for decl in &file.joints {
@@ -225,6 +234,7 @@ fn joints(file: &AssemblyFile, parts: &[Placed], ship: &mut ShipDef, errors: &mu
                 errors.push(format!("joint {:?}: a separation's strength in (0, 1], impulse ≥ 0", decl.name));
             }
             joint.allowable *= strength;
+            joint.buckling *= strength;
         }
     }
 }

@@ -22,6 +22,7 @@ fn root_mount(size: f64) -> MountPoint {
         size,
         kind: MountKind::Radial,
         allowable: 0.0,
+        buckling: 0.0,
     }
 }
 

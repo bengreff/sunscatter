@@ -248,6 +248,7 @@ impl EngineParams {
                 size: 2.0 * self.powerhead_radius,
                 kind: MountKind::Engine,
                 allowable: 0.0,
+                buckling: 0.0,
             }],
             mass,
             derived,
