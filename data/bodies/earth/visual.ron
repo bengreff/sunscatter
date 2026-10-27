@@ -5,6 +5,13 @@
     albedo: 0.30,
     // Visual geometric albedo, NASA Planetary Fact Sheet (NSSDCA): planetshine at full phase.
     geometric_albedo: Some(0.434),
+    // The whole sunlit disc's colour, what Earthshine is tinted with (not the
+    // drawn ocean's base_color, ten times bluer than red): clouds dominate the
+    // disc, Rayleigh scattering adds blue; the disc-integrated reflectance
+    // falls from ~0.32 in the blue to ~0.25 in the red (Earthshine spectra:
+    // Woolf et al. 2002, ApJ 574, 430; Turnbull et al. 2006, ApJ 644, 551),
+    // blue/red ≈ 1.25 (estimate). sRGB of linear (0.253, 0.274, 0.319).
+    shine_color: Some((0.54, 0.56, 0.60)),
     roughness: 0.85,
     icon_color: (0.45, 0.65, 1.0),
     // Open ocean's water-leaving reflectance (π·Rrs for clear water: ~0.03 at
