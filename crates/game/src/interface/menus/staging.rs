@@ -11,16 +11,21 @@ pub fn sections(d: &FlightData) -> Vec<Section> {
     let mut s = Section::summary();
     for stage in &d.stages {
         let (state, tone) = match stage.state {
-            StageState::Next => ("NEXT", Tone::Accent),
-            StageState::Active => ("ACTIVE", Tone::Dim),
+            StageState::Next => (" · NEXT", Tone::Accent),
+            StageState::Active => (" · ACTIVE", Tone::Dim),
+            StageState::Later => ("", Tone::Normal),
         };
-        s.heading(format!("STAGE {} · {state}", stage.number), tone);
+        let name = stage.name.as_ref().map(|n| format!(" · {}", n.to_uppercase())).unwrap_or_default();
+        s.heading(format!("STAGE {}{name}{state}", stage.number), tone);
         for p in &stage.parts {
             s.toned(format!("  {}", p.name), &p.state, part_tone(p.tone));
         }
     }
     let next = crate::staging::next(&d.stages);
-    if next.is_some() && d.landed {
+    // A craft of parts launches by its sequence: only the test craft's
+    // staging is locked on the ground.
+    let parts = d.stages.iter().any(|s| s.name.is_some());
+    if next.is_some() && d.landed && !parts {
         s.note("on the ground: staging locked (P still deploys the parachutes)", Tone::Dim);
     } else if let Some(n) = next {
         s.button(format!("Activate stage {n}  (Space)"), MenuAction::NextStage);

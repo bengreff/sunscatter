@@ -64,6 +64,8 @@ pub(crate) enum Step {
     Tracking,
     /// The pause menu, then the settings screen over it.
     Menu,
+    /// A craft of catalog parts' own script (`demo_parts`).
+    Parts,
 }
 
 /// Capturing one view, once the terrain has settled.
@@ -165,9 +167,19 @@ impl Demo {
         self.shot_taken = false;
     }
 
+    /// A view is being captured (the clock is frozen).
+    pub(crate) fn capturing(&self) -> bool {
+        self.capture.is_some()
+    }
+
+    /// Whether `SUNSCATTER_DEMO_STOP_AFTER` names `step`.
+    pub(crate) fn stops_after(&self, step: &str) -> bool {
+        self.stop_after.as_deref().is_some_and(|s| s.eq_ignore_ascii_case(step))
+    }
+
     /// Starts capturing `view` (the clock is frozen meanwhile), unless
     /// `SUNSCATTER_DEMO_NO_CAPTURE` is set (benchmark-only runs).
-    fn capture(&mut self, view: &'static str) {
+    pub(crate) fn capture(&mut self, view: &'static str) {
         if std::env::var_os("SUNSCATTER_DEMO_NO_CAPTURE").is_none() {
             self.capture = Some(Capture { view, timer: 0.0 });
         }
@@ -253,6 +265,9 @@ pub fn run(
     };
     let moon = sim.world.find("Moon").map(|s| s.node);
     match demo.step {
+        // A craft of catalog parts flies its own script (`demo_parts`).
+        Step::Pad if sim.ship().ship().is_some() => demo.next(Step::Parts),
+        Step::Parts => {}
         Step::Pad => {
             if !demo.pad_top_done {
                 rig.distance = 40.0;

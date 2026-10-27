@@ -15,6 +15,7 @@ mod comms;
 mod debris;
 mod demo;
 mod demo_checks;
+mod demo_parts;
 mod demo_views;
 mod fleet;
 mod format;
@@ -94,7 +95,7 @@ fn main() {
         .add_plugins(default_plugins(demo_mode, offscreen))
         .add_plugins(EguiPlugin::default())
         .add_plugins(body_plugins())
-        .add_plugins(GameState)
+        .add_plugins(GameState { craft: startup_craft(demo_mode) })
         // After the settings defaults: replaces them with the saved settings.
         .add_plugins(persist::PersistPlugin)
         .add_plugins((navball::NavballPlugin, interface::menus::view::MenusPlugin, profile::ProfilePlugin))
@@ -229,13 +230,22 @@ fn body_plugins() -> (
     )
 }
 
+/// The craft the game starts with: `SUNSCATTER_CRAFT`, else the first
+/// choice whose files exist (the test craft in the demo).
+fn startup_craft(demo_mode: bool) -> String {
+    let available: Vec<&str> = state::craft_choices(state::craft_exists).iter().map(|c| c.0).collect();
+    state::startup_craft(std::env::var("SUNSCATTER_CRAFT").ok().as_deref(), &available, demo_mode)
+}
+
 /// The game's resources and messages (before the saved settings replace
-/// the settings defaults).
-struct GameState;
+/// the settings defaults), with `craft` on the pad.
+struct GameState {
+    craft: String,
+}
 
 impl Plugin for GameState {
     fn build(&self, app: &mut App) {
-        app.insert_resource(state::SimState::new())
+        app.insert_resource(state::SimState::with_craft(&state::craft_or_test(&self.craft)))
             .init_resource::<state::Prediction>()
             .init_resource::<landing::LandingPrediction>()
             .init_resource::<landing::ImpactMarker>()

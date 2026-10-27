@@ -7,7 +7,7 @@ use crate::trajectory::{self, settings::OrbitSettings};
 use bevy::prelude::*;
 use bevy::tasks::{futures::check_ready, AsyncComputeTaskPool, Task};
 use glam::DVec3;
-use sim::craft::test_craft;
+use sim::craft::{craft_of, test_craft, Craft, CraftId};
 use sim::ephem::Ephemeris;
 use sim::frame::NodeId;
 use sim::kepler::Elements;
@@ -29,6 +29,48 @@ pub const MAX_PHYSICS_WARP: usize = 3;
 /// in the surf; a proper launch-site data patch is future work.
 pub const PAD_LAT: f64 = 28.6082;
 pub const PAD_LON: f64 = -80.66;
+
+/// The craft a new flight can start with (D100: the Falcon 9 Crew; D064:
+/// the test craft as the debug craft): a directory under `data/craft` and
+/// its name in the new-flight menu.
+pub const CRAFT_CHOICES: [(&str, &str); 2] =
+    [("falcon9-crew", "Falcon 9 Block 5 · Crew Dragon"), (sim::craft::TEST_CRAFT, "Test craft (debug)")];
+
+/// The choices whose craft files exist (`exists`: a directory under
+/// `data/craft` holds a `craft.ron`), in menu order.
+pub fn craft_choices(exists: impl Fn(&str) -> bool) -> Vec<(&'static str, &'static str)> {
+    CRAFT_CHOICES.iter().copied().filter(|(id, _)| exists(id)).collect()
+}
+
+/// Whether `data/craft/<id>/craft.ron` exists.
+pub fn craft_exists(id: &str) -> bool {
+    sim::craft::default_craft_dir().join(id).join(sim::craft::CRAFT_FILE).exists()
+}
+
+/// The craft a game starts with: `wanted` (`SUNSCATTER_CRAFT`) when it is
+/// one that exists; else the test craft in the demo (its script flies the
+/// test craft) and the first available choice in play (the Falcon 9 once
+/// its files exist), else the test craft.
+pub fn startup_craft(wanted: Option<&str>, available: &[&str], demo: bool) -> String {
+    match wanted.filter(|w| available.contains(w)) {
+        Some(w) => w.to_string(),
+        None if demo => sim::craft::TEST_CRAFT.to_string(),
+        None => available.first().map_or(sim::craft::TEST_CRAFT, |c| c).to_string(),
+    }
+}
+
+/// The craft `id` names, or the test craft (with the reason logged) when it
+/// does not build: a broken craft file never stops the game.
+pub fn craft_or_test(id: &str) -> Arc<Craft> {
+    let id = CraftId(id.to_string());
+    if id.0 != sim::craft::TEST_CRAFT {
+        if let Err(e) = sim::craft::registry::definition(&id) {
+            error!("craft {:?} does not build, flying the test craft: {e}", id.0);
+            return craft_of(&CraftId(sim::craft::TEST_CRAFT.into()));
+        }
+    }
+    craft_of(&id)
+}
 
 /// Per-frame look-ahead budgets (integration steps, ~10 µs each). The
 /// vessels themselves advance within the frame's time ([`crate::fleet`]):
@@ -95,18 +137,29 @@ fn load_world() -> World {
 }
 
 impl SimState {
+    /// A new game with the test craft on the pad (tests).
+    #[cfg(test)]
     pub fn new() -> Self {
-        // Start in daylight over Florida: 2030-01-01 17:00 TDB.
-        Self::starting_at(sol::sol_epoch().add_seconds(17.0 * 3600.0))
+        Self::with_craft(test_craft())
+    }
+
+    /// A new game with `craft` on the pad, in daylight over Florida:
+    /// 2030-01-01 17:00 TDB.
+    pub fn with_craft(craft: &Craft) -> Self {
+        Self::starting_with(sol::sol_epoch().add_seconds(17.0 * 3600.0), craft)
     }
 
     /// A new game whose clock starts at `clock` (the body tour's date),
-    /// with the ship on the pad.
+    /// with the test craft on the pad.
     pub fn starting_at(clock: Epoch) -> Self {
+        Self::starting_with(clock, test_craft())
+    }
+
+    fn starting_with(clock: Epoch, craft: &Craft) -> Self {
         let world = load_world();
         let (origin, mut site) = origin_clock(&world);
         let mut vessel_ids = VesselIds::default();
-        let mut ship = Vessel::landed_at(&world, vessel_ids.allocate(), "Earth", PAD_LAT, PAD_LON, clock, test_craft());
+        let mut ship = Vessel::landed_at(&world, vessel_ids.allocate(), "Earth", PAD_LAT, PAD_LON, clock, craft);
         ship.set_clock_offset(&world, site.offset_at(&world, clock));
         SimState {
             dominance: Dominance::new(&world.eph, clock),
@@ -228,9 +281,18 @@ impl SimState {
         nearest.min_by(|a, b| a.0.total_cmp(&b.0)).map(|(_, id)| id)
     }
 
+    /// Puts the active vessel back on the pad as a whole new craft of its
+    /// own kind (a piece's base craft).
     pub fn reset(&mut self) {
+        let base = self.ship().craft.id.base().to_string();
+        self.new_flight(&craft_or_test(&base));
+    }
+
+    /// Replaces the active vessel with a new one of `craft` on the pad
+    /// (fuelled at its loading, crew aboard; D104).
+    pub fn new_flight(&mut self, craft: &Craft) {
         let id = self.vessel_ids.allocate();
-        let ship = Vessel::landed_at(&self.world, id, "Earth", PAD_LAT, PAD_LON, self.clock, test_craft());
+        let ship = Vessel::landed_at(&self.world, id, "Earth", PAD_LAT, PAD_LON, self.clock, craft);
         self.fleet[self.active] = self.synchronised(ship);
         self.controls = Controls { sas: true, ..Default::default() };
         self.warp = 0;

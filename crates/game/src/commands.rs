@@ -30,8 +30,11 @@ pub enum GameCommand {
     Delete(VesselId),
     /// Replace the game with a (checked, non-empty) save: load or revert.
     Restore(Box<SaveGame>),
-    /// Put the active vessel back on the pad.
+    /// Put the active vessel back on the pad (a new craft of its kind).
     Reset,
+    /// A new flight: the active vessel replaced by a new craft `.0` (a
+    /// directory under `data/craft`) on the pad.
+    NewFlight(String),
     /// Debug: spawn test ships in low Earth orbit.
     SpawnTestShips(usize),
     /// Debug mode (D064) on every vessel: infinite propellant, no
@@ -117,6 +120,10 @@ pub fn apply(
                 sim.reset();
                 rig.focus = Focus::Ship;
             }
+            GameCommand::NewFlight(craft) => {
+                sim.new_flight(&crate::state::craft_or_test(craft));
+                rig.focus = Focus::Ship;
+            }
             GameCommand::SpawnTestShips(n) => sim.spawn_test_ships(*n),
             GameCommand::SetPlan { vessel, plan } => {
                 let sim = &mut *sim;
@@ -137,6 +144,18 @@ pub fn apply(
             }
             GameCommand::SetThrottle(t) => sim.controls.throttle = t.clamp(0.0, 1.0),
             GameCommand::SetSas(on) => sim.controls.sas = *on,
+            GameCommand::NextStage if sim.ship().ship().is_some() => {
+                let sim = &mut *sim;
+                let a = sim.active;
+                let text = match sim.fleet[a].next_stage(&sim.world) {
+                    Some((name, effects)) => {
+                        crate::staging::controls_after(&effects, &mut sim.controls);
+                        format!("Stage: {name}")
+                    }
+                    None => crate::staging::Refusal::NoStageLeft.message().to_string(),
+                };
+                toasts.push(time.elapsed_secs_f64(), text, false);
+            }
             GameCommand::NextStage => {
                 let mut controls = sim.controls;
                 let ship = sim.ship();

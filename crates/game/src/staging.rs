@@ -10,6 +10,8 @@
 //! launches, and Space on the pad must not arm the parachutes). P is not
 //! locked: nothing refuses the parachute command (D079).
 
+pub mod parts;
+
 use sim::chute::{CanopyState, ChuteSpec, ChuteState};
 use sim::vessel::Controls;
 
@@ -20,6 +22,8 @@ pub enum StageState {
     Next,
     /// Activated.
     Active,
+    /// After the next one (a craft of parts' sequence).
+    Later,
 }
 
 /// How a part's state reads.
@@ -33,7 +37,7 @@ pub enum PartTone {
 /// One part of a stage and its state, for display.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Part {
-    pub name: &'static str,
+    pub name: String,
     pub state: String,
     pub tone: PartTone,
 }
@@ -42,6 +46,8 @@ pub struct Part {
 pub struct Stage {
     pub number: u32,
     pub state: StageState,
+    /// Its name in a craft of parts' sequence.
+    pub name: Option<String>,
     pub parts: Vec<Part>,
 }
 
@@ -107,19 +113,28 @@ pub fn stack(s: &StageInputs) -> Vec<Stage> {
     chutes.push(canopy_part("MAINS", &s.spec.main, s.chute.main, s.chute.armed, waiting));
     let engine = if s.engine_running {
         Part {
-            name: "ENGINE",
+            name: "ENGINE".into(),
             state: format!("running · {:.0} %", s.controls.throttle * 100.0),
             tone: PartTone::Working,
         }
     } else if !s.fuelled {
-        Part { name: "ENGINE", state: "off · no propellant".into(), tone: PartTone::Failed }
+        Part { name: "ENGINE".into(), state: "off · no propellant".into(), tone: PartTone::Failed }
     } else {
-        Part { name: "ENGINE", state: "off".into(), tone: PartTone::Idle }
+        Part { name: "ENGINE".into(), state: "off".into(), tone: PartTone::Idle }
     };
     vec![
-        Stage { number: 0, state: chute_stage, parts: chutes },
-        Stage { number: 1, state: StageState::Active, parts: vec![engine] },
+        Stage { number: 0, state: chute_stage, name: None, parts: chutes },
+        Stage { number: 1, state: StageState::Active, name: None, parts: vec![engine] },
     ]
+}
+
+/// A vessel's stack under `controls`: a craft of parts' sequence
+/// ([`parts::stack`]), else the test craft's stages.
+pub fn stack_of(vessel: &sim::vessel::Vessel, controls: &Controls) -> Vec<Stage> {
+    match (vessel.ship_def(), vessel.ship()) {
+        (Some(def), Some(state)) => parts::stack(&def, state, controls.chute),
+        _ => stack(&StageInputs::of(vessel, controls)),
+    }
 }
 
 /// One canopy's state in the D079 sequence. `waiting`: the height the
@@ -142,7 +157,7 @@ fn canopy_part(
         CanopyState::Released => ("cut away".into(), PartTone::Idle),
         CanopyState::Failed => ("TORN".into(), PartTone::Failed),
     };
-    Part { name, state, tone }
+    Part { name: name.into(), state, tone }
 }
 
 /// The stage Space activates now, if any.
@@ -168,6 +183,15 @@ pub fn activate_next(s: &StageInputs, grounded: bool, controls: &mut Controls) -
     Ok(a)
 }
 
+/// What the pilot's controls do after a ship command's `effects` (a craft
+/// of parts): arming the parachutes is the parachute command (D079); the
+/// rest (separations, the clamps) are the vessel's.
+pub fn controls_after(effects: &[sim::craft::state::Effect], controls: &mut Controls) {
+    if effects.contains(&sim::craft::state::Effect::ArmChutes) {
+        controls.chute = true;
+    }
+}
+
 /// Whether a vessel counts as on the ground for staging.
 pub fn grounded(vessel: &sim::vessel::Vessel) -> bool {
     matches!(vessel.phase, sim::vessel::Phase::Landed { .. } | sim::vessel::Phase::Crashed { .. })
@@ -191,7 +215,8 @@ mod tests {
             s.iter().map(|s| (s.number, s.state)).collect::<Vec<_>>(),
             [(0, StageState::Next), (1, StageState::Active)]
         );
-        let parts: Vec<_> = s.iter().flat_map(|s| s.parts.iter().map(|p| (p.name, p.state.as_str()))).collect();
+        let parts: Vec<_> =
+            s.iter().flat_map(|s| s.parts.iter().map(|p| (p.name.as_str(), p.state.as_str()))).collect();
         assert_eq!(parts, [("DROGUES", "stowed"), ("MAINS", "stowed"), ("ENGINE", "running · 50 %")]);
         assert_eq!(next(&s), Some(0));
     }

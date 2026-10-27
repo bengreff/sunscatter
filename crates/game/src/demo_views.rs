@@ -45,7 +45,8 @@ pub struct DemoViewsPlugin;
 impl Plugin for DemoViewsPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Startup, size_offscreen.after(crate::camera::setup))
-            .add_systems(Update, run.after(crate::demo::run).before(crate::commands::apply));
+            .add_systems(Update, run.after(crate::demo::run).before(crate::commands::apply))
+            .add_systems(Update, crate::demo_parts::run.after(crate::demo::run).before(crate::commands::apply));
     }
 }
 

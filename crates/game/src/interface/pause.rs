@@ -1,7 +1,9 @@
 //! The Esc pause menu. Esc pauses (the clock stops, flight keys are ignored,
 //! the camera still works) and opens a centred menu: Resume, Settings, Save,
-//! Load, Revert flight to launch, Tracking station, Quit to desktop. Revert
-//! and Quit ask first. Esc again steps back (confirmation → menu → resume).
+//! Load, New flight (a choice of craft: the Falcon 9 Crew, the test craft as
+//! the debug craft), Revert flight to launch, Tracking station, Quit to
+//! desktop. Revert and Quit ask first. Esc again steps back (confirmation →
+//! menu → resume).
 //!
 //! "Revert flight to launch" restores the whole game as it was the moment
 //! the active vessel was last about to lift off (a snapshot taken then).
@@ -22,6 +24,8 @@ use sim::vessel::Phase;
 pub enum Page {
     #[default]
     Main,
+    /// The choice of craft for a new flight.
+    NewFlight,
     ConfirmRevert,
     ConfirmQuit,
 }
@@ -157,6 +161,9 @@ pub fn draw(
                     if save || load {
                         saves.show_list();
                     }
+                    if button(ui, "New flight…") {
+                        menu.page = Page::NewFlight;
+                    }
                     let revert = ui.add_enabled_ui(snapshot.0.is_some(), |ui| button(ui, "Revert flight to launch"));
                     if revert.inner {
                         menu.page = Page::ConfirmRevert;
@@ -171,6 +178,19 @@ pub fn draw(
                     }
                     if button(ui, "Quit to desktop") {
                         menu.page = Page::ConfirmQuit;
+                    }
+                }
+                Page::NewFlight => {
+                    ui.label("A new flight from the pad: the active vessel\nis replaced. Which craft?");
+                    ui.add_space(8.0);
+                    for (id, name) in crate::state::craft_choices(crate::state::craft_exists) {
+                        if button(ui, name) {
+                            commands.write(GameCommand::NewFlight(id.to_string()));
+                            menu.open = false;
+                        }
+                    }
+                    if button(ui, "Cancel") {
+                        menu.page = Page::Main;
                     }
                 }
                 Page::ConfirmRevert => {

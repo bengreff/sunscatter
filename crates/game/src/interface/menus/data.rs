@@ -307,7 +307,7 @@ pub fn gather(s: &Sources) -> FlightData {
         attitude: nav.map(|n| [n.angles.heading, n.angles.pitch, n.angles.roll]),
         craft: craft(sim, body),
         comms: comms(s),
-        stages: crate::staging::stack(&crate::staging::StageInputs::of(ship, &sim.controls)),
+        stages: crate::staging::stack_of(ship, &sim.controls),
         diagnostics: Diagnostics {
             anchor: sim.world.eph.node(anchor).name.clone(),
             fps: s.fps.clone(),

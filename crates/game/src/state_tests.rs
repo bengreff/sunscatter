@@ -140,3 +140,45 @@ fn a_craft_held_in_a_bubble_names_its_leader() {
     assert!(sim.fleet[0].in_bubble() && matches!(sim.fleet[0].phase, Phase::Powered { .. }));
     assert_eq!(sim.rails_block(), Some(RailsBlock::Near(other_id)));
 }
+
+#[test]
+fn the_startup_craft_is_the_wanted_one_else_the_first_available() {
+    let both = ["falcon9-crew", "test-craft"];
+    // (wanted, available, demo, expected)
+    let cases: [(Option<&str>, &[&str], bool, &str); 6] = [
+        (None, &both, false, "falcon9-crew"),
+        (None, &both, true, "test-craft"),
+        (Some("test-craft"), &both, false, "test-craft"),
+        (Some("falcon9-crew"), &both, true, "falcon9-crew"),
+        (Some("no-such-craft"), &both, false, "falcon9-crew"),
+        (None, &[], false, "test-craft"),
+    ];
+    for (wanted, available, demo, want) in cases {
+        assert_eq!(startup_craft(wanted, available, demo), want, "{wanted:?} {available:?} {demo}");
+    }
+    let only_test = craft_choices(|id| id == "test-craft");
+    assert_eq!(only_test, [("test-craft", "Test craft (debug)")]);
+    assert_eq!(craft_choices(|_| true).len(), CRAFT_CHOICES.len(), "the Falcon 9 first");
+    assert!(craft_exists("test-craft") && !craft_exists("no-such-craft"));
+}
+
+/// A new flight puts a new vessel of the chosen craft on the pad, fuelled at
+/// its loading; a reset puts back a new one of the active vessel's craft.
+#[test]
+fn a_new_flight_and_a_reset_bring_the_chosen_craft_to_the_pad() {
+    let mut sim = SimState::new();
+    let first = sim.ship().id();
+    let rocket = crate::test_rocket::rocket();
+    sim.new_flight(&rocket);
+    assert_eq!(sim.ship().craft.id, rocket.id);
+    assert!(sim.ship().id() != first && matches!(sim.ship().phase, Phase::Landed { .. }));
+    let def = sim.ship().ship_def().unwrap();
+    assert!((sim.ship().propellant() - def.loaded()).abs() < 1e-6, "fuelled at its loading");
+    assert_eq!(sim.ship().crew(), 1);
+    let before = sim.ship().id();
+    sim.reset();
+    assert_eq!((sim.ship().craft.id.clone(), sim.fleet.len()), (rocket.id.clone(), 1));
+    assert!(sim.ship().id() != before);
+    // A craft that does not build gives the test craft.
+    assert_eq!(craft_or_test("no-such-craft").id.0, "test-craft");
+}

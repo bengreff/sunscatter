@@ -123,9 +123,10 @@ pub fn opening(q: Option<f64>, design_q: f64) -> Opening {
 fn parachute(d: &FlightData) -> Section {
     let mut s = Section::new("parachute", "PARACHUTE");
     let ChuteData { commanded, q, design_q, .. } = d.chute;
-    let parts = d.stages.iter().find(|st| st.number == 0).map(|st| st.parts.as_slice()).unwrap_or_default();
-    for p in parts {
-        s.toned(p.name, &p.state, super::staging::part_tone(p.tone));
+    // The test craft's parachute stage (a craft of parts arms its chutes by a command).
+    let chutes = d.stages.iter().find(|st| st.number == 0 && st.name.is_none());
+    for p in chutes.map(|st| st.parts.as_slice()).unwrap_or_default() {
+        s.toned(p.name.clone(), &p.state, super::staging::part_tone(p.tone));
     }
     let q_text = q.map_or("—".to_string(), |q| format!("{:.1}", q / 1e3));
     s.row("q / DESIGN q", format!("{q_text} / {:.1} kPa", design_q / 1e3));
