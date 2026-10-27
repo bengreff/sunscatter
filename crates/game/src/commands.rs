@@ -21,6 +21,7 @@ use crate::tracking::{self, Tracked, TrackingStation};
 use bevy::prelude::*;
 use sim::craft::command::{ShipCommand, Stage};
 use sim::save::SaveGame;
+use sim::systems::OrderKind;
 use sim::time::Epoch;
 use sim::vessel::{FlightPlan, HoldMode, VesselId};
 
@@ -62,6 +63,12 @@ pub enum GameCommand {
     NextStage,
     /// Run a craft of parts' next stage (its sequence), sent to it.
     Stage(VesselId),
+    /// Run a craft of parts' saved function by name (the mini panel), sent
+    /// to it.
+    Function {
+        vessel: VesselId,
+        name: String,
+    },
     /// Commands to a craft of parts (D107: the systems screen, the mini
     /// systems panel's functions), applied in order.
     Ship {
@@ -137,19 +144,26 @@ pub fn apply(
         // the signal's light delay, and not at all without one (D067).
         if let Some(id) = addressee(&c).filter(|_| fresh) {
             let aboard = comms.location == crate::comms::Location::Vessel(id);
-            match route(aboard, comms.signal(id).map(|s| s.delay)) {
-                Route::Now => {}
-                Route::After(delay) => {
-                    if delay >= 1.0 {
-                        toasts.push(now, format!("Sent to Vessel {} ({})", id.0, crate::format::delay(delay)), false);
-                    }
-                    in_flight.send(sim.clock, delay, c);
-                    continue;
-                }
+            let delay = match route(aboard, comms.signal(id).map(|s| s.delay)) {
+                Route::Now => 0.0,
+                Route::After(delay) => delay,
                 Route::NoSignal => {
                     toasts.push(now, format!("Vessel {}: no signal, the command cannot reach it", id.0), true);
                     continue;
                 }
+            };
+            if delay >= 1.0 {
+                toasts.push(now, format!("Sent to Vessel {} ({})", id.0, crate::format::delay(delay)), false);
+            }
+            // Orders carry their epoch: the vessel applies them at its tick
+            // (`Vessel::order_at`), whatever the frames.
+            if let Some(kinds) = orders(&c) {
+                place(&mut sim, &mut toasts, now, id, kinds, delay);
+                continue;
+            }
+            if delay > 0.0 {
+                in_flight.send(sim.clock, delay, c);
+                continue;
             }
         }
         match &c {
@@ -178,11 +192,9 @@ pub fn apply(
                 sim.new_flight(&crate::state::craft_or_test(craft));
                 rig.focus = Focus::Ship;
             }
-            GameCommand::Ship { vessel, commands: list } => {
-                let now = time.elapsed_secs_f64();
-                for message in ship_commands(&mut sim, *vessel, list) {
-                    toasts.push(now, message, true);
-                }
+            GameCommand::Ship { vessel, .. } | GameCommand::Stage(vessel) | GameCommand::Function { vessel, .. } => {
+                let kinds = orders(&c).unwrap_or_default();
+                place(&mut sim, &mut toasts, now, *vessel, kinds, 0.0);
             }
             GameCommand::SetStages { vessel, stages } => {
                 let done = sim.index_of(*vessel).map(|i| sim.fleet[i].set_stages(stages.clone()));
@@ -212,20 +224,6 @@ pub fn apply(
             }
             GameCommand::SetThrottle(t) => sim.controls.throttle = t.clamp(0.0, 1.0),
             GameCommand::SetSas(on) => sim.controls.sas = *on,
-            GameCommand::Stage(id) => {
-                let sim = &mut *sim;
-                let Some(i) = sim.index_of(*id) else { continue };
-                let text = match sim.fleet[i].next_stage(&sim.world) {
-                    Some((name, effects)) => {
-                        if i == sim.active {
-                            crate::staging::controls_after(&effects, &mut sim.controls);
-                        }
-                        format!("Stage: {name}")
-                    }
-                    None => crate::staging::Refusal::NoStageLeft.message().to_string(),
-                };
-                toasts.push(now, text, false);
-            }
             GameCommand::NextStage => {
                 let mut controls = sim.controls;
                 let ship = sim.ship();
@@ -272,6 +270,7 @@ pub fn route(aboard: bool, delay: Option<f64>) -> Route {
 pub fn addressee(c: &GameCommand) -> Option<VesselId> {
     match c {
         GameCommand::Ship { vessel, .. }
+        | GameCommand::Function { vessel, .. }
         | GameCommand::SetStages { vessel, .. }
         | GameCommand::SetFunctions { vessel, .. } => Some(*vessel),
         GameCommand::Stage(id) => Some(*id),
@@ -279,20 +278,42 @@ pub fn addressee(c: &GameCommand) -> Option<VesselId> {
     }
 }
 
-/// Applies `list` to vessel `id` (a craft of parts) now, the active
-/// vessel's controls following their effects (the parachutes armed); the
-/// messages for what failed.
-pub fn ship_commands(sim: &mut SimState, id: VesselId, list: &[ShipCommand]) -> Vec<String> {
-    let Some(i) = sim.index_of(id) else { return vec![format!("Vessel {}: no such vessel", id.0)] };
-    let mut errors = Vec::new();
-    for c in list {
-        match sim.fleet[i].command(&sim.world, c) {
-            Ok(effects) if i == sim.active => crate::staging::controls_after(&effects, &mut sim.controls),
-            Ok(_) => {}
-            Err(e) => errors.push(format!("Vessel {}: {e}", id.0)),
+/// The orders a command gives a craft of parts (`None`: not an order).
+pub fn orders(c: &GameCommand) -> Option<Vec<OrderKind>> {
+    match c {
+        GameCommand::Ship { commands, .. } => Some(commands.iter().cloned().map(OrderKind::Command).collect()),
+        GameCommand::Stage(_) => Some(vec![OrderKind::Stage]),
+        GameCommand::Function { name, .. } => Some(vec![OrderKind::Function(name.clone())]),
+        _ => None,
+    }
+}
+
+/// Gives vessel `id` the orders `kinds` for `delay` seconds from now (its
+/// systems apply them at the tick; the events they log are toasted by
+/// `interface::events`). From aboard the active vessel, an order that arms
+/// the parachutes also gives the parachute command (D079: the pilot's).
+fn place(
+    sim: &mut SimState,
+    toasts: &mut crate::interface::toasts::Toasts,
+    now: f64,
+    id: VesselId,
+    kinds: Vec<OrderKind>,
+    delay: f64,
+) {
+    let Some(i) = sim.index_of(id) else {
+        toasts.push(now, format!("Vessel {}: no such vessel", id.0), true);
+        return;
+    };
+    let at = sim.clock.add_seconds(delay);
+    let arms = sim.fleet[i].ship().is_some_and(|state| crate::staging::arms_chutes(state, &kinds));
+    for kind in kinds {
+        if let Err(e) = sim.fleet[i].order_at(at, kind) {
+            toasts.push(now, format!("Vessel {}: {e}", id.0), true);
         }
     }
-    errors
+    if arms && i == sim.active && delay == 0.0 {
+        sim.controls.chute = true;
+    }
 }
 
 /// The toast after an edit of `what` (stages or functions) of `vessel`:
@@ -414,6 +435,15 @@ mod tests {
         let v = VesselId(7);
         assert_eq!(addressee(&GameCommand::Ship { vessel: v, commands: vec![] }), Some(v));
         assert_eq!(addressee(&GameCommand::Stage(v)), Some(v));
+        assert_eq!(addressee(&GameCommand::Function { vessel: v, name: "Legs".into() }), Some(v));
+        // Ship commands, a stage and a function are orders the vessel applies at its tick.
+        let ship = GameCommand::Ship { vessel: v, commands: vec![ShipCommand::ArmChutes, ShipCommand::ReleaseClamps] };
+        assert_eq!(
+            orders(&ship),
+            Some(vec![OrderKind::Command(ShipCommand::ArmChutes), OrderKind::Command(ShipCommand::ReleaseClamps)])
+        );
+        assert_eq!(orders(&GameCommand::Stage(v)), Some(vec![OrderKind::Stage]));
+        assert_eq!(orders(&GameCommand::SetStages { vessel: v, stages: vec![] }), None, "applied as sent");
         assert_eq!(addressee(&GameCommand::SetFunctions { vessel: v, functions: vec![] }), Some(v));
         assert_eq!(addressee(&GameCommand::NextStage), None, "the test craft's, at once");
         assert_eq!(addressee(&GameCommand::SetWarp(2)), None);

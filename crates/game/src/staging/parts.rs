@@ -121,7 +121,10 @@ pub fn status(def: &ShipDef, state: &ShipState, c: &ShipCommand, chute_armed: bo
             // The pad's hold-down joints (`Vessel::clamped` holds while one does).
             let hold = |j: &sim::craft::ship::JointDef| j.kind == sim::craft::assembly::JointKind::HoldDown;
             let holding = def.joints.iter().zip(&state.joints).any(|(d, s)| hold(d) && s.intact);
-            if state.clamped && holding {
+            if state.clamped && holding && state.runtime.release_armed {
+                // The pad's rule: they let go when every lit engine is at its rated thrust.
+                ("armed: lets go at full thrust".into(), PartTone::Working)
+            } else if state.clamped && holding {
                 ("holding".into(), PartTone::Idle)
             } else {
                 ("released".into(), PartTone::Working)
@@ -185,20 +188,32 @@ mod tests {
     }
 
     #[test]
-    fn arming_the_chutes_is_the_parachute_command_and_nothing_else_touches_the_controls() {
-        use sim::craft::state::Effect;
-        use sim::vessel::Controls;
-        // (effects, chute after)
+    fn orders_that_arm_the_parachutes() {
+        use sim::systems::OrderKind;
+        let craft = rocket();
+        let def = craft.ship.as_deref().unwrap();
+        let mut state = ShipState::initial(def);
+        state.functions.push(sim::craft::command::Stage {
+            name: "Chutes".into(),
+            key: None,
+            actions: vec![ShipCommand::ArmChutes],
+            pinned: false,
+        });
+        state.stages[1].actions.push(ShipCommand::ArmChutes);
+        // (orders, arms)
         let table = [
-            (vec![], false),
-            (vec![Effect::ReleaseClamps, Effect::Separate(3)], false),
-            (vec![Effect::ArmChutes], true),
+            (vec![OrderKind::Command(ShipCommand::ArmChutes)], true),
+            (vec![OrderKind::Command(ShipCommand::ReleaseClamps)], false),
+            (vec![OrderKind::Function("Chutes".into())], true),
+            (vec![OrderKind::Function("Legs".into())], false),
+            (vec![OrderKind::Stage], false),
         ];
-        for (effects, chute) in table {
-            let mut c = Controls { throttle: 0.7, ..Controls::default() };
-            super::super::controls_after(&effects, &mut c);
-            assert_eq!((c.chute, c.throttle), (chute, 0.7), "{effects:?}");
+        for (kinds, want) in table {
+            assert_eq!(super::super::arms_chutes(&state, &kinds), want, "{kinds:?}");
         }
+        // The next stage arms them once the sequence reaches it.
+        state.sequence = 1;
+        assert!(super::super::arms_chutes(&state, &[OrderKind::Stage]));
     }
 
     #[test]
@@ -225,7 +240,7 @@ mod tests {
         assert_eq!(st(&state, ShipCommand::Rcs("rcs#*".into(), true)), "2/2 enabled");
         assert_eq!(st(&state, ShipCommand::Ignite("nothing".into())), "not on this craft");
         assert_eq!(status(def, &state, &ShipCommand::ArmChutes, true).0, "armed");
-        assert_eq!(st(&state, ShipCommand::ReleaseClamps), "released");
+        assert_eq!(st(&state, ShipCommand::ReleaseClamps), "released", "no pad mount");
         assert_eq!(label(&ShipCommand::Throttle("main".into(), 0.6)), "THROTTLE main 60 %");
     }
 }

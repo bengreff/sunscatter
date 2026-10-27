@@ -40,15 +40,17 @@ pub struct MiniPanelPlugin;
 impl Plugin for MiniPanelPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(Update, keys.after(crate::commands::update_context).before(crate::state::read_controls))
+            .add_systems(Update, super::events::toast_events.after(crate::state::advance))
             .add_systems(bevy_egui::EguiPrimaryContextPass, draw.after(crate::hud::draw));
     }
 }
 
-/// The run of function `index` of the active vessel.
-fn run(sim: &SimState, index: usize) -> Option<(GameCommand, String)> {
+/// The run of function `index` of the active vessel (its systems log it:
+/// `interface::events` toasts it).
+fn run(sim: &SimState, index: usize) -> Option<GameCommand> {
     let v = sim.ship();
     let f = v.ship()?.functions.get(index)?;
-    Some((GameCommand::Ship { vessel: v.id(), commands: f.actions.clone() }, format!("Function: {}", f.name)))
+    Some(GameCommand::Function { vessel: v.id(), name: f.name.clone() })
 }
 
 /// A pinned function's key runs it (in flight).
@@ -56,9 +58,7 @@ pub fn keys(
     keys: Res<ButtonInput<KeyCode>>,
     ctx: Res<InputContext>,
     sim: Res<SimState>,
-    time: Res<Time>,
     mut cmds: MessageWriter<GameCommand>,
-    mut toasts: ResMut<super::toasts::Toasts>,
 ) {
     if !ctx.allows(Keys::Flight) {
         return;
@@ -66,9 +66,8 @@ pub fn keys(
     let Some(state) = sim.ship().ship() else { return };
     for e in entries(&state.functions) {
         if e.key.is_some_and(|k| keys.just_pressed(k)) {
-            if let Some((c, text)) = run(&sim, e.index) {
+            if let Some(c) = run(&sim, e.index) {
                 cmds.write(c);
-                toasts.push(time.elapsed_secs_f64(), text, false);
             }
         }
     }
@@ -81,9 +80,7 @@ pub fn draw(
     sim: Res<SimState>,
     station: Res<crate::tracking::TrackingStation>,
     mut systems: ResMut<crate::systems_screen::SystemsScreen>,
-    time: Res<Time>,
     mut cmds: MessageWriter<GameCommand>,
-    mut toasts: ResMut<super::toasts::Toasts>,
 ) -> Result {
     let Some(state) = sim.ship().ship() else { return Ok(()) };
     if station.open || systems.open {
@@ -116,9 +113,8 @@ pub fn draw(
             });
         });
     });
-    if let Some((c, text)) = clicked.and_then(|i| run(&sim, i)) {
+    if let Some(c) = clicked.and_then(|i| run(&sim, i)) {
         cmds.write(c);
-        toasts.push(time.elapsed_secs_f64(), text, false);
     }
     Ok(())
 }
@@ -152,19 +148,15 @@ mod tests {
         assert!(entries(&[f("x", Some("Z"), false)]).is_empty());
     }
 
-    /// The test rocket's pinned function runs through the ship command.
+    /// The test rocket's pinned function is sent to the vessel by name.
     #[test]
     fn a_pinned_function_runs_its_commands_on_the_active_vessel() {
         let rocket = crate::test_rocket::rocket();
         let sim = SimState::with_craft(&rocket);
         let e = entries(&sim.ship().ship().unwrap().functions);
         assert_eq!(e.len(), 1, "Legs is pinned, Pair is not");
-        let (c, text) = run(&sim, e[0].index).unwrap();
-        assert_eq!(text, "Function: Legs");
-        assert_eq!(
-            c,
-            GameCommand::Ship { vessel: sim.ship().id(), commands: vec![ShipCommand::Deploy("leg#*".into())] }
-        );
+        let c = run(&sim, e[0].index).unwrap();
+        assert_eq!(c, GameCommand::Function { vessel: sim.ship().id(), name: "Legs".into() });
         assert!(run(&sim, 99).is_none());
     }
 }

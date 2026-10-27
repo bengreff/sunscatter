@@ -183,13 +183,18 @@ pub fn activate_next(s: &StageInputs, grounded: bool, controls: &mut Controls) -
     Ok(a)
 }
 
-/// What the pilot's controls do after a ship command's `effects` (a craft
-/// of parts): arming the parachutes is the parachute command (D079); the
-/// rest (separations, the clamps) are the vessel's.
-pub fn controls_after(effects: &[sim::craft::state::Effect], controls: &mut Controls) {
-    if effects.contains(&sim::craft::state::Effect::ArmChutes) {
-        controls.chute = true;
-    }
+/// Whether orders arm the parachutes (a craft of parts): a command that
+/// does, the next stage of the vessel's sequence or a saved function with
+/// one. Arming them is the pilot's parachute command (D079).
+pub fn arms_chutes(state: &sim::craft::state::ShipState, kinds: &[sim::systems::OrderKind]) -> bool {
+    use sim::craft::command::ShipCommand::ArmChutes;
+    use sim::systems::OrderKind;
+    let has = |list: &[sim::craft::command::ShipCommand]| list.contains(&ArmChutes);
+    kinds.iter().any(|k| match k {
+        OrderKind::Command(c) => *c == ArmChutes,
+        OrderKind::Stage => state.stages.get(state.sequence as usize).is_some_and(|s| has(&s.actions)),
+        OrderKind::Function(name) => state.functions.iter().any(|f| f.name == *name && has(&f.actions)),
+    })
 }
 
 /// Whether a vessel counts as on the ground for staging.
