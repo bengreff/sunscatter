@@ -306,6 +306,39 @@ pub fn colour(layer: Layer, f: &PartFacts, selected: bool) -> [f32; 3] {
     }
 }
 
+/// The networks a layer draws as lines between their ends (craft axes):
+/// plumbing lines (from the owner of one port to the other's), electrical
+/// buses (each member to the bus's first), data links (each computer to
+/// what it commands); none in the other layers. `at(id, part)`: where an
+/// item is (a component's place, else its part's centre).
+pub fn networks(layer: Layer, def: &ShipDef, at: &dyn Fn(&str, u32) -> Vec3) -> Vec<(Vec3, Vec3)> {
+    let owner = |end: &str| end.split(':').next().unwrap_or(end).to_string();
+    match layer {
+        Layer::Plumbing => {
+            def.lines.iter().map(|l| (at(&owner(&l.from), l.parts.0), at(&owner(&l.to), l.parts.1))).collect()
+        }
+        Layer::Electrical => (def.buses.iter())
+            .flat_map(|b| {
+                let first = b.members.first().map(|m| at(&m.0, m.1));
+                b.members.iter().skip(1).filter_map(move |m| Some((first?, at(&m.0, m.1))))
+            })
+            .collect(),
+        Layer::Data => (def.links.iter())
+            .flat_map(|l| l.to.iter().map(move |m| (at(&l.from.0, l.from.1), at(&m.0, m.1))))
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// The colour of a layer's network lines (linear).
+pub fn network_colour(layer: Layer) -> [f32; 3] {
+    match layer {
+        Layer::Plumbing => [0.6, 0.85, 1.0],
+        Layer::Electrical => [1.0, 0.9, 0.2],
+        _ => [0.2, 0.95, 1.0],
+    }
+}
+
 /// The parts as a tree (attachments, roots first, children after their
 /// parent in the craft's order): (depth, index into `parts`).
 pub fn tree(parts: &[Part]) -> Vec<(usize, usize)> {

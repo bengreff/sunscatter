@@ -112,7 +112,8 @@ pub struct SystemsPlugin;
 impl Plugin for SystemsPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<SystemsScreen>()
-            .add_systems(Startup, view::setup)
+            .init_gizmo_group::<view::NetworkGizmos>()
+            .add_systems(Startup, (view::setup, view::setup_gizmos))
             .add_systems(Update, keys.after(crate::commands::update_context).before(crate::state::read_controls))
             .add_systems(Update, view::update.after(crate::state::advance))
             .add_systems(bevy_egui::EguiPrimaryContextPass, ui::draw.after(crate::hud::draw));

@@ -188,3 +188,26 @@ fn the_regions_tile_the_screen_and_keep_the_view_wide() {
         assert!((area - w * h).abs() < 1.0, "{area}");
     }
 }
+
+#[test]
+fn layers_draw_their_networks_between_the_items_ends() {
+    let craft = rocket();
+    let def = craft.ship.as_deref().unwrap();
+    // Each item at a point named by its id's length and its part (enough to
+    // tell the ends apart).
+    let at = |id: &str, part: u32| Vec3::new(id.len() as f32, part as f32, 0.0);
+    let plumbing = networks(Layer::Plumbing, def, &at);
+    assert_eq!(plumbing.len(), def.lines.len());
+    // The bottle (in the tank) to each thruster block (in the capsule).
+    let tank = def.part_named("tank").unwrap() as f32;
+    assert!(plumbing.iter().any(|(a, b)| *a == Vec3::new(6.0, tank, 0.0) && b.x == 5.0), "{plumbing:?}");
+    // The bus: the computer to the two blocks; the link: the computer to
+    // four engines and two blocks.
+    assert_eq!(networks(Layer::Electrical, def, &at).len(), 2);
+    let data = networks(Layer::Data, def, &at);
+    assert_eq!(data.len(), 6);
+    assert!(data.iter().all(|(a, _)| a.x == "computer".len() as f32));
+    for layer in [Layer::Physical, Layer::Structural, Layer::Thermal, Layer::Health] {
+        assert!(networks(layer, def, &at).is_empty(), "{layer:?}");
+    }
+}

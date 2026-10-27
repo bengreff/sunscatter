@@ -37,11 +37,26 @@ pub struct SystemsView {
     /// The craft's centre (craft axes) and its size (m), framing the view.
     centre: Vec3,
     pub radius: f32,
+    /// Each part's centre (craft axes), where its network lines end.
+    centres: Vec<Vec3>,
 }
 
 /// A drawn part of the view (an index into the craft's parts).
 #[derive(Component)]
 pub struct ViewPart(usize);
+
+/// The view's network lines (plumbing, buses, data links), drawn over the
+/// parts on the view's render layer.
+#[derive(Default, Reflect, GizmoConfigGroup)]
+pub struct NetworkGizmos;
+
+/// The network lines' layer, width and place over the parts.
+pub fn setup_gizmos(mut store: ResMut<GizmoConfigStore>) {
+    let (config, _) = store.config_mut::<NetworkGizmos>();
+    config.render_layers = RenderLayers::layer(LAYER);
+    config.depth_bias = -1.0;
+    config.line.width = 2.5;
+}
 
 /// The camera, its image and its light (inactive until the screen opens).
 pub fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
@@ -72,6 +87,7 @@ pub fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
         facts: Vec::new(),
         centre: Vec3::ZERO,
         radius: 10.0,
+        centres: Vec::new(),
     });
 }
 
@@ -103,6 +119,7 @@ fn rebuild(
     view.meshes = (0..craft.parts.len()).map(|k| models.part_mesh(craft, k)).collect();
     let (centre, radius) = bounds(&view.meshes);
     (view.centre, view.radius) = (centre, radius);
+    view.centres = view.meshes.iter().map(|m| bounds(std::slice::from_ref(m)).0).collect();
     // Craft axes into the view's (nose up), its centre at the origin.
     let turn = rules::craft_to_view();
     let root =
@@ -142,6 +159,7 @@ pub fn update(
     mut images: ResMut<Assets<Image>>,
     mut cameras: Query<(&mut Camera, &mut Transform, &GlobalTransform), Without<ViewPart>>,
     mut parts: Query<(&ViewPart, &mut Transform, &GlobalTransform), Without<Camera>>,
+    mut gizmos: Gizmos<NetworkGizmos>,
 ) {
     let Ok((mut camera, mut cam_t, cam_g)) = cameras.get_mut(view.camera) else { return };
     let vessel = sim.ship();
@@ -192,6 +210,18 @@ pub fn update(
         if *t != want {
             *t = want;
         }
+    }
+    // The layer's networks, from item to item (a component's place, else its
+    // part's centre), into the view's axes as the parts' root places them.
+    let turn = rules::craft_to_view();
+    let at = |id: &str, part: u32| -> Vec3 {
+        let own = def.components.iter().find(|c| c.id == id).map(|c| c.pose.pos.as_vec3());
+        let k = craft.parts.iter().position(|p| p.id == part);
+        own.or_else(|| k.and_then(|k| view.centres.get(k).copied())).unwrap_or(view.centre)
+    };
+    let [r, g, b] = rules::network_colour(screen.layer);
+    for (a, b2) in rules::networks(screen.layer, &def, &at) {
+        gizmos.line(turn * (a - view.centre), turn * (b2 - view.centre), Color::linear_rgb(r, g, b));
     }
     let distance = screen.distance.unwrap_or(view.radius * 2.4);
     *cam_t = rules::orbit_pose(Vec3::ZERO, screen.yaw, screen.pitch, distance);
