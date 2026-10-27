@@ -197,6 +197,14 @@ pub fn arms_chutes(state: &sim::craft::state::ShipState, kinds: &[sim::systems::
     })
 }
 
+/// Whether Space finds no stage left in a craft of parts' sequence: every
+/// stage run, or already ordered (an order waits for its tick, or for the
+/// signal's light delay, in `Runtime::orders`).
+pub fn no_stage_left(state: &sim::craft::state::ShipState) -> bool {
+    let ordered = state.runtime.orders.iter().filter(|o| matches!(o.kind, sim::systems::OrderKind::Stage)).count();
+    state.sequence as usize + ordered >= state.stages.len()
+}
+
 /// Whether a vessel counts as on the ground for staging.
 pub fn grounded(vessel: &sim::vessel::Vessel) -> bool {
     matches!(vessel.phase, sim::vessel::Phase::Landed { .. } | sim::vessel::Phase::Crashed { .. })
@@ -263,6 +271,29 @@ mod tests {
         assert_eq!(s[0].state, StageState::Active);
         assert_eq!(next(&s), None);
         assert_eq!(activate_next(&inputs(&after, &chute, &spec, false), false, &mut c), Err(Refusal::NoStageLeft));
+    }
+
+    /// Space after the sequence's last stage is told so (review: it gave
+    /// no feedback); stages already ordered count as run.
+    #[test]
+    fn space_after_the_last_stage_finds_none_left() {
+        use sim::systems::OrderKind;
+        let craft = crate::test_rocket::rocket();
+        let sim = crate::state::SimState::with_craft(&craft);
+        let mut state = sim.ship().ship().unwrap().clone();
+        let n = state.stages.len();
+        assert!(n >= 1);
+        // (run, ordered, none left)
+        let table = [(0, 0, false), (n - 1, 0, false), (n, 0, true), (n - 1, 1, true), (0, n, true)];
+        for (run, ordered, want) in table {
+            state.sequence = run as u32;
+            state.runtime.orders.clear();
+            for _ in 0..ordered {
+                state.runtime.order(sim.clock, OrderKind::Stage);
+            }
+            state.runtime.order(sim.clock, OrderKind::Function("x".into()));
+            assert_eq!(no_stage_left(&state), want, "{run} {ordered}");
+        }
     }
 
     #[test]

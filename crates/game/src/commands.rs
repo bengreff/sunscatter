@@ -307,6 +307,12 @@ fn place(
     let at = sim.clock.add_seconds(delay);
     let arms = sim.fleet[i].ship().is_some_and(|state| crate::staging::arms_chutes(state, &kinds));
     for kind in kinds {
+        let none_left = sim.fleet[i].ship().is_some_and(crate::staging::no_stage_left);
+        if matches!(kind, OrderKind::Stage) && none_left {
+            let message = crate::staging::Refusal::NoStageLeft.message();
+            toasts.push(now, format!("Vessel {}: {}", id.0, message.to_lowercase()), false);
+            continue;
+        }
         if let Err(e) = sim.fleet[i].order_at(at, kind) {
             toasts.push(now, format!("Vessel {}: {e}", id.0), true);
         }
