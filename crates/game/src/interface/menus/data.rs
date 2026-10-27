@@ -229,8 +229,7 @@ pub struct Diagnostics {
     pub plot_frame: String,
     pub fps: String,
     pub vessels: usize,
-    /// The profiler's latest summary (`profile::report::summary`; empty
-    /// when it is off).
+    /// The profiler's latest summary (empty when it is off).
     pub profile: Vec<(String, String)>,
 }
 
