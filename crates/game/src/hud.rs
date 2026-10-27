@@ -305,20 +305,51 @@ pub fn draw_body_menu(
     Ok(())
 }
 
-/// Held by the pad's clamps (D104): `Some(engines lit)`.
-pub type Pad = Option<bool>;
+/// Held by the pad's clamps (D104): what the state line says of it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Pad {
+    /// Nothing lit.
+    Idle,
+    /// Engines lit, the release not armed.
+    Lit,
+    /// The release armed at full throttle: it lets go once every lit
+    /// engine reaches its rated thrust.
+    Releasing,
+    /// The release armed with the throttle below 100 %: the engines never
+    /// reach their rated thrust, so it never lets go (they burn on the pad).
+    ThrottleUp,
+}
+
+/// What the pad's state line says: from engines lit, the release armed
+/// (`Runtime::release_armed`) and the pilot's throttle.
+pub fn pad_state(lit: bool, armed: bool, throttle: f64) -> Pad {
+    match (armed, lit) {
+        (true, _) if throttle < 1.0 => Pad::ThrottleUp,
+        (true, _) => Pad::Releasing,
+        (false, true) => Pad::Lit,
+        (false, false) => Pad::Idle,
+    }
+}
 
 /// The flight state under the navball, and whether it is an alert: a
 /// wreck's cause (at once, while it still moves), CLAMPED on the pad (with
-/// its engines lit or not: the release waits for their rated thrust),
-/// LANDED, POWERED (only a running engine: live, or a planned burn on
-/// rails), ON PARACHUTE, or FLIGHT (gliding, falling or coasting with the
-/// engine off).
-pub fn state_word(destroyed: Option<String>, pad: Pad, landed: bool, engine: bool, chute: bool) -> (String, bool) {
+/// its engines lit or not, the release armed: it waits for their rated
+/// thrust, an alert below full throttle), LANDED, POWERED (only a running
+/// engine: live, or a planned burn on rails), ON PARACHUTE, or FLIGHT
+/// (gliding, falling or coasting with the engine off).
+pub fn state_word(
+    destroyed: Option<String>,
+    pad: Option<Pad>,
+    landed: bool,
+    engine: bool,
+    chute: bool,
+) -> (String, bool) {
     match (destroyed, landed, engine, chute) {
         (Some(cause), ..) => (format!("{cause} (R R to reset)"), true),
-        (None, ..) if pad == Some(true) => ("CLAMPED · ENGINES LIT".into(), false),
-        (None, ..) if pad == Some(false) => ("CLAMPED".into(), false),
+        (None, ..) if pad == Some(Pad::ThrottleUp) => ("CLAMPED · THROTTLE UP TO RELEASE".into(), true),
+        (None, ..) if pad == Some(Pad::Releasing) => ("CLAMPED · RELEASING AT FULL THRUST".into(), false),
+        (None, ..) if pad == Some(Pad::Lit) => ("CLAMPED · ENGINES LIT".into(), false),
+        (None, ..) if pad == Some(Pad::Idle) => ("CLAMPED".into(), false),
         (None, true, ..) => ("LANDED".into(), false),
         (None, false, true, _) => ("POWERED".into(), false),
         (None, false, false, true) => ("ON PARACHUTE".into(), false),
@@ -339,7 +370,8 @@ pub fn state_line(sim: &SimState) -> (String, bool) {
         use sim::craft::state::EngineStatus::{Running, Starting};
         s.engines.iter().any(|e| matches!(e.status, Starting | Running))
     };
-    let pad = ship.clamped().then(|| ship.ship().is_some_and(lit));
+    let pad = ship.ship().filter(|_| ship.clamped());
+    let pad = pad.map(|s| pad_state(lit(s), s.runtime.release_armed, sim.controls.throttle));
     state_word(destroyed, pad, landed, crate::scene::engine_on(sim, sim.active), ship.chute.open())
 }
 
@@ -357,13 +389,36 @@ mod tests {
             (None, None, false, false, true, "ON PARACHUTE", false),
             (None, None, false, false, false, "FLIGHT", false),
             (None, None, true, false, false, "LANDED", false),
-            (None, Some(false), true, false, false, "CLAMPED", false),
-            (None, Some(true), true, false, false, "CLAMPED · ENGINES LIT", false),
+            (None, Some(Pad::Idle), true, false, false, "CLAMPED", false),
+            (None, Some(Pad::Lit), true, false, false, "CLAMPED · ENGINES LIT", false),
+            (None, Some(Pad::Releasing), true, false, false, "CLAMPED · RELEASING AT FULL THRUST", false),
+            (None, Some(Pad::ThrottleUp), true, false, false, "CLAMPED · THROTTLE UP TO RELEASE", true),
             (wreck(), None, false, false, true, "CRASHED at 40 m/s (R R to reset)", true),
-            (wreck(), Some(true), true, false, false, "CRASHED at 40 m/s (R R to reset)", true),
+            (wreck(), Some(Pad::Lit), true, false, false, "CRASHED at 40 m/s (R R to reset)", true),
         ];
         for (destroyed, pad, landed, engine, chute, want, alert) in table {
             assert_eq!(state_word(destroyed, pad, landed, engine, chute), (want.to_string(), alert));
+        }
+    }
+
+    /// The release lets go only at every lit engine's rated thrust: armed
+    /// below full throttle, the line says to throttle up (review H3).
+    #[test]
+    fn the_pad_line_asks_for_full_throttle_while_the_release_waits() {
+        // (lit, armed, throttle, expected)
+        let table = [
+            (false, false, 0.0, Pad::Idle),
+            (false, false, 1.0, Pad::Idle),
+            (true, false, 0.0, Pad::Lit),
+            (true, false, 1.0, Pad::Lit),
+            (true, true, 0.0, Pad::ThrottleUp),
+            (true, true, 0.99, Pad::ThrottleUp),
+            (true, true, 1.0, Pad::Releasing),
+            (false, true, 0.5, Pad::ThrottleUp),
+            (false, true, 1.0, Pad::Releasing),
+        ];
+        for (lit, armed, throttle, want) in table {
+            assert_eq!(pad_state(lit, armed, throttle), want, "{lit} {armed} {throttle}");
         }
     }
 
