@@ -37,6 +37,12 @@ pub(super) struct ShipTick {
     /// The translating thrusters (the pilot's translation and the engines'
     /// settling): force, torque and each block's flow.
     pub push: crate::systems::rcs::Push,
+    /// The deployed grid fins, the flow at them, their torque gains and
+    /// authority (included in the actuators' torque).
+    pub fins: Vec<crate::systems::fins::Fin>,
+    pub fin_flow: Option<crate::systems::fins::FinFlow>,
+    pub fin_gains: Vec<DVec3>,
+    pub fin_auth: DVec3,
 }
 
 impl Vessel {
@@ -185,10 +191,11 @@ impl Vessel {
     pub(super) fn actuators(
         &self,
         controls: &super::Controls,
-        (p, q): (f64, f64),
+        (p, flow): (f64, Option<crate::systems::fins::FinFlow>),
         dt: f64,
         props: &MassProps,
     ) -> (EngineOutput, Actuators, Option<ShipTick>) {
+        let q = flow.map_or(0.0, |f| f.q);
         let throttle = controls.throttle;
         let Some((def, state)) = self.ship_parts() else {
             let engine = self.craft.engine;
@@ -210,6 +217,11 @@ impl Vessel {
             .map(|(d, s)| s.enabled && (self.debug || block_fed(&d.feed, state)))
             .collect();
         let (torque, rcs_flow) = def.rcs_authority(props.com, &fed);
+        // Deployed grid fins in the air add their authority.
+        let fins = flow.map_or(Vec::new(), |_| crate::systems::fins::deployed(def, state));
+        let fin_gains = flow.map_or(Vec::new(), |f| crate::systems::fins::gains(&fins, &f, props.com));
+        let fin_auth = crate::systems::fins::authority(&fins, &fin_gains);
+        let torque = torque + fin_auth;
         let weights: Vec<(usize, f64)> = (0..def.thrusters.len())
             .filter(|&i| fed[i])
             .map(|i| (i, def.thrusters[i].nozzles.len() as f64 * def.thrusters[i].thrust / def.thrusters[i].isp))
@@ -221,7 +233,17 @@ impl Vessel {
             .clamp_length_max(1.0);
         let push = crate::systems::rcs::translate(def, state, props.com, want, self.debug);
         let limits = Some(limits(def, state, &t, dt, q));
-        let tick = ShipTick { draws: t.draws, heat: t.heat, rcs_flow, blocks, push };
+        let tick = ShipTick {
+            draws: t.draws,
+            heat: t.heat,
+            rcs_flow,
+            blocks,
+            push,
+            fins,
+            fin_flow: flow,
+            fin_gains,
+            fin_auth,
+        };
         (out, Actuators { torque, gimbal: Some(gimbal), limits }, Some(tick))
     }
 

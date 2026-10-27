@@ -53,26 +53,41 @@ pub(super) struct TickMotion {
     pub thrust_dir: DVec3,
 }
 
-/// A craft of parts' translating thrusters over a tick (`systems::rcs`):
-/// their torque added to the command's, their force (body axes) to the
-/// tick's constant acceleration `lift` (inertial; attitude `q`, `mass`).
-pub(super) fn with_push(
-    ship: Option<&ShipTick>,
-    cmd: &mut super::attitude::Command,
-    lift: DVec3,
-    q: glam::DQuat,
-    mass: f64,
-) -> DVec3 {
-    match ship {
-        Some(t) => {
-            cmd.torque += t.push.torque;
-            lift + q * t.push.force / mass
-        }
-        None => lift,
-    }
-}
-
 impl Vessel {
+    /// A craft of parts' other effectors over a tick, after the attitude
+    /// command: the translating thrusters (`systems::rcs`) and the grid
+    /// fins (`systems::fins`: the command's share of their authority
+    /// allocated to deflections at their actuators' rate, their real force
+    /// and torque, the flow's incidence included, in its place). Their
+    /// torques go into the command's, their forces (body axes) into the
+    /// tick's constant acceleration `lift` (inertial), which is returned.
+    pub(super) fn ship_effectors(
+        &mut self,
+        ship: Option<&ShipTick>,
+        cmd: &mut super::attitude::Command,
+        lift: DVec3,
+        props: &crate::craft::MassProps,
+        dt: f64,
+    ) -> DVec3 {
+        let Some(t) = ship else { return lift };
+        let q = self.attitude.q;
+        cmd.torque += t.push.torque;
+        let mut lift = lift + q * t.push.force / props.mass;
+        if let (Some(flow), Some(def), Some(state)) = (t.fin_flow, self.ship_def(), self.ship.as_mut()) {
+            if !t.fins.is_empty() {
+                use crate::systems::fins;
+                let want = cmd.u * t.fin_auth;
+                let now = fins::held(state, &t.fins);
+                let d = fins::allocate(&t.fins, &t.fin_gains, want, &now, dt);
+                let (force, torque) = fins::forces(&t.fins, &flow, props.com, &d);
+                cmd.torque += torque - want;
+                lift += q * force / props.mass;
+                fins::hold(&def, state, &t.fins, &d);
+            }
+        }
+        lift
+    }
+
     /// Where a craft of parts' gimbal holds the thrust after a tick's
     /// command (its actuators start the next tick from it).
     pub(super) fn hold_gimbal(&mut self, cmd: &super::attitude::Command) {

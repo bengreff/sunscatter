@@ -334,3 +334,74 @@ fn falcon9_gravity_turn_profile() {
     }
     println!("worst joint over the flight {worst_all:.2}");
 }
+
+/// The booster (`falcon9-crew#12-31`) at `alt` m over the sea, falling at
+/// `speed` m/s engines first (nose up), its first-stage tanks at `fill`.
+fn booster(w: &World, alt: f64, speed: f64, fill: f64) -> Vessel {
+    let earth = w.find("Earth").unwrap();
+    let p = earth.physical.as_ref().unwrap();
+    let craft = craft_of(&CraftId("falcon9-crew#12-31".into()));
+    let deg = crate::math::PI / 180.0;
+    let fixed = p.ground_point(28.0 * deg, -75.0 * deg, alt);
+    let rot = p.rotation;
+    let r = rot.to_inertial(fixed, t0()).raw();
+    let up = r.normalize();
+    let v = rot.omega(t0()).raw().cross(r) - up * speed;
+    let mut b = Vessel::coasting(w, VesselId(2), t0(), earth.node, r, v, &craft);
+    b.set_attitude(Attitude { q: super::attitude::quat_z_to(up), omega: DVec3::ZERO });
+    let def = b.ship_def().unwrap();
+    let s = b.ship.as_mut().unwrap();
+    for (t, st) in def.tanks.iter().zip(s.tanks.iter_mut()) {
+        st.liquid *= fill;
+        let g = crate::systems::plumbing::geometry(t, st);
+        st.ullage_moles = crate::fluids::moles(t.load.pressure, g.ullage, st.ullage_k);
+    }
+    b.propellant = s.consumables(&def);
+    b
+}
+
+/// A diagnostic descent (run by hand): the booster at 12 km falling at
+/// 300 m/s engines first, grid fins deployed or not, SAS holding surface
+/// retrograde after a 5° upset; printed every second.
+#[test]
+#[ignore]
+fn booster_grid_fin_descent_profile() {
+    use super::hold::{HoldMode, SpeedReference};
+    let w = world();
+    for deploy in [false, true] {
+        let mut v = booster(&w, 12_000.0, 300.0, 0.05);
+        v.set_attitude(Attitude {
+            q: v.attitude.q * super::attitude::quat_from_rotvec(DVec3::X * 0.09),
+            omega: DVec3::ZERO,
+        });
+        if deploy {
+            v.command(&w, &ShipCommand::Deploy("s1.gridfin#*".into())).unwrap();
+        }
+        let hold =
+            Controls { sas: true, hold: HoldMode::Retrograde, speed: SpeedReference::Surface, ..Default::default() };
+        let mut ids = VesselIds::default();
+        ids.allocate();
+        ids.allocate();
+        let earth = w.find("Earth").unwrap().node;
+        let start = v.time;
+        for k in 1..=30 {
+            v.advance(&w, start.add_seconds(k as f64), &hold, usize::MAX);
+            if let Some(plan) = v.plan_breakup() {
+                v.split(&w, &plan, &plan.crafts(), &mut ids);
+            }
+            let (anchor, r, vel) = v.state(&w);
+            let rot = w.source(earth).and_then(|s| s.physical.as_ref()).unwrap().rotation;
+            let surf = vel - rot.omega(v.time).raw().cross(r);
+            let off = crate::math::acos((-v.attitude.nose()).dot(surf.normalize()).clamp(-1.0, 1.0)).to_degrees();
+            let alt = crate::forces::altitude_above(&w, &w.snapshot(v.time), anchor, anchor, r).0;
+            let fins = v.ship().unwrap().runtime.fins.iter().map(|d| d.to_degrees()).collect::<Vec<_>>();
+            if k % 3 == 0 {
+                println!(
+                    "fins {deploy} T+{k} alt {alt:.0} speed {:.0} off-retrograde {off:.2}° ω {:.4} fins {fins:.1?}",
+                    surf.length(),
+                    v.attitude.omega.length()
+                );
+            }
+        }
+    }
+}

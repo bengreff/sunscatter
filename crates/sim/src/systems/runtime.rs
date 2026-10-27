@@ -128,6 +128,10 @@ pub struct Runtime {
     /// The engines' realised thrust direction after the gimbal (body axes;
     /// `None` until they first run): the actuators move it at their rate.
     pub thrust_dir: Option<DVec3>,
+    /// Each aero surface's deflection (rad; aligned with
+    /// `ShipDef::surfaces`, kept by every piece: a fin is on one).
+    #[serde(default)]
+    pub fins: Vec<f64>,
     /// The failure fates' seed (the save's) and the launch epoch they are
     /// drawn with (D105 §6.3).
     pub seed: u64,

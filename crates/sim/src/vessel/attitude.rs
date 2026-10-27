@@ -195,6 +195,8 @@ pub struct Command {
     /// Attitude-control use per body axis, a fraction of full command in
     /// [0, 1] (what the RCS fires).
     pub rcs: DVec3,
+    /// The command per body axis in [-1, 1] (fractions of the authority).
+    pub u: DVec3,
     sas: bool,
     saturated: bool,
     /// A direction hold: where the attitude is at the tick's end if it
@@ -282,16 +284,14 @@ pub fn command(
                 *inertia * ((w_target + closing_rate(e, alpha, HOLD_OMEGA, f64::INFINITY) - w) * (2.0 * HOLD_OMEGA))
                     + gyro
             }
-            // A craft of parts: its angular acceleration along the error
-            // (a stack's weak roll authority does not slow its pitch).
+            // A craft of parts: its angular acceleration along the error.
             (Some(target), Some(l)) => {
                 let e = rotvec_of(att.q.inverse() * target);
                 let a = alpha_along(inertia, auth, e);
                 let omega = hold_omega(Some(&l), a);
                 *inertia * ((w_target + closing_rate(e, a, omega, l.max_rate) - w) * (2.0 * omega)) + gyro
             }
-            // Damping: the test craft stops its rotation in a tick; a
-            // craft of parts damps it at its hold's frequency.
+            // Damping: in a tick (test craft), at the hold's frequency (parts).
             (None, Some(l)) => *inertia * (-w * (2.0 * hold_omega(Some(&l), alpha_along(inertia, auth, w)))) + gyro,
             (None, None) => *inertia * (-w / dt) + gyro,
         };
@@ -321,7 +321,7 @@ pub fn command(
     // A craft of parts' gentle damping does not stop the rotation in a tick:
     // its hold starts once the rotation has (nearly) stopped.
     let saturated = saturated || (act.limits.is_some() && target_free(control, sas) && w.length() > 1e-4);
-    Command { torque: u * act.torque + thrust_torque, thrust_dir, rcs, sas, saturated, snap_to }
+    Command { torque: u * act.torque + thrust_torque, thrust_dir, rcs, u, sas, saturated, snap_to }
 }
 
 /// SAS bookkeeping after a tick flown with `cmd`. `alone`: the command was

@@ -43,6 +43,7 @@ mod fin_search;
 pub mod friction;
 pub mod gas;
 pub mod geodesic;
+pub mod lattice;
 pub mod relief;
 pub mod slender;
 pub mod wave;

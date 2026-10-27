@@ -23,6 +23,7 @@
 pub mod command;
 pub mod data;
 pub mod failure;
+pub mod fins;
 pub mod mechanisms;
 pub mod plumbing;
 pub mod power;
