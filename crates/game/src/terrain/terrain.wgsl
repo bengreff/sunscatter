@@ -26,8 +26,9 @@
 #else
 #import bevy_pbr::{
     forward_io::{VertexOutput, FragmentOutput},
-    pbr_functions::{apply_pbr_lighting, main_pass_post_lighting_processing},
+    pbr_functions::main_pass_post_lighting_processing,
     pbr_functions,
+    ambient,
     pbr_types,
     lighting,
     shadows,
@@ -107,6 +108,9 @@ struct TerrainParams {
 // average the transmission: rings::mip_chain), read with textureLoad.
 @group(#{MATERIAL_BIND_GROUP}) @binding(111) var ring_profile: texture_2d<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(112) var<storage, read> frame_data: TerrainFrame;
+// The value noise's lattice (noise.rs): RG8, repeating every NOISE_SIZE cells.
+@group(#{MATERIAL_BIND_GROUP}) @binding(113) var noise_lattice: texture_3d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(114) var noise_sampler: sampler;
 
 // Starlight through the rings at `p` (world, camera-relative) from a star
 // at `star`: exp(−τ/|μ|) where the ray to it crosses the ring plane
@@ -225,20 +229,49 @@ fn vnoise2(p: vec3<f32>) -> vec2<f32> {
     return mix(y0, y1, u.z) * 2.0 - 1.0;
 }
 
+// The same value noise from the lattice texture (noise.rs): one trilinear
+// fetch at the coordinate smoothstepped within its cell.
+const NOISE_SIZE: f32 = 128.0;
+fn lattice_noise2(p: vec3<f32>) -> vec2<f32> {
+    let fl = floor(p);
+    let f = p - fl;
+    let u = f * f * (3.0 - 2.0 * f);
+    return textureSampleLevel(noise_lattice, noise_sampler, (fl + u + 0.5) / NOISE_SIZE, 0.0).rg * 2.0 - 1.0;
+}
+
+// A fixed rotation, applied once more per octave (with the doubling), so
+// the lattice's period never lines up between octaves.
+const OCTAVE_TURN: mat3x3<f32> = mat3x3<f32>(
+    vec3<f32>(0.00, 0.80, 0.60),
+    vec3<f32>(-0.80, 0.36, -0.48),
+    vec3<f32>(-0.60, -0.48, 0.64),
+);
+
+// One fBm octave: the hashed noise for the first, coarsest one (no period
+// at all), the lattice texture for the rest.
+fn octave_noise2(k: i32, q: vec3<f32>) -> vec2<f32> {
+    if k == 0 {
+        return vnoise2(q);
+    }
+    return lattice_noise2(q);
+}
+
 // The domain warp (zone texels): 3D fBm of the body-fixed position `p`
 // (m), wavelengths `lam0`, lam0/2, ..., each octave fading by footprint.
 fn zone_warp(p: vec3<f32>, lam0: f32, foot: f32) -> vec2<f32> {
     var w = vec2(0.0);
     var lam = lam0;
     var amp = WARP_AMP;
+    var q = p / lam0;
     for (var k = 0; k < WARP_OCTAVES; k++) {
         let wt = octave_weight(lam, foot);
         if wt <= 0.0 || lam < WARP_MIN_M {
             break;
         }
-        w += amp * wt * vnoise2(p / lam + f32(k) * vec3(17.31, 5.17, 11.73));
+        w += amp * wt * octave_noise2(k, q + f32(k) * vec3(17.31, 5.17, 11.73));
         lam *= 0.5;
         amp *= 0.5;
+        q = OCTAVE_TURN * q * 2.0;
     }
     return w;
 }
@@ -249,14 +282,16 @@ fn zone_tone(p: vec3<f32>, scale: f32, foot: f32) -> f32 {
     var t = 0.0;
     var lam = scale;
     var amp = 0.5;
+    var q = p / scale;
     for (var k = 0; k < TONE_OCTAVES; k++) {
         let wt = octave_weight(lam, foot);
         if wt <= 0.0 || lam < TONE_MIN_M {
             break;
         }
-        t += amp * wt * vnoise2(p / lam + vec3(3.7, 41.3, 23.9) + f32(k) * vec3(7.13, 13.7, 3.31)).x;
+        t += amp * wt * octave_noise2(k, q + vec3(3.7, 41.3, 23.9) + f32(k) * vec3(7.13, 13.7, 3.31)).x;
         lam *= 0.5;
         amp *= 0.5;
+        q = OCTAVE_TURN * q * 2.0;
     }
     return t;
 }
@@ -492,14 +527,15 @@ fn lighting_input_of(in: pbr_types::PbrInput) -> lighting::LightingInput {
     return input;
 }
 
-// Every star at its own flux, eclipses, ring shadow and elevation (D055):
-// `pbr` is Bevy's lighting of this fragment, whose directional lights
-// carry each slotted star's flux at the camera. Each light's share is
-// rescaled by its star's factor here; the rest (the sky light) by the
-// flux-weighted mean of the factors. Then, under a haze, each star's
-// diffuse light; planetshine from each reflector; and the starlight
-// without a slot as ambient.
-fn star_lighting(in: pbr_types::PbrInput, pbr: vec3<f32>, color: vec3<f32>, p: vec3<f32>, n: vec3<f32>) -> vec3<f32> {
+// The terrain's lighting, Bevy's PBR terms evaluated once (2026-10-26:
+// `apply_pbr_lighting` and then this took every light and shadow twice):
+// every star at its own flux, eclipses, ring shadow and elevation (D055),
+// each Bevy directional light (one per slotted star, carrying its flux at
+// the camera) rescaled by its star's factor here; Bevy's ambient term (the
+// sky stand-in) by the flux-weighted mean of the factors. Then, under a
+// haze, each star's diffuse light; planetshine from each reflector; and
+// the starlight without a slot as ambient.
+fn shade(in: pbr_types::PbrInput, color: vec3<f32>, p: vec3<f32>, n: vec3<f32>) -> vec3<f32> {
     let foot = length(fwidth(p));
     let up_here = normalize(p - frame_data.center.xyz);
     var factor: array<vec3<f32>, 4>;
@@ -537,13 +573,13 @@ fn star_lighting(in: pbr_types::PbrInput, pbr: vec3<f32>, color: vec3<f32>, p: v
     }
     // Bevy's directional lights, one by one, as apply_pbr_lighting adds them.
     var input = lighting_input_of(in);
+    let NdotV = input.layers[lighting::LAYER_BASE].NdotV;
     let view_z = dot(vec4(
         view.view_from_world[0].z,
         view.view_from_world[1].z,
         view.view_from_world[2].z,
         view.view_from_world[3].z
     ), in.world_position);
-    var direct = vec3(0.0);
     for (var i = 0u; i < lights.n_directional_lights; i++) {
         var shadow = 1.0;
         if (in.flags & mesh_types::MESH_FLAGS_SHADOW_RECEIVER_BIT) != 0u
@@ -551,14 +587,19 @@ fn star_lighting(in: pbr_types::PbrInput, pbr: vec3<f32>, color: vec3<f32>, p: v
             shadow = shadows::fetch_directional_shadow(i, in.world_position, in.world_normal, view_z, in.frag_coord.xy);
         }
         let c = lighting::directional_light(i, &input, true) * shadow * view.exposure;
-        direct += c;
         lit += c * factor[slot_of_light(i)];
     }
     var sky = vec3(1.0);
     if sky_den > 0.0 {
         sky = sky_num / sky_den;
     }
-    lit += max(pbr - direct, vec3(0.0)) * sky;
+    // Bevy's ambient term (no environment map, no clustered lights here).
+    let f0 = mix(input.F0_dielectric, input.F0_metallic, input.metallic);
+    let amb = ambient::ambient_light(
+        in.world_position, in.N, in.V, NdotV, input.diffuse_color, f0,
+        input.layers[lighting::LAYER_BASE].perceptual_roughness, in.diffuse_occlusion,
+    );
+    lit += amb * view.exposure * sky;
     // Planetshine: a Lambert term from each reflecting body.
     for (var m = 0; m < MAX_SHINES; m++) {
         let sh = frame_data.starlight.shines[m];
@@ -743,8 +784,7 @@ fn fragment(in: VertexOutput, @builtin(front_facing) is_front: bool) -> Fragment
     let out = deferred_output(in, pbr_input);
 #else
     var out: FragmentOutput;
-    out.color = apply_pbr_lighting(pbr_input);
-    out.color = vec4(star_lighting(pbr_input, out.color.rgb, color, in.world_position.xyz, normalize(in.world_normal)), out.color.a);
+    out.color = vec4(shade(pbr_input, color, in.world_position.xyz, normalize(in.world_normal)), 1.0);
     out.color = vec4(deck_fog(out.color.rgb, in.world_position.xyz), out.color.a);
     out.color = main_pass_post_lighting_processing(pbr_input, out.color);
 #endif

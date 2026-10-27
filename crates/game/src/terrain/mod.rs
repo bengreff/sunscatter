@@ -7,6 +7,7 @@
 mod lod;
 mod material;
 pub mod mesh;
+pub mod noise;
 pub mod water;
 pub mod zones;
 
@@ -172,8 +173,10 @@ pub fn setup(
     defs: Res<BodyDefs>,
     mut materials: ResMut<Assets<TerrainMaterial>>,
     mut buffers: ResMut<Assets<ShaderBuffer>>,
+    mut images: ResMut<Assets<Image>>,
 ) {
     let mut terrain = Terrain::default();
+    let noise = images.add(noise::image());
     for (node, def) in &defs.defs {
         if def.emissive.is_some() {
             continue;
@@ -214,6 +217,7 @@ pub fn setup(
                 zone_far: None,
                 ring_profile: None,
                 frame: frame_buffer.clone(),
+                noise: Some(noise.clone()),
             },
         });
         let shape = Shape {

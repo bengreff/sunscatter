@@ -115,6 +115,10 @@ pub struct TerrainExt {
     /// This frame's [`TerrainFrame`].
     #[storage(112, read_only)]
     pub frame: Handle<ShaderBuffer>,
+    /// The value noise's lattice (`noise`), repeating and filtered.
+    #[texture(113, dimension = "3d")]
+    #[sampler(114)]
+    pub noise: Option<Handle<Image>>,
 }
 
 impl MaterialExtension for TerrainExt {
