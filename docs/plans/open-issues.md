@@ -1,4 +1,4 @@
-# Open issues, 2026-09-27 (updated 2026-10-26 after the overnight run)
+# Open issues, 2026-09-27 (updated 2026-10-27 after the Falcon 9 night)
 
 Everything known to be open after the realism-1 build, for the next owner interview. Nothing here is being fixed yet (owner, 2026-09-27). Sources: the owner's play, `docs/reviews/2026-09-26-code-review.md`, `docs/design/aero-thermal.md` (limitations), and the agents' reports.
 
@@ -22,6 +22,19 @@ Defaults taken 2026-09-30 while the owner was away (each reversible, recorded as
 
 Settled 2026-09-28: haze (moot, D073), chute (keep), stability (finned rocket, D074).
 Settled 2026-10-01 (owner): a full craft tearing its mains is kept (D079); nose-first reentry overheating is accepted, heat shield later as a part (D064); SAS on a slope kept (D078); near-circular Ap/Pe plain (D076).
+
+## After the Falcon 9 night (2026-10-27, D088–D090, D100–D108)
+
+Each workstream's notes say more: `docs/features/{parts,falcon9,ship-systems,systems-screen,solar-system}.md`, `docs/plans/overnight-2026-10-27-falcon9.md`.
+
+- **Frame rate:** the owner's slow view (185 km, Earth filling the screen, 3024×1964) is ~10.5 ms of GPU (was 18.1) against 8.3 ms for 120 Hz; the render scale should hold the refresh at ~0.9 (not yet measured unpinned on a quiet machine). Over land and close to the ground the terrain's main pass is 13 ms (ascent shots 46–79 fps). The terrain shader is register-bound (lighting + zones together); next levers (GFX2): drop eclipse occluders on the CPU when their shadow cannot reach (~0.9 ms), let the zones' pattern reuse the warp's lattice fetches, the warp's coarse octaves per vertex, the close-up ground pattern's noise from a texture (~2 ms close up). `tools/gpu_trace.py` measures GPU time per pass from a Metal System Trace.
+- **Flying the Falcon 9:** RCS translation (`Controls::translate`) has no keys (H/N/I–L are taken). Engines' heat stays D077's static shares (an off engine still heats its nozzle); the engines gimbal together; RCS rotation keeps per-axis authority (translation is allocated); SuperDraco and Draco not flown in tests; Dragon's internal-power switch at T−5 min (the umbilical drops at clamp release instead).
+- **Ship systems not built:** slosh pendulums; single-use crush cores (they recover); legs' self-levelling; hard starts; pyroshock (no shock ratings); per-component vibration damage; failure hazards on the rails lattice; blast fragments (in vacuum a blast reaches only a tank's inside); Brinkley landing response (its data "verify"); O₂/N₂ as tanks; suits and leaks; grid-fin heating and their pump's fluid; the nosecone's aero while hinged; thruster couples in the joint loads; legs' strut capacity (legs left to the contact).
+- **Data marked U/E** in `falcon9.md`: dome shapes, the first stage's helium bottles, cold-gas thrust, gimbal ranges and rates, NPSP, crush-core stroke, grid-fin deflection, battery capacities, SuperDraco/Draco masses, parachute reefing; the legs derive 173 kg against a published 500 kg (reported as a contradiction); Dragon's CO₂ removal (4.0 kg/day) under four crew's 4.16.
+- **Gravity fields (D090):** a craft in low lunar orbit holds warp to ~4×10⁵× (degree 100; budget call open); Earth's rotation model is 0.09° off in longitude in 2030 (no nutation, polar motion or UT1); no tides; the ephemeris generator still uses `body.ron`'s J2/J4/J6.
+- **Lines and clock (D088, D089):** Sedna's orbit is never drawn as a line (the zoom limit follows its current distance); `settings_ui` relabelled the trackpad zoom.
+- **Planned burns for craft of parts** are refused (`PlanError::PartsUnsupported`).
+- **From the night's review (2026-10-27), not fixed:** the booster cannot relight in vacuum (the cold-gas pods' nozzles are all radial, no aft one: data unknown; its burns wait until drag settles the tanks, ~40 km; forcing a start spends a relight into gas ingestion); separating < 1 s after MECO lets the booster pass through the second stage (tail-off; the separation could wait for the engines to stop); bubble members flying together apply their orders only when alone (`bubble.rs:509`); an aborted bubble tick does not restore `ShipState` changes made in `begin_tick`; grid-fin deflections can misalign after a split (`Runtime::partition` copies them whole); `Vessel::landed_at`/`coasting` ignore a configured id's deployed parts; debug mode leaves crew injuries (alarm only) and power shedding on; `craft::engine::ship_thrust` and `ShipState::apply`'s instant Ignite/Deploy duplicate the engine rule (tests only, rule 5); after a pad abort the sequence is past Liftoff (Space would run MECO and separation on the pad).
 
 ## After the overnight run (2026-10-26, D081–D085)
 
