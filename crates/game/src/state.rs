@@ -246,7 +246,8 @@ impl SimState {
     }
 
     /// The warp actually applied: rails warp only while coasting or landed
-    /// with the throttle closed; otherwise capped at physics warp.
+    /// with the throttle closed (and not held live on the pad); otherwise
+    /// capped at physics warp.
     pub fn effective_warp(&self) -> usize {
         if self.rails_allowed() {
             self.warp
@@ -280,6 +281,12 @@ impl SimState {
         // atmosphere, say) would need 20 ms ticks at rails speed.
         if let Some(v) = self.fleet.iter().find(|v| matches!(v.phase, Phase::Powered { .. })) {
             return Some(RailsBlock::OtherLive(v.id()));
+        }
+        // Held on the pad with its systems live (engines lit, even at their
+        // minimum with the throttle closed; the release armed): ticked in
+        // place every 20 ms, so never at rails speed.
+        if let Some(v) = self.fleet.iter().find(|v| held_live(v)) {
+            return Some(if v.id() == ship.id() { RailsBlock::Held } else { RailsBlock::OtherHeld(v.id()) });
         }
         if matches!(ship.phase, Phase::Landed { .. } | Phase::Crashed { .. }) {
             return None;
@@ -582,6 +589,19 @@ pub enum RailsBlock {
     Near(VesselId),
     /// Below a body's rails floor (D062): (body, floor altitude in m).
     Floor { body: NodeId, floor: f64 },
+    /// Held on the pad's clamps with its systems live ([`held_live`]).
+    Held,
+    /// Another vessel is held on the pad with its systems live.
+    OtherHeld(VesselId),
+}
+
+/// Whether vessel `v` is held on the pad's clamps with its systems needing
+/// live ticks (an engine starting, running or in its tail-off, the release
+/// armed, a mechanism moving: `sim::systems::ship::busy`): the sim then
+/// ticks it in place every 20 ms (`Vessel::advance_held`), whatever the
+/// throttle.
+pub fn held_live(v: &Vessel) -> bool {
+    v.clamped() && v.ship().is_some_and(sim::systems::ship::busy)
 }
 
 /// The first body whose rails floor (D062) a flying object at (`anchor`,

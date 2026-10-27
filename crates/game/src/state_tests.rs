@@ -184,3 +184,34 @@ fn a_new_flight_and_a_reset_bring_the_chosen_craft_to_the_pad() {
     // A craft that does not build gives the test craft.
     assert_eq!(craft_or_test("no-such-craft").id.0, "test-craft");
 }
+
+/// Held on the pad with its engines lit (at their minimum with the throttle
+/// closed) or the release armed, a craft is ticked in place every 20 ms:
+/// rails warp is refused, for it and while another vessel is active.
+#[test]
+fn a_craft_held_live_on_the_pad_refuses_rails_warp() {
+    let mut sim = SimState::with_craft(&craft_or_test("falcon9-crew"));
+    let (a, f9) = (sim.active, sim.ship().id());
+    assert!(sim.ship().clamped(), "the Falcon 9 starts on the pad's clamps");
+    assert_eq!(sim.rails_block(), None, "on the pad, nothing lit: allowed");
+    // Ignition with the throttle closed: the nine engines spool to their minimum.
+    let s = &mut sim;
+    s.fleet[a].next_stage(&s.world).expect("the ignition");
+    assert_eq!(sim.controls.throttle, 0.0);
+    assert!(held_live(sim.ship()));
+    assert_eq!(sim.rails_block(), Some(RailsBlock::Held));
+    sim.warp = WARP_LEVELS.len() - 1;
+    assert_eq!(sim.effective_warp(), MAX_PHYSICS_WARP, "capped at physics warp");
+    // Another vessel active (in orbit): the held one is named.
+    let w = sim.world.clone();
+    let earth = w.find("Earth").unwrap();
+    let r = earth.physical.as_ref().unwrap().radius_eq + 400_000.0;
+    let (pos, vel) = (DVec3::new(r, 0.0, 0.0), DVec3::new(0.0, (earth.gm / r).sqrt(), 0.0));
+    let id = sim.vessel_ids.allocate();
+    sim.fleet.push(Vessel::coasting(&w, id, sim.clock, earth.node, pos, vel, test_craft()));
+    sim.active = sim.fleet.len() - 1;
+    assert_eq!(sim.rails_block(), Some(RailsBlock::OtherHeld(f9)));
+    // A craft of parts on the pad with nothing lit is not held live.
+    let idle = SimState::with_craft(&craft_or_test("falcon9-crew"));
+    assert!(idle.ship().clamped() && !held_live(idle.ship()));
+}
