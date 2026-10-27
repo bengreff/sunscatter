@@ -51,6 +51,9 @@ fn above(v: &Vessel, child: u32) -> f64 {
         kelvin: &[],
         pushes: &[],
         ambient: 0.0,
+        hottest: &[],
+        q: 0.0,
+        mach: 0.0,
     };
     let mass = crate::systems::structure::part_masses(def, state, &b);
     (0..parts.len()).filter(|&k| !inside[k]).map(|k| mass[k].mass).sum()
@@ -105,4 +108,60 @@ fn the_falcon_9_joints_on_the_pad_and_after_lift_off() {
         frames.advance(&w, t, &full(), usize::MAX);
     }
     assert_eq!(frames.ship().unwrap().runtime.joints, v.ship().unwrap().runtime.joints);
+}
+
+/// The ascent at full throttle (straight up, SAS holding): lift-off, MECO
+/// at the booster's last ~7 %, stage separation and the MVac's burn. Every
+/// part's normal operating temperatures and loads sit inside its limits:
+/// nothing melts, bursts, snaps or buckles (the radiatively cooled MVac
+/// bell runs ~1,400 K on its niobium, judged by its own material).
+#[test]
+fn the_falcon_9_ascent_breaks_nothing() {
+    let w = world();
+    let craft = craft_of(&CraftId("falcon9-crew".into()));
+    let mut v = Vessel::landed_at(&w, VesselId(1), "Earth", 28.6084, -80.6043, t0(), &craft);
+    let mut ids = VesselIds::default();
+    ids.allocate();
+    v.next_stage(&w).unwrap();
+    v.next_stage(&w).unwrap();
+    v.advance(&w, t0().add_seconds(3.0), &full(), usize::MAX);
+    let plan = v.plan_breakup().expect("the mount separates");
+    v.split(&w, &plan, &plan.crafts(), &mut ids);
+    let bad = |v: &Vessel| -> Vec<String> {
+        let words = ["destroyed", "burst", "ruptured", "snapped", "buckled", "melted"];
+        (v.ship_events().iter()).filter(|e| words.iter().any(|w| e.text.contains(w))).map(|e| e.text.clone()).collect()
+    };
+    // The booster to ~7 % of its propellant (MECO).
+    let def = v.ship_def().unwrap();
+    let s1: Vec<usize> = (0..def.tanks.len()).filter(|&i| def.tanks[i].id.starts_with("s1.")).collect();
+    let load: f64 = s1.iter().map(|&i| v.ship().unwrap().tanks[i].liquid).sum();
+    let mut t = 0.0;
+    while s1.iter().map(|&i| v.ship().unwrap().tanks[i].liquid).sum::<f64>() > 0.07 * load && t < 200.0 {
+        t += 1.0;
+        v.advance(&w, v.time.add_seconds(1.0), &full(), usize::MAX);
+        assert!(v.plan_breakup().is_none(), "at T+{t}: {:?}", bad(&v));
+    }
+    let (anchor, r, vel) = v.state(&w);
+    let up = crate::forces::altitude_above(&w, &w.snapshot(v.time), anchor, anchor, r).0;
+    println!("MECO at T+{t:.0} s: {:.1} km up, {:.0} m/s", up / 1e3, vel.length());
+    let peak = |v: &Vessel| {
+        let s = v.ship().unwrap();
+        s.runtime.joints.iter().map(|j| j.ratio).fold(0.0, f64::max)
+    };
+    println!("peak joint ratio now {:.2}", peak(&v));
+    assert!(bad(&v).is_empty(), "{:?}", bad(&v));
+    v.next_stage(&w).unwrap();
+    v.next_stage(&w).unwrap();
+    let plan = v.plan_breakup().expect("the stages separate");
+    let mut booster = v.split(&w, &plan, &plan.crafts(), &mut ids).remove(0);
+    v.next_stage(&w).unwrap();
+    for _ in 0..30 {
+        let next = v.time.add_seconds(1.0);
+        v.advance(&w, next, &full(), usize::MAX);
+        booster.advance(&w, next, &Controls::default(), usize::MAX);
+        assert!(v.plan_breakup().is_none() && booster.plan_breakup().is_none(), "{:?} {:?}", bad(&v), bad(&booster));
+    }
+    let mvac = v.ship().unwrap().runtime.engines.iter().map(|e| e.level).fold(0.0, f64::max);
+    println!("MVac level {mvac:.2}; events: {:?}", v.ship_events().iter().map(|e| &e.text).collect::<Vec<_>>());
+    assert!(bad(&v).is_empty() && bad(&booster).is_empty(), "{:?} {:?}", bad(&v), bad(&booster));
 }

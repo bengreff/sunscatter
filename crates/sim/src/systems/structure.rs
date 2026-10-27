@@ -32,11 +32,12 @@
 //!   Repeated loads are not tracked for fatigue (no data).
 
 use crate::craft::assembly::JointKind;
-use crate::craft::ship::{JointDef, ShipDef, TankDef};
-use crate::craft::state::{Effect, ShipState, TankState};
+use crate::craft::ship::{JointDef, ShipDef};
+use crate::craft::state::{Effect, ShipState};
 use crate::craft::MassProps;
 use crate::fluids::fluids;
 use crate::math;
+use crate::systems::plumbing;
 use crate::time::Epoch;
 use glam::{DMat3, DVec3};
 
@@ -251,6 +252,12 @@ pub struct Bodies<'a> {
     pub pushes: &'a [Push],
     /// Ambient pressure (Pa).
     pub ambient: f64,
+    /// Each part's hottest interior node (K), the air's dynamic pressure
+    /// (Pa) and Mach number: the failures' environment (`systems::failure`;
+    /// a skin cell over its own material's limit is the breakage's).
+    pub hottest: &'a [f64],
+    pub q: f64,
+    pub mach: f64,
 }
 
 /// Each engine's thrust (N, aligned with the definition's engines) at its
@@ -328,10 +335,22 @@ pub fn part_kelvin(cell_part: &[u32], skin: &[f64], parts: usize, default: f64) 
     sum.iter().zip(&n).map(|(&s, &n)| if n > 0 { s / f64::from(n) } else { default }).collect()
 }
 
+/// Each part's hottest interior node (K; `node_part` gives each node's
+/// part; a part without nodes: `default`).
+pub fn part_hottest(node_part: &[u32], nodes: &[f64], parts: usize, default: f64) -> Vec<f64> {
+    let mut out = vec![f64::NEG_INFINITY; parts];
+    for (&p, &k) in node_part.iter().zip(nodes) {
+        if let Some(x) = out.get_mut(p as usize) {
+            *x = x.max(k);
+        }
+    }
+    out.iter().map(|&k| if k.is_finite() { k } else { default }).collect()
+}
+
 /// Each part's mass properties with its contents now: its dry ones, each
 /// of its tanks' liquid (a solid cylinder from the region's base, as the
-/// vessel's mass model) and its bottles' gas; the ground's parts (the pad's
-/// mount) weigh nothing here (they are not the vehicle's).
+/// vessel's mass model) and ullage gas, and its bottles' gas; the ground's
+/// parts (the pad's mount) weigh nothing here (they are not the vehicle's).
 pub fn part_masses(def: &ShipDef, state: &ShipState, b: &Bodies) -> Vec<MassProps> {
     let index = |id: u32| b.ids.iter().position(|&x| x == id);
     let mut items: Vec<Vec<MassProps>> = b.dry.iter().map(|&d| vec![d]).collect();
@@ -340,6 +359,13 @@ pub fn part_masses(def: &ShipDef, state: &ShipState, b: &Bodies) -> Vec<MassProp
             let (d, h) = (t.region.axis.normalize(), t.region.axis.length() * (s.liquid / t.capacity).min(1.0));
             let inertia = crate::craft::mass::solid_cylinder(s.liquid, t.region.radius, h, d);
             items[k].push(MassProps { mass: s.liquid, com: t.region.base + d * (0.5 * h), inertia });
+        }
+    }
+    // Each ullage's gas at the top of its liquid's region (as `ShipState::contents`).
+    for (t, s) in def.tanks.iter().zip(&state.tanks) {
+        let kg = s.ullage_moles * fluids().gas(&t.load.pressurant).map_or(0.0, |g| g.molar_mass);
+        if let Some(k) = index(t.part).filter(|_| kg > 0.0) {
+            items[k].push(MassProps { mass: kg, com: t.region.base + t.region.axis, inertia: DMat3::ZERO });
         }
     }
     for (bd, s) in def.bottles.iter().zip(&state.bottles) {
@@ -361,41 +387,30 @@ pub fn part_masses(def: &ShipDef, state: &ShipState, b: &Bodies) -> Vec<MassProp
         .collect()
 }
 
-/// A tank's ullage pressure (Pa): its gas by the ideal-gas law in the
-/// volume its liquid leaves.
-pub fn ullage_pressure(t: &TankDef, s: &TankState) -> f64 {
-    let rho = fluids().liquid(&t.fluid).map_or(1000.0, |l| l.density(s.liquid_k));
-    let ullage = (t.volume - s.liquid / rho).max(1e-3 * t.volume);
-    crate::fluids::pressure(s.ullage_moles, ullage, s.ullage_k)
-}
-
 /// The gauge pressure (Pa) inside a joint's ring: a tank compartment of
 /// either part that the joint's plane cuts holds its ullage pressure plus
 /// the head of its liquid above the cut under `accel` (body axes, proper),
 /// less `ambient`; zero if none does (an unpressurised skirt or interstage).
-/// Until the plumbing regulates the pressures (`Runtime::pressure_regulated`)
-/// the ullage holds at least its loading (flight) pressure.
+/// Until the plumbing has regulated the pressures (it sets
+/// `Runtime::pressure_regulated`) the ullage holds at least its loading
+/// (flight) pressure.
 pub fn section_gauge(def: &ShipDef, state: &ShipState, j: &JointDef, accel: DVec3, ambient: f64) -> f64 {
     let mut gauge: f64 = 0.0;
     for (t, s) in def.tanks.iter().zip(&state.tanks) {
-        // The region's length is the liquid's height at capacity; the
-        // compartment (its ullage too) is its volume over the section.
-        let len = t.region.axis.length();
-        let extent = (t.volume / (math::PI * t.region.radius * t.region.radius)).max(len);
-        if !(t.part == j.parent || t.part == j.child) || len <= 0.0 {
+        if !(t.part == j.parent || t.part == j.child) {
             continue;
         }
-        let u = t.region.axis / len;
-        let x = (j.pos - t.region.base).dot(u);
-        if !(x > 0.0 && x < extent) {
+        // The compartment (its ullage too) as a cylinder of its volume from
+        // the outlet (`plumbing::geometry`, the one owner).
+        let g = plumbing::geometry(t, s);
+        let x = (j.pos - t.region.base).dot(g.axis);
+        if !(x > 0.0 && x < g.length) {
             continue;
         }
-        let level = len * (s.liquid / t.capacity.max(1e-9)).min(1.0);
-        let rho = fluids().liquid(&t.fluid).map_or(1000.0, |l| l.density(s.liquid_k));
-        let head = rho * accel.dot(u).max(0.0) * (level - x).max(0.0);
-        // Unregulated (no pressurisation modelled yet): at least the flight
-        // pressure the tank is loaded at and its regulator would hold.
-        let ullage = ullage_pressure(t, s);
+        let head = g.density * accel.dot(g.axis).max(0.0) * (g.height - x).max(0.0);
+        // Unregulated (no plumbing step yet): at least the flight pressure
+        // the tank is loaded at and its regulator holds.
+        let ullage = plumbing::pressure(t, s);
         let ullage = if state.runtime.pressure_regulated { ullage } else { ullage.max(t.load.pressure) };
         gauge = gauge.max(ullage + head - ambient);
     }
@@ -415,8 +430,22 @@ fn joint_factor(def: &ShipDef, j: &JointDef, kelvin: impl Fn(u32) -> Option<f64>
     side(j.parent).min(side(j.child))
 }
 
-/// One tick of the joints (see the module), the motion `m` (its centre of
-/// mass is the parts' own): each intact joint's force, moment and ratio
+/// The rigid body's motion its forces give (body axes): a = ΣF/M and
+/// α = I⁻¹(τ − ω×Iω) about the centre of mass, at angular velocity `omega`.
+/// The joints are loaded with it, so the whole tree lacks nothing: what a
+/// joint carries is the same seen from either side (a tick's integrated
+/// motion differs from it by what the gathered forces leave out, such as the
+/// thrusters' couples).
+pub fn consistent(total: &MassProps, pushes: &[Push], omega: DVec3) -> Motion {
+    let force: DVec3 = pushes.iter().map(|p| p.force).sum();
+    let torque: DVec3 = pushes.iter().map(|p| (p.at - total.com).cross(p.force) + p.torque).sum();
+    let i = total.inertia;
+    let alpha = if i.determinant().abs() > 0.0 { i.inverse() * (torque - omega.cross(i * omega)) } else { DVec3::ZERO };
+    Motion { com: total.com, accel: force / total.mass, omega, alpha }
+}
+
+/// One tick of the joints (see the module), the motion the forces give
+/// ([`consistent`]; `m` gives the angular velocity): each intact joint's force, moment and ratio
 /// into the ship state's runtime (the pad's hold-down excepted: the held
 /// ticks fill it); each part's peak ratio into its history; a joint at or
 /// over its ultimate load snaps (not in debug mode), logged, and returned
@@ -427,7 +456,10 @@ pub fn step(def: &ShipDef, state: &mut ShipState, b: &Bodies, m: &Motion, at: Ep
     }
     let mass = part_masses(def, state, b);
     let total = MassProps::sum(&mass);
-    let motion = Motion { com: total.com, ..*m };
+    if total.mass <= 0.0 {
+        return Vec::new();
+    }
+    let motion = consistent(&total, b.pushes, m.omega);
     let parents: Vec<Option<usize>> = b.parents.iter().map(|p| p.map(|p| p as usize)).collect();
     let loads = subtree_loads(&parents, &mass, b.pushes, &motion);
     let index = |id: u32| b.ids.iter().position(|&x| x == id);
@@ -440,7 +472,7 @@ pub fn step(def: &ShipDef, state: &mut ShipState, b: &Bodies, m: &Motion, at: Ep
         }
         let (force, about_origin) = loads[c];
         let moment = moment_about(force, about_origin, d.pos);
-        let gauge = section_gauge(def, state, d, m.accel, b.ambient);
+        let gauge = section_gauge(def, state, d, motion.accel, b.ambient);
         let sec = section(force, moment, d.normal, d.radius, gauge);
         let factor = joint_factor(def, d, |id| index(id).and_then(|k| b.kelvin.get(k).copied()));
         let buckling = if d.buckling > 0.0 { pressurised_buckling(d.buckling, d.radius, gauge) } else { 0.0 };

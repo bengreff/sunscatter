@@ -8,7 +8,10 @@
         compartments: [("rp1", "RP-1"), ("lox", "LOX")], split: 0.4554,
         skirt_high: 1.29,
         material: "al-li-2195", finish: "white-paint",
-        pressure: 4.0e5, safety_factor: 1.4, axial_load: 6.0e5, min_gauge: 0.003,   // D: Dragon at 4.5 g
+        // D: the forward skirt carries Dragon and its trunk (13.9 t) at the
+        // user's guide's 6 g axial limit load factor (falcon9.md §6.4): 8.2e5 N,
+        // which also covers max-Q at 4° α (~0.75 MN with its bending).
+        pressure: 4.0e5, safety_factor: 1.4, axial_load: 8.2e5, min_gauge: 0.003,
         ullage: 0.02,
     ),
 )

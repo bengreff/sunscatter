@@ -48,6 +48,9 @@ pub(super) struct TickMotion {
     /// under it, for the joints (`ship_loads`).
     pub air: Option<super::aerothermal::AeroLoads>,
     pub ground: Option<NodeId>,
+    /// The engines' thrust direction the tick flew (body axes, after the
+    /// gimbal).
+    pub thrust_dir: DVec3,
 }
 
 /// The gravitational acceleration (relative to `anchor`) at `r` at `t`.
@@ -184,7 +187,7 @@ impl Vessel {
         let loads = self.ship_parts().map(|(def, state)| {
             let out = propulsion::output(def, state, p, m.dt, debug);
             let ground = m.ground.map(|body| GroundAt { anchor: m.anchor, body, r: m.r1, v: m.v1 });
-            self.gather_live(world, &out, m.air.as_ref(), ground.as_ref(), p)
+            self.gather_live(world, (&out, m.thrust_dir), m.air.as_ref(), ground.as_ref(), p)
         });
         let (Some(def), Some(state)) = (self.ship_def(), self.ship.as_mut()) else { return (self.propellant, vec![]) };
         let mut per_block = vec![0.0; def.thrusters.len()];

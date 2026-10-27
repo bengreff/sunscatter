@@ -52,6 +52,9 @@ fn lift_off_loads_by_hand() {
         kelvin: &kelvin,
         pushes: &pushes,
         ambient: 101_325.0,
+        hottest: &kelvin,
+        q: 0.0,
+        mach: 0.0,
     };
     let mass = part_masses(def, &state, &b);
     let m_total: f64 = mass.iter().map(|m| m.mass).sum();
@@ -86,7 +89,8 @@ fn lift_off_loads_by_hand() {
         let expect = above(d) * a;
         // The parent pushes the child's side away from it (down the stack).
         let along = run.force.dot(d.normal);
-        assert!((along / expect - 1.0).abs() < 1e-9, "{name}: {along} against {expect}");
+        // (Its own off-axis masses turn it a little: the forces' own motion.)
+        assert!((along / expect - 1.0).abs() < 1e-6, "{name}: {along} against {expect}");
         // Only the off-axis equipment's lever (Dragon's centre of mass is
         // ~10 cm off the axis) bends it: a few percent of the line load.
         assert!(run.moment.length() < 0.1 * expect * d.radius, "{name}: {:?}", run.moment);
@@ -129,8 +133,17 @@ fn near_meco_the_upper_stack_is_heaviest() {
     }
     let (ids, parents, kelvin) = bodies_of(&craft);
     let pushes = merlins(&craft, 914e3);
-    let b =
-        Bodies { ids: &ids, parents: &parents, dry: &craft.part_mass, kelvin: &kelvin, pushes: &pushes, ambient: 0.0 };
+    let b = Bodies {
+        ids: &ids,
+        parents: &parents,
+        dry: &craft.part_mass,
+        kelvin: &kelvin,
+        pushes: &pushes,
+        ambient: 0.0,
+        hottest: &kelvin,
+        q: 0.0,
+        mach: 0.0,
+    };
     let total: f64 = part_masses(def, &state, &b).iter().map(|m| m.mass).sum();
     let a = 9.0 * 914e3 / total;
     println!("near MECO: {total:.0} kg, {:.2} g", a / 9.80665);
@@ -150,6 +163,101 @@ fn near_meco_the_upper_stack_is_heaviest() {
     assert!(bare.compression > d.buckling, "{} against {}", bare.compression, d.buckling);
 }
 
+/// Max-Q at 4° of angle of attack (falcon9.md §4.3: ~36 kPa near Mach
+/// 1.3), the Merlins throttled to ~75 %: the axial drag on the nose
+/// (q·S·0.5), slender-body lift on the nose (2α·q·S) and crossflow drag
+/// along the tanks (1.2·sin²α·q·D·L), the gimbal turning the thrust so the
+/// moment about the centre of mass vanishes (as the flight computer holds
+/// it). Every joint stays under 0.7 of its ultimate (the design factor 1.4).
+#[test]
+fn max_q_at_a_few_degrees_bends_the_stack_safely() {
+    let craft = falcon9();
+    let def = craft.ship.as_ref().unwrap();
+    let mut state = ShipState::initial(def);
+    // ~70 s of burn gone from the first stage (its regulator holds 3.5 bar).
+    for (t, s) in def.tanks.iter().zip(state.tanks.iter_mut()) {
+        if t.id.starts_with("s1.") {
+            s.liquid *= 0.55;
+            let rho = crate::fluids::fluids().liquid(&t.fluid).unwrap().density(s.liquid_k);
+            s.ullage_moles = crate::fluids::moles(3.5e5, t.volume - s.liquid / rho, s.ullage_k);
+        }
+    }
+    state.runtime.pressure_regulated = true;
+    let (ids, parents, kelvin) = bodies_of(&craft);
+    let index = |name: &str| craft.parts.iter().position(|p| def.parts[p.id as usize].id == name).unwrap();
+    let (q, alpha) = (36e3, 4.0f64.to_radians());
+    let area = crate::math::PI * 1.83 * 1.83;
+    let mut pushes = merlins(&craft, 0.75 * 914e3 - 20e3 * 0.681);
+    let lateral = DVec3::X;
+    let nose = Push {
+        part: index("dragon.capsule"),
+        force: -DVec3::Z * (q * area * 0.5) + lateral * (2.0 * alpha * q * area),
+        at: DVec3::Z * 2.0,
+        torque: DVec3::ZERO,
+    };
+    pushes.push(nose);
+    let cross = |len: f64| 1.2 * alpha.sin() * alpha.sin() * q * 3.66 * len;
+    for (name, z, len) in [("s2.tank", -9.0, 9.0), ("s1.tank", -39.0, 35.5)] {
+        pushes.push(Push { part: index(name), force: lateral * cross(len), at: DVec3::Z * z, torque: DVec3::ZERO });
+    }
+    // The gimbal: a side force at the engines cancelling the moment about
+    // the centre of mass.
+    let total = {
+        let b = Bodies {
+            ids: &ids,
+            parents: &parents,
+            dry: &craft.part_mass,
+            kelvin: &kelvin,
+            pushes: &[],
+            ambient: 20e3,
+            hottest: &kelvin,
+            q,
+            mach: 1.3,
+        };
+        MassProps::sum(&part_masses(def, &state, &b))
+    };
+    let tau: DVec3 = pushes.iter().map(|p| (p.at - total.com).cross(p.force)).sum();
+    let engines = DVec3::Z * -59.0;
+    let lever = engines - total.com;
+    let side = lever.cross(tau) / lever.length_squared();
+    let side = side - lever * side.dot(lever) / lever.length_squared();
+    pushes.push(Push { part: index("s1.octaweb"), force: side, at: engines, torque: DVec3::ZERO });
+    let b = Bodies {
+        ids: &ids,
+        parents: &parents,
+        dry: &craft.part_mass,
+        kelvin: &kelvin,
+        pushes: &pushes,
+        ambient: 20e3,
+        hottest: &kelvin,
+        q,
+        mach: 1.3,
+    };
+    let m = consistent(&total, &pushes, DVec3::ZERO);
+    println!(
+        "max-Q: {:.2} g, {:.4} rad/s² (balanced), gimbal side force {:.0} kN",
+        m.accel.length() / 9.80665,
+        m.alpha.length(),
+        side.length() / 1e3
+    );
+    assert!(m.alpha.length() < 1e-3, "{:?}", m.alpha);
+    let effects = step(def, &mut state, &b, &Motion::default(), Epoch::new(1_000_000_000, 0.0), false);
+    assert!(effects.is_empty());
+    for (j, d) in def.joints.iter().enumerate() {
+        let r = &state.runtime.joints[j];
+        if r.ratio > 0.05 {
+            println!(
+                "{:28} {:6.0} kN, {:5.0} kN·m, ratio {:.3}",
+                d.name,
+                r.force.dot(d.normal) / 1e3,
+                r.moment.length() / 1e3,
+                r.ratio
+            );
+        }
+        assert!(r.ratio <= 0.7, "{}: {}", d.name, r.ratio);
+    }
+}
+
 /// Until the plumbing regulates the tanks' pressures, a draining first
 /// stage keeps its flight pressure's relief: near MECO with its loaded gas
 /// only (0.07 bar in its 95 % ullage) its joints stay well under their
@@ -167,8 +275,17 @@ fn an_unregulated_tank_keeps_its_flight_pressure() {
     }
     let (ids, parents, kelvin) = bodies_of(&craft);
     let pushes = merlins(&craft, 914e3);
-    let b =
-        Bodies { ids: &ids, parents: &parents, dry: &craft.part_mass, kelvin: &kelvin, pushes: &pushes, ambient: 0.0 };
+    let b = Bodies {
+        ids: &ids,
+        parents: &parents,
+        dry: &craft.part_mass,
+        kelvin: &kelvin,
+        pushes: &pushes,
+        ambient: 0.0,
+        hottest: &kelvin,
+        q: 0.0,
+        mach: 0.0,
+    };
     let total: f64 = part_masses(def, &state, &b).iter().map(|m| m.mass).sum();
     let m = Motion { accel: DVec3::Z * (9.0 * 914e3 / total), ..Motion::default() };
     let t0 = Epoch::new(1_000_000_000, 0.0);
@@ -192,7 +309,7 @@ fn an_overload_snaps_the_joint() {
     let craft = falcon9();
     let def = craft.ship.as_ref().unwrap();
     let (ids, parents, kelvin) = bodies_of(&craft);
-    let pushes = merlins(&craft, 845e3);
+    let pushes = merlins(&craft, 845e3 * 22.0);
     let b = Bodies {
         ids: &ids,
         parents: &parents,
@@ -200,9 +317,12 @@ fn an_overload_snaps_the_joint() {
         kelvin: &kelvin,
         pushes: &pushes,
         ambient: 101_325.0,
+        hottest: &kelvin,
+        q: 0.0,
+        mach: 0.0,
     };
-    // 30 g: the forward skirt under Dragon goes first.
-    let m = Motion { accel: DVec3::Z * 300.0, ..Motion::default() };
+    // ~30 g (22 times the thrust): the forward skirt under Dragon goes first.
+    let m = Motion::default();
     let t0 = Epoch::new(1_000_000_000, 0.0);
     let mut debug = ShipState::initial(def);
     assert!(step(def, &mut debug, &b, &m, t0, true).is_empty());

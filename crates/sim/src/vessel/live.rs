@@ -545,6 +545,7 @@ impl Vessel {
                     air_k,
                     air: aero_loads,
                     ground,
+                    thrust_dir: cmd.thrust_dir,
                 };
                 let (left, effects) = self.ship_after_tick(world, tick, cmd.rcs, &m, controls.throttle);
                 (tick.heat, left, effects)

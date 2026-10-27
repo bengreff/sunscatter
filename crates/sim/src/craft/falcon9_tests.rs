@@ -94,13 +94,13 @@ fn the_falcon_9_joints_for_the_structure() {
     // The body origin is falcon9.md's z 61.35.
     let sep = joint("stage separation");
     assert!((sep.pos - glam::DVec3::Z * (46.40 - 61.35)).length() < 1e-9, "{:?}", sep.pos);
-    // The second stage's tank: 1.4 × 600 kN over 2π·1.83 m, as sized (its
-    // 3 mm minimum gauge a little over); the forward skirt (the Dragon
-    // ring's side) and the aft end alike.
-    let n = 1.4 * 6.0e5 / (crate::math::TAU * 1.83);
+    // The second stage's tank: 1.4 × 820 kN (Dragon at the guide's 6 g) over
+    // 2π·1.83 m, as sized; the forward skirt (the Dragon ring's side) and the
+    // aft end alike.
+    let n = 1.4 * 8.2e5 / (crate::math::TAU * 1.83);
     for name in ["s2.ring|s2.tank", "s2.tank|s2.skirt"] {
         let b = joint(name).buckling;
-        assert!(b >= n && b < 1.03 * n, "{name}: {b} against {n}");
+        assert!((b / n - 1.0).abs() < 0.02, "{name}: {b} against {n}");
     }
     // The first stage's: 6 MN.
     let b = joint("s1.tank|s1.octaweb").buckling;

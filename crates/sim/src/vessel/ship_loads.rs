@@ -24,6 +24,9 @@ pub(super) struct Gathered {
     kelvin: Vec<f64>,
     pushes: Vec<Push>,
     ambient: f64,
+    hottest: Vec<f64>,
+    q: f64,
+    mach: f64,
 }
 
 impl Gathered {
@@ -35,6 +38,9 @@ impl Gathered {
             kelvin: &self.kelvin,
             pushes: &self.pushes,
             ambient: self.ambient,
+            hottest: &self.hottest,
+            q: self.q,
+            mach: self.mach,
         }
     }
 }
@@ -48,15 +54,18 @@ pub(super) struct GroundAt {
 }
 
 impl Vessel {
-    /// The parts with the engines' thrust `out` and the ambient pressure.
-    fn gather(&self, out: &ShipThrust, ambient: f64) -> Gathered {
+    /// The parts with the engines' thrust `out` along `dir` (body axes; the
+    /// runtime's realised direction if `None`) and the ambient pressure.
+    fn gather(&self, out: &ShipThrust, dir: Option<DVec3>, ambient: f64) -> Gathered {
         let design = self.craft.design();
         let ids: Vec<u32> = design.parts.iter().map(|p| p.id).collect();
-        let kelvin = structure::part_kelvin(&design.cell_part, &self.thermal.state.skin, ids.len(), 295.0);
+        let st = &self.thermal.state;
+        let kelvin = structure::part_kelvin(&design.cell_part, &st.skin, ids.len(), 295.0);
+        let hottest = structure::part_hottest(&design.node_part, &st.nodes, ids.len(), 295.0);
         let mut pushes = Vec::new();
         if let Some((def, state)) = self.ship_parts() {
             let index = |id: u32| ids.iter().position(|&x| x == id);
-            pushes = structure::engine_pushes(def, &out.per_engine, state.runtime.thrust_dir, index);
+            pushes = structure::engine_pushes(def, &out.per_engine, dir.or(state.runtime.thrust_dir), index);
         }
         Gathered {
             parents: design.parts.iter().map(|p| p.parent).collect(),
@@ -65,23 +74,27 @@ impl Vessel {
             kelvin,
             pushes,
             ambient,
+            hottest,
+            q: 0.0,
+            mach: 0.0,
         }
     }
 
-    /// A live tick's (see the module): `out` the engines' output it flew,
-    /// `air` its loads, `ground` the contact at its end.
+    /// A live tick's (see the module): `out` the engines' output it flew
+    /// along `dir`, `air` its loads, `ground` the contact at its end.
     pub(super) fn gather_live(
         &self,
         world: &World,
-        out: &ShipThrust,
+        (out, dir): (&ShipThrust, DVec3),
         air: Option<&AeroLoads>,
         ground: Option<&GroundAt>,
         ambient: f64,
     ) -> Gathered {
-        let mut g = self.gather(out, ambient);
+        let mut g = self.gather(out, Some(dir), ambient);
         let design = self.craft.design();
         let n = g.ids.len();
         if let Some(a) = air {
+            (g.q, g.mach) = (a.flow.q, a.flow.mach);
             let exposure = design.bake.exposure_weights(a.flow.dir);
             let cells = &design.bake.geometry;
             let shares = structure::aero_pushes(
@@ -119,7 +132,7 @@ impl Vessel {
     /// force `on_vehicle` (body axes) at each intact hold-down joint's
     /// parent, shared between them.
     pub(super) fn gather_held(&self, out: &ShipThrust, on_vehicle: DVec3, ambient: f64) -> Gathered {
-        let mut g = self.gather(out, ambient);
+        let mut g = self.gather(out, None, ambient);
         if let Some((def, state)) = self.ship_parts() {
             let held: Vec<&crate::craft::ship::JointDef> = (def.joints.iter().zip(&state.joints))
                 .filter(|(d, s)| d.kind == crate::craft::assembly::JointKind::HoldDown && s.intact)
