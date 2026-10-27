@@ -28,7 +28,7 @@
     forward_io::{VertexOutput, FragmentOutput},
     pbr_functions::main_pass_post_lighting_processing,
     pbr_functions,
-    ambient,
+    ambient::ambient_light,
     pbr_types,
     lighting,
     shadows,
@@ -595,7 +595,7 @@ fn shade(in: pbr_types::PbrInput, color: vec3<f32>, p: vec3<f32>, n: vec3<f32>) 
     }
     // Bevy's ambient term (no environment map, no clustered lights here).
     let f0 = mix(input.F0_dielectric, input.F0_metallic, input.metallic);
-    let amb = ambient::ambient_light(
+    let amb = ambient_light(
         in.world_position, in.N, in.V, NdotV, input.diffuse_color, f0,
         input.layers[lighting::LAYER_BASE].perceptual_roughness, in.diffuse_occlusion,
     );
