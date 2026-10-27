@@ -45,7 +45,6 @@ pub const KEYS: &[(&str, &[(&str, &str)])] = &[
             ("F", "focus the nearest body"),
             ("`", "focus the ship"),
             ("double-click a body", "its menu"),
-            ("Tab", "plotting frame"),
         ],
     ),
     (

@@ -1,5 +1,5 @@
-//! Trajectory display: stored segments sampled into the plotting frame
-//! ([`lines`]), apsides found along them ([`apsides`]: the extrema of
+//! Trajectory display: stored segments sampled into the line's frame
+//! ([`LineFrame`], [`lines`]), apsides found along them ([`apsides`]: the extrema of
 //! distance on the N-body trajectory, D076), and how long vessel and body
 //! lines are ([`line`], [`settings`]; D056).
 
@@ -12,61 +12,103 @@ pub mod settings;
 pub use lines::draw;
 
 use crate::camera::CameraRig;
-use crate::hud::PlotFrame;
 use crate::relations::{Dominance, Orbit};
 use crate::state::SimState;
-use glam::{DMat3, DVec3};
+use glam::DVec3;
 use line::{Limits, LineRule};
 use settings::OrbitSettings;
 use sim::ephem::Ephemeris;
-use sim::frame::NodeId;
+use sim::frame::{NodeId, Vec3};
 use sim::kepler::Elements;
 use sim::time::Epoch;
 use sim::vessel::{Segment, Vessel};
 use sim::world::World;
 
-/// Earth–Moon rotating basis at `t` (x → Moon, z → orbit normal).
-fn rotating_basis(world: &World, t: Epoch) -> DMat3 {
-    let (earth, moon) = (world.find("Earth").map(|s| s.node), world.find("Moon").map(|s| s.node));
-    let (Some(e), Some(m)) = (earth, moon) else { return DMat3::IDENTITY };
-    let k = world.eph.relative(m, e, t);
-    let x = k.r.normalize();
-    let z = k.r.cross(k.v).normalize();
-    DMat3::from_cols(x, z.cross(x), z)
+/// The frame a vessel's line is drawn in (D089): the navball's switch
+/// for the active vessel, the dominant body's non-rotating frame for the
+/// others. The path is one physical path; the frame only changes how it is
+/// drawn.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LineFrame {
+    /// About a body, not turning: its position at each point's time is
+    /// taken out and the path drawn around where it is now (ORBIT).
+    About(NodeId),
+    /// Over a body's ground: each point in the body-fixed frame at its own
+    /// time, drawn where that ground is now (SURFACE: the path over the
+    /// ground, the body's rotation and the air's with it).
+    Ground(NodeId),
 }
 
-/// Maps a trajectory point at `epoch` to camera-relative render space in the
-/// selected plotting frame (centred on Earth's current position).
+impl LineFrame {
+    /// The body the frame is centred on.
+    pub fn body(self) -> NodeId {
+        match self {
+            LineFrame::About(b) | LineFrame::Ground(b) => b,
+        }
+    }
+}
+
+/// The frame of the line of fleet vessel `i`: the navball's frame for the
+/// active one (`active`), else about its dominant body.
+pub fn frame_of(sim: &SimState, i: usize, active: Option<LineFrame>) -> LineFrame {
+    match active.filter(|_| i == sim.active) {
+        Some(f) => f,
+        None => LineFrame::About(vessel_dominant(&sim.world, &sim.dominance, sim.clock, &sim.fleet[i])),
+    }
+}
+
+/// Maps a trajectory point at `epoch` to camera-relative render space in a
+/// [`LineFrame`], centred on its body's current position.
 pub struct Plotter<'a> {
     world: &'a World,
-    frame: PlotFrame,
-    earth: NodeId,
-    basis_now: DMat3,
-    /// Earth's current position, camera-relative.
+    frame: LineFrame,
+    now: Epoch,
+    /// The frame's body, now, camera-relative.
     origin: DVec3,
 }
 
 impl<'a> Plotter<'a> {
-    pub fn new(sim: &'a SimState, rig: &CameraRig, frame: PlotFrame) -> Option<Self> {
-        let earth = sim.world.find("Earth")?.node;
-        let basis_now = match frame {
-            PlotFrame::EarthInertial => DMat3::IDENTITY,
-            PlotFrame::EarthMoonRotating => rotating_basis(&sim.world, sim.clock),
+    pub fn new(sim: &'a SimState, rig: &CameraRig, frame: LineFrame) -> Self {
+        Self::at(&sim.world, sim.clock, rig.anchor, rig.cam_pos, frame)
+    }
+
+    /// A plotter at clock `now` for a camera at `cam_pos` relative to
+    /// `anchor`.
+    pub fn at(world: &'a World, now: Epoch, anchor: NodeId, cam_pos: DVec3, frame: LineFrame) -> Self {
+        let origin = world.snapshot(now).relative_r(frame.body(), anchor) - cam_pos;
+        // A body without a shape has no ground to draw over.
+        let frame = match frame {
+            LineFrame::Ground(b) if Self::spin(world, b).is_none() => LineFrame::About(b),
+            f => f,
         };
-        let origin = sim.world.snapshot(sim.clock).relative_r(earth, rig.anchor) - rig.cam_pos;
-        Some(Plotter { world: &sim.world, frame, earth, basis_now, origin })
+        Plotter { world, frame, now, origin }
+    }
+
+    fn spin(world: &World, body: NodeId) -> Option<&sim::body::BodyPhysical> {
+        world.source(body).and_then(|s| s.physical.as_ref())
     }
 
     /// Position `r` relative to `anchor` at `epoch`, plotted.
     pub fn plot(&self, anchor: NodeId, r: DVec3, epoch: Epoch) -> DVec3 {
-        let rel_earth = r + self.world.eph.relative(anchor, self.earth, epoch).r;
-        let plotted = match self.frame {
-            PlotFrame::EarthInertial => rel_earth,
-            PlotFrame::EarthMoonRotating => {
-                self.basis_now * (rotating_basis(self.world, epoch).transpose() * rel_earth)
+        let body = self.frame.body();
+        let rel = r + self.world.eph.relative(anchor, body, epoch).r;
+        let placed = match self.frame {
+            LineFrame::About(_) => rel,
+            LineFrame::Ground(b) => {
+                let rot = Self::spin(self.world, b).expect("checked in `at`").rotation;
+                rot.to_inertial(rot.to_fixed(Vec3::from_raw(rel), epoch), self.now).raw()
             }
         };
-        plotted + self.origin
+        placed + self.origin
+    }
+
+    /// How fast the frame turns (rad/s): a straight leg drawn in it bends by
+    /// this much more, which the line's sampling follows.
+    pub fn turn_rate(&self) -> f64 {
+        match self.frame {
+            LineFrame::About(_) => 0.0,
+            LineFrame::Ground(b) => Self::spin(self.world, b).map_or(0.0, |p| p.rotation.w_rate.abs()),
+        }
     }
 }
 

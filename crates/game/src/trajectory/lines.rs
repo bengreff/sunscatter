@@ -13,9 +13,9 @@
 
 use super::{clip, future_span, vessel_line_end, Plotter};
 use crate::camera::{CameraRig, MainCamera};
-use crate::hud::UiState;
 use crate::map::MapView;
 use crate::map_view::ObjectId;
+use crate::navball::Navball;
 use crate::state::{Prediction, SimState};
 use crate::tracking::Tracked;
 use crate::trajectory::apsides::vessel_segments;
@@ -27,8 +27,8 @@ use sim::vessel::{Segment, SegmentKind, VesselId};
 
 /// Largest turn of the velocity between two drawn points (rad).
 pub const MAX_TURN: f64 = 0.035;
-/// Longest time between drawn points (s): the Earth–Moon plotting frame
-/// turns about 2° an hour, so straight inertial legs still bend there.
+/// Longest time between drawn points (s): a long leg still bends as the
+/// bodies move (and a turning frame takes its own share, [`max_dt`]).
 pub const MAX_DT: f64 = 3_600.0;
 /// Most subdivisions of one interval.
 const MAX_SPLIT: usize = 32;
@@ -76,11 +76,22 @@ pub fn turn(a: DVec3, b: DVec3) -> f64 {
     a.cross(b).length().atan2(a.dot(b))
 }
 
+/// The longest time between drawn points in a frame turning at `rate`
+/// (rad/s): it turns at most [`MAX_TURN`] in between (8 minutes over
+/// Earth's ground), and never more than [`MAX_DT`].
+pub fn max_dt(rate: f64) -> f64 {
+    if rate > 0.0 {
+        MAX_DT.min(MAX_TURN / rate)
+    } else {
+        MAX_DT
+    }
+}
+
 /// Local times at which to draw `seg` over `[t0, t1]`: the stored samples
 /// between, thinned while the velocity turns less than [`MAX_TURN`] from
-/// the last kept point (within [`MAX_DT`]), and one interval subdivided
-/// where it alone turns more. Each time comes with its velocity.
-pub fn sample_times(seg: &Segment, t0: f64, t1: f64) -> Vec<(f64, DVec3)> {
+/// the last kept point (within `dt_max`, [`max_dt`]), and one interval
+/// subdivided where it alone turns more. Each time comes with its velocity.
+pub fn sample_times(seg: &Segment, t0: f64, t1: f64, dt_max: f64) -> Vec<(f64, DVec3)> {
     let Some((a0, _, v0)) = seg.eval(t0) else { return Vec::new() };
     let Some((a1, _, v1)) = seg.eval(t1) else { return vec![(t0, v0)] };
     let lo = seg.samples.partition_point(|s| s.s.t <= t0);
@@ -107,12 +118,12 @@ pub fn sample_times(seg: &Segment, t0: f64, t1: f64) -> Vec<(f64, DVec3)> {
         }
         let (step_turn, step_dt) = (turn(prev.1, c.1), c.0 - prev.0);
         let last_t = out.last().expect("started").0;
-        if step_turn > MAX_TURN || step_dt > MAX_DT {
+        if step_turn > MAX_TURN || step_dt > dt_max {
             // One coarse interval: keep its start, split it on the interpolant.
             if prev.0 > last_t {
                 out.push((prev.0, prev.1));
             }
-            let n = ((step_turn / MAX_TURN).max(step_dt / MAX_DT).ceil() as usize).clamp(1, MAX_SPLIT);
+            let n = ((step_turn / MAX_TURN).max(step_dt / dt_max).ceil() as usize).clamp(1, MAX_SPLIT);
             for k in 1..n {
                 let t = prev.0 + step_dt * k as f64 / n as f64;
                 if let Some((_, _, v)) = seg.eval(t) {
@@ -121,7 +132,7 @@ pub fn sample_times(seg: &Segment, t0: f64, t1: f64) -> Vec<(f64, DVec3)> {
             }
             out.push((c.0, c.1));
             last_v = c.1;
-        } else if (turn(last_v, c.1) > MAX_TURN || c.0 - last_t > MAX_DT) && prev.0 > last_t {
+        } else if (turn(last_v, c.1) > MAX_TURN || c.0 - last_t > dt_max) && prev.0 > last_t {
             out.push((prev.0, prev.1));
             last_v = prev.1;
         }
@@ -187,7 +198,8 @@ pub fn segment_runs(
     view: &Viewer,
     start: Option<DVec3>,
 ) -> (Vec<Vec<LinePoint>>, usize) {
-    let times = sample_times(seg, t0, t1);
+    let rate = view.plotter.turn_rate();
+    let times = sample_times(seg, t0, t1, max_dt(rate));
     let at = |t: f64| {
         let (anchor, r, _) = seg.eval(t)?;
         Some(view.plotter.plot(anchor, r, seg.t0.add_seconds(t)))
@@ -213,7 +225,9 @@ pub fn segment_runs(
             run.push(point(ta, pa));
         }
         // (Capped: across an anchor switch the velocities are not comparable.)
-        let err = chord_error_px(pa, pb, turn(va, vb).min(4.0 * MAX_TURN), view.focal);
+        // A turning frame bends the chord by its own turn as well.
+        let bend = turn(va, vb).min(4.0 * MAX_TURN) + rate * (tb - ta);
+        let err = chord_error_px(pa, pb, bend, view.focal);
         if err > 1.0 {
             let n = (err.sqrt().ceil() as usize).clamp(1, MAX_SPLIT);
             for k in 1..n {
@@ -240,7 +254,8 @@ pub fn draw(
     sim: Res<SimState>,
     rig: Res<CameraRig>,
     pred: Res<Prediction>,
-    ui: Res<UiState>,
+    nav: Res<Navball>,
+    station: Res<crate::tracking::TrackingStation>,
     map: Res<MapView>,
     tracked: Res<Tracked>,
     orbits: Res<OrbitSettings>,
@@ -252,7 +267,6 @@ pub fn draw(
     lines.evaluated = 0;
     let Some(v) = crate::map::view(&cam) else { return };
     let Ok((_, tf, _)) = cam.single() else { return };
-    let Some(plotter) = Plotter::new(&sim, &rig, ui.plot_frame) else { return };
     let tan_y = (v.fov() * 0.5).tan() as f32;
     let frustum = Frustum {
         right: tf.right().as_vec3(),
@@ -261,12 +275,17 @@ pub fn draw(
         tan_x: tan_y * v.aspect() as f32 * 1.05,
         tan_y: tan_y * 1.05,
     };
-    let viewer = Viewer { plotter: &plotter, frustum, focal: v.focal() };
+    // The navball's frame in flight; the tracking station shows orbits.
+    let active_frame = nav.line_frame().filter(|_| !station.open);
     for (i, vessel) in sim.fleet.iter().enumerate() {
         let active = i == sim.active;
         if (!active && !tracked.is_tracked(vessel.id())) || !map.in_map(ObjectId::Vessel(vessel.id())) {
             continue;
         }
+        // The active line in the navball's frame (D089), the others about
+        // their dominant bodies.
+        let plotter = Plotter::new(&sim, &rig, super::frame_of(&sim, i, active_frame));
+        let viewer = Viewer { plotter: &plotter, frustum, focal: v.focal() };
         let segs: Vec<&Segment> = vessel_segments(&sim, &pred, i)
             .into_iter()
             .filter(|s| s.t0.add_seconds(s.computed_until()).seconds_since(sim.clock) > 0.0)

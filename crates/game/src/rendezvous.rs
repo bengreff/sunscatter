@@ -6,7 +6,6 @@
 
 use crate::camera::CameraRig;
 use crate::format;
-use crate::hud::UiState;
 use crate::map::{self, MapView};
 use crate::navball::{NavTarget, Navball};
 use crate::state::SimState;
@@ -68,7 +67,7 @@ pub fn draw(
     mut contexts: EguiContexts,
     sim: Res<SimState>,
     rig: Res<CameraRig>,
-    ui: Res<UiState>,
+    nav: Res<Navball>,
     map: Res<MapView>,
     rv: Res<Rendezvous>,
     cam: Query<(&Camera, &Transform, &Projection), With<crate::camera::MainCamera>>,
@@ -83,13 +82,15 @@ pub fn draw(
         _ => None,
     };
     let Some(view) = map::view(&cam) else { return Ok(()) };
-    let Some(plotter) = Plotter::new(&sim, &rig, ui.plot_frame) else { return Ok(()) };
+    let frame = nav.line_frame();
     let ctx = contexts.ctx_mut()?;
     let painter = ctx.layer_painter(egui::LayerId::background());
     let colour = egui::Color32::from_rgb(200, 120, 255);
-    for (k, v) in std::iter::once(sim.ship()).chain(other.map(|j| &sim.fleet[j])).enumerate() {
+    for (k, i) in std::iter::once(sim.active).chain(other).enumerate() {
+        let v = &sim.fleet[i];
         let Some((anchor, r, _)) = v.trajectory().and_then(|tr| tr.eval(ca.t)) else { continue };
-        let c = plotter.plot(anchor, r, ca.t);
+        // On each vessel's line, in its frame (D089).
+        let c = Plotter::new(&sim, &rig, crate::trajectory::frame_of(&sim, i, frame)).plot(anchor, r, ca.t);
         let Some(s) = view.project(c).filter(|&s| !map.occluded(s, c.length())) else {
             continue;
         };

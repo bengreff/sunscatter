@@ -144,23 +144,52 @@ fn markers_are_undefined_without_velocity_and_target_points_at_the_target() {
 }
 
 #[test]
-fn mode_switches_at_36_km_unless_locked_or_targeting() {
-    use Mode::*;
-    // (current, locked, altitude, has_target, expected)
+fn the_rails_floor_has_a_band() {
+    use Side::*;
+    // (previous, altitude, floor, expected): Earth's floor is 150 km.
     let cases = [
-        (Surface, false, 10_000.0, false, Surface),
-        (Surface, false, 40_000.0, false, Orbit),
-        (Orbit, false, 35_999.0, false, Surface),
-        (Orbit, false, 36_000.0, false, Orbit),
-        (Surface, true, 400_000.0, false, Surface),
-        (Orbit, true, 0.0, false, Orbit),
-        (Target, false, 0.0, true, Target),
-        (Target, true, 400_000.0, true, Target),
-        (Target, false, 0.0, false, Surface),
-        (Target, true, 400_000.0, false, Orbit),
+        (None, 149_000.0, 150_000.0, Low),
+        (None, 150_000.0, 150_000.0, High),
+        (Some(High), 150_500.0, 150_000.0, High),
+        (Some(Low), 150_500.0, 150_000.0, Low),
+        (Some(Low), 151_600.0, 150_000.0, High),
+        (Some(High), 149_999.0, 150_000.0, Low),
+        // No floor (a giant planet): always high.
+        (Some(Low), -1_000.0, 0.0, High),
     ];
-    for (current, locked, alt, target, expected) in cases {
-        assert_eq!(auto_mode(current, locked, alt, target), expected, "{current:?} {locked} {alt} {target}");
+    for (previous, alt, floor, expected) in cases {
+        assert_eq!(side(previous, alt, floor), expected, "{previous:?} {alt} {floor}");
+    }
+}
+
+#[test]
+fn the_mode_switches_when_crossing_the_rails_floor() {
+    use Mode::*;
+    use Side::*;
+    // (current, locked, side before, side now, has target, expected)
+    let cases = [
+        // Climbing through the floor: orbit; descending: surface.
+        (Surface, false, Some(Low), High, false, Orbit),
+        (Orbit, false, Some(High), Low, false, Surface),
+        // A choice by hand holds between crossings, either side.
+        (Orbit, false, Some(Low), Low, false, Orbit),
+        (Surface, false, Some(High), High, false, Surface),
+        (Target, false, Some(High), High, true, Target),
+        // ... until the next crossing, target included.
+        (Target, false, Some(High), Low, true, Surface),
+        // A new vessel (no side yet) starts on its side's mode.
+        (Orbit, false, None, Low, false, Surface),
+        (Surface, false, None, High, false, Orbit),
+        // Locked: never switched.
+        (Surface, true, Some(Low), High, false, Surface),
+        (Orbit, true, None, Low, false, Orbit),
+        // Target without a target: the side's mode.
+        (Target, false, Some(High), High, false, Orbit),
+        (Target, true, Some(Low), Low, false, Surface),
+    ];
+    for (current, locked, before, now, target, expected) in cases {
+        let got = auto_mode(current, locked, before, now, target);
+        assert_eq!(got, expected, "{current:?} {locked} {before:?} {now:?} {target}");
     }
     assert_eq!(Surface.next(false), Orbit);
     assert_eq!(Orbit.next(false), Surface);
@@ -293,5 +322,23 @@ fn modes_and_holds_need_what_they_point_at() {
     ];
     for (mode, target, burn, want) in table {
         assert_eq!(hold_available(mode, target, burn), want, "{mode:?} {target} {burn}");
+    }
+}
+
+#[test]
+fn the_line_frame_follows_the_switch() {
+    use crate::trajectory::LineFrame::*;
+    use sim::frame::NodeId;
+    let (earth, moon) = (NodeId(3), NodeId(4));
+    // (mode, target body, expected)
+    let cases = [
+        (Mode::Orbit, None, About(earth)),
+        (Mode::Surface, None, Ground(earth)),
+        (Mode::Surface, Some(moon), Ground(earth)),
+        (Mode::Target, Some(moon), About(moon)),
+        (Mode::Target, None, About(earth)),
+    ];
+    for (mode, target, expected) in cases {
+        assert_eq!(line_frame(mode, earth, target), expected, "{mode:?} {target:?}");
     }
 }

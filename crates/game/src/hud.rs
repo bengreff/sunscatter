@@ -14,16 +14,8 @@ use bevy_egui::{egui, EguiContexts};
 use sim::frame::NodeId;
 use sim::vessel::Phase;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
-pub enum PlotFrame {
-    #[default]
-    EarthInertial,
-    EarthMoonRotating,
-}
-
 #[derive(Resource, Default)]
 pub struct UiState {
-    pub plot_frame: PlotFrame,
     /// Body whose menu is open, and where (logical pixels).
     pub menu: Option<(NodeId, Vec2)>,
     last_click: Option<(f64, Vec2)>,
@@ -66,11 +58,10 @@ pub fn measure_fps(time: Res<Time>, mut meter: ResMut<FpsMeter>) {
     meter.tick(time.delta_secs_f64());
 }
 
-/// Double-click on a body opens its menu. Tab toggles the plotting frame.
+/// Double-click on a body opens its menu.
 #[allow(clippy::too_many_arguments)]
 pub fn pick_bodies(
     buttons: Res<ButtonInput<MouseButton>>,
-    keys: Res<ButtonInput<KeyCode>>,
     time: Res<Time>,
     egui: Res<EguiWantsInput>,
     window: Query<&Window, With<PrimaryWindow>>,
@@ -79,12 +70,6 @@ pub fn pick_bodies(
     rig: Res<CameraRig>,
     mut ui: ResMut<UiState>,
 ) {
-    if keys.just_pressed(KeyCode::Tab) && !egui.wants_any_keyboard_input() {
-        ui.plot_frame = match ui.plot_frame {
-            PlotFrame::EarthInertial => PlotFrame::EarthMoonRotating,
-            PlotFrame::EarthMoonRotating => PlotFrame::EarthInertial,
-        };
-    }
     if !buttons.just_pressed(MouseButton::Left) || egui.wants_any_pointer_input() {
         return;
     }

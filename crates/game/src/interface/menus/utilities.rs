@@ -115,7 +115,6 @@ fn diagnostics(d: &FlightData) -> Section {
         return s;
     }
     s.row("ANCHOR", &g.anchor);
-    s.row("PLOT FRAME", format!("{} (Tab)", g.plot_frame));
     s.row("FPS", &g.fps);
     s.row("VESSELS", g.vessels.to_string());
     if g.profile.is_empty() {

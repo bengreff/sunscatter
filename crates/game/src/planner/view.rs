@@ -9,7 +9,6 @@ use super::{drag_dv, nearest_on_screen, plan_from, DraftBurn, Drag, Planner};
 use crate::camera::{CameraRig, MainCamera};
 use crate::commands::GameCommand;
 use crate::comms::{Comms, Location};
-use crate::hud::UiState;
 use crate::map::View;
 use crate::state::{Prediction, SimState};
 use crate::trajectory::{apsides::vessel_segments, eval_at, lines::Lines, Plotter};
@@ -80,7 +79,7 @@ pub fn pick_on_line(
     sim: Res<SimState>,
     pred: Res<Prediction>,
     rig: Res<CameraRig>,
-    ui: Res<UiState>,
+    nav: Res<crate::navball::Navball>,
     lines: Res<Lines>,
     comms: Res<Comms>,
     cam: Query<(&Camera, &Transform, &Projection), With<MainCamera>>,
@@ -91,9 +90,9 @@ pub fn pick_on_line(
     let Some(id) = planner.vessel.filter(|_| planner.open) else { return Ok(()) };
     let Some(i) = sim.index_of(id) else { return Ok(()) };
     let ctx = contexts.ctx_mut()?;
-    let (Some(v), Some(plotter)) = (crate::map::view(&cam), Plotter::new(&sim, &rig, ui.plot_frame)) else {
-        return Ok(());
-    };
+    let Some(v) = crate::map::view(&cam) else { return Ok(()) };
+    // On the vessel's line, in its frame (D089).
+    let plotter = Plotter::new(&sim, &rig, crate::trajectory::frame_of(&sim, i, nav.line_frame()));
     let painter = ctx.layer_painter(egui::LayerId::background());
     let pos = |p: Vec2| egui::pos2(p.x, p.y);
 

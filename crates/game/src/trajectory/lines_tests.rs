@@ -17,7 +17,7 @@ fn leo_coast(revs: f64) -> (SimState, Segment) {
 fn samples_turn_by_at_most_max_turn_and_cover_the_span() {
     let (_, seg) = leo_coast(1.2);
     let t1 = 5_560.0;
-    let times = sample_times(&seg, 10.0, t1);
+    let times = sample_times(&seg, 10.0, t1, MAX_DT);
     assert_eq!(times.first().map(|p| p.0), Some(10.0));
     assert_eq!(times.last().map(|p| p.0), Some(t1));
     assert!(times.windows(2).all(|w| w[1].0 > w[0].0));
@@ -46,9 +46,14 @@ fn a_straight_path_keeps_its_ends_and_the_clock_limit() {
     let i = sim.fleet.len() - 1;
     sim.fleet[i].extend_coast(&world, until, 200_000);
     let seg = &sim.fleet[i].trajectory().unwrap().segments[0];
-    let times = sample_times(seg, 0.0, 10.0 * 3_600.0);
+    let times = sample_times(seg, 0.0, 10.0 * 3_600.0, MAX_DT);
     assert!(times.len() >= 11 && times.len() <= 25, "{}", times.len());
     assert!(times.windows(2).all(|w| w[1].0 - w[0].0 <= MAX_DT + 1e-6));
+    // Over Earth's turning ground the same leg takes a point every 8 min.
+    let rate = 7.292_115e-5;
+    let times = sample_times(seg, 0.0, 10.0 * 3_600.0, max_dt(rate));
+    assert!(times.windows(2).all(|w| (w[1].0 - w[0].0) * rate <= MAX_TURN * 1.000_001));
+    assert!(times.len() >= 75 && times.len() <= 90, "{}", times.len());
 }
 
 #[test]
@@ -90,7 +95,8 @@ fn chord_error_grows_with_turn_and_nearness() {
 fn bench_line_sampling() {
     let (sim, seg) = leo_coast(1.0);
     let rig = CameraRig::default();
-    let plotter = Plotter::new(&sim, &rig, crate::hud::PlotFrame::EarthInertial).unwrap();
+    let earth = sim.world.find("Earth").unwrap().node;
+    let plotter = Plotter::new(&sim, &rig, crate::trajectory::LineFrame::About(earth));
     let t1 = seg.computed_until();
     let reps = 200;
     let t = std::time::Instant::now();

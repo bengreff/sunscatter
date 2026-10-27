@@ -234,7 +234,7 @@ Decided: build it in this round, modelled on KSP's, with more information. It is
   - radial in / out;
   - target and anti-target (when a target exists);
   - the maneuver (later, with the burn planner).
-- **Modes:** surface / orbit / target (click to cycle), with the matching speed readout above the ball. The mode switches automatically as in KSP: surface below 36 km, orbit above; the owner can lock it.
+- **Modes:** surface / orbit / target (click to cycle), with the matching speed readout above the ball. The mode switches automatically where rails warp stops (D089: the reference body's rails floor, Earth 150 km): surface below, orbit above; a mode picked by hand holds until the next crossing; the owner can lock it. The orbit line follows the mode (D089).
 - **More than KSP:**
   - heading, pitch and roll numbers;
   - angle of attack and sideslip in the atmosphere;

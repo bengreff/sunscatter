@@ -6,10 +6,13 @@
 //! (D yaws the nose towards it), −Y the top (W pitches the nose down, towards
 //! +Y).
 
+use crate::trajectory::LineFrame;
 use glam::{DQuat, DVec3};
+use sim::frame::NodeId;
 
-/// Below this altitude the navball shows surface mode, above it orbit mode.
-pub const SURFACE_MODE_BELOW: f64 = 36_000.0;
+/// A vessel below the rails floor counts as low until it is this fraction
+/// of the floor above it (a band, so the mode cannot chatter there).
+pub const SIDE_BAND: f64 = 0.01;
 /// Standard gravity for the g-load readout (m/s²).
 pub const G0: f64 = 9.806_65;
 /// Below this speed (m/s) there is no meaningful prograde.
@@ -46,15 +49,54 @@ impl Mode {
     }
 }
 
-/// The mode to show. Target mode (chosen by clicking) holds while a target
-/// exists; a locked surface/orbit mode holds; otherwise surface below 36 km
-/// and orbit above, as in KSP.
-pub fn auto_mode(current: Mode, locked: bool, altitude: f64, has_target: bool) -> Mode {
+/// Which side a vessel is of the boundary that restricts rails warp: the
+/// reference body's rails floor (D062: the top of the atmosphere, or above
+/// the highest ground).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Side {
+    Low,
+    High,
+}
+
+/// The side at `altitude` (above the reference ellipsoid, as the floor) of
+/// a body whose floor is `floor` (m; 0: none, a giant planet), given the
+/// side last frame: low below the floor, high again only [`SIDE_BAND`]
+/// above it.
+pub fn side(previous: Option<Side>, altitude: f64, floor: f64) -> Side {
+    let band = if previous == Some(Side::Low) { 1.0 + SIDE_BAND } else { 1.0 };
+    if floor > 0.0 && altitude < floor * band {
+        Side::Low
+    } else {
+        Side::High
+    }
+}
+
+/// The mode to show (D089). Crossing the rails floor (or a new vessel)
+/// sets SURFACE below it and ORBIT above, unless locked; between crossings
+/// the current choice holds, so a mode picked by hand stays until the next
+/// crossing. TARGET without a target falls back to the side's mode.
+pub fn auto_mode(current: Mode, locked: bool, before: Option<Side>, now: Side, has_target: bool) -> Mode {
+    let by_side = match now {
+        Side::Low => Mode::Surface,
+        Side::High => Mode::Orbit,
+    };
     match current {
-        Mode::Target if has_target => Mode::Target,
-        Mode::Surface | Mode::Orbit if locked => current,
-        _ if altitude < SURFACE_MODE_BELOW => Mode::Surface,
-        _ => Mode::Orbit,
+        _ if !locked && before != Some(now) => by_side,
+        Mode::Target if !has_target => by_side,
+        _ => current,
+    }
+}
+
+/// The frame the active vessel's line is drawn in (D089): ORBIT about the
+/// reference body without turning, SURFACE over its ground (turning with
+/// it), TARGET about the target body (a vessel target has no frame of its
+/// own: its future is a prediction too, drawn as its own line, so the line
+/// stays about the reference body).
+pub fn line_frame(mode: Mode, reference: NodeId, target_body: Option<NodeId>) -> LineFrame {
+    match (mode, target_body) {
+        (Mode::Surface, _) => LineFrame::Ground(reference),
+        (Mode::Target, Some(body)) => LineFrame::About(body),
+        _ => LineFrame::About(reference),
     }
 }
 

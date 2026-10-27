@@ -80,16 +80,11 @@ pub fn draw(
     });
     for action in actions {
         match action {
-            Action::SetMode(mode) => {
-                nav.mode = mode;
-                // Choosing surface/orbit by hand holds it; target always holds.
-                nav.locked = true;
-            }
+            // A choice by hand holds until the next crossing of the rails
+            // floor (D089), or for good while locked.
+            Action::SetMode(mode) => nav.mode = mode,
             Action::ToggleLock => nav.locked = !nav.locked,
-            Action::CycleMode => {
-                nav.mode = nav.mode.next(nav.target.is_some());
-                nav.locked = true;
-            }
+            Action::CycleMode => nav.mode = nav.mode.next(nav.target.is_some()),
             Action::Command(c) => {
                 commands.write(c);
             }
@@ -140,7 +135,10 @@ fn switch(ui: &mut egui::Ui, mode: Mode, locked: bool, has_target: bool, actions
     ui.add_space(6.0);
     let lock = RichText::new(if locked { "LOCK" } else { "AUTO" }).monospace().small().color(theme::DIM);
     let r = ui.add(egui::Button::new(lock).frame(false));
-    if r.on_hover_text("AUTO: surface below 36 km, orbit above").clicked() {
+    let hover = "AUTO: SURFACE below the altitude where rails warp stops (Earth: 150 km), ORBIT above; a mode \
+                 picked by hand holds until the next crossing. LOCK: never switches. The orbit line follows the \
+                 mode: over the ground in SURFACE, about the target body in TARGET.";
+    if r.on_hover_text(hover).clicked() {
         actions.push(Action::ToggleLock);
     }
 }

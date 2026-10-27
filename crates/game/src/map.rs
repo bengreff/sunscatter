@@ -4,7 +4,6 @@
 
 use crate::camera::{self, CameraRig, MainCamera};
 use crate::format;
-use crate::hud::{PlotFrame, UiState};
 use crate::map_view::{self, Object, ObjectId, Visibility};
 use crate::scene::BodyDefs;
 use crate::state::{Prediction, SimState};
@@ -155,7 +154,6 @@ pub fn update(
 pub fn draw_body_orbits(
     sim: Res<SimState>,
     rig: Res<CameraRig>,
-    ui: Res<UiState>,
     map: Res<MapView>,
     defs: Res<BodyDefs>,
     orbits: Res<OrbitSettings>,
@@ -176,10 +174,6 @@ pub fn draw_body_orbits(
         }
         let Some(p) = dom.of_body(eph, sim.clock, node) else { continue };
         if !orbits.body_line_shown(&eph.node(node).name, p, Some(current)) {
-            continue;
-        }
-        // The rotating frame is Earth–Moon: skip orbits about Earth there.
-        if ui.plot_frame == PlotFrame::EarthMoonRotating && eph.node(p).name == "Earth" {
             continue;
         }
         let Some((orbit, line)) = trajectory::body_line(eph, dom, node, p, sim.clock, limits, ORBIT_POINTS) else {
@@ -208,7 +202,7 @@ pub fn draw_overlay(
     sim: Res<SimState>,
     mut rig: ResMut<CameraRig>,
     pred: Res<Prediction>,
-    ui: Res<UiState>,
+    nav: Res<crate::navball::Navball>,
     map: Res<MapView>,
     defs: Res<BodyDefs>,
     cam: Query<(&Camera, &Transform, &Projection), With<MainCamera>>,
@@ -239,9 +233,8 @@ pub fn draw_overlay(
             }
         }
     }
-    if let Some(plotter) = Plotter::new(&sim, &rig, ui.plot_frame) {
-        draw_apsides(&painter, &sim, &pred, &v, &map, &aps, &lines, &plotter);
-    }
+    let active_frame = nav.line_frame().filter(|_| !station.open);
+    draw_apsides(&painter, &sim, &rig, &pred, &v, &map, &aps, &lines, active_frame);
 
     let cursor = window.single().ok().and_then(Window::cursor_position);
     let hovered =
@@ -280,20 +273,23 @@ pub fn draw_overlay(
 }
 
 /// Apsis markers (D076) and the impact point along the drawn part of each
-/// vessel line; labelled with altitude and time for the active vessel.
+/// vessel line, in the line's frame (D089); labelled with altitude and time
+/// for the active vessel.
 #[allow(clippy::too_many_arguments)]
 fn draw_apsides(
     painter: &egui::Painter,
     sim: &SimState,
+    rig: &CameraRig,
     pred: &Prediction,
     v: &View,
     map: &MapView,
     aps: &Apsides,
     lines: &Lines,
-    plotter: &Plotter,
+    active_frame: Option<trajectory::LineFrame>,
 ) {
     for line in &lines.vessels {
         let (Some(i), Some(list)) = (sim.index_of(line.id), aps.get(line.id)) else { continue };
+        let plotter = Plotter::new(sim, rig, trajectory::frame_of(sim, i, active_frame));
         let segs = trajectory::apsides::vessel_segments(sim, pred, i);
         let shown = |t: Epoch| t.seconds_since(sim.clock) > 0.0 && line.end.seconds_since(t) >= 0.0;
         // The active vessel's impact is drawn by `landing` at its ground

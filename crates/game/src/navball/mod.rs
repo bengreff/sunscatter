@@ -20,7 +20,7 @@ use crate::tracking::Tracked;
 use crate::trajectory::apsides::Apsides;
 use bevy::prelude::*;
 use glam::DVec3;
-use rules::{Angles, Local, Markers, Mode, Ship};
+use rules::{Angles, Local, Markers, Mode, Ship, Side};
 use sim::forces::{ActiveSources, ForceContext};
 use sim::frame::NodeId;
 use sim::time::Epoch;
@@ -53,8 +53,11 @@ pub enum NavTarget {
 #[derive(Resource, Default)]
 pub struct Navball {
     pub mode: Mode,
-    /// Holds the surface/orbit mode instead of switching at 36 km.
+    /// Never switches the mode at the rails floor (D089).
     pub locked: bool,
+    /// The active vessel's side of its reference body's rails floor last
+    /// frame: crossing it switches the mode (D089).
+    side: Option<(sim::vessel::VesselId, Side)>,
     pub target: Option<NavTarget>,
     /// The state this frame (`update`), for the cluster and the menus.
     pub now: Option<NavState>,
@@ -94,6 +97,8 @@ pub struct NavState {
     pub ap: Option<ApsisReadout>,
     pub pe: Option<ApsisReadout>,
     pub body: String,
+    /// The reference body (the attitude hold's, `hold_reference`).
+    pub reference: NodeId,
     /// Target name and distance (m).
     pub target: Option<(String, f64)>,
     /// The next planned burn: its direction now (inertial) and seconds to
@@ -198,7 +203,11 @@ pub fn nav_state(sim: &SimState, tracked: &Tracked, aps: &Apsides, nav: &mut Nav
     if nav.target.is_some() && target.is_none() {
         nav.target = None;
     }
-    nav.mode = rules::auto_mode(nav.mode, nav.locked, alt, target.is_some());
+    // The mode switches where rails warp does (D062's floor, D089).
+    let before = nav.side.filter(|(id, _)| *id == vessel.id()).map(|(_, side)| side);
+    let side = rules::side(before, alt, p.rails_floor);
+    nav.side = Some((vessel.id(), side));
+    nav.mode = rules::auto_mode(nav.mode, nav.locked, before, side, target.is_some());
     let v_mode = match (nav.mode, &target) {
         (Mode::Target, Some((_, _, tv))) => v - *tv,
         (Mode::Orbit, _) => v_orb,
@@ -235,6 +244,7 @@ pub fn nav_state(sim: &SimState, tracked: &Tracked, aps: &Apsides, nav: &mut Nav
         ap: readout(next_ap),
         pe: readout(next_pe),
         body: src.name.clone(),
+        reference: body,
         target: target.map(|(name, tr, _)| (name, (tr - r).length())),
         maneuver: vessel.plan().burns.iter().find(|b| b.t_start.seconds_since(t) > 0.0).map(|b| {
             let snap = sim.world.snapshot(t);
@@ -251,6 +261,17 @@ pub fn update(sim: Res<SimState>, tracked: Res<Tracked>, aps: Res<Apsides>, mut 
 }
 
 impl Navball {
+    /// The frame the active vessel's line is drawn in (D089), once the
+    /// navball has a state.
+    pub fn line_frame(&self) -> Option<crate::trajectory::LineFrame> {
+        let now = self.now.as_ref()?;
+        let target_body = match self.target {
+            Some(NavTarget::Body(node)) => Some(node),
+            _ => None,
+        };
+        Some(rules::line_frame(now.mode, now.reference, target_body))
+    }
+
     /// Picks the target (Orbital ▸ Target); without one, target mode falls
     /// back to surface.
     pub fn set_target(&mut self, t: Option<NavTarget>) {

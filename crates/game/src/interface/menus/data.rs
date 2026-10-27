@@ -11,7 +11,6 @@
 //! stages from `staging`.
 
 use crate::comms::{Comms, Signal};
-use crate::hud::PlotFrame;
 use crate::landing::Landing;
 use crate::navball::{ApsisReadout, NavState, NavTarget};
 use crate::rendezvous::Rendezvous;
@@ -226,7 +225,6 @@ pub struct CommsData {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Diagnostics {
     pub anchor: String,
-    pub plot_frame: String,
     pub fps: String,
     pub vessels: usize,
     /// The profiler's latest summary (empty when it is off).
@@ -245,7 +243,6 @@ pub struct Sources<'a> {
     pub rv: &'a Rendezvous,
     pub comms: &'a Comms,
     pub tracked: &'a Tracked,
-    pub plot_frame: PlotFrame,
     pub fps: String,
 }
 
@@ -262,7 +259,6 @@ pub fn update(
     rv: Res<Rendezvous>,
     comms: Res<Comms>,
     tracked: Res<Tracked>,
-    ui: Res<crate::hud::UiState>,
     fps: Res<crate::hud::FpsMeter>,
     station: Res<crate::tracking::TrackingStation>,
     profile: Res<crate::profile::Profile>,
@@ -284,7 +280,6 @@ pub fn update(
         rv: &rv,
         comms: &comms,
         tracked: &tracked,
-        plot_frame: ui.plot_frame,
         fps: fps.text(),
     };
     let mut d = gather(&sources);
@@ -315,10 +310,6 @@ pub fn gather(s: &Sources) -> FlightData {
         stages: crate::staging::stack(&crate::staging::StageInputs::of(ship, &sim.controls)),
         diagnostics: Diagnostics {
             anchor: sim.world.eph.node(anchor).name.clone(),
-            plot_frame: match s.plot_frame {
-                PlotFrame::EarthInertial => "Earth inertial".into(),
-                PlotFrame::EarthMoonRotating => "Earth–Moon rotating".into(),
-            },
             fps: s.fps.clone(),
             vessels: sim.fleet.len(),
             profile: Vec::new(),
@@ -595,7 +586,6 @@ mod tests {
             rv: &f.rv,
             comms: &f.comms,
             tracked: &f.tracked,
-            plot_frame: PlotFrame::EarthInertial,
             fps: "60".into(),
         }
     }
