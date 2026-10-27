@@ -56,6 +56,12 @@ const TAU_BOTTLE: f64 = 60.0;
 const TAU_ULLAGE: f64 = 300.0;
 /// Smallest ullage as a share of the tank (numerical floor).
 const MIN_ULLAGE: f64 = 1e-4;
+/// A liquid under this (kg) is gone: a tank burned dry keeps no residual
+/// for the sunlight to heat or a vent to cool (a 10⁻¹⁵ kg residual's heat
+/// capacity took the booster's LOX ullage to 8.7·10⁸ K).
+pub const RESIDUAL: f64 = 1e-6;
+/// Pressurant (mol) under which an ullage holds no gas.
+const NO_GAS: f64 = 1e-9;
 const STEFAN_BOLTZMANN: f64 = 5.670_374_419e-8;
 
 /// Surface tension (N/m) at the propellants' usual temperatures: LOX
@@ -97,6 +103,28 @@ pub fn liquid_of(t: &TankDef) -> Option<&'static Liquid> {
     fluids().liquid(&t.fluid).ok()
 }
 
+/// Draws `kg` from a tank's liquid; a residual under [`RESIDUAL`] goes too.
+pub fn drain(s: &mut TankState, kg: f64) {
+    s.liquid = (s.liquid - kg).max(0.0);
+    if s.liquid < RESIDUAL {
+        s.liquid = 0.0;
+    }
+}
+
+/// Keeps a tank's state physical after its heat and its venting: a residual
+/// under [`RESIDUAL`] goes, the liquid's temperature stays where it is a
+/// liquid (its freezing to its critical point, the fluid table's range),
+/// and an ullage without gas is at the liquid's temperature.
+fn keep_physical(t: &TankDef, s: &mut TankState) {
+    drain(s, 0.0);
+    if let Some(l) = liquid_of(t) {
+        s.liquid_k = s.liquid_k.clamp(l.freezing_k, l.critical_k);
+    }
+    if s.ullage_moles < NO_GAS {
+        s.ullage_k = s.liquid_k;
+    }
+}
+
 /// A tank's geometry with its liquid now.
 pub fn geometry(t: &TankDef, s: &TankState) -> Geometry {
     let density = liquid_of(t).map_or(1000.0, |l| l.density(s.liquid_k));
@@ -120,11 +148,19 @@ pub fn geometry(t: &TankDef, s: &TankState) -> Geometry {
 }
 
 /// The ullage's pressure (Pa): the pressurant's in the ullage plus the
-/// liquid's vapour pressure.
+/// liquid's vapour's ([`vapour`]).
 pub fn pressure(t: &TankDef, s: &TankState) -> f64 {
     let g = geometry(t, s);
-    let vapour = liquid_of(t).map_or(0.0, |l| l.vapour_pressure(s.liquid_k));
-    s.ullage_moles * R_GAS * s.ullage_k / g.ullage + vapour
+    s.ullage_moles * R_GAS * s.ullage_k / g.ullage + vapour(t, s, g.ullage)
+}
+
+/// The vapour's partial pressure in a tank's ullage of `ullage` m³ (Pa):
+/// the liquid's vapour pressure, at most what all of the liquid gives as
+/// gas there (a residual cannot fill a dry tank with saturated vapour: a
+/// few grams of LOX at its 4 bar boiling point would vent all the helium).
+fn vapour(t: &TankDef, s: &TankState, ullage: f64) -> f64 {
+    let all = |l: &Liquid| s.liquid / l.molar_mass * R_GAS * s.liquid_k / ullage;
+    liquid_of(t).map_or(0.0, |l| l.vapour_pressure(s.liquid_k).min(all(l)))
 }
 
 /// The proper acceleration along a tank's axis towards its outlet (m/s²;
@@ -271,8 +307,7 @@ fn pressurise(def: &ShipDef, state: &mut ShipState, i: usize, dt: f64) -> f64 {
     let Ok(gas) = fluids().gas(&t.load.pressurant) else { return 0.0 };
     let (liquid_k, moles0, k0) = (state.tanks[i].liquid_k, state.tanks[i].ullage_moles, state.tanks[i].ullage_k);
     let g = geometry(t, &state.tanks[i]);
-    let vapour = liquid_of(t).map_or(0.0, |l| l.vapour_pressure(liquid_k));
-    let target = t.load.pressure - vapour;
+    let target = t.load.pressure - vapour(t, &state.tanks[i], g.ullage);
     if moles0 * R_GAS * k0 / g.ullage >= target {
         return 0.0;
     }
@@ -335,7 +370,7 @@ fn relieve(def: &ShipDef, state: &mut ShipState, i: usize) -> f64 {
         vented += boiled;
     }
     let g = geometry(t, s);
-    let vapour = liquid.vapour_pressure(s.liquid_k);
+    let vapour = vapour(t, s, g.ullage);
     let gas = s.ullage_moles * R_GAS * s.ullage_k / g.ullage;
     if gas + vapour > t.pressure && s.ullage_moles > 0.0 {
         let keep = ((t.pressure - vapour).max(0.0) * g.ullage / (R_GAS * s.ullage_k)).min(s.ullage_moles);
@@ -400,13 +435,18 @@ pub fn slow(def: &ShipDef, state: &mut ShipState, env: &Surroundings, dt: f64) -
     for i in 0..def.tanks.len() {
         let q = heat_in(def, state, i, env);
         let s = &mut state.tanks[i];
+        // A residual goes before it heats (its vapour would read the
+        // table's top, 42 bar for LOX).
+        drain(s, 0.0);
         if s.liquid > 0.0 {
             if let Some(l) = liquid_of(&def.tanks[i]) {
                 s.liquid_k += q * dt / (s.liquid * l.specific_heat);
             }
+            keep_physical(&def.tanks[i], s);
             s.ullage_k += (s.liquid_k - s.ullage_k) * (1.0 - math::exp(-dt / TAU_ULLAGE));
         }
         let out = relieve(def, state, i);
+        keep_physical(&def.tanks[i], &mut state.tanks[i]);
         state.runtime.tanks[i].vented += out;
         vented += out;
     }

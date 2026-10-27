@@ -51,7 +51,7 @@ pub fn tick(def: &ShipDef, state: &mut ShipState, env: &TickEnv, draws: &[f64], 
     let before = plumbing::ullages(def, state);
     if !env.debug {
         for (s, d) in state.tanks.iter_mut().zip(draws) {
-            s.liquid = (s.liquid - d * env.dt).max(0.0);
+            plumbing::drain(s, d * env.dt);
         }
         for (i, &kg) in rcs.iter().enumerate() {
             draw_block(def, state, i, kg);
@@ -110,7 +110,7 @@ pub fn draw_block(def: &ShipDef, state: &mut ShipState, i: usize, kg: f64) {
             for (list, share) in [(o, mr / (1.0 + mr)), (f, 1.0 / (1.0 + mr))] {
                 if let Some(&j) = list.iter().find(|&&j| state.tanks[j as usize].liquid > 0.0) {
                     let s = &mut state.tanks[j as usize];
-                    s.liquid = (s.liquid - kg * share).max(0.0);
+                    plumbing::drain(s, kg * share);
                 }
             }
         }

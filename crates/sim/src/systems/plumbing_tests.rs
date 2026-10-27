@@ -186,3 +186,53 @@ fn the_bottles_feed_their_tanks() {
     assert_eq!(names("s1.tank:rp1").len(), 6);
     assert_eq!(names("dragon.mmh#2:main"), ["dragon.helium#1", "dragon.helium#2"]);
 }
+
+/// A tank burned dry (the review's case: the booster's LOX after a burn to
+/// depletion read 0 kg, no pressurant and an 8.7·10⁸ K ullage, from the
+/// sunlight's heat in a 10⁻¹⁵ kg residual; in a 10⁻¹⁰–10⁻⁶ kg residual a
+/// vent cooled the liquid under 0 K and its vapour pressure read 42 bar).
+/// The first stage's tanks drained at full flow, then a residual from none
+/// to a gram left in the LOX tank, coasting two minutes in full sunlight:
+/// the liquid stays between its freezing and critical points, the ullage
+/// under 1,000 K, every pressure at most its relief's and nothing bursts.
+#[test]
+fn a_tank_burned_dry_stays_physical() {
+    let (def, mut state) = falcon9();
+    let (lox, rp1) = (tank(&def, "s1.tank:lox"), tank(&def, "s1.tank:rp1"));
+    let flow = 9.0 * 299.7;
+    let (ox, fuel, dt) = (flow * 2.33 / 3.33, flow / 3.33, 0.02);
+    let a = vec![20.0; def.tanks.len()];
+    while state.tanks[lox].liquid > 0.0 || state.tanks[rp1].liquid > 0.0 {
+        let before = ullages(&def, &state);
+        drain(&mut state.tanks[lox], ox * dt);
+        drain(&mut state.tanks[rp1], fuel * dt);
+        fast(&def, &mut state, &before, &a, dt);
+        slow(&def, &mut state, &Surroundings { sun: DVec3::ZERO, air_k: None }, dt);
+    }
+    let sun = Surroundings { sun: DVec3::new(816.6, 0.0, -1_088.8), air_k: None };
+    let at = crate::time::Epoch::new(845_000_000, 0.0);
+    for residual in [0.0, 1e-15, 1e-9, 2e-6, 1e-3] {
+        let mut s = state.clone();
+        s.tanks[lox].liquid = residual;
+        let free = vec![0.0; def.tanks.len()];
+        for _ in 0..6_000 {
+            let before = ullages(&def, &s);
+            fast(&def, &mut s, &before, &free, dt);
+            slow(&def, &mut s, &sun, dt);
+            for i in [lox, rp1] {
+                let (t, x) = (&def.tanks[i], &s.tanks[i]);
+                let l = liquid_of(t).unwrap();
+                let p = pressure(t, x);
+                let sane = (l.freezing_k..=l.critical_k).contains(&x.liquid_k) && x.ullage_k > 1.0 && x.ullage_k < 1e3;
+                assert!(sane && p <= t.pressure + 1.0, "{} with {residual} kg: {x:?}, {p} Pa", t.id);
+            }
+            let burst = crate::systems::failure::physical::bursts(&def, &mut s, 0.0, at);
+            assert!(burst.is_empty(), "{residual} kg: {burst:?}");
+        }
+        println!(
+            "{residual} kg left: LOX {:?}, {:.2} bar",
+            s.tanks[lox],
+            pressure(&def.tanks[lox], &s.tanks[lox]) / 1e5
+        );
+    }
+}
