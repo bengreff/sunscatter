@@ -1,6 +1,6 @@
 # Feature data: Falcon 9 Block 5 with Crew Dragon
 
-**Status:** data sheet, being written (DATA workstream, night of 2026-10-26/27). Sections land in order: §1 the stack and its parts, §2 engines, §3 fluids and tanks, §4 the flight, §5 systems, §6 ratings and failures, §7 materials and fluids (the values in `data/materials.ron` and `data/fluids.ron`). The design this feeds is [ship-model.md](../design/ship-model.md); the decisions are D100–D108; the plan is [overnight-2026-10-27-falcon9.md](../plans/overnight-2026-10-27-falcon9.md).
+**Status:** data sheet (DATA workstream, night of 2026-10-26/27), all seven sections written: §1 the stack and its parts, §2 engines, §3 fluids and tanks, §4 the flight, §5 systems, §6 ratings and failures, §7 materials and fluids (the values in `data/materials.ron` and `data/fluids.ron`). The design this feeds is [ship-model.md](../design/ship-model.md); the decisions are D100–D108; the plan is [overnight-2026-10-27-falcon9.md](../plans/overnight-2026-10-27-falcon9.md).
 
 ## How to read this sheet
 
@@ -571,7 +571,32 @@ Transient (≤ 0.5 s, landing and abort): the **Brinkley dynamic response** crit
 
 ## 7. Materials and fluids
 
-*(in progress)*
+The values live in `data/materials.ron` and `data/fluids.ron` (format by CORE, 3978740; DATA edits values and sources only). Each entry's `verify` lists the fields still from memory; a field leaves `verify` only when every number in it was checked against a named source. `cargo test -p sim --lib -- materials fluids` passes (8 tests) after these edits.
+
+### 7.1 Fluids: checked and changed
+
+| Fluid | Change | Source | Still to verify |
+|---|---|---|---|
+| **LOX** | **density above 90 K was wrong** (e.g. 1,087 → 1,090.9 at 100 K, 960 → 973.9 at 120 K, 784 → 813.2 at 140 K); table extended to 55, 65 and 150 K; vapour pressures replaced by NIST's (all within 0.5 % of the old ones) | NIST WebBook SRD 69 saturation table (Schmidt & Wagner EOS), queried for this sheet | nothing (`verify: []`) |
+| **RP-1** | molar mass 0.170 → **0.1635** kg/mol; critical temperature 662 → **677 K**; density anchored to **808.1 kg/m³ at 288.7 K** (table shifted −1.9) | Huber, Lemmon, Ott, Bruno 2009 (NIST surrogate, Table 3) | density slope, vapour pressure, cp, latent heat, freezing and boiling points (a distillation range: initial boiling 475.6 K) |
+| **MMH** | vapour pressure 233–333 K from **NIST's Antoine fit** (5.0 kPa at 20 °C, agreeing with the handbook); latent heat 877 → **876 kJ/kg** (40.37 kJ/mol) | NIST WebBook (Aston et al. 1951); handbook bp 87.5 °C kept (NIST lists 364 K; the Antoine fit, extrapolated, reaches 1 atm at 363 K) | density table, critical temperature |
+| **NTO** | vapour pressure at 293 K 94.6 → **96.0 kPa** | CRC/Wikipedia chembox; Clausius–Clapeyron with 38.1 kJ/mol puts 1 atm at 294.2 K, so the 294.3 K boiling point stays | density, vapour-pressure table, cp, latent heat |
+| water, helium, nitrogen, oxygen, CO₂, hydrogen | unchanged (already checked by CORE) | NIST | — |
+| water vapour | γ 1.33 checked: cp 33.6 J/(mol·K) at 300 K → γ = 1.329 | NIST | — |
+
+Densities at Falcon 9's loading temperatures from these tables: **LOX 1,253 kg/m³ at 66.5 K** (vapour pressure 3.4 kPa), **RP-1 825 kg/m³ at 266.5 K** — the values §1–§3 use.
+
+### 7.2 Materials: checked and changed
+
+| Material | Change | Source | Still to verify |
+|---|---|---|---|
+| `inconel-718` | density 8,190 → **8,220** (aged); strength at 922 K **896/1,034 MPa** and a new point at **978 K 779/889 MPa** (the lowest of the published hot-finished results); conductivity 11.4 and specific heat 435 confirmed | Special Metals SMC-045 (2007), Tables 2 and 22 and the conductivity table | strength at 77, 811, 1,033, 1,144 K; optical properties; service temperature; fatigue; cost |
+| `al-li-2195` | the alloy confirmed for Falcon 9's barrels and domes (Airware 2195-T8); a supplier's 70 °F values (510/552 MPa, E 75.8 GPa) are 6 % below the 295 K point kept here (typical) | Light Metal Age 2019; Metal Suppliers Online | the whole strength table (MMPDS not reachable tonight), conductivity (the supplier gives 85 Btu/(h·ft·°F), i.e. 147 W/(m·K), which looks too high for an Al-Li alloy) |
+| `ti-6al-4v` | 295 K point and physical constants confirmed (yield 880–920, ultimate 900–950 MPa; 4.43 g/cm³; 6.7–7.5 W/(m·K)) | Wikipedia's ASTM Grade 5 table | the strength table at other temperatures |
+| `al-7075`, `al-6061`, `al-2219` | 295 K points and densities confirmed | Wikipedia (MMPDS/ASM-derived values) | the strength tables at other temperatures |
+| `niobium-c103`, `copper-narloy-z`, `stainless-301`, `cfrp`, `al-honeycomb`, `kevlar-49`, `pica-x`, `silicone-ablator`, `fused-silica`, the finishes | unchanged | the manufacturers' sheets (ATI, Corning, Hexcel) and NASA TPSX were unreachable from this session (404/403/refused); MatWeb refused connections | as listed in the files |
+
+**Weakest material numbers** (most consequential for the Falcon 9 model): the **PICA-X ablation data** (effective heat of ablation 30 MJ/kg and char properties: they decide Dragon's heat-shield recession), **Al-Li 2195 at cryogenic temperature** (it sizes every tank wall; densified LOX at 66.5 K is colder than the SLWT's 90 K data), and **C-103's strength at 1,400–1,600 K** (the MVac extension). They should be checked against NASA TPSX (PICA), NASA TM-2002-211548 or MMPDS (2195) and ATI's C-103 sheet before the heat-shield and nozzle failure modes are trusted.
 
 ---
 

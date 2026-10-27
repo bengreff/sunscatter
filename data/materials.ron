@@ -28,7 +28,7 @@
             conductivity: 88.0, specific_heat: 880.0, emissivity: 0.08, absorptivity: 0.15,
             service_k: 422.0, destruction_k: 833.0,
             fatigue_exponent: Some(9.0), cost_per_kg: 40.0, era: 1998,
-            sources: ["MMPDS (Metallic Materials Properties Development and Standardization), 2195-T8", "NASA TM-2002-211548, Al-Li 2195 cryogenic properties (Super Lightweight Tank)"],
+            sources: ["MMPDS (Metallic Materials Properties Development and Standardization), 2195-T8", "NASA TM-2002-211548, Al-Li 2195 cryogenic properties (Super Lightweight Tank)", "Light Metal Age, 26 Apr 2019: Falcon 9's tank barrels and domes are Constellium Airware 2195-T8 plate", "Metal Suppliers Online, 2195-T8: 74 ksi yield, 80 ksi ultimate at 70 °F (510/552 MPa), 11.0 Msi — 6 % below the 295 K point here, which is kept as typical pending MMPDS"],
             verify: ["modulus", "strength", "conductivity", "specific_heat", "emissivity", "absorptivity", "service_k", "destruction_k", "fatigue_exponent", "cost_per_kg"],
         ),
         (
@@ -77,7 +77,7 @@
             conductivity: 130.0, specific_heat: 960.0, emissivity: 0.08, absorptivity: 0.15,
             service_k: 400.0, destruction_k: 750.0,
             fatigue_exponent: Some(7.9), cost_per_kg: 8.0, era: 1943,
-            sources: ["MMPDS, 7075-T6", "ASM Handbook Vol. 2"],
+            sources: ["MMPDS, 7075-T6", "ASM Handbook Vol. 2", "Wikipedia, 7075 aluminium alloy: 2.81 g/cm³, 71.7 GPa, T6 ultimate 572 MPa, T651 83/73 ksi (572/503 MPa) — the 295 K point agrees"],
             verify: ["strength", "emissivity", "absorptivity", "service_k", "fatigue_exponent", "cost_per_kg"],
         ),
         (
@@ -93,7 +93,7 @@
             conductivity: 167.0, specific_heat: 896.0, emissivity: 0.08, absorptivity: 0.15,
             service_k: 420.0, destruction_k: 855.0,
             fatigue_exponent: Some(9.0), cost_per_kg: 5.0, era: 1935,
-            sources: ["MMPDS, 6061-T6", "ASM Handbook Vol. 2"],
+            sources: ["MMPDS, 6061-T6", "ASM Handbook Vol. 2", "Wikipedia, 6061 aluminium alloy: 2.70 g/cm³, 68–69 GPa, T6 minimum 42/35 ksi, ~152 W/(m·K) at 25 °C"],
             verify: ["strength", "emissivity", "absorptivity", "service_k", "fatigue_exponent", "cost_per_kg", "era"],
         ),
         (
@@ -110,24 +110,26 @@
             conductivity: 6.7, specific_heat: 526.0, emissivity: 0.3, absorptivity: 0.6,
             service_k: 673.0, destruction_k: 1877.0,
             fatigue_exponent: Some(9.6), cost_per_kg: 40.0, era: 1954,
-            sources: ["MMPDS, Ti-6Al-4V annealed", "ASM Materials Properties Handbook: Titanium Alloys (1994)"],
+            sources: ["MMPDS, Ti-6Al-4V annealed", "ASM Materials Properties Handbook: Titanium Alloys (1994)", "Wikipedia, Ti-6Al-4V (ASTM Grade 5) property table: density 4.429–4.512 g/cm³, E 104–113 GPa, yield 880–920 MPa, ultimate 900–950 MPa, conductivity 6.7–7.5 W/(m·K) — the 295 K point and the physical constants agree"],
             verify: ["strength", "emissivity", "absorptivity", "service_k", "fatigue_exponent", "cost_per_kg"],
         ),
         (
             id: "inconel-718", name: "Inconel 718 (solution treated and aged)", kind: Metal,
-            density: 8190.0, modulus: 200.0e9,
+            // 295 K: the 1700–1850 °F anneal-and-age specification minimum (150/180 ksi); 922 and 978 K: the lowest of Special Metals' Table 22 hot-finished results (1200 °F: 130/150 ksi; 1300 °F: 113/129 ksi). The 77, 811, 1033 and 1144 K points are still from memory.
+            density: 8220.0, modulus: 200.0e9,
             strength: [
                 (k: 77.0, yield_pa: 1300.0e6, ultimate_pa: 1600.0e6),
                 (k: 295.0, yield_pa: 1034.0e6, ultimate_pa: 1241.0e6),
                 (k: 811.0, yield_pa: 960.0e6, ultimate_pa: 1150.0e6),
-                (k: 922.0, yield_pa: 900.0e6, ultimate_pa: 1030.0e6),
+                (k: 922.0, yield_pa: 896.0e6, ultimate_pa: 1034.0e6),
+                (k: 978.0, yield_pa: 779.0e6, ultimate_pa: 889.0e6),
                 (k: 1033.0, yield_pa: 700.0e6, ultimate_pa: 800.0e6),
                 (k: 1144.0, yield_pa: 300.0e6, ultimate_pa: 400.0e6),
             ],
             conductivity: 11.4, specific_heat: 435.0, emissivity: 0.3, absorptivity: 0.6,
             service_k: 973.0, destruction_k: 1533.0,
             fatigue_exponent: Some(12.0), cost_per_kg: 60.0, era: 1965,
-            sources: ["Special Metals, Inconel alloy 718 data sheet (SMC-045)", "MMPDS, Inconel 718"],
+            sources: ["Special Metals, Inconel alloy 718 technical bulletin (SMC-045, Sept 2007): Table 2 (density 0.297 lb/in³ aged, melting 1260–1336 °C, specific heat 435 J/(kg·K)), thermal conductivity table (79 Btu·in/(ft²·h·°F) = 11.4 W/(m·K) at 70 °F, aged), the anneal-and-age property tables and Table 22", "MMPDS, Inconel 718"],
             verify: ["strength", "emissivity", "absorptivity", "service_k", "fatigue_exponent", "cost_per_kg"],
         ),
         (
