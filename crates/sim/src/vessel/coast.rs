@@ -33,7 +33,9 @@ use glam::{DMat3, DVec3};
 /// on the reference Mac (D028), so a budget bounds a frame's time whatever
 /// the craft. One coast integration step (8th order, 12 force
 /// evaluations): a perturbed step in low orbit takes ~18 µs with the full
-/// Solar System (bare ~11 µs), and covers ~6 minutes there.
+/// Solar System (bare ~11 µs), and covers ~6 minutes there; the gravity
+/// fields add their share, 12 × [`crate::forces::field_units`] (D090: ~100
+/// units a step in a low lunar orbit, ~12 in LEO).
 pub const STEP_UNITS: usize = 15;
 /// Units of a systems lattice step (the sunlight with eclipses at the
 /// vessel, then the systems).
@@ -74,6 +76,17 @@ impl Budget {
     /// at least one) and as many for the lattices.
     pub fn new(units: usize) -> Self {
         Budget { steps: (units / STEP_UNITS).max(1), thermal: units, spent: 0 }
+    }
+
+    /// Integrates `trajectory` towards `target` within the integration
+    /// budget. A step through a body's gravity field costs more (D090): the
+    /// budget counts plain steps, so a costlier one uses several.
+    fn extend(&mut self, world: &World, trajectory: &mut Trajectory, plan: &super::FlightPlan, target: Epoch) {
+        let fields = crate::forces::field_units(world, trajectory.current().active_sources());
+        let per_step = STEP_UNITS + 12 * fields;
+        let steps = trajectory.extend(world, plan, target, (self.steps * STEP_UNITS / per_step).max(1));
+        self.steps = self.steps.saturating_sub((steps * per_step).div_ceil(STEP_UNITS));
+        self.spent += steps * per_step;
     }
 
     /// Charges `units` of lattice work.
@@ -259,9 +272,7 @@ impl Vessel {
             self.attitude = trajectory.refly(world, self.attitude, control);
             self.control = control;
         }
-        let steps = trajectory.extend(world, &self.plan, target, budget.steps);
-        budget.steps -= steps;
-        budget.spent += steps * STEP_UNITS;
+        budget.extend(world, trajectory, &self.plan, target);
         let computed = trajectory.computed_until();
         let at_end = target.seconds_since(computed) >= 0.0;
         let mut reach = if at_end { computed } else { target };

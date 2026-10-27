@@ -170,6 +170,23 @@ pub const FIELD_STEP: f64 = 3.0;
 /// longest step (3 h): they do not cap the step ([`ForceContext::max_step`]).
 pub const FIELD_STEP_ACCEL: f64 = 1e-9;
 
+/// Budget units (about a microsecond each on the reference Mac,
+/// `vessel::STEP_UNITS`) of one force evaluation's gravity fields at the
+/// degrees included: ~1.6 ns a term (`examples/gravity_convergence`), so a
+/// low lunar orbit's degree 100 is ~8 units an evaluation, LEO's 30 ~1.
+pub fn field_units(world: &World, active: &ActiveSources) -> usize {
+    let terms: usize = active
+        .0
+        .iter()
+        .filter(|a| a.degree >= 2)
+        .filter_map(|a| {
+            let f = world.sources[a.source].physical.as_ref()?.gravity.as_deref()?;
+            Some(f.evaluation_terms(usize::from(a.degree)))
+        })
+        .sum();
+    terms * 16 / 10_000
+}
+
 /// The acceleration a body's neglected field degrees may reach at a vessel
 /// (m/s²): a hundredth of the cutoff, as for the other model
 /// simplifications (clusters, faint bodies; D023).

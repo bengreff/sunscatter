@@ -204,6 +204,22 @@ impl Field {
         (t.c, t.s)
     }
 
+    /// The number of `(n, m)` terms an evaluation to `degree` computes:
+    /// two columns for a zonal field (or the zonal part below the first
+    /// tesseral degree), every order's column otherwise (its cost goes with
+    /// this, ~1.6 ns a term on the reference Mac).
+    pub fn evaluation_terms(&self, degree: usize) -> usize {
+        let n = degree.min(self.degree);
+        if n < 2 {
+            0
+        } else if n < self.tesseral_from {
+            2 * (n + 1)
+        } else {
+            let m = n.min(self.max_order) + 1;
+            (m + 1) * (n + 1) - m * (m + 1) / 2
+        }
+    }
+
     fn index(&self, n: usize, m: usize) -> usize {
         self.columns[m] + n - m
     }
