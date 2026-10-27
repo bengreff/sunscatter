@@ -78,6 +78,9 @@ pub struct ShipModels {
     /// Each part's mesh by (base craft, part id, deployed).
     parts: HashMap<(String, u32, bool), Arc<RenderMesh>>,
     crafts: HashMap<String, Arc<Model>>,
+    /// Each part's mesh uploaded alone (the systems screen draws parts one
+    /// by one), keyed as `parts`.
+    handles: HashMap<(String, u32, bool), Handle<Mesh>>,
     /// The unit flame cone and its material.
     flame: Option<(Handle<Mesh>, Handle<StandardMaterial>)>,
 }
@@ -99,6 +102,18 @@ impl ShipModels {
         self.parts.entry(key).or_insert_with(|| Arc::new(parts::part_mesh(craft, k))).clone()
     }
 
+    /// Part `k`'s mesh of `craft` as a Bevy mesh (kept as [`Self::part_mesh`]).
+    pub fn part_handle(&mut self, craft: &Craft, k: usize, meshes: &mut Assets<Mesh>) -> Handle<Mesh> {
+        let id = craft.parts[k].id;
+        let key = (craft.id.base().to_string(), id, craft.id.deployed().contains(&id));
+        if let Some(h) = self.handles.get(&key) {
+            return h.clone();
+        }
+        let handle = meshes.add(bevy_mesh(&self.part_mesh(craft, k)));
+        self.handles.insert(key, handle.clone());
+        handle
+    }
+
     /// The drawing of `craft`, built on first use.
     fn model(&mut self, craft: &Craft, meshes: &mut Assets<Mesh>) -> Arc<Model> {
         if let Some(m) = self.crafts.get(&craft.id.0) {
@@ -117,15 +132,8 @@ impl ShipModels {
             let plain = Drawn { mesh: meshes.add(bevy_mesh(&craft.mesh)), colour: None, mechanism: None };
             return Model { groups: vec![plain], flames: vec![(None, nozzle)] };
         };
-        let m = sim::materials::materials();
         let ids: Vec<u32> = craft.parts.iter().map(|p| p.id).collect();
-        let colours: Vec<[f32; 3]> = (ids.iter())
-            .map(|&id| match def.parts.iter().find(|p| p.part == id) {
-                Some(info) if info.ground => parts::GROUND,
-                Some(info) => parts::colour(&info.material, info.finish.as_deref(), m),
-                None => parts::UNKNOWN,
-            })
-            .collect();
+        let colours = parts::part_colours(craft, def, sim::materials::materials());
         let part_meshes: Vec<Arc<RenderMesh>> = (0..craft.parts.len()).map(|k| self.part_mesh(craft, k)).collect();
         let groups = (parts::groups(&colours, &parts::mechanisms(def, &ids)).into_iter())
             .map(|g| match g {

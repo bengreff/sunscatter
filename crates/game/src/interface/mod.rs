@@ -6,6 +6,7 @@
 pub mod help;
 pub mod layout;
 pub mod menus;
+pub mod mini_panel;
 pub mod pause;
 pub mod toasts;
 

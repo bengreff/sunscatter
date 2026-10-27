@@ -48,6 +48,8 @@ pub struct OpenWindows {
     pub settings: bool,
     pub saves: bool,
     pub planner: bool,
+    /// The systems screen (D107).
+    pub systems: bool,
 }
 
 /// What Esc does, given what is open: the innermost thing closes first.
@@ -60,6 +62,8 @@ pub fn on_escape(open: OpenWindows, menu: &PauseMenu) -> EscAction {
         EscAction::CloseSaves
     } else if open.planner && !menu.open {
         EscAction::ClosePlanner
+    } else if open.systems && !menu.open {
+        EscAction::CloseSystems
     } else if !menu.open {
         EscAction::Pause
     } else if menu.page != Page::Main {
@@ -75,6 +79,7 @@ pub enum EscAction {
     CloseSettings,
     CloseSaves,
     ClosePlanner,
+    CloseSystems,
     Pause,
     BackToMenu,
     Resume,
@@ -87,16 +92,24 @@ pub fn keys(
     mut settings: ResMut<SettingsUi>,
     mut saves: ResMut<SaveUi>,
     mut planner: ResMut<crate::planner::Planner>,
+    mut systems: ResMut<crate::systems_screen::SystemsScreen>,
 ) {
     if !keys.just_pressed(KeyCode::Escape) {
         return;
     }
-    let open = OpenWindows { help: help.open, settings: settings.open, saves: saves.open, planner: planner.open };
+    let open = OpenWindows {
+        help: help.open,
+        settings: settings.open,
+        saves: saves.open,
+        planner: planner.open,
+        systems: systems.open,
+    };
     match on_escape(open, &menu) {
         EscAction::CloseHelp => help.open = false,
         EscAction::CloseSettings => settings.open = false,
         EscAction::CloseSaves => saves.open = false,
         EscAction::ClosePlanner => planner.open = false,
+        EscAction::CloseSystems => systems.open = false,
         EscAction::Pause => *menu = PauseMenu { open: true, page: Page::Main },
         EscAction::BackToMenu => menu.page = Page::Main,
         EscAction::Resume => menu.open = false,
@@ -230,7 +243,8 @@ mod tests {
         let closed = PauseMenu::default();
         let main = PauseMenu { open: true, page: Page::Main };
         let confirm = PauseMenu { open: true, page: Page::ConfirmQuit };
-        let w = |help, settings, saves, planner| OpenWindows { help, settings, saves, planner };
+        let w = |help, settings, saves, planner| OpenWindows { help, settings, saves, planner, systems: false };
+        let systems = OpenWindows { systems: true, ..w(false, false, false, false) };
         // (open windows, menu, expected)
         let cases = [
             (w(true, true, true, true), &main, EscAction::CloseHelp),
@@ -239,6 +253,8 @@ mod tests {
             (w(false, false, true, true), &closed, EscAction::CloseSaves),
             (w(false, false, false, true), &closed, EscAction::ClosePlanner),
             (w(false, false, false, true), &main, EscAction::Resume),
+            (systems, &closed, EscAction::CloseSystems),
+            (OpenWindows { planner: true, ..systems }, &closed, EscAction::ClosePlanner),
             (w(false, false, false, false), &closed, EscAction::Pause),
             (w(false, false, false, false), &confirm, EscAction::BackToMenu),
             (w(false, false, false, false), &main, EscAction::Resume),

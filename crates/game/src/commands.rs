@@ -10,12 +10,16 @@
 //! written by `state::read_controls` in the input stage.
 //!
 //! `InputContext` says which keys act this frame (review game 2): one rule,
-//! read by every key system.
+//! read by every key system; [`keys`] which keys the game takes and the
+//! keys a craft's pinned functions get.
+
+pub mod keys;
 
 use crate::camera::{CameraRig, Focus};
 use crate::state::{Prediction, SimState, WARP_LEVELS};
 use crate::tracking::{self, Tracked, TrackingStation};
 use bevy::prelude::*;
+use sim::craft::command::{ShipCommand, Stage};
 use sim::save::SaveGame;
 use sim::time::Epoch;
 use sim::vessel::{FlightPlan, HoldMode, VesselId};
@@ -42,7 +46,10 @@ pub enum GameCommand {
     SetDebug(bool),
     /// Replace a vessel's flight plan (a vessel-directed command: from
     /// anywhere but aboard it, it travels with the signal's light delay).
-    SetPlan { vessel: VesselId, plan: FlightPlan },
+    SetPlan {
+        vessel: VesselId,
+        plan: FlightPlan,
+    },
     /// The active vessel's attitude hold (D075); turns SAS on.
     SetHold(HoldMode),
     /// The active vessel's throttle, 0–1 (the navball's throttle bar).
@@ -51,6 +58,22 @@ pub enum GameCommand {
     SetSas(bool),
     /// Activate the active vessel's next stage (Space, the Staging menu).
     NextStage,
+    /// Commands to a craft of parts (D107: the systems screen, the mini
+    /// systems panel's functions), applied in order.
+    Ship {
+        vessel: VesselId,
+        commands: Vec<ShipCommand>,
+    },
+    /// A craft of parts' stage sequence or saved functions, edited in the
+    /// systems screen (saved with the vessel; checked, refused whole).
+    SetStages {
+        vessel: VesselId,
+        stages: Vec<Stage>,
+    },
+    SetFunctions {
+        vessel: VesselId,
+        functions: Vec<Stage>,
+    },
 }
 
 /// Commands on their way to a vessel at light speed (D063, D067): applied
@@ -124,6 +147,20 @@ pub fn apply(
                 sim.new_flight(&crate::state::craft_or_test(craft));
                 rig.focus = Focus::Ship;
             }
+            GameCommand::Ship { vessel, commands: list } => {
+                let now = time.elapsed_secs_f64();
+                for message in ship_commands(&mut sim, *vessel, list) {
+                    toasts.push(now, message, true);
+                }
+            }
+            GameCommand::SetStages { vessel, stages } => {
+                let done = sim.index_of(*vessel).map(|i| sim.fleet[i].set_stages(stages.clone()));
+                edited(&mut toasts, time.elapsed_secs_f64(), *vessel, "stages", done);
+            }
+            GameCommand::SetFunctions { vessel, functions } => {
+                let done = sim.index_of(*vessel).map(|i| sim.fleet[i].set_functions(functions.clone()));
+                edited(&mut toasts, time.elapsed_secs_f64(), *vessel, "functions", done);
+            }
             GameCommand::SpawnTestShips(n) => sim.spawn_test_ships(*n),
             GameCommand::SetPlan { vessel, plan } => {
                 let sim = &mut *sim;
@@ -176,6 +213,38 @@ pub fn apply(
     }
 }
 
+/// Applies `list` to vessel `id` (a craft of parts) now, the active
+/// vessel's controls following their effects (the parachutes armed); the
+/// messages for what failed.
+pub fn ship_commands(sim: &mut SimState, id: VesselId, list: &[ShipCommand]) -> Vec<String> {
+    let Some(i) = sim.index_of(id) else { return vec![format!("Vessel {}: no such vessel", id.0)] };
+    let mut errors = Vec::new();
+    for c in list {
+        match sim.fleet[i].command(&sim.world, c) {
+            Ok(effects) if i == sim.active => crate::staging::controls_after(&effects, &mut sim.controls),
+            Ok(_) => {}
+            Err(e) => errors.push(format!("Vessel {}: {e}", id.0)),
+        }
+    }
+    errors
+}
+
+/// The toast after an edit of `what` (stages or functions) of `vessel`:
+/// saved, or refused with the reasons (`None`: no such vessel).
+fn edited(
+    toasts: &mut crate::interface::toasts::Toasts,
+    now: f64,
+    vessel: VesselId,
+    what: &str,
+    done: Option<Result<(), Vec<String>>>,
+) {
+    match done {
+        Some(Ok(())) => toasts.push(now, format!("Vessel {}: {what} saved", vessel.0), false),
+        Some(Err(e)) => toasts.push(now, format!("Vessel {}: {what} refused: {}", vessel.0, e.join("; ")), true),
+        None => toasts.push(now, format!("Vessel {}: no such vessel", vessel.0), true),
+    }
+}
+
 /// Where keyboard input goes this frame.
 #[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum InputContext {
@@ -183,6 +252,8 @@ pub enum InputContext {
     Flight,
     /// The tracking station is open.
     Station,
+    /// The systems screen is open (D107).
+    Systems,
     /// The pause menu is open.
     Paused,
     /// A text field has keyboard focus.
@@ -205,14 +276,17 @@ pub enum Keys {
 }
 
 impl InputContext {
-    /// The context from what is open; text entry wins, then the pause menu.
-    pub fn from_state(text_entry: bool, paused: bool, station: bool) -> Self {
+    /// The context from what is open; text entry wins, then the pause
+    /// menu, the tracking station, the systems screen.
+    pub fn from_state(text_entry: bool, paused: bool, station: bool, systems: bool) -> Self {
         if text_entry {
             InputContext::TextEntry
         } else if paused {
             InputContext::Paused
         } else if station {
             InputContext::Station
+        } else if systems {
+            InputContext::Systems
         } else {
             InputContext::Flight
         }
@@ -223,7 +297,7 @@ impl InputContext {
         use InputContext as C;
         match keys {
             Keys::Flight | Keys::Debug => self == C::Flight,
-            Keys::Warp => matches!(self, C::Flight | C::Station),
+            Keys::Warp => matches!(self, C::Flight | C::Station | C::Systems),
             Keys::Menus => self != C::TextEntry,
             Keys::Hud => matches!(self, C::Flight | C::Paused),
         }
@@ -235,9 +309,11 @@ pub fn update_context(
     egui: Res<bevy_egui::input::EguiWantsInput>,
     menu: Res<crate::interface::pause::PauseMenu>,
     station: Res<TrackingStation>,
+    systems: Res<crate::systems_screen::SystemsScreen>,
     mut ctx: ResMut<InputContext>,
 ) {
-    ctx.set_if_neq(InputContext::from_state(egui.wants_any_keyboard_input(), menu.open, station.open));
+    let context = InputContext::from_state(egui.wants_any_keyboard_input(), menu.open, station.open, systems.open);
+    ctx.set_if_neq(context);
 }
 
 #[cfg(test)]
@@ -257,11 +333,19 @@ mod tests {
     }
 
     #[test]
-    fn text_entry_wins_then_pause_then_station() {
-        assert_eq!(InputContext::from_state(true, true, true), InputContext::TextEntry);
-        assert_eq!(InputContext::from_state(false, true, true), InputContext::Paused);
-        assert_eq!(InputContext::from_state(false, false, true), InputContext::Station);
-        assert_eq!(InputContext::from_state(false, false, false), InputContext::Flight);
+    fn text_entry_wins_then_pause_then_station_then_systems() {
+        use InputContext as C;
+        // (text entry, paused, station, systems, context)
+        let table = [
+            (true, true, true, true, C::TextEntry),
+            (false, true, true, true, C::Paused),
+            (false, false, true, true, C::Station),
+            (false, false, false, true, C::Systems),
+            (false, false, false, false, C::Flight),
+        ];
+        for (text, paused, station, systems, want) in table {
+            assert_eq!(InputContext::from_state(text, paused, station, systems), want);
+        }
     }
 
     #[test]
@@ -271,6 +355,7 @@ mod tests {
         let table = [
             (C::Flight, true, true, true, true, true),
             (C::Station, false, true, true, false, false),
+            (C::Systems, false, true, true, false, false),
             (C::Paused, false, false, true, false, true),
             (C::TextEntry, false, false, false, false, false),
         ];

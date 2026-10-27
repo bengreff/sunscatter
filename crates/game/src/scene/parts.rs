@@ -51,6 +51,18 @@ pub fn colour(material: &str, finish: Option<&str>, m: &Materials) -> [f32; 3] {
     tint.map(|c| c * albedo)
 }
 
+/// Each part's flat colour (`craft`'s parts in order): ground grey for the
+/// pad's, else its finish's or material's ([`colour`]).
+pub fn part_colours(craft: &Craft, def: &ShipDef, m: &Materials) -> Vec<[f32; 3]> {
+    (craft.parts.iter())
+        .map(|p| match def.parts.iter().find(|i| i.part == p.id) {
+            Some(info) if info.ground => GROUND,
+            Some(info) => colour(&info.material, info.finish.as_deref(), m),
+            None => UNKNOWN,
+        })
+        .collect()
+}
+
 /// A part's own closed surface in the craft's axes (part `k` of `craft`).
 pub fn part_mesh(craft: &Craft, k: usize) -> RenderMesh {
     let own: Vec<_> =

@@ -1,5 +1,8 @@
 //! The demo of a craft of catalog parts (`SUNSCATTER_CRAFT=falcon9-crew
-//! SUNSCATTER_DEMO=<dir>`): the craft on the pad from several angles, then
+//! SUNSCATTER_DEMO=<dir>`): the craft on the pad from several angles and in
+//! the systems screen by layer (physical; plumbing with the first stage's
+//! tank selected; structural with the interstage; electrical with the
+//! capsule), then
 //! a scripted ascent through its sequence: ignition and liftoff (Space),
 //! full throttle with the attitude held directly along a gravity turn (as
 //! the main demo's magic hold), shots at max-Q, at MECO, at stage
@@ -14,6 +17,7 @@ use crate::demo::{Demo, Step};
 use crate::interface::layout::InterfaceSettings;
 use crate::interface::menus::MenuId;
 use crate::state::SimState;
+use crate::systems_screen::{inspect::Selection, rules::Layer, SystemsScreen};
 use bevy::prelude::*;
 use glam::DVec3;
 use sim::vessel::{quat_z_to, Attitude, VesselId};
@@ -25,6 +29,14 @@ const PAD_VIEWS: [(&str, f64, f64, f64); 4] = [
     ("parts_pad_three_quarter", 150.0, 0.45, 0.8),
     ("parts_pad_low", 45.0, -0.05, 2.2),
     ("parts_pad_top", 110.0, 1.45, 0.0),
+];
+/// The systems screen's shots on the pad (D107): (shot, layer, the part
+/// selected by its craft-file id).
+const SYSTEMS_VIEWS: [(&str, Layer, Option<&str>); 4] = [
+    ("parts_systems_physical", Layer::Physical, None),
+    ("parts_systems_plumbing", Layer::Plumbing, Some("s1.tank")),
+    ("parts_systems_structural", Layer::Structural, Some("s1.interstage")),
+    ("parts_systems_electrical", Layer::Electrical, Some("dragon.capsule")),
 ];
 /// The turn: pitch from vertical (rad) grows as √(altitude / TURN_HEIGHT)
 /// up to TURN_MAX, from TURN_START metres up.
@@ -88,6 +100,7 @@ pub fn run(
     mut rig: ResMut<CameraRig>,
     mut iface: ResMut<InterfaceSettings>,
     mut cmds: MessageWriter<GameCommand>,
+    mut systems: ResMut<SystemsScreen>,
     mut script: Local<Script>,
 ) {
     let Some(mut demo) = demo else { return };
@@ -112,6 +125,16 @@ pub fn run(
                 demo.capture(name);
                 return;
             }
+            if let Some(&(name, layer, part)) = SYSTEMS_VIEWS.get(script.view - PAD_VIEWS.len()) {
+                let def = sim.ship().ship_def();
+                systems.open = true;
+                systems.layer = layer;
+                systems.selected = part.and_then(|p| def.as_ref()?.part_named(p)).map(Selection::Part);
+                script.view += 1;
+                demo.capture(name);
+                return;
+            }
+            systems.open = false;
             if demo.stops_after("Pad") {
                 script.phase = Phase::Done;
                 demo.next(Step::Done);

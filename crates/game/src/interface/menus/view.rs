@@ -67,7 +67,11 @@ pub fn draw(
     }
     let rect = |id: &str| ctx.memory(|m| m.area_rect(egui::Id::new(id)));
     let overlay = if settings_ui.overlay || bench.running() { rect("perf") } else { None };
-    let cluster = rect(crate::navball::AREA);
+    // The navball cluster and the mini systems panel above it.
+    let cluster = match (rect(crate::navball::AREA), rect(crate::interface::mini_panel::AREA)) {
+        (Some(c), Some(m)) => Some(c.union(m)),
+        (c, m) => c.or(m),
+    };
     let screen = ctx.content_rect();
     let mut actions = Vec::new();
     for dock in [Dock::Left, Dock::Right] {

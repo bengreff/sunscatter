@@ -52,6 +52,7 @@ pub const KEYS: &[(&str, &[(&str, &str)])] = &[
         &[
             ("[ / ]", "previous / next vessel"),
             ("F7", "tracking station"),
+            ("F8", "systems screen: the craft by layer, its commands, stages and functions"),
             ("F5 / F9", "quicksave / quickload"),
             ("F6", "saves"),
             ("F3", "settings"),

@@ -43,6 +43,7 @@ mod ship_light;
 mod sky;
 mod staging;
 mod state;
+mod systems_screen;
 mod terrain;
 #[cfg(test)]
 mod test_rocket;
@@ -98,7 +99,7 @@ fn main() {
         .add_plugins(GameState { craft: startup_craft(demo_mode) })
         // After the settings defaults: replaces them with the saved settings.
         .add_plugins(persist::PersistPlugin)
-        .add_plugins((navball::NavballPlugin, interface::menus::view::MenusPlugin, profile::ProfilePlugin))
+        .add_plugins(interface_plugins())
         .configure_sets(Update, (Stage::Input, Stage::Simulate, Stage::Camera, Stage::Scene).chain())
         .add_systems(Startup, (scene::setup, terrain::setup, sky::setup_stars, camera::setup).chain())
         .add_systems(
@@ -227,6 +228,24 @@ fn body_plugins() -> (
         clouds::CloudsPlugin,
         ship_light::ShipLightPlugin,
         render_scale::RenderScalePlugin,
+    )
+}
+
+/// The flight view's instruments and screens: the navball cluster, the
+/// task menus, the profiler, the systems screen and the mini systems panel.
+fn interface_plugins() -> (
+    navball::NavballPlugin,
+    interface::menus::view::MenusPlugin,
+    profile::ProfilePlugin,
+    systems_screen::SystemsPlugin,
+    interface::mini_panel::MiniPanelPlugin,
+) {
+    (
+        navball::NavballPlugin,
+        interface::menus::view::MenusPlugin,
+        profile::ProfilePlugin,
+        systems_screen::SystemsPlugin,
+        interface::mini_panel::MiniPanelPlugin,
     )
 }
 
