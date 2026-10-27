@@ -81,7 +81,7 @@ Propellant loads (the tanks' design fluids, §3 for temperatures):
 | Flight termination system | Component | LOX/RP-1 tank walls (linear charges) + safe-and-arm in interstage | — | — | ~50 kg E | Autonomous (AFSS) with destructors on both stages (P [S4] §2.1.4). |
 | Thermal protection coatings (Block 5) | Finish | octaweb, legs, raceway, interstage | — | black ablative/insulating coat U → `black-paint` | in the gap | |
 
-**Hold-down points.** The stage stands on the pad on **four hold-down clamps** at the base of the engine section (E from photos of the LC-39A transporter-erector; four is also the count of leg and load hard points). Mount names `hold_#` at z 1.0 m, r 1.83 m, at 45°+90°k (aligned with the legs) E.
+**Hold-down points.** The stage is "held down at the base via **hydraulic clamps**"; "the hydraulic release system is activated at T−0" once the flight computer has checked ignition and full power (P, [S1] §10, [S22] §8.5.5). **Four** clamps (E, from photos of the LC-39A transporter-erector; four is also the count of leg and load hard points). Mount names `hold_#` at z 1.0 m, r 1.83 m, at 45°+90°k (aligned with the legs) E.
 
 ### 1.3 Interstage
 
@@ -193,11 +193,153 @@ Check against published totals: the fairing configuration without payload is pub
 
 ## 2. Engines
 
-*(in progress)*
+### 2.1 Merlin 1D (Block 5), first stage × 9
+
+Cycle (all **P**, [S1] §1.3, §2.2): open gas generator; one shaft drives the LOX pump, the fuel pump and the turbine; regeneratively cooled chamber and nozzle with a **milled copper-alloy liner**; **pintle injector**; TVC actuators powered by **high-pressure RP-1 from the engine's own pump** (no separate hydraulic system); each engine in its own metal bay; the vehicle shuts down an off-nominal engine before it fails (engine-out capability "through much of first-stage flight"). Ignition by **TEA-TEB** (pyrophoric). The gas generator's exhaust heats the helium for tank pressurisation (E, Spaceflight101 [S5]).
+
+| Quantity | Value | Tag | Source, or derivation |
+|---|---|---|---|
+| Thrust, sea level | **845 kN** (190,000 lbf) | P | [S1]; SpaceX May 2018 "8 % more, 190,000 lbf" (Musk, [S7]) |
+| Thrust, vacuum | **914 kN** (205,500 lbf) | P | SpaceX, May 2016 ([S5], [S7]) |
+| Isp, vacuum | **311 s** | P | SpaceX web page 2013 [S7] (an earlier rating; the later engine is at least as good) |
+| Isp, sea level | 282 s published (2013); **287.5 s derived** for Block 5 | P/D | The three Block 5 numbers fix the flow and the exit area: ṁ = 914 kN/(311 s·g₀) = **299.7 kg/s**; Aₑ = (914 − 845) kN / 101,325 Pa = **0.681 m²**; Isp_SL = 845 kN/(ṁ·g₀) = 287.5 s. The 2013 282 s belongs to the 147,000-lbf engine; **pick 287.5 s** so thrust, flow and Isp agree (D101: report the 2 % gap to the 2013 number). Everyday Astronaut gives 285/313 s and 845/934 kN (E, unsourced). |
+| Mass flow, full thrust | 299.7 kg/s: LOX 209.7, RP-1 90.0 | D | ṁ above, mixture ratio below |
+| Mixture ratio (O/F) | **2.33** (engine total, gas generator included) | D | the stage's loaded ratio (§1.2), since the stage burns to near depletion of both; U published |
+| Chamber pressure | 9.7 MPa (1,410 psi) at the 2011 rating (147,000 lbf SL); **~12.5 MPa derived for Block 5** | P/D | 1,410 psi: AvWeek 2011 [S7]. If the throat is unchanged (Dt below), Pc scales with vacuum thrust: 9.7 × 914/690 ≈ 12.9 MPa; from F = Cf·Pc·At with Cf_vac(ε 16, γ 1.22) = 1.78 × 0.97 efficiency: 914 kN/(1.73 × 0.0426 m²) = 12.4 MPa. **Pick 12.5 MPa** (U published). |
+| Expansion ratio | **16** | P | SpaceX 2011 goals [S7]; [S3] |
+| Exit diameter | **0.93 m** (0.92 m in [S7]) | D | from Aₑ above. A larger 1.03 m follows from the 2013 Isp pair, but the octaweb rules it out: eight 1.03 m bells cannot fit a ring inside 3.66 m (§1.2). |
+| Throat diameter | **0.233 m** | D | Aₜ = Aₑ/16 = 0.0426 m² |
+| Nozzle length, throat to exit | 1.04 m | D | 80 % bell: 0.8 × (0.93 − 0.233)/2 / tan 15° |
+| Powerhead length (gimbal to throat), radius | 1.30 m, 0.45 m | E | photos; Merlin 1C was 2.92 m long overall [S7] |
+| Engine length overall | ~2.4 m (gimbal to exit 2.34 m) | D | |
+| Dry mass | **470 kg** with its TVC actuators | E | Tom Mueller (SpaceX's founding propulsion CTO), 2015: "The Merlin 1D weighs 1030 pounds, including the hydraulic steering (TVC) actuators … the new full thrust variant weighs the same" [S7]; Spaceflight101 470 kg [S5] |
+| Thrust-to-weight (CORE's `thrust_to_weight`, vacuum thrust over sea-level weight) | **198** | D | 914 kN / (470 kg · g₀); Spaceflight101 "198" [S5] |
+| Throttle range | **40 %–100 %** (engine); the guide's ascent range is **57 %–100 %** of sea-level thrust | P | Musk, 6 May 2016, of the landing burn: "min is ~40% of 1 Merlin" [S7]; [S1] Table 2-1: 190,000 to 108,300 lbf at sea level (= 60 % in vacuum terms). **Pick `throttle_min` 0.40** (what the engine can do; the guide's 57 % is the ascent profile's), throttle as a fraction of full flow. |
+| Thrust against throttle and ambient pressure | F = τ·914 kN − p·0.681 m² (τ the flow fraction, p ambient) | D | ideal nozzle; Isp(τ, p) = F/(τ·ṁ·g₀). At deep throttle a 16:1 nozzle at sea level separates (Summerfield p_e < ~0.35 p_a): p_e at full thrust ≈ 12.5 MPa × 0.0064 = 80 kPa, at 40 % ≈ 32 kPa — separation risk at sea level below ~45 % (D); flown anyway (landing burns are at ~40–70 %); no failure from it unless data says so. |
+| Gimbal range | **±5°** | E | spacelaunchlive (low confidence, no primary source); U published. Class: kerolox boosters ±5° to ±8°. |
+| Gimbal rate | **20 °/s** | U | class estimate for hydraulic TVC of this size; propose 20 °/s and a 0.1 s actuator time constant. |
+| Ignition | TEA-TEB; **on the pad all nine use the ground supply**; three engines carry their own canisters for relights: **E1, E5 and E9** (E9 the centre engine) | E | Everyday Astronaut (SES-22 and other mission pages, 2022) [S21]; FAA: TEA-TEB is "used as a first and second stage ignitor" [S4] (P) |
+| Ignitions | pad start: unlimited from the ground (any engine); **in flight: E1, E5, E9 three starts each** (boostback, entry, landing) — the other six none | E | [S21]: "restarts available are 3–4 per mission"; Crew missions to a droneship do entry (3 engines) and landing (1 engine, sometimes 3) |
+| Spin start | turbopump spun up by **high-pressure helium** before ignition | E | Spaceflight101 [S5] |
+| Start sequence and time | start command at **T−3 s**; to full thrust in **~2 s** (stagger allowed); held down until the computers confirm all nine healthy; clamps released at T−0 | P (T−3 s, hold-down, release) / E (2 s) | [S1] §10 timelines "T−3s Engine start sequence"; [S18] "T−3 s engine controller commands engine ignition sequence"; 2 s: the time from T−3 s to the health check before T−0 (D). **`start_time` 2.0 s.** |
+| Shutdown | commanded; tail-off impulse U → propose **0.25 s at full thrust equivalent** (~210 kN·s) | U | class value for gas-generator kerolox engines |
+| NPSP required (pump inlets) | LOX **0.17 MPa**, RP-1 **0.10 MPa** | U | not published. Class values for kerolox turbopumps with inducers (NPSH ~15 m LOX, ~13 m RP-1, typical of booster engines). Falcon's densified LOX (vapour pressure 2.7 kPa at 66.5 K, §3) gives large margin, so these values bind only on warm or depleted propellant. |
+| Nozzle heat (D077 share) | regeneratively cooled: `nozzle_heat_fraction` 0 | D | no radiatively cooled part on the booster engine |
+| Engine-out | the stage tolerates one engine out through much of the ascent; the computers shut a failing engine down | P | [S1] §1.3; CRS-1 (2012) lost one engine at T+79 s and reached orbit (§6) |
+| Rated life | Block 5 designed for 10 flights with minor maintenance, up to 100 with refurbishment (stage); one Merlin flew its 22nd mission in Feb 2024 | P | [S7] (SpaceX, Musk 2018); SpaceX 23 Feb 2024 [S7] |
+
+### 2.2 Merlin Vacuum (MVac D), second stage × 1
+
+| Quantity | Value | Tag | Source, or derivation |
+|---|---|---|---|
+| Thrust, vacuum | **981 kN** (220,500 lbf) | P | [S1] Table 2-1 |
+| Isp, vacuum | **348 s** | P | SpaceX web page [S7] |
+| Mass flow | 287.5 kg/s (LOX 207.2 at O/F 2.58, RP-1 80.3) | D | 981 kN/(348 s·g₀); O/F from the stage's loaded ratio (§1.4) |
+| Expansion ratio | **165:1**, fixed, non-deploying | P | [S1] |
+| Exit diameter | **3.0 m** (3.3 m in [S7] and Everyday Astronaut, unsourced) | D | 165 × Aₜ of the Merlin 1D (0.0426 m², the same chamber) = 7.03 m² → 2.99 m. A 3.3 m exit would need a 0.257 m throat, inconsistent with §2.1. **Pick 3.0 m.** |
+| Throat diameter | 0.233 m | D | as §2.1 |
+| Nozzle length, throat to exit | **4.13 m** | D | 80 % bell |
+| Regeneratively cooled section | throat to ε ≈ 16 (the booster nozzle's exit), then a **radiatively cooled niobium-alloy extension** | P (niobium) / E (split) | the short-nozzle variant uses "75 % less niobium" [S7]; **`Extension.start` 0.25** of the nozzle length (1.04/4.13), material `niobium-c103` with `silicide-coating`, thickness **1.0 mm** (E: gives ~180 kg, see mass) |
+| Dry mass | **650 kg** | D | 470 kg (the Merlin 1D, §2.1) + the extension 20 m² × 1.0 mm × 8,860 kg/m³ ≈ 180 kg; Spaceflight101's 490 kg [S5] looks too light for a 3 m niobium bell. |
+| Thrust-to-weight | 154 | D | 981 kN / (650 kg · g₀) |
+| Throttle range | **64 %–100 %** published (2019–2025 guides); 39 % in the 2015 guide | P | [S1]: 220,500 to 140,679 lbf; [S7] quoting the 2015 guide: 210,000 to 81,000 lbf. **Pick 0.64** (the current published range). |
+| Ignition | **dual-redundant TEA-TEB igniters** | P | [S1] |
+| Ignitions | **≥ 3 on a standard stage** (SES-1, SES-2, the deorbit burn); more with a mission-extension kit (more TEA-TEB, COPVs) | E | [S7]; the guide's sample GTO timeline has two burns plus disposal [S1] §10 |
+| Start | needs settled propellant (§3.5) and chilled-in engine; start time ~**3 s** to full thrust (E: MECO→SES-1 is 7–8 s, sep at +3–4 s) | E | Demo-2: sep +2:36, SES +2:44 [S18] |
+| Gimbal | range U → propose ±5°; rate 10 °/s | U | pitch and yaw by gimbal, roll by nitrogen thrusters [S1] |
+| Nozzle heat | extension radiatively cooled: `nozzle_heat_fraction` per D077, propose **0.010** of jet power to the extension wall | E | niobium extensions run ~1,400–1,600 K in vacuum (C-103 + R512E limit ~1,640 K, D077) |
+| Short-nozzle variant (2023–) | 10 % less thrust (~883 kN), 75 % less niobium | P | [S7] (SpaceX, Transporter-7); not used on Crew flights (E) |
+
+### 2.3 SuperDraco and Draco (Crew Dragon)
+
+| Quantity | SuperDraco (8, in 4 pods of 2) | Draco (16) | Tag | Source |
+|---|---|---|---|---|
+| Propellants | NTO / MMH, hypergolic, shared tanks | same | P | [S7] (SpaceX, NASA) |
+| Thrust | **71 kN** each (16,000 lbf; capable of 16,400 lbf) | **400 N** (90 lbf), vacuum | P | SpaceX 2014 qualification release, FAA DragonFly EA [S7]; Draco: SpaceX [S7] |
+| Isp | **235 s** at sea level (E: unsourced) | **300 s** vacuum | E / P | [S7]; Draco: SpaceX 2009 guide [S7] |
+| Mass flow | 30.8 kg/s each, 246 kg/s for 8 | 0.136 kg/s | D | F/(Isp·g₀) |
+| Chamber pressure | **6.9 MPa** (1,000 psi) | U (propose 1.0 MPa) | P/U | [S7] (NSF and AvWeek, 2014) |
+| Throttle | **20 %–100 %** | on/off, pulsed | P | SpaceX 31 July 2014 [S7]: "successfully throttling between 20% and 100%" |
+| Start transient | **ignition to full thrust 100 ms** | ~10–20 ms (U, class for 400 N bipropellant thrusters) | P / U | NASA, 1 Feb 2012 [S7] |
+| Pulse | — | minimum impulse bit U → propose 20 ms pulses (class: R-4D 490 N ~ 10–20 ms) | U | |
+| Cycle | pressure-fed, regeneratively cooled printed Inconel chamber, each pod in a printed nacelle | pressure-fed | P | [S7] (SpaceX 2014) |
+| Abort burn | all 8 at full thrust for ~5–6 s on the pad abort; Dragon reached 100 mph in 1.2 s (≈3.8 g mean) | — | P | NASA 2012 (5 s planned), Ars Technica 2016 [S7] |
+| Engine mass | U → propose **40 kg** each (T/W ~180) | U → **3 kg** (R-4D class) | U | |
+| Ignitions | many (hypergolic); restartable | thousands of pulses | P | [S7] |
+| Placement | four pods at the sidewall, 90° apart, each pair canted outward | 4 forward-facing under the nosecone (P); 12 around the lower sidewall, in 4 clusters of 3 (E) | P/E | §1.5 |
+| Propulsive landing | enabled again in 2024 as a backup to the parachutes | — | P | [S7] |
+
+### 2.4 Cold-gas thrusters (nitrogen), both stages
+
+| Quantity | Value | Tag | Source, or derivation |
+|---|---|---|---|
+| Gas | gaseous nitrogen (GN₂) | P | [S1] Table 2-1 |
+| Stage 1 use | coast and recovery attitude control only (flip after separation, entry attitude); **not** used in ascent | P | [S1] Table 2-1 ("recovery only") |
+| Stage 2 use | roll during burns; pitch, yaw and roll in coasts; propellant settling before restarts (§3.5) | P (attitude) / E (settling) | [S1] |
+| Isp | **70 s** (falls with the bottle's gas temperature as it blows down: Isp ∝ √T) | D | ideal maximum for N₂ at 290 K is 79 s (vₑ = √(2γ/(γ−1)·RT/M) = 776 m/s); real thrusters reach 85–92 % of it |
+| Thrust, stage 1 | **U**; propose **2 kN per nozzle**, 4 nozzles per pod, 2 pods | U/D | Order of magnitude from the flip: a booster of ~50 t and ~9×10⁶ kg·m² turned 180° in ~30–40 s (droneship profile, webcasts) needs a couple of 70–90 kN·m, i.e. 2 × ~1.3 kN at a 30 m arm; the faster RTLS flips (~15 s) need several kN per side. Spaceflight101 [S5]: v1.1 brought "a more powerful cold gas reaction control system". |
+| Thrust, stage 2 | **U**; propose **200 N per nozzle**, 4 per pod, 2 pods | U | |
+| Bottles | Component Bottle, nitrogen at up to **34.5 MPa** (the pad's GN₂ supply is 5,000 psi [S22]): stage 1 ~2 × 0.2 m³, stage 2 ~1 × 0.2 m³ | P (supply pressure) / U (sizes) | 2015 guide's launch-site services [S22] |
+| Fairing halves | have their own nitrogen cold-gas thrusters (not on Crew flights) | P | [S4] App. |
 
 ## 3. Fluids and tanks
 
-*(in progress)*
+### 3.1 Loading temperatures and densities
+
+| Quantity | Value | Tag | Source |
+|---|---|---|---|
+| LOX loading temperature | **66.5 K** (−340 °F, −207 °C), about 12 K above the triple point (54.36 K) | P | Musk, 17 Dec 2015: "−340 F in this case … First time anyone has gone this low for O2" [S7]; NASA (Dragon crew loading): LOX "near −340 °F" [S7]; Spaceflight101 −207 °C [S5] |
+| LOX density at 66.5 K | **1,253 kg/m³** (1,141 at the normal boiling point 90.19 K: +9.8 %) | D | NIST saturation table (§7): 1,259.7 at 65 K, 1,237.0 at 70 K |
+| LOX vapour pressure at 66.5 K | **3.4 kPa** | D | NIST (§7): 2,335 Pa at 65 K, 6,262 Pa at 70 K, log-linear |
+| RP-1 loading temperature | **266.5 K** (20 °F, −7 °C) | P | Musk, same tweet: "[RP-1 chilled] from 70F to 20F" [S7]; NASA "near 20 °F" [S7] |
+| RP-1 density at 266.5 K | **825 kg/m³** (MIL-DTL-25576: 799–815 at 288.7 K) | D | §7 table (0.72 kg/m³ per K from the specification's midpoint 807) |
+| Loading sequence (Crew) | RP-1 from **T−35 min**; stage 1 LOX from **T−35 min**; stage 2 LOX from **T−16 min**; engine chill from **T−7 min**; Dragon on internal power **T−5 min**; tanks pressurised to flight pressure from **T−1 min** | P | NASA Demo-2 timeline [S18] |
+| Replenishment | tanks topped (LOX replaced as it warms) until the final minutes; the "load-and-go" order was approved by NASA for crew because the densified LOX warms | P | [S7] (NASA) |
+
+### 3.2 Tank pressures and walls
+
+| Quantity | Value | Tag | Source, or derivation |
+|---|---|---|---|
+| Ullage pressure, all four main tanks | **3.5 bar absolute** (~36 psig) in flight | E | "a few tens of psi" (Musk's 20 July 2015 press call, as reported by Space Access Society [S23]); U published. Check: the monocoque LOX tank needs internal pressure to carry the compression above it — at 3.5 bar the pressure lifts 3.5e5 × 10.46 = 3.7 MN, comparable to the 4–5 MN the upper barrel carries near MECO (D). |
+| Ullage pressure on the pad before T−1 min | ~1.5 bar (vent-and-relief level) | U | the timeline pressurises "to flight pressure" at T−1 min [S18] |
+| Maximum expected operating pressure (MEOP), relief setting | **4.0 bar** | U | propose relief at 115 % of flight pressure |
+| Burst pressure (design) | **1.4 × MEOP = 5.6 bar** from the walls (the generator's `safety_factor` 1.4) | D | §1.1 |
+| Minimum gauge | **3.0 mm** (machined Al-Li sheet/plate) | E | class value; friction-stir welded panels |
+| Axial design load, stage 1 RP-1 barrel (skin-stringer) | **6.0 MN** compression (limit) | D | everything above it at liftoff: LOX 287 t + LOX tank ~5 t + interstage + stage 2 110 t + Dragon 13.6 t = 418 t × 1.39 g₀ (T/W at liftoff, thrust-limited) = 5.7 MN, + bending at max-Q ≈ 6 MN |
+| Axial design load, stage 1 LOX barrel (monocoque) | **5.5 MN** compression (limit), relieved by pressure | D | near MECO: stage 2 + Dragon + interstage ≈ 124 t at up to ~4.5 g₀ (Crew flights throttle to stay below ~4 g, E) |
+| Axial design load, stage 2 tanks | **0.6 MN** (Dragon 13.6 t at 4.5 g₀) | D | |
+
+### 3.3 Pressurisation scheme
+
+- **Pressurant**: helium stored at **5,500 psi (37.9 MPa)** in COPVs **submerged in the LOX tanks** of both stages (colder helium is denser) (E: Musk's 2015 press call via [S23]; Block 5's COPV 2.0 [S7]; P that the bottles are in the LOX tank [S8], [S13]). The pad supplies helium at 5,700 psi at SLC-40 and 6,000 psi at Vandenberg (P, 2015 guide [S22]), an upper bound on the bottles' MEOP.
+- **Heating**: the helium passes through heat exchangers on the engines (the gas generator's exhaust, E [S5]) before entering the tanks: "heated helium" (P [S1]). Propose an inlet temperature to the ullage of **~250 K** for the LOX tank and **~300 K** for the RP-1 tank (U).
+- **Regulation**: each tank's ullage held at its setpoint while the bottles can (U how: SpaceX's "pressurization controllers" are mentioned [S1] §2.6, so active valves, not fixed regulators — propose a bang-bang valve per tank with ±0.1 bar deadband).
+- **Helium budget**: stage 1 ~260 kg delivered (384 m³ of ullage at 3.5 bar, 250 K at MECO), stage 2 ~66 kg (98.5 m³) (D, §1.2, §1.4); plus spin-start helium for the Merlins (U) and the separation and leg-deployment pneumatics (P that these are helium [S1], [S5]).
+- **Bottles**: COPV burst ≥ 2.0 × MEOP for vessels outside DOT rules (P: the factor SpaceX requires of payload vessels, [S1] Table 6-4; their own vessels' factor is U → propose 1.5 for flight COPVs, the AIAA S-081 minimum for crewed vehicles is 1.5).
+- **Block 5 and AMOS-6**: after AMOS-6 SpaceX changed the helium loading (warmer, slower) and redesigned the COPVs (COPV 2.0) so oxygen cannot pool and freeze in liner buckles (P [S13], [S7]); Block 5 also allowed "faster, later, denser, chilled kerosene fuel loading" (E, Space Launch Report [S6]).
+
+### 3.4 Lines and engine inlets
+
+| Quantity | Value | Tag | Source |
+|---|---|---|---|
+| Stage 1 LOX downcomer | through the RP-1 tank's centre, double-walled | P | [S1] |
+| Engine feed lines | **10 cm** lines to each engine from a 9-way manifold | E | Spaceflight101 [S5] |
+| Line lengths, stage 1 | LOX: tank outlet (z 17.8) → manifold (z ~3) ≈ 15 m downcomer + 2 m branch; RP-1: tank outlet (z 3.0) → engine ≈ 1.5 m | D | from §1.2 positions |
+| Line loss | propose ΔP = 0.05 MPa at full flow per line (k such that ΔP = k·ṁ²) | U | |
+| Inlet pressure | p_ullage + ρ·a·h − ΔP_line; at liftoff, stage 1 LOX: 3.5 bar + 1,253 × 13.6 m/s² × ~37 m (full) = 6.6 bar + 3.5 = 10.1 bar; near MECO (4 g, 1 m head) ≈ 4 bar | D | §5.2 of the design |
+
+### 3.5 Settling (ullage) before MVac ignition
+
+- After MECO the stack coasts ~3 s, separates (the pushers give stage 2 a forward push) and **MVac starts ~8 s after MECO** (Demo-2: MECO 2:33, sep 2:36, SES 2:44 [S18]). The pushers' impulse and the second stage's nitrogen thrusters firing aft settle the propellant (E: the published architecture [S1] has no ullage motors; the nitrogen thrusters are the only means).
+- For restarts after a coast (SES-2, the deorbit burn) the stage settles with aft-firing nitrogen thrusters before ignition (E).
+- Settling criterion for the sim (D, design §5.2): Bond number Bo = ρ·a·R²/σ ≫ 1 (LOX: σ = 0.0193 N/m at 66.5 K, NIST): with R = 1.83 m, a = 1×10⁻³ m/s² gives Bo ≈ 220 (propose settled above Bo = 100); then a settling time t ≈ √(2L/a) for the liquid to cross the tank (L the tank length): with 200 N × 8 thrusters ≈ 1.6 kN on a 110 t stage, a = 0.015 m/s² → ~30 s for a 6 m tank. Faster with the pushers.
+
+### 3.6 Boil-off and warming
+
+- The main tanks are **uninsulated** aluminium (frost forms on the LOX tanks on the pad, photos: E).
+- On the pad the densified LOX warms from the wall: propose a wall heat flux of **2 kW/m²** (U; frosted bare aluminium in humid air, class value 1–5 kW/m²): stage 2 LOX tank (~62 m², 76 t) warms ~**0.6 K per 10 min** without replenishment (D: 124 kW / (76,200 kg × 1,680 J/(kg·K)) = 0.97 mK/s). This is why loading is late and continuous.
+- At 3.5 bar the LOX saturates at ~104 K (NIST, §7), so in flight it does not boil; during the coast to the deorbit burn (~50 min) the stage 2 LOX warms in sunlight (U → the thermal network does it).
+- Dragon's MMH/NTO are storable: no boil-off; NTO freezes at 261.9 K and MMH at 220.8 K (§7), so their tanks are heated (U → propose heaters keeping 288–300 K).
 
 ## 4. The flight
 
@@ -239,3 +381,6 @@ Check against published totals: the fairing configuration without payload is pub
 - **[S18]** NASA, *Mission Timeline for Launch Saturday, May 30* (Demo-2), 2020.
 - **[S19]** SpaceX, statement on the 20 April 2019 Crew Dragon static-fire anomaly (15 July 2019), as reported (Wikipedia SpaceX Dragon 2, CBS News, SpaceNews).
 - **[S20]** NASA, "Top 10 Things to Know for NASA's SpaceX Demo-2 Return", 23 July 2020 (Dragon with trunk ~27,600 lb at undocking; capsule ~21,200 lb at entry).
+- **[S21]** Everyday Astronaut (Tim Dodd's team), mission pages, e.g. "SES-22 | Falcon 9 Block 5" (2022): TEA-TEB from the ground for the pad start; canisters on E1, E5, E9 for relights; Merlin 845/934 kN, 285/313 s (estimates).
+- **[S22]** SpaceX, *Falcon 9 Launch Vehicle Payload User's Guide*, Rev 2, 21 Oct 2015: throttle ranges, launch-site services (helium 5,700 psi SLC-40 / 6,000 psi VAFB, GN₂ 5,000 psi), hold-down by hydraulic clamps released at T−0, sample timelines.
+- **[S23]** Space Access Society, *Space Access Update #145*, 20 July 2015 (summary of Musk's CRS-7 press call: helium bottles at 5,500 psi in the LOX tank; tanks pressurised to "a few tens of psi"; the strut: steel, ~2 ft long, ~1 in diameter, rated 10,000 lbf, normal peak 3,000–3,500 lbf, failed near 2,000 lbf at 3.2 g).
