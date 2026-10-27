@@ -343,15 +343,231 @@ Cycle (all **P**, [S1] §1.3, §2.2): open gas generator; one shaft drives the L
 
 ## 4. The flight
 
-*(in progress)*
+### 4.1 Launch site: LC-39A
+
+| Quantity | Value | Tag | Source |
+|---|---|---|---|
+| Position | **28°36′30″ N, 80°36′16″ W** (28.6083°, −80.6044°) | P | [S7] (Kennedy Space Center Launch Complex 39A, from NASA) |
+| Pad deck elevation | ~14.6 m (48 ft) above sea level, the Apollo-era hardstand | E | U published for today's deck; propose 15 m |
+| Launch azimuth to the ISS (51.6°) | **45°** (north-east) | D | sin A = cos 51.6° / cos 28.61° = 0.707 |
+| Integration | horizontal, in the Horizontal Integration Facility; rolled out and raised by the **transporter-erector** (TE), whose strongback holds the umbilicals and retracts "just prior to launch" | P | [S1] §10; [S7] |
+| Hold-down | **hydraulic clamps** at the base, released at T−0 after the full-thrust health check (§1.2) | P | [S1], [S22] |
+| Crew access | the **crew access arm** on the fixed service structure (a new level built in 2018) at the capsule's side hatch; retracts at **T−42 min** | P | [S7]; [S18] |
+| Flame trench and deluge | Apollo/Shuttle flame trench; water deluge system (tested 2017) | P | [S7] |
+| Other things on the pad | the Starship tower and mount (in work) — out of scope (D104: nothing else on the ground) | — | |
+
+### 4.2 Countdown (Crew; from the Demo-2 timeline [S18])
+
+| Time | Event |
+|---|---|
+| T−2:35 h | crew ingress |
+| T−1:55 h | hatch closed |
+| T−45 min | go for propellant load |
+| T−42 min | crew access arm retracts |
+| T−37 min | **Dragon's launch escape system armed** |
+| T−35 min | RP-1 loading begins; stage 1 LOX loading begins |
+| T−16 min | stage 2 LOX loading begins |
+| T−7 min | Falcon 9 begins **engine chill** |
+| T−5 min | Dragon to internal power |
+| T−1 min | flight computer's final checks; **tanks pressurised to flight pressure** |
+| T−45 s | launch director's go |
+| **T−3 s** | **engine controller commands the ignition sequence** |
+| **T−0** | **liftoff** (clamps released after the health check) |
+
+The countdown itself is abstracted as a time and funds sink (D104); the sim starts on the pad at about T−1 min (fuelled, pressurising) per the plan's acceptance.
+
+### 4.3 Ascent (Crew to the ISS; P from NASA unless marked)
+
+| Event | Demo-2 (2020) [S18] | Crew-2 (2021) [S12] | Crew-10 (2025, RTLS) [S24] | Notes |
+|---|---|---|---|---|
+| Liftoff | 0:00 | 0:00 | 0:00 | T/W 1.38 (D) |
+| Throttle-down for max-Q | ~0:45–1:15 | | | **E**: to ~75–80 % (webcasts; U published). The guide: "Both the first and second stage engines may be throttled to help maintain … steady state acceleration limits" [S1]. |
+| Max-Q | **0:58** | 1:02 | ~1:02 | ~30–35 kPa (E, typical for Falcon 9) |
+| MECO | **2:33** | 2:36 | ~2:26 | stage 1 burns ~150 s; it leaves 6–10 % of its load for recovery (D: 152 s at full flow empties the stage, §2.1) |
+| Stage separation | **2:36** | 2:39 | ~2:30 | MECO + 3 s; pneumatic latches and pushers (§1.3) |
+| Second engine start (SES-1) | **2:44** | ~2:47 | ~2:36 | sep + ~8 s; settling first (§3.5) |
+| (no fairing on Crew flights) | | | | |
+| Stage 1 entry burn | **7:15** (start) | | 6:18–6:29 | 3 engines (E1, E5, E9), ~15–25 s (E); Crew-10's RTLS 11 s |
+| SECO-1 | **8:47** | 8:47 | ~8:38 | stage 2 burns ~363 s; MVac throttles down near the end to keep the crew's acceleration (E: at full thrust a ~20 t stage-plus-Dragon would reach 5 g) |
+| Stage 1 landing burn | **8:52** (start) | | 7:22–7:39 | 1 engine (E9), sometimes 3 at first (E); Demo-2 ~30 s; the NASA timeline prints "entry burn" twice, the second is the landing burn |
+| Stage 1 landing | **9:22** | | 7:39 | droneship, or LZ for RTLS |
+| Dragon separation | **12:00** | 11:58 | 9:58 | |
+| Nosecone open | **12:46** | | 10:46 | |
+| Insertion orbit | ~190 × 205 km, 51.6° | | | Space Launch Report [S6] (Demo-2) |
+
+### 4.4 The booster's return (Crew missions: droneship)
+
+| Quantity | Value | Tag | Source, or derivation |
+|---|---|---|---|
+| Profile | no boostback on droneship missions; flip engines-first with the nitrogen thrusters, fins deployed, **entry burn** with 3 engines, grid-fin guided descent, **landing burn** with 1 engine (or 3 then 1) | P/E | Demo-2 timeline [S18]; Spaceflight101 [S5] for the sequence |
+| Separation state | ~65–80 km altitude, ~2.0–2.4 km/s (Mach 6–8) | E | webcast telemetry (Spaceflight101: "about 80 km … Mach 10" for the heavier GTO profile [S5]) |
+| Apogee | ~120–140 km | E | [S5] |
+| Entry burn | starts at ~70 km (E [S5]), 3 engines, ~20 s, slowing the stage from ~1,300 to ~250 m/s on GTO profiles ([S5]: "from 1,300 m/s to about 250 m/s" with drag) | E | [S5] |
+| Landing burn | single engine (E9) from ~2–3 km, ~25–30 s; touchdown at ~2 m/s ([S5]); legs deploy ~10 s into the burn ([S5]) | E | [S5]; [S18] (8:52 → 9:22) |
+| Hoverslam | a single Merlin at its 40 % minimum (338 kN at sea level) exceeds the empty stage's weight (~27–30 t × g₀ ≈ 270–290 kN): **the stage cannot hover** | D | §2.1 throttle and §1.2 dry mass |
+| Droneship position, Crew missions | **~510–550 km downrange** along the 45° azimuth | E | FAA 2017: "a drone ship located approximately 500 miles downrange" (generic, all missions) [S4] App.; Crew-mission positions from launch coverage (E). **Pick 520 km** at azimuth 45° from LC-39A. |
+| Droneship | ~91 m × 52 m deck ("Marmac 300"-class barge), dynamically positioned to ~3 m, deck water deluge; Octagrabber robot secures the stage | E | Spaceflight101 [S5]; [S7] |
+| RTLS alternative | boostback with 3 engines from ~T+2:40, entry and landing at LZ-1/LZ-2 or LZ-40 (Crew-10) | P | [S24] |
+
+### 4.5 Dragon: entry and splashdown (for the later Crew mission; P from NASA [S20] unless marked)
+
+| Quantity | Value | Tag | Source |
+|---|---|---|---|
+| Trunk jettison | before the deorbit burn | P | [S20] |
+| Entry speed | ~7.8 km/s (17,500 mph) | P | [S20] |
+| Peak heat-shield temperature | ~2,200 K (3,500 °F) | P | [S20] |
+| Communications blackout | ~6 min | P | [S20] |
+| Drogue deployment | **~5.5 km (18,000 ft) at ~156 m/s (350 mph)** in a nominal entry | P | [S20]. In the in-flight abort test the drogues opened higher, at ~5.5–6 miles (8.9–9.7 km), the mains at ~1.1 miles (1.8 km) [S4] Table 2-1. |
+| Main deployment | **~1.8 km (6,000 ft) at ~53 m/s (119 mph)**; drogues released | P | [S20] |
+| Splashdown speed | ~**7 m/s** (15 mph) D; FAA says ~13 mph (5.8 m/s) [S4] App. | D/P | D: four 35.4 m mains at Cd₀ 0.8 (ringsail class, E) give Cd·A ≈ 3,150 m²; a 9,600 kg capsule then falls at √(2mg/(ρ·Cd·A)) = 7.0 m/s at sea level. |
+| Parachute model (for `Canopy`) | drogues: 2 × D₀ 5.8 m, Cd·A **29 m²** for both (Cd₀ 0.55 conical ribbon, E), fill constant n ≈ 10 (ribbon class, E: Knacke), deploy_max_q **12 kPa**, max_load **500 kN** for both (D: q 8.5 kPa at deployment × Cd·A × opening factor 2); mains: 4 × D₀ 35.4 m, Cd·A **3,150 m²** for four, n ≈ 7 (ringsail class, E: Knacke), one reefed stage at **15 % for 6 s** (U, propose), deploy_max_q 2.5 kPa, max_load **1.0 MN** for four (D: q 1.4 kPa × reefed Cd·A 470 m² × 1.5) | D/E/U | sizes P [S4] App.; the rest as marked |
+| Main canopy material | Kevlar and nylon; risers 147 ft (44.8 m); drogues risers 72 ft (21.9 m) | P | [S4] App. |
+| Recovery | ships *Go Searcher*, *Go Navigator* (later *Megan*, *Shannon*); 45–60 min to crew egress | P | [S20] |
 
 ## 5. Systems
 
-*(in progress)*
+### 5.1 Avionics and software
+
+| Item | Value | Tag | Source |
+|---|---|---|---|
+| Falcon 9 architecture | **three-string, single-fault-tolerant**, "designed to human-rating requirements"; fault tolerance by isolated compartments inside boxes or triplicated units | P | [S1] §1.3, §2.6 |
+| Falcon 9 contents | flight computers, GPS receivers, inertial measurement units, SpaceX controllers for propulsion, valves, pressurisation, separation and payload interfaces, a network backbone, S-band transmitters (telemetry and video from both stages, even after separation), a C-band transponder for range tracking | P | [S1] §2.6 |
+| Where | stage 2 hosts the vehicle's guidance in ascent; stage 1 has its own triple-redundant flight control and GPS/IMU navigation, the only controller in its descent | E | Spaceflight101 [S5] |
+| Engine controllers | each Merlin has its own controller with **three processors** cross-checking | E | [S5] |
+| Software | Linux, C++; radiation-tolerant commercial parts rather than radiation-hardened | E | [S5] |
+| Flight termination | **autonomous** (AFSS), destructors on both stages; for Crew a pyrovalve for stage 2 thrust termination | P | [S1] §2.6, [S4] §2.1.4 |
+| Dragon | triple-redundant flight computers (each with cross-checking processors, E), three touchscreen displays plus physical buttons for critical commands (abort, fire suppression, deorbit) (E), fully autonomous docking | E | [S7] |
+
+**For the sim (D106 sensors and computers as components):** per stage 3 flight computers (`Computer { channels: 1 }` × 3 or one with 3 channels), 3 IMUs, 2 GPS receivers, 1 S-band transmitter set, 1 C-band transponder; Dragon 3 flight computers, 2 IMUs, 2 GPS, 2 star trackers (E), a docking sensor suite (lidar and cameras under the nosecone, E from the press kit's "guidance and navigation control sensors" under the nosecone [S12]).
+
+### 5.2 Sensors
+
+| Sensor | Where | Measures | Accuracy, rate | Tag |
+|---|---|---|---|---|
+| IMU (ring-laser or fibre-optic gyros + accelerometers) | each stage, Dragon | attitude, rates, specific force | gyro bias ~0.01 °/h, accel ~50 µg (navigation-grade class); 100–400 Hz | P (present [S1]) / E (class) |
+| GPS receiver | each stage, Dragon | position, velocity | ~5 m, ~0.1 m/s (single-frequency class); 10 Hz; no lock above ~GPS altitudes or in plasma blackout | P (present) / E |
+| Star tracker | Dragon (and likely stage 2 for long coasts, U) | attitude | ~5–10 arcsec; 10 Hz | E |
+| Radar altimeter | **none known** on Falcon 9 (navigation by GPS/IMU; the landing uses "an onboard predictive simulation" with a wind profile from balloons) | U | FAA [S4] App. |
+| Tank pressure transducers | every tank and bottle (CRS-7 and AMOS-6 investigations use them) | pressure | ~0.1 % FS, 100 Hz+ | P (present: "a sense line for a pressure sensor", 2024 [S25]) / E (class) |
+| Tank level sensors (point sensors and capacitance probes) | main tanks | propellant level | E | E |
+| Thermocouples / RTDs | engines, tanks, avionics, TPS | temperature | ±1 K | E |
+| Engine controller readouts | each engine | chamber pressure, turbopump speed, inlet pressures, valve positions | | E |
+| Strain gauges | structure (development and early flights) | strain | | E |
+| Dragon docking sensors | under the nosecone | range, bearing (lidar, thermal cameras) | | P [S12] (sensors present) / E |
+| Dragon cabin sensors | cabin | total pressure, ppO₂, ppCO₂, humidity, temperature, smoke | | E |
+
+### 5.3 Power
+
+| Item | Value | Tag | Source, or derivation |
+|---|---|---|---|
+| Falcon 9 batteries | **lithium-ion, "multiple redundant" on each stage** | P | [S1] §2.6 |
+| Falcon 9 bus | 28 V DC class | E | |
+| Capacity, stage 1 | U → propose **2 × 2.5 kWh** | U/D | loads: avionics ~1 kW for ~10 min, the grid-fin hydraulic pump ~20 kW for ~5 min (D: 4 fins × ~10 kN·m hinge moment × 0.5 rad/s), valves and pumps → ~2.5 kWh needed; doubled for redundancy |
+| Capacity, stage 2 | U → propose **2 × 2 kWh** | U/D | avionics ~1.5 kW for ~1 h until the deorbit burn |
+| Ground power | through the T−0 umbilical until internal power (stage: ~T−3 min, U; Dragon: **T−5 min** P [S18]) | P/U | |
+| Dragon batteries | **4 lithium-polymer**; buses **28 V and 120 V DC** | E | [S7] |
+| Dragon battery capacity | U → propose **4 × 2.5 kWh** (entry and splashdown on batteries after trunk jettison: ~1.5 kW for ~2 h) | U/D | |
+| Dragon solar | cells on the trunk's solar half; **1.5–2 kW** orbit average (E [S7]); peak ~**3.6 kW** with the solar side to the Sun (D: projected area 3.7 m × 3.0 m × 80 % cell coverage × 30 % triple-junction efficiency × 1,361 W/m²) | E/D | §1.6 |
+
+### 5.4 Communications
+
+| Link | Band | Tag | Source |
+|---|---|---|---|
+| Falcon 9 telemetry and video, both stages | **S-band**, 2,200–2,400 MHz (the guide reserves 2,206–2,216, 2,227.5–2,237.5, 2,242.5–2,260.5, 2,267.5–2,277.5, 2,365.5–2,375.5, 2,377.5–2,387.5 MHz for the vehicle's own emitters) | P | [S1] §2.6, §5.6 |
+| Range tracking | **C-band transponder** | P | [S1] |
+| Command destruct | none (autonomous FTS) | P | [S1] |
+| Dragon | S-band via TDRS and to ground stations (E); IDSS docking-link hardline after capture | E | |
+
+### 5.5 Crew Dragon life support (cut first if the night runs short, by the plan)
+
+| Item | Value | Tag | Source |
+|---|---|---|---|
+| Cabin | **9.3 m³** pressurised; sea-level air (101.3 kPa, 21 % O₂) | P (volume [S11]) / E (pressure) | |
+| Cabin temperature | 18–27 °C (65–80 °F), crew-selectable | P | [S12] |
+| Leak tolerance | lands safely with a 6.35 mm equivalent orifice | P | [S7] |
+| O₂ and N₂ storage | COPVs in the service section | E | |
+| CO₂ removal | lithium hydroxide canisters (E); keep ppCO₂ below NASA's limits | E | |
+| Crew consumption | O₂ **0.82 kg** per person-day; CO₂ produced **1.04 kg**; water vapour ~**1.9 kg** (respiration and perspiration) | E | NASA BVAD (Baseline Values and Assumptions Document, NASA/TP-2015-218570): nominal values |
+| Suits | SpaceX IVA pressure suits, umbilicals for air, power and data at the seats; protect the crew in a cabin depressurisation | P | [S7] |
+| Free flight | up to ~1 week autonomously (U exact); **docked up to 210 days** | P (210 d) | [S7] (NASA) |
 
 ## 6. Ratings and failures
 
-*(in progress)*
+### 6.1 The record (Falcon 9 Block 5 to 23 October 2026)
+
+From Wikipedia's maintained statistics [S7]: **642 Block 5 Falcon 9 launches, 1 failure** (Starlink Group 9-3, July 2024: second-stage engine), 0 partial; **652 Block 5 landing attempts, 646 successes, 6 failures** (flights 65, 81, 83, 108, 367, 443); a booster has flown **37** times; one Merlin had flown **22** missions by Feb 2024.
+
+### 6.2 The real failures and their mechanisms (each a failure mode the sim can reproduce)
+
+| Event | Mechanism | Sim mode (D105) | Tag, source |
+|---|---|---|---|
+| **CRS-1** (Oct 2012, Falcon 9 v1.0, Merlin 1C) | Engine 1 lost pressure at T+79 s near max-Q (a breach of the chamber jacket, attributed to a material flaw); the computers shut it down, its fairing panels blew off; the other eight burned longer and Dragon reached orbit; the secondary payload did not (stage 2 restart forbidden by ISS rules) | **benign engine shutdown** (statistical, turbomachinery/chamber) + engine-out recovery by the vehicle | P (SpaceX statement Oct 2012, [S7]) |
+| **CRS-7** (June 2015, v1.1) | A helium COPV in the stage 2 LOX tank broke free when a **cast stainless steel rod end** of its axial strut failed at **~2,000 lbf at 3.2 g** (rated 10,000 lbf, normal peak 3,000–3,500 lbf); the buoyant bottle shot up, struck the LOX tank's forward dome and ruptured the helium plumbing → stage 2 overpressure and breakup at T+139 s. NASA's IRT: a **design error** (an industrial-grade casting in a critical cryogenic load path, without screening) | a **joint snap** (the strut's capacity is a statistical draw on a flawed casting: a "fate" on the strut's ultimate load, D105) → a **liberated COPV** hitting the dome → **burst** of the LOX tank | P [S8]; Musk 2015 [S23] |
+| **AMOS-6** (Sept 2016, on the pad during loading for a static fire) | A stage 2 helium COPV failed: **liquid oxygen pooled in buckles between the liner and the overwrap and solidified** (the helium had been loaded colder than LOX's freezing point), ignited by friction or broken fibres → COPV rupture → stage 2 LOX tank breach → fire and explosion of the vehicle and payload | **physical trigger**: bottle temperature below 54.4 K with LOX contact → COPV burst (Block 5's COPV 2.0 and warmer helium loading remove it: debug the condition, not a rate) | P [S13] |
+| **Starlink v1.0-L5** (Mar 2020, B5) | **Isopropyl alcohol** (cleaning fluid) trapped in a sensor dead-leg ignited; the engine was shut down at T+2:22; payload delivered; booster landing failed | **benign engine shutdown** (statistical) | P (SpaceX via Spaceflight Now, NASA ASAP) [S7] |
+| **Starlink** (Feb 2021, B5, flight 108) | Hot exhaust passed through a **damaged heat-shield cover ("boot")** around an engine; the engine shut down; booster lost | **benign engine shutdown**; history-dependent (a reused part's damaged cover) | P [S7] |
+| **GPS III SV04 abort** (Oct 2020) | Two engines started early at T−2 s: a **gas generator relief port blocked by masking lacquer**; abort on the pad; two Crew-1 engines replaced | **ignition failure → pad abort** (safe; the hold-down catches it) | P (Ars Technica, SpaceX/NASA) [S7] |
+| **CRS-16** (Dec 2018, B5) | The **grid-fin hydraulic pump stalled** (single string); the stage spun, landed in the sea | **component lost** (pump) → fins frozen | P [S16] |
+| **Crew Dragon C204** (20 Apr 2019, static fire at LZ-1) | **NTO leaked through a check valve into the helium pressurisation line** during ground processing; when the abort system pressurised (~100 ms before SuperDraco ignition) the NTO slug was driven at high speed into the **titanium check valve**, which ignited in high-pressure NTO → explosion and loss of the capsule. Fix: **burst discs** replace the check valves; flaps seal the SuperDracos before splashdown | **leak** (statistical, valve) → **physical** (oxidiser in the pressurant line at pressurisation → explosion) | P [S19] |
+| **Starlink Group 9-3** (July 2024, B5 stage 2) | A **sense line for a pressure sensor on the stage 2 LOX system cracked from fatigue** (high loading from engine vibration and a loose clamp); the LOX leak over-cooled engine components, including those delivering the igniter fluid; at the second burn the MVac **hard-started**, damaging the engine; the satellites were left in a low orbit | **vibration damage (Miner) → leak** of a line → over-cooling → **hard start** at the next ignition (physical, D105 §6.2) | P (SpaceX update, July 2024) [S25] |
+
+### 6.3 Statistical rates from the vehicle's own record (D105: the part's own data first, at the low end)
+
+Method (D): with k failures in N exposures, the point rate is k/N and the **low end** is the one-sided 10 % Poisson bound χ²₀.₁₀(2k)/(2N) (0.105/N for k = 1, 0.532/N for k = 2); with **k = 0 the low end is zero, so the mode is not statistical** ("if the simulator is not sure, don't trigger the failure"). Exposures: 642 Block 5 boosters × 9 engines = **5,778 engine-ascents** of ~150 s (241 engine-hours); ~656 MVac flights with ~1,300 starts; 652 landings.
+
+| Part, mode | k / N | Point | **Low end (use)** | Hazard for `FailureMode` | Outcome |
+|---|---|---|---|---|---|
+| Merlin 1D booster, in-flight shutdown (benign) | 2 / 241 engine-hours | 8.3×10⁻³ /h | **2.2×10⁻³ /h** | `PerHour(2.2e-3)` | `BenignShutdown` |
+| Merlin 1D, uncontained in flight | 0 / 5,778 | 0 (95 % upper 5.2×10⁻⁴ per flight) | **0** | none | — |
+| Merlin 1D, ignition failure on the pad | ≥ 1 known (2020) / ~700 pad starts × 9 | ~1.6×10⁻⁴ per start | **1.7×10⁻⁵ per start** | `PerStart(1.7e-5)` | `IgnitionFailure` (pad abort) |
+| MVac, failure at a restart | 1 / ~1,300 starts (and its cause was a vibration-fatigue leak, modelled physically) | 7.7×10⁻⁴ | **8×10⁻⁵ per start** if not modelled physically; **0** if the leak path is modelled | `PerStart(8e-5)` | `Uncontained` |
+| Grid-fin hydraulic pump stall | 1 / 652 landings (before the fix) | 1.5×10⁻³ | **1.6×10⁻⁴ per landing** | `PerCycle(1.6e-4)` | `Lost` |
+| Landing failure, all causes | 6 / 652 | 9×10⁻³ | not a mode: the sim's physics lands or crashes the stage | — | — |
+| COPV, strut rod end (CRS-7 type) | 1 / ~2 vehicles' worth of flawed castings, then fixed | — | **0** after the fix (Block 5) | none | — |
+
+Class-level rates where the vehicle's record is silent (valves, batteries, computers, sensors): the vehicle's record of **zero** mission failures from avionics, batteries or valves in 642 flights gives a low end of **zero** — so **no statistical mode for them on Falcon 9 and Dragon** (D105). For other parts of the catalog the class values to use, low ends: liquid-engine catastrophic failure ~1×10⁻³ per engine-flight historically (Aerospace Corp., Chang 2001, the guide's citation [S1]); propulsion causes about two-thirds of launch failures (same); valves, batteries and electronics from NPRD/MIL-HDBK-217 class data (U here; to be sourced when such parts enter the catalog).
+
+### 6.4 Vibration and shock environments and qualification
+
+| Quantity | Value | Tag | Source |
+|---|---|---|---|
+| Random vibration at the payload interface (all flight events, P95/50) | 20–100 Hz 0.0044 g²/Hz; 300–700 Hz 0.01; 800–925 Hz 0.03; 2,000 Hz 0.00644; **5.13 g rms** | P | [S1] Table 5-10 (mid band from aeroacoustics, 600–2,000 Hz from **MVac structure-borne vibration**) |
+| Acoustic (inside the fairing, 60 % fill) | OASPL **131.4 dB** with blankets, **137.9 dB** without | P | [S1] Tables 5-5, 5-6 |
+| Sine | 5–100 Hz, 0.5–1.0 g (axial and lateral, by payload class) | P | [S1] Table 5-4 |
+| Quasi-static limit load factors (payload > 1,800 kg) | axial +6.0 / −2.0 g, lateral ±2.0 g (with axial 3.5 g) | P | [S1] Table 5-3 |
+| Shock at the separation plane | LV-induced: 30 g at 100 Hz to 300 g at 500–10,000 Hz (standard fairing); separation systems: 1,000 g from 1–10 kHz | P | [S1] Tables 5-8, 5-9 |
+| Shock sources | hold-down release, stage separation, fairing and spacecraft separation; all pneumatic on Falcon ("benign shock") | P | [S1] |
+| Qualification margins (general) | qualification = MPE **+6 dB**, duration ~3–4 × the flight exposure (min. 2 min/axis); protoflight +3 dB; acceptance at MPE | P | GSFC-STD-7000B (GEVS); SMC-S-016; NASA-HDBK-7005 |
+| GEVS component random vibration | qualification **14.1 g rms**, acceptance 10.0 g rms (20–2,000 Hz), 2 min/axis (qual), 1 min/axis (acceptance) | P | GEVS (GSFC-STD-7000B) Table 2.4-3 |
+| Pressure vessels (payloads on Falcon) | design: yield 1.5 × MEOP, ultimate 2.0 × MEOP (lines ≥ 1.5 in: 2.5; < 1.5 in: 4.0; valves and regulators 2.5); proof 1.5 × MEOP | P | [S1] Table 6-4 |
+
+**Proposed environments for the sim (§5.9 of the design)** (E/D): engine-mounted components (powerhead) **20 g rms**, qualification 26 g rms (class: engine-mounted equipment); thrust structure and engine bay 10 g rms; tank-mounted and interstage 6 g rms; stage 2 forward skirt and Dragon interface 5.13 g rms (P, the guide's envelope) with qualification **10.3 g rms** (+6 dB) for 3 × the flight exposure. Transmissibility across a bolted joint ~0.5–0.7 (−3 to −6 dB) (E). Miner exponent b ≈ 4 (E, typical for random-vibration fatigue of metallic structure).
+
+### 6.5 Explosions
+
+| Quantity | Value | Tag | Source |
+|---|---|---|---|
+| LOX/RP-1 yield factor (lb TNT per lb of propellant involved), by impact speed | **0 at rest → 0.215 at ≥ 52 m/s (170 ft/s)**, linear between | P (upper-bound screening model from Project PYRO) | FAA AC 450.137-1 (2024), Table 1 [S26] |
+| Hypergols (NTO/MMH) yield factor | 0.020 at rest; 0.085 at 30 m/s; 0.135 at 61 m/s; 0.180 at 91 m/s; 0.220 at 122 m/s; 0.245 at 152 m/s; 0.260 at 183 m/s; 0.275 at 213 m/s; 0.280 at 244 m/s | P | [S26] Table 1 |
+| LOX/LH₂ (for later) | 0.16 to 26 m/s, 1.50 at ≥ 227 m/s | P | [S26] |
+| Static LOX/RP-1 (pad, siting) | 10 % (test stands) to 20 % (launch pads, up to 500,000 lb) TNT | P | DoD 6055.9-STD, as summarised in [S27] |
+| D105's low end for in-flight tank ruptures (no impact) | the at-rest values: LOX/RP-1 **0** blast (a deflagration and fireball, not a detonation), hypergols **2 %** | D | [S26] |
+| Gas-bottle burst energy | E = p·V/(γ−1)·[1 − (p_a/p)^((γ−1)/γ)] (isentropic expansion): a stage 2 helium COPV, 0.19 m³ at 37.9 MPa → **9.8 MJ = 2.3 kg TNT**; a 0.43 m³ stage 1 bottle → 22 MJ = 5.3 kg TNT; a 0.2 m³ nitrogen bottle at 34.5 MPa → 14 MJ = 3.3 kg TNT | D | standard (Brode-type) energy of a burst vessel; TNT 4.184 MJ/kg |
+| Blast | Kingery–Bulmash overpressure against scaled distance Z = R/W^⅓ | P | design §6.5 |
+
+### 6.6 Crew limits (NASA-STD-3001 Vol. 2 Rev. F, 2025 [S28])
+
+Sustained (> 0.5 s) translational acceleration, **seated**, as (duration s, limit m/s²) points (log-linear between):
+
+| Axis | Non-deconditioned crew (launch) | Deconditioned crew (entry after long flight) | Emergency (abort) |
+|---|---|---|---|
+| +Ax (chest-to-back, "eyeballs in") | (0.5, 186), (5, 157), (300, 73.5) | (0.5, 137), (10, 98.1), (30, 78.5), (50, 61.8), (90, 49.0), (120, 42.2), (150, 39.2), (10000, 39.2) | (0.5, 373), (120, 86.3), (300, 73.5), (1200, 49.0) |
+| −Ax | (0.5, −216), (5, −147), (120, −58.8), (400, −39.2) | (0.5, −132), (10, −78.5), (30, −58.8), (50, −46.1), (90, −39.7), (100, −39.2), (10000, −39.2) | (0.5, −284), (120, −75.5), (300, −60.8), (1200, −42.2) |
+| ±Ay | (0.5, 29.4), (1000, 19.6) | (0.5, 19.6), (100, 9.81), (10000, 9.81) | (0.5, 49.0), (1000, 19.6) |
+| +Az (head-to-foot... "eyeballs down") | (0.5, 81.4), (5, 62.8), (1200, 39.2) | (0.5, 19.6), (15, 12.3), (30, 9.81), (36, 9.12), (50, 8.53), (80, 7.55), (120, 6.28), (170, 4.90), (1000, 4.90) | (0.5, 167), (120, 58.8), (1200, 37.3) |
+| −Az | (0.5, −58.8), (5, −37.3), (60, −21.6), (1200, −9.81) | 0 until the total reaches 9.81 m/s², then −1.96 | (0.5, −63.7), (120, −22.6), (1200, −15.7) |
+
+Transient (≤ 0.5 s, landing and abort): the **Brinkley dynamic response** criterion, β ≤ 1.0 at the "low" risk limits (NASA/TM-2013-217380, required by [S28] §6.5.4). Model per axis: a damped spring, DR = ωₙ²·δ/g; parameters and "low" limits as commonly tabulated from Brinkley (1985): x ωₙ 62.8 rad/s, ζ 0.20, DR limits +35 / −28; y ωₙ 58.0, ζ 0.09, ±14; z ωₙ 52.9, ζ 0.224, +15.2 / −13.4 (E: from secondary tabulations; **verify against NASA/TM-2013-217380** before use). Injury-risk targets: [S28] Table 6.5-9 (e.g. < 0.1 % severe for > 95 % of dynamic cases).
 
 ## 7. Materials and fluids
 
@@ -384,3 +600,8 @@ Cycle (all **P**, [S1] §1.3, §2.2): open gas generator; one shaft drives the L
 - **[S21]** Everyday Astronaut (Tim Dodd's team), mission pages, e.g. "SES-22 | Falcon 9 Block 5" (2022): TEA-TEB from the ground for the pad start; canisters on E1, E5, E9 for relights; Merlin 845/934 kN, 285/313 s (estimates).
 - **[S22]** SpaceX, *Falcon 9 Launch Vehicle Payload User's Guide*, Rev 2, 21 Oct 2015: throttle ranges, launch-site services (helium 5,700 psi SLC-40 / 6,000 psi VAFB, GN₂ 5,000 psi), hold-down by hydraulic clamps released at T−0, sample timelines.
 - **[S23]** Space Access Society, *Space Access Update #145*, 20 July 2015 (summary of Musk's CRS-7 press call: helium bottles at 5,500 psi in the LOX tank; tanks pressurised to "a few tens of psi"; the strut: steel, ~2 ft long, ~1 in diameter, rated 10,000 lbf, normal peak 3,000–3,500 lbf, failed near 2,000 lbf at 3.2 g).
+- **[S24]** NASA, "A Look at Tonight's/Today's Key Launch Milestones" (Commercial Crew blog), Crew-10 (March 2025): entry burn 6:18–6:29, landing burn 7:22–7:39, landing 7:39, Dragon separation 9:58, nosecone 10:46.
+- **[S25]** SpaceX, Starlink Group 9-3 update, 25 July 2024, as reported by Space.com and SpaceNews: "a crack in a sense line for a pressure sensor attached to the vehicle's oxygen system … due to fatigue caused by high loading from engine vibration and looseness in the clamp"; the engine hard-started at its second burn.
+- **[S26]** FAA, Advisory Circular AC 450.137-1, *De Minimis Far-Field Overpressure Blast Effects Analysis*, 10 Sept 2024: §4.7 and §7.3, Table 1 (liquid-propellant yield factors from Project PYRO by impact speed).
+- **[S27]** DoD 6055.9-STD explosive equivalents for liquid propellants (LO2/RP-1 10 % test stands, 20 % launch pads up to 500,000 lb), as summarised by DTIC report AD1104981 *Explosive Equivalence of Hydrocarbon Propellants* and NASA NTRS 20150002957.
+- **[S28]** NASA, *NASA-STD-3001 Volume 2, Revision F* (2025), §6.5.1 Tables 6.5-1 to 6.5-3 (sustained acceleration limits, seated), §6.5.3 Table 6.5-9, §6.5.4 (Brinkley criterion, NASA/TM-2013-217380).
