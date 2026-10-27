@@ -75,6 +75,18 @@ pub fn normal_force(kind: ContactKind, c: &ContactFile, depth: f64, closing: f64
         return 0.0;
     }
     let (spring, damping) = match kind {
+        ContactKind::Foot if c.foot.crush > 0.0 => {
+            // A crush core: the strut pushes at most its plateau while it
+            // strokes; bottomed out, the hull takes the rest.
+            let s = c.foot.stroke;
+            let strut = (c.foot.stiffness * depth.min(s) + c.foot.damping * closing).clamp(0.0, c.foot.crush);
+            let past = (depth - s).max(0.0);
+            return if past > 0.0 {
+                c.foot.crush + (c.hull.stiffness * past + c.hull.damping * closing).max(0.0)
+            } else {
+                strut
+            };
+        }
         ContactKind::Foot => {
             let s = c.foot.stroke;
             let past = (depth - s).max(0.0);

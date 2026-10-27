@@ -3,8 +3,8 @@ use crate::craft::Spring;
 
 fn params() -> ContactFile {
     ContactFile {
-        foot: Spring { stiffness: 4e5, damping: 6e4, stroke: 0.35, friction: 0.8 },
-        hull: Spring { stiffness: 2e6, damping: 1e5, stroke: 0.0, friction: 0.5 },
+        foot: Spring { stiffness: 4e5, damping: 6e4, stroke: 0.35, friction: 0.8, crush: 0.0 },
+        hull: Spring { stiffness: 2e6, damping: 1e5, stroke: 0.0, friction: 0.5, crush: 0.0 },
         stick_speed: 0.05,
     }
 }
@@ -195,4 +195,25 @@ fn holds_table() {
     assert!(!holds(com, -DVec3::Z, &on(0.8), 2.2));
     let shifted = com + DVec3::new(1.0, 1.0, 0.0) * std::f64::consts::FRAC_1_SQRT_2;
     assert!(holds(shifted, -DVec3::Z, &on(0.8), 1.1) && !holds(shifted, -DVec3::Z, &on(0.8), 1.15));
+}
+
+/// A foot with a crush core pushes at most its plateau within its stroke
+/// (the strut's spring and damper below it), then the hull takes the rest.
+#[test]
+fn a_crush_core_caps_the_foot() {
+    let mut c = params();
+    c.foot.crush = 5e4;
+    // (depth, closing) → force
+    let cases = [
+        (0.0, 3.0, 0.0),
+        (0.05, 0.0, 4e5 * 0.05),      // the strut's spring
+        (0.05, 1.0, 5e4),             // spring + damper over the plateau: capped
+        (0.3, 0.0, 5e4),              // deep in the stroke: the plateau
+        (0.45, 0.0, 5e4 + 2e6 * 0.1), // bottomed out: plus the hull
+        (0.1, -2.0, 0.0),             // pulling away: never pulls
+    ];
+    for (depth, closing, want) in cases {
+        let f = normal_force(ContactKind::Foot, &c, depth, closing);
+        assert!((f - want).abs() < 1e-6, "{depth} {closing}: {f} vs {want}");
+    }
 }

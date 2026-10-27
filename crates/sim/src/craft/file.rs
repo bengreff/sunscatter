@@ -176,6 +176,10 @@ pub struct Spring {
     pub stroke: f64,
     /// Coulomb friction coefficient.
     pub friction: f64,
+    /// A foot's crush core (N; zero: none): within its stroke the foot
+    /// pushes at most this (a honeycomb crushing at its plateau force).
+    #[serde(default)]
+    pub crush: f64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]

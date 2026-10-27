@@ -338,9 +338,15 @@ fn falcon9_gravity_turn_profile() {
 /// The booster (`falcon9-crew#12-31`) at `alt` m over the sea, falling at
 /// `speed` m/s engines first (nose up), its first-stage tanks at `fill`.
 fn booster(w: &World, alt: f64, speed: f64, fill: f64) -> Vessel {
+    booster_as(w, CraftId("falcon9-crew#12-31".into()), alt, speed, fill)
+}
+
+/// As [`booster`], in configuration `id` (its mechanisms at their deployed
+/// angles where the id says so).
+fn booster_as(w: &World, id: CraftId, alt: f64, speed: f64, fill: f64) -> Vessel {
     let earth = w.find("Earth").unwrap();
     let p = earth.physical.as_ref().unwrap();
-    let craft = craft_of(&CraftId("falcon9-crew#12-31".into()));
+    let craft = craft_of(&id);
     let deg = crate::math::PI / 180.0;
     let fixed = p.ground_point(28.0 * deg, -75.0 * deg, alt);
     let rot = p.rotation;
@@ -355,6 +361,11 @@ fn booster(w: &World, alt: f64, speed: f64, fill: f64) -> Vessel {
         st.liquid *= fill;
         let g = crate::systems::plumbing::geometry(t, st);
         st.ullage_moles = crate::fluids::moles(t.load.pressure, g.ullage, st.ullage_k);
+    }
+    for (d, m) in def.mechanisms.iter().zip(s.mechanisms.iter_mut()) {
+        if id.deployed().contains(&d.part) {
+            (m.angle, m.target) = (d.item.deployed_deg, d.item.deployed_deg);
+        }
     }
     b.propellant = s.consumables(&def);
     b
@@ -404,4 +415,77 @@ fn booster_grid_fin_descent_profile() {
             }
         }
     }
+}
+
+/// The booster's landing burn on one engine (falcon9.md §4.4): from 2 km
+/// falling at 150 m/s engines first, grid fins and legs out, the centre
+/// Merlin lit by the "Booster: one engine" function and throttled by a
+/// simple hoverslam rule (the deceleration that stops it at the ground,
+/// within the engine's 40–100 %), SAS on retrograde, then holding upright:
+/// it touches down on its four legs, intact, and comes to rest. It cannot
+/// hover (40 % of a Merlin is more than its weight: falcon9.md §4.4), so
+/// the engine is cut at touchdown. Ignored until the structure's leg joints
+/// carry a landing (their ring-bending ultimate of ~128 kN snaps them at
+/// touchdown; the dynamics land it at 1.1 m/s).
+#[test]
+#[ignore]
+fn the_booster_lands_on_one_engine() {
+    use super::hold::{HoldMode, SpeedReference};
+    let w = world();
+    let id = CraftId("falcon9-crew#12-31".into()).with_deployed(&[13, 14, 15, 16, 28, 29, 30, 31]);
+    let mut v = booster_as(&w, id, 2_000.0, 150.0, 0.03);
+    let earth = w.find("Earth").unwrap();
+    let rot = earth.physical.as_ref().unwrap().rotation;
+    let g = 9.81;
+    let mut lit = false;
+    let mut t = v.time;
+    let mut touchdown = None;
+    for _ in 0..1200 {
+        t = t.add_seconds(0.1);
+        let (anchor, r, vel) = v.state(&w);
+        let surface = vel - rot.omega(v.time).raw().cross(r);
+        let up = r.normalize();
+        let vz = surface.dot(up);
+        let h = crate::forces::altitude_above(&w, &w.snapshot(v.time), anchor, anchor, r).0 - v.contact_height();
+        let mass = v.mass();
+        // The thrust the engine gives at full here (sea level ~845 kN).
+        let full = 845.0e3;
+        let need = (vz * vz / (2.0 * (h - 1.0).max(0.5)) + g) * mass / full;
+        if !lit && need > 0.85 {
+            v.command(&w, &ShipCommand::Select("s1.one".into())).unwrap();
+            v.command(&w, &ShipCommand::Ignite("s1.one".into())).unwrap();
+            lit = true;
+        }
+        let touching = matches!(v.phase, Phase::Landed { .. }) || (h < 0.3 && vz.abs() < 3.0);
+        if lit && touching && touchdown.is_none() {
+            touchdown = Some((vz, h));
+            v.command(&w, &ShipCommand::Shutdown("s1.one".into())).unwrap();
+        }
+        let hold = if surface.length() > 20.0 { HoldMode::Retrograde } else { HoldMode::Stability };
+        let controls = Controls {
+            throttle: need.clamp(0.0, 1.0),
+            sas: true,
+            hold,
+            speed: SpeedReference::Surface,
+            ..Default::default()
+        };
+        v.advance(&w, t, &controls, usize::MAX);
+        if matches!(v.phase, Phase::Landed { .. } | Phase::Crashed { .. }) || v.plan_breakup().is_some() {
+            break;
+        }
+    }
+    let t0b = v.ship().unwrap().runtime.launch.unwrap();
+    let events: Vec<String> =
+        v.ship_events().iter().map(|e| format!("{:.2} {}", e.at.seconds_since(t0b), e.text)).collect();
+    println!(
+        "touchdown {touchdown:?}, {:?}, destroyed {:?}, events {events:#?}",
+        std::mem::discriminant(&v.phase),
+        v.destruction()
+    );
+    assert!(lit, "the engine lit");
+    assert!(matches!(v.phase, Phase::Landed { .. }), "at rest, intact");
+    assert!(v.destruction().is_none() && v.plan_breakup().is_none());
+    let def = v.ship_def().unwrap();
+    let e9 = def.engines.iter().position(|e| e.id == "s1.merlin.9").unwrap();
+    assert_eq!(v.ship().unwrap().engines[e9].ignitions, 2, "one relight used");
 }

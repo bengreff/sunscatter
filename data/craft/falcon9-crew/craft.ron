@@ -248,7 +248,9 @@
     // On the pad: ~1,560 t (with the mount's share of the pad) on the posts'
     // bottoms (hull points); landing: the legs' feet on their crush cores.
     contact: (
-        foot: (stiffness: 2.0e6, damping: 5.0e5, stroke: 0.4, friction: 0.8),
+        // The legs' crush cores (aluminium honeycomb, falcon9.md §1.2): a
+        // plateau of 250 kN per leg (U: ~2.4 g on an empty 30 t stage).
+        foot: (stiffness: 2.0e6, damping: 5.0e5, stroke: 0.4, friction: 0.8, crush: 2.5e5),
         hull: (stiffness: 5.0e7, damping: 2.0e6, friction: 0.5),
         stick_speed: 0.05,
     ),
