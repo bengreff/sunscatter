@@ -69,8 +69,9 @@ impl Default for ControlsSettings {
 /// The graphics settings' version: a file saved with an older one gets the
 /// default graphics (save compatibility is not required, D063). 1: Minimal
 /// became the default tier (D073). 2: Minimal draws surface zones and the
-/// adaptive raymarched sky (crisp-surfaces.md).
-pub const GRAPHICS_VERSION: u32 = 2;
+/// adaptive raymarched sky (crisp-surfaces.md). 3: Minimal draws planetshine
+/// (D055, solar-visuals.md).
+pub const GRAPHICS_VERSION: u32 = 3;
 
 /// The settings file.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

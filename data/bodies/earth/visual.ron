@@ -3,6 +3,8 @@
     base_color: (0.18, 0.32, 0.55),
     color_map: Some("color.jpg"),
     albedo: 0.30,
+    // Visual geometric albedo, NASA Planetary Fact Sheet (NSSDCA): planetshine at full phase.
+    geometric_albedo: Some(0.434),
     roughness: 0.85,
     icon_color: (0.45, 0.65, 1.0),
     // Open ocean's water-leaving reflectance (π·Rrs for clear water: ~0.03 at

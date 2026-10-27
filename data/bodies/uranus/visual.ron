@@ -9,6 +9,8 @@
     // values, not measurements: the first warp wavelength, its amplitude, the east-west stretch, the tone.
     clouds: Some((scale_m: 1000000.0, warp: 0.15, stretch: 6.0, contrast: 0.03)),
     albedo: 0.3,
+    // Visual geometric albedo, NASA Planetary Fact Sheet (NSSDCA): planetshine at full phase.
+    geometric_albedo: Some(0.488),
     roughness: 0.95,
     icon_color: (0.82, 0.98, 1.00),
 )

@@ -36,6 +36,13 @@ pub struct BodyVisualDef {
     /// Bond albedo (for light reflected onto nearby objects).
     #[serde(default = "default_albedo")]
     pub albedo: f32,
+    /// Visual geometric albedo p: the light reflected towards the Sun,
+    /// relative to a white disc. Planetshine at full phase is E p (R/d)²;
+    /// without it, a Lambert sphere of the Bond albedo (p = 2/3 A), which
+    /// underestimates bodies brighter towards the Sun (Earth 0.434 against
+    /// 2/3 × 0.294, Jupiter 0.538 against 2/3 × 0.343).
+    #[serde(default)]
+    pub geometric_albedo: Option<f32>,
     /// Icon colour in map mode.
     #[serde(default = "default_icon")]
     pub icon_color: [f32; 3],

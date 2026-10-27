@@ -3,6 +3,8 @@
 (
     base_color: (0.55, 0.52, 0.50),
     albedo: 0.088,
+    // Visual geometric albedo, NASA Planetary Fact Sheet (NSSDCA): planetshine at full phase.
+    geometric_albedo: Some(0.142),
     roughness: 0.95,
     icon_color: (0.72, 0.69, 0.68),
     // Zones (crisp-surfaces.md) from k-means centres of the colour map (MESSENGER MDIS 3-colour basemap, USGS 665 m) in CIELAB;

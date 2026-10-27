@@ -3,6 +3,8 @@
 (
     base_color: (1.0, 0.99, 0.97),
     albedo: 0.76,
+    // Visual geometric albedo, NASA Planetary Fact Sheet (NSSDCA): planetshine at full phase.
+    geometric_albedo: Some(0.689),
     roughness: 0.95,
     icon_color: (1.00, 0.98, 0.83),
     // The surface (agent SKY; docs/features/solar-visuals.md#venus-and-titan-surfaces): zones from the Magellan

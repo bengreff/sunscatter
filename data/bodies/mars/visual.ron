@@ -3,6 +3,8 @@
 (
     base_color: (0.76, 0.45, 0.30),
     albedo: 0.25,
+    // Visual geometric albedo, NASA Planetary Fact Sheet (NSSDCA): planetshine at full phase.
+    geometric_albedo: Some(0.17),
     roughness: 0.95,
     icon_color: (0.90, 0.63, 0.51),
     // The sky (D052, Hillaire): CO2 Rayleigh scattering and suspended dust, at 680, 550, 440 nm.

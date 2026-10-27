@@ -109,12 +109,20 @@ pub fn update_scene(sim: Res<SimState>, rig: Res<CameraRig>, defs: Res<BodyDefs>
             let sphere = Sphere {
                 centre: rel(*n),
                 radius: radius(*n),
-                albedo: f64::from(d.albedo),
+                albedo: reflector_albedo(d.albedo, d.geometric_albedo),
                 tint: color::reflector_tint(d.base_color),
             };
             (*n, sphere)
         })
         .collect();
+}
+
+/// The Lambert albedo a body reflects other bodies' light with
+/// ([`planetshine`](rules::planetshine)'s sphere): the one whose geometric
+/// albedo (2/3 of it) is the body's measured one, so planetshine at full
+/// phase is right (E p (R/d)²); else the Bond albedo.
+pub fn reflector_albedo(bond: f32, geometric: Option<f32>) -> f64 {
+    geometric.map_or(f64::from(bond), |p| 1.5 * f64::from(p))
 }
 
 /// A drawn star's light: Bevy's directional light for light slot `.0`.

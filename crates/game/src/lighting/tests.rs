@@ -393,3 +393,36 @@ fn the_shaders_share_the_lighting_limits() {
         assert!(wgsl.contains(&decl), "light.wgsl lacks `{decl}`");
     }
 }
+
+#[test]
+fn planetshine_from_the_data_is_of_the_measured_size() {
+    // Full-phase planetshine is E p (R/d)^2 with the body's measured
+    // geometric albedo (visual.ron), not 2/3 of its Bond albedo.
+    let reflector = |name: &str| {
+        let d = crate::body_visual::load(name).expect(name);
+        super::reflector_albedo(d.albedo, d.geometric_albedo)
+    };
+    let sun = luminous_power(3.828e26, 93.0);
+    let full = |name: &str, r: f64, d: f64, au: f64| {
+        let e = flux(sun, au * AU);
+        planetshine(DVec3::new(-d, 0.0, 0.0), DVec3::ZERO, r, reflector(name), e, DVec3::new(-1.0, 0.0, 0.0))
+    };
+    // (case, lux at full phase, expected range)
+    let cases = [
+        // Earth (p 0.434) from the Moon at new Moon: ~15 lux, some 50 times
+        // full moonlight (~0.3 lux).
+        ("Earthshine on the Moon", full("Earth", EARTH_R, 3.844e8, 1.0), (12.0, 18.0)),
+        // Jupiter (p 0.538) from Io at full Jupiter: ~73 lux, 1.5 % of
+        // Io's sunlight (4,680 lux at 5.2 AU).
+        ("Jupitershine on Io", full("Jupiter", 7.1492e7, 4.217e8, 5.203), (60.0, 85.0)),
+        // Saturn (p 0.499) from Titan: ~1.7 lux, 0.12 % of its sunlight.
+        ("Saturnshine on Titan", full("Saturn", 6.0268e7, 1.2219e9, 9.537), (1.4, 2.0)),
+    ];
+    for (case, lux, (lo, hi)) in cases {
+        assert!(lux >= lo && lux <= hi, "{case}: {lux}");
+    }
+    // A body without a measured geometric albedo reflects as a Lambert
+    // sphere of its Bond albedo.
+    assert_eq!(super::reflector_albedo(0.3, None), 0.3f32 as f64);
+    assert!((super::reflector_albedo(0.3, Some(0.4)) - 0.6).abs() < 1e-6);
+}

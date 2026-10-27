@@ -27,6 +27,8 @@
         ],
     )),
     albedo: 0.342,
+    // Visual geometric albedo, NASA Planetary Fact Sheet (NSSDCA): planetshine at full phase.
+    geometric_albedo: Some(0.499),
     roughness: 0.95,
     icon_color: (0.98, 0.92, 0.76),
 )

@@ -129,6 +129,10 @@ impl GraphicsSettings {
                 star_magnitude: 5.0,
                 shadows: true,
                 msaa: MsaaLevel::X2,
+                // Planetshine is physical light (D055: Jupiter lights its
+                // moons' night sides with 1.5 % of their sunlight), and costs
+                // two Lambert terms.
+                earthshine: true,
                 ..base
             },
             Tier::Low => GraphicsSettings {
@@ -264,11 +268,11 @@ mod tests {
         let m = GraphicsSettings::preset(Tier::Minimal);
         assert_eq!(Tier::default(), Tier::Minimal);
         // Relief on (the drawn ground is the physical ground), crisp zones,
-        // the physical sky (raymarched from orbit), stars and shadows; the
-        // costly effects off.
-        assert!(m.terrain && m.zones && m.shadows && m.star_magnitude >= 5.0);
+        // the physical sky (raymarched from orbit), stars, shadows and
+        // planetshine; the costly effects off.
+        assert!(m.terrain && m.zones && m.shadows && m.earthshine && m.star_magnitude >= 5.0);
         assert_eq!(m.atmosphere, AtmosphereQuality::Raymarched);
-        assert!(!(m.detail || m.bloom || m.flare || m.ocean_glint || m.earthshine || m.sky_light));
+        assert!(!(m.detail || m.bloom || m.flare || m.ocean_glint || m.sky_light));
         assert_ne!(m.msaa, MsaaLevel::X4);
     }
 
