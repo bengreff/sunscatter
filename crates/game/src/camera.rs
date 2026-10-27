@@ -38,9 +38,10 @@ pub struct CameraRig {
     pub pitch: f64,
     pub distance: f64,
     /// Computed each frame: the frame's anchor, camera position within it,
-    /// and the camera's up vector.
+    /// the focus position within it, and the camera's up vector.
     pub anchor: NodeId,
     pub cam_pos: DVec3,
+    pub target: DVec3,
     pub up: DVec3,
     /// The horizontal direction yaw is measured from, perpendicular to `up`:
     /// carried from frame to frame ([`carry_reference`]), reset to
@@ -66,6 +67,15 @@ pub enum UpRef {
     Fixed,
 }
 
+impl CameraRig {
+    /// The camera's distance to its focus as placed this frame: the chosen
+    /// `distance`, unless a surface pulled the camera in. Map view measures
+    /// sizes with it (D054).
+    pub fn seen_distance(&self) -> f64 {
+        (self.cam_pos - self.target).length()
+    }
+}
+
 impl Default for CameraRig {
     fn default() -> Self {
         CameraRig {
@@ -75,6 +85,7 @@ impl Default for CameraRig {
             distance: 60.0,
             anchor: NodeId(0),
             cam_pos: DVec3::ZERO,
+            target: DVec3::ZERO,
             up: DVec3::Z,
             reference: DVec3::X,
             up_ref: UpRef::Fixed,
@@ -362,6 +373,7 @@ pub fn update(
     let cam_pos = place(target, d, rig.distance, min, up, clear);
     rig.anchor = anchor;
     rig.cam_pos = cam_pos;
+    rig.target = target;
     rig.up = up;
     if let Ok(mut t) = cam.single_mut() {
         let look = safe_dir(target - cam_pos, -d);

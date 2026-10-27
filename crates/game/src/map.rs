@@ -44,6 +44,19 @@ impl MapView {
     pub fn in_map(&self, id: ObjectId) -> bool {
         self.get(id).in_map
     }
+
+    /// Whether the object's orbit line is drawn (D054).
+    pub fn line(&self, id: ObjectId) -> bool {
+        self.get(id).line
+    }
+
+    /// The body a double-click at `cursor` picks (D054: the heaviest).
+    pub fn pick_body(&self, cursor: Vec2) -> Option<sim::frame::NodeId> {
+        match self.objects[map_view::pick_body(&self.objects, cursor)?].id {
+            ObjectId::Body(node) => Some(node),
+            ObjectId::Vessel(_) => None,
+        }
+    }
 }
 
 /// View parameters for projecting camera-relative points to the screen.
@@ -121,6 +134,7 @@ pub fn update(
         depth: c.length(),
         disc_px: v.radius_px(c, radius),
         pinned: false,
+        flown: false,
     };
     let mut objects = Vec::new();
     for node in eph.bodies() {
@@ -140,10 +154,14 @@ pub fn update(
         let mut o = object(ObjectId::Vessel(id), c, VESSEL_RADIUS, orbit, 0.0);
         // The tracking station never hides a tracked vessel.
         o.pinned = station.open && (id == active || tracked.is_tracked(id));
+        o.flown = id == active;
         objects.push(o);
     }
-    let k = map_view::scale(v.height, v.fov, rig.distance);
-    let vis = map_view::classify(&objects, k, |id| map.in_map(id));
+    // The scale where the camera is: a surface may have pulled it in from
+    // the chosen distance (then nothing far away is a map object).
+    let distance = rig.seen_distance();
+    let k = map_view::scale(v.height, v.fov, distance);
+    let vis = map_view::classify(&objects, k, distance, |id| map.get(id));
     *map = MapView { objects, vis, k };
 }
 
@@ -169,7 +187,7 @@ pub fn draw_body_orbits(
     let current = trajectory::vessel_dominant(&sim.world, dom, sim.clock, sim.ship());
     let snap = sim.world.snapshot(sim.clock);
     for node in eph.bodies() {
-        if !map.in_map(ObjectId::Body(node)) {
+        if !map.line(ObjectId::Body(node)) {
             continue;
         }
         let Some(p) = dom.of_body(eph, sim.clock, node) else { continue };

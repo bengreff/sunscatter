@@ -279,7 +279,7 @@ pub fn draw(
     let active_frame = nav.line_frame().filter(|_| !station.open);
     for (i, vessel) in sim.fleet.iter().enumerate() {
         let active = i == sim.active;
-        if (!active && !tracked.is_tracked(vessel.id())) || !map.in_map(ObjectId::Vessel(vessel.id())) {
+        if (!active && !tracked.is_tracked(vessel.id())) || !map.line(ObjectId::Vessel(vessel.id())) {
             continue;
         }
         // The active line in the navball's frame (D089), the others about

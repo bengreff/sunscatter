@@ -227,10 +227,11 @@ It lists tracked vessels (and later asteroids), lets you focus and switch to a v
 - Physical units: sunlight is about 126,600 lux at 1 AU, from the Sun's luminosity in data. How light reaches each object and how exposure works: D055.
 - Atmospheres use Bevy's Hillaire 2020 implementation (its lookup tables inside an atmosphere, raymarched from outside it), with scattering coefficients and scale heights as data. We work around its runtime-toggling bugs rather than maintain our own scattering, unless it proves insufficient.
 
-**D054: Map view is decided per object, by pixel size.** *Decided, 2026-09-26. Replaces D049 and D053.*
-- An object (body or vessel) is in map view when its sprite is under 1 px and its orbit radius is at least 1 px, with hysteresis. Sizes use one scale: pixels per metre at the camera's distance to its focus.
-- Its icon, orbit line, hover ring and name, and Ap/Pe markers are shown only while it is in map view. There is no global map mode and no map-view key.
-- On hover, the heaviest object under the cursor wins (a planet over its moons).
+**D054: Map view is decided per object, by pixel size.** *Decided, 2026-09-26; orbit lines and double-click revised 2026-10-26 (owner). Replaces D049 and D053.*
+- An object (body or vessel) is in map view when its sprite is under 1 px and its orbit radius is at least 1 px, with hysteresis. Sizes use one scale: pixels per metre at the camera's distance to its focus, as placed (a surface may pull the camera in from the chosen distance).
+- Its icon, hover ring and name, and Ap/Pe markers are shown only while it is in map view. There is no global map mode and no map-view key.
+- Its orbit line is shown while it is in map view and its orbit is seen from outside: a radius of at most the focus distance, with hysteresis to 1.5 times. From inside, an orbit wraps around the camera and crosses the sky as a straight line (the owner, 2026-10-26: the planets' and dwarf planets' orbits seen from the pad, "too many appear too early"). The active vessel's own line is exempt: it starts under the camera.
+- On hover and on a double-click, the heaviest object under the cursor wins (a planet over its moons).
 - Details: [map-view-lighting-controls.md](features/map-view-lighting-controls.md).
 
 **D055: Lighting is physical and per body, at a fixed exposure.** *Decided, 2026-09-26; exposure revised the same day.*

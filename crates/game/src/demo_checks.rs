@@ -37,14 +37,20 @@ pub fn check_map_view(
     let Some(demo) = demo else { return };
     let ship = map.in_map(ObjectId::Vessel(sim.ship().id()));
     let body = |name: &str| sim.world.find(name).map(|s| map.in_map(ObjectId::Body(s.node)));
+    let line = |name: &str| sim.world.find(name).map(|s| map.line(ObjectId::Body(s.node)));
+    let body_lines = || sim.world.eph.bodies().filter(|&b| map.line(ObjectId::Body(b))).count();
     match demo.step {
-        Step::Pad => assert!(!ship, "demo Pad: the ship must not be in map view"),
+        Step::Pad => {
+            assert!(!ship, "demo Pad: the ship must not be in map view");
+            assert_eq!(body_lines(), 0, "demo Pad: no orbit lines from the pad (D054)");
+        }
         Step::Map if demo.shot_taken => {
             assert!(ship, "demo Map: the ship must be in map view");
             assert_eq!(body("Earth"), Some(false), "demo Map: Earth is drawn at full size");
         }
         Step::Tracking if station.open && demo.timer > 1.0 => {
-            assert_eq!(body("Moon"), Some(true), "demo tracking station: the Moon's orbit must show");
+            assert_eq!(body("Moon"), Some(true), "demo tracking station: the Moon must be in map view");
+            assert_eq!(line("Moon"), Some(true), "demo tracking station: the Moon's orbit must show");
             assert!(ship, "demo tracking station: the active vessel is pinned");
         }
         _ => {}

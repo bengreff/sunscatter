@@ -40,7 +40,7 @@ The speed is also a setting (§6), stored in `ControlsSettings`. The farthest zo
 
 ### The rule
 
-Each object *o* is a body or a vessel. All sizes are measured with **one scale**: pixels per metre at the camera's distance to its **focus**.
+Each object *o* is a body or a vessel. All sizes are measured with **one scale**: pixels per metre at the camera's distance to its **focus**, as the camera is placed (a surface can pull it in from the chosen distance: then it is the nearer one).
 
     k = viewport_height_px / (2 · tan(fov/2) · focus_distance)
 
@@ -49,6 +49,7 @@ Using one scale is the owner's wording, and it has a property we want. Objects i
 - `sprite_px(o) = k · radius(o)`. A vessel uses its bounding radius, currently 10 m.
 - `orbit_px(o) = k · orbit_radius(o)`, where the orbit radius is the osculating semi-major axis about the object's primary, or the current distance to it if unbound.
 - **o is in map view ⇔ `sprite_px(o) < 1` and `orbit_px(o) ≥ 1`,** with hysteresis: it enters below 1 px and leaves above 2 px, and likewise for the orbit bound.
+- **o's orbit line is drawn ⇔ o is in map view and its orbit is seen from outside: `orbit_radius(o) ≤ focus_distance`** (it leaves above 1.5 times; revised 2026-10-26). From inside its orbit the camera sees the orbit wrap around it, a great circle across the sky: from the pad, every dwarf planet's line did that. The active vessel's line is exempt (it starts under the camera, the flight's own prediction); pinned objects in the tracking station too. Tested by a table (`map_view::tests::orbit_lines_appear_only_when_seen_as_orbits`): from the pad and from low orbit no heliocentric line and no Moon line; the Earth–Moon system the Moon's; the inner and outer Solar System the planets' that fit.
 
 ### What depends on it
 
@@ -57,7 +58,7 @@ This is the only place any of these behaviours are decided:
 | Thing | Shown when |
 |---|---|
 | Icon | o is in map view |
-| Orbit line of o | o is in map view (and o's orbit lines are enabled, §6) |
+| Orbit line of o | o is in map view and its orbit is seen from outside (the active vessel's always), and o's orbit lines are enabled (§6) |
 | Hover highlight ring and name | o is in map view |
 | Ap/Pe markers (vessels) | o is in map view |
 | The 3D model/terrain | always, from any distance (it just becomes sub-pixel) |
@@ -66,7 +67,7 @@ There is no global "map mode" flag any more. The old ship test (<1 px) is the ve
 
 ### Hover priority (item 9)
 
-Only objects in map view can be hovered: a body drawn at full size shows no ring and no name. Among the in-map-view objects under the cursor:
+Only objects in map view can be hovered: a body drawn at full size shows no ring and no name. A double-click on bodies (their menu) follows the same priority (`map_view::pick_body`), among bodies drawn at any size whose disc, at least 16 px across the centre, is under the cursor and that no nearer body's disc hides. Among the in-map-view objects under the cursor:
 1. the one with the **largest** mass wins, so a planet beats its moons when their icons overlap, and a star beats its planets;
 2. ties go to the nearest icon centre.
 

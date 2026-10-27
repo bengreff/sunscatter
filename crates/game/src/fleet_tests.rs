@@ -370,10 +370,16 @@ fn game_side_costs() {
             depth: 1e7 + k as f64,
             disc_px: 0.5,
             pinned: false,
+            flown: false,
         })
         .collect();
     let mut shown = 0;
-    let classify_ms = time(&mut || shown += classify(&objects, 1e-5, |_| true).iter().filter(|v| v.icon).count());
+    let classify_ms = time(&mut || {
+        shown += classify(&objects, 1e-5, 1e8, |_| crate::map_view::Visibility { in_map: true, icon: true, line: true })
+            .iter()
+            .filter(|v| v.icon)
+            .count()
+    });
     println!(
         "50 vessels: Dominance::new {new_ms:.3} ms; line ends of all 50 {lines_ms:.2} ms ({:.3} each); map orbit sizes {orbit_ms:.3} ms; map-view rule over 94 objects {classify_ms:.3} ms",
         lines_ms / 50.0

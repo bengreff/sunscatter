@@ -3,7 +3,7 @@
 //! and the double-click body menu. The navball cluster is in
 //! [`crate::navball`], the task menus in [`crate::interface::menus`].
 
-use crate::camera::{self, CameraRig, MainCamera};
+use crate::camera::{self, CameraRig};
 use crate::interface::layout::{self, InterfaceSettings};
 use crate::interface::{fixed_panel, theme};
 use crate::state::{SimState, MAX_PHYSICS_WARP, WARP_LEVELS};
@@ -58,22 +58,20 @@ pub fn measure_fps(time: Res<Time>, mut meter: ResMut<FpsMeter>) {
     meter.tick(time.delta_secs_f64());
 }
 
-/// Double-click on a body opens its menu.
-#[allow(clippy::too_many_arguments)]
+/// Double-click on a body opens its menu: the heaviest body under the
+/// cursor (D054, `map_view::pick_body`), a planet over its moons.
 pub fn pick_bodies(
     buttons: Res<ButtonInput<MouseButton>>,
     time: Res<Time>,
     egui: Res<EguiWantsInput>,
     window: Query<&Window, With<PrimaryWindow>>,
-    camera: Query<(&Camera, &GlobalTransform), With<MainCamera>>,
-    sim: Res<SimState>,
-    rig: Res<CameraRig>,
+    map: Res<crate::map::MapView>,
     mut ui: ResMut<UiState>,
 ) {
     if !buttons.just_pressed(MouseButton::Left) || egui.wants_any_pointer_input() {
         return;
     }
-    let (Ok(window), Ok((cam, cam_tf))) = (window.single(), camera.single()) else { return };
+    let Ok(window) = window.single() else { return };
     let Some(cursor) = window.cursor_position() else { return };
     let now = time.elapsed_secs_f64();
     let double = ui.last_click.is_some_and(|(t, p)| now - t < 0.4 && p.distance(cursor) < 8.0);
@@ -81,24 +79,7 @@ pub fn pick_bodies(
     if !double {
         return;
     }
-    let Ok(ray) = cam.viewport_to_world(cam_tf, cursor) else { return };
-    let dir = ray.direction.as_vec3().as_dvec3();
-    let snap = sim.world.snapshot(sim.clock);
-    let hit = sim
-        .world
-        .sources
-        .iter()
-        .filter_map(|s| {
-            let radius = s.physical.as_ref()?.radius_eq;
-            let c = snap.relative(s.node, rig.anchor).r - rig.cam_pos;
-            let dist = c.length();
-            // Angular test with a minimum pick size so small discs are clickable.
-            let angle = dir.dot(c / dist).clamp(-1.0, 1.0).acos();
-            let size = (radius / dist).clamp(0.0, 1.0).asin().max(0.015);
-            (angle <= size).then_some((s.node, dist))
-        })
-        .min_by(|a, b| a.1.total_cmp(&b.1));
-    if let Some((node, _)) = hit {
+    if let Some(node) = map.pick_body(cursor) {
         ui.menu = Some((node, cursor));
     }
 }
