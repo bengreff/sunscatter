@@ -603,3 +603,25 @@ fn a_failure_fires_the_same_in_frames_and_in_one_jump() {
         }
     }
 }
+
+/// The legs stay stowed on the pad (review, 2026-10-27): deployed there,
+/// their feet would reach ~2.5 m below the engines, into the mount and the
+/// ground, and the reshaping woke the clamped stack, which the contact
+/// blew apart. The pinned "Landing legs" function is refused with an
+/// alarm while the clamps hold; the vessel stays clamped on the pad.
+#[test]
+fn the_legs_stay_stowed_while_the_clamps_hold() {
+    let w = world();
+    let mut v = falcon9(&w);
+    let at = t0().add_seconds(1.0);
+    v.order_at(at, OrderKind::Function("Landing legs".into())).unwrap();
+    v.advance(&w, at.add_seconds(5.0), &Controls::default(), usize::MAX);
+    assert!(v.clamped() && matches!(v.phase, Phase::Landed { .. }), "still clamped on the pad");
+    let (def, ship) = (v.ship_def().unwrap(), v.ship().unwrap());
+    for (m, s) in def.mechanisms.iter().zip(&ship.mechanisms) {
+        if m.item.foot.is_some() {
+            assert_eq!(s.target, m.item.stowed_deg, "{} stays stowed", m.id);
+        }
+    }
+    assert!(v.ship_events().iter().any(|e| e.text.contains("cannot deploy while the clamps hold")));
+}

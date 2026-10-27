@@ -111,6 +111,18 @@ pub fn apply(def: &ShipDef, state: &mut ShipState, command: &ShipCommand, cx: Co
             }
             for i in picked {
                 let m = &def.mechanisms[i].item;
+                // Legs stay stowed while the pad's clamps hold the vessel:
+                // deployed, their feet would reach below the launch mount
+                // and the ground (the real pad's interlock; a reshaping
+                // there blew the stack apart, found by review 2026-10-27).
+                if state.clamped
+                    && m.foot.is_some()
+                    && matches!(command, ShipCommand::Deploy(_) | ShipCommand::Angle(..))
+                {
+                    let text = format!("{}: cannot deploy while the clamps hold the vessel", def.mechanisms[i].id);
+                    state.runtime.event(cx.at, text, true);
+                    continue;
+                }
                 let before = state.mechanisms[i].target;
                 let now = &mut state.mechanisms[i];
                 now.target = match command {
