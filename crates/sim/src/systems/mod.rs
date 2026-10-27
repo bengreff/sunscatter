@@ -21,12 +21,14 @@
 //! panel, a battery, constant loads) and [`Consumables`] (boil-off).
 
 pub mod command;
+pub mod data;
 pub mod mechanisms;
 pub mod power;
 pub mod propulsion;
 pub mod runtime;
 pub mod ship;
 
+pub use data::{Knowledge, Quantity, Reading};
 pub use power::{Power, PowerSpec};
 pub use runtime::{Event, Order, OrderKind, Runtime};
 

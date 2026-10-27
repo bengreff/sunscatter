@@ -128,6 +128,18 @@ impl Vessel {
         self.ship_thrust(throttle, p).map(|t| t.per_engine)
     }
 
+    /// What the vessel knows now (D106, `systems::data`): from its working
+    /// sensors, or everything exactly in debug mode and for a craft without
+    /// the part system (the test craft, the debug craft of D064). An
+    /// uncrewed craft's knowledge reaches mission control after the light
+    /// time (the game's telemetry delay).
+    pub fn knowledge(&self) -> crate::systems::Knowledge {
+        match self.ship_parts() {
+            Some((def, state)) => crate::systems::data::knowledge(def, state, self.debug),
+            None => crate::systems::Knowledge::perfect(),
+        }
+    }
+
     /// The ship's event log (failures, aborts, stages; newest last).
     pub fn ship_events(&self) -> &[crate::systems::Event] {
         self.ship.as_ref().map_or(&[], |s| &s.runtime.events)

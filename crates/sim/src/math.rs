@@ -47,6 +47,14 @@ pub fn ln(x: f64) -> f64 {
     libm::log(x)
 }
 #[inline]
+pub fn log10(x: f64) -> f64 {
+    libm::log10(x)
+}
+#[inline]
+pub fn pow(x: f64, y: f64) -> f64 {
+    libm::pow(x, y)
+}
+#[inline]
 pub fn sinh(x: f64) -> f64 {
     libm::sinh(x)
 }
