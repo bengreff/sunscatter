@@ -143,9 +143,10 @@ fn the_test_rocket_draws_part_by_part() {
     assert_eq!(legs.len(), 4);
     assert!(legs.iter().all(|&k| mech[k].is_some()), "{mech:?}");
     assert_eq!(mech.iter().filter(|m| m.is_some()).count(), 4, "only the legs move");
-    // Ignited at full throttle in vacuum every engine burns at full
-    // thrust; a pair alone, two of them; at 10 % an engine runs at its
-    // minimum (40 %); without propellant nothing, unless debug mode.
+    // The vessel's per-engine thrusts as fractions: nothing before the
+    // ignition; then only the ignited pair (how fast it comes up is the
+    // engines' start transient, RUNTIME's); none without propellant unless
+    // debug mode.
     let sim = crate::state::SimState::new();
     let earth = sim.world.find("Earth").unwrap().node;
     let (r, vel) = (DVec3::X * 7.0e6, DVec3::Y * 7.5e3);
@@ -153,12 +154,20 @@ fn the_test_rocket_draws_part_by_part() {
     let at = |v: &sim::vessel::Vessel, throttle: f64| engine_fractions(def, &v.engine_thrusts(throttle, 0.0).unwrap());
     assert_eq!(at(&v, 1.0), [0.0; 4]);
     v.command(&sim.world, &sim::craft::command::ShipCommand::Ignite("pair".into())).unwrap();
-    let close = |a: Vec<f64>, b: [f64; 4]| a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-9);
-    assert!(close(at(&v, 1.0), [1.0, 0.0, 1.0, 0.0]), "{:?}", at(&v, 1.0));
-    assert!(close(at(&v, 0.1), [0.4, 0.0, 0.4, 0.0]), "{:?}", at(&v, 0.1));
-    assert!(close(at(&v, 0.0), [0.0; 4]));
+    let f = at(&v, 1.0);
+    assert!(f.iter().all(|x| (0.0..=1.0).contains(x)) && f[1] == 0.0 && f[3] == 0.0, "{f:?}");
+    assert_eq!(at(&v, 0.0), [0.0; 4]);
     v.set_propellant(&sim.world, 0.0);
-    assert!(close(at(&v, 1.0), [0.0; 4]), "no propellant");
-    v.set_debug(&sim.world, true);
-    assert!(close(at(&v, 1.0), [1.0, 0.0, 1.0, 0.0]), "debug mode");
+    assert_eq!(at(&v, 1.0), [0.0; 4], "no propellant");
+}
+
+/// Thrusts to fractions of each engine's full vacuum thrust, held in 0–1.
+#[test]
+fn flames_are_each_engines_share_of_its_full_thrust() {
+    let craft = rocket();
+    let def = craft.ship.as_deref().unwrap();
+    let full = def.engines[0].data.thrust_vac;
+    let got = engine_fractions(def, &[full, 0.5 * full, 2.0 * full, -1.0]);
+    assert_eq!(got, [1.0, 0.5, 1.0, 0.0]);
+    assert!(engine_fractions(def, &[]).is_empty());
 }

@@ -70,13 +70,17 @@ pub fn status(def: &ShipDef, state: &ShipState, c: &ShipCommand, chute_armed: bo
                 return none();
             }
             let status = |i: &usize| state.engines.get(*i).map(|e| e.status);
-            let running = engines.iter().filter(|i| status(i) == Some(EngineStatus::Running)).count();
-            let failed = engines.iter().filter(|i| status(i) == Some(EngineStatus::Failed)).count();
+            let count = |s: EngineStatus| engines.iter().filter(|i| status(i) == Some(s)).count();
+            let (running, starting) = (count(EngineStatus::Running), count(EngineStatus::Starting));
+            let failed = count(EngineStatus::Failed);
             let n = engines.len();
+            let starting_text = if starting > 0 { format!(" · {starting} starting") } else { String::new() };
             match (running, failed) {
-                (_, f) if f > 0 => (format!("{running}/{n} running · {f} failed"), PartTone::Failed),
+                (_, f) if f > 0 => (format!("{running}/{n} running{starting_text} · {f} failed"), PartTone::Failed),
+                (0, _) if starting > 0 => (format!("{starting}/{n} starting"), PartTone::Working),
                 (0, _) => (if n == 1 { "off".into() } else { format!("{n} off") }, PartTone::Idle),
-                (r, _) => (if n == 1 { "running".into() } else { format!("{r}/{n} running") }, PartTone::Working),
+                (_, _) if n == 1 => ("running".into(), PartTone::Working),
+                (r, _) => (format!("{r}/{n} running{starting_text}"), PartTone::Working),
             }
         }
         ShipCommand::Open(s) | ShipCommand::Close(s) => {
@@ -209,6 +213,15 @@ mod tests {
         state.apply(def, &ShipCommand::Ignite("pair".into())).unwrap();
         assert_eq!(st(&state, ShipCommand::Ignite("main".into())), "2/4 running");
         assert_eq!(st(&state, ShipCommand::Ignite("engine#1".into())), "running");
+        // Engines on their start transient (RUNTIME's): starting.
+        state.engines[1].status = EngineStatus::Starting;
+        assert_eq!(st(&state, ShipCommand::Ignite("main".into())), "2/4 running · 1 starting");
+        state.engines[0].status = EngineStatus::Off;
+        state.engines[2].status = EngineStatus::Off;
+        assert_eq!(st(&state, ShipCommand::Ignite("main".into())), "1/4 starting");
+        state.engines[0].status = EngineStatus::Running;
+        state.engines[2].status = EngineStatus::Running;
+        state.engines[1].status = EngineStatus::Off;
         assert_eq!(st(&state, ShipCommand::Rcs("rcs#*".into(), true)), "2/2 enabled");
         assert_eq!(st(&state, ShipCommand::Ignite("nothing".into())), "not on this craft");
         assert_eq!(status(def, &state, &ShipCommand::ArmChutes, true).0, "armed");

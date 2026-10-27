@@ -76,14 +76,28 @@ pub struct Script {
     q_max: f64,
     max_q_shot: bool,
     upper: Option<VesselId>,
+    /// The demo time from which the script goes on after a shot.
+    resume_at: f64,
+}
+
+/// How long the script waits after a capture ends before it changes the
+/// view (s): the screenshot is written from a frame drawn after it.
+const AFTER_SHOT: f64 = 0.5;
+
+/// Captures `name` (the clock frozen meanwhile); the script waits until
+/// the shot is written.
+fn shoot(demo: &mut Demo, script: &mut Script, name: &'static str) {
+    demo.capture(name);
+    script.resume_at = demo.timer + AFTER_SHOT;
 }
 
 /// The first stage's share of propellant left: the tanks feeding the
-/// running main engines (the booster's, until MECO).
+/// starting or running main engines (the booster's, until MECO).
 pub fn feeding_share(v: &sim::vessel::Vessel) -> Option<f64> {
     let (def, state) = (v.ship_def()?, v.ship()?);
+    use sim::craft::state::EngineStatus;
     let running = (def.engines.iter().zip(&state.engines))
-        .filter(|(e, s)| e.main && s.status == sim::craft::state::EngineStatus::Running);
+        .filter(|(e, s)| e.main && matches!(s.status, EngineStatus::Starting | EngineStatus::Running));
     let mut tanks: Vec<usize> = running.flat_map(|(e, _)| e.feeds.iter().flatten().map(|&t| t as usize)).collect();
     tanks.sort_unstable();
     tanks.dedup();
@@ -104,7 +118,9 @@ pub fn run(
     mut script: Local<Script>,
 ) {
     let Some(mut demo) = demo else { return };
-    if demo.step != Step::Parts || demo.capturing() {
+    // A shot is written from a frame drawn after its capture ends: nothing
+    // changes until then.
+    if demo.step != Step::Parts || demo.capturing() || demo.timer < script.resume_at {
         return;
     }
     let t = demo.timer;
@@ -126,7 +142,7 @@ pub fn run(
                 (rig.distance, rig.pitch) = (distance, pitch);
                 rig.yaw += yaw;
                 script.view += 1;
-                demo.capture(name);
+                shoot(&mut demo, &mut script, name);
                 return;
             }
             if let Some(&(name, layer, part)) = SYSTEMS_VIEWS.get(script.view - PAD_VIEWS.len()) {
@@ -135,7 +151,7 @@ pub fn run(
                 systems.layer = layer;
                 systems.selected = part.and_then(|p| def.as_ref()?.part_named(p)).map(Selection::Part);
                 script.view += 1;
-                demo.capture(name);
+                shoot(&mut demo, &mut script, name);
                 return;
             }
             systems.open = false;
@@ -148,14 +164,14 @@ pub fn run(
             cmds.write(GameCommand::NextStage);
             (rig.distance, rig.pitch) = (120.0, 0.1);
             script.phase = Phase::Ignition;
-            demo.timer = 0.0;
+            (demo.timer, script.resume_at) = (0.0, 0.0);
         }
         Phase::Ignition if t > 0.5 => {
             cmds.write(GameCommand::NextStage);
             sim.warp = 2;
             script.liftoff_at = Some(sim.clock);
             script.phase = Phase::Ascent;
-            demo.capture("parts_ignition");
+            shoot(&mut demo, &mut script, "parts_ignition");
         }
         Phase::Ignition => {}
         Phase::Ascent => {
@@ -177,7 +193,7 @@ pub fn run(
                     since(&script)
                 );
                 (rig.distance, rig.pitch) = (150.0, 0.15);
-                demo.capture("parts_max_q");
+                shoot(&mut demo, &mut script, "parts_max_q");
                 return;
             }
             let share = feeding_share(sim.ship()).unwrap_or(0.0);
@@ -192,7 +208,7 @@ pub fn run(
                 cmds.write(GameCommand::NextStage);
                 sim.warp = 0;
                 script.phase = Phase::Meco(t);
-                demo.capture("parts_meco");
+                shoot(&mut demo, &mut script, "parts_meco");
             }
         }
         Phase::Meco(at) if t - at > 2.0 => {
@@ -204,7 +220,7 @@ pub fn run(
             (rig.distance, rig.pitch) = (90.0, 0.3);
             script.upper = Some(sim.ship().id());
             script.phase = Phase::Upper(t, false);
-            demo.capture("parts_separation");
+            shoot(&mut demo, &mut script, "parts_separation");
         }
         Phase::Separating(at, _) => {
             if t - at > 60.0 {
@@ -221,7 +237,7 @@ pub fn run(
         Phase::Upper(at, lit) => {
             if lit && t - at > 8.0 {
                 (rig.distance, rig.pitch) = (160.0, 0.2);
-                demo.capture("parts_upper_stage");
+                shoot(&mut demo, &mut script, "parts_upper_stage");
                 script.phase = Phase::Booster(t, false);
             }
         }
@@ -236,7 +252,7 @@ pub fn run(
         Phase::Booster(at, true) if t - at > 2.0 => {
             rig.focus = Focus::Ship;
             (rig.distance, rig.pitch) = (120.0, 0.2);
-            demo.capture("parts_booster");
+            shoot(&mut demo, &mut script, "parts_booster");
             script.phase = Phase::Done;
         }
         Phase::Booster(..) => {}

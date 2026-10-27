@@ -112,7 +112,7 @@ fn failures(modes: &[sim::catalog::FailureMode]) -> Option<Group> {
             Hazard::PerStart(x) => format!("{x:.1e} /start"),
             Hazard::PerCycle(x) => format!("{x:.1e} /cycle"),
         };
-        g.row(&m.mode, format!("{hazard} → {:?}", m.outcome));
+        g.row(&m.mode, format!("{hazard}: {:?}", m.outcome));
     }
     Some(g)
 }
@@ -354,7 +354,8 @@ pub fn commands(def: &ShipDef, state: &ShipState, sel: Selection) -> Vec<(String
     };
     let engines: Vec<usize> = (0..def.engines.len()).filter(|&i| def.engines[i].owner == id).collect();
     if !engines.is_empty() {
-        let running = engines.iter().any(|&i| state.engines.get(i).is_some_and(|e| e.status == EngineStatus::Running));
+        let on = |s: EngineStatus| matches!(s, EngineStatus::Starting | EngineStatus::Running);
+        let running = engines.iter().any(|&i| state.engines.get(i).is_some_and(|e| on(e.status)));
         out.push(if running { ShipCommand::Shutdown(id.clone()) } else { ShipCommand::Ignite(id.clone()) });
     }
     for (i, m) in def.mechanisms.iter().enumerate().filter(|(_, m)| Some(m.part) == part) {

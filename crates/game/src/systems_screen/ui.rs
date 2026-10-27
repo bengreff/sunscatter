@@ -55,7 +55,7 @@ pub fn draw(
         let Some((def, state)) = ship.as_ref() else {
             region(ui, regions.view, |ui| {
                 ui.label(
-                    "The test craft is one part (D064): it has no systems to show. Esc ▸ New flight… for the Falcon 9.",
+                    "The test craft is one part (D064): it has no systems to show. Esc > New flight… for the Falcon 9.",
                 );
             });
             return;
@@ -224,11 +224,14 @@ fn editors(
     let catalogue = edit::catalogue(def);
     let mut edits: Vec<Edit> = Vec::new();
     let mut run: Option<Vec<sim::craft::command::ShipCommand>> = None;
-    egui::ScrollArea::vertical().id_salt("systems_editor").max_height(ui.available_height() - 30.0).show(ui, |ui| {
-        for (i, s) in list.iter().enumerate() {
-            entry(ui, i, s, functions, keys[i], &catalogue, &mut edits, &mut run);
-        }
-    });
+    egui::ScrollArea::vertical().id_salt("systems_editor").max_height((ui.available_height() - 30.0).max(40.0)).show(
+        ui,
+        |ui| {
+            for (i, s) in list.iter().enumerate() {
+                entry(ui, i, s, functions, keys[i], &catalogue, &mut edits, &mut run);
+            }
+        },
+    );
     ui.horizontal(|ui| {
         if ui.button(if functions { "+ function" } else { "+ stage" }).clicked() {
             edits.push(Edit::Add(if functions { "New function".into() } else { "New stage".into() }));
@@ -280,13 +283,13 @@ fn entry(
         if ui.add(egui::TextEdit::singleline(&mut name).desired_width(170.0)).changed() {
             edits.push(Edit::Rename(i, name));
         }
-        if ui.small_button("▲").clicked() {
+        if ui.small_button("up").clicked() {
             edits.push(Edit::Up(i));
         }
-        if ui.small_button("▼").clicked() {
+        if ui.small_button("down").clicked() {
             edits.push(Edit::Down(i));
         }
-        if ui.small_button("✕").clicked() {
+        if ui.small_button("remove").clicked() {
             edits.push(Edit::Remove(i));
         }
         if function {
@@ -300,7 +303,7 @@ fn entry(
                 edits.push(Edit::Key(i, Some(text)));
             }
             if let Some(k) = key {
-                ui.label(egui::RichText::new(format!("→ {}", key_label(k))).color(theme::ACCENT));
+                ui.label(egui::RichText::new(format!("runs on {}", key_label(k))).color(theme::ACCENT));
             }
             if ui.button("run").clicked() {
                 *run = Some(s.actions.clone());
@@ -318,10 +321,11 @@ fn entry(
         ui.add_space(14.0);
         for (j, c) in s.actions.iter().enumerate() {
             ui.label(egui::RichText::new(label(c)).monospace().color(theme::MUTED));
-            if j > 0 && ui.small_button("◀").clicked() {
+            // (The default font has no arrow glyphs: plain words.)
+            if j > 0 && ui.small_button("<").on_hover_text("earlier").clicked() {
                 edits.push(Edit::ActionUp(i, j));
             }
-            if ui.small_button("✕").clicked() {
+            if ui.small_button("x").on_hover_text("remove").clicked() {
                 edits.push(Edit::RemoveAction(i, j));
             }
         }
