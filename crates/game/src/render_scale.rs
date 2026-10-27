@@ -189,12 +189,14 @@ fn adapt(
     parts: Res<crate::look::Parts>,
     mut scale: ResMut<RenderScale>,
 ) {
-    if let Some(s) = pinned() {
-        scale.fixed = Some(s);
-        return;
-    }
+    // The benchmark first: its "−full resolution" row must measure half
+    // resolution even under a pin.
     if bench.running() {
         scale.fixed = Some(if parts.native { 1.0 } else { 0.5 });
+        return;
+    }
+    if let Some(s) = pinned() {
+        scale.fixed = Some(s);
         return;
     }
     scale.fixed = None;
