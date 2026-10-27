@@ -114,7 +114,10 @@ pub fn status(def: &ShipDef, state: &ShipState, c: &ShipCommand, chute_armed: bo
             None => ("separated".into(), PartTone::Working),
         },
         ShipCommand::ReleaseClamps => {
-            if state.clamped {
+            // The pad's hold-down joints (`Vessel::clamped` holds while one does).
+            let hold = |j: &sim::craft::ship::JointDef| j.kind == sim::craft::assembly::JointKind::HoldDown;
+            let holding = def.joints.iter().zip(&state.joints).any(|(d, s)| hold(d) && s.intact);
+            if state.clamped && holding {
                 ("holding".into(), PartTone::Idle)
             } else {
                 ("released".into(), PartTone::Working)

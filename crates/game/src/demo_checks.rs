@@ -117,7 +117,10 @@ pub fn log_fps(
     let body = sim.dominant_of(sim.active);
     let (anchor, r, _) = sim.ship().state_at(&sim.world, sim.clock);
     let rel = r - sim.world.snapshot(sim.clock).relative_r(body, anchor);
-    let alt = sim.world.source(body).and_then(|s| s.physical.as_ref()).map_or(0.0, |p| rel.length() - p.radius_eq);
+    // Above the reference ellipsoid (not the equatorial radius: on the pad
+    // at 28.6° N that read −4.9 km).
+    let fixed = |p: &sim::body::BodyPhysical| p.rotation.to_fixed(sim::frame::Vec3::from_raw(rel), sim.clock);
+    let alt = sim.world.source(body).and_then(|s| s.physical.as_ref()).map_or(0.0, |p| p.altitude(fixed(p)));
     info!(
         "demo fps {:.0} step {:?} alt {:.1} km chunks {}",
         fps.fps().unwrap_or(0.0),

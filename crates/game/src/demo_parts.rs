@@ -71,8 +71,8 @@ enum Phase {
 pub struct Script {
     phase: Phase,
     view: usize,
-    /// Demo time at liftoff, the highest q seen and whether max-Q was shot.
-    liftoff: f64,
+    /// The game clock at liftoff, the highest q seen and whether max-Q was shot.
+    liftoff_at: Option<sim::time::Epoch>,
     q_max: f64,
     max_q_shot: bool,
     upper: Option<VesselId>,
@@ -109,9 +109,13 @@ pub fn run(
     }
     let t = demo.timer;
     let earth = sim.world.find("Earth").expect("Earth").clone();
-    let re = earth.physical.as_ref().expect("Earth is physical").radius_eq;
+    let p = earth.physical.as_ref().expect("Earth is physical");
     let (anchor, r, v) = sim.ship().state(&sim.world);
-    let alt = r.length() - re;
+    // Above the reference ellipsoid (the anchor is Earth near Earth).
+    let alt = p.altitude(p.rotation.to_fixed(sim::frame::Vec3::from_raw(r), sim.clock));
+    // Game time since liftoff (the script's timer runs in wall seconds).
+    let clock = sim.clock;
+    let since = |s: &Script| s.liftoff_at.map_or(0.0, |l| clock.seconds_since(l));
     match script.phase {
         Phase::Pad => {
             if t < 1.0 {
@@ -149,7 +153,7 @@ pub fn run(
         Phase::Ignition if t > 0.5 => {
             cmds.write(GameCommand::NextStage);
             sim.warp = 2;
-            script.liftoff = t;
+            script.liftoff_at = Some(sim.clock);
             script.phase = Phase::Ascent;
             demo.capture("parts_ignition");
         }
@@ -170,19 +174,19 @@ pub fn run(
                     "demo parts: max-Q {:.1} kPa at {:.1} km, T+{:.0} s",
                     script.q_max / 1e3,
                     alt / 1e3,
-                    t - script.liftoff
+                    since(&script)
                 );
                 (rig.distance, rig.pitch) = (150.0, 0.15);
                 demo.capture("parts_max_q");
                 return;
             }
             let share = feeding_share(sim.ship()).unwrap_or(0.0);
-            if share <= MECO_RESERVE || t - script.liftoff >= MECO_T {
+            if share <= MECO_RESERVE || since(&script) >= MECO_T {
                 info!(
                     "demo parts: MECO at {:.1} km, {:.0} m/s, T+{:.0} s, {:.0} % left",
                     alt / 1e3,
                     v.length(),
-                    t - script.liftoff,
+                    since(&script),
                     share * 100.0
                 );
                 cmds.write(GameCommand::NextStage);

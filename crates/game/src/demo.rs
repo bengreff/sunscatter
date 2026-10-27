@@ -266,7 +266,9 @@ pub fn run(
     let moon = sim.world.find("Moon").map(|s| s.node);
     match demo.step {
         // A craft of catalog parts flies its own script (`demo_parts`).
-        Step::Pad if sim.ship().ship().is_some() => demo.next(Step::Parts),
+        // (Not through `next`: `SUNSCATTER_DEMO_STOP_AFTER=Pad` stops after
+        // the parts script's own pad shots.)
+        Step::Pad if sim.ship().ship().is_some() => (demo.step, demo.timer) = (Step::Parts, 0.0),
         Step::Parts => {}
         Step::Pad => {
             if !demo.pad_top_done {

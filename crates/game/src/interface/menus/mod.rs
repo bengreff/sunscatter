@@ -11,6 +11,7 @@
 //! show is not drawn.
 
 pub mod data;
+mod hottest;
 mod landing;
 mod orbital;
 pub mod render;

@@ -248,6 +248,18 @@ pub fn delta_v(isp: f64, mass: f64, propellant: f64) -> f64 {
     isp * sim::vessel::G0 * (mass / dry).ln()
 }
 
+/// The vehicle's mass (kg): the vessel's less the ground it still holds
+/// (a craft of parts' `PartInfo::ground` parts and their components: the
+/// pad's launch mount until the clamps release), so mass, thrust-to-weight
+/// and Δv readouts are the vehicle's.
+pub fn vehicle_mass(v: &sim::vessel::Vessel) -> f64 {
+    let Some(def) = v.ship_def() else { return v.mass() };
+    let ground: Vec<u32> = def.parts.iter().filter(|p| p.ground).map(|p| p.part).collect();
+    let parts: f64 = def.parts.iter().filter(|p| p.ground).map(|p| p.mass).sum();
+    let components: f64 = def.components.iter().filter(|c| ground.contains(&c.part)).map(|c| c.mass).sum();
+    v.mass() - parts - components
+}
+
 /// Thrust-to-weight ratio in local gravity `g` (m/s²); `None` in free space.
 pub fn twr(thrust: f64, mass: f64, g: f64) -> Option<f64> {
     (g > 1e-6).then(|| thrust / (mass * g))

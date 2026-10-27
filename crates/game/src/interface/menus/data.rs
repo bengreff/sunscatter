@@ -478,7 +478,8 @@ fn marked_entry(s: &Sources) -> Option<(f64, f64)> {
 fn craft(sim: &SimState, body: sim::frame::NodeId) -> CraftData {
     let ship = sim.ship();
     let engine = &ship.craft.engine;
-    let mass = ship.mass();
+    // The vehicle's: not the pad's launch mount it stands on.
+    let mass = crate::hud::vehicle_mass(ship);
     let (anchor, r, _) = ship.state_at(&sim.world, sim.clock);
     let g = sim.world.source(body).map_or(0.0, |b| {
         let d = (r - sim.world.snapshot(sim.clock).relative_r(b.node, anchor)).length();
@@ -499,43 +500,9 @@ fn craft(sim: &SimState, body: sim::frame::NodeId) -> CraftData {
         rcs_flow: ship.craft.rcs_flow.to_array(),
         skin: ship.skin_nearest_limit(),
         interior: (node, ship.craft.thermal.internal_max_k),
-        hottest: hottest_parts(ship),
+        hottest: super::hottest::parts(ship, HOTTEST),
         clock_offset: sim.ship_clock_offset(sim.active),
     }
-}
-
-/// Per part of the craft (its geometry primitive), the skin cell nearest
-/// its own limit; the parts nearest their limits first.
-fn hottest_parts(ship: &sim::vessel::Vessel) -> Vec<(String, f64, f64)> {
-    let design = ship.craft.design();
-    let skin = &ship.thermal().state.skin;
-    // Primitive names come with the craft's files; every vessel flies the
-    // test craft for now (D060).
-    let names: Vec<String> = if ship.craft.id.0 == sim::craft::TEST_CRAFT {
-        sim::craft::test_craft().geometry.primitives.iter().map(|p| p.name.clone()).collect()
-    } else {
-        Vec::new()
-    };
-    let mut best: Vec<Option<(f64, f64)>> = Vec::new();
-    for (i, cell) in design.cells.iter().enumerate() {
-        let (Some(&t), Some(&limit)) = (skin.get(i), design.skin_max.get(i)) else { continue };
-        let p = cell.primitive as usize;
-        if best.len() <= p {
-            best.resize(p + 1, None);
-        }
-        if best[p].is_none_or(|(bt, bl)| t / limit > bt / bl) {
-            best[p] = Some((t, limit));
-        }
-    }
-    let mut parts: Vec<(String, f64, f64)> = (best.into_iter().enumerate())
-        .filter_map(|(p, b)| {
-            let (t, limit) = b?;
-            Some((names.get(p).cloned().unwrap_or_else(|| format!("part {}", p + 1)), t, limit))
-        })
-        .collect();
-    parts.sort_by(|a, b| (b.1 / b.2).total_cmp(&(a.1 / a.2)));
-    parts.truncate(HOTTEST);
-    parts
 }
 
 fn comms(s: &Sources) -> CommsData {

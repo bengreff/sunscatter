@@ -79,11 +79,20 @@ pub fn ready_breakup(fleet: &[Standing]) -> Option<usize> {
 }
 
 /// The toast of vessel `id`'s breakup by `plan` that made `new` vessels
-/// (the pieces but the first, which stays the vessel): none when nothing
-/// came off.
-pub fn breakup_toast(id: VesselId, plan: &SplitPlan, new: usize) -> Option<String> {
+/// (the pieces but the first, which stays the vessel), and whether it is an
+/// alert: none when nothing came off (a craft taking a new configuration);
+/// a separation the craft fired on command (nothing destroyed or torn) is
+/// told as one, not as a breakup.
+pub fn breakup_toast(id: VesselId, plan: &SplitPlan, new: usize, separation: bool) -> Option<(String, bool)> {
     let wrecks = plan.destroyed.iter().filter(|d| d.is_some()).count();
-    (new > 0).then(|| format!("Vessel {id} broke up: {} pieces ({wrecks} wrecks)", new + 1))
+    if new == 0 {
+        None
+    } else if separation && wrecks == 0 {
+        let pieces = if new == 1 { "a new vessel".to_string() } else { format!("{new} new vessels") };
+        Some((format!("Vessel {id} separated: {pieces}"), false))
+    } else {
+        Some((format!("Vessel {id} broke up: {} pieces ({wrecks} wrecks)", new + 1), true))
+    }
 }
 
 /// Applies a built breakup, starts building the next, deletes debris.
@@ -113,9 +122,12 @@ pub fn update(
         if is(ready_breakup(&standing), id, epoch) {
             let (_, _, (plan, crafts)) = breakups.built.take().expect("built");
             let i = sim.index_of(id).expect("a ready breakup's vessel");
+            let separation = sim.fleet[i]
+                .breakup()
+                .is_some_and(|b| !b.separated.is_empty() && b.destroyed.is_empty() && b.torn.is_empty());
             let pieces = sim.fleet[i].split(&sim.world, &plan, &crafts, &mut sim.vessel_ids);
-            if let Some(text) = breakup_toast(id, &plan, pieces.len()) {
-                toasts.push(now, text, true);
+            if let Some((text, alert)) = breakup_toast(id, &plan, pieces.len(), separation) {
+                toasts.push(now, text, alert);
             }
             sim.fleet.extend(pieces);
         } else if !is(next, id, epoch) {
@@ -223,12 +235,17 @@ mod tests {
         let id = |p: u32| sim::craft::CraftId::piece("stress-40", &[p]);
         let wreck = Some(sim::vessel::Destruction::Impact { speed: 9.0, point: 0 });
         let one = SplitPlan { pieces: vec![vec![0, 1]], ids: vec![id(0)], destroyed: vec![None] };
-        assert_eq!(breakup_toast(VesselId(3), &one, 0), None, "nothing came off");
+        assert_eq!(breakup_toast(VesselId(3), &one, 0, false), None, "nothing came off");
+        assert_eq!(breakup_toast(VesselId(3), &one, 0, true), None, "a new configuration");
         let three = SplitPlan {
             pieces: vec![vec![0], vec![1], vec![2]],
             ids: vec![id(0), id(1), id(2)],
             destroyed: vec![None, None, wreck],
         };
-        assert_eq!(breakup_toast(VesselId(3), &three, 2).as_deref(), Some("Vessel #3 broke up: 3 pieces (1 wrecks)"));
+        let toast = |plan: &SplitPlan, new, separation| breakup_toast(VesselId(3), plan, new, separation);
+        assert_eq!(toast(&three, 2, false), Some(("Vessel #3 broke up: 3 pieces (1 wrecks)".into(), true)));
+        assert_eq!(toast(&three, 2, true), Some(("Vessel #3 broke up: 3 pieces (1 wrecks)".into(), true)), "a wreck");
+        let two = SplitPlan { pieces: vec![vec![0], vec![1]], ids: vec![id(0), id(1)], destroyed: vec![None, None] };
+        assert_eq!(toast(&two, 1, true), Some(("Vessel #3 separated: a new vessel".into(), false)));
     }
 }
