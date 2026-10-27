@@ -1,0 +1,77 @@
+// Fluids (D104, docs/design/ship-model.md §3.2; read by sim::fluids).
+//
+// Liquids: saturated density (K, kg/m³) and vapour pressure (K, Pa) tables,
+// specific heat J/(kg·K), latent heat at the normal boiling point J/kg,
+// freezing, normal boiling and critical points K, molar mass kg/mol; the
+// gas their vapour is. Gases are ideal: molar mass kg/mol, γ and cₚ near
+// room temperature. Density is interpolated linearly in T, vapour pressure
+// as ln p linear in 1/T, both held at the table's ends.
+//
+// Provenance: CORE wrote this first set from well-known values (NIST
+// Chemistry WebBook, propellant handbooks; 2026-10-26); `verify` lists the
+// fields given from memory, for DATA to check against the sources.
+(
+    liquids: [
+        (
+            id: "LOX", name: "Liquid oxygen", molar_mass: 0.031999, vapour: Some("oxygen"),
+            // Falcon 9 loads it densified near 66 K (−207 °C).
+            density: [(60.0, 1282.0), (70.0, 1237.0), (80.0, 1190.0), (90.0, 1142.0), (100.0, 1087.0), (110.0, 1027.0), (120.0, 960.0), (130.0, 880.0), (140.0, 784.0)],
+            vapour_pressure: [(60.0, 726.0), (70.0, 6250.0), (80.0, 30100.0), (90.0, 99300.0), (100.0, 254000.0), (110.0, 543000.0), (120.0, 1022000.0), (130.0, 1749000.0), (140.0, 2788000.0), (150.0, 4200000.0)],
+            specific_heat: 1690.0, latent_heat: 213.1e3,
+            freezing_k: 54.36, boiling_k: 90.19, critical_k: 154.58,
+            sources: ["NIST Chemistry WebBook, SRD 69: oxygen, saturation properties (Schmidt & Wagner 1985 equation of state)"],
+            verify: ["density", "vapour_pressure", "specific_heat"],
+        ),
+        (
+            id: "RP-1", name: "Rocket propellant 1 (kerosene, MIL-DTL-25576)", molar_mass: 0.170,
+            // Falcon 9 loads it chilled near 266 K (−7 °C).
+            density: [(225.0, 856.0), (250.0, 838.0), (266.0, 827.0), (288.7, 810.0), (300.0, 802.0), (350.0, 766.0), (400.0, 729.0)],
+            vapour_pressure: [(250.0, 20.0), (300.0, 300.0), (350.0, 2500.0), (400.0, 12000.0), (489.0, 101325.0)],
+            specific_heat: 1880.0, latent_heat: 246.0e3,
+            freezing_k: 225.0, boiling_k: 489.0, critical_k: 662.0,
+            sources: ["MIL-DTL-25576 (RP-1 specification: density 799–815 kg/m³ at 288.7 K)", "CPIA/M4 Liquid Propellant Manual, RP-1", "Edwards, J. Propulsion and Power 19 (2003), hydrocarbon fuels"],
+            verify: ["molar_mass", "density", "vapour_pressure", "specific_heat", "latent_heat", "freezing_k", "boiling_k", "critical_k"],
+        ),
+        (
+            id: "MMH", name: "Monomethylhydrazine", molar_mass: 0.04607,
+            density: [(233.0, 928.0), (273.0, 892.0), (293.0, 874.0), (313.0, 856.0), (333.0, 838.0), (353.0, 819.0)],
+            vapour_pressure: [(233.0, 60.0), (273.0, 1340.0), (293.0, 4520.0), (313.0, 13000.0), (333.0, 33100.0), (360.6, 101325.0), (400.0, 290000.0)],
+            specific_heat: 2930.0, latent_heat: 877.0e3,
+            freezing_k: 220.8, boiling_k: 360.6, critical_k: 567.0,
+            sources: ["CPIA/M4 Liquid Propellant Manual, MMH", "NIST Chemistry WebBook, methylhydrazine"],
+            verify: ["density", "vapour_pressure", "specific_heat", "latent_heat", "critical_k"],
+        ),
+        (
+            id: "NTO", name: "Nitrogen tetroxide (N₂O₄, MON-3 class)", molar_mass: 0.092011,
+            density: [(263.0, 1510.0), (273.0, 1490.0), (293.0, 1446.0), (313.0, 1401.0), (333.0, 1355.0)],
+            vapour_pressure: [(263.0, 15900.0), (273.0, 30100.0), (293.0, 94600.0), (313.0, 257000.0), (333.0, 620000.0)],
+            specific_heat: 1550.0, latent_heat: 414.0e3,
+            freezing_k: 261.9, boiling_k: 294.3, critical_k: 431.0,
+            sources: ["CPIA/M4 Liquid Propellant Manual, N2O4", "NIST Chemistry WebBook, dinitrogen tetroxide"],
+            verify: ["density", "vapour_pressure", "specific_heat", "latent_heat"],
+        ),
+        (
+            id: "water", name: "Water", molar_mass: 0.018015, vapour: Some("water-vapour"),
+            density: [(273.16, 999.8), (277.13, 1000.0), (293.15, 998.2), (313.15, 992.2), (333.15, 983.2), (353.15, 971.8), (373.15, 958.4)],
+            vapour_pressure: [(273.16, 611.7), (293.15, 2339.0), (313.15, 7385.0), (333.15, 19950.0), (353.15, 47410.0), (373.15, 101325.0), (393.15, 198700.0)],
+            specific_heat: 4182.0, latent_heat: 2257.0e3,
+            freezing_k: 273.15, boiling_k: 373.15, critical_k: 647.1,
+            sources: ["NIST Chemistry WebBook, water (IAPWS-95)"],
+            verify: [],
+        ),
+    ],
+    gases: [
+        (id: "helium", name: "Helium", molar_mass: 0.0040026, gamma: 1.667, cp: 5193.0,
+            sources: ["NIST Chemistry WebBook, helium"], verify: []),
+        (id: "nitrogen", name: "Nitrogen", molar_mass: 0.0280134, gamma: 1.400, cp: 1040.0,
+            sources: ["NIST Chemistry WebBook, nitrogen"], verify: []),
+        (id: "oxygen", name: "Oxygen", molar_mass: 0.031999, gamma: 1.395, cp: 918.0,
+            sources: ["NIST Chemistry WebBook, oxygen"], verify: []),
+        (id: "CO2", name: "Carbon dioxide", molar_mass: 0.04401, gamma: 1.289, cp: 844.0,
+            sources: ["NIST Chemistry WebBook, carbon dioxide"], verify: []),
+        (id: "water-vapour", name: "Water vapour", molar_mass: 0.018015, gamma: 1.33, cp: 1864.0,
+            sources: ["NIST Chemistry WebBook, water (ideal gas at 300 K)"], verify: ["gamma"]),
+        (id: "hydrogen", name: "Hydrogen", molar_mass: 0.002016, gamma: 1.405, cp: 14300.0,
+            sources: ["NIST Chemistry WebBook, hydrogen"], verify: []),
+    ],
+)
