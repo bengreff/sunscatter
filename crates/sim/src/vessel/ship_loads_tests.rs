@@ -165,3 +165,47 @@ fn the_falcon_9_ascent_breaks_nothing() {
     println!("MVac level {mvac:.2}; events: {:?}", v.ship_events().iter().map(|e| &e.text).collect::<Vec<_>>());
     assert!(bad(&v).is_empty() && bad(&booster).is_empty(), "{:?} {:?}", bad(&v), bad(&booster));
 }
+
+/// The demo's gravity turn: the attitude held directly along a pitch
+/// program (pitch from vertical 1.2·√(h / 70 km) from 500 m), so the stack
+/// flies through max-Q (~36 kPa) at ~4° angle of attack. The air's drag is
+/// not all on the nose (the forebody's share, the rest along the body) and
+/// its normal force is spread along the stack: the Dragon ring peaks well
+/// under its ultimate and nothing breaks.
+#[test]
+fn the_demo_gravity_turn_breaks_nothing() {
+    let w = world();
+    let craft = craft_of(&CraftId("falcon9-crew".into()));
+    let mut v = Vessel::landed_at(&w, VesselId(1), "Earth", 28.6084, -80.6043, t0(), &craft);
+    let mut ids = VesselIds::default();
+    ids.allocate();
+    v.next_stage(&w).unwrap();
+    v.next_stage(&w).unwrap();
+    v.advance(&w, t0().add_seconds(3.0), &full(), usize::MAX);
+    let plan = v.plan_breakup().expect("the mount separates");
+    v.split(&w, &plan, &plan.crafts(), &mut ids);
+    let liftoff = v.time;
+    let def = v.ship_def().unwrap();
+    let ring = def.joints.iter().position(|j| j.name == "s2.ring|s2.tank").unwrap();
+    let (mut peak, mut q_max) = (0.0f64, 0.0f64);
+    while v.time.seconds_since(liftoff) < 75.0 {
+        let (anchor, r, vel) = v.state(&w);
+        let alt = crate::forces::altitude_above(&w, &w.snapshot(v.time), anchor, anchor, r).0;
+        let up = r.normalize();
+        let h = vel - up * vel.dot(up);
+        let h = if h.length() > 1.0 { h.normalize() } else { DVec3::Z.cross(up).normalize() };
+        let pitch = if alt < 500.0 { 0.0 } else { (1.2 * (alt / 70_000.0).sqrt()).min(1.2) };
+        let dir = up * pitch.cos() + h * pitch.sin();
+        v.set_attitude(Attitude { q: crate::vessel::quat_z_to(dir.normalize()), omega: DVec3::ZERO });
+        v.advance(&w, v.time.add_seconds(1.0 / 30.0), &full(), usize::MAX);
+        assert!(v.plan_breakup().is_none(), "at T+{:.1}: {:?}", v.time.seconds_since(liftoff), v.ship_events());
+        let snap = w.snapshot(v.time);
+        let (anchor, r, vel) = v.state(&w);
+        let q = crate::vessel::air_at(&w, &snap, anchor, r, vel).map_or(0.0, |a| 0.5 * a.rho * a.wind.length_squared());
+        q_max = q_max.max(q);
+        peak = peak.max(v.ship().unwrap().runtime.joints[ring].ratio);
+    }
+    println!("max-Q {:.1} kPa; the Dragon ring's peak ratio {peak:.2}", q_max / 1e3);
+    assert!(q_max > 30e3, "through max-Q: {q_max}");
+    assert!(peak < 0.7, "{peak}");
+}

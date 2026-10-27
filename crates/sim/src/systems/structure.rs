@@ -281,42 +281,120 @@ pub fn engine_pushes(
 
 /// The air's force on each part (body axes) from the hull's total `force`
 /// and `moment` (about the body origin; the aero model gives no per-part
-/// forces): shared by each part's exposed area facing the flow (Σ e·A·cos θ
-/// over its cells, `exposure` from the bake), at that area's centroid; the
-/// rest of the moment shared alike as couples. The totals are exact, the
-/// split an approximation. `flow` is the direction the air moves past the
-/// vessel; `cell_part` gives each cell's part (an index into the list).
+/// forces), split along the body's `axis` (its slender axis):
+/// * **axial**: the forebody's pressure on each part's upstream cells
+///   (Newtonian, q·Cp,max·e·A·cos²θ, at most the whole axial force) and the
+///   rest (skin friction, base suction) by wetted area — so a stack's drag
+///   is not all on its nose;
+/// * **normal**: by each part's exposed area facing the crossflow
+///   (e·A·cos θ to the flow's normal part), shifted together along the axis
+///   so the normal forces' moment is the model's;
+/// * whatever moment is left (roll, small) as couples shared by exposure.
+///
+/// The totals are the model's exactly; the split is an approximation.
+/// `flow` is the direction the air moves past the vessel, `q` its dynamic
+/// pressure and `cp_max` its stagnation pressure coefficient; `cell_part`
+/// gives each cell's part (an index into the list).
+#[allow(clippy::too_many_arguments)]
 pub fn aero_pushes(
     cell_part: &[u32],
     cells: &[crate::aero::CellGeometry],
     exposure: impl Fn(usize) -> f64,
-    flow: DVec3,
+    (flow, q, cp_max): (DVec3, f64, f64),
+    axis: DVec3,
     (force, moment): (DVec3, DVec3),
     parts: usize,
 ) -> Vec<Push> {
-    let mut w = vec![0.0; parts];
-    let mut centre = vec![DVec3::ZERO; parts];
+    let a = axis.normalize_or(DVec3::Z);
+    let axial = a * force.dot(a);
+    let normal = force - axial;
+    let cross = flow - a * flow.dot(a);
+    let cross = if cross.length() > 1e-9 { cross.normalize() } else { DVec3::ZERO };
+    // Per part: forebody pressure (axial), wetted area, crossflow area.
+    let (mut fore, mut wet, mut side) = (vec![0.0; parts], vec![0.0; parts], vec![0.0; parts]);
+    let (mut c_wet, mut c_side, mut c_fore) =
+        (vec![DVec3::ZERO; parts], vec![DVec3::ZERO; parts], vec![DVec3::ZERO; parts]);
     for (i, (c, &p)) in cells.iter().zip(cell_part).enumerate() {
-        let facing = -c.normal.dot(flow);
         let p = p as usize;
-        if facing > 0.0 && p < parts {
-            let x = exposure(i) * c.area * facing;
-            w[p] += x;
-            centre[p] += c.centroid * x;
+        if p >= parts {
+            continue;
+        }
+        wet[p] += c.area;
+        c_wet[p] += c.centroid * c.area;
+        let facing = -c.normal.dot(flow);
+        if facing > 0.0 {
+            let x = q * cp_max * exposure(i) * c.area * facing * facing * (-c.normal).dot(a);
+            fore[p] += x;
+            c_fore[p] += c.centroid * x.abs();
+        }
+        let crossing = -c.normal.dot(cross);
+        if crossing > 0.0 {
+            let x = exposure(i).max(0.0) * c.area * crossing;
+            side[p] += x;
+            c_side[p] += c.centroid * x;
         }
     }
-    let total: f64 = w.iter().sum();
-    if total <= 0.0 {
-        return Vec::new();
+    let total_axial = force.dot(a);
+    let fore_total: f64 = fore.iter().sum();
+    // The forebody takes its Newtonian share, never more than the whole.
+    let scale = if fore_total.abs() > 1e-9 && total_axial * fore_total > 0.0 {
+        (total_axial / fore_total).min(1.0)
+    } else {
+        0.0
+    };
+    let rest = total_axial - fore_total * scale;
+    let wet_total: f64 = wet.iter().sum();
+    let side_total: f64 = side.iter().sum();
+    let mut pushes = Vec::new();
+    for p in 0..parts {
+        let f_fore = fore[p] * scale;
+        let f_rest = if wet_total > 0.0 { rest * wet[p] / wet_total } else { 0.0 };
+        let at = if fore[p] != 0.0 && f_fore.abs() > f_rest.abs() {
+            c_fore[p] / fore[p].abs()
+        } else if wet[p] > 0.0 {
+            c_wet[p] / wet[p]
+        } else {
+            continue;
+        };
+        if f_fore != 0.0 {
+            let at_fore = if fore[p] != 0.0 { c_fore[p] / fore[p].abs() } else { at };
+            pushes.push(Push { part: p, force: a * f_fore, at: at_fore, torque: DVec3::ZERO });
+        }
+        if f_rest != 0.0 && wet[p] > 0.0 {
+            pushes.push(Push { part: p, force: a * f_rest, at: c_wet[p] / wet[p], torque: DVec3::ZERO });
+        }
+        if side_total > 0.0 && side[p] > 0.0 {
+            let n = normal * (side[p] / side_total);
+            pushes.push(Push { part: p, force: n, at: c_side[p] / side[p], torque: DVec3::ZERO });
+        }
     }
-    let mut pushes: Vec<Push> = (0..parts)
-        .filter(|&p| w[p] > 0.0)
-        .map(|p| Push { part: p, force: force * (w[p] / total), at: centre[p] / w[p], torque: DVec3::ZERO })
-        .collect();
-    let placed: DVec3 = pushes.iter().map(|q| q.at.cross(q.force)).sum();
-    let rest = moment - placed;
-    for q in &mut pushes {
-        q.torque = rest * (w[q.part] / total);
+    if side_total <= 0.0 && normal.length() > 0.0 && wet_total > 0.0 {
+        // No crossflow area (pure axial flow): the normal force by wetted area.
+        for p in (0..parts).filter(|&p| wet[p] > 0.0) {
+            pushes.push(Push {
+                part: p,
+                force: normal * (wet[p] / wet_total),
+                at: c_wet[p] / wet[p],
+                torque: DVec3::ZERO,
+            });
+        }
+    }
+    // Shift the normal forces along the axis so their moment is the model's.
+    let placed: DVec3 = pushes.iter().map(|x| x.at.cross(x.force)).sum();
+    let lever = a.cross(normal);
+    if lever.length_squared() > 1e-18 {
+        let shift = lever.dot(moment - placed) / lever.length_squared();
+        for x in pushes.iter_mut().filter(|x| x.force.cross(a).length() > 0.0) {
+            x.at += a * shift;
+        }
+    }
+    let placed: DVec3 = pushes.iter().map(|x| x.at.cross(x.force)).sum();
+    let left = moment - placed;
+    let weight: f64 = wet_total;
+    if weight > 0.0 {
+        for p in (0..parts).filter(|&p| wet[p] > 0.0) {
+            pushes.push(Push { part: p, force: DVec3::ZERO, at: c_wet[p] / wet[p], torque: left * (wet[p] / weight) });
+        }
     }
     pushes
 }

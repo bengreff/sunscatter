@@ -97,14 +97,11 @@ impl Vessel {
             (g.q, g.mach) = (a.flow.q, a.flow.mach);
             let exposure = design.bake.exposure_weights(a.flow.dir);
             let cells = &design.bake.geometry;
-            let shares = structure::aero_pushes(
-                &design.cell_part,
-                cells,
-                |i| exposure.at(i),
-                a.flow.dir,
-                (a.force, a.moment),
-                n,
-            );
+            let cp_max = crate::aero::air::cp_max(a.flow.gamma, a.flow.mach);
+            let axis = design.bake.sections.axis;
+            let air = (a.flow.dir, a.flow.q, cp_max);
+            let shares =
+                structure::aero_pushes(&design.cell_part, cells, |i| exposure.at(i), air, axis, (a.force, a.moment), n);
             g.pushes.extend(shares);
             let chute = design.parts.iter().position(|p| p.chute);
             if let (Some((force, mount)), Some(part)) = (a.chute, chute) {
