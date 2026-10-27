@@ -22,11 +22,11 @@
 
 pub mod command;
 pub mod data;
+pub mod failure;
 pub mod mechanisms;
 pub mod plumbing;
 pub mod power;
 pub mod propulsion;
-pub mod rcs;
 pub mod runtime;
 pub mod ship;
 pub mod structure;

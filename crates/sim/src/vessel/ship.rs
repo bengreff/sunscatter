@@ -34,9 +34,6 @@ pub(super) struct ShipTick {
     /// firing, with their shares of it.
     pub rcs_flow: DVec3,
     pub blocks: Vec<(usize, f64)>,
-    /// The translating thrusters (the pilot's translation and the engines'
-    /// settling): force, torque and each block's flow.
-    pub push: crate::systems::rcs::Push,
 }
 
 impl Vessel {
@@ -73,6 +70,10 @@ impl Vessel {
         let Some(def) = self.ship_def() else { return };
         let mut state = ShipState::initial(&def);
         state.runtime.launch = Some(self.time);
+        // The fates are drawn at the launch, counting the parts' starts and
+        // cycles from here (D105 §6.3).
+        let seed = state.runtime.seed;
+        crate::systems::failure::draw_fates(&def, &mut state, seed, self.time);
         self.propellant = state.consumables(&def);
         self.ship = Some(state);
         self.sync_engine();
@@ -121,12 +122,6 @@ impl Vessel {
     /// mechanism moving, the clamps' release armed).
     pub(super) fn ship_needs_ticks(&self) -> bool {
         self.ship.as_ref().is_some_and(crate::systems::ship::busy)
-    }
-
-    /// Whether a craft of parts needs live ticks with `controls`: its
-    /// systems busy, or the pilot translating on its thrusters.
-    pub(super) fn ship_wants_ticks(&self, controls: &super::Controls) -> bool {
-        self.ship_needs_ticks() || (self.ship.is_some() && controls.translate != DVec3::ZERO)
     }
 
     /// Each engine's thrust (N, aligned with the ship definition's engines)
@@ -180,12 +175,11 @@ impl Vessel {
     /// parts what it draws.
     pub(super) fn actuators(
         &self,
-        controls: &super::Controls,
+        throttle: f64,
         p: f64,
         dt: f64,
         props: &MassProps,
     ) -> (EngineOutput, Actuators, Option<ShipTick>) {
-        let throttle = controls.throttle;
         let Some((def, state)) = self.ship_parts() else {
             let engine = self.craft.engine;
             let out = engine.tick_output(throttle, p, self.propellant, dt, self.debug);
@@ -213,10 +207,7 @@ impl Vessel {
         let total: f64 = weights.iter().map(|w| w.1).sum();
         let blocks = weights.into_iter().map(|(i, w)| (i, w / total)).collect();
         let out = EngineOutput { thrust: t.thrust, mdot: t.mdot };
-        let want = (controls.translate.clamp(DVec3::splat(-1.0), DVec3::splat(1.0)) + propulsion::ullage(def, state))
-            .clamp_length_max(1.0);
-        let push = crate::systems::rcs::translate(def, state, props.com, want, self.debug);
-        let tick = ShipTick { draws: t.draws, heat: t.heat, rcs_flow, blocks, push };
+        let tick = ShipTick { draws: t.draws, heat: t.heat, rcs_flow, blocks };
         (out, Actuators { torque, gimbal: Some(gimbal) }, Some(tick))
     }
 
@@ -296,8 +287,18 @@ impl Vessel {
                 _ => None,
             })
             .collect();
+        // A part that failed destroyed leaves as a wreck of its own.
+        let failed: Vec<(u32, super::Destruction)> = effects
+            .iter()
+            .filter_map(|e| match e {
+                Effect::Destroy(part, why) => {
+                    parts.iter().position(|p| p.id == *part).map(|i| (i as u32, super::Destruction::Failed(*why)))
+                }
+                _ => None,
+            })
+            .collect();
         let moved = self.deployed_parts() != self.craft.id.deployed();
-        if separated.is_empty() && torn.is_empty() && !moved {
+        if separated.is_empty() && torn.is_empty() && failed.is_empty() && !moved {
             return;
         }
         let epoch = self.time;
@@ -309,6 +310,12 @@ impl Vessel {
         });
         b.separated.extend(separated);
         b.torn.extend(torn);
+        for (part, why) in failed {
+            if !b.destroyed.iter().any(|d| d.0 == part) {
+                b.destroyed.push((part, why));
+            }
+        }
+        b.destroyed.sort_by_key(|d| d.0);
     }
 }
 

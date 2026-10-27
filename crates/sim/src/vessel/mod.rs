@@ -116,10 +116,6 @@ pub struct Controls {
     /// What the target modes aim at.
     #[serde(default)]
     pub target: Option<TargetState>,
-    /// Translation command in body axes (each in [-1, 1]): a craft of
-    /// parts' thrusters push along it (`systems::rcs`; settling burns).
-    #[serde(default)]
-    pub translate: DVec3,
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -156,6 +152,8 @@ pub enum Destruction {
     /// A skin cell or an interior node above its limit at `temperature`
     /// (K) (D065).
     Overheat { at: crate::thermal::Overheat, temperature: f64 },
+    /// A part of a craft of parts failed (`sim::systems::failure`).
+    Failed(crate::craft::state::PartFailure),
 }
 
 impl Destruction {
@@ -169,6 +167,7 @@ impl Destruction {
             Destruction::Overheat { at: crate::thermal::Overheat::Node(_), temperature } => {
                 format!("OVERHEATED: interior at {temperature:.0} K")
             }
+            Destruction::Failed(why) => format!("FAILED: {}", why.describe()),
         }
     }
 }

@@ -327,7 +327,7 @@ fn describe(parts: &[Placed], components: &[PlacedComponent], ship: &mut ShipDef
             finish: g.finish.clone(),
             ground: g.functions.iter().any(|f| matches!(f, Function::Pad)),
             ratings: p.built.ratings,
-            failures: Vec::new(),
+            failures: p.built.failures.clone(),
         });
         functions(&p.id, &p.id, i as u32, &p.pose, &g.functions, true, ship);
     }
@@ -342,7 +342,7 @@ fn describe(parts: &[Placed], components: &[PlacedComponent], ship: &mut ShipDef
             envelope: g.envelope.expect("a component has an envelope"),
             power: g.power,
             ratings: c.built.ratings,
-            failures: Vec::new(),
+            failures: c.built.failures.clone(),
         });
         functions(&c.id, &c.id, c.part, &c.pose, &g.functions, false, ship);
     }

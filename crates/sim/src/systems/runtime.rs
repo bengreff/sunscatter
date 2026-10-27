@@ -41,10 +41,6 @@ pub struct EngineRun {
     /// Why it stopped or failed last, for the player.
     #[serde(default)]
     pub reason: Option<String>,
-    /// Waiting to start while its propellant settles (seconds waited): its
-    /// start sequence fires the thrusters that push along its thrust.
-    #[serde(default)]
-    pub settling: Option<f64>,
 }
 
 /// A joint's load at the last live tick.
@@ -87,6 +83,16 @@ pub struct Event {
     pub text: String,
     /// Bad news (a failure, an abort).
     pub alarm: bool,
+}
+
+/// A function lost to a failure (D105 §6.4): a computer, a sensor, a pump,
+/// a mechanism's actuator (`sim::systems::failure`).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Lost {
+    pub part: u32,
+    /// The part's or component's id.
+    pub owner: String,
+    pub why: String,
 }
 
 /// How many events are kept.
@@ -134,6 +140,9 @@ pub struct Runtime {
     /// not one to break a joint on (D105).
     #[serde(default)]
     pub pressure_regulated: bool,
+    /// The functions lost to failures (by part, as the rest).
+    #[serde(default)]
+    pub lost: Vec<Lost>,
 }
 
 impl Runtime {
@@ -162,6 +171,7 @@ impl Runtime {
             tanks: by(&self.tanks, |t| t.part, kept),
             engines: by(&self.engines, |e| e.part, kept),
             joints: by(&self.joints, |j| if kept.contains(&j.parent) { j.child } else { u32::MAX }, kept),
+            lost: by(&self.lost, |l| l.part, kept),
             release_armed: false,
             release_engines: Vec::new(),
             ..self.clone()

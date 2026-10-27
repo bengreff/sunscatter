@@ -154,6 +154,9 @@ pub struct Fate {
     pub mode: String,
     pub threshold: f64,
     pub hazard: f64,
+    /// Its owner's starts or cycles counted so far (`sim::systems::failure`).
+    #[serde(default)]
+    pub seen: u32,
 }
 
 /// A component's power switch.
@@ -202,6 +205,32 @@ pub struct ShipState {
 /// gas (kg).
 pub type Contents = (Vec<(Tank, f64, f64)>, Vec<(DVec3, f64)>);
 
+/// How a part failed destroyed (D105 §6.4; `sim::systems::failure`).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub enum PartFailure {
+    /// At its destruction temperature, or its time at temperature spent.
+    Melted { k: f64 },
+    /// A tank or bottle over its burst pressure (Pa).
+    Burst { pa: f64 },
+    /// A blast's overpressure (Pa) over its rating.
+    Blast { pa: f64 },
+    /// An engine's uncontained failure.
+    Uncontained,
+}
+
+impl PartFailure {
+    /// A few words for the player.
+    pub fn describe(&self) -> String {
+        match *self {
+            PartFailure::Melted { k } => format!("melted at {k:.0} K"),
+            PartFailure::Burst { pa } if pa > 0.0 => format!("burst at {:.1} bar", pa / 1e5),
+            PartFailure::Burst { .. } => "burst".into(),
+            PartFailure::Blast { pa } => format!("blast of {:.1} bar", pa / 1e5),
+            PartFailure::Uncontained => "uncontained engine failure".into(),
+        }
+    }
+}
+
 /// What a command asks of the vessel beyond the ship state.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Effect {
@@ -211,6 +240,9 @@ pub enum Effect {
     /// (N): the child's side tears off with what hangs from it (no
     /// separation system fires; `sim::systems::structure`).
     Snap(u32, f64),
+    /// The part (`Part::id`) failed destroyed (`sim::systems::failure`): it
+    /// leaves as a wreck of its own.
+    Destroy(u32, PartFailure),
     ReleaseClamps,
     ArmChutes,
 }

@@ -64,7 +64,11 @@ impl Vessel {
                 hot(design.cell_part[i], Overheat::Cell(i as u32), t, &mut b);
             }
         }
-        for (j, (&t, &max)) in st.nodes.iter().zip(&design.node_max).enumerate() {
+        // A craft of parts' interiors are judged by their time at
+        // temperature (`systems::failure`: rated to destruction), not at once
+        // at their service limit.
+        let interiors = if design.ship.is_some() { &[][..] } else { &st.nodes[..] };
+        for (j, (&t, &max)) in interiors.iter().zip(&design.node_max).enumerate() {
             if t > max {
                 hot(design.node_part[j], Overheat::Node(j as u32), t, &mut b);
             }

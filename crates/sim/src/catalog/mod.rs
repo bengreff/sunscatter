@@ -347,6 +347,8 @@ pub struct Built {
     /// Published minus derived dry mass (kg) and the entry's reason, when
     /// the entry publishes a dry mass.
     pub unmodelled: Option<(f64, String)>,
+    /// The entry's statistical failure modes (D105).
+    pub failures: Vec<FailureMode>,
 }
 
 impl Entry {
@@ -406,7 +408,7 @@ impl Entry {
             }
         }
         let ratings = self.ratings.or(generator_ratings(&g));
-        Ok(Built { generated: g, ratings, overrides, unmodelled })
+        Ok(Built { generated: g, ratings, overrides, unmodelled, failures: self.failures.clone() })
     }
 }
 

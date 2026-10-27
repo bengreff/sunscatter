@@ -75,6 +75,7 @@ pub fn tick(def: &ShipDef, state: &mut ShipState, env: &TickEnv, draws: &[f64], 
         let m = super::structure::Motion { com: DVec3::ZERO, accel: env.accel, omega: env.omega, alpha: env.alpha };
         effects.extend(super::structure::step(def, state, b, &m, env.at, env.debug));
     }
+    effects.extend(super::failure::step(def, state, env));
     effects
 }
 
