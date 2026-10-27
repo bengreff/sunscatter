@@ -110,11 +110,12 @@ impl Controller {
             return None;
         }
         let share = self.recent.iter().filter(|(_, m)| *m).count() as f64 / self.recent.len().max(1) as f64;
-        // A step down that did not make frames faster: limited elsewhere
-        // (the CPU); go back and stay a long while.
-        if let Some((step_before, dt_before)) = self.before.take() {
+        // A step down that did not make frames faster: pixels are not what
+        // limits them (the CPU is); back to full resolution for a long while.
+        if let Some((_, dt_before)) = self.before.take() {
             if self.mean_dt() > 0.95 * dt_before {
-                self.change(step_before);
+                self.change(0);
+                self.trying = None;
                 self.no_down_until = self.now + MAX_WAIT;
                 return Some(self.scale());
             }
@@ -414,8 +415,17 @@ mod tests {
     fn a_cpu_bound_frame_keeps_full_resolution() {
         let mut c = Controller::default();
         // 3 periods whatever the scale: stepping down did not help.
-        let s = run(&mut c, 3.0 * P, 10.0);
-        assert!(s >= 0.9, "{s}");
+        assert_eq!(run(&mut c, 3.0 * P, 10.0), 1.0);
+        // Nor after a while at a lower step, the scene having changed.
+        let mut c = Controller::default();
+        let mut t = 0.0;
+        while t < 3.0 {
+            let dt = 3.0 * f64::from(c.scale()).powi(2) * P;
+            c.update(dt, P);
+            t += dt;
+        }
+        assert!(c.scale() < 1.0);
+        assert_eq!(run(&mut c, 3.0 * P, 5.0), 1.0, "CPU-bound now: full resolution again");
     }
 
     #[test]
