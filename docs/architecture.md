@@ -92,7 +92,7 @@ A short map to search before building anything: who owns what, the frame order, 
 | Whether a vessel's engine runs now (display) | `game::scene` (`engine_on`) | a stored burn segment, or live flight with thrust at the pilot's throttle (`Vessel::engine_running`) |
 | Drawing ships (D073): a craft of parts part by part (each part's own closed surface, kept per base craft and part id; a flat colour from its finish's or bare material's solar absorptivity, `colour`; static parts merged by colour, a part on a mechanism turned about its hinge from the ship state, `hinge`), a flame per engine from its thrust (`Vessel::engine_thrusts`; `nozzle`, `flame`), the test craft as one mesh in the ship colour; one light buffer per ship | `game::scene::parts` (rules), `game::scene::ships` (`update_ships`, `update_parts`, `ShipModels`) | a piece after a split draws its parts' meshes |
 | Where files live | `game::persist` | `SUNSCATTER_HOME` override |
-| Number/unit formatting (distance, speed, duration) | `game::format` | |
+| Number/unit formatting (distance, speed, duration); readouts through what the craft knows (D106: `Known` from `Vessel::knowledge`, a dash for what it cannot measure, the digits its precision gives: `decimals`, `Known::distance`, `speed`, `value`) | `game::format` | the navball cluster, the menus (`FlightData::known`) and the systems screen read through it; debug mode and the test craft know everything |
 
 ## Frame order (Update schedule, `main.rs`)
 

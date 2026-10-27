@@ -6,7 +6,7 @@ fn rocket_facts(state: &ShipState) -> Vec<PartFacts> {
     let craft = rocket();
     let def = craft.ship.as_deref().unwrap();
     let colours = vec![[0.5; 3]; craft.parts.len()];
-    facts(&craft.parts, &colours, def, state, None)
+    facts(&craft.parts, &colours, def, state, None, &sim::systems::Knowledge::perfect())
 }
 
 fn named<'a>(f: &'a [PartFacts], name: &str) -> &'a PartFacts {
@@ -27,7 +27,7 @@ fn facts_gather_each_parts_joint_tanks_and_systems() {
     assert_eq!((joint.name.as_str(), joint.class, joint.intact), ("separation", JointClass::Separation, true));
     let fluids: Vec<&str> = tank.tanks.iter().map(|t| t.0.as_str()).collect();
     assert_eq!(fluids, ["RP-1", "LOX"]);
-    assert!((tank.tanks[0].1 - 0.9 * tank.tanks[0].2).abs() < 1e-9, "fuel loaded to 90 %");
+    assert!((tank.tanks[0].1.unwrap() - 0.9 * tank.tanks[0].2).abs() < 1e-9, "fuel loaded to 90 %");
     assert!(tank.plumbing, "the bottle inside it");
     // The capsule: the root, the computer and its 50 W, a seat; linked.
     let capsule = named(&f, "capsule");
@@ -61,8 +61,18 @@ fn temperatures_go_to_their_parts_nearest_their_limits() {
         node_max: &[400.0],
     };
     let colours = vec![[0.5; 3]; craft.parts.len()];
-    let f = facts(&craft.parts, &colours, def, &state, Some(&temps));
+    let f = facts(&craft.parts, &colours, def, &state, Some(&temps), &sim::systems::Knowledge::perfect());
     assert_eq!(f[0].skin, Some((900.0, 950.0)), "the cell nearest its limit, not the hottest");
+    // Without temperature or level sensors the craft knows neither (D106).
+    let blind = facts(&craft.parts, &colours, def, &state, Some(&temps), &sim::systems::Knowledge::default());
+    assert!(blind.iter().all(|p| p.skin.is_none() && p.interior.is_none()));
+    assert!(blind.iter().flat_map(|p| &p.tanks).all(|t| t.1.is_none()));
+    let tank = blind.iter().find(|p| !p.tanks.is_empty()).unwrap();
+    let shade = colour(Layer::Plumbing, tank, false);
+    assert_eq!(
+        shade,
+        fluid_colour(&tank.tanks.iter().max_by(|a, b| a.2.total_cmp(&b.2)).unwrap().0).map(|c| c * UNKNOWN_FILL)
+    );
     assert_eq!((f[0].interior, f[1].interior, f[1].skin), (None, Some((350.0, 400.0)), None));
     // Its thermal colour is near the red end.
     let c = colour(Layer::Thermal, &f[0], false);
@@ -74,8 +84,8 @@ fn temperatures_go_to_their_parts_nearest_their_limits() {
 fn layer_colours_table() {
     let base = PartFacts { material: [0.8, 0.8, 0.8], integrity: 1.0, ..Default::default() };
     let joint = |class, intact| Some(JointFact { name: "j".into(), class, intact, allowable: 1.0, radius: 1.0 });
-    let lox_half = PartFacts { tanks: vec![("LOX".into(), 50.0, 100.0)], ..base.clone() };
-    let lox_full = PartFacts { tanks: vec![("LOX".into(), 100.0, 100.0)], ..base.clone() };
+    let lox_half = PartFacts { tanks: vec![("LOX".into(), Some(50.0), 100.0)], ..base.clone() };
+    let lox_full = PartFacts { tanks: vec![("LOX".into(), Some(100.0), 100.0)], ..base.clone() };
     // (layer, facts, colour)
     let table = [
         (Layer::Physical, base.clone(), [0.8, 0.8, 0.8]),

@@ -8,7 +8,9 @@
 //! Layers show what exists: the structure's joints by kind (their loads
 //! are RUNTIME's, not computed yet), the temperatures the thermal network
 //! has, the tanks' fills, the electrical and data items as placed; each
-//! layer says plainly what it cannot show yet ([`Layer::note`]).
+//! layer says plainly what it cannot show yet ([`Layer::note`]). Like every
+//! readout they show only what the craft measures (D106): a part's
+//! temperature with its sensor, a tank's fill with its level sensor.
 
 use bevy::prelude::{Quat, Transform, Vec3};
 use sim::craft::assembly::JointKind;
@@ -60,18 +62,21 @@ impl Layer {
                 "Joints by kind: integral white, bolted grey, separation amber, hold-down concrete. \
                  Loads against capacity are not simulated yet (RUNTIME)."
             }
-            Layer::Thermal => "Each part's hottest skin cell or interior node against its limit: blue cold, red at it.",
+            Layer::Thermal => {
+                "Each part's skin cell or interior node nearest its limit, blue cold, red at it, where a \
+                 temperature sensor measures it (D106; debug mode: everywhere)."
+            }
             Layer::Plumbing => {
-                "Tanks by fluid, brighter the fuller. Pressures, flows and settling are not simulated yet \
-                 (RUNTIME): pressures shown are the ullage gas law on the ship state."
+                "Tanks by fluid, brighter the fuller where a level sensor measures it (else a middle shade). \
+                 Pressures are the ullage gas law on the ship state; flows and settling come with RUNTIME."
             }
             Layer::Electrical => {
                 "Sources green, loads orange, bus members yellow. Power flow and charge use are not \
                  simulated yet (RUNTIME)."
             }
             Layer::Data => {
-                "Computers cyan, sensors violet, linked actuators blue. What the craft knows from its \
-                 sensors is not simulated yet (RUNTIME)."
+                "Computers cyan, sensors violet, linked actuators blue. What the craft knows (D106) comes from \
+                 the sensors a working computer reads; every readout shows only that."
             }
             Layer::Health => {
                 "Integrity and damage: green sound, yellow damaged, red failed. Damage does not accumulate \
@@ -113,8 +118,9 @@ pub struct PartFacts {
     /// The hottest skin cell and interior node with their limits (K).
     pub skin: Option<(f64, f64)>,
     pub interior: Option<(f64, f64)>,
-    /// Its tanks: fluid, liquid (kg), capacity (kg).
-    pub tanks: Vec<(String, f64, f64)>,
+    /// Its tanks: fluid, liquid (kg; `None`: no level sensor, D106),
+    /// capacity (kg).
+    pub tanks: Vec<(String, Option<f64>, f64)>,
     /// Bottles, valves, engines or thrusters on it or its components.
     pub plumbing: bool,
     /// A battery or solar array; a bus member; its components' draw (W).
@@ -158,7 +164,9 @@ pub fn facts(
     def: &ShipDef,
     state: &ShipState,
     t: Option<&Temps>,
+    known: &sim::systems::Knowledge,
 ) -> Vec<PartFacts> {
+    use sim::systems::Quantity;
     (parts.iter().enumerate())
         .map(|(k, p)| {
             let id = p.id;
@@ -175,10 +183,15 @@ pub fn facts(
                 allowable: j.allowable,
                 radius: j.radius,
             });
-            let tanks = (def.tanks.iter().zip(&state.tanks))
-                .filter(|(d, _)| d.part == id)
-                .map(|(d, s)| (d.fluid.clone(), s.liquid, d.capacity))
+            let tanks = (def.tanks.iter().zip(&state.tanks).enumerate())
+                .filter(|(_, (d, _))| d.part == id)
+                .map(|(i, (d, s))| {
+                    let level = known.knows(Quantity::TankLevel(i as u32)).then_some(s.liquid);
+                    (d.fluid.clone(), level, d.capacity)
+                })
                 .collect();
+            // Temperatures where the craft measures them (D106).
+            let t = t.filter(|_| known.knows(Quantity::PartTemperature(id)));
             let on = |part: u32| part == id;
             let plumbing = def.bottles.iter().any(|b| on(b.part))
                 || def.valves.iter().any(|v| on(v.part))
@@ -213,6 +226,9 @@ pub fn facts(
         })
         .collect()
 }
+
+/// The shade of a tank whose level the craft cannot measure.
+pub const UNKNOWN_FILL: f32 = 0.35;
 
 /// A part that does not matter in a layer (linear).
 pub const GHOST: [f32; 3] = [0.06, 0.065, 0.075];
@@ -277,10 +293,12 @@ pub fn colour(layer: Layer, f: &PartFacts, selected: bool) -> [f32; 3] {
             }
         }
         Layer::Plumbing => match f.tanks.iter().max_by(|a, b| a.2.total_cmp(&b.2)) {
-            Some((fluid, liquid, capacity)) => {
+            Some((fluid, Some(liquid), capacity)) => {
                 let fill = if *capacity > 0.0 { (liquid / capacity) as f32 } else { 0.0 };
                 fluid_colour(fluid).map(|c| c * (0.2 + 0.8 * fill.clamp(0.0, 1.0)))
             }
+            // Its fluid by design, its level unknown: a middle shade.
+            Some((fluid, None, _)) => fluid_colour(fluid).map(|c| c * UNKNOWN_FILL),
             None if f.plumbing => [0.55, 0.57, 0.6],
             None => GHOST,
         },

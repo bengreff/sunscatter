@@ -3,16 +3,19 @@
 //! the commands it takes. Pure functions of the ship definition and state
 //! (and the layers' facts), table-tested.
 //!
-//! Values are what the simulation holds now (perfect information until the
-//! knowledge model, D106, gives each its precision or a dash). What the
-//! simulation does not compute yet says so: joint loads, power flow.
+//! Values are what the craft measures (D106, `sim::systems::data`): a dash
+//! where it has no sensor, the digits its precision gives; design data
+//! (ratings, masses, ranges) as built. What the simulation does not compute
+//! yet says so: joint loads, power flow.
 
 use super::rules::{JointClass, PartFacts};
+use crate::format::Known;
 use crate::staging::parts::label;
 use sim::catalog::{Hazard, Life, Ratings};
 use sim::craft::command::ShipCommand;
 use sim::craft::ship::ShipDef;
 use sim::craft::state::{EngineStatus, ShipState};
+use sim::systems::Quantity;
 
 /// What the inspector shows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -127,7 +130,7 @@ pub fn ullage_pressure(def: &sim::craft::ship::TankDef, s: &sim::craft::state::T
 }
 
 /// The groups about part `id` (with its layers' facts `f`).
-fn part_groups(def: &ShipDef, state: &ShipState, id: u32, f: Option<&PartFacts>, out: &mut Vec<Group>) {
+fn part_groups(def: &ShipDef, state: &ShipState, id: u32, f: Option<&PartFacts>, k: &Known, out: &mut Vec<Group>) {
     let Some(info) = def.parts.iter().find(|p| p.part == id) else { return };
     let mut g = Group::new(format!("PART {}", info.id));
     g.row("catalog entry", info.entry.clone()).row("dry mass", kg(info.mass)).row("derived", kg(info.derived));
@@ -184,7 +187,7 @@ fn part_groups(def: &ShipDef, state: &ShipState, id: u32, f: Option<&PartFacts>,
         out.push(g);
     }
     for (i, _) in def.tanks.iter().enumerate().filter(|(_, t)| t.id.split(':').next() == Some(info.id.as_str())) {
-        out.push(tank_group(def, state, i));
+        out.push(tank_group(def, state, i, k));
     }
     for (i, e) in def.engines.iter().enumerate().filter(|(_, e)| e.owner == info.id) {
         out.push(engine_group(state, i, e));
@@ -209,15 +212,20 @@ fn part_groups(def: &ShipDef, state: &ShipState, id: u32, f: Option<&PartFacts>,
     }
 }
 
-fn tank_group(def: &ShipDef, state: &ShipState, i: usize) -> Group {
+fn tank_group(def: &ShipDef, state: &ShipState, i: usize, k: &Known) -> Group {
     let (t, s) = (&def.tanks[i], &state.tanks[i]);
+    let q = |f: fn(u32) -> Quantity| f(i as u32);
     let mut g = Group::new(format!("TANK {}", t.id));
     let fill = if t.capacity > 0.0 { s.liquid / t.capacity } else { 0.0 };
+    let level = k.or_dash(k.knows(q(Quantity::TankLevel)), || {
+        format!("{} / {} ({:.1} %)", kg(s.liquid), kg(t.capacity), fill * 100.0)
+    });
+    let warm = k.knows(q(Quantity::TankTemperature));
     g.row("fluid", t.fluid.clone())
-        .row("liquid", format!("{} / {} ({:.1} %)", kg(s.liquid), kg(t.capacity), fill * 100.0))
-        .row("liquid temperature", kelvin(s.liquid_k))
-        .row("ullage pressure", bar(ullage_pressure(t, s)))
-        .row("ullage temperature", kelvin(s.ullage_k))
+        .row("liquid", level)
+        .row("liquid temperature", k.or_dash(warm, || kelvin(s.liquid_k)))
+        .row("ullage pressure", k.value(q(Quantity::TankPressure), ullage_pressure(t, s), 1e5, 2, "bar"))
+        .row("ullage temperature", k.or_dash(warm, || kelvin(s.ullage_k)))
         .row("operating · burst", format!("{} · {}", bar(t.pressure), bar(t.burst)));
     g
 }
@@ -245,8 +253,48 @@ fn engine_group(state: &ShipState, i: usize, e: &sim::craft::ship::EngineDef) ->
     g
 }
 
+/// A component's bottle, battery and valve groups (its stored energy and
+/// pressure as the craft measures them).
+fn stores(def: &ShipDef, state: &ShipState, id: &str, k: &Known, out: &mut Vec<Group>) {
+    for (j, b) in def.bottles.iter().enumerate().filter(|(_, b)| b.id == id) {
+        let s = &state.bottles[j];
+        let gas = sim::fluids::fluids().gas(&b.gas).map_or(0.0, |g| g.molar_mass);
+        let q = Quantity::BottlePressure(j as u32);
+        let pressure = k.value(q, sim::fluids::pressure(s.moles, b.volume, s.k), 1e5, 2, "bar");
+        let mut g = Group::new(format!("BOTTLE {}", b.id));
+        g.row("gas", b.gas.clone())
+            .row("contents", k.or_dash(k.knows(q), || kg(s.moles * gas)))
+            .row("pressure", format!("{pressure} (rated {})", bar(b.pressure)))
+            .row("temperature", k.or_dash(k.knowledge.perfect, || kelvin(s.k)))
+            .row("burst", bar(b.burst));
+        out.push(g);
+    }
+    for (j, _) in def.tanks.iter().enumerate().filter(|(_, t)| t.id.split(':').next() == Some(id)) {
+        out.push(tank_group(def, state, j, k));
+    }
+    for (j, b) in def.batteries.iter().enumerate().filter(|(_, b)| b.id == id) {
+        let s = &state.batteries[j];
+        let charge = k.or_dash(k.knows(Quantity::BatteryCharge(j as u32)), || format!("{:.0}", s.charge / 3600.0));
+        let mut g = Group::new(format!("BATTERY {}", b.id));
+        g.row("charge", format!("{charge} / {:.0} Wh", b.item.capacity / 3600.0))
+            .row("voltage", format!("{:.0} V", b.item.voltage))
+            .row("temperature", k.or_dash(k.knowledge.perfect, || kelvin(s.k)))
+            .row("use", "power flow is not simulated yet (RUNTIME)");
+        out.push(g);
+    }
+    for (j, v) in def.valves.iter().enumerate().filter(|(_, v)| v.id == id) {
+        let s = &state.valves[j];
+        let open = format!("{}{}", if s.open { "open" } else { "closed" }, if s.stuck { " · STUCK" } else { "" });
+        let mut g = Group::new(format!("VALVE {}", v.id));
+        g.row("kind", format!("{:?}", v.item.kind))
+            .row("state", open)
+            .row("cycles", format!("{} of {:.0} rated", s.cycles, v.item.cycles));
+        out.push(g);
+    }
+}
+
 /// The groups about component `i`.
-fn component_groups(def: &ShipDef, state: &ShipState, i: usize, out: &mut Vec<Group>) {
+fn component_groups(def: &ShipDef, state: &ShipState, i: usize, k: &Known, out: &mut Vec<Group>) {
     let Some(c) = def.components.get(i) else { return };
     let host = def.parts.iter().find(|p| p.part == c.part).map_or("?", |p| p.id.as_str());
     let mut g = Group::new(format!("COMPONENT {}", c.id));
@@ -258,53 +306,17 @@ fn component_groups(def: &ShipDef, state: &ShipState, i: usize, out: &mut Vec<Gr
     out.push(g);
     out.push(ratings(&c.ratings));
     out.extend(failures(&c.failures));
+    stores(def, state, &c.id, k, out);
     let mine = |id: &str| id == c.id;
-    for (k, b) in def.bottles.iter().enumerate().filter(|(_, b)| mine(&b.id)) {
-        let s = &state.bottles[k];
-        let gas = sim::fluids::fluids().gas(&b.gas).map_or(0.0, |g| g.molar_mass);
-        let mut g = Group::new(format!("BOTTLE {}", b.id));
-        g.row("gas", b.gas.clone())
-            .row("contents", kg(s.moles * gas))
-            .row(
-                "pressure",
-                format!("{} (rated {})", bar(sim::fluids::pressure(s.moles, b.volume, s.k)), bar(b.pressure)),
-            )
-            .row("temperature", kelvin(s.k))
-            .row("burst", bar(b.burst));
-        out.push(g);
-    }
-    for (k, _) in def.tanks.iter().enumerate().filter(|(_, t)| t.id.split(':').next() == Some(c.id.as_str())) {
-        out.push(tank_group(def, state, k));
-    }
-    for (k, b) in def.batteries.iter().enumerate().filter(|(_, b)| mine(&b.id)) {
-        let s = &state.batteries[k];
-        let mut g = Group::new(format!("BATTERY {}", b.id));
-        g.row("charge", format!("{:.0} / {:.0} Wh", s.charge / 3600.0, b.item.capacity / 3600.0))
-            .row("voltage", format!("{:.0} V", b.item.voltage))
-            .row("temperature", kelvin(s.k))
-            .row("use", "power flow is not simulated yet (RUNTIME)");
-        out.push(g);
-    }
-    for (k, v) in def.valves.iter().enumerate().filter(|(_, v)| mine(&v.id)) {
-        let s = &state.valves[k];
-        let mut g = Group::new(format!("VALVE {}", v.id));
-        g.row("kind", format!("{:?}", v.item.kind))
-            .row(
-                "state",
-                format!("{}{}", if s.open { "open" } else { "closed" }, if s.stuck { " · STUCK" } else { "" }),
-            )
-            .row("cycles", format!("{} of {:.0} rated", s.cycles, v.item.cycles));
-        out.push(g);
-    }
-    for (k, t) in def.thrusters.iter().enumerate().filter(|(_, t)| mine(&t.id)) {
-        let on = state.thrusters.get(k).is_some_and(|s| s.enabled);
+    for (j, t) in def.thrusters.iter().enumerate().filter(|(_, t)| mine(&t.id)) {
+        let on = state.thrusters.get(j).is_some_and(|s| s.enabled);
         let mut g = Group::new(format!("THRUSTERS {}", t.id));
         g.row("nozzles", format!("{} × {:.0} N, Isp {:.0} s", t.nozzles.len(), t.thrust, t.isp))
             .row("enabled", if on { "yes" } else { "no" });
         out.push(g);
     }
-    for (k, e) in def.engines.iter().enumerate().filter(|(_, e)| e.owner == c.id) {
-        out.push(engine_group(state, k, e));
+    for (j, e) in def.engines.iter().enumerate().filter(|(_, e)| e.owner == c.id) {
+        out.push(engine_group(state, j, e));
     }
     for s in def.sensors.iter().filter(|s| mine(&s.id)) {
         let mut g = Group::new(format!("SENSOR {}", s.id));
@@ -313,9 +325,9 @@ fn component_groups(def: &ShipDef, state: &ShipState, i: usize, out: &mut Vec<Gr
             .row("rate", format!("{:.0} Hz", s.item.rate_hz));
         out.push(g);
     }
-    for k in def.computers.iter().filter(|k| mine(&k.id)) {
-        let mut g = Group::new(format!("COMPUTER {}", k.id));
-        g.row("channels", k.item.channels.to_string());
+    for computer in def.computers.iter().filter(|x| mine(&x.id)) {
+        let mut g = Group::new(format!("COMPUTER {}", computer.id));
+        g.row("channels", computer.item.channels.to_string());
         let links: Vec<&str> =
             (def.links.iter().filter(|l| l.from.0 == c.id)).flat_map(|l| l.to.iter().map(|m| m.0.as_str())).collect();
         g.row("commands", if links.is_empty() { "—".to_string() } else { links.join(", ") });
@@ -326,12 +338,13 @@ fn component_groups(def: &ShipDef, state: &ShipState, i: usize, out: &mut Vec<Gr
     }
 }
 
-/// Everything known about `sel` (`facts`: the parts' layer facts).
-pub fn details(def: &ShipDef, state: &ShipState, facts: &[PartFacts], sel: Selection) -> Vec<Group> {
+/// Everything known about `sel` (`facts`: the parts' layer facts; `k`:
+/// what the craft measures, D106: a dash for the rest).
+pub fn details(def: &ShipDef, state: &ShipState, facts: &[PartFacts], sel: Selection, k: &Known) -> Vec<Group> {
     let mut out = Vec::new();
     match sel {
-        Selection::Part(id) => part_groups(def, state, id, facts.iter().find(|f| f.id == id), &mut out),
-        Selection::Component(i) => component_groups(def, state, i, &mut out),
+        Selection::Part(id) => part_groups(def, state, id, facts.iter().find(|f| f.id == id), k, &mut out),
+        Selection::Component(i) => component_groups(def, state, i, k, &mut out),
     }
     out.retain(|g| !g.rows.is_empty());
     out

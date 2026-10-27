@@ -26,12 +26,17 @@ fn summary(d: &FlightData) -> Section {
     } else {
         Tone::Normal
     };
-    s.toned("PROPELLANT", format!("{:.0} kg · {:.0} %", c.propellant, 100.0 * fraction), tone);
-    s.row("ΔV (VAC)", format!("{:.0} m/s", c.dv_vac));
+    // What the craft cannot measure reads as a dash (D106): its tanks'
+    // levels, its parts' temperatures.
+    let k = &d.known;
+    let propellant = k.or_dash(k.propellant, || format!("{:.0} kg · {:.0} %", c.propellant, 100.0 * fraction));
+    s.toned("PROPELLANT", propellant, if k.propellant { tone } else { Tone::Normal });
+    s.row("ΔV (VAC)", k.or_dash(k.propellant, || format!("{:.0} m/s", c.dv_vac)));
     let (skin, skin_limit) = c.skin;
-    s.toned("SKIN MAX", temperature(skin, skin_limit), heat_tone(skin, skin_limit));
+    s.toned("SKIN MAX", k.or_dash(k.temperatures, || temperature(skin, skin_limit)), heat_tone(skin, skin_limit));
     let (node, node_limit) = c.interior;
-    s.toned("INTERIOR MAX", temperature(node, node_limit), heat_tone(node, node_limit));
+    let interior = k.or_dash(k.temperatures, || temperature(node, node_limit));
+    s.toned("INTERIOR MAX", interior, heat_tone(node, node_limit));
     let link = d.comms.link.as_ref();
     let comms = match link {
         None => "no signal".to_string(),
@@ -55,8 +60,10 @@ fn summary(d: &FlightData) -> Section {
 fn propulsion(d: &FlightData) -> Section {
     let mut s = Section::new("propulsion", "PROPULSION");
     let c = &d.craft;
-    s.row("TWR (VAC)", c.twr_vac.map_or("— (free space)".to_string(), |t| format!("{t:.2} in {}'s gravity", d.body)));
-    s.row("MASS", format!("{:.2} t", c.mass / 1e3));
+    let k = &d.known;
+    let twr = c.twr_vac.map_or("— (free space)".to_string(), |t| format!("{t:.2} in {}'s gravity", d.body));
+    s.row("TWR (VAC)", k.or_dash(k.propellant, || twr));
+    s.row("MASS", k.or_dash(k.propellant, || format!("{:.2} t", c.mass / 1e3)));
     s.row("THRUST (VAC)", format!("{:.0} kN", c.thrust_vac / 1e3));
     s.row("ISP", format!("{:.0} s vac · {:.0} s SL", c.isp_vac, c.isp_sl));
     let [pitch, yaw, roll] = c.rcs_torque;
@@ -70,12 +77,13 @@ fn propulsion(d: &FlightData) -> Section {
 /// The parts nearest their limits, and the interior.
 fn thermal(d: &FlightData) -> Section {
     let mut s = Section::new("thermal", "THERMAL");
+    let k = &d.known;
     for (name, t, limit) in &d.craft.hottest {
-        s.toned(name.to_uppercase(), temperature(*t, *limit), heat_tone(*t, *limit));
+        s.toned(name.to_uppercase(), k.or_dash(k.temperatures, || temperature(*t, *limit)), heat_tone(*t, *limit));
     }
     if !s.items.is_empty() {
         let (node, limit) = d.craft.interior;
-        s.toned("INTERIOR", temperature(node, limit), heat_tone(node, limit));
+        s.toned("INTERIOR", k.or_dash(k.temperatures, || temperature(node, limit)), heat_tone(node, limit));
     }
     s
 }

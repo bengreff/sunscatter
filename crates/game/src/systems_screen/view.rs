@@ -186,7 +186,7 @@ pub fn update(
         skin_max: &design.skin_max,
         node_max: &design.node_max,
     };
-    view.facts = rules::facts(&craft.parts, &colours, &def, state, Some(&temps));
+    view.facts = rules::facts(&craft.parts, &colours, &def, state, Some(&temps), &vessel.knowledge());
     for (k, (_, material)) in view.parts.iter().enumerate() {
         let selected = screen.selected == Some(Selection::Part(craft.parts[k].id));
         let [r, g, b] = view.facts.get(k).map_or(rules::GHOST, |f| rules::colour(screen.layer, f, selected));

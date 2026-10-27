@@ -7,7 +7,7 @@
 use super::rules::{self, Mode};
 use super::{ApsisReadout, NavState, Navball};
 use crate::commands::GameCommand;
-use crate::format::{distance as fmt_dist, duration as fmt_duration, speed as fmt_speed};
+use crate::format::{duration as fmt_duration, DASH};
 use crate::interface::layout::InterfaceSettings;
 use crate::interface::theme;
 use crate::state::{SimState, HOLD_KEYS};
@@ -15,6 +15,7 @@ use crate::tracking::TrackingStation;
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 use egui::{vec2, Align2, Color32, RichText, Stroke};
+use sim::systems::Quantity;
 use sim::vessel::HoldMode;
 
 /// Width of the readouts left of the ball and of the controls right of it.
@@ -59,7 +60,8 @@ pub fn draw(
         let has_target = shown.target.is_some();
         centred_row(ui, egui::Id::new("nav_switch"), |ui| switch(ui, shown.mode, locked, has_target, &mut actions));
         ui.vertical_centered(|ui| {
-            ui.label(RichText::new(fmt_speed(shown.speed)).monospace().size(20.0).color(theme::TEXT));
+            let speed = shown.known.speed(Quantity::Velocity, shown.speed);
+            ui.label(RichText::new(speed).monospace().size(20.0).color(theme::TEXT));
             let about = shown.target.as_ref().filter(|_| shown.mode == Mode::Target).map_or(&shown.body, |t| &t.0);
             ui.label(RichText::new(format!("{} · {about}", shown.mode.label())).monospace().small().color(theme::DIM));
         });
@@ -143,18 +145,27 @@ fn switch(ui: &mut egui::Ui, mode: Mode, locked: bool, has_target: bool, actions
     }
 }
 
-/// Altitude, V/S, Ap and Pe with the time to each (D076).
+/// Altitude, V/S, Ap and Pe with the time to each (D076), as the craft
+/// knows them (D106: a dash for what it cannot measure).
 fn readouts(ui: &mut egui::Ui, s: &NavState) {
     let (alt_label, alt) = s.altitude;
+    let k = &s.known;
+    let orbit = k.orbit();
     let apsis = |name: &str, a: &Option<ApsisReadout>| match a {
         Some(a) => [
-            (a.other_body.as_ref().map_or(name.to_string(), |b| format!("{name} {b}")), fmt_dist(a.altitude)),
-            ("  in".to_string(), fmt_duration(a.in_s)),
+            (
+                a.other_body.as_ref().map_or(name.to_string(), |b| format!("{name} {b}")),
+                k.distance(Quantity::Position, a.altitude),
+            ),
+            ("  in".to_string(), k.or_dash(orbit, || fmt_duration(a.in_s))),
         ],
-        None => [(name.to_string(), "—".to_string()), ("  in".to_string(), "—".to_string())],
+        None => [(name.to_string(), DASH.to_string()), ("  in".to_string(), DASH.to_string())],
     };
-    let mut rows =
-        vec![(alt_label.to_string(), fmt_dist(alt)), ("V/S".into(), format!("{:+.1} m/s", s.vertical_speed))];
+    // Above the terrain from an altimeter (or a fix), above sea level from the position.
+    let alt_q = if s.mode == Mode::Surface { Quantity::Altitude } else { Quantity::Position };
+    let vs = k.speed(Quantity::Velocity, s.vertical_speed);
+    let vs = if vs == DASH || s.vertical_speed < 0.0 { vs } else { format!("+{vs}") };
+    let mut rows = vec![(alt_label.to_string(), k.distance(alt_q, alt)), ("V/S".into(), vs)];
     rows.extend(apsis("Ap", &s.ap));
     rows.extend(apsis("Pe", &s.pe));
     ui.add_space(10.0);
@@ -193,12 +204,16 @@ fn controls(ui: &mut egui::Ui, sim: &SimState, s: &NavState, height: f32, action
         ui.add_space(6.0);
         ui.vertical_centered(|ui| {
             ui.spacing_mut().item_spacing.y = 2.0;
-            ui.label(RichText::new("THR").monospace().small().color(theme::DIM));
+            let hint = "Shift / Ctrl, Z / X. A craft of parts' lit engines hold within their range: \
+                        0 % is each one's minimum (a Merlin's 40 %), not off; shut them down to stop them.";
+            ui.label(RichText::new("THR").monospace().small().color(theme::DIM)).on_hover_text(hint);
             let running = sim.ship().engine_running(&c);
             if let Some(t) = throttle_bar(ui, c.throttle, running, (height - 36.0).max(40.0)) {
                 actions.push(Action::Command(GameCommand::SetThrottle(t)));
             }
-            ui.label(RichText::new(format!("{:.0}%", c.throttle * 100.0)).monospace().small().color(theme::TEXT));
+            let lit = sim.ship().ship().is_some() && running;
+            let caption = rules::throttle_caption(c.throttle, lit);
+            ui.label(RichText::new(caption).monospace().small().color(theme::TEXT)).on_hover_text(hint);
         });
     });
 }

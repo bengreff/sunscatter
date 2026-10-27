@@ -342,3 +342,12 @@ fn the_line_frame_follows_the_switch() {
         assert_eq!(line_frame(mode, earth, target), expected, "{mode:?} {target:?}");
     }
 }
+
+#[test]
+fn the_throttle_caption_says_min_where_zero_is_the_engines_minimum() {
+    // (throttle, a craft of parts' engines lit, caption)
+    let table = [(0.0, false, "0%"), (0.0, true, "min"), (0.55, true, "55%"), (1.0, false, "100%")];
+    for (t, lit, want) in table {
+        assert_eq!(throttle_caption(t, lit), want, "{t} {lit}");
+    }
+}

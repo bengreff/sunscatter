@@ -5,7 +5,18 @@
 
 use super::data::{Brake, ChuteData, FlightData};
 use super::{Section, Tone};
-use crate::format::{distance as fmt_dist, duration as fmt_duration};
+use crate::format::{distance as fmt_dist, duration as fmt_duration, Known, DASH};
+use sim::systems::Quantity::{Acceleration, Altitude, Attitude, Position, Velocity};
+
+/// A signed speed as the craft knows it (`+12.3 m/s`).
+fn signed(k: &Known, v: f64) -> String {
+    let text = k.speed(Velocity, v);
+    if text == DASH || v < 0.0 {
+        text
+    } else {
+        format!("+{text}")
+    }
+}
 
 pub fn sections(d: &FlightData) -> Vec<Section> {
     vec![summary(d), braking(d), reentry(d), parachute(d), attitude(d)]
@@ -17,11 +28,12 @@ fn summary(d: &FlightData) -> Section {
     let mut s = Section::summary();
     match &d.impact {
         Some(h) => {
+            let k = &d.known;
             let tone = if h.in_s < 60.0 { Tone::Warn } else { Tone::Normal };
-            s.toned("IMPACT IN", fmt_duration(h.in_s), tone);
-            s.row("IMPACT V/S", format!("{:+.1} m/s", h.v_vertical));
-            s.row("IMPACT H. SPEED", format!("{:.1} m/s", h.v_horizontal));
-            s.row("AT", format!("{:+.3}° {:+.3}°", h.lat, h.lon));
+            s.toned("IMPACT IN", k.or_dash(k.orbit(), || fmt_duration(h.in_s)), tone);
+            s.row("IMPACT V/S", signed(k, h.v_vertical));
+            s.row("IMPACT H. SPEED", k.speed(Velocity, h.v_horizontal));
+            s.row("AT", k.or_dash(k.orbit(), || format!("{:+.3}° {:+.3}°", h.lat, h.lon)));
         }
         None if d.landed => {
             s.note("on the ground", Tone::Dim);
@@ -31,9 +43,9 @@ fn summary(d: &FlightData) -> Section {
         }
     }
     if let Some(m) = d.surface.filter(|_| !d.landed) {
-        s.row("RADAR ALT", fmt_dist(m.radar));
-        s.row("V/S", format!("{:+.1} m/s", m.v_vertical));
-        s.row("H. SPEED", format!("{:.1} m/s", m.v_horizontal));
+        s.row("RADAR ALT", d.known.distance(Altitude, m.radar));
+        s.row("V/S", signed(&d.known, m.v_vertical));
+        s.row("H. SPEED", d.known.speed(Velocity, m.v_horizontal));
     }
     s
 }
@@ -42,14 +54,18 @@ fn summary(d: &FlightData) -> Section {
 fn braking(d: &FlightData) -> Section {
     let mut s = Section::new("braking", "BRAKING");
     let (Some(_), Some(brake)) = (&d.impact, d.braking) else { return s };
+    // The burn needs the orbit and the mass (the propellant aboard).
+    let k = &d.known;
+    let known = k.orbit() && k.propellant;
     if let Some(m) = d.surface {
-        s.toned("LOCAL TWR", format!("{:.2}", m.twr), if m.twr < 1.0 { Tone::Warn } else { Tone::Normal });
+        let tone = if m.twr < 1.0 { Tone::Warn } else { Tone::Normal };
+        s.toned("LOCAL TWR", k.or_dash(k.propellant, || format!("{:.2}", m.twr)), tone);
     }
     match brake {
         Brake::Burn { in_s, ignite_height } => {
             let tone = if in_s < 10.0 { Tone::Warn } else { Tone::Normal };
-            s.toned("BURN IN", crate::landing::burn_in(in_s), tone);
-            s.row("IGNITE AT", fmt_dist(ignite_height));
+            s.toned("BURN IN", k.or_dash(known, || crate::landing::burn_in(in_s)), tone);
+            s.row("IGNITE AT", k.or_dash(known, || fmt_dist(ignite_height)));
         }
         Brake::CannotStop => {
             s.toned("BRAKE", "cannot stop", Tone::Alert);
@@ -63,27 +79,32 @@ fn reentry(d: &FlightData) -> Section {
     let mut s = Section::new("reentry", "REENTRY");
     match (&d.air, d.entry) {
         (Some(air), _) => {
-            s.row("DYN. PRESSURE", format!("{:.2} kPa", air.q / 1e3));
-            s.row("MACH", format!("{:.2}", air.mach));
-            s.row("G-LOAD", format!("{:.2} g", d.g_load));
+            let k = &d.known;
+            let moving = k.knows(Velocity);
+            s.row("DYN. PRESSURE", k.or_dash(moving, || format!("{:.2} kPa", air.q / 1e3)));
+            s.row("MACH", k.or_dash(moving, || format!("{:.2}", air.mach)));
+            s.row("G-LOAD", k.or_dash(k.knows(Acceleration), || format!("{:.2} g", d.g_load)));
             if let Some((aoa, slip)) = air.aoa_slip {
-                s.row("AoA", format!("{aoa:+.1}°"));
-                s.row("SIDESLIP", format!("{slip:+.1}°"));
+                let known = moving && k.knows(Attitude);
+                s.row("AoA", k.or_dash(known, || format!("{aoa:+.1}°")));
+                s.row("SIDESLIP", k.or_dash(known, || format!("{slip:+.1}°")));
             }
         }
         (None, Some(e)) => {
+            let k = &d.known;
             s.row("ENTRY INTERFACE", fmt_dist(e.top));
             if let Some(t) = e.in_s {
-                s.row("  IN", fmt_duration(t));
+                s.row("  IN", k.or_dash(k.orbit(), || fmt_duration(t)));
             }
             if let Some(pe) = e.periapsis {
-                s.row("PERIAPSIS", fmt_dist(pe));
+                s.row("PERIAPSIS", k.distance(Position, pe));
             }
         }
         (None, None) => return s,
     }
     let (t, limit) = d.craft.skin;
-    s.toned("SKIN MAX", crate::hud::temperature(t, limit), heat_tone(t, limit));
+    let k = &d.known;
+    s.toned("SKIN MAX", k.or_dash(k.temperatures, || crate::hud::temperature(t, limit)), heat_tone(t, limit));
     s
 }
 
@@ -143,9 +164,11 @@ fn parachute(d: &FlightData) -> Section {
 fn attitude(d: &FlightData) -> Section {
     let mut s = Section::new("attitude", "ATTITUDE");
     if let Some([heading, pitch, roll]) = d.attitude {
-        s.row("HEADING", format!("{heading:05.1}°"));
-        s.row("PITCH", format!("{pitch:+.1}°"));
-        s.row("ROLL", format!("{roll:+.1}°"));
+        let k = &d.known;
+        let known = k.knows(Attitude);
+        s.row("HEADING", k.or_dash(known, || format!("{heading:05.1}°")));
+        s.row("PITCH", k.or_dash(known, || format!("{pitch:+.1}°")));
+        s.row("ROLL", k.or_dash(known, || format!("{roll:+.1}°")));
     }
     s
 }
@@ -284,6 +307,30 @@ mod tests {
         d.chute.commanded = true;
         let s = shown(&d);
         assert!(!find(&s, "parachute").unwrap().items.iter().any(|i| matches!(i, Item::Note(..))), "armed: no advice");
+    }
+
+    /// What the craft cannot measure reads as a dash (D106); what it can,
+    /// to the digits its precision gives.
+    #[test]
+    fn readouts_follow_what_the_craft_knows() {
+        let mut k = sim::systems::Knowledge::default();
+        let blind = FlightData { known: Known::from(k.clone()), attitude: Some([1.0, 2.0, 3.0]), ..falling() };
+        let s = shown(&blind);
+        let summary = find(&s, "summary").unwrap();
+        assert!(summary.rows().iter().all(|(_, v)| *v == DASH), "{:?}", summary.rows());
+        assert!(find(&s, "attitude").unwrap().rows().iter().all(|(_, v)| *v == DASH));
+        assert_eq!(find(&s, "braking").unwrap().value("BURN IN"), Some(DASH));
+        // A GNSS fix (3 m, 0.1 m/s): the impact and the motion, not the attitude.
+        for (q, p) in sim::systems::data::provides("position", 3.0) {
+            k.learn(q, p);
+        }
+        let fixed = FlightData { known: Known::from(k), ..blind };
+        let s = shown(&fixed);
+        let summary = find(&s, "summary").unwrap();
+        assert_eq!(summary.value("IMPACT V/S"), Some("-160.0 m/s"));
+        assert_eq!(summary.value("RADAR ALT"), Some("2850 m"), "altitude to 4.5 m");
+        assert!(find(&s, "attitude").unwrap().rows().iter().all(|(_, v)| *v == DASH));
+        assert_eq!(find(&s, "braking").unwrap().value("BURN IN"), Some(DASH), "the propellant is not known");
     }
 
     #[test]

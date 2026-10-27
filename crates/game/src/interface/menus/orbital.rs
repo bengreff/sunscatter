@@ -3,11 +3,12 @@
 
 use super::data::{Burn, Elements, FlightData, TargetData};
 use super::{MenuAction, Section, Tone};
-use crate::format::{distance as fmt_dist, duration as fmt_duration, speed as fmt_speed};
+use crate::format::{duration as fmt_duration, Known};
 use crate::navball::ApsisReadout;
+use sim::systems::Quantity::{Position, Velocity};
 
 pub fn sections(d: &FlightData) -> Vec<Section> {
-    vec![summary(d), elements(d), target(&d.target), maneuvers(&d.burns)]
+    vec![summary(d), elements(d), target(&d.target, &d.known), maneuvers(&d.burns)]
 }
 
 /// Ap and Pe from the predicted trajectory (D076), then the osculating
@@ -18,14 +19,15 @@ fn summary(d: &FlightData) -> Section {
         s.note(format!("on {}: no orbit", d.body), Tone::Dim);
         return s;
     }
-    apsis(&mut s, "APOAPSIS", d.ap.as_ref());
-    apsis(&mut s, "PERIAPSIS", d.pe.as_ref());
+    let k = &d.known;
+    apsis(&mut s, "APOAPSIS", d.ap.as_ref(), k);
+    apsis(&mut s, "PERIAPSIS", d.pe.as_ref(), k);
     if let Some(el) = &d.elements {
         if let Some(p) = el.period {
-            s.row("PERIOD", fmt_duration(p));
+            s.row("PERIOD", k.or_dash(k.orbit(), || fmt_duration(p)));
         }
-        s.row("INCLINATION", format!("{:.2}°", el.inclination));
-        s.row("ECCENTRICITY", format!("{:.5}", el.e));
+        s.row("INCLINATION", k.or_dash(k.orbit(), || format!("{:.2}°", el.inclination)));
+        s.row("ECCENTRICITY", k.or_dash(k.orbit(), || format!("{:.5}", el.e)));
     }
     if d.ap.is_none() && d.elements.is_some_and(|e| e.e >= 1.0) {
         s.note(format!("escaping {}", d.body), Tone::Dim);
@@ -33,46 +35,49 @@ fn summary(d: &FlightData) -> Section {
     s
 }
 
-fn apsis(s: &mut Section, label: &str, a: Option<&ApsisReadout>) {
+fn apsis(s: &mut Section, label: &str, a: Option<&ApsisReadout>, k: &Known) {
     if let Some(a) = a {
+        let altitude = k.distance(Position, a.altitude);
         let value = match &a.other_body {
-            Some(b) => format!("{} · {b}", fmt_dist(a.altitude)),
-            None => fmt_dist(a.altitude),
+            Some(b) => format!("{altitude} · {b}"),
+            None => altitude,
         };
         s.row(label, value);
-        s.row("  IN", fmt_duration(a.in_s));
+        s.row("  IN", k.or_dash(k.orbit(), || fmt_duration(a.in_s)));
     }
 }
 
 fn elements(d: &FlightData) -> Section {
     let mut s = Section::new("elements", "ELEMENTS · OSCULATING");
     let Some(Elements { a, lan, argp, true_anomaly, speed, .. }) = d.elements else { return s };
-    s.row("SEMI-MAJOR AXIS", fmt_dist(a));
-    s.row("ASC. NODE", format!("{lan:.2}°"));
-    s.row("ARG. PERIAPSIS", format!("{argp:.2}°"));
-    s.row("TRUE ANOMALY", format!("{true_anomaly:.2}°"));
-    s.row("ORBITAL SPEED", fmt_speed(speed));
+    let k = &d.known;
+    let angle = |x: f64| k.or_dash(k.orbit(), || format!("{x:.2}°"));
+    s.row("SEMI-MAJOR AXIS", k.distance(Position, a));
+    s.row("ASC. NODE", angle(lan));
+    s.row("ARG. PERIAPSIS", angle(argp));
+    s.row("TRUE ANOMALY", angle(true_anomaly));
+    s.row("ORBITAL SPEED", k.speed(Velocity, speed));
     s.note(format!("two-body, about {}'s equator; Ap and Pe above are the predicted path's", d.body), Tone::Dim);
     s
 }
 
 /// The target picker (always), then what is known about the target.
-fn target(t: &TargetData) -> Section {
+fn target(t: &TargetData, k: &Known) -> Section {
     let title = t.info.as_ref().map_or("TARGET".to_string(), |i| format!("TARGET · {}", i.name));
     let mut s = Section::new("target", title);
     let current = t.choices.iter().find(|c| c.1 == t.current).map_or("none".to_string(), |c| c.0.clone());
     let options = t.choices.iter().map(|(name, id)| (name.clone(), *id == t.current, MenuAction::SetTarget(*id)));
     s.items.push(super::Item::Choice { label: "TARGET".into(), current, options: options.collect() });
     let Some(i) = &t.info else { return s };
-    s.row("DISTANCE", fmt_dist(i.distance));
-    s.row("REL. SPEED", fmt_speed(i.rel_speed));
+    s.row("DISTANCE", k.distance(Position, i.distance));
+    s.row("REL. SPEED", k.speed(Velocity, i.rel_speed));
     if let Some(ca) = &i.approach {
-        s.row(if ca.over_body { "PASS" } else { "CLOSEST" }, fmt_dist(ca.distance));
-        s.row("  IN", fmt_duration(ca.in_s));
-        s.row("  AT", fmt_speed(ca.speed));
+        s.row(if ca.over_body { "PASS" } else { "CLOSEST" }, k.distance(Position, ca.distance));
+        s.row("  IN", k.or_dash(k.orbit(), || fmt_duration(ca.in_s)));
+        s.row("  AT", k.speed(Velocity, ca.speed));
     }
     if let Some(x) = i.rel_inclination {
-        s.row("REL. INCLINATION", format!("{x:.2}°"));
+        s.row("REL. INCLINATION", k.or_dash(k.orbit(), || format!("{x:.2}°")));
     }
     s
 }
@@ -175,7 +180,7 @@ mod tests {
         let choices = vec![("none".to_string(), None), ("Moon".to_string(), Some(moon))];
         // (target, rows)
         let none = TargetData { current: None, choices: choices.clone(), info: None };
-        let s = target(&none);
+        let s = target(&none, &Known::default());
         assert_eq!(s.title, "TARGET");
         assert!(s.rows().is_empty(), "no target: only the picker");
         let Some(Item::Choice { current, options, .. }) = s.items.first() else { panic!("the picker comes first") };
@@ -190,7 +195,7 @@ mod tests {
             rel_inclination: Some(5.14),
         };
         let with = TargetData { current: Some(moon), choices, info: Some(info) };
-        let s = target(&with);
+        let s = target(&with, &Known::default());
         assert_eq!(s.title, "TARGET · Moon");
         assert_eq!(
             s.rows(),
@@ -206,7 +211,7 @@ mod tests {
         let mut vessel = with.info.clone().unwrap();
         vessel.approach = vessel.approach.map(|a| Approach { over_body: false, ..a });
         vessel.rel_inclination = None;
-        let s = target(&TargetData { info: Some(vessel), ..with });
+        let s = target(&TargetData { info: Some(vessel), ..with }, &Known::default());
         assert!(s.value("CLOSEST").is_some() && s.value("PASS").is_none() && s.value("REL. INCLINATION").is_none());
     }
 

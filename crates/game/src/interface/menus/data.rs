@@ -52,6 +52,8 @@ pub struct FlightData {
     pub comms: CommsData,
     pub stages: Vec<crate::staging::Stage>,
     pub diagnostics: Diagnostics,
+    /// What the craft knows (D106): every readout through it.
+    pub known: crate::format::Known,
 }
 
 /// Osculating elements about the dominant body's equator.
@@ -308,6 +310,7 @@ pub fn gather(s: &Sources) -> FlightData {
         craft: craft(sim, body),
         comms: comms(s),
         stages: crate::staging::stack_of(ship, &sim.controls),
+        known: crate::format::Known::of(ship),
         diagnostics: Diagnostics {
             anchor: sim.world.eph.node(anchor).name.clone(),
             fps: s.fps.clone(),

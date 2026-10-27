@@ -62,7 +62,8 @@ pub fn draw(
         };
         region(ui, regions.left, |ui| part_list(ui, &mut screen, &craft, def));
         view_image(ui, &mut screen, regions.view, id, view.radius);
-        region(ui, regions.right, |ui| inspector(ui, &screen, def, state, &view.facts, vessel.id(), &mut out));
+        let known = crate::format::Known::of(vessel);
+        region(ui, regions.right, |ui| inspector(ui, &screen, def, state, &view.facts, &known, vessel.id(), &mut out));
         region(ui, regions.bottom, |ui| editors(ui, &mut screen, def, vessel.id(), &mut out));
     });
     for c in out {
@@ -163,6 +164,7 @@ fn inspector(
     def: &sim::craft::ship::ShipDef,
     state: &sim::craft::state::ShipState,
     facts: &[rules::PartFacts],
+    known: &crate::format::Known,
     vessel: sim::vessel::VesselId,
     out: &mut Vec<GameCommand>,
 ) {
@@ -182,7 +184,7 @@ fn inspector(
         ui.separator();
     }
     egui::ScrollArea::vertical().id_salt("systems_inspector").show(ui, |ui| {
-        for g in inspect::details(def, state, facts, sel) {
+        for g in inspect::details(def, state, facts, sel, known) {
             ui.label(egui::RichText::new(&g.title).color(theme::ACCENT));
             egui::Grid::new(("inspect", g.title.clone())).num_columns(2).spacing([12.0, 2.0]).show(ui, |ui| {
                 for (label, value) in &g.rows {

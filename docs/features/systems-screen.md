@@ -31,6 +31,8 @@ The owner: "Systems should be an entire new screen separate from flight. Flight 
 
 **Commands travel** (D067, `commands::route`): from aboard a crewed craft they act at once; to an uncrewed one (the booster after separation, flown from mission control) after the signal's light delay, and not at all without a signal (a toast says so). The same holds for Space on a craft of parts (`GameCommand::Stage(vessel)`) and for saving its stages and functions.
 
+**Readouts through knowledge** (D106; `sim::systems::data`, `game::format::Known`): every value the craft measures is shown to the digits its precision gives, everything else as a dash: in the inspector the tanks' levels, pressures and temperatures, the bottles' pressures, the batteries' charge; in the layers the thermal colours (a part's temperature with its sensor) and the plumbing fills (a tank's level with its level sensor; else a middle shade of its fluid). The same rule runs the flight view: the navball cluster (speed, altitude, V/S, Ap and Pe: velocity, position or an altimeter) and the menus (the orbit and the target with position and velocity, the attitude with an attitude sensor, g-load with an accelerometer, propellant, mass, Δv and TWR with every tank's level, temperatures with every part's). Debug mode and the test craft know everything.
+
 ## The mini systems panel (`game::interface::mini_panel`)
 
 A small fixed dock just above the navball cluster (D080: designated places; the docks keep clear of it): SYSTEMS F8, then each pinned function as a button with its key. Nothing for the test craft.
@@ -43,6 +45,5 @@ Rules with table tests: facts per part (joints, tanks, plumbing, power, data, da
 
 ## Not done
 
-- Readouts through knowledge (D106): values are the simulation's own (perfect information) until RUNTIME's knowledge API; then dashes and digits from precision.
 - Loads, pressures, flows, power flow, damage: shown as RUNTIME gives them; the layers say what is missing.
 - The main 3D view still renders under the screen (its cost while the screen is open is not measured).

@@ -104,6 +104,9 @@ pub struct NavState {
     /// The next planned burn: its direction now (inertial) and seconds to
     /// ignition.
     pub maneuver: Option<(DVec3, f64)>,
+    /// What the craft knows (D106): the readouts show a dash for what it
+    /// cannot measure and the digits its precision gives.
+    pub known: crate::format::Known,
 }
 
 /// A target's name, position and velocity relative to `anchor` at `t`.
@@ -250,6 +253,7 @@ pub fn nav_state(sim: &SimState, tracked: &Tracked, aps: &Apsides, nav: &mut Nav
             let snap = sim.world.snapshot(t);
             (b.law.direction.direction(&snap, anchor, r, v), b.t_start.seconds_since(t))
         }),
+        known: crate::format::Known::of(vessel),
     })
 }
 

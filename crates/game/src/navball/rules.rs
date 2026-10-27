@@ -263,6 +263,17 @@ pub fn mode_altitude(mode: Mode, above_terrain: f64, above_sea_level: f64) -> (&
     }
 }
 
+/// The throttle's caption under its bar: its percentage, or "min" at zero
+/// while a craft of parts' engines burn (D104: a lit engine holds within
+/// its range, zero is its minimum, not off).
+pub fn throttle_caption(throttle: f64, parts_lit: bool) -> String {
+    if parts_lit && throttle <= 0.0 {
+        "min".into()
+    } else {
+        format!("{:.0}%", throttle * 100.0)
+    }
+}
+
 /// The speed reference the hold's prograde and retrograde follow: the
 /// navball's mode (D075).
 pub fn speed_reference(mode: Mode) -> sim::vessel::SpeedReference {
