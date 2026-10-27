@@ -11,6 +11,7 @@ use bevy::render::render_resource::{
     AsBindGroup, Extent3d, RenderPipelineDescriptor, ShaderType, SpecializedMeshPipelineError, TextureDimension,
     TextureFormat,
 };
+use bevy::render::storage::ShaderBuffer;
 use bevy::shader::ShaderDefVal;
 use bevy::shader::ShaderRef;
 use std::path::PathBuf;
@@ -29,23 +30,46 @@ pub const ATTRIBUTE_MORPH: MeshVertexAttribute =
 /// A chunk's morph factor travels in its `MeshTag` as factor × this.
 pub const MORPH_TAG_SCALE: f32 = 1000.0;
 
+/// What changes every frame (the camera moves): kept out of the material,
+/// in a storage buffer the material binds (`TerrainExt::frame`), so the
+/// material asset is never modified per frame. A modified material is
+/// prepared again in the render world and every chunk drawn with it is
+/// specialised again (~3 ms a frame for ~40 bodies, 2026-10-26).
 #[derive(Clone, Copy, Debug, Default, ShaderType, Reflect)]
-pub struct TerrainParams {
+pub struct TerrainFrame {
+    /// Rows of the world → body-fixed rotation.
     pub fixed_x: Vec4,
     pub fixed_y: Vec4,
     pub fixed_z: Vec4,
+    /// xyz: the body's centre relative to the camera.
     pub center: Vec4,
+    /// Lighting (D055, `lighting::LightUniform`): the drawn stars, their
+    /// light at this body, the bodies that can eclipse them, planetshine.
+    pub starlight: crate::lighting::LightUniform,
+    /// x: the share of the global ambient light this body receives
+    /// (`sky::ambient_share`: the daylight sky stand-in lights only the body
+    /// whose air the camera is in).
+    pub ambient: Vec4,
+    /// x: 1 when the zones are drawn (loaded, `look::Parts::zones`).
+    pub flags: Vec4,
+    /// Under an opaque deck (`clouds`): rgb the gas's extinction at the
+    /// datum (m⁻¹), w its scale height (m).
+    pub fog: Vec4,
+    /// rgb: the sky's radiance the gas scatters towards the camera
+    /// (lux/sr); w 1 when the camera is below the deck (0: no fog).
+    pub fog_light: Vec4,
+}
+
+/// What is fixed once the body's maps are loaded.
+#[derive(Clone, Copy, Debug, Default, ShaderType, Reflect)]
+pub struct TerrainParams {
     pub shape: Vec4,
     pub rock: Vec4,
     pub snow: Vec4,
     pub ocean: Vec4,
     pub flags: UVec4,
     pub base: Vec4,
-    /// Lighting (D055, `lighting::LightUniform`): the drawn stars, their
-    /// light at this body, the bodies that can eclipse them, planetshine.
-    pub starlight: crate::lighting::LightUniform,
-    /// Surface zones (`zones`): x 1 when drawn, y the warp's first
-    /// wavelength (m).
+    /// Surface zones (`zones`): y the warp's first wavelength (m).
     pub zones: Vec4,
     /// rgb: shallow-water albedo (linear), w 1 when set.
     pub shallow: Vec4,
@@ -53,10 +77,6 @@ pub struct TerrainParams {
     pub zone_color: [Vec4; MAX_ZONES],
     /// Zone pattern: x scale (m), y contrast.
     pub zone_pattern: [Vec4; MAX_ZONES],
-    /// x: the share of the global ambient light this body receives
-    /// (`sky::ambient_share`: the daylight sky stand-in lights only the body
-    /// whose air the camera is in).
-    pub ambient: Vec4,
     /// Cloud detail on a colour map (giants, `CloudsDef`): x the first
     /// wavelength (m, 0 = off), y the warp's amplitude as a fraction of it,
     /// z the east-west stretch, w the tone's contrast.
@@ -68,12 +88,6 @@ pub struct TerrainParams {
     pub haze_diffuse: Vec4,
     /// Rings (`rings`): x inner, y outer radius (m), z the profile's bins (0: none).
     pub rings: Vec4,
-    /// Under an opaque deck (`clouds`): rgb the gas's extinction at the
-    /// datum (m⁻¹), w its scale height (m).
-    pub fog: Vec4,
-    /// rgb: the sky's radiance the gas scatters towards the camera
-    /// (lux/sr); w 1 when the camera is below the deck (0: no fog).
-    pub fog_light: Vec4,
 }
 
 #[derive(Asset, AsBindGroup, Reflect, Debug, Clone, Default)]
@@ -98,6 +112,9 @@ pub struct TerrainExt {
     /// read with `textureLoad` for their shadow on the planet.
     #[texture(111)]
     pub ring_profile: Option<Handle<Image>>,
+    /// This frame's [`TerrainFrame`].
+    #[storage(112, read_only)]
+    pub frame: Handle<ShaderBuffer>,
 }
 
 impl MaterialExtension for TerrainExt {

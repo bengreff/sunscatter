@@ -65,7 +65,7 @@ impl Plugin for CloudsPlugin {
         embedded_asset!(app, "clouds.wgsl");
         app.add_plugins(MaterialPlugin::<DeckMaterial>::default())
             .add_systems(Startup, setup.after(crate::terrain::setup))
-            .add_systems(Update, update.after(crate::scene::update_bodies));
+            .add_systems(Update, update.after(crate::scene::update_bodies).before(crate::terrain::upload_frames));
     }
 }
 
@@ -118,10 +118,9 @@ pub fn update(
     rig: Res<CameraRig>,
     scene: Res<crate::lighting::LightScene>,
     parts: Res<crate::look::Parts>,
-    terrain: Res<crate::terrain::Terrain>,
+    mut terrain: ResMut<crate::terrain::Terrain>,
     mut decks: Query<(&Deck, &MeshMaterial3d<DeckMaterial>, &mut Transform, &mut Visibility)>,
     mut materials: ResMut<Assets<DeckMaterial>>,
-    mut terrain_materials: ResMut<Assets<crate::terrain::TerrainMaterial>>,
 ) {
     let snap = sim.world.snapshot(sim.clock);
     for (deck, mat, mut t, mut vis) in &mut decks {
@@ -152,13 +151,12 @@ pub fn update(
         if let Some(light) = scene.body(deck.0) {
             m.params.starlight = crate::lighting::LightUniform::new(&scene, &light, &[], parts.planetshine);
         }
-        let ground = terrain.materials().find(|(n, _)| *n == deck.0).and_then(|(_, h)| terrain_materials.get_mut(h));
-        if let Some(mut g) = ground {
+        if let Some((_, g)) = terrain.frames_mut().find(|(n, _)| *n == deck.0) {
             let a = &deck.2;
             let sigma = a.rayleigh_scattering;
-            g.extension.params.fog = Vec4::new(sigma[0], sigma[1], sigma[2], a.rayleigh_scale_height_m);
+            g.fog = Vec4::new(sigma[0], sigma[1], sigma[2], a.rayleigh_scale_height_m);
             let j = sky.map_or([0.0; 3], |l| crate::lighting::haze::fog_source(l, a.ground_albedo));
-            g.extension.params.fog_light = Vec4::new(j[0] as f32, j[1] as f32, j[2] as f32, inside.w);
+            g.fog_light = Vec4::new(j[0] as f32, j[1] as f32, j[2] as f32, inside.w);
         }
     }
 }

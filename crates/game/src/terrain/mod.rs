@@ -19,10 +19,11 @@ use crate::state::SimState;
 use bevy::asset::embedded_asset;
 use bevy::pbr::ExtendedMaterial;
 use bevy::prelude::*;
+use bevy::render::storage::ShaderBuffer;
 use bevy::tasks::{futures::check_ready, AsyncComputeTaskPool, Task};
 use glam::{DMat3, DVec3};
-pub use material::TerrainMaterial;
 use material::{TerrainExt, TerrainParams};
+pub use material::{TerrainFrame, TerrainMaterial};
 use mesh::{ChunkData, ChunkKey, HeightFn, Shape};
 
 use sim::frame::NodeId;
@@ -96,6 +97,11 @@ pub struct TerrainBody {
     /// Heights from data (left out only by the benchmark, `Parts::relief`).
     heights: Option<HeightFn>,
     material: Handle<TerrainMaterial>,
+    /// This frame's data for the shader, filled by `lod::update`,
+    /// `lighting::update_terrain` and `clouds::update`, uploaded by
+    /// [`upload_frames`] into `frame_buffer` (the material's storage buffer).
+    pub frame: TerrainFrame,
+    frame_buffer: Handle<ShaderBuffer>,
     chunks: HashMap<ChunkKey, Chunk>,
     pending: HashMap<ChunkKey, Task<ChunkData>>,
     color_task: Option<Task<Maps>>,
@@ -123,9 +129,14 @@ pub struct Terrain {
 }
 
 impl Terrain {
-    /// Each terrain body and its material (for per-body lighting).
+    /// Each terrain body and its material.
     pub fn materials(&self) -> impl Iterator<Item = (NodeId, &Handle<TerrainMaterial>)> {
         self.bodies.iter().map(|b| (b.node, &b.material))
+    }
+
+    /// Each terrain body's frame data (lighting, fog), to fill this frame.
+    pub fn frames_mut(&mut self) -> impl Iterator<Item = (NodeId, &mut TerrainFrame)> {
+        self.bodies.iter_mut().map(|b| (b.node, &mut b.frame))
     }
 
     /// Chunks or surface maps are still being built.
@@ -160,6 +171,7 @@ pub fn setup(
     sim: Res<SimState>,
     defs: Res<BodyDefs>,
     mut materials: ResMut<Assets<TerrainMaterial>>,
+    mut buffers: ResMut<Assets<ShaderBuffer>>,
 ) {
     let mut terrain = Terrain::default();
     for (node, def) in &defs.defs {
@@ -185,12 +197,13 @@ pub fn setup(
             ocean: def.ocean.as_ref().map_or(Vec4::ONE, |o| v4(o.albedo, 1.0)),
             base: v4(def.base_color, 1.0),
             shallow,
-            ambient: Vec4::ONE,
             clouds: def.clouds.map_or(Vec4::ZERO, |c| Vec4::new(c.scale_m, c.warp, c.stretch.max(1.0), c.contrast)),
             haze: haze.map_or(Vec4::ZERO, |h| v4(h.tau, h.r_over_h)),
             haze_diffuse: haze.map_or(Vec4::ZERO, |h| v4(h.diffuse, 0.0)),
             ..default()
         };
+        let frame = TerrainFrame { ambient: Vec4::ONE, ..default() };
+        let frame_buffer = buffers.add(ShaderBuffer::from(frame));
         let material = materials.add(ExtendedMaterial {
             base: StandardMaterial { perceptual_roughness: def.roughness, reflectance: 0.3, ..default() },
             extension: TerrainExt {
@@ -200,6 +213,7 @@ pub fn setup(
                 zone_map: None,
                 zone_far: None,
                 ring_profile: None,
+                frame: frame_buffer.clone(),
             },
         });
         let shape = Shape {
@@ -229,6 +243,8 @@ pub fn setup(
             shape,
             heights: heights.map(|h| h.0),
             material,
+            frame,
+            frame_buffer,
             chunks: HashMap::new(),
             pending: HashMap::new(),
             color_task: None,
@@ -247,6 +263,16 @@ pub fn setup(
 fn body_matrix(sim: &SimState, node: NodeId) -> DMat3 {
     let p = sim.world.source(node).and_then(|s| s.physical.as_ref()).expect("terrain body is physical");
     crate::scene::body_matrix(p, sim.clock)
+}
+
+/// Writes each body's frame data into its storage buffer (the material
+/// itself is left alone: see `TerrainFrame`).
+pub fn upload_frames(terrain: Res<Terrain>, mut buffers: ResMut<Assets<ShaderBuffer>>) {
+    for body in &terrain.bodies {
+        if let Some(mut b) = buffers.get_mut(&body.frame_buffer) {
+            b.set_data(body.frame);
+        }
+    }
 }
 
 /// A body's surface maps, loaded together (each only if its width changed).

@@ -155,7 +155,7 @@ pub fn update(
     cam: Query<(&Camera, &Transform, &Projection), With<MainCamera>>,
     mut terrain: ResMut<Terrain>,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<TerrainMaterial>>,
+    materials: Res<Assets<TerrainMaterial>>,
     mut chunks_q: Query<ChunkParts, ChunkFilter>,
 ) {
     let Some(view) = map::view(&cam) else { return };
@@ -243,17 +243,18 @@ pub fn update(
                 commands.entity(c.entity).despawn();
             }
         }
-        if let Some(mut mat) = materials.get_mut(&body.material) {
-            // The zone colours use the colour map's sampler, so both must be in.
-            let zones_loaded = mat.extension.zone_map.is_some() && mat.extension.color_map.is_some();
-            let p = &mut mat.extension.params;
-            p.fixed_x = m.x_axis.as_vec3().extend(0.0);
-            p.fixed_y = m.y_axis.as_vec3().extend(0.0);
-            p.fixed_z = m.z_axis.as_vec3().extend(0.0);
-            p.center = centre.as_vec3().extend(0.0);
-            // Zones draw once loaded (`update_textures`).
-            p.zones.x = if parts.zones && zones_loaded { 1.0 } else { 0.0 };
-        }
+        // The zone colours use the colour map's sampler, so both must be in
+        // (read only: a modified material is prepared again).
+        let zones_loaded = materials
+            .get(&body.material)
+            .is_some_and(|m| m.extension.zone_map.is_some() && m.extension.color_map.is_some());
+        let f = &mut body.frame;
+        f.fixed_x = m.x_axis.as_vec3().extend(0.0);
+        f.fixed_y = m.y_axis.as_vec3().extend(0.0);
+        f.fixed_z = m.z_axis.as_vec3().extend(0.0);
+        f.center = centre.as_vec3().extend(0.0);
+        // Zones draw once loaded (`update_textures`).
+        f.flags.x = if parts.zones && zones_loaded { 1.0 } else { 0.0 };
     }
     terrain.drawn = drawn;
 }

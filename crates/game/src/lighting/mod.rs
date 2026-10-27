@@ -25,7 +25,7 @@ use crate::camera::CameraRig;
 use crate::look::Parts;
 use crate::scene::BodyDefs;
 use crate::state::SimState;
-use crate::terrain::{Terrain, TerrainMaterial};
+use crate::terrain::Terrain;
 use bevy::prelude::*;
 use bevy::render::render_resource::ShaderType;
 use glam::DVec3;
@@ -249,25 +249,22 @@ pub fn update_exposure(
     }
 }
 
-/// Fills each terrain body's lighting uniforms from [`body_light`].
+/// Fills each terrain body's lighting (its frame data) from [`body_light`].
 pub fn update_terrain(
     sim: Res<SimState>,
     rig: Res<CameraRig>,
     defs: Res<BodyDefs>,
     scene: Res<LightScene>,
     parts: Res<Parts>,
-    terrain: Res<Terrain>,
-    mut materials: ResMut<Assets<TerrainMaterial>>,
+    mut terrain: ResMut<Terrain>,
 ) {
     let sky = crate::sky::sky_ambient(&sim, &rig, &defs);
     let spheres = scene.spheres();
-    for (node, handle) in terrain.materials() {
+    for (node, frame) in terrain.frames_mut() {
         let Some(i) = scene.index(node) else { continue };
         let l = body_light(i, &spheres, &scene.stars, &scene.slots);
-        let Some(mut mat) = materials.get_mut(handle) else { continue };
-        let p = &mut mat.extension.params;
-        p.starlight = LightUniform::new(&scene, &l, &[], parts.planetshine);
-        p.ambient.x = crate::sky::ambient_share(node, sky);
+        frame.starlight = LightUniform::new(&scene, &l, &[], parts.planetshine);
+        frame.ambient.x = crate::sky::ambient_share(node, sky);
     }
 }
 
