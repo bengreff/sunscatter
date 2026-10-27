@@ -17,7 +17,8 @@ use super::command::Stage;
 use super::file::{Shape, Tank};
 use super::place::Pose;
 use crate::catalog::{
-    AeroSurface, Battery, Computer, EngineData, FailureMode, Mechanism, Nozzle, Propellant, Ratings, Sensor, Valve,
+    AeroSurface, Battery, Computer, EngineData, FailureMode, LifeSupport, Mechanism, Nozzle, Propellant, Ratings,
+    Sensor, Solar, Valve,
 };
 use glam::DVec3;
 use serde::{Deserialize, Serialize};
@@ -211,6 +212,12 @@ pub struct ShipDef {
     pub sensors: Vec<Owned<Sensor>>,
     pub computers: Vec<Owned<Computer>>,
     pub seats: Vec<Owned<u32>>,
+    /// Solar cells and life support (components; `sim::systems::power`,
+    /// `sim::systems::crew`).
+    #[serde(default)]
+    pub solars: Vec<Owned<Solar>>,
+    #[serde(default)]
+    pub life_support: Vec<Owned<LifeSupport>>,
     pub joints: Vec<JointDef>,
     pub lines: Vec<LineDef>,
     pub buses: Vec<BusDef>,
@@ -272,6 +279,8 @@ impl ShipDef {
             sensors: keep(&self.sensors, |v| v.part, kept).0,
             computers: keep(&self.computers, |v| v.part, kept).0,
             seats: keep(&self.seats, |v| v.part, kept).0,
+            solars: keep(&self.solars, |v| v.part, kept).0,
+            life_support: keep(&self.life_support, |v| v.part, kept).0,
             joints: self.joints.iter().filter(|j| within(j.parent) && within(j.child)).cloned().collect(),
             lines: self.lines.iter().filter(|l| within(l.parts.0) && within(l.parts.1)).cloned().collect(),
             buses: (self.buses.iter())

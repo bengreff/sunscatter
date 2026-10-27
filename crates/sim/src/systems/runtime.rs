@@ -151,6 +151,12 @@ pub struct Runtime {
     /// The functions lost to failures (by part, as the rest).
     #[serde(default)]
     pub lost: Vec<Lost>,
+    /// The loads without power now (their bus short: shed, or no source)
+    /// and the buses as they stood (`systems::power`).
+    #[serde(default)]
+    pub unpowered: Vec<Lost>,
+    #[serde(default)]
+    pub buses: Vec<super::power::BusRun>,
 }
 
 impl Runtime {
@@ -180,6 +186,7 @@ impl Runtime {
             engines: by(&self.engines, |e| e.part, kept),
             joints: by(&self.joints, |j| if kept.contains(&j.parent) { j.child } else { u32::MAX }, kept),
             lost: by(&self.lost, |l| l.part, kept),
+            unpowered: by(&self.unpowered, |l| l.part, kept),
             release_armed: false,
             release_engines: Vec::new(),
             ..self.clone()

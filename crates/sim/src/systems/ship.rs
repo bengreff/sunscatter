@@ -76,6 +76,7 @@ pub fn tick(def: &ShipDef, state: &mut ShipState, env: &TickEnv, draws: &[f64], 
         effects.extend(super::structure::step(def, state, b, &m, env.at, env.debug));
     }
     effects.extend(super::failure::step(def, state, env));
+    super::power::step_ship(def, state, env.sun, env.dt, env.at);
     effects
 }
 
@@ -142,5 +143,6 @@ pub fn lattice(def: &ShipDef, state: &mut ShipState, at: Epoch, env: &plumbing::
     let a = plumbing::accels(def, state, DVec3::ZERO, accel, DVec3::ZERO, DVec3::ZERO);
     let vented = plumbing::slow(def, state, env, dt);
     plumbing::fast(def, state, &before, &a, dt);
+    super::power::step_ship(def, state, env.sun, dt, at);
     vented
 }
