@@ -56,8 +56,12 @@ pub enum GameCommand {
     SetThrottle(f64),
     /// SAS on or off (the navball's SAS button; T toggles it directly).
     SetSas(bool),
-    /// Activate the active vessel's next stage (Space, the Staging menu).
+    /// Activate the active vessel's next stage (Space, the Staging menu);
+    /// for a craft of parts it becomes [`GameCommand::Stage`] of that
+    /// vessel, sent to it.
     NextStage,
+    /// Run a craft of parts' next stage (its sequence), sent to it.
+    Stage(VesselId),
     /// Commands to a craft of parts (D107: the systems screen, the mini
     /// systems panel's functions), applied in order.
     Ship {
@@ -117,10 +121,37 @@ pub fn apply(
     mut ts: ResMut<TrackingStation>,
     mut in_flight: ResMut<InFlight>,
     mut toasts: ResMut<crate::interface::toasts::Toasts>,
+    comms: Res<crate::comms::Comms>,
     time: Res<Time>,
 ) {
-    let arrived = in_flight.arrived(sim.clock);
-    for c in commands.read().cloned().chain(arrived) {
+    let now = time.elapsed_secs_f64();
+    let fresh: Vec<(GameCommand, bool)> = commands.read().map(|c| (c.clone(), true)).collect();
+    let arrived = in_flight.arrived(sim.clock).into_iter().map(|c| (c, false));
+    for (c, fresh) in fresh.into_iter().chain(arrived) {
+        // Space on a craft of parts: its own sequence's next stage.
+        let c = match c {
+            GameCommand::NextStage if sim.ship().ship().is_some() => GameCommand::Stage(sim.ship().id()),
+            c => c,
+        };
+        // A command for a vessel reaches it at once from aboard, else after
+        // the signal's light delay, and not at all without one (D067).
+        if let Some(id) = addressee(&c).filter(|_| fresh) {
+            let aboard = comms.location == crate::comms::Location::Vessel(id);
+            match route(aboard, comms.signal(id).map(|s| s.delay)) {
+                Route::Now => {}
+                Route::After(delay) => {
+                    if delay >= 1.0 {
+                        toasts.push(now, format!("Sent to Vessel {} ({})", id.0, crate::format::delay(delay)), false);
+                    }
+                    in_flight.send(sim.clock, delay, c);
+                    continue;
+                }
+                Route::NoSignal => {
+                    toasts.push(now, format!("Vessel {}: no signal, the command cannot reach it", id.0), true);
+                    continue;
+                }
+            }
+        }
         match &c {
             GameCommand::SetWarp(level) => sim.warp = (*level).min(WARP_LEVELS.len() - 1),
             GameCommand::Switch(i) => {
@@ -181,17 +212,19 @@ pub fn apply(
             }
             GameCommand::SetThrottle(t) => sim.controls.throttle = t.clamp(0.0, 1.0),
             GameCommand::SetSas(on) => sim.controls.sas = *on,
-            GameCommand::NextStage if sim.ship().ship().is_some() => {
+            GameCommand::Stage(id) => {
                 let sim = &mut *sim;
-                let a = sim.active;
-                let text = match sim.fleet[a].next_stage(&sim.world) {
+                let Some(i) = sim.index_of(*id) else { continue };
+                let text = match sim.fleet[i].next_stage(&sim.world) {
                     Some((name, effects)) => {
-                        crate::staging::controls_after(&effects, &mut sim.controls);
+                        if i == sim.active {
+                            crate::staging::controls_after(&effects, &mut sim.controls);
+                        }
                         format!("Stage: {name}")
                     }
                     None => crate::staging::Refusal::NoStageLeft.message().to_string(),
                 };
-                toasts.push(time.elapsed_secs_f64(), text, false);
+                toasts.push(now, text, false);
             }
             GameCommand::NextStage => {
                 let mut controls = sim.controls;
@@ -210,6 +243,39 @@ pub fn apply(
                 }
             }
         }
+    }
+}
+
+/// How a command reaches a vessel (D067).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Route {
+    Now,
+    /// After this light delay (s).
+    After(f64),
+    NoSignal,
+}
+
+/// How a command reaches a vessel: at once from aboard it, after the
+/// signal's one-way delay (`delay`, `None`: no path) from anywhere else.
+pub fn route(aboard: bool, delay: Option<f64>) -> Route {
+    match (aboard, delay) {
+        (true, _) => Route::Now,
+        (false, Some(d)) if d > 0.0 => Route::After(d),
+        (false, Some(_)) => Route::Now,
+        (false, None) => Route::NoSignal,
+    }
+}
+
+/// The vessel a command travels to: a craft of parts' commands, its next
+/// stage, its edited stages and functions (flight plans are routed by the
+/// planner; controls by `state::RemoteControls`).
+pub fn addressee(c: &GameCommand) -> Option<VesselId> {
+    match c {
+        GameCommand::Ship { vessel, .. }
+        | GameCommand::SetStages { vessel, .. }
+        | GameCommand::SetFunctions { vessel, .. } => Some(*vessel),
+        GameCommand::Stage(id) => Some(*id),
+        _ => None,
     }
 }
 
@@ -330,6 +396,27 @@ mod tests {
         assert_eq!(q.arrived(t0.add_seconds(0.5)), vec![GameCommand::SetWarp(1)]);
         assert_eq!(q.arrived(t0.add_seconds(10.0)), vec![GameCommand::SetWarp(2)]);
         assert!(q.queue.is_empty());
+    }
+
+    #[test]
+    fn commands_reach_a_vessel_from_aboard_now_else_after_the_delay() {
+        // (aboard, delay, route)
+        let table = [
+            (true, None, Route::Now),
+            (true, Some(3.0), Route::Now),
+            (false, Some(0.0), Route::Now),
+            (false, Some(1.3), Route::After(1.3)),
+            (false, None, Route::NoSignal),
+        ];
+        for (aboard, delay, want) in table {
+            assert_eq!(route(aboard, delay), want, "{aboard} {delay:?}");
+        }
+        let v = VesselId(7);
+        assert_eq!(addressee(&GameCommand::Ship { vessel: v, commands: vec![] }), Some(v));
+        assert_eq!(addressee(&GameCommand::Stage(v)), Some(v));
+        assert_eq!(addressee(&GameCommand::SetFunctions { vessel: v, functions: vec![] }), Some(v));
+        assert_eq!(addressee(&GameCommand::NextStage), None, "the test craft's, at once");
+        assert_eq!(addressee(&GameCommand::SetWarp(2)), None);
     }
 
     #[test]

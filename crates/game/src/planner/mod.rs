@@ -338,8 +338,7 @@ pub fn draw(
                 ))
                 .color(colour),
             );
-            let signal = comms.signal(id);
-            let delay = if comms.location == Location::Vessel(id) { Some(0.0) } else { signal.map(|s| s.delay) };
+            let delay = plan_delay(&comms, id);
             ui.horizontal(|ui| {
                 let label = match delay {
                     Some(0.0) => "Set plan".to_string(),
@@ -355,8 +354,7 @@ pub fn draw(
     );
     planner.open = open;
     if send {
-        let delay =
-            if comms.location == Location::Vessel(id) { 0.0 } else { comms.signal(id).map_or(0.0, |s| s.delay) };
+        let delay = plan_delay(&comms, id).unwrap_or(0.0);
         let plan = plan_from(vessel, &planner.draft, now.add_seconds(delay));
         let cmd = GameCommand::SetPlan { vessel: id, plan };
         if delay > 0.0 {
@@ -367,6 +365,17 @@ pub fn draw(
         }
     }
     Ok(())
+}
+
+/// How long a plan takes to reach vessel `id` (s; `None`: no signal), by
+/// the one routing rule (`commands::route`, D067).
+fn plan_delay(comms: &crate::comms::Comms, id: VesselId) -> Option<f64> {
+    let aboard = comms.location == Location::Vessel(id);
+    match crate::commands::route(aboard, comms.signal(id).map(|s| s.delay)) {
+        crate::commands::Route::Now => Some(0.0),
+        crate::commands::Route::After(d) => Some(d),
+        crate::commands::Route::NoSignal => None,
+    }
 }
 
 #[cfg(test)]
