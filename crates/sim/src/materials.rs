@@ -352,6 +352,7 @@ mod tests {
             "niobium-c103",
             "stainless-301",
             "cfrp",
+            "cfrp-tps",
             "al-honeycomb",
             "kevlar-49",
             "pica-x",

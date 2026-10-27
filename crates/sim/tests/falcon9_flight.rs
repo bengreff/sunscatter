@@ -104,3 +104,52 @@ fn a_gravity_turn_to_meco_and_the_mvac_lights_like_the_real_one() {
     let booster = pieces.iter_mut().find(|p| p.ship().is_some_and(|s| s.engines.len() == 9)).expect("the booster");
     assert!(booster.controllable(), "the booster flies on");
 }
+
+/// The hottest skin cell of the parts named `name…` on `v` (K), if it
+/// carries them.
+fn hottest_k(v: &Vessel, name: &str) -> Option<f64> {
+    let d = v.craft.design();
+    let skin = &v.thermal().state.skin;
+    let of = |c: usize| d.parts[d.cell_part[c] as usize].name.starts_with(name);
+    (0..skin.len()).filter(|&c| of(c)).map(|c| skin[c]).reduce(f64::max)
+}
+
+/// The review's flatter ascent (M2): a 0.3 s full-authority pitch input
+/// at T+10 s, then SAS on surface prograde (MECO at ~55 km and ~2.3 km/s),
+/// the second stage burning on for two minutes. Crew Dragon's trunk fins
+/// (727 K at their hottest) and nosecone (679 K) survive it, as the real
+/// ones survive every ascent (D105: not sure, don't fail).
+#[test]
+fn a_flatter_ascent_keeps_dragons_fins_and_nosecone() {
+    use sim::vessel::{HoldMode, SpeedReference};
+    let w = world();
+    let craft = craft_of(&CraftId("falcon9-crew".into()));
+    let mut v = Vessel::landed_at(&w, VesselId(1), "Earth", 28.6084, -80.6043, t0(), &craft);
+    let mut ids = VesselIds::default();
+    ids.allocate();
+    let go = t0().add_seconds(1.0);
+    let liftoff = go.add_seconds(2.0);
+    let meco = liftoff.add_seconds(145.0);
+    for at in [go, go, meco, meco.add_seconds(3.0), meco.add_seconds(8.0)] {
+        v.order_at(at, OrderKind::Stage).unwrap();
+    }
+    let up = Controls { throttle: 1.0, sas: true, ..Default::default() };
+    let kick = Controls { throttle: 1.0, rotate: glam::DVec3::new(1.0, 0.0, 0.0), ..Default::default() };
+    let prograde = Controls { hold: HoldMode::Prograde, speed: SpeedReference::Surface, ..up };
+    let mut pieces = fly(&w, &mut v, liftoff.add_seconds(10.0), &up, &mut ids);
+    pieces.extend(fly(&w, &mut v, liftoff.add_seconds(10.3), &kick, &mut ids));
+    let (mut t, mut hottest, mut nose) = (liftoff.add_seconds(10.3), 0.0f64, 0.0f64);
+    while t < meco.add_seconds(120.0) {
+        t = t.add_seconds(2.5);
+        pieces.extend(fly(&w, &mut v, t, &prograde, &mut ids));
+        hottest = hottest_k(&v, "dragon.fin").map_or(hottest, |k| hottest.max(k));
+        nose = hottest_k(&v, "dragon.nose").map_or(nose, |k| nose.max(k));
+    }
+    let (anchor, r, _) = v.state(&w);
+    let alt = sim::forces::altitude_above(&w, &w.snapshot(v.time), anchor, anchor, r).0;
+    println!("the fins' skin at most {hottest:.0} K, the nosecone's {nose:.0} K; at MECO+120 s {:.1} km", alt / 1e3);
+    let fins = |p: &Vessel| p.craft.design().parts.iter().filter(|x| x.name.starts_with("dragon.fin")).count();
+    let dragon = |p: &Vessel| p.craft.design().parts.iter().any(|x| x.name.starts_with("dragon."));
+    assert!(!pieces.iter().any(dragon), "a part of Crew Dragon left the stack");
+    assert_eq!(fins(&v), 4);
+}

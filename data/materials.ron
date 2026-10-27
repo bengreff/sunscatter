@@ -193,6 +193,28 @@
             verify: ["modulus", "strength", "conductivity", "specific_heat", "service_k", "destruction_k", "fatigue_exponent", "cost_per_kg", "era"],
         ),
         (
+            // The laminate under a thin ablative or insulating coat, as on
+            // aerosurfaces and fairings that fly through max-Q (Crew Dragon's
+            // trunk fins and nosecone, which survive every ascent): the
+            // laminate's data, with the limit of the coated skin. U: the coat
+            // is not published; 1000 K is proposed above the 727 K a flat
+            // ascent gives the fins (MECO at 55 km, 2.3 km/s; review M2;
+            // D105: not sure, don't fail).
+            id: "cfrp-tps", name: "Carbon fibre/epoxy laminate under a thin thermal-protection coat (aerosurfaces)", kind: Composite,
+            density: 1580.0, modulus: 60.0e9,
+            strength: [
+                (k: 77.0, yield_pa: 650.0e6, ultimate_pa: 650.0e6),
+                (k: 295.0, yield_pa: 600.0e6, ultimate_pa: 600.0e6),
+                (k: 394.0, yield_pa: 500.0e6, ultimate_pa: 500.0e6),
+                (k: 450.0, yield_pa: 300.0e6, ultimate_pa: 300.0e6),
+            ],
+            conductivity: 5.0, specific_heat: 1000.0, emissivity: 0.85, absorptivity: 0.9,
+            service_k: 420.0, destruction_k: 1000.0,
+            fatigue_exponent: Some(15.0), cost_per_kg: 100.0, era: 1985,
+            sources: ["as cfrp (Hexcel HexPly 8552 / IM7, MIL-HDBK-17)"],
+            verify: ["modulus", "strength", "conductivity", "specific_heat", "service_k", "destruction_k", "fatigue_exponent", "cost_per_kg", "era"],
+        ),
+        (
             id: "al-honeycomb", name: "Aluminium honeycomb core 5052, 50 kg/m³ (3.1 lb/ft³)", kind: Core,
             density: 50.0, modulus: 0.52e9,
             strength: [
