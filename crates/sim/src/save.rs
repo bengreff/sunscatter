@@ -18,7 +18,7 @@
 
 use crate::ephem::{fnv1a64, Ephemeris};
 use crate::time::Epoch;
-use crate::vessel::{Controls, Vessel, VesselIds};
+use crate::vessel::{Controls, SiteClock, Vessel, VesselIds};
 use crate::world::World;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -56,6 +56,11 @@ pub struct SaveGame {
     pub active: usize,
     /// The controls latched for the active vessel.
     pub controls: Controls,
+    /// The origin's clock (D088), a pure function of time kept here so a
+    /// late save loads without integrating it from its epoch again.
+    /// Absent in older saves: then it is integrated.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub site_clock: Option<SiteClock>,
 }
 
 #[derive(Debug)]
@@ -113,6 +118,7 @@ impl SaveGame {
             vessel_ids,
             active,
             controls,
+            site_clock: None,
         }
     }
 

@@ -19,7 +19,7 @@ The agent is at a **control location** like you (D067): mission control when the
 
 | Tool | Does |
 |---|---|
-| `get_state` | Clock (TDB), warp, location, active vessel, every vessel's status and signal |
+| `get_state` | Clock (TDB), the origin's clock (TT, D088) and the active ship clock's offset from it, warp, location, active vessel, every vessel's status and signal |
 | `list_bodies` | Bodies: name, GM, radius, what they orbit |
 | `get_vessel` | A vessel as seen from the location: position, velocity, altitude, osculating orbit, signal |
 | `get_trajectory` | A vessel's predicted path from now, sampled |

@@ -63,7 +63,7 @@ pub use attitude::{quat_from_rotvec, quat_z_to, rotvec_of, Attitude, AttitudeCon
 pub use burn::{
     prograde_normal_radial, BurnEnd, BurnLaw, BurnLimits, DirectionLaw, FlightPlan, PlanError, PlannedBurn, G0,
 };
-pub use clock::{landed_rate, ShipClock, LANDED_STEP};
+pub use clock::{landed_rate, ShipClock, SiteClock, LANDED_STEP};
 pub use flown::BurnCraft;
 pub use hold::{hold_direction, hold_reference, laplace_radius, primary, turn_lead};
 pub use hold::{HoldInputs, HoldMode, SpeedReference, TargetState};
@@ -334,8 +334,6 @@ impl Vessel {
         self.id
     }
 
-    /// Proper time minus coordinate time, δ = τ − t (s), at the vessel's
-    /// time: what the ship clock shows minus the game clock (D012).
     /// People aboard (0: an uncrewed probe).
     pub fn crew(&self) -> u32 {
         self.crew
@@ -346,8 +344,22 @@ impl Vessel {
         self.crew = crew;
     }
 
+    /// Proper time minus coordinate time (TDB), δ = τ − t (s), at the
+    /// vessel's time (D012); the game shows it against the origin's clock
+    /// (D088).
     pub fn proper_time_offset(&self) -> f64 {
         self.clock.offset
+    }
+
+    /// Sets the ship clock to δ = `offset` at the vessel's time: a new
+    /// vessel synchronised with the clock of the place it starts from
+    /// (D088). A coast starts again from the same state, so only its clock
+    /// changes.
+    pub fn set_clock_offset(&mut self, world: &World, offset: f64) {
+        self.clock = ShipClock::at(self.time, offset);
+        if matches!(self.phase, Phase::Coasting { .. }) {
+            self.start_coast(world);
+        }
     }
 
     /// The drag model in use (with the open parachutes' area).

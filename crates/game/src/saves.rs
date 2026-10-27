@@ -96,7 +96,14 @@ pub fn save_path(dir: &Path, name: &str) -> PathBuf {
 }
 
 pub fn save(sim: &SimState, path: &Path) -> Result<(), SaveError> {
-    SaveGame::capture(&sim.world, sim.clock, &sim.fleet, sim.vessel_ids, sim.active, sim.controls).write(path)
+    capture(sim).write(path)
+}
+
+/// The game as a save (with the origin's clock, D088).
+pub fn capture(sim: &SimState) -> SaveGame {
+    let mut save = SaveGame::capture(&sim.world, sim.clock, &sim.fleet, sim.vessel_ids, sim.active, sim.controls);
+    save.site_clock = Some(sim.site);
+    save
 }
 
 /// Reads and checks a save for `sim`'s world (a load is then a
@@ -128,6 +135,12 @@ pub fn restore(sim: &mut SimState, save: SaveGame) {
     sim.warp = 0;
     sim.compute_limited = false;
     sim.refresh_dominance();
+    // The origin's clock is a pure function of time: the saved one only
+    // spares integrating it again (D088).
+    if let Some(site) = save.site_clock {
+        sim.site = site;
+    }
+    sim.advance_site_clock();
 }
 
 /// Game state that follows a load: prediction, ids and camera focus.

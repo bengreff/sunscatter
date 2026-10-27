@@ -60,8 +60,9 @@ pub fn tools() -> Vec<Tool> {
     vec![
         t(
             "get_state",
-            "Game clock (TDB), time warp, your control location, the active vessel, and every vessel's status and \
-             signal at your location.",
+            "Game clock (TDB, the physics' time), the origin's clock (TT, the time the player sees) and the active \
+             ship clock's offset from it, time warp, your control location, the active vessel, and every vessel's \
+             status and signal at your location.",
             schema(json!({}), &[]),
         ),
         t("list_bodies", "Celestial bodies: name, GM (m³/s²), radius (m), what they orbit.", schema(json!({}), &[])),
@@ -150,6 +151,12 @@ fn epoch_text(t: sim::time::Epoch) -> String {
     format!("{y}-{mo:02}-{d:02} {h:02}:{mi:02}:{s:06.3} TDB")
 }
 
+/// The origin's clock reading (D088): TT.
+fn site_text(t: sim::time::Epoch) -> String {
+    let (y, mo, d, h, mi, s) = t.to_calendar();
+    format!("{y}-{mo:02}-{d:02} {h:02}:{mi:02}:{s:06.3} TT")
+}
+
 fn status(phase: &Phase) -> &'static str {
     match phase {
         Phase::Landed { .. } => "landed",
@@ -206,6 +213,8 @@ fn run(
                 .collect();
             let v = json!({
                 "clock": epoch_text(sim.clock),
+                "site_clock": {"site": sim.origin, "time": site_text(sim.site_time()),
+                               "active_ship_clock_offset_s": sim.ship_clock_offset(sim.active)},
                 "warp_level": sim.effective_warp(), "warp_factor": WARP_LEVELS[sim.effective_warp()],
                 "location": comms.location_name(), "active_vessel": sim.ship().id().0, "vessels": vessels,
             });

@@ -1,6 +1,7 @@
 //! The ship clock (D012, realism-1 §4a): δ = τ − t, proper time minus the
-//! game clock (coordinate time), integrated at
-//! [`crate::relativity::proper_time_rate`].
+//! coordinate time (TDB), integrated at
+//! [`crate::relativity::proper_time_rate`]; and the clock of a site on a
+//! body's surface ([`SiteClock`]: the origin's, which the game shows, D088).
 //!
 //! * Coasts and planned burns carry δ in their segments (the integrator's
 //!   extra scalar, outside error control).
@@ -66,19 +67,65 @@ impl ShipClock {
     }
 }
 
+/// The clock of a fixed place on a body (a launch site): δ by the landed
+/// rule ([`landed_rate`] on the [`LANDED_STEP`] lattice) from a fixed
+/// epoch, so its reading is a pure function of time, whatever the frames,
+/// the warp or the order of the calls. The game shows the origin's (D088):
+/// started from TT at the ephemeris' first epoch, it reads TT (the geoid's
+/// time) to within microseconds; ships are shown against it.
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct SiteClock {
+    body: NodeId,
+    fixed: Vec3<BodyFixed>,
+    /// Where the clock was set, and δ there.
+    epoch: Epoch,
+    delta0: f64,
+    clock: ShipClock,
+}
+
+impl SiteClock {
+    /// A clock at `fixed` on `body` showing δ = `delta0` at `epoch`.
+    pub fn new(body: NodeId, fixed: Vec3<BodyFixed>, epoch: Epoch, delta0: f64) -> Self {
+        SiteClock { body, fixed, epoch, delta0, clock: ShipClock::at(epoch, delta0) }
+    }
+
+    /// A clock at `fixed` on `body` set to TT at `epoch`
+    /// ([`crate::relativity::tdb_minus_tt`]).
+    pub fn reading_tt(body: NodeId, fixed: Vec3<BodyFixed>, epoch: Epoch) -> Self {
+        Self::new(body, fixed, epoch, -crate::relativity::tdb_minus_tt(epoch))
+    }
+
+    /// δ = τ − t at `t` (s). Moving forward continues the lattice; a time
+    /// before the last lattice point starts again from the epoch (the same
+    /// bits, at the cost of the integration).
+    pub fn offset_at(&mut self, world: &World, t: Epoch) -> f64 {
+        if t < self.clock.base {
+            self.clock = ShipClock::at(self.epoch, self.delta0);
+        }
+        self.clock.advance_landed(world, self.body, self.fixed, t);
+        self.clock.offset
+    }
+
+    /// δ at the last time asked for.
+    pub fn offset(&self) -> f64 {
+        self.clock.offset
+    }
+}
+
 /// ∫ dδ over `[t, t + dt]` at a body-fixed point (Gauss–Legendre).
 fn landed_integral(world: &World, body: NodeId, fixed: Vec3<BodyFixed>, t: Epoch, dt: f64) -> f64 {
     GAUSS3.iter().map(|&(x, w)| w * landed_rate(world, body, fixed, t.add_seconds(x * dt))).sum::<f64>() * dt
 }
 
 /// `dδ/dt` at a body-fixed point at `t`: the potential of every source
-/// there, and the velocity of the point (the body's, plus its rotation).
+/// there, with the body's field to the degree a vessel there includes (as
+/// a ship flying over it), and the velocity of the point (the body's, plus
+/// its rotation).
 pub fn landed_rate(world: &World, body: NodeId, fixed: Vec3<BodyFixed>, t: Epoch) -> f64 {
     let rot = world.source(body).and_then(|s| s.physical.as_ref()).expect("physical body").rotation;
     let snap = world.snapshot(t);
     let r = rot.to_inertial(fixed, t).raw();
     let v = rot.omega(t).raw().cross(r);
-    // Every source cut: only the potential is wanted (it counts all of them).
-    let none = ActiveSources(Vec::new());
-    ForceContext { world, anchor: body, active: &none, drag: None, thrust: DVec3::ZERO }.accel_rate(&snap, r, v).1
+    let active = ActiveSources::select(world, &snap, body, r);
+    ForceContext { world, anchor: body, active: &active, drag: None, thrust: DVec3::ZERO }.accel_rate(&snap, r, v).1
 }

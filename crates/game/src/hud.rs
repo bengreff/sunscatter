@@ -173,7 +173,8 @@ pub fn draw(
     station: Res<crate::tracking::TrackingStation>,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
-    let (y, mo, d, h, mi, s) = sim.clock.to_calendar();
+    // The origin's clock (D088): the launch site's proper time, TT.
+    let (y, mo, d, h, mi, s) = sim.site_time().to_calendar();
     let dim = |t: &str| egui::RichText::new(t).monospace().small().color(theme::DIM);
 
     // The tracking station is its own screen: no flight HUD.
@@ -185,7 +186,12 @@ pub fn draw(
     let margin = [layout::MARGIN, layout::MARGIN];
     fixed_panel(ctx, layout::TIME_AREA, egui::Align2::LEFT_TOP, margin, |ui_| {
         ui_.horizontal(|ui_| {
-            ui_.monospace(format!("{y}-{mo:02}-{d:02} {h:02}:{mi:02}:{s:04.1} TDB"));
+            ui_.monospace(format!("{y}-{mo:02}-{d:02} {h:02}:{mi:02}:{s:04.1} TT")).on_hover_text(format!(
+                "The clock at {}, the origin (D088): its proper time, which is TT (the geoid's time) to within \
+                 microseconds. Ship clocks are shown against it (Utilities ▸ Clock); the physics runs on TDB.",
+                sim.origin
+            ));
+            ui_.label(dim(&sim.origin));
             if sim.ship().debug() {
                 let badge = egui::RichText::new("DEBUG").monospace().small().strong().color(theme::WARN);
                 ui_.label(badge).on_hover_text("Debug mode (D064): infinite propellant, no overheating, unbreakable");

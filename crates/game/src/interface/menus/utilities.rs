@@ -103,7 +103,7 @@ fn comms(c: &CommsData) -> Section {
 fn clock(d: &FlightData) -> Section {
     let mut s = Section::new("clock", "CLOCK");
     s.row("SHIP CLOCK", clock_offset(d.craft.clock_offset));
-    s.note("proper time minus the game clock (relativity)", Tone::Dim);
+    s.note("proper time minus the origin's clock, the time shown (relativity)", Tone::Dim);
     s
 }
 

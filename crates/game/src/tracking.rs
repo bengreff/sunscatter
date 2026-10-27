@@ -286,8 +286,8 @@ pub fn draw(
             ui.set_min_height(height - 16.0);
             ui.label(egui::RichText::new("TRACKING STATION").size(18.0).color(accent));
             ui.label(egui::RichText::new(format!("at {} (mission control)", comms.location_name())).small().color(dim));
-            let (y, mo, d, h, mi, _) = sim.clock.to_calendar();
-            ui.monospace(format!("{y}-{mo:02}-{d:02} {h:02}:{mi:02} TDB   warp {}x", WARP_LEVELS[sim.warp]));
+            let (y, mo, d, h, mi, _) = sim.site_time().to_calendar();
+            ui.monospace(format!("{y}-{mo:02}-{d:02} {h:02}:{mi:02} TT   warp {}x", WARP_LEVELS[sim.warp]));
             if ui.button("Back to flight (F7)").clicked() {
                 actions.push(Action::Close);
             }

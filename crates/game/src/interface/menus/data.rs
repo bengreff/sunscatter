@@ -208,7 +208,7 @@ pub struct CraftData {
     pub interior: (f64, f64),
     /// The parts nearest their limits: name, temperature, limit (K).
     pub hottest: Vec<(String, f64, f64)>,
-    /// Ship clock minus game clock (s, D012).
+    /// Ship clock minus the origin's clock, the time shown (s, D012, D088).
     pub clock_offset: f64,
 }
 
@@ -509,7 +509,7 @@ fn craft(sim: &SimState, body: sim::frame::NodeId) -> CraftData {
         skin: ship.skin_nearest_limit(),
         interior: (node, ship.craft.thermal.internal_max_k),
         hottest: hottest_parts(ship),
-        clock_offset: ship.proper_time_offset(),
+        clock_offset: sim.ship_clock_offset(sim.active),
     }
 }
 

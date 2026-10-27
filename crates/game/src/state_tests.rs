@@ -1,0 +1,142 @@
+use super::*;
+
+#[test]
+fn rails_floor_blocks_low_orbits_on_earth_and_low_passes_over_the_moon() {
+    let sim = SimState::new();
+    let w = &sim.world;
+    let t = sim.clock;
+    let earth = w.find("Earth").unwrap().node;
+    let moon = w.find("Moon").unwrap().node;
+    let re = w.find("Earth").unwrap().physical.as_ref().unwrap().radius_eq;
+    let rm = w.find("Moon").unwrap().physical.as_ref().unwrap().radius_eq;
+    // (anchor, distance from its centre along x, blocked by)
+    let cases = [
+        (earth, re + 120_000.0, Some(earth)),
+        (earth, re + 200_000.0, None),
+        (moon, rm + 10_000.0, Some(moon)),
+        (moon, rm + 15_000.0, None),
+    ];
+    for (anchor, d, expected) in cases {
+        let got = below_rails_floor(w, t, anchor, DVec3::X * d).map(|b| b.0);
+        assert_eq!(got, expected, "{d}");
+    }
+}
+
+#[test]
+fn throttle_keys_ramp_and_clamp() {
+    // (start, up, down, fine, dt, expected)
+    let cases = [
+        (0.0, true, false, false, 0.5, 0.3),
+        (0.0, true, false, true, 1.0, 0.05),
+        (0.5, false, true, false, 0.5, 0.2),
+        (0.5, true, true, false, 1.0, 0.5),
+        (0.95, true, false, false, 1.0, 1.0),
+        (0.02, false, true, true, 1.0, 0.0),
+    ];
+    for (t, up, down, fine, dt, want) in cases {
+        let got = throttle_after(t, up, down, fine, dt);
+        assert!((got - want).abs() < 1e-12, "{t} {up} {down} {fine} {dt}: {got}");
+    }
+}
+
+#[test]
+fn reset_needs_a_second_press() {
+    assert!(!reset_confirmed(None, 10.0));
+    assert!(reset_confirmed(Some(9.0), 10.0));
+    assert!(!reset_confirmed(Some(7.0), 10.0));
+}
+
+#[test]
+fn remote_controls_arrive_after_the_delay_and_not_without_signal() {
+    let t = sol::sol_epoch();
+    let mut rc = RemoteControls::default();
+    let full = Controls { throttle: 1.0, ..Default::default() };
+    assert_eq!(rc.step(t, full, Some(1.3)).throttle, 0.0);
+    assert_eq!(rc.step(t.add_seconds(1.0), full, Some(1.3)).throttle, 0.0);
+    assert_eq!(rc.step(t.add_seconds(1.3), Controls::default(), Some(1.3)).throttle, 1.0);
+    // No signal: the vessel keeps what it last received.
+    assert_eq!(rc.step(t.add_seconds(10.0), Controls::default(), None).throttle, 0.0);
+    let mut rc = RemoteControls::default();
+    rc.step(t, full, None);
+    assert_eq!(rc.step(t.add_seconds(100.0), full, None).throttle, 0.0, "nothing sent without signal");
+}
+
+#[test]
+fn lookahead_takes_turns_and_skips_the_active_vessel() {
+    assert_eq!(lookahead_turn(0, 1, 0), None);
+    assert_eq!(lookahead_turn(0, 3, 0), Some(1));
+    assert_eq!(lookahead_turn(2, 3, 0), Some(2));
+    assert_eq!(lookahead_turn(3, 3, 0), Some(1), "wraps past the active vessel");
+    assert_eq!(lookahead_turn(5, 3, 2), Some(0));
+}
+
+/// D081: rails warp is refused while any craft is live, with the
+/// reason; craft in limbo (perturbed coasts: thin-air drag, light, a
+/// low-thrust burn under way) never refuse it.
+#[test]
+fn only_live_craft_refuse_rails_warp_and_limbo_craft_do_not() {
+    use sim::vessel::{BurnEnd, BurnLaw, DirectionLaw, FlightPlan, PlannedBurn, SegmentKind};
+    let mut sim = SimState::new();
+    let w = sim.world.clone();
+    let earth = w.find("Earth").unwrap();
+    let re = earth.physical.as_ref().unwrap().radius_eq;
+    let circular = |h: f64| {
+        let r = re + h;
+        (DVec3::new(r, 0.0, 0.0), DVec3::new(0.0, (earth.gm / r).sqrt(), 0.0))
+    };
+    let craft = |sim: &mut SimState, h: f64| {
+        let (r, v) = circular(h);
+        let id = sim.vessel_ids.allocate();
+        Vessel::coasting(&w, id, sim.clock, earth.node, r, v, test_craft())
+    };
+    // On the pad, nothing else flying: allowed.
+    assert_eq!(sim.rails_block(), None);
+    // Limbo: drag decay at 300 km, and a 0.5 N burn spiralling up.
+    let decaying = craft(&mut sim, 300_000.0);
+    let mut spiral = craft(&mut sim, 700_000.0);
+    let law = BurnLaw::from_isp(0.5, 3_000.0, DirectionLaw::Tracking { reference: earth.node, axes: DVec3::X });
+    let burn = PlannedBurn { t_start: sim.clock, law, end: BurnEnd::Duration(30.0 * 86_400.0) };
+    spiral.set_plan(&w, FlightPlan { burns: vec![burn] }).unwrap();
+    spiral.advance(&w, sim.clock.add_seconds(3_600.0), &Controls { sas: true, ..Default::default() }, 1_200);
+    assert!(matches!(spiral.segment().unwrap().kind, SegmentKind::Burn(_)), "burning on rails");
+    sim.fleet.extend([decaying, spiral]);
+    assert_eq!(sim.rails_block(), None, "limbo craft do not refuse rails warp");
+    // A craft in the air (live below the boundary, 100 km): refused, named.
+    let entering = craft(&mut sim, 100_000.0);
+    let id = entering.id();
+    assert!(matches!(entering.phase, Phase::Powered { .. }));
+    sim.fleet.push(entering);
+    assert_eq!(sim.rails_block(), Some(RailsBlock::OtherLive(id)));
+    // The active vessel's own reasons come first.
+    sim.controls.throttle = 0.5;
+    assert_eq!(sim.rails_block(), Some(RailsBlock::Thrust));
+    sim.controls.throttle = 0.0;
+    sim.active = sim.fleet.len() - 1;
+    assert_eq!(sim.rails_block(), Some(RailsBlock::Live));
+}
+
+/// D082: a craft held live in the bubble of a live controllable craft
+/// names it as the reason rails warp is refused.
+#[test]
+fn a_craft_held_in_a_bubble_names_its_leader() {
+    let mut sim = SimState::new();
+    let w = sim.world.clone();
+    let earth = w.find("Earth").unwrap();
+    let r = earth.physical.as_ref().unwrap().radius_eq + 400_000.0;
+    let (pos, vel) = (DVec3::new(r, 0.0, 0.0), DVec3::new(0.0, (earth.gm / r).sqrt(), 0.0));
+    let craft = |sim: &mut SimState, along: f64| {
+        let id = sim.vessel_ids.allocate();
+        Vessel::coasting(&w, id, sim.clock, earth.node, pos + DVec3::Y * along, vel, test_craft())
+    };
+    let (ship, other) = (craft(&mut sim, 0.0), craft(&mut sim, 2_000.0));
+    let other_id = other.id();
+    sim.fleet = vec![ship, other];
+    sim.active = 0;
+    assert_eq!(sim.rails_block(), None, "both coasting");
+    // The other craft burns: a bubble forms around it and holds the
+    // active one live.
+    let burn = |i: usize| Controls { sas: true, throttle: if i == 1 { 0.1 } else { 0.0 }, ..Default::default() };
+    sim::vessel::bubble::advance(&w, &mut sim.fleet, &burn, sim.clock.add_seconds(0.1));
+    assert!(sim.fleet[0].in_bubble() && matches!(sim.fleet[0].phase, Phase::Powered { .. }));
+    assert_eq!(sim.rails_block(), Some(RailsBlock::Near(other_id)));
+}

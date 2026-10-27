@@ -1,13 +1,15 @@
-//! Proper time (D012, realism-1 §4a): the ship clock δ = τ − t against the
-//! GPS numbers, and its determinism (chunked = single pass, save/load).
+//! Proper time (D012, D088, realism-1 §4a): the ship clock δ = τ − t
+//! (t TDB) against the GPS and ISS numbers, a site's clock against TT, and
+//! determinism (chunked = single pass, save/load).
 
 use sim::craft::test_craft;
 use sim::ephem::Ephemeris;
 use sim::kepler::Elements;
+use sim::relativity::tdb_minus_tt;
 use sim::save::SaveGame;
 use sim::sol;
 use sim::time::Epoch;
-use sim::vessel::{Controls, Vessel, VesselId, VesselIds};
+use sim::vessel::{Controls, SiteClock, Vessel, VesselId, VesselIds};
 use sim::world::World;
 use std::sync::Arc;
 
@@ -46,15 +48,66 @@ fn a_gps_clock_gains_38_6_microseconds_a_day_over_the_equator() {
     sat.advance(&w, end, &Controls::default(), usize::MAX);
     ground.advance(&w, end, &Controls::default(), usize::MAX);
     assert_eq!((sat.time, ground.time), (end, end));
-    let gain = (sat.proper_time_offset() - ground.proper_time_offset()) / (2.0 * period) * 86_400.0 * 1e6;
-    println!(
-        "GPS gain {gain:.3} µs/day; ground {:.1} µs/day",
-        ground.proper_time_offset() / (2.0 * period) * 86_400.0 * 1e6
-    );
+    let per_day = |d: f64| d / (2.0 * period) * 86_400.0 * 1e6;
+    let gain = per_day(sat.proper_time_offset() - ground.proper_time_offset());
+    // The ground clock keeps TT: it follows TT − TDB's annual term (−29
+    // µs/day in early January) within the topocentric terms (~2 µs) and
+    // the point-mass potential's missing J2 (33 ns/day at the equator).
+    let tt = per_day(tdb_minus_tt(t0()) - tdb_minus_tt(end));
+    let ground_rate = per_day(ground.proper_time_offset());
+    println!("GPS gain {gain:.3} µs/day; ground {ground_rate:.2} µs/day, TT {tt:.2}");
     assert!((gain / 38.6 - 1.0).abs() < 0.01, "{gain} µs/day");
-    // Both clocks run slow against coordinate (barycentric) time: the Sun's
-    // potential and Earth's orbital speed dominate.
-    assert!(sat.proper_time_offset() < 0.0 && ground.proper_time_offset() < 0.0);
+    assert!((ground_rate - tt).abs() < 3.0, "{ground_rate} vs {tt} µs/day");
+}
+
+/// A clock at the launch site (Kennedy, 28.6° N) set to TT reads TT through
+/// a year: the integrated rule matches the IAU series (geocentric, ~10 µs)
+/// within 6.4 µs, the site's own diurnal term (v_Earth · r_site / c², ±1.8
+/// µs) included, over a swing of 3.3 ms. Without L_B it lost 0.49 s.
+#[test]
+fn the_site_clock_reads_tt_through_a_year() {
+    let w = world();
+    let earth = w.find("Earth").unwrap();
+    let p = earth.physical.as_ref().unwrap();
+    let fixed = p.surface_point(28.6082f64.to_radians(), (-80.66f64).to_radians(), 0.0);
+    let start = sol::sol_epoch();
+    let mut site = SiteClock::reading_tt(earth.node, fixed, start);
+    let mut worst: f64 = 0.0;
+    for day in (0..=365).step_by(5) {
+        let t = start.add_seconds(f64::from(day) * 86_400.0);
+        let tt = -tdb_minus_tt(t);
+        worst = worst.max((site.offset_at(&w, t) - tt).abs());
+    }
+    println!("site clock − TT: at most {:.2} µs over a year", worst * 1e6);
+    assert!(worst < 10e-6, "{worst} s");
+    // Any order of calls gives the same bits (a pure function of time).
+    let mid = start.add_seconds(100.3 * 86_400.0);
+    let mut fresh = SiteClock::reading_tt(earth.node, fixed, start);
+    assert_eq!(fresh.offset_at(&w, mid).to_bits(), site.offset_at(&w, mid).to_bits());
+}
+
+/// An ISS-like clock (400 km, 51.6°) loses ≈ 25 µs a day against the
+/// launch site's: −28.3 from its speed, +3.5 from the shallower potential,
+/// +0.1 for the site's own rotation.
+#[test]
+fn an_iss_clock_loses_25_microseconds_a_day_against_the_site() {
+    let w = world();
+    let earth = w.find("Earth").unwrap();
+    let p = earth.physical.as_ref().unwrap();
+    let fixed = p.surface_point(28.6082f64.to_radians(), (-80.66f64).to_radians(), 0.0);
+    let a = 6_371_000.0 + 400_000.0;
+    let el = Elements { a, e: 0.0, i: 51.6f64.to_radians(), raan: 0.3, argp: 0.0, mean_anomaly: 0.0 };
+    let (r, v) = el.to_state(earth.gm);
+    let period = std::f64::consts::TAU * (a * a * a / earth.gm).sqrt();
+    let mut site = SiteClock::reading_tt(earth.node, fixed, t0());
+    let mut iss = Vessel::coasting(&w, VesselId(3), t0(), earth.node, r, v, test_craft());
+    iss.set_clock_offset(&w, site.offset_at(&w, t0()));
+    // 16 orbits, about a day: the orbital periodic terms come back.
+    let end = t0().add_seconds(16.0 * period);
+    iss.advance(&w, end, &Controls::default(), usize::MAX);
+    let loss = (iss.proper_time_offset() - site.offset_at(&w, end)) / (16.0 * period) * 86_400.0 * 1e6;
+    println!("ISS against the site: {loss:.2} µs/day");
+    assert!((loss + 24.7).abs() < 0.6, "{loss} µs/day");
 }
 
 /// Advances in frames of `dt` (the last one ending at `end`).
@@ -104,10 +157,11 @@ fn live_ticks_carry_the_clock() {
         }
         single.advance(&w, start.add_seconds(10.0), &full, usize::MAX);
         assert_eq!(*ship, single);
-        // About 10 s at a rate of −1.5e-8 (the Sun's potential and Earth's
-        // orbital speed): −0.15 µs.
+        // About 10 s against TDB: TT's rate on the pad (−29 µs/day in
+        // early January) and, in orbit, GPS's gain plus the periodic term of
+        // its speed along Earth's (±1.3e-9): tens of nanoseconds at most.
         let d = ship.proper_time_offset() - before;
-        assert!(d < -1.4e-7 && d > -1.7e-7, "{d} s in 10 s");
+        assert!(d != 0.0 && d.abs() < 2e-8, "{d} s in 10 s");
     }
 }
 
