@@ -5,15 +5,24 @@
 //! set of parts ([`parts`], the stress craft and the pieces of a craft
 //! that broke up). This module owns everything derived from those at load.
 
+pub mod assembly;
 pub mod broad;
+pub mod build;
+#[cfg(test)]
+pub(crate) mod build_tests;
 pub mod cells;
+pub mod command;
 pub mod design;
 pub mod engine;
 pub mod file;
+mod layers;
 pub mod mass;
 pub mod mesh;
 pub mod parts;
+pub mod place;
 pub mod registry;
+pub mod ship;
+pub mod state;
 pub mod stress;
 pub mod volume;
 
@@ -60,6 +69,8 @@ pub struct Craft {
     /// properties.
     pub parts: Vec<Part>,
     pub part_mass: Vec<MassProps>,
+    /// A craft of catalog parts: its ship definition ([`ship`]).
+    pub ship: Option<std::sync::Arc<ship::ShipDef>>,
     /// The aerodynamic bake and thermal network, built on first use.
     design: DesignSlot,
 }
@@ -77,11 +88,25 @@ impl Craft {
     /// attached to (a piece that breaks off keeps them); one part is the
     /// craft's shell over the whole surface with its one tank.
     pub fn from_def(id: CraftId, def: CraftDef, res: &Resolution, opts: &CellOptions) -> Self {
-        let CraftDef { spec, geometry, parts } = def;
+        let tanks = def.tanks();
+        let CraftDef { spec, geometry, parts, ship } = def;
         let surface = mesh::union_surface(&geometry.primitives, res);
         let cells = cells::build_cells(&surface, &geometry.primitives, &geometry.skin, opts);
         let g = &geometry;
-        let (mass, part_mass) = if parts.len() == 1 {
+        let (mass, part_mass) = if let Some(ship) = &ship {
+            // Each part: its own shell, and its components as solids.
+            let part_mass: Vec<MassProps> = (parts.iter())
+                .map(|p| {
+                    let own: Vec<Primitive> = p.primitives.iter().map(|&q| g.primitives[q as usize].clone()).collect();
+                    let hosted: Vec<&ship::ComponentDef> = ship.components.iter().filter(|c| c.part == p.id).collect();
+                    let shell = p.dry_mass - hosted.iter().map(|c| c.mass).sum::<f64>();
+                    let mut items = vec![MassModel::shell(&mesh::union_surface(&own, res), &own, &g.skin, shell)];
+                    items.extend(hosted.iter().map(|c| MassProps::solid(&c.envelope, c.mass, c.pose.rot, c.pose.pos)));
+                    MassProps::sum(&items)
+                })
+                .collect();
+            (MassModel::of_parts(&part_mass, &tanks), part_mass)
+        } else if parts.len() == 1 {
             let capacity = spec.propellant.capacity;
             let mass = MassModel::new(&surface, &g.primitives, &g.skin, spec.dry_mass, &g.tank, capacity);
             (mass, vec![mass.at(0.0)])
@@ -92,16 +117,20 @@ impl Craft {
                     MassModel::shell(&mesh::union_surface(&own, res), &own, &g.skin, p.dry_mass)
                 })
                 .collect();
-            let tanks: Vec<(Tank, f64)> = parts.iter().filter_map(|p| p.tank).map(|t| (t.region, t.capacity)).collect();
             (MassModel::of_parts(&part_mass, &tanks), part_mass)
         };
         let mesh = surface.render_mesh();
-        Craft { id, spec, mesh, surface, cells, geometry, mass, parts, part_mass, design: DesignSlot::default() }
+        Craft { id, spec, mesh, surface, cells, geometry, mass, parts, part_mass, ship, design: DesignSlot::default() }
     }
 
     /// The craft's definition (files and parts).
     pub fn def(&self) -> CraftDef {
-        CraftDef { spec: self.spec.clone(), geometry: self.geometry.clone(), parts: self.parts.clone() }
+        CraftDef {
+            spec: self.spec.clone(),
+            geometry: self.geometry.clone(),
+            parts: self.parts.clone(),
+            ship: self.ship.clone(),
+        }
     }
 
     /// The design's aerodynamic bake and thermal network (built once).
@@ -113,7 +142,13 @@ impl Craft {
     pub fn params(&self) -> CraftParams {
         let s = &self.surface;
         let design = self.design().clone();
-        let (torque, rcs_flow) = parts::rcs(&self.parts);
+        let (torque, rcs_flow) = match &self.ship {
+            Some(ship) => {
+                let enabled: Vec<bool> = ship.thrusters.iter().map(|t| t.enabled).collect();
+                ship.rcs_authority(self.mass.dry_com, &enabled)
+            }
+            None => parts::rcs(&self.parts),
+        };
         CraftParams {
             id: self.id.clone(),
             engine: Engine::from_file(&self.spec.engine),
@@ -208,6 +243,25 @@ pub fn load_craft(dir: &Path) -> Result<Craft, DataError> {
     };
     let id = CraftId(dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
     parse_craft(id, &read(CRAFT_FILE)?, &read(GEOMETRY_FILE)?, dir)
+}
+
+/// The definition in `dir`: a single-part craft file (`craft.ron` with
+/// `geometry.ron`, [`load_craft`]) or a craft of catalog parts (`craft.ron`
+/// alone: [`assembly`], built from [`crate::catalog::catalog`]).
+pub fn load_definition(dir: &Path) -> Result<CraftDef, DataError> {
+    if dir.join(GEOMETRY_FILE).exists() {
+        return Ok(load_craft(dir)?.def());
+    }
+    load_assembly(dir).map(|a| a.def)
+}
+
+/// Builds the craft of catalog parts in `dir`; every build error is listed.
+pub fn load_assembly(dir: &Path) -> Result<build::Assembly, DataError> {
+    let path = dir.join(CRAFT_FILE);
+    let err = |message: String| DataError { path: path.clone(), message };
+    let text = std::fs::read_to_string(&path).map_err(|e| err(e.to_string()))?;
+    let file: assembly::AssemblyFile = crate::catalog::ron_options().from_str(&text).map_err(|e| err(e.to_string()))?;
+    build::build(&file, crate::catalog::catalog(), &crate::catalog::Ctx::data()).map_err(|e| err(e.join("\n")))
 }
 
 /// `data/craft` of this source tree (development builds and tests).

@@ -87,12 +87,15 @@ pub struct Part {
     pub max_load: f64,
 }
 
-/// A craft's definition: its files and its parts.
+/// A craft's definition: its files and its parts; a craft of catalog
+/// parts also its ship definition ([`super::ship`]: tanks, engines,
+/// components, layers, sequence).
 #[derive(Clone, Debug, PartialEq)]
 pub struct CraftDef {
     pub spec: CraftFile,
     pub geometry: GeometryFile,
     pub parts: Vec<Part>,
+    pub ship: Option<std::sync::Arc<super::ship::ShipDef>>,
 }
 
 /// The placeholder power of a craft file's one part: the default power
@@ -124,7 +127,7 @@ impl CraftDef {
             crew: spec.crew,
             max_load: f64::INFINITY,
         };
-        CraftDef { spec, geometry, parts: vec![part] }
+        CraftDef { spec, geometry, parts: vec![part], ship: None }
     }
 
     /// The part owning each primitive.
@@ -138,9 +141,13 @@ impl CraftDef {
         owner
     }
 
-    /// The tanks (region, capacity) in part order.
+    /// The tanks (region, capacity) in part order; a craft of catalog
+    /// parts: its ship's tanks and bottles ([`super::ship::ShipDef::regions`]).
     pub fn tanks(&self) -> Vec<(Tank, f64)> {
-        self.parts.iter().filter_map(|p| p.tank).map(|t| (t.region, t.capacity)).collect()
+        match &self.ship {
+            Some(ship) => ship.regions(),
+            None => self.parts.iter().filter_map(|p| p.tank).map(|t| (t.region, t.capacity)).collect(),
+        }
     }
 
     /// The piece made of `parts` (indices into this craft's parts, any
@@ -176,9 +183,15 @@ impl CraftDef {
             .collect();
         let mut spec = self.spec.clone();
         aggregate(&mut spec, &new_parts);
+        let ids: Vec<u32> = new_parts.iter().map(|p| p.id).collect();
+        let ship = self.ship.as_ref().map(|s| std::sync::Arc::new(s.subset(&ids)));
+        if let Some(s) = &ship {
+            let crew = spec.crew;
+            super::build::ship_aggregate(&mut spec, s, crew);
+        }
         let tank = new_parts.iter().find_map(|p| p.tank).map_or(self.geometry.tank, |t| t.region);
         let geometry = GeometryFile { skin: self.geometry.skin, tank, primitives };
-        CraftDef { spec, geometry, parts: new_parts }
+        CraftDef { spec, geometry, parts: new_parts, ship }
     }
 
     /// Checks the parts against the geometry: each primitive owned by

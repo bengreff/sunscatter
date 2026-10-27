@@ -83,7 +83,7 @@ pub fn definition(id: &CraftId) -> Result<CraftDef, String> {
     } else if base == super::TEST_CRAFT {
         super::test_craft().def()
     } else {
-        super::load_craft(&super::default_craft_dir().join(base)).map_err(|e| e.to_string())?.def()
+        super::load_definition(&super::default_craft_dir().join(base)).map_err(|e| e.to_string())?
     };
     let Some(ids) = id.parts() else { return Ok(whole) };
     let local: Option<Vec<u32>> =
@@ -100,6 +100,7 @@ pub fn definition(id: &CraftId) -> Result<CraftDef, String> {
 /// ([`CellOptions::for_parts`]).
 pub fn cell_options(id: &CraftId, def: &CraftDef) -> CellOptions {
     let file = id.parts().is_none()
+        && def.ship.is_none()
         && !id.0.starts_with("stress-")
         && !registered().lock().expect("craft registry").contains_key(&id.0);
     if file {

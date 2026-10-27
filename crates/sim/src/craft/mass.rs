@@ -69,6 +69,50 @@ impl TankMoments {
     }
 }
 
+impl MassProps {
+    /// Bodies together: masses added, the centre of mass weighted, the
+    /// inertias about it (parallel-axis theorem). Nothing: zero mass at the
+    /// origin.
+    pub fn sum(items: &[MassProps]) -> MassProps {
+        let mass: f64 = items.iter().map(|p| p.mass).sum();
+        if mass <= 0.0 {
+            return MassProps { mass: 0.0, com: DVec3::ZERO, inertia: DMat3::ZERO };
+        }
+        let com = items.iter().map(|p| p.com * p.mass).sum::<DVec3>() / mass;
+        let inertia = items.iter().fold(DMat3::ZERO, |i, p| i + p.inertia + parallel_axis(p.mass, p.com - com));
+        MassProps { mass, com, inertia }
+    }
+
+    /// A uniform solid `shape` of `mass` (a component's envelope: a box, a
+    /// cylinder or a sphere; anything else as its bounding cylinder),
+    /// turned by `rot` and moved to `at`.
+    pub fn solid(shape: &super::Shape, mass: f64, rot: DMat3, at: DVec3) -> MassProps {
+        use super::Shape;
+        let (centre, local) = match *shape {
+            Shape::Box { center, half } => {
+                let s = half * half * (4.0 / 12.0) * mass;
+                (center, DMat3::from_diagonal(DVec3::new(s.y + s.z, s.x + s.z, s.x + s.y)))
+            }
+            Shape::SphereCap { center, radius, height, .. } if height >= 2.0 * radius => {
+                (center, DMat3::from_diagonal(DVec3::splat(0.4 * mass * radius * radius)))
+            }
+            Shape::Cylinder { base, axis, radius } => {
+                (base + axis * 0.5, solid_cylinder(mass, radius, axis.length(), axis.normalize()))
+            }
+            Shape::Frustum { base, axis, r_base, r_top } => {
+                (base + axis * 0.5, solid_cylinder(mass, r_base.max(r_top), axis.length(), axis.normalize()))
+            }
+            Shape::SphereCap { center, radius, .. } => {
+                (center, DMat3::from_diagonal(DVec3::splat(0.4 * mass * radius * radius)))
+            }
+            Shape::Strut { from, to, radius } => {
+                ((from + to) * 0.5, solid_cylinder(mass, radius, (to - from).length(), (to - from).normalize()))
+            }
+        };
+        MassProps { mass, com: rot * centre + at, inertia: rot * local * rot.transpose() }
+    }
+}
+
 /// `m (|d|² 𝟙 − d dᵀ)`: what moving a mass `m` by `d` from the reference
 /// point adds to an inertia tensor (parallel-axis theorem).
 pub fn parallel_axis(m: f64, d: DVec3) -> DMat3 {
@@ -169,6 +213,28 @@ impl MassModel {
             capacity: tanks.iter().map(|t| t.1).sum(),
             tanks: (tanks.len() > 1).then(|| TankMoments::of(tanks)),
         }
+    }
+
+    /// Mass properties with each tank's own contents (a craft of catalog
+    /// parts): the dry craft, each tank's liquid a solid cylinder of its
+    /// region filling from the base (`mass` of `capacity` kg; the region's
+    /// length is the liquid's height at capacity) and the point masses
+    /// (bottles' gas).
+    pub fn with_contents(&self, slugs: &[(Tank, f64, f64)], points: &[(DVec3, f64)]) -> MassProps {
+        let mut items = vec![MassProps { mass: self.dry_mass, com: self.dry_com, inertia: self.dry_inertia }];
+        for &(t, capacity, mass) in slugs {
+            if mass > 0.0 && capacity > 0.0 {
+                let (d, h) = (t.axis.normalize(), t.axis.length() * (mass / capacity).min(1.0));
+                let com = t.base + d * (0.5 * h);
+                items.push(MassProps { mass, com, inertia: solid_cylinder(mass, t.radius, h, d) });
+            }
+        }
+        for &(at, mass) in points {
+            if mass > 0.0 {
+                items.push(MassProps { mass, com: at, inertia: DMat3::ZERO });
+            }
+        }
+        MassProps::sum(&items)
     }
 
     /// Mass properties with `propellant` kg in the tank (clamped to

@@ -163,7 +163,7 @@ pub fn id(parts: usize) -> CraftId {
 impl StressLayout {
     /// The craft's definition (files and parts).
     pub fn def(&self) -> CraftDef {
-        CraftDef { spec: self.spec.clone(), geometry: self.geometry.clone(), parts: self.parts.clone() }
+        CraftDef { spec: self.spec.clone(), geometry: self.geometry.clone(), parts: self.parts.clone(), ship: None }
     }
 
     /// Builds the craft (surface, cells, mass model) through the craft

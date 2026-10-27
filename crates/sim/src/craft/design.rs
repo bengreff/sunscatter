@@ -9,7 +9,7 @@
 //! [`super::registry`]). The bake is deterministic, so a rebuilt design is
 //! the same bits.
 
-use super::parts::{CraftDef, Part};
+use super::parts::Part;
 use super::{Cell, Craft, CraftId, MassProps, VolumeGrid};
 use crate::aero::{self, AeroBake, BakeOptions, Flow};
 use crate::thermal::{Interior, ThermalNetwork};
@@ -53,6 +53,8 @@ pub struct CraftDesign {
     pub surfaces: crate::forces::SurfaceTable,
     /// The parts ([`super::parts`]) and each one's dry mass properties.
     pub parts: Vec<Part>,
+    /// A craft of catalog parts: its ship definition ([`super::ship`]).
+    pub ship: Option<Arc<super::ship::ShipDef>>,
     pub part_mass: Vec<MassProps>,
     /// The part of each cell and of each interior node (the part filling
     /// most of it).
@@ -72,7 +74,7 @@ impl CraftDesign {
             .positions
             .iter()
             .fold((glam::DVec3::splat(f64::MAX), glam::DVec3::splat(f64::MIN)), |b, p| (b.0.min(*p), b.1.max(*p)));
-        let def = CraftDef { spec: craft.spec.clone(), geometry: craft.geometry.clone(), parts: craft.parts.clone() };
+        let def = craft.def();
         let owner = def.primitive_part();
         let volume = match craft.parts.len() {
             1 => VolumeGrid::new(&craft.geometry.primitives, bounds, &craft.geometry.tank, t.node_size),
@@ -142,6 +144,7 @@ impl CraftDesign {
             mean_drag_area,
             surfaces,
             parts: craft.parts.clone(),
+            ship: craft.ship.clone(),
             part_mass: craft.part_mass.clone(),
             cell_part,
             node_part,

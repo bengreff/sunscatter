@@ -114,6 +114,122 @@ impl Engine {
     }
 }
 
+/// The engines of a craft of parts running together over a tick: each at
+/// its own mount with its own Isp pair and throttle range, drawing its
+/// oxidizer and fuel by its mixture ratio from the first of its feed tanks
+/// that holds any; an engine whose tanks cannot supply the whole tick gives
+/// that share of it (the last partial tick, as [`Engine::tick_output`]).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ShipThrust {
+    pub thrust: f64,
+    pub mdot: f64,
+    /// Thrust-weighted mount and direction (body axes; unit), and the
+    /// smallest gimbal range of the engines giving thrust (rad): all
+    /// deflecting together, their torque is the summed thrust's about the
+    /// weighted mount, exactly.
+    pub pos: DVec3,
+    pub dir: DVec3,
+    pub gimbal: f64,
+    /// Heat into the nozzles' walls (W, D077).
+    pub heat: f64,
+    /// Each tank's draw (kg/s).
+    pub draws: Vec<f64>,
+}
+
+/// The engine file of one engine of a craft of parts (its gimbal point and
+/// direction as given).
+pub fn file_of(d: &crate::catalog::EngineData) -> EngineFile {
+    EngineFile {
+        thrust_vac: d.thrust_vac,
+        isp_vac: d.isp_vac,
+        isp_sl: d.isp_sl,
+        min_throttle: d.throttle_min,
+        gimbal_deg: d.gimbal_deg,
+        mount: super::file::Mount { pos: d.pos, dir: d.dir },
+        nozzle_heat_fraction: d.nozzle_heat_fraction,
+    }
+}
+
+/// The engine model of one engine of a craft of parts.
+pub fn engine_of(d: &crate::catalog::EngineData) -> Engine {
+    Engine::from_file(&file_of(d))
+}
+
+/// The running engines' output at the pilot's `throttle` and ambient
+/// pressure `p` over `dt` (`infinite`: debug mode, no draw limits).
+pub fn ship_thrust(
+    def: &super::ship::ShipDef,
+    state: &super::state::ShipState,
+    throttle: f64,
+    p: f64,
+    dt: f64,
+    infinite: bool,
+) -> ShipThrust {
+    let mut draws = vec![0.0; def.tanks.len()];
+    let mut running: Vec<(usize, Engine, EngineOutput, [Option<usize>; 2])> = Vec::new();
+    for (i, (e, s)) in def.engines.iter().zip(&state.engines).enumerate() {
+        if s.status != super::state::EngineStatus::Running {
+            continue;
+        }
+        let engine = engine_of(&e.data);
+        let setting = engine.setting(throttle * s.throttle).min(e.data.throttle_max);
+        if setting <= 0.0 {
+            continue;
+        }
+        let out = engine.output(setting, p);
+        let first = |list: &[u32]| list.iter().map(|&t| t as usize).find(|&t| infinite || state.tanks[t].liquid > 0.0);
+        let tanks = [first(&e.feeds[0]), first(&e.feeds[1])];
+        if !infinite && tanks.iter().any(Option::is_none) {
+            continue;
+        }
+        let mr = e.data.mixture_ratio;
+        for (t, share) in tanks.iter().zip([mr / (1.0 + mr), 1.0 / (1.0 + mr)]) {
+            if let Some(t) = t {
+                draws[*t] += out.mdot * share;
+            }
+        }
+        running.push((i, engine, out, tanks));
+    }
+    // Tanks that cannot supply the whole tick share out what they hold.
+    let supply: Vec<f64> = (0..draws.len())
+        .map(|t| {
+            if infinite || draws[t] * dt <= state.tanks[t].liquid {
+                1.0
+            } else {
+                state.tanks[t].liquid / (draws[t] * dt)
+            }
+        })
+        .collect();
+    let mut out = ShipThrust { draws: vec![0.0; def.tanks.len()], gimbal: f64::INFINITY, ..ShipThrust::default() };
+    let (mut pos, mut dir) = (DVec3::ZERO, DVec3::ZERO);
+    for (i, engine, o, tanks) in running {
+        let f = tanks.iter().flatten().map(|&t| supply[t]).fold(1.0, f64::min);
+        let (thrust, mdot) = (o.thrust * f, o.mdot * f);
+        let mr = def.engines[i].data.mixture_ratio;
+        for (t, share) in tanks.iter().zip([mr / (1.0 + mr), 1.0 / (1.0 + mr)]) {
+            if let Some(t) = t {
+                out.draws[*t] += mdot * share;
+            }
+        }
+        out.thrust += thrust;
+        out.mdot += mdot;
+        out.heat += engine.heat(thrust, mdot);
+        pos += engine.mount_pos * thrust;
+        dir += engine.mount_dir * thrust;
+        if thrust > 0.0 {
+            out.gimbal = out.gimbal.min(engine.gimbal);
+        }
+    }
+    if out.thrust > 0.0 {
+        out.pos = pos / out.thrust;
+        out.dir = dir.normalize();
+    } else {
+        out.dir = DVec3::Z;
+        out.gimbal = 0.0;
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1,0 +1,487 @@
+//! The ship state (D104, D105; `docs/design/ship-model.md` §2, §5):
+//! everything about a craft of catalog parts that changes in flight, saved
+//! with the vessel as plain data — each tank's liquid and ullage, bottles,
+//! engines, thruster blocks, valves, batteries, mechanisms, joints, each
+//! part's integrity, damage and history, the cabin, failure fates, the pad's
+//! clamps and the sequence's position.
+//!
+//! Every list is aligned with its [`ShipDef`] list and every entry names
+//! its part (`Part::id`), so a split partitions the state exactly as the
+//! definition ([`ShipState::partition`], [`ShipDef::subset`]).
+//!
+//! What the systems do with it is `sim::systems` (RUNTIME). Here: the state
+//! at load (tanks filled at their loading temperatures, bottles at their
+//! pressure) and the plain effect of each [`ShipCommand`] ([`ShipState::apply`]:
+//! engines start and stop at once, valves and mechanisms move at once; the
+//! transients are the systems').
+
+use super::command::{matches, ShipCommand};
+use super::file::Tank;
+use super::ship::ShipDef;
+use crate::catalog::Igniter;
+use crate::fluids::{self, fluids};
+use glam::DVec3;
+use serde::{Deserialize, Serialize};
+
+/// Room temperature for what is not loaded cold (K).
+const ROOM_K: f64 = 293.15;
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TankState {
+    pub part: u32,
+    /// kg and K.
+    pub liquid: f64,
+    pub liquid_k: f64,
+    /// The ullage's gas (pressurant and vapour), moles and K.
+    pub ullage_moles: f64,
+    pub ullage_k: f64,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct BottleState {
+    pub part: u32,
+    pub moles: f64,
+    pub k: f64,
+}
+
+/// Where an engine is in its life.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum EngineStatus {
+    #[default]
+    Off,
+    Starting,
+    Running,
+    ShuttingDown,
+    Failed,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct EngineState {
+    pub part: u32,
+    pub status: EngineStatus,
+    /// Seconds in the current status (transients).
+    pub timer: f64,
+    /// Starts left (`u32::MAX`: hypergolic, unlimited).
+    pub ignitions: u32,
+    /// Its own throttle setting (the pilot's throttle scales it).
+    pub throttle: f64,
+    /// Gimbal deflection about the mount's two lateral axes (rad).
+    pub gimbal: [f64; 2],
+    /// The pilot's throttle and the readouts refer to it.
+    pub selected: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ThrusterState {
+    pub part: u32,
+    pub enabled: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ValveState {
+    pub part: u32,
+    pub open: bool,
+    /// Stuck where it is (a failure).
+    pub stuck: bool,
+    pub cycles: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct BatteryState {
+    pub part: u32,
+    /// J and K.
+    pub charge: f64,
+    pub k: f64,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct MechanismState {
+    pub part: u32,
+    /// Degrees about its hinge from as built, and where it is going.
+    pub angle: f64,
+    pub target: f64,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct JointState {
+    pub parent: u32,
+    pub child: u32,
+    pub intact: bool,
+}
+
+/// A part's life across flights (D105 §6.6).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct History {
+    /// Seconds operating, starts, cycles.
+    pub run_time: f64,
+    pub starts: u32,
+    pub cycles: u32,
+    pub peak_k: f64,
+    pub peak_load: f64,
+    pub flights: u32,
+    pub landings: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PartState {
+    pub part: u32,
+    /// 1 intact, 0 destroyed.
+    pub integrity: f64,
+    /// Miner's sums of thermal and vibration damage (fails at 1).
+    pub thermal_damage: f64,
+    pub vibration_damage: f64,
+    pub history: History,
+}
+
+/// A crew cabin's air (partial pressures, Pa) and temperature.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct CabinState {
+    pub part: u32,
+    pub o2: f64,
+    pub n2: f64,
+    pub co2: f64,
+    pub h2o: f64,
+    pub k: f64,
+}
+
+/// A statistical failure mode's fate (D105 §6.3): the threshold E drawn
+/// once and the hazard accumulated.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Fate {
+    pub part: u32,
+    /// The owner's id and the mode's name.
+    pub owner: String,
+    pub mode: String,
+    pub threshold: f64,
+    pub hazard: f64,
+}
+
+/// A component's power switch.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Switch {
+    pub part: u32,
+    pub on: bool,
+}
+
+/// Everything about a craft of parts that changes in flight.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+pub struct ShipState {
+    pub tanks: Vec<TankState>,
+    pub bottles: Vec<BottleState>,
+    pub engines: Vec<EngineState>,
+    pub thrusters: Vec<ThrusterState>,
+    pub valves: Vec<ValveState>,
+    pub batteries: Vec<BatteryState>,
+    pub mechanisms: Vec<MechanismState>,
+    pub joints: Vec<JointState>,
+    pub parts: Vec<PartState>,
+    /// One per component.
+    pub power: Vec<Switch>,
+    #[serde(default)]
+    pub cabin: Option<CabinState>,
+    #[serde(default)]
+    pub fates: Vec<Fate>,
+    /// Held by the pad's clamps.
+    #[serde(default)]
+    pub clamped: bool,
+    /// The next stage of the sequence.
+    #[serde(default)]
+    pub sequence: u32,
+}
+
+/// Each tank's region, capacity and liquid (kg), each bottle's place and
+/// gas (kg).
+pub type Contents = (Vec<(Tank, f64, f64)>, Vec<(DVec3, f64)>);
+
+/// What a command asks of the vessel beyond the ship state.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Effect {
+    /// Separate at the joint whose child part is this (`Part::id`).
+    Separate(u32),
+    ReleaseClamps,
+    ArmChutes,
+}
+
+impl ShipState {
+    /// The state at load (D104): tanks filled at their loading temperature
+    /// with their ullage at its pressure, bottles at their pressure,
+    /// engines off with their ignitions, valves and thrusters as built,
+    /// batteries full, mechanisms stowed, joints intact, the first engines
+    /// the sequence ignites selected.
+    pub fn initial(def: &ShipDef) -> ShipState {
+        let f = fluids();
+        let tanks = (def.tanks.iter())
+            .map(|t| {
+                let liquid = t.capacity * t.load.fill;
+                let density = f.liquid(&t.fluid).map_or(1000.0, |l| l.density(t.load.temperature_k));
+                let ullage = (t.volume - liquid / density).max(0.0);
+                TankState {
+                    part: t.part,
+                    liquid,
+                    liquid_k: t.load.temperature_k,
+                    ullage_moles: fluids::moles(t.load.pressure, ullage, t.load.temperature_k),
+                    ullage_k: t.load.temperature_k,
+                }
+            })
+            .collect();
+        let bottles = (def.bottles.iter())
+            .map(|b| BottleState {
+                part: b.part,
+                moles: fluids::moles(b.pressure, b.volume, b.temperature_k),
+                k: b.temperature_k,
+            })
+            .collect();
+        let first = def.sequence.iter().flat_map(|s| &s.actions).find_map(|a| match a {
+            ShipCommand::Ignite(s) => Some(def.engines_of(s)),
+            _ => None,
+        });
+        let engines = (def.engines.iter().enumerate())
+            .map(|(i, e)| EngineState {
+                part: e.part,
+                status: EngineStatus::Off,
+                timer: 0.0,
+                ignitions: if e.data.igniter == Igniter::Hypergolic { u32::MAX } else { e.data.ignitions },
+                throttle: 1.0,
+                gimbal: [0.0; 2],
+                selected: first.as_ref().is_some_and(|f| f.contains(&i)),
+            })
+            .collect();
+        let crewed = def.seats.first().map(|s| s.part);
+        ShipState {
+            tanks,
+            bottles,
+            engines,
+            thrusters: def.thrusters.iter().map(|t| ThrusterState { part: t.part, enabled: t.enabled }).collect(),
+            valves: (def.valves.iter())
+                .map(|v| ValveState { part: v.part, open: v.item.open, stuck: false, cycles: 0 })
+                .collect(),
+            batteries: (def.batteries.iter())
+                .map(|b| BatteryState { part: b.part, charge: b.item.capacity, k: ROOM_K })
+                .collect(),
+            mechanisms: (def.mechanisms.iter())
+                .map(|m| MechanismState { part: m.part, angle: m.item.stowed_deg, target: m.item.stowed_deg })
+                .collect(),
+            joints: def.joints.iter().map(|j| JointState { parent: j.parent, child: j.child, intact: true }).collect(),
+            parts: (def.parts.iter())
+                .map(|p| PartState {
+                    part: p.part,
+                    integrity: 1.0,
+                    thermal_damage: 0.0,
+                    vibration_damage: 0.0,
+                    history: History::default(),
+                })
+                .collect(),
+            power: def.components.iter().map(|c| Switch { part: c.part, on: true }).collect(),
+            // Sea-level air (21 % O2, 78 % N2 by volume, ~1 % H2O), 295 K.
+            cabin: crewed.map(|part| CabinState {
+                part,
+                o2: 21_200.0,
+                n2: 79_000.0,
+                co2: 50.0,
+                h2o: 1_000.0,
+                k: 295.0,
+            }),
+            fates: Vec::new(),
+            clamped: false,
+            sequence: 0,
+        }
+    }
+
+    /// The state of the piece holding the parts `kept` (`Part::id`s): every
+    /// entry of those parts, in order; joints within the piece; the cabin
+    /// if its part is kept. The sequence's position and the clamps stay.
+    pub fn partition(&self, kept: &[u32]) -> ShipState {
+        fn by<T: Clone>(items: &[T], part: impl Fn(&T) -> u32, kept: &[u32]) -> Vec<T> {
+            items.iter().filter(|x| kept.contains(&part(x))).cloned().collect()
+        }
+        ShipState {
+            tanks: by(&self.tanks, |x| x.part, kept),
+            bottles: by(&self.bottles, |x| x.part, kept),
+            engines: by(&self.engines, |x| x.part, kept),
+            thrusters: by(&self.thrusters, |x| x.part, kept),
+            valves: by(&self.valves, |x| x.part, kept),
+            batteries: by(&self.batteries, |x| x.part, kept),
+            mechanisms: by(&self.mechanisms, |x| x.part, kept),
+            joints: by(&self.joints, |j| if kept.contains(&j.parent) { j.child } else { u32::MAX }, kept),
+            parts: by(&self.parts, |x| x.part, kept),
+            power: by(&self.power, |x| x.part, kept),
+            cabin: self.cabin.clone().filter(|c| kept.contains(&c.part)),
+            fates: by(&self.fates, |x| x.part, kept),
+            clamped: self.clamped,
+            sequence: self.sequence,
+        }
+    }
+
+    /// Liquid in the tanks (kg).
+    pub fn liquid(&self) -> f64 {
+        self.tanks.iter().map(|t| t.liquid).sum()
+    }
+
+    /// Gas in the bottles (kg).
+    pub fn gas(&self, def: &ShipDef) -> f64 {
+        (self.bottles.iter().zip(&def.bottles))
+            .map(|(s, b)| s.moles * fluids().gas(&b.gas).map_or(0.0, |g| g.molar_mass))
+            .sum()
+    }
+
+    /// Everything the vessel carries that it can spend (kg): what its
+    /// `propellant` is.
+    pub fn consumables(&self, def: &ShipDef) -> f64 {
+        self.liquid() + self.gas(def)
+    }
+
+    /// Each tank's region, capacity and liquid, and each bottle's gas at its
+    /// place: what `MassModel::with_contents` takes.
+    pub fn contents(&self, def: &ShipDef) -> Contents {
+        let slugs = self.tanks.iter().zip(&def.tanks).map(|(s, t)| (t.region, t.capacity, s.liquid)).collect();
+        let points = (self.bottles.iter().zip(&def.bottles))
+            .map(|(s, b)| (b.pos, s.moles * fluids().gas(&b.gas).map_or(0.0, |g| g.molar_mass)))
+            .collect();
+        (slugs, points)
+    }
+
+    /// Scales every tank's liquid and bottle's gas so the consumables total
+    /// `kg` (a coast's continuous mass laws and `set_propellant` give one
+    /// total; the tanks keep their shares).
+    pub fn scale_to(&mut self, def: &ShipDef, kg: f64) {
+        let now = self.consumables(def);
+        let f = if now > 0.0 { (kg / now).max(0.0) } else { 0.0 };
+        if f == 1.0 {
+            return;
+        }
+        for t in &mut self.tanks {
+            t.liquid *= f;
+        }
+        for b in &mut self.bottles {
+            b.moles *= f;
+        }
+    }
+
+    /// Applies a command's plain effect (see the module): the state changes
+    /// at once; what the vessel must do besides is returned. Naming nothing
+    /// the craft has is an error (nothing changes).
+    pub fn apply(&mut self, def: &ShipDef, command: &ShipCommand) -> Result<Vec<Effect>, String> {
+        let none = || Err(format!("{command:?}: names nothing on this craft"));
+        let ids = |list: &mut dyn Iterator<Item = &String>, s: &str| -> Vec<usize> {
+            list.enumerate().filter(|(_, id)| matches(s, id)).map(|(i, _)| i).collect()
+        };
+        match command {
+            ShipCommand::Ignite(s)
+            | ShipCommand::Shutdown(s)
+            | ShipCommand::Throttle(s, _)
+            | ShipCommand::Select(s) => {
+                let picked = def.engines_of(s);
+                if picked.is_empty() {
+                    return none();
+                }
+                if matches!(command, ShipCommand::Select(_)) {
+                    for (i, e) in self.engines.iter_mut().enumerate() {
+                        e.selected = picked.contains(&i);
+                    }
+                }
+                for &i in &picked {
+                    let e = &mut self.engines[i];
+                    match command {
+                        ShipCommand::Ignite(_) if matches!(e.status, EngineStatus::Off) && e.ignitions > 0 => {
+                            e.status = EngineStatus::Running;
+                            e.timer = 0.0;
+                            e.selected = true;
+                            if e.ignitions != u32::MAX {
+                                e.ignitions -= 1;
+                            }
+                        }
+                        ShipCommand::Shutdown(_) if !matches!(e.status, EngineStatus::Off | EngineStatus::Failed) => {
+                            e.status = EngineStatus::Off;
+                            e.timer = 0.0;
+                        }
+                        ShipCommand::Throttle(_, x) => e.throttle = x.clamp(0.0, 1.0),
+                        _ => {}
+                    }
+                }
+                Ok(Vec::new())
+            }
+            ShipCommand::Open(s) | ShipCommand::Close(s) => {
+                let picked = ids(&mut def.valves.iter().map(|v| &v.id), s);
+                if picked.is_empty() {
+                    return none();
+                }
+                let open = matches!(command, ShipCommand::Open(_));
+                for i in picked {
+                    let v = &mut self.valves[i];
+                    if !v.stuck && v.open != open {
+                        v.open = open;
+                        v.cycles += 1;
+                    }
+                }
+                Ok(Vec::new())
+            }
+            ShipCommand::Deploy(s) | ShipCommand::Retract(s) | ShipCommand::Angle(s, _) => {
+                let picked = ids(&mut def.mechanisms.iter().map(|m| &m.id), s);
+                if picked.is_empty() {
+                    return none();
+                }
+                for i in picked {
+                    let m = &def.mechanisms[i].item;
+                    let target = match command {
+                        ShipCommand::Deploy(_) => m.deployed_deg,
+                        ShipCommand::Retract(_) if m.retractable => m.stowed_deg,
+                        ShipCommand::Retract(_) => self.mechanisms[i].angle,
+                        ShipCommand::Angle(_, a) => {
+                            a.clamp(m.stowed_deg.min(m.deployed_deg), m.stowed_deg.max(m.deployed_deg))
+                        }
+                        _ => unreachable!(),
+                    };
+                    self.mechanisms[i].target = target;
+                    self.mechanisms[i].angle = target;
+                }
+                Ok(Vec::new())
+            }
+            ShipCommand::Separate(name) => {
+                let Some(j) = def.joints.iter().position(|j| j.name == *name) else { return none() };
+                if !self.joints[j].intact {
+                    return Ok(Vec::new());
+                }
+                self.joints[j].intact = false;
+                Ok(vec![Effect::Separate(def.joints[j].child)])
+            }
+            ShipCommand::ReleaseClamps => {
+                self.clamped = false;
+                Ok(vec![Effect::ReleaseClamps])
+            }
+            ShipCommand::ArmChutes => Ok(vec![Effect::ArmChutes]),
+            ShipCommand::Rcs(s, on) => {
+                let picked = ids(&mut def.thrusters.iter().map(|t| &t.id), s);
+                if picked.is_empty() {
+                    return none();
+                }
+                for i in picked {
+                    self.thrusters[i].enabled = *on;
+                }
+                Ok(Vec::new())
+            }
+            ShipCommand::Power(s, on) => {
+                let picked = ids(&mut def.components.iter().map(|c| &c.id), s);
+                if picked.is_empty() {
+                    return none();
+                }
+                for i in picked {
+                    self.power[i].on = *on;
+                }
+                Ok(Vec::new())
+            }
+        }
+    }
+
+    /// Runs the next stage of the sequence: each of its commands' plain
+    /// effect (a command naming what this piece lacks is skipped). `None`
+    /// when the sequence is done.
+    pub fn next_stage(&mut self, def: &ShipDef) -> Option<(String, Vec<Effect>)> {
+        let stage = def.sequence.get(self.sequence as usize)?;
+        self.sequence += 1;
+        let mut effects = Vec::new();
+        for a in &stage.actions {
+            effects.extend(self.apply(def, a).unwrap_or_default());
+        }
+        Some((stage.name.clone(), effects))
+    }
+}
