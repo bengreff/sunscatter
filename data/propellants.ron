@@ -1,0 +1,41 @@
+// What each propellant pair's exhaust is made of (D109; sim::systems::exhaust):
+// placeholders from published handbook figures until the owner's engine
+// testbench (CRUCIBLE, ~/inquiry-project) gives each engine's own nozzle-exit
+// state. P published, E estimate, D derived, U unknown (proposed value).
+//
+// gamma, molar_mass (g/mol) and chamber_temperature (K) are the handbook's
+// shifting-equilibrium figures at `mixture_ratio` and 1,000 psia (Sutton &
+// Biblarz, Rocket Propulsion Elements, 9th ed., Table 5-5); the seed derives
+// the exit state from each engine's own thrust, Isp and nozzle with gamma and
+// molar_mass, and checks itself against chamber_temperature.
+// stoichiometric_ratio: the oxidizer-to-fuel mass ratio that burns the fuel
+// completely to CO2 and H2O (D: from the formulas); an engine run below it
+// leaves fuel (CO, H2) that afterburns in air.
+// water: mole fraction of H2O at the exit. soot, alumina: mass fractions of
+// condensed particles (what glows as a grey body).
+{
+    "LOX/RP-1": (
+        gamma: 1.24, molar_mass: 23.3, chamber_temperature: 3677.0, mixture_ratio: 2.56,
+        stoichiometric_ratio: 3.41,   // D: RP-1 as CH1.95 (H/C of the NIST surrogate, Huber et al. 2009), 1.4875 O2 per CH1.95
+        water: 0.30,                  // E: shifting-equilibrium products of kerolox near MR 2.5 (CEA class), not re-run
+        soot: 0.005,                  // U: kerolox plumes are visibly sooty (most from the fuel-rich turbine exhaust); no published fraction found
+        alumina: 0.0,
+        source: "E: Sutton & Biblarz 9th ed. Table 5-5 (O2/RP-1, shifting, 1,000 psia): T 3,677 K, M 23.3, gamma 1.24; not re-checked against the printed table",
+    ),
+    "NTO/MMH": (
+        gamma: 1.25, molar_mass: 21.5, chamber_temperature: 3398.0, mixture_ratio: 2.15,
+        stoichiometric_ratio: 2.50,   // D: CH6N2 + 1.25 N2O4 -> CO2 + 3 H2O + 3.5 N2
+        water: 0.35,                  // E: CEA class, not re-run
+        soot: 0.0,
+        alumina: 0.0,
+        source: "E: Sutton & Biblarz 9th ed. Table 5-5 (N2O4/MMH, shifting, 1,000 psia): T 3,398 K, M 21.5, gamma 1.25; not re-checked against the printed table",
+    ),
+    "LOX/LH2": (
+        gamma: 1.26, molar_mass: 10.0, chamber_temperature: 2999.0, mixture_ratio: 4.02,
+        stoichiometric_ratio: 7.94,   // D: 2 H2 + O2 -> 2 H2O
+        water: 0.60,                  // E: CEA class, not re-run
+        soot: 0.0,
+        alumina: 0.0,
+        source: "E: Sutton & Biblarz 9th ed. Table 5-5 (O2/H2, shifting, 1,000 psia): T 2,999 K, M 10.0, gamma 1.26; not re-checked against the printed table",
+    ),
+}

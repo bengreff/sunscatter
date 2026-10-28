@@ -153,6 +153,11 @@ pub struct EngineData {
     pub nozzle_heat_fraction: f64,
     /// Nozzle exit area (m², from the geometry).
     pub exit_area: f64,
+    /// Nozzle throat area (m², from the geometry; 0: not given). With the
+    /// exit area, the expansion ratio the exhaust seed needs
+    /// (`systems::exhaust`).
+    #[serde(default)]
+    pub throat_area: f64,
     /// Gimbal point and thrust direction (the force on the craft), part frame.
     pub pos: DVec3,
     pub dir: DVec3,

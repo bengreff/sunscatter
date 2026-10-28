@@ -170,6 +170,7 @@ impl EngineParams {
             npsp_fuel: self.npsp_fuel,
             nozzle_heat_fraction: self.nozzle_heat_fraction,
             exit_area: math::PI * self.exit_diameter * self.exit_diameter / 4.0,
+            throat_area: math::PI * self.throat_diameter * self.throat_diameter / 4.0,
             pos: DVec3::ZERO,
             dir: DVec3::Z,
         })

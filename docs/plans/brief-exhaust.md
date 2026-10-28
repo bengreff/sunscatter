@@ -15,3 +15,15 @@ Read first: D109 and D073 (and the "one look" line that D109 revises) in `docs/d
 
 - Check the other agent's files in `git status` before editing (`settings_ui.rs` was NAV's).
 - See it: the demo (pad, ascent, after separation for the Merlin Vacuum; `SUNSCATTER_CRAFT=falcon9-crew`) under the demo lock, with the toggle on and off. Visuals come from physics, never for their own sake (D109): if the model cannot show something, leave it out and say so.
+
+## State (EXHAUST, stopped at its context budget, 2026-10-27)
+
+Landed (see the commit "The exhaust seed"): wanted 1, the seed in `sim::systems::exhaust` (`exit_state`, `NozzleSpec::of` / `of_engine`, `jet`, `propellants()`), the table `data/propellants.ron`, `EngineData::throat_area`, five table tests; the spec [exhaust.md](../features/exhaust.md) with the render model's and the toggle's design.
+
+Left, in order:
+1. The `docs/architecture.md` row (SYSTEMS had the file open; add it after it commits): "The exhaust seed (D109): each engine's exit state from its thrust, Isp, nozzle and the propellant pair (`exit_state`, `NozzleSpec`), the jet in the local air (`jet`: pressure ratio, expanded Mach and radius, lip turning, shock-cell length); the pairs' table `data/propellants.ron` | `sim::systems::exhaust` | what flames are drawn from; never read by the trajectory".
+2. The toggle (wanted 3): `VisualSettings { exhaust: bool }` (default false) as `visuals` in `persist::SettingsFile` (the test that the file never says "graphics" must still pass), a checkbox in `settings_ui` (ask the agent holding it first).
+3. The render model (wanted 2) in a new `game::scene::exhaust` (rules, table tests) wired in `scene::ships::update_parts`: per flame, `NozzleSpec::of(&def.engines[e].data)`, the level from its thrust (`NozzleSpec::level`), the seed, `jet` at the vessel's ambient pressure (already computed there); the cone stays when the toggle is off. The test craft: `NozzleSpec::of_engine` with the LOX/RP-1 row (it has no propellants: an assumption, say so). Then a `look::Parts` row (`exhaust`) and the demo (pad, ascent, after separation; `SUNSCATTER_CRAFT=falcon9-crew`) with the toggle on and off.
+4. The plan's row and the spec's status words once each lands.
+
+Open for the owner (written in the plan): the propellant data lives in a pair table beside `fluids.ron`, not in the engine entries (γ, molar mass and composition belong to the propellants and their mixture; an engine's own figures, CRUCIBLE's, would come as a per-engine exit state later). Exit pressure is derived (thrust-consistent), not a new published field.
