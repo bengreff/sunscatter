@@ -39,6 +39,22 @@ pub const C: f64 = 299_792_458.0;
 /// Boltzmann's constant (J/K).
 pub const K_B: f64 = 1.380_649e-23;
 
+/// The plasma frequency (Hz) of an electron density `n_e` (1/m³):
+/// f_p = (1/2π)·√(nₑe²/(ε₀mₑ)) ≈ 8.98·√nₑ (CODATA 2018 constants).
+pub fn plasma_frequency(n_e: f64) -> f64 {
+    const E: f64 = 1.602_176_634e-19;
+    const EPS0: f64 = 8.854_187_812_8e-12;
+    const M_E: f64 = 9.109_383_701_5e-31;
+    (n_e.max(0.0) * E * E / (EPS0 * M_E)).sqrt() / (2.0 * math::PI)
+}
+
+/// Whether a radio link at `frequency_hz` through a plasma of electron
+/// density `n_e` (1/m³) is cut: a wave below the plasma frequency is
+/// reflected (the reentry blackout, D109).
+pub fn blacked_out(frequency_hz: f64, n_e: f64) -> bool {
+    plasma_frequency(n_e) >= frequency_hz
+}
+
 /// A transmitter/receiver: gain (dBi, the same both ways) and transmit power.
 #[derive(Clone, Copy, Debug, PartialEq, Deserialize)]
 pub struct Antenna {

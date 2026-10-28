@@ -385,6 +385,34 @@ fn most(a: f64, b: f64) -> f64 {
 
 /// The air's heat into each cell (W), added to `out`, from the boundary
 /// layer `layer` (`cont` a per-cell buffer).
+/// The stagnation point of a flow on a nose.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Stagnation {
+    /// Convective flux (W/m², cold wall), bridged to free molecular.
+    pub convective: f64,
+    /// The shock layer's radiative flux (W/m², Tauber–Sutton; zero where
+    /// the atmosphere names no relation).
+    pub radiative: f64,
+    /// Wilmoth's bridge on λ/Rn: 0 continuum, 1 free molecular.
+    pub rarefied: f64,
+}
+
+/// The stagnation point's fluxes of `air` at density `rho` (kg/m³) and
+/// airspeed `v` (m/s) on a nose of radius `rn` (m), on a craft whose
+/// Knudsen length (the flow's) is `length` (m). The continuum stagnation
+/// flux never exceeds the free-molecular energy flux (C_H ≤ 1;
+/// Sutton–Graves passes it at Kn ≳ 1). The stagnation point is rarefied on
+/// the nose's scale (λ/Rn, Tauber fig. 8: its C_H to 1), the acreage on the
+/// body's (λ/D_b, as the forces): a sharp tip goes free molecular long
+/// before its flanks.
+pub fn stagnation(air: &FlowHeat, rho: f64, v: f64, rn: f64, length: f64) -> Stagnation {
+    let q_fm = 0.5 * rho * v * v * v;
+    let rarefied = if rn > 0.0 { aero::bridge(air.flow.knudsen * length / rn) } else { 1.0 };
+    let convective = q_fm + (sutton_graves(air.sutton_graves_k, rho, rn, v).min(q_fm) - q_fm) * (1.0 - rarefied);
+    let radiative = air.radiative.map_or(0.0, |model| tauber_sutton(model, rho, rn, v));
+    Stagnation { convective, radiative, rarefied }
+}
+
 fn convective(
     bake: &AeroBake,
     cells: &[Cell],
@@ -405,15 +433,8 @@ fn convective(
     let cp = g * r_gas / (g - 1.0);
     let t0 = t * (1.0 + 0.5 * (g - 1.0) * m * m);
     let rn = bake.nose_radius_at(d);
-    // The continuum stagnation flux never exceeds the free-molecular
-    // energy flux (C_H ≤ 1; Sutton–Graves passes it at Kn ≳ 1).
-    // The stagnation point is rarefied on the nose's scale (λ/Rn, Tauber
-    // fig. 8: its C_H to 1), the acreage on the body's (λ/D_b, as the
-    // forces): a sharp tip goes free molecular long before its flanks.
+    let Stagnation { convective: q_conv, radiative: q_rad, .. } = stagnation(air, rho, v, rn, bake.length);
     let q_fm = 0.5 * rho * v * v * v;
-    let nose_bridge = if rn > 0.0 { aero::bridge(flow.knudsen * bake.length / rn) } else { 1.0 };
-    let q_conv = q_fm + (sutton_graves(air.sutton_graves_k, rho, rn, v).min(q_fm) - q_fm) * (1.0 - nose_bridge);
-    let q_rad = air.radiative.map_or(0.0, |model| tauber_sutton(model, rho, rn, v));
     let b = aero::bridge(flow.knudsen);
     let scale = rho * v * cp;
     let exposure = bake.exposure_weights(d);

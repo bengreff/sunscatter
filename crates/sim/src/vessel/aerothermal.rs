@@ -106,6 +106,64 @@ pub struct VesselThermal {
     /// Coasts: the nodes' heat capacities of the last solve.
     #[serde(skip)]
     capacities: Capacities,
+    /// The shock layer at the last live tick (none out of the air).
+    #[serde(default)]
+    pub shock: Option<ShockLayer>,
+    /// The highest stagnation flux (W/m², convective plus radiative) of
+    /// any live tick so far.
+    #[serde(default)]
+    pub peak_heating: f64,
+}
+
+/// A vessel's shock layer at its stagnation point (D109,
+/// `docs/features/reentry.md`).
+#[derive(Clone, Copy, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ShockLayer {
+    /// Equilibrium temperature behind the normal shock (K; zero where the
+    /// gas has no equilibrium model: CO₂).
+    pub temperature: f64,
+    /// Pressure behind the shock (Pa).
+    pub pressure: f64,
+    /// The sheath's electron density (1/m³): equilibrium behind the normal
+    /// shock, times the share of it the layer's collisions reach
+    /// (`aero::shock::equilibrium_share`) and the continuum share (no
+    /// shock layer forms in free molecular flow).
+    pub electron_density: f64,
+    /// The shock's standoff from the nose (m).
+    pub standoff: f64,
+    /// The continuum share at the nose, 1 − Wilmoth's bridge on λ/Rn.
+    pub continuum: f64,
+    /// Stagnation fluxes (W/m², cold wall): convective and the shock
+    /// layer's radiation.
+    pub convective: f64,
+    pub radiative: f64,
+}
+
+/// The shock layer of `flow` in `air` on `design`'s nose for the flow's
+/// direction; none below 1 km/s.
+pub fn shock_layer(design: &CraftDesign, flow: &Flow, air: &Air) -> Option<ShockLayer> {
+    let (v, rho) = (flow.speed, air.rho);
+    if v < 1_000.0 || rho <= 0.0 || flow.dir.length_squared() == 0.0 {
+        return None;
+    }
+    let rn = design.bake.nose_radius_at(flow.dir.normalize());
+    let heat =
+        thermal::FlowHeat { flow, sutton_graves_k: air.sutton_graves_k, radiative: air.radiative_heating, wall: &[] };
+    let stag = thermal::heating::stagnation(&heat, rho, v, rn, design.bake.length);
+    let continuum = 1.0 - stag.rarefied;
+    let jump = aero::shock::jump(air.gas, v, rho);
+    let compression = jump.map_or(air.gas.shock_density_ratio(v), |j| j.compression);
+    let standoff = aero::shock::standoff(rn, compression);
+    let share = aero::shock::equilibrium_share(standoff, compression, air.mean_free_path);
+    Some(ShockLayer {
+        temperature: jump.map_or(0.0, |j| j.temperature),
+        pressure: jump.map_or(0.0, |j| j.pressure),
+        electron_density: jump.map_or(0.0, |j| j.electron_density) * share * continuum,
+        standoff,
+        continuum,
+        convective: stag.convective,
+        radiative: stag.radiative,
+    })
 }
 
 /// The nodes' heat capacities (J/K) of a coast solve, kept for its design
@@ -165,6 +223,8 @@ impl VesselThermal {
             hold_power: 0.0,
             hold_air: DVec3::ZERO,
             capacities: Capacities::default(),
+            shock: None,
+            peak_heating: 0.0,
         }
     }
 
@@ -518,9 +578,14 @@ pub fn live_step(
 ) {
     let mut b = Buffers::new(design);
     let (bake, cells) = (&design.bake, &design.cells);
+    th.shock = None;
     match tick {
         Some((aero_tick, air)) => {
             let flow = aero_tick.flow(q.normalize());
+            th.shock = shock_layer(design, &flow, air);
+            if let Some(s) = th.shock {
+                th.peak_heating = th.peak_heating.max(s.convective + s.radiative);
+            }
             let heat = thermal::FlowHeat {
                 flow: &flow,
                 sutton_graves_k: air.sutton_graves_k,
@@ -563,6 +628,7 @@ pub fn coast_step(
     epoch: Epoch,
     last: bool,
 ) -> bool {
+    th.shock = None;
     let dt = epoch.seconds_since(th.epoch);
     th.lattice = epoch;
     if dt <= 0.0 {

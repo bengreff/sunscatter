@@ -39,12 +39,14 @@ pub mod bake;
 pub mod base;
 pub mod boundary;
 pub mod crossflow;
+pub mod equilibrium;
 mod fin_search;
 pub mod friction;
 pub mod gas;
 pub mod geodesic;
 pub mod lattice;
 pub mod relief;
+pub mod shock;
 pub mod slender;
 pub mod wave;
 
@@ -219,5 +221,7 @@ fn forces_with(bake: &AeroBake, flow: &Flow, cd0: f64, friction: impl Fn(DVec3) 
 
 #[cfg(test)]
 mod lift_tests;
+#[cfg(test)]
+mod shock_tests;
 #[cfg(test)]
 pub(crate) mod tests;
