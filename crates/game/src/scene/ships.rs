@@ -45,6 +45,13 @@ pub struct ShipVisual {
     bound: (Vec3, f32),
 }
 
+impl ShipVisual {
+    /// The drawing's bounding sphere (centre in body axes, radius; m).
+    pub fn bound(&self) -> (Vec3, f32) {
+        self.bound
+    }
+}
+
 /// A drawn group of a vessel's parts; a mechanism (an index into the ship
 /// definition's) turns it.
 #[derive(Component)]
@@ -125,6 +132,16 @@ impl ShipModels {
         let id = craft.parts[k].id;
         let key = (craft.id.base().to_string(), id, craft.id.deployed().contains(&id));
         self.parts.entry(key).or_insert_with(|| Arc::new(parts::part_mesh(craft, k))).clone()
+    }
+
+    /// Every part's mesh of `craft` in body axes (the test craft's one
+    /// mesh), kept as [`Self::part_mesh`].
+    pub fn meshes_of(&mut self, craft: &Craft) -> Vec<Arc<RenderMesh>> {
+        if craft.ship.is_none() {
+            let key = (craft.id.base().to_string(), u32::MAX, false);
+            return vec![self.parts.entry(key).or_insert_with(|| Arc::new(craft.mesh.clone())).clone()];
+        }
+        (0..craft.parts.len()).map(|k| self.part_mesh(craft, k)).collect()
     }
 
     /// Part `k`'s mesh of `craft` as a Bevy mesh (kept as [`Self::part_mesh`]).

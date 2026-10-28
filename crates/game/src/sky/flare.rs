@@ -2,11 +2,12 @@
 //! two soft glows for each star drawn as a light (`lighting::star_slots`),
 //! as strong as the star's direct light at the camera against the light the
 //! exposure is set for (D087), hidden by the bodies in front of its disc
-//! (the one eclipse rule), dimmed and reddened by the air along the line of
-//! sight when the camera is in an atmosphere ([`flare`]). Soft glows only
+//! (the one eclipse rule) and by craft ([`craft_cover`], D110), dimmed and
+//! reddened by the air along the line of sight (`haze::air_along`, from
+//! inside an atmosphere or through a limb; [`flare`]). Soft glows only
 //! (D058): a streak and ghosts popped in and out as the Sun crossed a limb.
 
-use crate::camera::{CameraRig, MainCamera};
+use crate::camera::MainCamera;
 use crate::lighting::{rules::luminance, LightScene};
 use crate::look::Parts;
 use crate::map;
@@ -15,6 +16,7 @@ use crate::state::SimState;
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 use glam::DVec3;
+use std::sync::Arc;
 
 /// Below this strength no flare is drawn.
 const MIN_STRENGTH: f32 = 0.01;
@@ -54,6 +56,69 @@ pub fn flare(
     Some(Flare { strength, rgb: light.map(|c| (c / peak) as f32) })
 }
 
+/// Directions across a star's disc of angular radius `a` around `axis`
+/// (unit): its centre and six around it at 0.6 a, each standing for a
+/// seventh of the disc.
+pub fn disc_rays(axis: Vec3, a: f32) -> [Vec3; 7] {
+    let (e1, e2) = axis.any_orthonormal_pair();
+    let t = (0.6 * a).tan();
+    let mut rays = [axis; 7];
+    for (k, ray) in rays.iter_mut().enumerate().skip(1) {
+        let phi = k as f32 * std::f32::consts::TAU / 6.0;
+        *ray = (axis + (e1 * phi.cos() + e2 * phi.sin()) * t).normalize();
+    }
+    rays
+}
+
+/// A craft as the flare sees it: its bounding sphere (camera-relative
+/// centre, radius) and its parts' meshes with their transforms.
+pub struct CraftShape<'a> {
+    pub centre: Vec3,
+    pub radius: f32,
+    pub parts: Vec<(&'a sim::craft::RenderMesh, Transform)>,
+}
+
+/// The share of `rays` from the camera (the origin) that craft hide: a ray
+/// is tested against a craft's parts (`systems_screen::rules::pick`, the
+/// one ray-against-parts rule) only when it passes the craft's sphere in
+/// front of the camera.
+pub fn craft_cover(rays: &[Vec3], crafts: &[CraftShape]) -> f64 {
+    if rays.is_empty() {
+        return 0.0;
+    }
+    let near = |ray: Vec3, c: &CraftShape| {
+        let along = ray.dot(c.centre);
+        along > -c.radius && (c.centre - ray * along).length() <= c.radius
+    };
+    let hidden = (rays.iter())
+        .filter(|&&ray| {
+            crafts
+                .iter()
+                .any(|c| near(ray, c) && crate::systems_screen::rules::pick(Vec3::ZERO, ray, &c.parts).is_some())
+        })
+        .count();
+    hidden as f64 / rays.len() as f64
+}
+
+/// The craft near the camera as [`CraftShape`]s (their part meshes kept by
+/// `ShipModels`).
+fn craft_shapes<'a>(
+    sim: &SimState,
+    ships: &Query<(&crate::scene::ships::ShipVisual, &Transform)>,
+    meshes: &'a [(Arc<sim::craft::RenderMesh>, usize)],
+) -> Vec<CraftShape<'a>> {
+    let mut out: Vec<CraftShape> = Vec::new();
+    for (ship, t) in ships {
+        if sim.fleet.get(ship.index).is_none() {
+            continue;
+        }
+        let (centre, radius) = ship.bound();
+        let parts = (meshes.iter()).filter(|(_, i)| *i == ship.index).map(|(m, _)| (m.as_ref(), *t)).collect();
+        out.push(CraftShape { centre: t.transform_point(centre), radius, parts });
+    }
+    out
+}
+
 /// Additive colour (premultiplied with zero alpha).
 fn add(rgb: [f32; 3], k: f32) -> egui::Color32 {
     let to = |x: f32| (x * k * 255.0).clamp(0.0, 255.0) as u8;
@@ -79,10 +144,12 @@ fn glow(painter: &egui::Painter, c: egui::Pos2, radius: f32, rgb: [f32; 3], k: f
 pub fn draw(
     mut contexts: EguiContexts,
     sim: Res<SimState>,
-    rig: Res<CameraRig>,
+    rig: Res<crate::camera::CameraRig>,
     defs: Res<BodyDefs>,
     scene: Res<LightScene>,
     parts: Res<Parts>,
+    mut models: ResMut<crate::scene::ships::ShipModels>,
+    ships: Query<(&crate::scene::ships::ShipVisual, &Transform)>,
     cam: Query<(&Camera, &Transform, &Projection), With<MainCamera>>,
 ) -> Result {
     if !parts.flare || scene.slots.is_empty() {
@@ -91,7 +158,13 @@ pub fn draw(
     let ctx = contexts.ctx_mut()?;
     let Some(view) = map::view(&cam) else { return Ok(()) };
     let exposure_lux = crate::lighting::exposure_lux(&sim, &rig, &defs, &scene);
-    let air = crate::lighting::air_at_camera(&sim, &rig, &defs);
+    let airs = scene.airs(&defs);
+    // Every drawn craft's part meshes, by fleet slot.
+    let meshes: Vec<(Arc<sim::craft::RenderMesh>, usize)> = (ships.iter())
+        .filter_map(|(ship, _)| Some((ship.index, sim.fleet.get(ship.index)?)))
+        .flat_map(|(i, v)| models.meshes_of(&sim::craft::craft_of(&v.craft.id)).into_iter().map(move |m| (m, i)))
+        .collect();
+    let crafts = craft_shapes(&sim, &ships, &meshes);
     let screen = ctx.content_rect();
     let painter = ctx.layer_painter(egui::LayerId::background());
     for &k in &scene.slots {
@@ -104,10 +177,12 @@ pub fn draw(
             .map(|b| (b.1.centre, b.1.radius))
             .chain(scene.stars.iter().enumerate().filter(|(j, _)| *j != k).map(|(_, o)| (o.centre, o.radius)))
             .collect();
-        let visible = crate::lighting::eclipse_factor(DVec3::ZERO, star.centre, star.radius, &occluders);
         let to_star = star.centre.normalize_or(DVec3::Z);
-        let transmittance =
-            air.map_or([1.0; 3], |(a, r, h, up)| crate::lighting::haze::direct_transmittance(a, r, h, up.dot(to_star)));
+        let a = (star.radius / star.centre.length().max(star.radius)).asin() as f32;
+        let hidden = craft_cover(&disc_rays(to_star.as_vec3(), a), &crafts);
+        let visible =
+            crate::lighting::eclipse_factor(DVec3::ZERO, star.centre, star.radius, &occluders) * (1.0 - hidden);
+        let transmittance = crate::lighting::haze::air_along(DVec3::ZERO, to_star, &airs);
         let p = egui::pos2(s.x, s.y);
         let offset = f64::from((p - screen.center()).length() / screen.width().max(1.0));
         let lux = star.lux_at(DVec3::ZERO);
@@ -148,6 +223,40 @@ mod tests {
                 (g, w) => assert_eq!(g, w, "{case}"),
             }
         }
+    }
+
+    #[test]
+    fn craft_in_front_of_the_sun_hide_its_flare() {
+        // A 10 m square plate 100 m ahead, facing the camera.
+        let plate = sim::craft::RenderMesh {
+            positions: vec![[-5.0, -5.0, 0.0], [5.0, -5.0, 0.0], [5.0, 5.0, 0.0], [-5.0, 5.0, 0.0]],
+            normals: vec![[0.0, 0.0, 1.0]; 4],
+            indices: vec![0, 1, 2, 0, 2, 3],
+        };
+        let at = |x: f32| Transform::from_xyz(x, 0.0, -100.0);
+        let craft = |x: f32| CraftShape { centre: at(x).translation, radius: 7.1, parts: vec![(&plate, at(x))] };
+        let sun = Vec3::NEG_Z;
+        // The Sun's disc seen from Earth: 0.27° in radius.
+        let rays = disc_rays(sun, 0.27f32.to_radians());
+        // (case, craft, share hidden)
+        let cases: [(&str, Vec<CraftShape>, f64); 3] = [
+            ("no craft", vec![], 0.0),
+            ("the plate in front", vec![craft(0.0)], 1.0),
+            ("beside the line", vec![craft(20.0)], 0.0),
+        ];
+        for (case, crafts, want) in cases {
+            assert!((craft_cover(&rays, &crafts) - want).abs() < 1e-9, "{case}: {}", craft_cover(&rays, &crafts));
+        }
+        // Its edge across the disc: part of it.
+        let edge = craft_cover(&rays, &[craft(4.9)]);
+        assert!(edge > 0.0 && edge < 1.0, "{edge}");
+        // Behind the camera, nothing hides it.
+        let behind = CraftShape {
+            centre: Vec3::new(0.0, 0.0, 100.0),
+            radius: 7.1,
+            parts: vec![(&plate, Transform::from_xyz(0.0, 0.0, 100.0))],
+        };
+        assert_eq!(craft_cover(&rays, &[behind]), 0.0);
     }
 
     #[test]
