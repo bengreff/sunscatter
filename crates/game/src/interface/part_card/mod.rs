@@ -6,6 +6,8 @@
 //! draggable. A line joins each card to its part (projected every frame)
 //! or icon. A dash's tooltip, after hovering it 2 s, names the sensor that
 //! would measure it (D106). Irreversible commands ask for a confirmation.
+//! The card's "more" opens the systems screen at the part
+//! (`SystemsScreen::open_at`): everything about it, by layer.
 
 pub mod content;
 pub mod place;
@@ -86,7 +88,7 @@ pub fn show(
     mut contexts: EguiContexts,
     sim: Res<SimState>,
     station: Res<crate::tracking::TrackingStation>,
-    systems: Res<crate::systems_screen::SystemsScreen>,
+    mut systems: ResMut<crate::systems_screen::SystemsScreen>,
     bar: Res<stage_bar::StageBar>,
     mut cards: ResMut<PartCards>,
     mut cmds: MessageWriter<GameCommand>,
@@ -138,6 +140,7 @@ pub fn show(
             Some(Click::Run(c)) => {
                 cmds.write(GameCommand::Ship { vessel: id, commands: vec![c] });
             }
+            Some(Click::More) => systems.open_at(None, Some(open.part)),
             None => {}
         }
         let target = match open.from {
@@ -161,6 +164,8 @@ pub fn show(
 enum Click {
     Close,
     Run(sim::craft::command::ShipCommand),
+    /// The systems screen at this part.
+    More,
 }
 
 /// One card's contents (see the module).
@@ -182,6 +187,10 @@ fn draw(ui: &mut egui::Ui, card: &Card, open: &mut Open) -> Option<Click> {
             for l in &s.lines {
                 line(ui, &l.label, &l.value);
             }
+        }
+        let more = ui.add(egui::Button::new(egui::RichText::new("more ›").small().color(theme::ACCENT)).frame(false));
+        if more.on_hover_text("Everything about this part: the systems screen (Tab)").clicked() {
+            click = Some(Click::More);
         }
         if card.commands.is_empty() {
             return;

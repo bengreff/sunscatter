@@ -224,7 +224,7 @@ fn joints_and_mechanisms(live: &Live, part: u32, out: &mut Vec<Section>) {
     for (j, m) in def.mechanisms.iter().enumerate().filter(|(_, m)| m.part == part) {
         let s = &state.mechanisms[j];
         let words = if (s.angle - s.target).abs() > 0.5 {
-            format!("moving: {:.0}° → {:.0}°", s.angle, s.target)
+            format!("moving: {:.0}° to {:.0}°", s.angle, s.target)
         } else if (s.angle - m.item.deployed_deg).abs() < 0.5 {
             "deployed".to_string()
         } else if (s.angle - m.item.stowed_deg).abs() < 0.5 {
