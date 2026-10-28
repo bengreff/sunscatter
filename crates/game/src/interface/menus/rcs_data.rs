@@ -46,7 +46,7 @@ pub fn gather(v: &Vessel, mode: RcsMode) -> RcsData {
         let (d, s) = (&def.bottles[b as usize], &state.bottles[b as usize]);
         let molar = sim::fluids::fluids().gas(&d.gas).map_or(0.0, |g| g.molar_mass);
         r.feeds.push(Feed {
-            name: format!("{} {}", d.id, d.gas),
+            name: d.id.clone(),
             kg: s.moles * molar,
             full: def.bottle_gas(d),
             known: knowledge.knows(Quantity::BottlePressure(b)),

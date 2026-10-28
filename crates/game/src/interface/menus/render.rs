@@ -145,6 +145,10 @@ pub fn dock(ctx: &egui::Context, place: DockPlace, menus: &[(MenuId, Vec<Section
     let mut out = Vec::new();
     egui::Area::new(dock_area()).fixed_pos(pos2(place.x, place.top)).show(ctx, |ui| {
         ui.set_width(DOCK_WIDTH);
+        // An area lays out within its remembered size (egui's default area
+        // is 400 px tall): the scroll area could not grow past it, and the
+        // dock was cut at 400 px with room to spare.
+        ui.set_max_height(place.max_height);
         egui::ScrollArea::vertical().id_salt("menu_dock_scroll").max_height(place.max_height).show(ui, |ui| {
             ui.set_width(DOCK_WIDTH);
             for (k, (m, sections)) in menus.iter().enumerate() {
@@ -321,5 +325,29 @@ mod tests {
         let [press, release] = click(pos2(panel.left() + 6.0, panel.bottom() - 8.0));
         frame_of(&ctx, &all, press);
         assert_eq!(frame_of(&ctx, &all, release).actions, [flip]);
+    }
+
+    /// The dock takes the height its place gives, not egui's default area
+    /// height (400 px): menus taller than that showed only their top.
+    #[test]
+    fn the_dock_uses_its_whole_height() {
+        let ctx = egui::Context::default();
+        let mut tall = Section::new("tall", "TALL");
+        for k in 0..80 {
+            tall.row(format!("ROW {k}"), "1");
+        }
+        let menus = [(MenuId::Orbital, vec![tall])];
+        let place = DockPlace { x: 10.0, top: 50.0, max_height: 700.0 };
+        for _ in 0..4 {
+            let input = RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1600.0, 900.0))),
+                ..Default::default()
+            };
+            ctx.begin_pass(input);
+            dock(&ctx, place, &menus);
+            ctx.end_pass().drop_without_applying_deltas();
+        }
+        let rect = ctx.memory(|m| m.area_rect(dock_area())).expect("drawn");
+        assert!((rect.height() - 700.0).abs() < 2.0, "{rect:?}");
     }
 }
