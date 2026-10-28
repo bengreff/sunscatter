@@ -7,14 +7,16 @@
 //! full throttle, a pitch kick and then SAS holding surface prograde (a
 //! gravity turn as a pilot flies it), shots at max-Q, at MECO, at stage
 //! separation, of the upper stage after its engine lights and of the
-//! booster after a switch to it. `SUNSCATTER_DEMO_STOP_AFTER=Pad` ends
-//! after the pad's shots. Every stage goes through `GameCommand::NextStage`,
+//! booster after a switch to it; on the pad, at max-Q and at separation the
+//! flight interface too (`parts_ui_*`: menus open, RCS on).
+//! `SUNSCATTER_DEMO_STOP_AFTER=Pad` ends after the pad's shots. Every stage goes through `GameCommand::NextStage`,
 //! the player's Space.
 
 use crate::camera::{CameraRig, Focus};
 use crate::commands::GameCommand;
 use crate::demo::{Demo, Step};
 use crate::interface::layout::InterfaceSettings;
+use crate::interface::menus::MenuId;
 use crate::state::SimState;
 use crate::systems_screen::{inspect::Selection, rules::Layer, SystemsScreen};
 use bevy::prelude::*;
@@ -37,6 +39,14 @@ const SYSTEMS_VIEWS: [(&str, Layer, Option<&str>); 4] = [
     ("parts_systems_plumbing", Layer::Plumbing, Some("s1.tank")),
     ("parts_systems_structural", Layer::Structural, Some("s1.interstage")),
     ("parts_systems_electrical", Layer::Electrical, Some("dragon.capsule")),
+];
+/// The flight interface's shots (D111): after the craft's own shot `.0`,
+/// the same view `.1` with RCS on (its menu heads the dock) and the menus
+/// `.2` open; then closed again and RCS off, the flight as before.
+const INTERFACE: [(&str, &str, &[MenuId]); 3] = [
+    ("parts_pad_side", "parts_ui_pad", &[MenuId::Orbital, MenuId::Crew, MenuId::Power]),
+    ("parts_max_q", "parts_ui_ascent", &[MenuId::Orbital, MenuId::Landing]),
+    ("parts_separation", "parts_ui_separation", &[MenuId::Orbital, MenuId::Maneuver, MenuId::Comms]),
 ];
 /// The gravity turn as a pilot flies it (RUNTIME's `falcon9_flight` test):
 /// SAS holds the attitude until KICK_AT seconds after liftoff, then a pitch
@@ -80,6 +90,19 @@ pub struct Script {
     upper: Option<VesselId>,
     /// The demo time from which the script goes on after a shot.
     resume_at: f64,
+    /// The interface shot under way.
+    ui: Ui,
+}
+
+/// An interface shot ([`INTERFACE`], by index): due after its craft shot,
+/// its menus open (the shot next), shot (undone next).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+enum Ui {
+    #[default]
+    Idle,
+    Due(usize),
+    Open(usize),
+    Shot,
 }
 
 /// How long the script waits after a capture ends before it changes the
@@ -91,6 +114,43 @@ const AFTER_SHOT: f64 = 0.5;
 fn shoot(demo: &mut Demo, script: &mut Script, name: &'static str) {
     demo.capture(name);
     script.resume_at = demo.timer + AFTER_SHOT;
+    if let Some(k) = INTERFACE.iter().position(|v| v.0 == name) {
+        script.ui = Ui::Due(k);
+    }
+}
+
+/// The interface shot after a craft shot: its menus open and RCS on, the
+/// shot, then both undone. Whether the frame was spent on it.
+fn interface_shot(
+    demo: &mut Demo,
+    script: &mut Script,
+    iface: &mut InterfaceSettings,
+    cmds: &mut MessageWriter<GameCommand>,
+) -> bool {
+    let rcs = |on| GameCommand::SetRcs(sim::systems::rcs::RcsMode { on, ..Default::default() });
+    match script.ui {
+        Ui::Idle => return false,
+        Ui::Due(k) => {
+            for m in INTERFACE[k].2 {
+                iface.menus.set_open(*m, true);
+            }
+            cmds.write(rcs(true));
+            // A few frames for the menus' snapshot to catch up.
+            script.resume_at = demo.timer + 0.3;
+            script.ui = Ui::Open(k);
+        }
+        Ui::Open(k) => {
+            demo.capture(INTERFACE[k].1);
+            script.resume_at = demo.timer + AFTER_SHOT;
+            script.ui = Ui::Shot;
+        }
+        Ui::Shot => {
+            iface.menus.show_only(None);
+            cmds.write(rcs(false));
+            script.ui = Ui::Idle;
+        }
+    }
+    true
 }
 
 /// The first stage's share of propellant left: the tanks feeding the
@@ -123,6 +183,9 @@ pub fn run(
     // A shot is written from a frame drawn after its capture ends: nothing
     // changes until then.
     if demo.step != Step::Parts || demo.capturing() || demo.timer < script.resume_at {
+        return;
+    }
+    if interface_shot(&mut demo, &mut script, &mut iface, &mut cmds) {
         return;
     }
     let t = demo.timer;
