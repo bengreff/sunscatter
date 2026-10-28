@@ -54,6 +54,7 @@ pub fn label(c: &ShipCommand) -> String {
         ShipCommand::ArmChutes => "ARM PARACHUTES".into(),
         ShipCommand::Rcs(s, b) => format!("RCS {s} {}", on(*b)),
         ShipCommand::Power(s, b) => format!("POWER {s} {}", on(*b)),
+        ShipCommand::Sequence(_) => "EDIT SEQUENCE".into(),
     }
 }
 
@@ -153,6 +154,7 @@ pub fn status(def: &ShipDef, state: &ShipState, c: &ShipCommand, chute_armed: bo
             let on = comps.iter().filter(|&&i| state.power.get(i).is_some_and(|p| p.on)).count();
             (format!("{on}/{} on", comps.len()), if on > 0 { PartTone::Working } else { PartTone::Idle })
         }
+        ShipCommand::Sequence(_) => (String::new(), PartTone::Idle),
     }
 }
 

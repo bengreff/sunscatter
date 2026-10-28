@@ -39,6 +39,21 @@ pub enum ShipCommand {
     Rcs(String, bool),
     /// Switch a component's power.
     Power(String, bool),
+    /// Edit the stage sequence in flight (D111: the staging bar). Never a
+    /// stage's or function's own command.
+    Sequence(SequenceEdit),
+}
+
+/// An edit of the stage sequence, by indices into it. Only stages still to
+/// run change (`sim::systems::command::edit_sequence`).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum SequenceEdit {
+    /// Move stage `from` to position `to`.
+    Move { from: u32, to: u32 },
+    /// Move command `action` of stage `from` to the end of stage `to`.
+    MoveAction { from: u32, action: u32, to: u32 },
+    /// Delete a stage and its commands.
+    Delete(u32),
 }
 
 /// A named list of commands: a stage of the sequence or a saved function
@@ -71,7 +86,7 @@ impl ShipCommand {
             | ShipCommand::Separate(s)
             | ShipCommand::Rcs(s, _)
             | ShipCommand::Power(s, _) => Some(s),
-            ShipCommand::ReleaseClamps | ShipCommand::ArmChutes => None,
+            ShipCommand::ReleaseClamps | ShipCommand::ArmChutes | ShipCommand::Sequence(_) => None,
         }
     }
 }

@@ -20,6 +20,7 @@ use super::file::Tank;
 use super::ship::ShipDef;
 use crate::catalog::Igniter;
 use crate::fluids::{self, fluids};
+use crate::systems::command::edit_sequence;
 use glam::DVec3;
 use serde::{Deserialize, Serialize};
 
@@ -566,6 +567,7 @@ impl ShipState {
                 }
                 Ok(Vec::new())
             }
+            ShipCommand::Sequence(e) => edit_sequence(&mut self.stages, self.sequence, e).map(|()| Vec::new()),
         }
     }
 

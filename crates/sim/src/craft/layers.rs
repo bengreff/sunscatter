@@ -274,5 +274,6 @@ pub(super) fn check(ship: &ShipDef, command: &ShipCommand) -> Result<(), String>
         ShipCommand::Rcs(s, _) => some(named(s, ship.thrusters.iter().map(|v| &v.id)), "thruster block"),
         ShipCommand::Power(s, _) => some(named(s, ship.components.iter().map(|v| &v.id)), "component"),
         ShipCommand::ReleaseClamps | ShipCommand::ArmChutes => Ok(()),
+        ShipCommand::Sequence(_) => Err(format!("{command:?} edits the sequence: not a stage's command")),
     }
 }

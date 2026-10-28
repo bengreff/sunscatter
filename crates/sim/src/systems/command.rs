@@ -14,7 +14,7 @@
 
 use super::runtime::OrderKind;
 use crate::catalog::Igniter;
-use crate::craft::command::{matches, ShipCommand, Stage};
+use crate::craft::command::{matches, SequenceEdit, ShipCommand, Stage};
 use crate::craft::ship::ShipDef;
 use crate::craft::state::{Effect, EngineStatus, ShipState};
 use crate::time::Epoch;
@@ -158,6 +158,40 @@ pub fn apply(def: &ShipDef, state: &mut ShipState, command: &ShipCommand, cx: Co
     }
 }
 
+/// Edits the stage sequence (D111: the staging bar in flight): moves a
+/// stage, moves one of a stage's commands to the end of another, or deletes
+/// a stage. Only stages still to run (from `sequence` on) change; anything
+/// else is refused and nothing changes. A stage left without commands
+/// stays (it can be deleted).
+pub fn edit_sequence(stages: &mut Vec<Stage>, sequence: u32, edit: &SequenceEdit) -> Result<(), String> {
+    let pending = |k: u32| {
+        if (k as usize) < stages.len() && k >= sequence {
+            Ok(k as usize)
+        } else {
+            Err(format!("{edit:?}: stage {k} is not one still to run ({sequence}..{})", stages.len()))
+        }
+    };
+    match *edit {
+        SequenceEdit::Move { from, to } => {
+            let (from, to) = (pending(from)?, pending(to)?);
+            let stage = stages.remove(from);
+            stages.insert(to, stage);
+        }
+        SequenceEdit::MoveAction { from, action, to } => {
+            let (from, to) = (pending(from)?, pending(to)?);
+            if action as usize >= stages[from].actions.len() || from == to {
+                return Err(format!("{edit:?}: no such command to move"));
+            }
+            let command = stages[from].actions.remove(action as usize);
+            stages[to].actions.push(command);
+        }
+        SequenceEdit::Delete(k) => {
+            stages.remove(pending(k)?);
+        }
+    }
+    Ok(())
+}
+
 /// Whether an engine named by `s` waits for its propellant to settle.
 fn settling(def: &ShipDef, state: &ShipState, s: &str) -> bool {
     let waits = |i: usize| state.runtime.engines.get(i).is_some_and(|r| r.settling.is_some());
@@ -261,6 +295,61 @@ mod tests {
             matches!(state.engines[mvac].status, EngineStatus::Starting)
                 || state.runtime.engines[mvac].settling.is_some()
         );
+    }
+
+    /// The sequence is edited in flight (D111) through the ship's commands:
+    /// stages still to run move, swap commands and go; the stages run and
+    /// out-of-range indices are refused whole.
+    #[test]
+    fn the_sequence_is_edited_where_it_has_not_run() {
+        use SequenceEdit::{Delete, Move, MoveAction};
+        let stage = |name: &str, n: usize| Stage {
+            name: name.into(),
+            key: None,
+            actions: (0..n).map(|k| ShipCommand::Ignite(format!("{name}{k}"))).collect(),
+            pinned: false,
+        };
+        let names = |s: &[Stage]| s.iter().map(|s| format!("{}{}", s.name, s.actions.len())).collect::<Vec<_>>();
+        // (edit, sequence, stages after, or refused)
+        let cases: [(SequenceEdit, u32, Option<[&str; 4]>); 9] = [
+            (Move { from: 3, to: 1 }, 1, Some(["a1", "d1", "b2", "c0"])),
+            (Move { from: 1, to: 3 }, 1, Some(["a1", "c0", "d1", "b2"])),
+            (Move { from: 0, to: 2 }, 1, None),
+            (Move { from: 1, to: 4 }, 0, None),
+            (MoveAction { from: 1, action: 1, to: 3 }, 1, Some(["a1", "b1", "c0", "d2"])),
+            (MoveAction { from: 1, action: 2, to: 3 }, 1, None),
+            (MoveAction { from: 1, action: 0, to: 1 }, 0, None),
+            (MoveAction { from: 0, action: 0, to: 2 }, 1, None),
+            (Delete(2), 2, Some(["a1", "b2", "d1", ""])),
+        ];
+        for (edit, sequence, want) in cases {
+            let mut stages = vec![stage("a", 1), stage("b", 2), stage("c", 0), stage("d", 1)];
+            let before = stages.clone();
+            let got = edit_sequence(&mut stages, sequence, &edit);
+            match want {
+                Some(w) => {
+                    got.unwrap();
+                    let w: Vec<String> = w.iter().filter(|s| !s.is_empty()).map(|s| s.to_string()).collect();
+                    assert_eq!(names(&stages), w, "{edit:?}");
+                }
+                None => {
+                    assert!(got.is_err(), "{edit:?}");
+                    assert_eq!(stages, before, "refused whole");
+                }
+            }
+        }
+        // As a ship command: the moved command keeps its place in order.
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/craft/falcon9-crew");
+        let def = crate::craft::load_definition(&path).unwrap().ship.unwrap();
+        let mut state = ShipState::initial(&def);
+        let cx = Context { at: Epoch::new(1_000_000_000, 0.0), sequence: false };
+        let n = state.stages.len();
+        let edit = ShipCommand::Sequence(MoveAction { from: 3, action: 1, to: 6 });
+        apply(&def, &mut state, &edit, cx).unwrap();
+        assert_eq!(state.stages[6].actions.last(), Some(&ShipCommand::Rcs("s1.coldgas#*".into(), true)));
+        apply(&def, &mut state, &ShipCommand::Sequence(Delete(5)), cx).unwrap();
+        assert_eq!(state.stages.len(), n - 1);
+        assert!(def.check(&edit).is_err(), "never a stage's own command");
     }
 
     /// The sequence's second-stage ignition on floating propellant waits
