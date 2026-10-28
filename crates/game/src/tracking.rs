@@ -1,6 +1,7 @@
 //! Vessel switching and the tracking station (D050).
 //!
-//! `[` / `]` cycle the active vessel. F7 opens the tracking station, a full
+//! `[` / `]` step the active vessel through the fleet, nearest first
+//! ([`Cycle`]). F7 opens the tracking station, a full
 //! screen (KSP-like): the object list on the left (vessels grouped by status
 //! with track toggles, bodies as a star → planet → moon tree), details and
 //! actions (Focus, Switch to, Delete with confirmation) for the selection,
@@ -115,6 +116,44 @@ pub fn left_lit_notice(left: &sim::vessel::Vessel) -> Option<String> {
     })
 }
 
+/// The order `[` / `]` step through the fleet: the vessel the stepping
+/// started from, then the others by distance from it, nearest first (ties
+/// in fleet order). The order is kept while the player steps, so `]` then
+/// `[` come back to the same vessel; it is rebuilt when the active vessel is
+/// not the one the last step went to (a switch from elsewhere) or the
+/// fleet's vessels changed.
+#[derive(Default, Debug)]
+pub struct Cycle {
+    order: Vec<VesselId>,
+    went_to: Option<VesselId>,
+}
+
+impl Cycle {
+    /// The vessel a step goes to from `active` (`forward`: `]`, else `[`) in
+    /// a fleet of `ids`, `distance(id)` from the active vessel (asked only
+    /// when the order is rebuilt); `None` with no other vessel.
+    pub fn step(
+        &mut self,
+        active: VesselId,
+        ids: &[VesselId],
+        distance: impl Fn(VesselId) -> f64,
+        forward: bool,
+    ) -> Option<VesselId> {
+        let same = self.order.len() == ids.len() && ids.iter().all(|id| self.order.contains(id));
+        if self.went_to != Some(active) || !same {
+            let mut others: Vec<(f64, VesselId)> =
+                ids.iter().filter(|&&id| id != active).map(|&id| (distance(id), id)).collect();
+            others.sort_by(|a, b| a.0.total_cmp(&b.0));
+            self.order = std::iter::once(active).chain(others.into_iter().map(|(_, id)| id)).collect();
+        }
+        let n = self.order.len();
+        let k = self.order.iter().position(|&id| id == active)?;
+        let next = (n > 1).then(|| self.order[(k + if forward { 1 } else { n - 1 }) % n])?;
+        self.went_to = Some(next);
+        Some(next)
+    }
+}
+
 /// Removes a non-active vessel ("delete debris").
 pub fn delete_vessel(sim: &mut SimState, tracked: &mut Tracked, rig: &mut CameraRig, id: VesselId) -> bool {
     let Some(i) = sim.index_of(id) else { return false };
@@ -141,18 +180,23 @@ pub fn update(
     mut rig: ResMut<CameraRig>,
     mut ts: ResMut<TrackingStation>,
     mut commands: MessageWriter<GameCommand>,
+    mut cycle: Local<Cycle>,
 ) {
     if ctx.allows(Keys::Menus) && pressed(&keys, keys::Action::TrackingStation) {
         ts.open = !ts.open;
     }
     if ctx.allows(Keys::Flight) {
-        let n = sim.fleet.len();
-        let id = |i: usize| sim.fleet[i % n].id();
-        if pressed(&keys, keys::Action::NextVessel) {
-            commands.write(GameCommand::Switch(id(sim.active + 1)));
-        }
-        if pressed(&keys, keys::Action::PreviousVessel) {
-            commands.write(GameCommand::Switch(id(sim.active + n - 1)));
+        let forward = pressed(&keys, keys::Action::NextVessel);
+        if forward || pressed(&keys, keys::Action::PreviousVessel) {
+            let ids: Vec<VesselId> = sim.fleet.iter().map(|v| v.id()).collect();
+            let ship = sim.ship();
+            let distance = |id| {
+                let v = &sim.fleet[sim.index_of(id).expect("a fleet id")];
+                sim::vessel::debris::separation(&sim.world, sim.clock, ship, v)
+            };
+            if let Some(id) = cycle.step(ship.id(), &ids, distance, forward) {
+                commands.write(GameCommand::Switch(id));
+            }
         }
     }
     if let Focus::Vessel(id) = rig.focus {
@@ -498,6 +542,35 @@ mod tests {
         assert_eq!(left_lit_notice(sim.ship()), Some(want));
         sim.controls_mut().throttle = 0.6;
         assert!(left_lit_notice(sim.ship()).unwrap().contains("at its throttle (60 %)"));
+    }
+
+    #[test]
+    fn brackets_step_through_the_fleet_nearest_first_both_ways() {
+        let v = |k: u64| VesselId(k);
+        let ids = [v(1), v(2), v(3), v(4)];
+        // Distances from vessel 1 (where the stepping starts).
+        let from_1 = |id: VesselId| [0.0, 300.0, 100.0, 200.0][id.0 as usize - 1];
+        let never = |_: VesselId| -> f64 { panic!("the order is kept: no distances asked") };
+        let mut c = Cycle::default();
+        // (active, forward, goes to): ] goes nearest first and wraps; [ goes back.
+        assert_eq!(c.step(v(1), &ids, from_1, true), Some(v(3)));
+        for (active, forward, want) in
+            [(3, true, 4), (4, true, 2), (2, true, 1), (1, false, 2), (2, false, 4), (4, false, 3), (3, false, 1)]
+        {
+            assert_eq!(c.step(v(active), &ids, never, forward), Some(v(want)), "{active} {forward}");
+        }
+        // [ first: the farthest.
+        let mut c = Cycle::default();
+        assert_eq!(c.step(v(1), &ids, from_1, false), Some(v(2)));
+        // A switch from elsewhere (the tracking station) starts a new order
+        // from the vessel now active, by its own distances.
+        let from_4 = |id: VesselId| [50.0, 10.0, 70.0, 0.0][id.0 as usize - 1];
+        assert_eq!(c.step(v(4), &ids, from_4, true), Some(v(2)));
+        assert_eq!(c.step(v(2), &ids, never, true), Some(v(1)));
+        // The fleet changed (a vessel deleted, a separation): rebuilt.
+        let fewer = [v(1), v(2), v(4)];
+        assert_eq!(c.step(v(1), &fewer, from_1, true), Some(v(4)));
+        assert_eq!(c.step(v(4), &[v(4)], from_1, true), None, "alone: nowhere to go");
     }
 
     #[test]

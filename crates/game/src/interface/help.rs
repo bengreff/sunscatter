@@ -62,7 +62,7 @@ pub const KEYS: &[(&str, &[(&str, &str)])] = &[
     (
         "Game",
         &[
-            ("[ / ]", "previous / next vessel"),
+            ("[ / ]", "previous / next vessel, nearest first"),
             ("M", "tracking station"),
             ("Tab", "systems screen: the craft by layer, its commands, stages and functions"),
             ("Cmd+S / Cmd+L", "quicksave / quickload (Ctrl+Alt+S / Ctrl+Alt+L on Windows and Linux)"),
