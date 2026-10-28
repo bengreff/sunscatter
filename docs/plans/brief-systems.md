@@ -4,6 +4,10 @@ Third in the owner's order after the flight interface and VESSEL. Rules: [agent-
 
 Read first: the owner's answers 36–37 (and the questions around them) in [interview-2026-10-27-flight-ui.md](interview-2026-10-27-flight-ui.md); §7 and the part-card rule (current measured state against the part's own rated or limit numbers, `value/limit`, a dash where nothing senses it) in [research-2026-10-27-flight-ui.md](research-2026-10-27-flight-ui.md); D105, D106 and D111 in `docs/decisions.md`; [systems-screen.md](../features/systems-screen.md) and [staging-bar.md](../features/staging-bar.md) (BAR's part cards, which link here); the code in `crates/game/src/systems_screen/` and `crates/game/src/interface/part_card.rs`.
 
+## First: NAV's leftovers (small; NAV has finished)
+
+Items 1–4 of "Left" in [brief-nav.md](brief-nav.md): the orbit menu's wording, the part cards' "more" link (through `SystemsScreen::open_at`, the same entry point as item 4 below), the missing `docs/architecture.md` rows, and the small issues from the demo (the RCS menu's thruster list squeezes the rest of the dock; `commands.rs` messages without a vessel link). Also from the last demo shot (`15_parts_ui_separation`): the notifications window's fold arrow draws as a box (□), so use a glyph the font has; and "Stage: MECO" still carries the "Stage:" prefix. Mark them done in brief-nav.md and the plan's NAV row.
+
 ## Wanted (owner: layers first, structure / fluids / electrical; "maybe be a bit more clear and organized about part stats. Pop up menus welcome.")
 
 1. **A layer selected shows that layer as a whole**, before any part: structure (mass and centre of mass, the g-limit and its limiting joint from `sim::systems::g_limit`, the joints closest to their limits); fluids (each tank and bottle with level/capacity, pressure, what feeds what, flows now); electrical (buses, batteries charge/capacity, sources, loads, what is unpowered and why). Add any other layer the screen has the same way. Each figure is computed in a pure function with table tests (rule 8), and goes through D106: a dash for what nothing on board measures.
@@ -14,5 +18,5 @@ Read first: the owner's answers 36–37 (and the questions around them) in [inte
 
 ## Watch out
 
-- Start only once NAV has finished (the lead launches you then); VESSEL may still be running in `sim::vessel`, `sim::save`, `game/src/state.rs`, `agent.rs` and `crates/mcp`.
+- NAV and VESSEL have finished. EXHAUST may be running in `sim::craft` engines, `scene/parts.rs`, `scene/ships.rs` and the settings (`settings_ui.rs`, `persist.rs`).
 - Check it on screen: the demo's systems-screen step (`SUNSCATTER_DEMO_STOP_AFTER`, with `SUNSCATTER_CRAFT=falcon9-crew` too), at 1600×900 and `SUNSCATTER_DEMO_SIZE=3024x1964`, under the demo lock. Fix what looks wrong; the owner judges the final look.
