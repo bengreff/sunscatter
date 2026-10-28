@@ -225,3 +225,21 @@ fn layers_draw_their_networks_between_the_items_ends() {
         assert!(networks(layer, def, &at).is_empty(), "{layer:?}");
     }
 }
+
+/// A part opens the screen at the layer it is mostly about.
+#[test]
+fn a_part_opens_at_its_main_layer() {
+    let tank = PartFacts { tanks: vec![("LOX".into(), None, 1.0)], source: true, ..PartFacts::default() };
+    let battery = PartFacts { source: true, computers: 1, ..PartFacts::default() };
+    let computer = PartFacts { computers: 2, ..PartFacts::default() };
+    // (facts, layer)
+    let table = [
+        (tank, Layer::Plumbing),
+        (battery, Layer::Electrical),
+        (computer, Layer::Data),
+        (PartFacts::default(), Layer::Structural),
+    ];
+    for (f, want) in table {
+        assert_eq!(Layer::main(&f), want, "{f:?}");
+    }
+}

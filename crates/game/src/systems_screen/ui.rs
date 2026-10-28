@@ -2,12 +2,14 @@
 //! (D107: a screen of its own), in the regions of [`rules::regions`]: the
 //! title and layer switch on top, the part tree on the left, the view in
 //! the middle (drag to orbit, scroll to zoom, click to select), the
-//! inspector with the selection's commands on the right, the stage and
-//! function editors at the bottom. Every change to the craft is a
-//! `GameCommand`; the rules are `super::{rules, inspect, edit}`.
+//! layer's summary on the right, the stage and function editors at the
+//! bottom; over them the pop-ups (egui windows, closable, several at
+//! once), each a part or component with its commands. Every change to the
+//! craft is a `GameCommand`; the rules are `super::{rules, summary,
+//! inspect, edit}`.
 
 use super::edit::{self, Edit};
-use super::inspect::{self, Selection};
+use super::inspect::{self, Group, Selection};
 use super::rules::{self, Layer};
 use super::view::SystemsView;
 use super::{Drafts, SystemsScreen, Tab};
@@ -46,6 +48,7 @@ pub fn draw(
         screen.drafts = Some(Drafts::sync(old, vessel.id(), &craft.id.0, &state.stages, &state.functions));
     }
     let mut out: Vec<GameCommand> = Vec::new();
+    let known = crate::format::Known::of(vessel);
     egui::Area::new("systems_screen".into()).order(egui::Order::Foreground).fixed_pos(full.min).show(ctx, |ui| {
         ui.painter().rect_filled(full, 0.0, FILL);
         ui.set_min_size(full.size());
@@ -61,10 +64,24 @@ pub fn draw(
         };
         region(ui, regions.left, |ui| part_list(ui, &mut screen, &craft, def));
         view_image(ui, &mut screen, regions.view, id, view.radius);
-        let known = crate::format::Known::of(vessel);
-        region(ui, regions.right, |ui| inspector(ui, &screen, def, state, &view.facts, &known, vessel.id(), &mut out));
+        region(ui, regions.right, |ui| {
+            let power = crate::interface::menus::power::gather(vessel);
+            let x = super::summary::Inputs {
+                def,
+                state,
+                facts: &view.facts,
+                known: &known,
+                mass: (vessel.mass_props().mass, vessel.craft.mass.dry_mass, vessel.contact_height()),
+                power: power.as_ref(),
+            };
+            layer_summary(ui, &mut screen, &x);
+        });
         region(ui, regions.bottom, |ui| editors(ui, &mut screen, def, vessel.id(), &mut out));
     });
+    if let Some((def, state)) = ship.as_ref() {
+        screen.settle_layer(&view.facts);
+        popups(ctx, &mut screen, def, state, &view.facts, &known, regions.view, vessel.id(), &mut out);
+    }
     for c in out {
         cmds.write(c);
     }
@@ -89,6 +106,7 @@ fn top_bar(ui: &mut egui::Ui, screen: &mut SystemsScreen, name: &str, vessel: u6
         for layer in Layer::ALL {
             if ui.selectable_label(screen.layer == layer, layer.name()).clicked() {
                 screen.layer = layer;
+                screen.pick_layer = false;
             }
         }
         ui.add_space(16.0);
@@ -114,7 +132,7 @@ fn part_list(
             ui.horizontal(|ui| {
                 ui.add_space(12.0 * depth as f32);
                 if ui.selectable_label(screen.selected == Some(sel), name).clicked() {
-                    screen.selected = Some(sel);
+                    screen.select(Some(sel));
                 }
             });
             for (i, c) in def.components.iter().enumerate().filter(|(_, c)| c.part == part.id) {
@@ -123,7 +141,7 @@ fn part_list(
                     ui.add_space(12.0 * depth as f32 + 14.0);
                     let text = egui::RichText::new(format!("· {}", c.id)).color(theme::MUTED);
                     if ui.selectable_label(screen.selected == Some(sel), text).clicked() {
-                        screen.selected = Some(sel);
+                        screen.select(Some(sel));
                     }
                 });
             }
@@ -156,45 +174,130 @@ fn view_image(ui: &mut egui::Ui, screen: &mut SystemsScreen, rect: egui::Rect, i
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-fn inspector(
+/// The layer as a whole (`summary`); a row about a part opens its pop-up.
+fn layer_summary(ui: &mut egui::Ui, screen: &mut SystemsScreen, x: &super::summary::Inputs) {
+    ui.label(egui::RichText::new(format!("{} · THE CRAFT AS A WHOLE", screen.layer.name())).color(theme::DIM));
+    ui.label(egui::RichText::new("Click a part, or a row about one, for its details.").small().color(theme::DIM));
+    ui.add_space(4.0);
+    let mut open = None;
+    egui::ScrollArea::vertical().id_salt("systems_summary").show(ui, |ui| {
+        groups(ui, "summary", &super::summary::summary(screen.layer, x), &mut open);
+    });
+    if open.is_some() {
+        screen.select(open);
+    }
+}
+
+/// Titled groups of rows: dim labels (a term's hover explains it), values
+/// in monospace coloured by their level against their limit; a row about
+/// a part or component is a link to its pop-up (`open`).
+fn groups(
     ui: &mut egui::Ui,
-    screen: &SystemsScreen,
+    id: impl std::hash::Hash + std::fmt::Debug + Copy,
+    groups: &[Group],
+    open: &mut Option<Selection>,
+) {
+    for g in groups {
+        ui.label(egui::RichText::new(&g.title).color(theme::ACCENT));
+        egui::Grid::new((id, g.title.as_str())).num_columns(2).spacing([12.0, 2.0]).show(ui, |ui| {
+            for r in &g.rows {
+                let label = ui.label(egui::RichText::new(&r.label).color(theme::DIM));
+                if let Some(h) = &r.hover {
+                    label.on_hover_text(h);
+                }
+                let value = egui::RichText::new(&r.value).monospace().color(theme::level_colour(r.level));
+                match r.open {
+                    Some(sel) => {
+                        if ui.link(value).on_hover_text("Open its details").clicked() {
+                            *open = Some(sel);
+                        }
+                    }
+                    None => {
+                        ui.label(value);
+                    }
+                }
+                ui.end_row();
+            }
+        });
+        ui.add_space(6.0);
+    }
+}
+
+/// A pop-up's window: the `n`th open cascades from the view's top left.
+fn popup_window<'a>(title: String, sel: Selection, n: usize, view: egui::Rect, open: &'a mut bool) -> egui::Window<'a> {
+    let at = view.min + egui::vec2(16.0, 16.0) + egui::vec2(28.0, 28.0) * n as f32;
+    egui::Window::new(egui::RichText::new(title).color(theme::ACCENT))
+        .id(egui::Id::new(("systems_popup", sel)))
+        .order(egui::Order::Tooltip)
+        .open(open)
+        .collapsible(false)
+        .resizable(false)
+        .default_pos(at)
+        .constrain_to(view)
+        .frame(
+            egui::Frame::window(&egui::Style::default()).fill(POPUP_FILL).stroke(egui::Stroke::new(1.0, theme::BORDER)),
+        )
+}
+
+/// A pop-up's background: opaque, a shade above the screen's.
+const POPUP_FILL: egui::Color32 = egui::Color32::from_rgb(16, 21, 29);
+
+/// A pop-up's width (logical px).
+const POPUP_WIDTH: f32 = 340.0;
+
+/// The open pop-ups: each part or component in its own window over the
+/// view (closable, cascading), its commands on top, then everything about
+/// it (`inspect::details`).
+#[allow(clippy::too_many_arguments)]
+fn popups(
+    ctx: &egui::Context,
+    screen: &mut SystemsScreen,
     def: &sim::craft::ship::ShipDef,
     state: &sim::craft::state::ShipState,
     facts: &[rules::PartFacts],
     known: &crate::format::Known,
+    view: egui::Rect,
     vessel: sim::vessel::VesselId,
     out: &mut Vec<GameCommand>,
 ) {
-    let Some(sel) = screen.selected else {
-        ui.label(egui::RichText::new("Select a part in the view or the list.").color(theme::DIM));
-        return;
-    };
-    let commands = inspect::commands(def, state, sel);
-    if !commands.is_empty() {
-        ui.horizontal_wrapped(|ui| {
-            for (text, c) in commands {
-                if ui.button(text).clicked() {
-                    out.push(GameCommand::Ship { vessel, commands: vec![c] });
-                }
+    let mut closed = Vec::new();
+    let mut opened = None;
+    for (n, sel) in screen.popups.clone().into_iter().enumerate() {
+        let title = match sel {
+            Selection::Part(id) => def.parts.iter().find(|p| p.part == id).map_or("part".into(), |p| p.id.clone()),
+            Selection::Component(i) => def.components.get(i).map_or("component".into(), |c| c.id.clone()),
+        };
+        let mut open = true;
+        popup_window(title, sel, n, view, &mut open).show(ctx, |ui| {
+            // A fixed width (a new window's first, sizing pass could take the screen's).
+            ui.set_width(POPUP_WIDTH);
+            let commands = inspect::commands(def, state, sel);
+            if !commands.is_empty() {
+                ui.horizontal_wrapped(|ui| {
+                    for (text, c) in commands {
+                        if ui.button(text).clicked() {
+                            out.push(GameCommand::Ship { vessel, commands: vec![c] });
+                        }
+                    }
+                });
+                ui.separator();
             }
-        });
-        ui.separator();
-    }
-    egui::ScrollArea::vertical().id_salt("systems_inspector").show(ui, |ui| {
-        for g in inspect::details(def, state, facts, sel, known) {
-            ui.label(egui::RichText::new(&g.title).color(theme::ACCENT));
-            egui::Grid::new(("inspect", g.title.clone())).num_columns(2).spacing([12.0, 2.0]).show(ui, |ui| {
-                for (label, value) in &g.rows {
-                    ui.label(egui::RichText::new(label).color(theme::DIM));
-                    ui.label(egui::RichText::new(value).monospace());
-                    ui.end_row();
-                }
+            let room = (view.height() - 110.0).max(120.0);
+            egui::ScrollArea::vertical().id_salt(("systems_popup_scroll", sel)).max_height(room).show(ui, |ui| {
+                groups(ui, ("popup", sel), &inspect::details(def, state, facts, sel, known), &mut opened);
             });
-            ui.add_space(6.0);
+        });
+        if !open {
+            closed.push(sel);
         }
-    });
+    }
+    screen.popups.retain(|p| !closed.contains(p));
+    if screen.selected.is_some_and(|s| closed.contains(&s)) {
+        screen.selected = None;
+    }
+    if opened.is_some() {
+        screen.select(opened);
+    }
 }
 
 fn editors(
@@ -318,4 +421,42 @@ fn entry(
         }
     });
     ui.add_space(4.0);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A pop-up keeps its width and stays where it opens (in the view).
+    #[test]
+    fn a_pop_up_is_a_small_window_in_the_view() {
+        let ctx = egui::Context::default();
+        let view = egui::Rect::from_min_max(egui::pos2(280.0, 70.0), egui::pos2(1220.0, 650.0));
+        let mut g = Group::new("PART s1.tank");
+        for k in 0..40 {
+            g.row(&format!("row {k}"), "12.3 bar / 45.6 bar").opens(Selection::Component(k));
+            g.row("ullage pressure", "12.3 bar / 45.6 bar");
+        }
+        let sel = Selection::Part(3);
+        let mut rect = egui::Rect::NOTHING;
+        for _ in 0..4 {
+            let input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(1600.0, 900.0))),
+                ..Default::default()
+            };
+            ctx.begin_pass(input);
+            let mut open = true;
+            let shown = popup_window("s1.tank".into(), sel, 0, view, &mut open).show(&ctx, |ui| {
+                ui.set_width(POPUP_WIDTH);
+                let room = view.height() - 110.0;
+                egui::ScrollArea::vertical()
+                    .max_height(room)
+                    .show(ui, |ui| groups(ui, "t", std::slice::from_ref(&g), &mut None));
+            });
+            rect = shown.map(|s| s.response.rect).unwrap_or(rect);
+            ctx.end_pass().drop_without_applying_deltas();
+        }
+        assert!(rect.width() < POPUP_WIDTH + 40.0, "{rect:?}");
+        assert!(view.contains_rect(rect), "{rect:?}");
+    }
 }

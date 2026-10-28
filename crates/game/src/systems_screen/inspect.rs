@@ -1,15 +1,23 @@
 //! The systems screen's inspector (D107; rule 8): everything known about
-//! a selected part or component, as titled groups of labelled values, and
-//! the commands it takes. Pure functions of the ship definition and state
-//! (and the layers' facts), table-tested.
+//! a selected part or component, as titled groups of rows, and the
+//! commands it takes. Pure functions of the ship definition and state (and
+//! the layers' facts), table-tested.
+//!
+//! One layout for every part: its name and type, then STRUCTURE (mass,
+//! its joint and the joint's load), then a group per function it has
+//! (engines, tanks, mechanisms, aero surfaces), THERMAL, CONDITION (wear
+//! against its rated life), RATINGS, FAILURE MODES and its COMPONENTS
+//! (each a link to its own). A row against a
+//! limit reads `value / limit` and is coloured by the one rule
+//! (`format::limit_level`: amber from 80 %, red at it); a term's hover
+//! explains it ([`term`]).
 //!
 //! Values are what the craft measures (D106, `sim::systems::data`): a dash
 //! where it has no sensor, the digits its precision gives; design data
-//! (ratings, masses, ranges) as built. What the simulation does not compute
-//! yet says so: joint loads, power flow.
+//! (ratings, masses, ranges) as built.
 
 use super::rules::{JointClass, PartFacts};
-use crate::format::Known;
+use crate::format::{limit_level, Known, Level};
 use crate::staging::parts::label;
 use sim::catalog::{Hazard, Life, Ratings};
 use sim::craft::command::ShipCommand;
@@ -18,7 +26,7 @@ use sim::craft::state::{EngineStatus, ShipState};
 use sim::systems::Quantity;
 
 /// What the inspector shows.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Selection {
     /// A part, by its id (`Part::id`).
     Part(u32),
@@ -26,22 +34,102 @@ pub enum Selection {
     Component(usize),
 }
 
-/// A titled group of labelled values.
+/// One labelled value.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Row {
+    pub label: String,
+    pub value: String,
+    /// How it reads against its limit (`format::limit_level`).
+    pub level: Level,
+    /// What the label means (a hover; [`term`]).
+    pub hover: Option<String>,
+    /// What it is about: a click opens its pop-up.
+    pub open: Option<Selection>,
+}
+
+/// A titled group of rows.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Group {
     pub title: String,
-    pub rows: Vec<(String, String)>,
+    pub rows: Vec<Row>,
 }
 
 impl Group {
-    fn new(title: impl Into<String>) -> Self {
+    pub fn new(title: impl Into<String>) -> Self {
         Group { title: title.into(), rows: Vec::new() }
     }
 
-    fn row(&mut self, label: &str, value: impl Into<String>) -> &mut Self {
-        self.rows.push((label.to_string(), value.into()));
+    /// A row (its hover the term's explanation, if [`term`] has one).
+    pub fn row(&mut self, label: &str, value: impl Into<String>) -> &mut Self {
+        let hover = term(label).map(str::to_string);
+        self.rows.push(Row { label: label.to_string(), value: value.into(), hover, ..Row::default() });
         self
     }
+
+    /// A row against a limit: `x` of `limit` (same units) sets its level;
+    /// `None` (not measured) leaves it normal.
+    pub fn limit(&mut self, label: &str, value: impl Into<String>, x: Option<f64>, limit: f64) -> &mut Self {
+        self.row(label, value);
+        if let (Some(x), Some(r)) = (x, self.rows.last_mut()) {
+            r.level = limit_level(x, Some(limit));
+        }
+        self
+    }
+
+    /// The last row's level, or its link.
+    pub fn level(&mut self, level: Level) -> &mut Self {
+        if let Some(r) = self.rows.last_mut() {
+            r.level = level;
+        }
+        self
+    }
+
+    pub fn opens(&mut self, sel: Selection) -> &mut Self {
+        if let Some(r) = self.rows.last_mut() {
+            r.open = Some(sel);
+        }
+        self
+    }
+
+    /// The value of the row labelled `label`.
+    #[cfg(test)]
+    pub fn value(&self, label: &str) -> Option<&str> {
+        self.rows.iter().find(|r| r.label == label).map(|r| r.value.as_str())
+    }
+}
+
+/// What a term on the screen means (the rows' hovers).
+pub fn term(label: &str) -> Option<&'static str> {
+    Some(match label {
+        "dry mass" => "The part's own mass without what its tanks and bottles hold.",
+        "derived" => "The mass its catalog generator computes from its geometry and materials.",
+        "unmodelled" => "Published mass the generator does not account for (fittings, wiring, margins).",
+        "joint load" | "load" => {
+            "The heaviest line load on the joint's ring at the last tick over what it takes at its temperature; \
+             100 % is its ultimate (it fails). Measured by a strain gauge."
+        }
+        "allowable line load" => "The line load (force per metre of ring) the joint takes at room temperature.",
+        "axial capacity" => "The allowable line load times the ring's circumference: the pull or push it takes.",
+        "ullage pressure" | "pressure" => {
+            "The gas over the liquid (or in the bottle) against its burst pressure: amber from 80 %. The relief \
+             vents above the operating pressure."
+        }
+        "ullage temperature" => "The temperature of the gas over the liquid.",
+        "liquid" | "contents" => "What it holds now against what it holds full.",
+        "chamber pressure" => "The engine's flow level against its rated full thrust (the controller's reading).",
+        "Isp vac · SL" => "Specific impulse: seconds of thrust per weight of propellant, in vacuum and at sea level.",
+        "skin" | "interior" => "The hottest skin cell or interior node of the part against its limit.",
+        "integrity" => "100 % sound; it fails at 0 %.",
+        "thermal damage" => "Wear from time above its rated temperature; it fails at 1.",
+        "vibration damage" => "Wear from vibration past its qualification (Miner's rule); it fails at 1.",
+        "run time" | "starts" | "cycles" => "Its use so far against its rated life.",
+        "g-limit" => {
+            "The acceleration the craft takes along its thrust before a joint reaches its ultimate, or the crew's \
+             limit along that axis (sim::systems::g_limit)."
+        }
+        "centre of mass" => "Its height above the craft's base, along its axis.",
+        _ => return None,
+    })
 }
 
 fn kg(x: f64) -> String {
@@ -129,15 +217,12 @@ pub fn ullage_pressure(def: &sim::craft::ship::TankDef, s: &sim::craft::state::T
     sim::fluids::pressure(s.ullage_moles, volume, s.ullage_k)
 }
 
-/// The groups about part `id` (with its layers' facts `f`).
+/// The groups about part `id` (with its layers' facts `f`), in the one
+/// layout (see the module).
 fn part_groups(def: &ShipDef, state: &ShipState, id: u32, f: Option<&PartFacts>, k: &Known, out: &mut Vec<Group>) {
     let Some(info) = def.parts.iter().find(|p| p.part == id) else { return };
     let mut g = Group::new(format!("PART {}", info.id));
-    g.row("catalog entry", info.entry.clone()).row("dry mass", kg(info.mass)).row("derived", kg(info.derived));
-    if let Some((gap, reason)) = &info.unmodelled {
-        g.row("unmodelled", format!("{} ({reason})", kg(*gap)));
-    }
-    g.row("material", info.material.clone());
+    g.row("type", info.entry.clone()).row("material", info.material.clone());
     if let Some(finish) = &info.finish {
         g.row("finish", finish.clone());
     }
@@ -145,57 +230,33 @@ fn part_groups(def: &ShipDef, state: &ShipState, id: u32, f: Option<&PartFacts>,
         g.row("ground", "the pad's, not the vehicle's");
     }
     out.push(g);
+    let mut g = Group::new("STRUCTURE");
+    g.row("dry mass", kg(info.mass)).row("derived", kg(info.derived));
+    if let Some((gap, reason)) = &info.unmodelled {
+        g.row("unmodelled", format!("{} ({reason})", kg(*gap)));
+    }
     if let Some(j) = f.and_then(|f| f.joint.as_ref()) {
-        let mut g = Group::new(format!("JOINT {}", j.name));
         let kind = match j.class {
             JointClass::Integral => "integral",
             JointClass::Bolted => "bolted",
             JointClass::Separation => "separation system",
             JointClass::HoldDown => "hold-down clamps",
         };
-        g.row("kind", kind).row("state", if j.intact { "attached" } else { "separated" });
+        g.row("joint", format!("{} · {kind}", j.name)).row("state", if j.intact { "attached" } else { "separated" });
+        // RUNTIME's load at the last live tick, where a strain gauge measures it.
+        let load = j.ratio.map_or_else(|| crate::format::DASH.to_string(), |r| format!("{:.0} % / 100 %", r * 100.0));
+        g.limit("joint load", load, j.ratio, 1.0);
         g.row("allowable line load", format!("{:.0} kN/m", j.allowable / 1e3));
         if j.radius > 0.0 {
             g.row("axial capacity", kilonewtons(j.allowable * 2.0 * std::f64::consts::PI * j.radius));
         }
-        // RUNTIME's load at the last live tick, where a strain gauge measures it.
-        let load = match j.ratio {
-            Some(r) => format!("{:.0} % of its ultimate", r * 100.0),
-            None => crate::format::DASH.to_string(),
-        };
-        g.row("load", load);
-        out.push(g);
     }
-    out.push(ratings(&info.ratings));
-    out.extend(failures(&info.failures));
-    if let Some(s) = state.parts.iter().find(|s| s.part == id) {
-        let mut g = Group::new("CONDITION");
-        g.row("integrity", format!("{:.0} %", s.integrity * 100.0))
-            .row("thermal damage", format!("{:.2}", s.thermal_damage))
-            .row("vibration damage", format!("{:.2}", s.vibration_damage));
-        let h = &s.history;
-        g.row("run time", crate::format::duration(h.run_time))
-            .row("starts · cycles", format!("{} · {}", h.starts, h.cycles))
-            .row("flights · landings", format!("{} · {}", h.flights, h.landings));
-        if h.peak_k > 0.0 {
-            g.row("peak temperature", kelvin(h.peak_k));
-        }
-        out.push(g);
-    }
-    if let Some(f) = f.filter(|f| f.skin.is_some() || f.interior.is_some()) {
-        let mut g = Group::new("THERMAL");
-        for (label, v) in [("skin (nearest its limit)", f.skin), ("interior (nearest its limit)", f.interior)] {
-            if let Some((k, limit)) = v {
-                g.row(label, format!("{} / {}", kelvin(k), kelvin(limit)));
-            }
-        }
-        out.push(g);
+    out.push(g);
+    for (i, e) in def.engines.iter().enumerate().filter(|(_, e)| e.owner == info.id) {
+        out.push(engine_group(state, i, e, k));
     }
     for (i, _) in def.tanks.iter().enumerate().filter(|(_, t)| t.id.split(':').next() == Some(info.id.as_str())) {
         out.push(tank_group(def, state, i, k));
-    }
-    for (i, e) in def.engines.iter().enumerate().filter(|(_, e)| e.owner == info.id) {
-        out.push(engine_group(state, i, e));
     }
     for (i, m) in def.mechanisms.iter().enumerate().filter(|(_, m)| m.part == id) {
         let s = state.mechanisms.get(i);
@@ -207,14 +268,78 @@ fn part_groups(def: &ShipDef, state: &ShipState, id: u32, f: Option<&PartFacts>,
             .row("retractable", if m.item.retractable { "yes" } else { "no" });
         out.push(g);
     }
-    for s in def.surfaces.iter().filter(|s| s.part == id) {
+    for (i, s) in def.surfaces.iter().enumerate().filter(|(_, s)| s.part == id) {
         let mut g = Group::new(format!("AERO SURFACE {}", s.id));
+        let now = state.runtime.fins.get(i).map_or(0.0, |d| d.to_degrees());
         g.row("kind", if s.item.lattice { "lattice (grid) fin" } else { "fin" })
             .row("area", format!("{:.2} m²", s.item.area))
-            .row("deflection", format!("±{:.0}° at {:.0} °/s", s.item.deflection_deg, s.item.rate_dps))
-            .row("aerodynamics", "the lattice-fin model is RUNTIME's (not simulated yet)");
+            .limit(
+                "deflection",
+                format!("{now:+.1}° / ±{:.0}°", s.item.deflection_deg),
+                Some(now.abs()),
+                s.item.deflection_deg,
+            )
+            .row("rate", format!("{:.0} °/s", s.item.rate_dps));
         out.push(g);
     }
+    if let Some(f) = f.filter(|f| f.skin.is_some() || f.interior.is_some()) {
+        let mut g = Group::new("THERMAL");
+        for (label, v) in [("skin", f.skin), ("interior", f.interior)] {
+            if let Some((t, limit)) = v {
+                g.limit(label, format!("{} / {}", kelvin(t), kelvin(limit)), Some(t), limit);
+            }
+        }
+        out.push(g);
+    }
+    if let Some(s) = state.parts.iter().find(|s| s.part == id) {
+        out.push(condition(s, &info.ratings));
+    }
+    out.push(ratings(&info.ratings));
+    out.extend(failures(&info.failures));
+    // Its components last, each a link to its own pop-up.
+    let components: Vec<usize> = (0..def.components.len()).filter(|&i| def.components[i].part == id).collect();
+    let mut g = Group::new(format!("COMPONENTS · {}", components.len()));
+    for &i in &components {
+        let c = &def.components[i];
+        g.row(&c.id, c.entry.clone()).opens(Selection::Component(i));
+    }
+    out.push(g);
+}
+
+/// A part's wear: integrity, damage (fails at 1), its use against its
+/// rated life, its peak temperature against its rating.
+fn condition(s: &sim::craft::state::PartState, r: &Ratings) -> Group {
+    let mut g = Group::new("CONDITION");
+    g.limit("integrity", format!("{:.0} %", s.integrity * 100.0), Some(1.0 - s.integrity), 1.0)
+        .limit("thermal damage", format!("{:.2} / 1", s.thermal_damage), Some(s.thermal_damage), 1.0)
+        .limit("vibration damage", format!("{:.2} / 1", s.vibration_damage), Some(s.vibration_damage), 1.0);
+    let h = &s.history;
+    let run = crate::format::duration(h.run_time);
+    match r.life {
+        Some(Life::Hours(rated)) => {
+            g.limit("run time", format!("{run} / {rated:.0} h"), Some(h.run_time / 3600.0), rated);
+            g.row("starts · cycles", format!("{} · {}", h.starts, h.cycles));
+        }
+        Some(Life::Starts(rated)) => {
+            g.row("run time", run).limit("starts", format!("{} / {rated:.0}", h.starts), Some(h.starts as f64), rated);
+        }
+        Some(Life::Cycles(rated)) => {
+            g.row("run time", run).limit("cycles", format!("{} / {rated:.0}", h.cycles), Some(h.cycles as f64), rated);
+        }
+        None => {
+            g.row("run time", run).row("starts · cycles", format!("{} · {}", h.starts, h.cycles));
+        }
+    }
+    g.row("flights · landings", format!("{} · {}", h.flights, h.landings));
+    if h.peak_k > 0.0 {
+        match r.rated_k {
+            Some(rated) => {
+                g.limit("peak temperature", format!("{} / {}", kelvin(h.peak_k), kelvin(rated)), Some(h.peak_k), rated)
+            }
+            None => g.row("peak temperature", kelvin(h.peak_k)),
+        };
+    }
+    g
 }
 
 fn tank_group(def: &ShipDef, state: &ShipState, i: usize, k: &Known) -> Group {
@@ -226,22 +351,29 @@ fn tank_group(def: &ShipDef, state: &ShipState, i: usize, k: &Known) -> Group {
         format!("{} / {} ({:.1} %)", kg(s.liquid), kg(t.capacity), fill * 100.0)
     });
     let warm = k.knows(q(Quantity::TankTemperature));
+    let p = ullage_pressure(t, s);
+    let known_p = k.knows(q(Quantity::TankPressure));
+    let pressure = format!("{} / {}", k.value(q(Quantity::TankPressure), p, 1e5, 2, "bar"), bar(t.burst));
     g.row("fluid", t.fluid.clone())
         .row("liquid", level)
+        .limit("ullage pressure", pressure, known_p.then_some(p), t.burst)
+        .row("operating", bar(t.pressure))
         .row("liquid temperature", k.or_dash(warm, || kelvin(s.liquid_k)))
-        .row("ullage pressure", k.value(q(Quantity::TankPressure), ullage_pressure(t, s), 1e5, 2, "bar"))
-        .row("ullage temperature", k.or_dash(warm, || kelvin(s.ullage_k)))
-        .row("operating · burst", format!("{} · {}", bar(t.pressure), bar(t.burst)));
+        .row("ullage temperature", k.or_dash(warm, || kelvin(s.ullage_k)));
     g
 }
 
-fn engine_group(state: &ShipState, i: usize, e: &sim::craft::ship::EngineDef) -> Group {
+fn engine_group(state: &ShipState, i: usize, e: &sim::craft::ship::EngineDef, k: &Known) -> Group {
     let mut g = Group::new(format!("ENGINE {}", e.id));
     let d = &e.data;
     if let Some(s) = state.engines.get(i) {
         let ignitions =
             if s.ignitions == u32::MAX { "unlimited (hypergolic)".to_string() } else { s.ignitions.to_string() };
+        let level = state.runtime.engines.get(i).map_or(0.0, |r| r.level);
+        let chamber =
+            k.or_dash(k.knows(Quantity::EngineThrust(i as u32)), || format!("{:.0} % / 100 %", level * 100.0));
         g.row("status", format!("{:?}", s.status))
+            .row("chamber pressure", chamber)
             .row("ignitions left", ignitions)
             .row("own throttle", format!("{:.0} %", s.throttle * 100.0))
             .row("selected", if s.selected { "yes (the pilot's throttle)" } else { "no" });
@@ -266,12 +398,13 @@ fn stores(def: &ShipDef, state: &ShipState, id: &str, k: &Known, out: &mut Vec<G
         let gas = sim::fluids::fluids().gas(&b.gas).map_or(0.0, |g| g.molar_mass);
         let q = Quantity::BottlePressure(j as u32);
         let pressure = k.value(q, sim::fluids::pressure(s.moles, b.volume, s.k), 1e5, 2, "bar");
+        let p = sim::fluids::pressure(s.moles, b.volume, s.k);
         let mut g = Group::new(format!("BOTTLE {}", b.id));
         g.row("gas", b.gas.clone())
             .row("contents", k.or_dash(k.knows(q), || kg(s.moles * gas)))
-            .row("pressure", format!("{pressure} (rated {})", bar(b.pressure)))
-            .row("temperature", k.or_dash(k.knowledge.perfect, || kelvin(s.k)))
-            .row("burst", bar(b.burst));
+            .limit("pressure", format!("{pressure} / {}", bar(b.burst)), k.knows(q).then_some(p), b.burst)
+            .row("rated", bar(b.pressure))
+            .row("temperature", k.or_dash(k.knowledge.perfect, || kelvin(s.k)));
         out.push(g);
     }
     for (j, _) in def.tanks.iter().enumerate().filter(|(_, t)| t.id.split(':').next() == Some(id)) {
@@ -283,17 +416,25 @@ fn stores(def: &ShipDef, state: &ShipState, id: &str, k: &Known, out: &mut Vec<G
         let mut g = Group::new(format!("BATTERY {}", b.id));
         g.row("charge", format!("{charge} / {:.0} Wh", b.item.capacity / 3600.0))
             .row("voltage", format!("{:.0} V", b.item.voltage))
-            .row("temperature", k.or_dash(k.knowledge.perfect, || kelvin(s.k)))
-            .row("use", "power flow is not simulated yet (RUNTIME)");
+            .row("temperature", k.or_dash(k.knowledge.perfect, || kelvin(s.k)));
+        // The bus it feeds, as `systems::power` runs it.
+        for bus in def.buses.iter().filter(|bus| bus.members.iter().any(|m| m.0 == b.id)) {
+            if let Some(run) = state.runtime.buses.iter().find(|r| r.name == bus.name) {
+                g.row("bus", format!("{} · {:.1} V · {:.0} W", run.name, run.volts, run.load));
+            }
+        }
         out.push(g);
     }
     for (j, v) in def.valves.iter().enumerate().filter(|(_, v)| v.id == id) {
         let s = &state.valves[j];
         let open = format!("{}{}", if s.open { "open" } else { "closed" }, if s.stuck { " · STUCK" } else { "" });
         let mut g = Group::new(format!("VALVE {}", v.id));
-        g.row("kind", format!("{:?}", v.item.kind))
-            .row("state", open)
-            .row("cycles", format!("{} of {:.0} rated", s.cycles, v.item.cycles));
+        g.row("kind", format!("{:?}", v.item.kind)).row("state", open).limit(
+            "cycles",
+            format!("{} / {:.0}", s.cycles, v.item.cycles),
+            Some(s.cycles as f64),
+            v.item.cycles,
+        );
         out.push(g);
     }
 }
@@ -303,7 +444,7 @@ fn component_groups(def: &ShipDef, state: &ShipState, i: usize, k: &Known, out: 
     let Some(c) = def.components.get(i) else { return };
     let host = def.parts.iter().find(|p| p.part == c.part).map_or("?", |p| p.id.as_str());
     let mut g = Group::new(format!("COMPONENT {}", c.id));
-    g.row("catalog entry", c.entry.clone()).row("in part", host).row("mass", kg(c.mass));
+    g.row("type", c.entry.clone()).row("in part", host).opens(Selection::Part(c.part)).row("mass", kg(c.mass));
     if c.power > 0.0 {
         let on = state.power.get(i).is_none_or(|s| s.on);
         g.row("power", format!("{:.0} W · {}", c.power, if on { "on" } else { "off" }));
@@ -321,7 +462,7 @@ fn component_groups(def: &ShipDef, state: &ShipState, i: usize, k: &Known, out: 
         out.push(g);
     }
     for (j, e) in def.engines.iter().enumerate().filter(|(_, e)| e.owner == c.id) {
-        out.push(engine_group(state, j, e));
+        out.push(engine_group(state, j, e, k));
     }
     for s in def.sensors.iter().filter(|s| mine(&s.id)) {
         let mut g = Group::new(format!("SENSOR {}", s.id));
@@ -339,7 +480,9 @@ fn component_groups(def: &ShipDef, state: &ShipState, i: usize, k: &Known, out: 
         out.push(g);
     }
     for s in def.seats.iter().filter(|s| mine(&s.id)) {
-        out.push(Group { title: format!("SEAT {}", s.id), rows: vec![("crew".into(), s.item.to_string())] });
+        let mut g = Group::new(format!("SEAT {}", s.id));
+        g.row("crew", s.item.to_string());
+        out.push(g);
     }
 }
 

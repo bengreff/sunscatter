@@ -173,6 +173,7 @@ pub fn update(
         // stays); a component's index may name another after a split.
         let kept = |s: &Selection| matches!(s, Selection::Part(id) if craft.parts.iter().any(|p| p.id == *id));
         screen.selected = screen.selected.filter(kept);
+        screen.popups.retain(kept);
     }
     // What each part is now, and its colour in the layer shown.
     let colours = parts::part_colours(&craft, &def, sim::materials::materials());
@@ -247,6 +248,6 @@ pub fn update(
             .collect();
         let order: Vec<usize> = parts.iter().map(|(p, _, _)| p.0).collect();
         let hit = rules::pick(ray.origin, ray.direction.as_vec3(), &placed).map(|i| order[i]);
-        screen.selected = hit.and_then(|k| craft.parts.get(k)).map(|p| Selection::Part(p.id));
+        screen.select(hit.and_then(|k| craft.parts.get(k)).map(|p| Selection::Part(p.id)));
     }
 }

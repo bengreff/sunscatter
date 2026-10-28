@@ -5,12 +5,13 @@
 //! each layer, the part tree, the orbit camera's pose and the pick of a
 //! part under the cursor.
 //!
-//! Layers show what exists: the structure's joints by kind (their loads
-//! are RUNTIME's, not computed yet), the temperatures the thermal network
-//! has, the tanks' fills, the electrical and data items as placed; each
-//! layer says plainly what it cannot show yet ([`Layer::note`]). Like every
-//! readout they show only what the craft measures (D106): a part's
-//! temperature with its sensor, a tank's fill with its level sensor.
+//! Layers show the craft by one system: the structure's joints by their
+//! load (else by kind), the temperatures the thermal network has, the
+//! tanks' fills, the electrical and data items as placed, each layer's
+//! colours explained by [`Layer::note`] and the layer as a whole by
+//! `super::summary`. Like every readout they show only what the craft
+//! measures (D106): a part's temperature with its sensor, a tank's fill
+//! with its level sensor.
 
 use bevy::prelude::{Quat, Transform, Vec3};
 use sim::craft::assembly::JointKind;
@@ -54,7 +55,7 @@ impl Layer {
         }
     }
 
-    /// What the colours mean, and what the simulation does not give yet.
+    /// What the colours mean.
     pub fn note(self) -> &'static str {
         match self {
             Layer::Physical => "Parts by their outer material or paint.",
@@ -68,21 +69,36 @@ impl Layer {
                  temperature sensor measures it (D106; debug mode: everywhere)."
             }
             Layer::Plumbing => {
-                "Tanks by fluid, brighter the fuller where a level sensor measures it (else a middle shade). \
-                 Pressures are the ullage gas law on the ship state; flows and settling come with RUNTIME."
+                "Tanks by fluid, brighter the fuller where a level sensor measures it (else a middle shade); \
+                 lines join bottles to the tanks they pressurise and tanks to the engines they feed."
             }
             Layer::Electrical => {
-                "Sources green, loads orange, bus members yellow. Power flow and charge use are not \
-                 simulated yet (RUNTIME)."
+                "Sources green, loads orange, bus members yellow; lines join each bus's members. The buses' \
+                 voltage and load, the batteries' charge and what is without power: the summary."
             }
             Layer::Data => {
                 "Computers cyan, sensors violet, linked actuators blue. What the craft knows (D106) comes from \
                  the sensors a working computer reads; every readout shows only that."
             }
             Layer::Health => {
-                "Integrity and damage: green sound, yellow damaged, red failed. Damage does not accumulate \
-                 yet (RUNTIME)."
+                "Integrity and damage: green sound, yellow damaged, red failed. Heat past a part's rating and \
+                 vibration past its qualification wear it."
             }
+        }
+    }
+
+    /// The layer a part is mostly about, for opening the screen at it (a
+    /// part card's "more"): its tanks Plumbing, a battery Electrical, a
+    /// computer Data, the rest Structural.
+    pub fn main(f: &PartFacts) -> Layer {
+        if !f.tanks.is_empty() {
+            Layer::Plumbing
+        } else if f.source {
+            Layer::Electrical
+        } else if f.computers > 0 {
+            Layer::Data
+        } else {
+            Layer::Structural
         }
     }
 }

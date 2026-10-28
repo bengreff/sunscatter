@@ -1,0 +1,307 @@
+//! The systems screen's layer summaries (D107; rule 8): a layer shown as
+//! a whole before any part, in the inspector's groups and rows (a row
+//! against a limit coloured by `format::limit_level`; a row about a part
+//! opens its pop-up).
+//!
+//! * **Structure**: the mass and centre of mass now, the g-limit and what
+//!   sets it (`sim::systems::g_limit`), the joints nearest their ultimate.
+//! * **Thermal**: the parts nearest their temperature limits.
+//! * **Plumbing**: each tank's contents, the tanks' and bottles' pressures
+//!   against their burst, what feeds what (the lines), the engines' flows.
+//! * **Electrical**: the Power menu's own sections (`menus::power`: one
+//!   owner): the buses, the batteries, what is without power and why.
+//! * **Data**: the computers, the sensors by kind, what the craft measures.
+//! * **Health**: the parts' wear, what is lost and why.
+//!
+//! Like every readout, only what the craft measures (D106): a dash, and a
+//! count of what nothing measures.
+
+use super::inspect::{Group, Selection};
+use super::rules::{Layer, PartFacts};
+use crate::format::{limit_level, Known, Level, DASH};
+use crate::interface::menus::{power, Item, Tone};
+use sim::craft::ship::ShipDef;
+use sim::craft::state::ShipState;
+use sim::systems::Quantity;
+
+/// What the summaries read besides the ship.
+pub struct Inputs<'a> {
+    pub def: &'a ShipDef,
+    pub state: &'a ShipState,
+    pub facts: &'a [PartFacts],
+    pub known: &'a Known,
+    /// The mass now and dry (kg), the centre of mass's height above the
+    /// base (m).
+    pub mass: (f64, f64, f64),
+    /// The electrical system (`menus::power::gather`).
+    pub power: Option<&'a power::PowerData>,
+}
+
+/// How many joints or parts a "nearest their limits" list shows.
+pub const TOP: usize = 6;
+
+/// Layer `layer` as a whole.
+pub fn summary(layer: Layer, x: &Inputs) -> Vec<Group> {
+    let mut out = match layer {
+        Layer::Physical => vec![craft(x)],
+        Layer::Structural => structure(x),
+        Layer::Thermal => vec![thermal(x)],
+        Layer::Plumbing => fluids(x),
+        Layer::Electrical => electrical(x.power),
+        Layer::Data => data(x),
+        Layer::Health => health(x),
+    };
+    out.retain(|g| !g.rows.is_empty());
+    out
+}
+
+fn tonnes(kg: f64) -> String {
+    if kg >= 1e4 {
+        format!("{:.2} t", kg / 1e3)
+    } else {
+        format!("{kg:.0} kg")
+    }
+}
+
+fn name(def: &ShipDef, part: u32) -> String {
+    def.parts.iter().find(|p| p.part == part).map_or_else(|| format!("part {part}"), |p| p.id.clone())
+}
+
+/// The craft: its parts and components, its mass.
+fn craft(x: &Inputs) -> Group {
+    let mut g = Group::new("CRAFT");
+    let ground = x.facts.iter().filter(|f| f.ground).count();
+    g.row("parts", format!("{} (and {ground} of the pad's)", x.facts.len() - ground))
+        .row("components", x.def.components.len().to_string())
+        .row("mass", x.known.or_dash(x.known.propellant, || tonnes(x.mass.0)))
+        .row("dry mass", tonnes(x.mass.1));
+    g
+}
+
+/// The mass and centre of mass, the g-limit, the joints nearest their
+/// ultimate (measured by strain gauges) and how many nothing measures.
+fn structure(x: &Inputs) -> Vec<Group> {
+    let (def, state, k) = (x.def, x.state, x.known);
+    let mut g = Group::new("STRUCTURE");
+    g.row("mass", k.or_dash(k.propellant, || tonnes(x.mass.0)))
+        .row("dry mass", tonnes(x.mass.1))
+        .row("centre of mass", k.or_dash(k.propellant, || format!("{:.1} m above the base", x.mass.2)));
+    let g0 = crate::navball::rules::G0;
+    let now = state.runtime.accel.length() / g0;
+    match sim::systems::g_limit::g_limit(def, state) {
+        Some(l) if k.knows(Quantity::Acceleration) => {
+            let by = crate::navball::g_meter::limiter(l.by, |j| def.joints.get(j).map(|j| j.name.clone()));
+            g.limit("g-limit", format!("{now:.1} g / {:.1} g", l.accel / g0), Some(now), l.accel / g0)
+                .row("set by", by);
+        }
+        Some(_) => {
+            g.row("g-limit", DASH);
+        }
+        None => {
+            g.row("g-limit", "none: not accelerating");
+        }
+    }
+    let mut joints = Group::new("JOINTS NEAREST THEIR ULTIMATE");
+    let intact = |i: usize| state.joints.get(i).is_none_or(|s| s.intact);
+    let mut loads: Vec<(usize, f64)> = (0..def.joints.len())
+        .filter(|&i| intact(i) && k.knows(Quantity::JointLoad(i as u32)))
+        .filter_map(|i| Some((i, state.runtime.joints.get(i)?.ratio)))
+        .collect();
+    loads.sort_by(|a, b| b.1.total_cmp(&a.1));
+    for &(i, r) in loads.iter().take(TOP) {
+        let j = &def.joints[i];
+        joints.limit(&j.name, format!("{:.0} % / 100 %", r * 100.0), Some(r), 1.0).opens(Selection::Part(j.child));
+    }
+    let blind = (0..def.joints.len()).filter(|&i| intact(i)).count() - loads.len();
+    if blind > 0 {
+        joints.row("not measured", format!("{blind} joints (no strain gauge)"));
+    }
+    vec![g, joints]
+}
+
+/// A part's temperature nearest its limit (K, limit K).
+fn nearest(f: &PartFacts) -> Option<(f64, f64)> {
+    [f.skin, f.interior].into_iter().flatten().max_by(|a, b| (a.0 / a.1).total_cmp(&(b.0 / b.1)))
+}
+
+/// The parts nearest their temperature limits, and how many nothing
+/// measures.
+fn thermal(x: &Inputs) -> Group {
+    let mut g = Group::new("NEAREST THEIR LIMITS");
+    let parts: Vec<&PartFacts> = x.facts.iter().filter(|f| !f.ground).collect();
+    let mut hot: Vec<(&PartFacts, (f64, f64))> = parts.iter().filter_map(|f| Some((*f, nearest(f)?))).collect();
+    hot.sort_by(|a, b| (b.1 .0 / b.1 .1).total_cmp(&(a.1 .0 / a.1 .1)));
+    for (f, (t, limit)) in hot.iter().take(TOP) {
+        g.limit(&f.name, format!("{t:.0} K / {limit:.0} K"), Some(*t), *limit).opens(Selection::Part(f.id));
+    }
+    if hot.len() < parts.len() {
+        g.row("not measured", format!("{} parts (no temperature sensor)", parts.len() - hot.len()));
+    }
+    g
+}
+
+/// The tanks' contents, the pressures against their burst, the lines,
+/// the engines' flows now.
+fn fluids(x: &Inputs) -> Vec<Group> {
+    let (def, state, k) = (x.def, x.state, x.known);
+    let mut tanks = Group::new("TANKS");
+    let mut pressures = Group::new("PRESSURES (burst)");
+    for (i, (d, s)) in def.tanks.iter().zip(&state.tanks).enumerate() {
+        let q = |f: fn(u32) -> Quantity| f(i as u32);
+        let level = k.or_dash(k.knows(q(Quantity::TankLevel)), || tonnes(s.liquid));
+        tanks.row(&format!("{} · {}", d.id, d.fluid), format!("{level} / {}", tonnes(d.capacity)));
+        tanks.opens(Selection::Part(d.part));
+        let p = super::inspect::ullage_pressure(d, s);
+        let known = k.knows(q(Quantity::TankPressure));
+        let shown = format!("{} / {:.1} bar", k.value(q(Quantity::TankPressure), p, 1e5, 2, "bar"), d.burst / 1e5);
+        pressures.limit(&d.id, shown, known.then_some(p), d.burst).opens(Selection::Part(d.part));
+    }
+    for (j, (b, s)) in def.bottles.iter().zip(&state.bottles).enumerate() {
+        let q = Quantity::BottlePressure(j as u32);
+        let p = sim::fluids::pressure(s.moles, b.volume, s.k);
+        let shown = format!("{} / {:.0} bar", k.value(q, p, 1e5, 0, "bar"), b.burst / 1e5);
+        pressures.limit(&format!("{} · {}", b.id, b.gas), shown, k.knows(q).then_some(p), b.burst);
+        if let Some(c) = def.components.iter().position(|c| c.id == b.id) {
+            pressures.opens(Selection::Component(c));
+        }
+    }
+    vec![tanks, pressures, feeds(def), flows(x)]
+}
+
+/// What feeds what: each line's owner and what the lines from it reach
+/// (by their ends' owners, each once; past two, how many more).
+fn feeds(def: &ShipDef) -> Group {
+    let mut g = Group::new("LINES");
+    let owner = |end: &str| end.split(':').next().unwrap_or(end).to_string();
+    let mut from: Vec<(String, Vec<String>)> = Vec::new();
+    for l in &def.lines {
+        let (a, b) = (owner(&l.from), owner(&l.to));
+        match from.iter_mut().find(|f| f.0 == a) {
+            Some(f) if f.1.contains(&b) => {}
+            Some(f) => f.1.push(b),
+            None => from.push((a, vec![b])),
+        }
+    }
+    for (a, to) in from {
+        let more = if to.len() > 2 { format!(" +{}", to.len() - 2) } else { String::new() };
+        g.row(&a, format!("→ {}{more}", to[..to.len().min(2)].join(", ")));
+    }
+    g
+}
+
+/// Each burning engine's propellant flow now (`systems::propulsion`'s, at
+/// its flow level), where its controller reports it.
+fn flows(x: &Inputs) -> Group {
+    let mut g = Group::new("FLOWS NOW");
+    let mut total = 0.0;
+    for (i, e) in x.def.engines.iter().enumerate() {
+        let level = x.state.runtime.engines.get(i).map_or(0.0, |r| r.level);
+        if level <= 0.0 || !x.known.knows(Quantity::EngineThrust(i as u32)) {
+            continue;
+        }
+        let mdot = sim::systems::propulsion::steady(&e.data, level, 0.0).1;
+        total += mdot;
+        g.row(&e.id, format!("{mdot:.1} kg/s")).opens(Selection::Part(e.part));
+    }
+    if g.rows.is_empty() {
+        g.row("engines", "none burning");
+    } else if g.rows.len() > 1 {
+        g.row("total", format!("{total:.1} kg/s"));
+    }
+    g
+}
+
+/// The Power menu's sections (one owner) as groups: a warning amber, an
+/// alert red.
+fn electrical(p: Option<&power::PowerData>) -> Vec<Group> {
+    (power::sections(p).into_iter())
+        .map(|s| {
+            let mut g = Group::new(if s.title.is_empty() { "BUSES".to_string() } else { s.title.clone() });
+            for item in &s.items {
+                match item {
+                    Item::Row(r) => {
+                        g.row(&r.label, r.value.clone()).level(match r.tone {
+                            Tone::Warn => Level::Warn,
+                            Tone::Alert => Level::Over,
+                            _ => Level::Normal,
+                        });
+                    }
+                    Item::Note(text, _) => {
+                        g.row("", text.clone());
+                    }
+                    _ => {}
+                }
+            }
+            g
+        })
+        .collect()
+}
+
+/// The computers, the sensors by kind, and what the craft measures of
+/// what it could (D106).
+fn data(x: &Inputs) -> Vec<Group> {
+    let (def, k) = (x.def, x.known);
+    let mut computers = Group::new("COMPUTERS");
+    for c in &def.computers {
+        let commands: usize = def.links.iter().filter(|l| l.from.0 == c.id).map(|l| l.to.len()).sum();
+        computers.row(&c.id, format!("{} channels · commands {commands}", c.item.channels));
+        if let Some(i) = def.components.iter().position(|x| x.id == c.id) {
+            computers.opens(Selection::Component(i));
+        }
+    }
+    let mut sensors = Group::new(format!("SENSORS · {}", def.sensors.len()));
+    let mut kinds: Vec<(&str, usize)> = Vec::new();
+    for s in &def.sensors {
+        match kinds.iter_mut().find(|(q, _)| *q == s.item.quantity) {
+            Some(k) => k.1 += 1,
+            None => kinds.push((&s.item.quantity, 1)),
+        }
+    }
+    for (kind, n) in kinds {
+        sensors.row(kind, n.to_string());
+    }
+    let mut known = Group::new("WHAT THE CRAFT MEASURES");
+    let count = |n: usize, q: &dyn Fn(u32) -> Quantity| (0..n as u32).filter(|&i| k.knows(q(i))).count();
+    let rows: [(&str, usize, usize); 6] = [
+        ("tank levels", count(def.tanks.len(), &Quantity::TankLevel), def.tanks.len()),
+        ("tank pressures", count(def.tanks.len(), &Quantity::TankPressure), def.tanks.len()),
+        ("bottle pressures", count(def.bottles.len(), &Quantity::BottlePressure), def.bottles.len()),
+        ("battery charges", count(def.batteries.len(), &Quantity::BatteryCharge), def.batteries.len()),
+        ("joint loads", count(def.joints.len(), &Quantity::JointLoad), def.joints.len()),
+        (
+            "part temperatures",
+            def.parts.iter().filter(|p| k.knows(Quantity::PartTemperature(p.part))).count(),
+            def.parts.len(),
+        ),
+    ];
+    for (label, n, of) in rows.into_iter().filter(|r| r.2 > 0) {
+        known.row(label, format!("{n} of {of}"));
+    }
+    if k.knowledge.perfect {
+        known.row("", "debug mode: everything");
+    }
+    vec![computers, sensors, known]
+}
+
+/// The parts' wear (the worst first) and what is lost and why.
+fn health(x: &Inputs) -> Vec<Group> {
+    let mut g = Group::new("CONDITION");
+    let parts: Vec<&PartFacts> = x.facts.iter().filter(|f| !f.ground).collect();
+    let worn = |f: &PartFacts| f.damage.max(1.0 - f.integrity);
+    let mut hurt: Vec<&PartFacts> = parts.iter().copied().filter(|f| worn(f) > 0.0).collect();
+    hurt.sort_by(|a, b| worn(b).total_cmp(&worn(a)));
+    g.row("sound", format!("{} of {} parts", parts.len() - hurt.len(), parts.len()));
+    for f in hurt.iter().take(TOP) {
+        let text = format!("integrity {:.0} % · damage {:.2} / 1", f.integrity * 100.0, f.damage);
+        g.row(&f.name, text).level(limit_level(worn(f), Some(1.0))).opens(Selection::Part(f.id));
+    }
+    let mut lost = Group::new(format!("LOST · {}", x.state.runtime.lost.len()));
+    for l in &x.state.runtime.lost {
+        lost.row(&l.owner, format!("{} ({})", l.why, name(x.def, l.part))).level(Level::Over);
+    }
+    vec![g, lost]
+}
+
+#[cfg(test)]
+#[path = "summary_tests.rs"]
+mod tests;

@@ -18,23 +18,29 @@ fn titles(groups: &[Group]) -> Vec<&str> {
 
 fn value<'a>(groups: &'a [Group], title: &str, label: &str) -> &'a str {
     let g = groups.iter().find(|g| g.title == title).unwrap_or_else(|| panic!("{title}"));
-    g.rows.iter().find(|r| r.0 == label).map(|r| r.1.as_str()).unwrap_or_else(|| panic!("{title}: {label}"))
+    g.value(label).unwrap_or_else(|| panic!("{title}: {label}"))
 }
 
 #[test]
-fn a_tank_part_shows_its_joint_ratings_condition_and_both_compartments() {
+fn a_tank_part_shows_its_structure_both_compartments_condition_and_ratings() {
     let (craft, state, facts) = setup();
     let def = craft.ship.as_deref().unwrap();
     let id = def.part_named("tank").unwrap();
     let g = details(def, &state, &facts, Selection::Part(id), &Known::default());
-    assert_eq!(titles(&g), ["PART tank", "JOINT separation", "RATINGS", "CONDITION", "TANK tank:fuel", "TANK tank:ox"]);
-    assert_eq!(value(&g, "JOINT separation", "kind"), "separation system");
+    // The one layout: name and type, structure, its functions, then its wear and ratings.
+    let want = ["PART tank", "STRUCTURE", "TANK tank:fuel", "TANK tank:ox", "CONDITION", "RATINGS", "COMPONENTS · 1"];
+    assert_eq!(titles(&g), want);
+    assert_eq!(value(&g, "STRUCTURE", "joint"), "separation · separation system");
     // Known (perfect knowledge here) and unloaded on the pad's state.
-    assert_eq!(value(&g, "JOINT separation", "load"), "0 % of its ultimate");
+    assert_eq!(value(&g, "STRUCTURE", "joint load"), "0 % / 100 %");
     assert_eq!(value(&g, "TANK tank:ox", "fluid"), "LOX");
     assert!(value(&g, "TANK tank:fuel", "liquid").ends_with("(90.0 %)"));
-    // Loaded at 3 bar: the gas law on the state gives it back.
-    assert_eq!(value(&g, "TANK tank:ox", "ullage pressure"), "3.00 bar");
+    // Loaded at 3 bar: the gas law on the state gives it back, against its burst.
+    let ox = g.iter().find(|g| g.title == "TANK tank:ox").unwrap();
+    let row = ox.rows.iter().find(|r| r.label == "ullage pressure").unwrap();
+    assert!(row.value.starts_with("3.00 bar / ") && row.value.ends_with(" bar"), "{}", row.value);
+    assert_eq!(row.level, crate::format::Level::Normal, "well under its burst");
+    assert!(row.hover.is_some(), "the term is explained");
     assert_eq!(value(&g, "CONDITION", "integrity"), "100 %");
     assert!(value(&g, "RATINGS", "burst pressure").ends_with("bar"), "derived from the tank");
 }
@@ -100,18 +106,19 @@ fn values_without_a_sensor_read_as_a_dash() {
     let def = craft.ship.as_deref().unwrap();
     let blind = Known::from(sim::systems::Knowledge::default());
     let tank = details(def, &state, &facts, Selection::Part(def.part_named("tank").unwrap()), &blind);
-    for label in ["liquid", "liquid temperature", "ullage pressure", "ullage temperature"] {
+    for label in ["liquid", "liquid temperature", "ullage temperature"] {
         assert_eq!(value(&tank, "TANK tank:ox", label), DASH, "{label}");
     }
+    assert!(value(&tank, "TANK tank:ox", "ullage pressure").starts_with("— / "), "against the design's burst");
     assert_eq!(value(&tank, "TANK tank:ox", "fluid"), "LOX");
-    assert!(value(&tank, "TANK tank:ox", "operating · burst").ends_with("bar"), "the design's");
+    assert!(value(&tank, "TANK tank:ox", "operating").ends_with("bar"), "the design's");
     let bottle = def.components.iter().position(|c| c.id == "bottle").unwrap();
     let g = details(def, &state, &facts, Selection::Component(bottle), &blind);
     assert_eq!(value(&g, "BOTTLE bottle", "contents"), DASH);
-    assert!(value(&g, "BOTTLE bottle", "pressure").starts_with("— (rated"));
+    assert!(value(&g, "BOTTLE bottle", "pressure").starts_with("— / "));
     // A pressure transducer to 0.1 bar: one decimal.
     let mut k = sim::systems::Knowledge::default();
     k.learn(Quantity::TankPressure(1), 1e4);
     let g = details(def, &state, &facts, Selection::Part(def.part_named("tank").unwrap()), &Known::from(k));
-    assert_eq!(value(&g, "TANK tank:ox", "ullage pressure"), "3.0 bar");
+    assert!(value(&g, "TANK tank:ox", "ullage pressure").starts_with("3.0 bar / "));
 }

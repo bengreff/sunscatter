@@ -17,8 +17,9 @@ use crate::commands::GameCommand;
 use crate::demo::{Demo, Step};
 use crate::interface::layout::InterfaceSettings;
 use crate::interface::menus::MenuId;
+use crate::interface::part_card::PartCards;
 use crate::state::SimState;
-use crate::systems_screen::{inspect::Selection, rules::Layer, SystemsScreen};
+use crate::systems_screen::{rules::Layer, SystemsScreen};
 use bevy::prelude::*;
 use glam::DVec3;
 use sim::vessel::{HoldMode, SpeedReference, VesselId};
@@ -119,13 +120,16 @@ fn shoot(demo: &mut Demo, script: &mut Script, name: &'static str) {
     }
 }
 
-/// The interface shot after a craft shot: its menus open and RCS on, the
-/// shot, then both undone. Whether the frame was spent on it.
+/// The interface shot after a craft shot: its menus open and RCS on (and
+/// the first shot a part card, `card`: its "more ›" link), the shot, then
+/// all undone. Whether the frame was spent on it.
 fn interface_shot(
     demo: &mut Demo,
     script: &mut Script,
     iface: &mut InterfaceSettings,
     cmds: &mut MessageWriter<GameCommand>,
+    cards: &mut PartCards,
+    card: Option<(sim::vessel::VesselId, u32)>,
 ) -> bool {
     let rcs = |on| GameCommand::SetRcs(sim::systems::rcs::RcsMode { on, ..Default::default() });
     match script.ui {
@@ -135,6 +139,9 @@ fn interface_shot(
                 iface.menus.set_open(*m, true);
             }
             cmds.write(rcs(true));
+            if let Some((vessel, part)) = card.filter(|_| k == 0) {
+                cards.open(vessel, part, crate::interface::part_card::From::Bar);
+            }
             // A few frames for the menus' snapshot to catch up.
             script.resume_at = demo.timer + 0.3;
             script.ui = Ui::Open(k);
@@ -147,6 +154,7 @@ fn interface_shot(
         Ui::Shot => {
             iface.menus.show_only(None);
             cmds.write(rcs(false));
+            cards.open.clear();
             script.ui = Ui::Idle;
         }
     }
@@ -177,6 +185,7 @@ pub fn run(
     mut iface: ResMut<InterfaceSettings>,
     mut cmds: MessageWriter<GameCommand>,
     mut systems: ResMut<SystemsScreen>,
+    mut cards: ResMut<PartCards>,
     mut script: Local<Script>,
 ) {
     let Some(mut demo) = demo else { return };
@@ -185,7 +194,8 @@ pub fn run(
     if demo.step != Step::Parts || demo.capturing() || demo.timer < script.resume_at {
         return;
     }
-    if interface_shot(&mut demo, &mut script, &mut iface, &mut cmds) {
+    let card = sim.ship().ship_def().and_then(|d| d.part_named("s1.tank")).map(|p| (sim.ship().id(), p));
+    if interface_shot(&mut demo, &mut script, &mut iface, &mut cmds, &mut cards, card) {
         return;
     }
     let t = demo.timer;
@@ -212,9 +222,9 @@ pub fn run(
             }
             if let Some(&(name, layer, part)) = SYSTEMS_VIEWS.get(script.view - PAD_VIEWS.len()) {
                 let def = sim.ship().ship_def();
-                systems.open = true;
-                systems.layer = layer;
-                systems.selected = part.and_then(|p| def.as_ref()?.part_named(p)).map(Selection::Part);
+                systems.popups.clear();
+                systems.selected = None;
+                systems.open_at(Some(layer), part.and_then(|p| def.as_ref()?.part_named(p)));
                 script.view += 1;
                 shoot(&mut demo, &mut script, name);
                 return;
