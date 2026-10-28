@@ -12,8 +12,8 @@ pub fn sections(d: &FlightData) -> Vec<Section> {
     vec![summary(d), elements(d), target(&d.target, &d.known), clock(d)]
 }
 
-/// Ap and Pe from the predicted trajectory (D076), then the osculating
-/// period, inclination and eccentricity.
+/// Ap and Pe from the predicted trajectory (D076), above the datum and from
+/// the centre, then the two-body period, inclination and eccentricity.
 fn summary(d: &FlightData) -> Section {
     let mut s = Section::summary();
     if d.landed {
@@ -44,21 +44,32 @@ fn apsis(s: &mut Section, label: &str, a: Option<&ApsisReadout>, k: &Known) {
             None => altitude,
         };
         s.row(label, value);
+        s.row("  FROM CENTRE", k.distance(Position, a.distance));
         s.row("  IN", k.or_dash(k.orbit(), || fmt_duration(a.in_s)));
     }
 }
 
+/// The two-body orbit through the state now (the osculating elements; the
+/// owner did not know the word, interview 34): sizes from the body's
+/// centre, angles about its equator.
 fn elements(d: &FlightData) -> Section {
-    let mut s = Section::new("elements", "ELEMENTS · OSCULATING");
+    let mut s = Section::new("elements", format!("ORBIT NOW · two-body · about {}'s centre", d.body));
     let Some(Elements { a, lan, argp, true_anomaly, speed, .. }) = d.elements else { return s };
     let k = &d.known;
     let angle = |x: f64| k.or_dash(k.orbit(), || format!("{x:.2}°"));
-    s.row("SEMI-MAJOR AXIS", k.distance(Position, a));
+    s.row("SEMI-MAJOR AXIS (from the centre)", k.distance(Position, a));
     s.row("ASC. NODE", angle(lan));
     s.row("ARG. PERIAPSIS", angle(argp));
     s.row("TRUE ANOMALY", angle(true_anomaly));
     s.row("ORBITAL SPEED", k.speed(Velocity, speed));
-    s.note(format!("two-body, about {}'s equator; Ap and Pe above are the predicted path's", d.body), Tone::Dim);
+    s.note(
+        format!(
+            "the orbit if only {0}'s gravity acted from now, angles about {0}'s equator; Ap and Pe above are the \
+             predicted path's, above the datum",
+            d.body
+        ),
+        Tone::Dim,
+    );
     s
 }
 
@@ -83,7 +94,6 @@ fn target(t: &TargetData, k: &Known) -> Section {
     s
 }
 
-/// Each planned burn, and the planner (N).
 /// The ship's own clock against the origin's (relativity).
 fn clock(d: &FlightData) -> Section {
     let mut s = Section::new("clock", "SHIP CLOCK");
@@ -133,15 +143,17 @@ mod tests {
     }
 
     #[test]
-    fn the_summary_reads_the_apsides_and_the_osculating_shape() {
+    fn the_summary_reads_the_apsides_and_the_two_body_shape() {
         let s = sections(&orbit());
         let summary = find(&s, "summary").unwrap();
         assert_eq!(
             summary.rows(),
             [
                 ("APOAPSIS", "301.2 km"),
+                ("  FROM CENTRE", "6679.3 km"),
                 ("  IN", "12m 05s"),
                 ("PERIAPSIS", "280.0 km"),
+                ("  FROM CENTRE", "6658.1 km"),
                 ("  IN", "58m 10s"),
                 ("PERIOD", "1h 30m"),
                 ("INCLINATION", "28.61°"),
@@ -149,8 +161,8 @@ mod tests {
             ]
         );
         let el = find(&s, "elements").unwrap();
-        assert!(el.title.contains("OSCULATING"), "labelled so");
-        assert_eq!(el.value("SEMI-MAJOR AXIS"), Some("6668.0 km"));
+        assert_eq!(el.title, "ORBIT NOW · two-body · about Earth's centre", "no jargon, says where from");
+        assert_eq!(el.value("SEMI-MAJOR AXIS (from the centre)"), Some("6668.0 km"));
     }
 
     #[test]

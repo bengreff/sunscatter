@@ -330,3 +330,24 @@ fn the_throttle_caption_says_min_where_zero_is_the_engines_minimum() {
         assert_eq!(throttle_caption(t, lit), want, "{t} {lit}");
     }
 }
+
+#[test]
+fn an_apsis_hover_says_above_what_and_from_where() {
+    use crate::navball::ApsisReadout;
+    let a = |other: Option<&str>| ApsisReadout {
+        altitude: 301_200.0,
+        above_datum: 301_200.0,
+        distance: 6_679_337.0,
+        in_s: 725.0,
+        other_body: other.map(str::to_string),
+    };
+    let k = crate::format::Known::default();
+    // (apsis, reference body, hover)
+    let table = [
+        (a(None), "Earth", "301.2 km above Earth's datum\n6679.3 km from Earth's centre"),
+        (a(Some("Moon")), "Earth", "301.2 km above Moon's datum\n6679.3 km from Moon's centre"),
+    ];
+    for (apsis, body, want) in table {
+        assert_eq!(apsis_hover(&apsis, body, &k), want);
+    }
+}

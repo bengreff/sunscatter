@@ -307,6 +307,18 @@ pub fn hold_available(mode: sim::vessel::HoldMode, has_target: bool, has_burn: b
     }
 }
 
+/// The hover of an Ap or Pe readout: the readout is above the datum; the
+/// orbit's own size is from the centre (interview 34: say which).
+pub fn apsis_hover(a: &super::ApsisReadout, reference_body: &str, k: &crate::format::Known) -> String {
+    use sim::systems::Quantity::Position;
+    let body = a.other_body.as_deref().unwrap_or(reference_body);
+    format!(
+        "{} above {body}'s datum\n{} from {body}'s centre",
+        k.distance(Position, a.above_datum),
+        k.distance(Position, a.distance)
+    )
+}
+
 #[cfg(test)]
 #[path = "rules_tests.rs"]
 mod tests;

@@ -159,7 +159,7 @@ pub fn draw(
         ui_.horizontal(|ui_| {
             ui_.monospace(format!("{y}-{mo:02}-{d:02} {h:02}:{mi:02}:{s:04.1} TT")).on_hover_text(format!(
                 "The clock at {}, the origin (D088): its proper time, which is TT (the geoid's time) to within \
-                 microseconds. Ship clocks are shown against it (Orbital ▸ Ship clock); the physics runs on TDB.",
+                 microseconds. Ship clocks are shown against it (Orbital › Ship clock); the physics runs on TDB.",
                 sim.origin
             ));
             ui_.label(dim(&sim.origin));

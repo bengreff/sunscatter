@@ -132,7 +132,7 @@ fn switch(ui: &mut egui::Ui, mode: Mode, locked: bool, has_target: bool, actions
         let hint = match m {
             Mode::Orbit => "Speed and markers relative to the body's centre",
             Mode::Surface => "Speed and markers relative to the rotating surface",
-            Mode::Target => "Speed and markers relative to the target (pick one in Orbital ▸ Target)",
+            Mode::Target => "Speed and markers relative to the target (pick one in Orbital › Target)",
         };
         if r.on_hover_text(hint).clicked() && m != mode {
             actions.push(Action::SetMode(m));
@@ -160,10 +160,11 @@ fn readouts(ui: &mut egui::Ui, s: &NavState, actions: &mut Vec<Action>) {
             (
                 a.other_body.as_ref().map_or(name.to_string(), |b| format!("{name} {b}")),
                 k.distance(Quantity::Position, a.above_datum),
+                Some(rules::apsis_hover(a, &s.body, k)),
             ),
-            ("  in".to_string(), k.or_dash(orbit, || fmt_duration(a.in_s))),
+            ("  in".to_string(), k.or_dash(orbit, || fmt_duration(a.in_s)), None),
         ],
-        None => [(name.to_string(), DASH.to_string()), ("  in".to_string(), DASH.to_string())],
+        None => [(name.to_string(), DASH.to_string(), None), ("  in".to_string(), DASH.to_string(), None)],
     };
     // Above the terrain from an altimeter (or a fix), above the datum from the position.
     let alt_q = if s.altitude_ref == AltitudeRef::Terrain { Quantity::Altitude } else { Quantity::Position };
@@ -198,9 +199,12 @@ fn readouts(ui: &mut egui::Ui, s: &NavState, actions: &mut Vec<Action>) {
         let text = if known { g_meter::text(&s.g) } else { DASH.to_string() };
         value(ui, text, if known { colour } else { theme::TEXT }).on_hover_text(g_meter::hover(&s.g));
         ui.end_row();
-        for (label, text) in rows {
+        for (label, text, hover) in rows {
             ui.label(dim(&label));
-            value(ui, text, theme::TEXT);
+            let r = value(ui, text, theme::TEXT);
+            if let Some(h) = hover {
+                r.on_hover_text(h);
+            }
             ui.end_row();
         }
     });
