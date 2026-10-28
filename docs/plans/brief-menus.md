@@ -1,0 +1,16 @@
+# Brief: MENUS (2026-10-28)
+
+You are one of two agents working for one hour (start 11:05, **land your last commit by 11:55, report by 12:05**; run `date`). Read [agent-rules.md](agent-rules.md), the owner's words and the contracts in [fixes-2026-10-28.md](fixes-2026-10-28.md), then [brief-systems.md](brief-systems.md) "State", [staging-bar.md](../features/staging-bar.md) and the `docs/architecture.md` rows for the interface and the systems screen. Target dir: `CARGO_TARGET_DIR=target/agents/menus` (new; check `df -h .` first, about 30 GB free). Stop at 150k context.
+
+## The work, in order
+
+1. **Nothing in the menus flickers.** "The q/design q under parachute sometimes flickers on and off, make sure that NOTHING in the menus flickers like that. Via under comms and S2.BATTERY#1 sometimes flickers as well when on launchpad." Find each root cause (a row shown on a per-frame condition, a value crossing a threshold back and forth, a route or "best" choice alternating between near-equal options, a sort order with ties, a sensor reading appearing and disappearing). Fix the causes, then make it a rule for every menu, the cards, the staging bar and the systems screen: a row's presence and a choice between options change only with hysteresis or a minimum hold, never frame to frame; ties broken by a stable key. One owner for that rule (a pure function with table tests, e.g. in `format` or the menus' module), used everywhere. Add a test that steps the pad (Falcon 9, `SUNSCATTER_CRAFT=falcon9-crew`) for a few hundred frames' worth of state and checks that every menu's row set and labels do not change.
+2. **A click on an open card's part closes it.** "Clicking on a part/icon when the live menu for that part is open closes the menu." Today `PartCards::open` only moves the card. Make the staging bar's icon and the part on the ship toggle the card. Table test.
+3. **The action bar to the top right.** "Move the systems mini-tab to the top right corner, same width as staging." The "systems mini-tab" is `interface/action_bar.rs` (SYSTEMS Tab and the pinned functions). Put it in the top right corner at `stage_bar::WIDTH`, the staging bar below it; nothing cut off at 1600×900 or 3024×1964 (`format`/`layout` rules with tests).
+4. **The systems screen's two panels.** "Clicking on a part in the systems menu should NOT open a pop up menu, instead all the info for that part should be displayed in the panel on the right, and the system wide info should be on the left, that menu toggles between system wide and parts list with a default of system wide." Left panel: a toggle between system-wide (the layer summaries) and the parts list, system-wide by default. Right panel: everything about the selected part (what the pop-up showed and the part layout's rows). No pop-up on a part click (hover explanations of terms may stay). `open_at` (cards' "more ›") selects the part in the right panel.
+
+Verify on screen with short offscreen demos (one at a time, `target/demo.lock`; the parts demo's systems shots, `SUNSCATTER_CRAFT=falcon9-crew`); look at the shots at both sizes. Docs in the same round: staging-bar.md and the systems screen's spec, the architecture rows, this brief's State, your row in the plan.
+
+## State
+
+(Update before you stop: landed with hashes, what is left.)

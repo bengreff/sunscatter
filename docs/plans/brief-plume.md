@@ -1,0 +1,15 @@
+# Brief: PLUME (2026-10-28)
+
+You are one of two agents working for one hour (start 11:05, **land your last commit by 11:55, report by 12:05**; run `date`). Read [agent-rules.md](agent-rules.md), the owner's words and the contracts in [fixes-2026-10-28.md](fixes-2026-10-28.md), then [exhaust.md](../features/exhaust.md), [brief-exhaust.md](brief-exhaust.md) "State" and the `docs/architecture.md` rows for exhaust, terrain and lighting. Target dir: `CARGO_TARGET_DIR=target/agents/glow` (warm; already built). Stop at 150k context.
+
+## The work, in order
+
+1. **The plume's colour at altitude.** "Exhaust plumes look great at sea level, but turn grey and dull at high altitude. Make sure you are getting the correct color." Find out why first (shots at several altitudes on the Falcon 9 ascent: `SUNSCATTER_CRAFT=falcon9-crew SUNSCATTER_EXHAUST=1` with the parts demo, see `demo_parts.rs`). Candidates: the plume lit as grey scattering soot instead of glowing (soot at the plume's temperature emits; the colour is a Planck spectrum through the scene's exposure, not a hand-picked tint); the core cooling too fast with the expansion; the haze or aerial perspective applied to it; the auto exposure. Get the colour from the physics (temperature along the plume, soot emission, the same exposure and tone mapping as the rest of the scene), and say in the spec what real photos of a kerolox plume at 20–80 km show and why yours matches. The "vacuum plume from soot only, near-invisible in daylight" default was the owner's open question: their answer is that it is wrong as it looks now.
+2. **The gap between nozzle and plume.** The owner's screenshot shows the upper stage's plume starting well below its bell's exit. The plume must start at the exit plane with the exit's radius, attached, at every altitude and camera distance (check the mesh's origin, the engine's exit position in the craft file vs the drawn bell, and any core-length offset). A table test of the plume's start against the nozzle's exit.
+3. **A loading screen.** "When launching a ship, it should display a loading screen until the terrain etc is loaded rather than slowly loading stuff in." On start, new flight, load and revert (all go through the replace path, see the contract): a full-screen loading view (the game's theme, a progress line naming what is loading) with the sim clock held, until what the first view needs is ready: the terrain tiles around the camera at their wanted level, the body maps, the craft's meshes, pipelines still compiling (Bevy's pipeline cache). The "ready" rule is a pure function of counts with a table test; the system only wires it. Make sure the demo still runs (it may wait for ready too) and the clock is not advanced while loading (determinism: the save loaded is the state flown).
+
+Verify each on screen with short offscreen demos (one at a time, `target/demo.lock`); look at the shots. Docs in the same round: exhaust.md, a loading section in the architecture rows, this brief's State, your row in the plan.
+
+## State
+
+(Update before you stop: landed with hashes, what is left.)
