@@ -34,7 +34,7 @@ The NAV workstream of [flight-ui-2026-10-27.md](flight-ui-2026-10-27.md) (D111, 
 
 Done by SYSTEMS (2026-10-27): 1 the orbit menu's wording (`ORBIT NOW · two-body · about Earth's centre`, `SEMI-MAJOR AXIS (from the centre)`, `FROM CENTRE` under Ap and Pe, the navball's Ap/Pe hover: `navball::rules::apsis_hover`); 2 the part cards' "more" (`SystemsScreen::open_at(None, Some(part))`); 3 the architecture rows; 4 the commands' replies linked to their vessel, the notifications' fold glyphs (⏶ ⏷: the proportional font has no ▲ ▼), "MECO" without "Stage:", the hover texts' ▸ and the card's → (boxes in the proportional font).
 
-Still open, handed to SYSTEMS's brief: the RCS menu's thruster list squeezing the dock; links from events to a layer (the sim's events do not say which system they come from); the staging bar's scroll area and `set_max_height` when stages are added in flight.
+Done by the second SYSTEMS agent (2026-10-28): the RCS menu's thruster list no longer squeezes the dock (each docked menu a fair share, `layout::fair_heights`, eef17ad); the staging bar's area grows past egui's default height (750852b). Still open: links from events to a layer (the sim's events do not say which system they come from).
 
 Rules: `docs/plans/agent-rules.md` (offscreen demos allowed one at a time: `mkdir target/demo.lock`, `rmdir` after).
 
