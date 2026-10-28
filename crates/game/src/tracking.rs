@@ -105,12 +105,14 @@ pub fn switch_to(sim: &mut SimState, rig: &mut CameraRig, pred: &mut Prediction,
 }
 
 /// What the pilot is told on leaving vessel `left` for another, if anything:
-/// a craft of parts left with engines lit keeps them burning at their
-/// minimum (the throttle is the active vessel's: the others fly at 0).
+/// a craft of parts left with engines lit burns on at its own throttle
+/// (D112: each vessel keeps its controls) until they are cut.
 pub fn left_lit_notice(left: &sim::vessel::Vessel) -> Option<String> {
     let lit = left.ship().is_some_and(|s| !sim::systems::propulsion::lit(s).is_empty());
-    let id = left.id().0;
-    lit.then(|| format!("Vessel {id} left with its engines lit: they burn at their minimum (throttle 0) until cut"))
+    let (id, throttle) = (left.id().0, left.controls().throttle * 100.0);
+    lit.then(|| {
+        format!("Vessel {id} left with its engines lit: they burn on at its throttle ({throttle:.0} %) until cut")
+    })
 }
 
 /// Removes a non-active vessel ("delete debris").
@@ -492,8 +494,10 @@ mod tests {
         let s = &mut sim;
         s.fleet[a].next_stage(&s.world).expect("the ignition");
         let id = sim.ship().id().0;
-        let want = format!("Vessel {id} left with its engines lit: they burn at their minimum (throttle 0) until cut");
+        let want = format!("Vessel {id} left with its engines lit: they burn on at its throttle (0 %) until cut");
         assert_eq!(left_lit_notice(sim.ship()), Some(want));
+        sim.controls_mut().throttle = 0.6;
+        assert!(left_lit_notice(sim.ship()).unwrap().contains("at its throttle (60 %)"));
     }
 
     #[test]
