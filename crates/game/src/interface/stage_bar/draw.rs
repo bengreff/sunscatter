@@ -119,13 +119,39 @@ fn stage(ui: &mut egui::Ui, row: &Row, bar: &mut StageBar, out: &mut Vec<Action>
 }
 
 /// A stage's number and name (dragged to move the stage), its place, the
-/// next stage's run button and the delete with its confirmation.
+/// next stage's run button and the delete with its confirmation. One line
+/// high: a right-to-left layout straight in a column centres its content
+/// in the column's whole remaining height, which stretched the active
+/// stage (drawn outside the scroll area) down the screen's edge.
 fn header(ui: &mut egui::Ui, row: &Row, editable: bool, bar: &mut StageBar, out: &mut Vec<Action>) {
     let colour = match row.place {
         Place::Next => theme::ACCENT,
         Place::Active => theme::GOOD,
         Place::Later => theme::TEXT,
     };
+    ui.horizontal(|ui| header_line(ui, row, editable, colour, bar, out));
+    let Some(j) = row.stage.filter(|&j| bar.confirm == Some(j)) else { return };
+    ui.horizontal(|ui| {
+        ui.label(RichText::new("Delete stage?").small().color(theme::WARN));
+        if ui.small_button("Delete").clicked() {
+            out.push(Action::Edit(SequenceEdit::Delete(j as u32)));
+            bar.confirm = None;
+        }
+        if ui.small_button("Keep").clicked() {
+            bar.confirm = None;
+        }
+    });
+}
+
+/// The header's line, right to left.
+fn header_line(
+    ui: &mut egui::Ui,
+    row: &Row,
+    editable: bool,
+    colour: Color32,
+    bar: &mut StageBar,
+    out: &mut Vec<Action>,
+) {
     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
         if let (true, Some(j)) = (editable, row.stage) {
             let x = ui.add(egui::Button::new(RichText::new("×").small().color(theme::DIM)).frame(false));
@@ -148,17 +174,6 @@ fn header(ui: &mut egui::Ui, row: &Row, editable: bool, bar: &mut StageBar, out:
             ui.add(egui::Label::new(text).truncate().sense(if editable { Sense::drag() } else { Sense::hover() }));
         if let (true, Some(j)) = (editable, row.stage) {
             label.dnd_set_drag_payload(Drag::Stage(j));
-        }
-    });
-    let Some(j) = row.stage.filter(|&j| bar.confirm == Some(j)) else { return };
-    ui.horizontal(|ui| {
-        ui.label(RichText::new("Delete stage?").small().color(theme::WARN));
-        if ui.small_button("Delete").clicked() {
-            out.push(Action::Edit(SequenceEdit::Delete(j as u32)));
-            bar.confirm = None;
-        }
-        if ui.small_button("Keep").clicked() {
-            bar.confirm = None;
         }
     });
 }
@@ -223,5 +238,38 @@ fn icon_rows(ui: &mut egui::Ui, row: &Row, editable: bool, bar: &mut StageBar, o
         if resp.on_hover_text(format!("{label}\n{}", icon.id)).clicked() {
             out.push(Action::Open(icon.part));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::interface::stage_bar::rows::Figures;
+    use egui::{Pos2, RawInput, Rect};
+
+    fn row(stage: usize, place: Place, figures: Option<Figures>) -> Row {
+        Row { stage: Some(stage), number: Some(stage as u32), name: format!("S{stage}"), place, items: vec![], figures }
+    }
+
+    /// The bar is as tall as its rows: an active stage (drawn below the
+    /// scroll area) once stretched it the screen's whole height, empty.
+    #[test]
+    fn the_bar_is_as_tall_as_its_rows() {
+        let figures = Figures { bars: vec![], burnout: "1m".into(), dv: "100 m/s".into(), active: None };
+        let rows = [row(1, Place::Next, None), row(0, Place::Active, Some(figures))];
+        let ctx = egui::Context::default();
+        let mut state = StageBar::default();
+        for _ in 0..4 {
+            let input = RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1600.0, 900.0))),
+                ..Default::default()
+            };
+            ctx.begin_pass(input);
+            bar(&ctx, &rows, &mut state);
+            ctx.end_pass().drop_without_applying_deltas();
+        }
+        let rect = ctx.memory(|m| m.area_rect(Id::new(AREA))).expect("drawn");
+        assert!(rect.height() < 250.0, "{rect:?}");
+        assert!((rect.bottom() - (900.0 - layout::MARGIN)).abs() < 2.0, "{rect:?}");
     }
 }
