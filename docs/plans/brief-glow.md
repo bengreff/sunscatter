@@ -16,3 +16,16 @@ Read first: D109 in `docs/decisions.md` ("Reentry glow comes from the aero model
 
 - Check the other agent's files in `git status` before editing.
 - See it: a reentry. If the demo has no reentry view, add one as small as possible (a step from the parachute part of the script, or a save on an entry path) and look at it under the demo lock with the toggle on and off.
+
+## State (first agent, stopped at its context budget, 2026-10-28)
+
+Landed:
+- **79a6a2d** sim: `aero::equilibrium` (11-species air, nitrogen), `aero::shock` (jump, table per gas, Olivier standoff, `equilibrium_share`), `comms::{plasma_frequency, blacked_out}`, `vessel::aerothermal::ShockLayer` per live tick + `VesselThermal::peak_heating`, `thermal::heating::stagnation` shared. Tests in `aero/shock_tests.rs`.
+- **9767d61** game: `game::comms::sheath_cut` drops the vessel's antenna in blackout; Comms menu BLACKOUT row; Reentry section SHOCK LAYER / HEATING / PEAK (`landing::shock_rows`). Table tests.
+- Docs: `docs/features/reentry.md` (spec, honest status), aero-thermal "Shock layer", an architecture row, the plan's GLOW row.
+
+Left, in order (details in reentry.md "To build"):
+1. Toggle `reentry_glow` beside `exhaust` in `persist::VisualSettings` (EXHAUST's pattern: `settings_ui::visuals_tab`, `VisualSettings::demo` from an env var, `look::Parts` row, a `drawn(setting, bench.running(), look.part)` rule).
+2. The glow in `game::scene` (see `scene::exhaust` for the pattern): emissive shell from `ShockLayer` (Δ, T₂, q̇_r, continuum) and skin cells' blackbody; calibration test against the cited peak fluxes.
+3. Blackout start/end notification (`interface::toasts`/events); a reentry view in the demo (`SUNSCATTER_DEMO_ONLY` step from the parachute part), toggle on and off, under the demo lock.
+4. Not checked: an in-flight assertion that `tests/aerothermal.rs`'s entry shows blackout and a peak (cheap to add).
