@@ -1,7 +1,7 @@
 //! One renderer for every menu (D080, D111): a panel with the menu's
 //! title, its summary, and every section under its heading (flat: nothing
-//! collapses); the left dock that stacks the open menus and always scrolls
-//! within its height; the menu bar. Labels
+//! collapses); the left dock that stacks the open menus, each with a fair
+//! share of its height and scrolling within it; the menu bar. Labels
 //! are dim small monospace, values monospace and right-aligned in the
 //! tone's colour.
 
@@ -33,8 +33,17 @@ pub fn tone_colour(t: Tone) -> Color32 {
 }
 
 /// Draws one menu: the title bar, the summary, then each section under its
-/// heading.
+/// heading (the dock draws the two parts itself, the body scrolling).
+#[cfg(test)]
 pub fn menu(ui: &mut egui::Ui, menu: MenuId, sections: &[Section]) -> MenuInput {
+    let mut input = header(ui, menu);
+    body(ui, menu, sections, &mut input);
+    input
+}
+
+/// A menu's title line (its key, its close button) and the spacing of
+/// what follows.
+fn header(ui: &mut egui::Ui, menu: MenuId) -> MenuInput {
     let mut input = MenuInput::default();
     ui.spacing_mut().item_spacing = vec2(6.0, 2.0);
     // A section's items sit just inside its header's text (egui's default
@@ -53,13 +62,17 @@ pub fn menu(ui: &mut egui::Ui, menu: MenuId, sections: &[Section]) -> MenuInput 
         });
     });
     ui.add_space(2.0);
+    input
+}
+
+/// A menu's sections, each under its heading.
+fn body(ui: &mut egui::Ui, menu: MenuId, sections: &[Section], input: &mut MenuInput) {
     for s in sections {
         if s.id != SUMMARY && !s.title.is_empty() {
             heading(ui, &s.title);
         }
-        items(ui, menu, s, &mut input);
+        items(ui, menu, s, input);
     }
-    input
 }
 
 /// A full-width section heading: a rule and the title, dim.
@@ -139,10 +152,22 @@ pub fn dock_area() -> egui::Id {
     egui::Id::new("menu_dock")
 }
 
-/// Draws the open menus stacked from `place`, in a scroll area of its
-/// height (always: deciding by last frame's height cut menus off).
+/// The egui memory of a docked menu's natural height (last frame's).
+fn natural_id(m: MenuId) -> egui::Id {
+    dock_area().with(("natural", m))
+}
+
+/// Draws the open menus stacked from `place`, each with its fair share of
+/// the dock's height (`layout::fair_heights`, from each one's natural
+/// height last frame): a short menu whole, a long one scrolling within
+/// its share under its fixed title. The whole dock also scrolls, should
+/// the titles alone not fit.
 pub fn dock(ctx: &egui::Context, place: DockPlace, menus: &[(MenuId, Vec<Section>)]) -> Vec<(MenuId, MenuInput)> {
     let mut out = Vec::new();
+    let natural: Vec<f32> =
+        menus.iter().map(|(m, _)| ctx.data(|d| d.get_temp(natural_id(*m))).unwrap_or(f32::INFINITY)).collect();
+    let gaps = GAP * menus.len().saturating_sub(1) as f32;
+    let heights = layout::fair_heights(&natural, place.max_height - gaps);
     egui::Area::new(dock_area()).fixed_pos(pos2(place.x, place.top)).show(ctx, |ui| {
         ui.set_width(DOCK_WIDTH);
         // An area lays out within its remembered size (egui's default area
@@ -155,11 +180,25 @@ pub fn dock(ctx: &egui::Context, place: DockPlace, menus: &[(MenuId, Vec<Section
                 if k > 0 {
                     ui.add_space(GAP);
                 }
+                let top = ui.cursor().top();
                 let shown = theme::panel_frame().show(ui, |ui| {
                     ui.set_width(inner_width());
-                    menu(ui, *m, sections)
+                    let mut input = header(ui, *m);
+                    // Above the body: the frame's top and the title; below it, the frame's bottom.
+                    let frame = theme::panel_frame();
+                    let bottom = f32::from(frame.inner_margin.bottom) + frame.stroke.width;
+                    let chrome = ui.cursor().top() - top + bottom;
+                    let room = (heights[k] - chrome).max(40.0);
+                    let body_out = egui::ScrollArea::vertical()
+                        .id_salt(("menu_dock_body", *m))
+                        .max_height(room)
+                        .show(ui, |ui| body(ui, *m, sections, &mut input));
+                    (input, body_out.content_size.y - body_out.inner_rect.height())
                 });
-                out.push((*m, shown.inner));
+                let (input, hidden) = shown.inner;
+                let natural = shown.response.rect.height() + hidden.max(0.0);
+                ui.ctx().data_mut(|d| d.insert_temp(natural_id(*m), natural));
+                out.push((*m, input));
             }
         });
     });

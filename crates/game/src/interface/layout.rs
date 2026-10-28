@@ -7,7 +7,8 @@
 //! the menu bar top centre, the navball cluster bottom centre with the
 //! action bar above it, the staging bar on the right edge
 //! (`interface::stage_bar`), every open menu in the left dock, stacked
-//! top to bottom and scrolling within the dock's height, and the
+//! top to bottom, each with a fair share of the dock's height
+//! ([`fair_heights`]) and scrolling within it, and the
 //! notifications window (`interface::toasts`) under the dock, bottom left.
 
 use crate::interface::menus::MenuSettings;
@@ -129,6 +130,25 @@ pub fn covered(r: Rect, hud: &[Rect]) -> bool {
     hud.iter().any(|h| h.intersects(r))
 }
 
+/// Each stacked panel's height when together they must fit in `total`
+/// (`natural`: each one's height with room to spare): a fair share, the
+/// small ones whole and the rest of the room split evenly between the
+/// tall ones (each of which then scrolls within its share). So one long
+/// menu (the RCS menu's thrusters) no longer pushes the others out of the
+/// dock. An unknown natural height (the first frame) is `f32::INFINITY`.
+pub fn fair_heights(natural: &[f32], total: f32) -> Vec<f32> {
+    let mut out: Vec<f32> = natural.iter().map(|h| h.max(0.0)).collect();
+    let mut order: Vec<usize> = (0..out.len()).collect();
+    order.sort_by(|&a, &b| out[a].total_cmp(&out[b]));
+    let mut room = total.max(0.0);
+    for (k, &i) in order.iter().enumerate() {
+        let share = room / (order.len() - k) as f32;
+        out[i] = out[i].min(share);
+        room -= out[i];
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -241,5 +261,24 @@ mod tests {
         let s: InterfaceSettings = ron::from_str(old).expect("loads");
         assert_eq!((s.ui_scale, s.navball_size, s.show_fps), (1.5, 180.0, false));
         assert_eq!(s.menus, MenuSettings::default());
+    }
+
+    /// Stacked panels share the room: the short ones whole, the tall ones
+    /// an even share of the rest.
+    #[test]
+    fn panels_share_the_room_fairly() {
+        let inf = f32::INFINITY;
+        // (natural heights, room, heights)
+        let table: [(&[f32], f32, &[f32]); 6] = [
+            (&[100.0, 200.0], 600.0, &[100.0, 200.0]),
+            (&[100.0, 900.0], 600.0, &[100.0, 500.0]),
+            (&[900.0, 100.0, 150.0], 600.0, &[350.0, 100.0, 150.0]),
+            (&[900.0, 800.0], 600.0, &[300.0, 300.0]),
+            (&[inf, inf, 50.0], 650.0, &[300.0, 300.0, 50.0]),
+            (&[], 600.0, &[]),
+        ];
+        for (natural, room, want) in table {
+            assert_eq!(fair_heights(natural, room), want, "{natural:?} in {room}");
+        }
     }
 }
