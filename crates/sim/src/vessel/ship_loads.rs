@@ -68,6 +68,14 @@ impl Vessel {
         }
     }
 
+    /// Each part's temperature now (K): the mean of its skin cells
+    /// (`structure::part_kelvin`), by part id (`Part::id`).
+    pub fn part_kelvin(&self) -> Vec<(u32, f64)> {
+        let design = self.craft.design();
+        let kelvin = structure::part_kelvin(&design.cell_part, &self.thermal.state.skin, design.parts.len(), 295.0);
+        design.parts.iter().map(|p| p.id).zip(kelvin).collect()
+    }
+
     /// The parts with the engines' thrust `out` along `dir` (body axes; the
     /// runtime's realised direction if `None`) and the ambient pressure.
     fn gather(&self, out: &ShipThrust, dir: Option<DVec3>, ambient: f64) -> Gathered {

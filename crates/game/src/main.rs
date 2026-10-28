@@ -232,13 +232,16 @@ fn body_plugins() -> (
 }
 
 /// The flight view's instruments and screens: the navball cluster, the
-/// task menus, the profiler, the systems screen and the mini systems panel.
+/// task menus, the profiler, the systems screen, the mini systems panel,
+/// the staging bar and the part cards.
 fn interface_plugins() -> (
     navball::NavballPlugin,
     interface::menus::view::MenusPlugin,
     profile::ProfilePlugin,
     systems_screen::SystemsPlugin,
     interface::mini_panel::MiniPanelPlugin,
+    interface::stage_bar::StageBarPlugin,
+    interface::part_card::PartCardPlugin,
 ) {
     (
         navball::NavballPlugin,
@@ -246,6 +249,8 @@ fn interface_plugins() -> (
         profile::ProfilePlugin,
         systems_screen::SystemsPlugin,
         interface::mini_panel::MiniPanelPlugin,
+        interface::stage_bar::StageBarPlugin,
+        interface::part_card::PartCardPlugin,
     )
 }
 

@@ -74,6 +74,42 @@ fn read(r: Option<Reading>, unit_of: fn(f64) -> (f64, &'static str, usize)) -> S
     format!("{:.*} {unit}", decimals(r.precision, scale, max), v / scale)
 }
 
+/// The unit a mass is shown in: kg, then tonnes.
+fn mass_unit(kg: f64) -> (f64, &'static str, usize) {
+    if kg.abs() < 1.0e4 {
+        (1.0, "kg", 0)
+    } else {
+        (1e3, "t", 1)
+    }
+}
+
+/// The unit a force is shown in: N, kN, MN.
+fn force_unit(n: f64) -> (f64, &'static str, usize) {
+    let a = n.abs();
+    if a < 1.0e4 {
+        (1.0, "N", 0)
+    } else if a < 1.0e7 {
+        (1e3, "kN", 1)
+    } else {
+        (1e6, "MN", 2)
+    }
+}
+
+/// A mass as it is known (D106: an estimate's reading, a dash when unknown).
+pub fn mass(r: Option<Reading>) -> String {
+    read(r, mass_unit)
+}
+
+/// A force as it is known.
+pub fn force(r: Option<Reading>) -> String {
+    read(r, force_unit)
+}
+
+/// A speed (a Δv) as it is known.
+pub fn speed_of(r: Option<Reading>) -> String {
+    read(r, speed_unit)
+}
+
 /// What the craft knows (D106: `Vessel::knowledge`, from its working
 /// sensors) for the readouts: everything by default (a craft without the
 /// part system, debug mode).
@@ -261,6 +297,27 @@ mod tests {
             [(0.0, 1.0, 1, 1), (0.1, 1.0, 1, 1), (3.0, 1e3, 1, 1), (3000.0, 1e3, 1, 0), (5e4, 1.0, 1, 0)]
         {
             assert_eq!(decimals(p, scale, max), want, "{p} {scale}");
+        }
+    }
+
+    #[test]
+    fn masses_and_forces_as_known() {
+        let r = |value: f64, precision: f64| Some(Reading { value, precision });
+        // (text, want)
+        let table = [
+            (mass(r(559_860.4, 0.0)), "559.9 t"),
+            (mass(r(559_860.4, 2_600.0)), "560 t"),
+            (mass(r(8_312.0, 0.0)), "8312 kg"),
+            (mass(None), DASH),
+            (force(r(7_607_000.0, 0.0)), "7607.0 kN"),
+            (force(r(81_000_000.0, 0.0)), "81.00 MN"),
+            (force(r(400.0, 0.0)), "400 N"),
+            (speed_of(r(3_990.24, 0.0)), "3990.2 m/s"),
+            (speed_of(r(3_990.24, 12.0)), "3990 m/s"),
+            (speed_of(None), DASH),
+        ];
+        for (got, want) in table {
+            assert_eq!(got, want);
         }
     }
 
