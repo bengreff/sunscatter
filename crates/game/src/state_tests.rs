@@ -230,3 +230,54 @@ fn thrust_not_the_throttle_refuses_rails_warp() {
     f9.controls_mut().throttle = 1.0;
     assert_eq!(f9.rails_block(), None);
 }
+
+/// The angle between vessel `v`'s nose and its velocity about Earth (deg).
+fn off_prograde(sim: &SimState, v: &Vessel) -> f64 {
+    let (_, _, vel) = v.state(&sim.world);
+    (v.attitude.q * DVec3::Z).angle_between(vel).to_degrees()
+}
+
+/// Frames of `dt` (s) for `span` seconds through the game's step, every
+/// uncrewed vessel `delay` s from its operator.
+fn fly_frames(sim: &mut SimState, span: f64, dt: f64, delay: f64) {
+    let from = sim.clock;
+    for k in 0..(span / dt).round() as usize {
+        sim.step(from.add_seconds(dt * (k + 1) as f64), |_| Some(delay), None);
+    }
+}
+
+/// A script's settings (`SetControls`, D112) make an inactive uncrewed
+/// vessel turn to prograde and burn while the active vessel coasts, through
+/// `SimState::step`: they reach it after its own light delay (D034), and
+/// 0.1 s and 0.5 s frames give the same motion bit for bit.
+#[test]
+fn a_script_flies_an_inactive_probe_through_the_step() {
+    bevy::tasks::ComputeTaskPool::get_or_init(bevy::tasks::TaskPool::default);
+    let mut sim = SimState::new();
+    sim.spawn_test_ships(2);
+    sim.active = 1;
+    assert_eq!((sim.fleet[1].crew() > 0, sim.fleet[2].crew()), (true, 0), "active crewed, probe uncrewed");
+    let (fuel, coast) = (sim.fleet[2].propellant(), sim.fleet[1].propellant());
+    let probe = sim.fleet[2].controls_mut();
+    crate::commands::apply_controls(probe, Some(0.1), None, Some(sim::vessel::HoldMode::Prograde));
+    fly_frames(&mut sim, 0.2, 0.1, 0.3);
+    assert_eq!(sim.fleet[2].propellant(), fuel, "the setting is still on its way");
+    fly_frames(&mut sim, 0.8, 0.1, 0.3);
+    assert_eq!(sim.fleet[2].controls_in_flight(), 0, "the setting has arrived");
+    // The same from here in 0.1 s and 0.5 s frames.
+    let mut chunked = SimState::new();
+    (chunked.fleet, chunked.active, chunked.clock) = (sim.fleet.clone(), sim.active, sim.clock);
+    fly_frames(&mut sim, 60.0, 0.1, 0.3);
+    fly_frames(&mut chunked, 60.0, 0.5, 0.3);
+    assert_eq!(sim.clock, chunked.clock);
+    for i in 0..sim.fleet.len() {
+        assert_eq!(sim.fleet[i].state(&sim.world), chunked.fleet[i].state(&sim.world), "vessel {i}");
+        assert_eq!(sim.fleet[i].attitude, chunked.fleet[i].attitude, "vessel {i}");
+    }
+    assert!(sim.fleet[2].propellant() < fuel, "the probe burns");
+    assert_eq!(sim.fleet[1].propellant(), coast, "the active vessel coasts");
+    let off = off_prograde(&sim, &sim.fleet[2]);
+    assert!(off < 2.0, "the probe holds prograde: {off:.2} deg off");
+    assert_eq!(sim.fleet[2].controls().throttle, 0.1, "its own controls, kept");
+    assert_eq!(sim.controls().throttle, 0.0, "the active vessel's untouched");
+}

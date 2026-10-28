@@ -5,7 +5,8 @@
 //! vessels as their light arrives there, and it cannot read a vessel with no
 //! signal. Actions go through the same `GameCommand`s as the keyboard and
 //! the UI; nothing is special-cased for the agent. Vessel-directed commands
-//! (burn plans) will travel with the path's light delay.
+//! (burn plans, controls, stages) travel with the path's light delay; a
+//! script flies any vessel it has a signal to, active or not (D112).
 
 use crate::commands::GameCommand;
 use crate::comms::{self, Comms, Location};
@@ -23,11 +24,6 @@ pub enum Effect {
     Command(GameCommand),
     /// Go to mission control (true) or aboard the active vessel (false).
     Station(bool),
-    /// Throttle (0–1) and SAS of the active vessel, when aboard.
-    Controls {
-        throttle: Option<f64>,
-        sas: Option<bool>,
-    },
     /// A command sent over the network: it arrives after `delay` seconds.
     Send {
         delay: f64,
@@ -132,17 +128,26 @@ pub fn tools() -> Vec<Tool> {
         ),
         t(
             "set_controls",
-            "Throttle (0–1), SAS and the attitude hold of the active vessel. Only aboard it (as its crew). \
-             Prograde and retrograde follow the navball's speed reference (orbit, surface or target) about \
-             its reference body; a planned burn is flown by the maneuver hold on its own.",
+            "Throttle (0–1), SAS and the attitude hold of a vessel (`id`, default the active one; each vessel \
+             keeps its own, active or not). From anywhere but aboard, the settings reach it after the signal's \
+             light delay (`arrives_in_s`); without a signal they cannot be sent. Prograde and retrograde follow \
+             the vessel's speed reference (orbit, surface or target, as last set on its navball) about its \
+             reference body; a planned burn is flown by the maneuver hold on its own.",
             schema(
                 json!({
+                    "id": id,
                     "throttle": {"type": "number", "minimum": 0, "maximum": 1},
                     "sas": {"type": "boolean"},
                     "hold": {"type": "string", "enum": HOLD_NAMES.map(|(n, _)| n)}
                 }),
                 &[],
             ),
+        ),
+        t(
+            "stage",
+            "Run a craft of parts' next stage of its sequence (`id`, default the active vessel): engines lit, \
+             pieces separated, as its stage list says. It travels like any command (`arrives_in_s`).",
+            schema(json!({"id": id}), &[]),
         ),
     ]
 }
@@ -175,6 +180,20 @@ fn signal_json(s: Option<&comms::Signal>) -> Value {
 
 fn vessel_id(args: &Value) -> Result<VesselId, String> {
     args.get("id").and_then(Value::as_u64).map(VesselId).ok_or_else(|| "missing integer `id`".into())
+}
+
+/// The vessel a command is for (`id`, default the active one) and how long
+/// it takes to reach it from the agent's location (s: 0 aboard, else the
+/// signal's light delay); an error without a signal. The command itself is
+/// routed by `commands::apply` (D067, D034).
+fn reach(args: &Value, sim: &SimState, comms: &Comms) -> Result<(VesselId, f64), String> {
+    let id = if args.get("id").is_some() { vessel_id(args)? } else { sim.ship().id() };
+    sim.index_of(id).ok_or("no such vessel")?;
+    if comms.location == Location::Vessel(id) {
+        return Ok((id, 0.0));
+    }
+    let delay = comms.signal(id).map(|s| s.delay).ok_or_else(|| format!("no signal to vessel {}", id.0))?;
+    Ok((id, delay))
 }
 
 /// Answers one call: the result, and what the game must do.
@@ -280,9 +299,7 @@ fn run(
         "get_landing_prediction" => (landing_json(sim), Vec::new()),
         "closest_approaches" => approaches(args, sim)?,
         "set_controls" => {
-            if comms.location != Location::Vessel(sim.ship().id()) {
-                return Err("you are not aboard the active vessel (use switch_vessel)".into());
-            }
+            let (id, arrives) = reach(args, sim, comms)?;
             let throttle = args.get("throttle").and_then(Value::as_f64);
             if throttle.is_some_and(|t| !(0.0..=1.0).contains(&t)) {
                 return Err("throttle must be in 0–1".into());
@@ -298,11 +315,18 @@ fn run(
                         .ok_or(format!("unknown hold `{name}`"))?,
                 ),
             };
-            let mut effects = vec![Effect::Controls { throttle, sas }];
-            // After SAS: choosing a hold turns SAS on.
-            effects.extend(hold.map(|m| Effect::Command(GameCommand::SetHold(m))));
-            let hold = hold.map(|m| m.label());
-            (json!({"throttle": throttle, "sas": sas, "hold": hold}), effects)
+            let command = GameCommand::SetControls { vessel: id, throttle, sas, hold };
+            let hold = hold.and_then(|m| HOLD_NAMES.iter().find(|(_, h)| *h == m)).map(|(n, _)| *n);
+            let reply = json!({"id": id.0, "throttle": throttle, "sas": sas, "hold": hold, "arrives_in_s": arrives});
+            (reply, vec![Effect::Command(command)])
+        }
+        "stage" => {
+            let (id, arrives) = reach(args, sim, comms)?;
+            let i = sim.index_of(id).ok_or("no such vessel")?;
+            if sim.fleet[i].ship().is_none() {
+                return Err(format!("vessel {} is not a craft of parts (it has no stage sequence)", id.0));
+            }
+            (json!({"id": id.0, "arrives_in_s": arrives}), vec![Effect::Command(GameCommand::Stage(id))])
         }
         _ => return Err(format!("unknown tool {tool}")),
     })
@@ -462,7 +486,7 @@ pub fn new_token() -> String {
 pub fn serve(
     mut iface: ResMut<InterfaceSettings>,
     mut state: Local<AgentServer>,
-    mut sim: ResMut<SimState>,
+    sim: Res<SimState>,
     comms: Res<Comms>,
     pred: Res<crate::state::Prediction>,
     mut station: ResMut<TrackingStation>,
@@ -507,14 +531,6 @@ pub fn serve(
                 }
                 Effect::Station(open) => station.open = open,
                 Effect::Send { delay, command } => in_flight.send(sim.clock, delay, command),
-                Effect::Controls { throttle, sas } => {
-                    if let Some(t) = throttle {
-                        sim.controls_mut().throttle = t;
-                    }
-                    if let Some(s) = sas {
-                        sim.controls_mut().sas = s;
-                    }
-                }
             }
         }
         call.reply(result);
@@ -589,27 +605,51 @@ mod tests {
     }
 
     #[test]
-    fn actions_become_commands_and_controls_need_the_crew() {
+    fn actions_become_commands_and_controls_reach_any_vessel() {
         let (sim, mut comms) = setup();
         let (_, e) = answer("set_warp", &json!({"level": 5}), &sim, &comms, &Default::default());
         assert_eq!(e, vec![Effect::Command(GameCommand::SetWarp(5))]);
         let (r, _) = answer("set_warp", &json!({"level": 99}), &sim, &comms, &Default::default());
         assert!(matches!(r, ToolResult::Err(_)));
+        // Aboard the active vessel: its controls, at once.
+        let active = sim.ship().id();
+        comms.location = Location::Vessel(active);
+        let (r, e) = answer("set_controls", &json!({"throttle": 0.5, "sas": false}), &sim, &comms, &Default::default());
+        let set = |vessel, throttle, sas, hold| GameCommand::SetControls { vessel, throttle, sas, hold };
+        assert_eq!(e, vec![Effect::Command(set(active, Some(0.5), Some(false), None))]);
+        assert!(matches!(r, ToolResult::Ok(v) if v["arrives_in_s"] == 0.0));
+        // From mission control, an inactive probe's (D112): after the light
+        // delay, and not without a signal.
         comms.location = Location::Site(0);
-        let (r, _) = answer("set_controls", &json!({"throttle": 1.0}), &sim, &comms, &Default::default());
-        assert!(matches!(r, ToolResult::Err(e) if e.contains("not aboard")));
-        comms.location = Location::Vessel(sim.ship().id());
-        let (_, e) = answer("set_controls", &json!({"throttle": 0.5, "sas": false}), &sim, &comms, &Default::default());
-        assert_eq!(e, vec![Effect::Controls { throttle: Some(0.5), sas: Some(false) }]);
-        let (_, e) = answer("set_controls", &json!({"hold": "retrograde"}), &sim, &comms, &Default::default());
-        assert_eq!(
-            e,
-            vec![
-                Effect::Controls { throttle: None, sas: None },
-                Effect::Command(GameCommand::SetHold(HoldMode::Retrograde))
-            ]
-        );
-        let (r, _) = answer("set_controls", &json!({"hold": "sideways"}), &sim, &comms, &Default::default());
+        let probe = sim.fleet[2].id();
+        assert_eq!(sim.fleet[2].crew(), 0);
+        comms.signals.insert(probe, Some(comms::Signal { delay: 0.02, rate: 1e6, via: vec![] }));
+        let args = json!({"id": probe.0, "hold": "retrograde"});
+        let (r, e) = answer("set_controls", &args, &sim, &comms, &Default::default());
+        assert_eq!(e, vec![Effect::Command(set(probe, None, None, Some(HoldMode::Retrograde)))]);
+        assert!(matches!(r, ToolResult::Ok(v) if v["arrives_in_s"] == 0.02 && v["hold"] == "retrograde"));
+        let (r, _) =
+            answer("set_controls", &json!({"id": probe.0, "throttle": 2.0}), &sim, &comms, &Default::default());
+        assert!(matches!(r, ToolResult::Err(e) if e.contains("0–1")));
+        let (r, _) =
+            answer("set_controls", &json!({"id": probe.0, "hold": "sideways"}), &sim, &comms, &Default::default());
         assert!(matches!(r, ToolResult::Err(e) if e.contains("unknown hold")));
+        let (r, _) = answer("stage", &json!({"id": probe.0}), &sim, &comms, &Default::default());
+        assert!(matches!(r, ToolResult::Err(e) if e.contains("not a craft of parts")));
+        comms.signals.insert(probe, None);
+        let (r, _) = answer("set_controls", &args, &sim, &comms, &Default::default());
+        assert!(matches!(r, ToolResult::Err(e) if e.contains("no signal")));
+        let (r, _) = answer("set_controls", &json!({"id": 999}), &sim, &comms, &Default::default());
+        assert!(matches!(r, ToolResult::Err(e) if e.contains("no such vessel")));
+    }
+
+    #[test]
+    fn a_script_stages_a_craft_of_parts() {
+        let sim = SimState::with_craft(&crate::test_rocket::rocket());
+        let mut comms = Comms::load();
+        comms.location = Location::Vessel(sim.ship().id());
+        let (r, e) = answer("stage", &json!({}), &sim, &comms, &Default::default());
+        assert_eq!(e, vec![Effect::Command(GameCommand::Stage(sim.ship().id()))]);
+        assert!(matches!(r, ToolResult::Ok(v) if v["arrives_in_s"] == 0.0));
     }
 }

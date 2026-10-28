@@ -26,7 +26,8 @@ The agent is at a **control location** like you (D067): mission control when the
 | `set_warp` | Time warp level |
 | `switch_vessel` | Go aboard a vessel (it becomes active) |
 | `go_to_mission_control` | Open the tracking station (mission control) |
-| `set_controls` | Throttle and SAS, aboard only |
+| `set_controls` | Throttle, SAS and hold of any vessel (`id`, default the active one; D112), after the light delay from anywhere but aboard |
+| `stage` | A craft of parts' next stage (`id`, default the active one), sent like any command |
 | `set_plan` | Replace a vessel's planned burns (prograde/normal/radial Δv, time); sent with light delay |
 | `get_landing_prediction` | Impact time and speed of the active vessel's stored trajectory |
 | `closest_approaches` | Closest approaches between two vessels (nearest first) |

@@ -6,8 +6,10 @@
 //! messages are the hook for the MCP server and scripting (D063), which will
 //! add an origin (a control location, D067).
 //!
-//! Continuous flight input (throttle, rotation) stays in `SimState::controls`,
-//! written by `keys::read_controls` in the input stage.
+//! Continuous flight input (throttle, rotation) goes straight to the active
+//! vessel's controls (`SimState::controls_mut`), written by
+//! `keys::read_controls` in the input stage. A script sets any vessel's
+//! with [`GameCommand::SetControls`].
 //!
 //! `InputContext` says which keys act this frame (review game 2): one rule,
 //! read by every key system; [`keys`] which keys the game takes.
@@ -22,7 +24,7 @@ use sim::craft::command::{ShipCommand, Stage};
 use sim::save::SaveGame;
 use sim::systems::OrderKind;
 use sim::time::Epoch;
-use sim::vessel::{FlightPlan, HoldMode, VesselId};
+use sim::vessel::{Controls, FlightPlan, HoldMode, VesselId};
 
 #[derive(Message, Clone, Debug, PartialEq)]
 pub enum GameCommand {
@@ -61,6 +63,15 @@ pub enum GameCommand {
     SetSas(bool),
     /// The pilot's RCS mode (D111: on, translation or rotation only, fine).
     SetRcs(sim::systems::rcs::RcsMode),
+    /// Any vessel's latched controls (D112: a script flies an inactive
+    /// vessel; `None` leaves a setting as it is). Sent to the vessel
+    /// ([`controls_route`]).
+    SetControls {
+        vessel: VesselId,
+        throttle: Option<f64>,
+        sas: Option<bool>,
+        hold: Option<HoldMode>,
+    },
     /// Activate the active vessel's next stage (Space, the Staging menu);
     /// for a craft of parts it becomes [`GameCommand::Stage`] of that
     /// vessel, sent to it.
@@ -147,8 +158,7 @@ pub fn apply(
         // A command for a vessel reaches it at once from aboard, else after
         // the signal's light delay, and not at all without one (D067).
         if let Some(id) = addressee(&c).filter(|_| fresh) {
-            let aboard = comms.location == crate::comms::Location::Vessel(id);
-            let delay = match route(aboard, comms.signal(id).map(|s| s.delay)) {
+            let delay = match route_to(&c, id, &sim, &comms) {
                 Route::Now => 0.0,
                 Route::After(delay) => delay,
                 Route::NoSignal => {
@@ -238,6 +248,10 @@ pub fn apply(
             GameCommand::SetThrottle(t) => sim.controls_mut().throttle = t.clamp(0.0, 1.0),
             GameCommand::SetSas(on) => sim.controls_mut().sas = *on,
             GameCommand::SetRcs(mode) => sim.controls_mut().rcs = *mode,
+            GameCommand::SetControls { vessel, throttle, sas, hold } => match sim.index_of(*vessel) {
+                Some(i) => apply_controls(sim.fleet[i].controls_mut(), *throttle, *sas, *hold),
+                None => toasts.push(now, format!("Controls for Vessel {}: no such vessel", vessel.0), true),
+            },
             GameCommand::NextStage => {
                 let mut controls = *sim.controls();
                 let ship = sim.ship();
@@ -278,16 +292,58 @@ pub fn route(aboard: bool, delay: Option<f64>) -> Route {
     }
 }
 
+/// How command `c` reaches vessel `id` from the control location: a change
+/// of controls by [`controls_route`], anything else by [`route`].
+fn route_to(c: &GameCommand, id: VesselId, sim: &SimState, comms: &crate::comms::Comms) -> Route {
+    let aboard = comms.location == crate::comms::Location::Vessel(id);
+    let signal = comms.signal(id).map(|s| s.delay);
+    match c {
+        GameCommand::SetControls { .. } => {
+            controls_route(aboard, sim.index_of(id).is_some_and(|i| sim.fleet[i].crew() > 0), signal)
+        }
+        _ => route(aboard, signal),
+    }
+}
+
+/// How a change of a vessel's controls reaches it ([`GameCommand::SetControls`]).
+/// An uncrewed vessel's helm carries the light delay itself (D034,
+/// `sim::vessel::helm`): the change is set at once with a signal (never
+/// delayed twice) and not at all without. A crewed vessel's crew acts on
+/// its controls at once, so the change travels to them like any command
+/// (D067, [`route`]).
+pub fn controls_route(aboard: bool, crewed: bool, delay: Option<f64>) -> Route {
+    match (crewed, delay) {
+        (true, _) => route(aboard, delay),
+        (false, Some(_)) => Route::Now,
+        (false, None) => Route::NoSignal,
+    }
+}
+
+/// A change of controls (`None`: left as it is): the throttle clamped to
+/// 0–1, then SAS, then the hold (choosing a hold turns SAS on, as the
+/// navball's buttons do).
+pub fn apply_controls(c: &mut Controls, throttle: Option<f64>, sas: Option<bool>, hold: Option<HoldMode>) {
+    if let Some(t) = throttle {
+        c.throttle = t.clamp(0.0, 1.0);
+    }
+    if let Some(s) = sas {
+        c.sas = s;
+    }
+    if let Some(h) = hold {
+        (c.hold, c.sas) = (h, true);
+    }
+}
+
 /// The vessel a command travels to: a craft of parts' commands, its next
-/// stage, its edited stages and functions (flight plans are routed by the
-/// planner; controls by each vessel's helm, `sim::vessel::helm`).
+/// stage, its edited stages and functions, a script's controls (flight
+/// plans are routed by the planner).
 pub fn addressee(c: &GameCommand) -> Option<VesselId> {
     match c {
         GameCommand::Ship { vessel, .. }
         | GameCommand::Function { vessel, .. }
         | GameCommand::SetStages { vessel, .. }
         | GameCommand::SetFunctions { vessel, .. } => Some(*vessel),
-        GameCommand::Stage(id) => Some(*id),
+        GameCommand::Stage(id) | GameCommand::SetControls { vessel: id, .. } => Some(*id),
         _ => None,
     }
 }
@@ -439,6 +495,26 @@ mod tests {
     }
 
     #[test]
+    fn a_change_of_controls_sets_only_what_it_names() {
+        let start = Controls { throttle: 0.4, sas: false, ..Controls::idle() };
+        // (throttle, sas, hold) → (throttle, sas, hold)
+        let table = [
+            ((None, None, None), (0.4, false, HoldMode::Stability)),
+            ((Some(1.5), None, None), (1.0, false, HoldMode::Stability)),
+            ((Some(-1.0), Some(true), None), (0.0, true, HoldMode::Stability)),
+            ((None, Some(false), Some(HoldMode::Prograde)), (0.4, true, HoldMode::Prograde)),
+        ];
+        for (i, ((t, s, h), want)) in table.into_iter().enumerate() {
+            let mut c = start;
+            apply_controls(&mut c, t, s, h);
+            assert_eq!((c.throttle, c.sas, c.hold), want, "case {i}");
+        }
+        let v = VesselId(3);
+        let c = GameCommand::SetControls { vessel: v, throttle: Some(1.0), sas: None, hold: None };
+        assert_eq!(addressee(&c), Some(v), "sent to its vessel");
+    }
+
+    #[test]
     fn commands_reach_a_vessel_from_aboard_now_else_after_the_delay() {
         // (aboard, delay, route)
         let table = [
@@ -450,6 +526,19 @@ mod tests {
         ];
         for (aboard, delay, want) in table {
             assert_eq!(route(aboard, delay), want, "{aboard} {delay:?}");
+        }
+        // Controls (aboard, crewed, delay, route): an uncrewed vessel's helm
+        // carries the delay, so its changes are set now (D034).
+        let table = [
+            (true, true, Some(0.0), Route::Now),
+            (false, true, Some(1.3), Route::After(1.3)),
+            (false, true, None, Route::NoSignal),
+            (false, false, Some(1.3), Route::Now),
+            (false, false, Some(0.0), Route::Now),
+            (false, false, None, Route::NoSignal),
+        ];
+        for (aboard, crewed, delay, want) in table {
+            assert_eq!(controls_route(aboard, crewed, delay), want, "{aboard} {crewed} {delay:?}");
         }
         let v = VesselId(7);
         assert_eq!(addressee(&GameCommand::Ship { vessel: v, commands: vec![] }), Some(v));
