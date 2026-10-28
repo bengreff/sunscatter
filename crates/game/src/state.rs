@@ -1,7 +1,6 @@
 //! Simulation state owned by the app: the world, the fleet, the clock and
 //! time warp, the player's controls, and trajectory predictions.
 
-use crate::commands::{GameCommand, InputContext, Keys};
 use crate::relations::Dominance;
 use crate::trajectory::{self, settings::OrbitSettings};
 use bevy::prelude::*;
@@ -13,7 +12,7 @@ use sim::frame::NodeId;
 use sim::kepler::Elements;
 use sim::sol;
 use sim::time::Epoch;
-use sim::vessel::{Controls, HoldMode, Phase, Segment, SiteClock, Vessel, VesselId, VesselIds};
+use sim::vessel::{Controls, Phase, Segment, SiteClock, Vessel, VesselId, VesselIds};
 use sim::world::World;
 use std::sync::Arc;
 
@@ -356,100 +355,6 @@ impl SimState {
     }
 }
 
-/// The keys that pick an attitude hold mode.
-pub const HOLD_KEYS: [(KeyCode, HoldMode); 6] = [
-    (KeyCode::Digit1, HoldMode::Stability),
-    (KeyCode::Digit2, HoldMode::Prograde),
-    (KeyCode::Digit3, HoldMode::Retrograde),
-    (KeyCode::Digit4, HoldMode::Target),
-    (KeyCode::Digit5, HoldMode::AntiTarget),
-    (KeyCode::Digit6, HoldMode::Maneuver),
-];
-
-/// Keyboard → controls, warp, and meta actions.
-pub fn read_controls(
-    keys: Res<ButtonInput<KeyCode>>,
-    time: Res<Time>,
-    ctx: Res<InputContext>,
-    mut sim: ResMut<SimState>,
-    mut commands: MessageWriter<GameCommand>,
-    mut toasts: ResMut<crate::interface::toasts::Toasts>,
-    mut reset_pressed: Local<Option<f64>>,
-) {
-    let dt = time.delta_secs_f64();
-    if ctx.allows(Keys::Warp) {
-        // `,` at 1× stops time; `.` runs it again at 1× (D111).
-        let (level, stopped) = (sim.effective_warp(), sim.paused);
-        if keys.just_pressed(KeyCode::Period) {
-            commands.write(GameCommand::SetWarp(if stopped { 0 } else { level + 1 }));
-        }
-        if keys.just_pressed(KeyCode::Comma) && !stopped {
-            commands.write(if level == 0 { GameCommand::PauseTime } else { GameCommand::SetWarp(level - 1) });
-        }
-        if keys.just_pressed(KeyCode::Slash) {
-            commands.write(GameCommand::SetWarp(0));
-        }
-    }
-    let c = &mut sim.controls;
-    // Typing in a text field, the pause menu and the tracking station (R
-    // would reset the ship unseen) do not fly the ship.
-    if !ctx.allows(Keys::Flight) {
-        c.rotate = DVec3::ZERO;
-        return;
-    }
-    let held = |a: KeyCode, b: KeyCode| keys.pressed(a) || keys.pressed(b);
-    c.throttle = throttle_after(
-        c.throttle,
-        held(KeyCode::ShiftLeft, KeyCode::ShiftRight),
-        held(KeyCode::ControlLeft, KeyCode::ControlRight),
-        held(KeyCode::AltLeft, KeyCode::AltRight),
-        dt,
-    );
-    if keys.just_pressed(KeyCode::KeyZ) {
-        c.throttle = 1.0;
-    }
-    if keys.just_pressed(KeyCode::KeyX) {
-        c.throttle = 0.0;
-    }
-    if keys.just_pressed(KeyCode::KeyT) {
-        c.sas = !c.sas;
-    }
-    // Hold modes (D075): 1 stability, 2 prograde, 3 retrograde, 4 target,
-    // 5 anti-target, 6 maneuver.
-    for (key, mode) in HOLD_KEYS {
-        if keys.just_pressed(key) {
-            commands.write(GameCommand::SetHold(mode));
-        }
-    }
-    if keys.just_pressed(KeyCode::KeyP) {
-        c.chute = true;
-    }
-    if keys.just_pressed(KeyCode::Space) {
-        commands.write(GameCommand::NextStage);
-    }
-    let axis =
-        |pos: KeyCode, neg: KeyCode| f64::from(u8::from(keys.pressed(pos))) - f64::from(u8::from(keys.pressed(neg)));
-    // Body axes: +Z nose. Pitch about X (W/S), yaw about Y (A/D), roll about Z (Q/E).
-    c.rotate = DVec3::new(
-        axis(KeyCode::KeyS, KeyCode::KeyW),
-        axis(KeyCode::KeyD, KeyCode::KeyA),
-        axis(KeyCode::KeyE, KeyCode::KeyQ),
-    );
-    if keys.just_pressed(KeyCode::KeyR) {
-        let now = time.elapsed_secs_f64();
-        if reset_confirmed(*reset_pressed, now) {
-            commands.write(GameCommand::Reset);
-            *reset_pressed = None;
-        } else {
-            toasts.push(now, "Press R again to reset to the pad", false);
-            *reset_pressed = Some(now);
-        }
-    }
-    if keys.just_pressed(KeyCode::F2) && ctx.allows(Keys::Debug) {
-        commands.write(GameCommand::SpawnTestShips(10));
-    }
-}
-
 /// Throttle ramp rates (per second): normal, and fine while Alt is held.
 pub const THROTTLE_RATE: f64 = 0.6;
 pub const THROTTLE_RATE_FINE: f64 = 0.05;
@@ -460,14 +365,6 @@ pub fn throttle_after(throttle: f64, up: bool, down: bool, fine: bool, dt: f64) 
     let rate = if fine { THROTTLE_RATE_FINE } else { THROTTLE_RATE };
     let step = rate * dt * (f64::from(u8::from(up)) - f64::from(u8::from(down)));
     (throttle + step).clamp(0.0, 1.0)
-}
-
-/// A second press of R within this many seconds resets the ship.
-pub const RESET_CONFIRM_S: f64 = 2.0;
-
-/// Whether a press of R at `now` confirms one at `previous`.
-pub fn reset_confirmed(previous: Option<f64>, now: f64) -> bool {
-    previous.is_some_and(|p| now - p <= RESET_CONFIRM_S)
 }
 
 /// Freezes the clock (used by the demo while it captures every graphics

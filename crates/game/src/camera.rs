@@ -5,6 +5,7 @@
 //! placed relative to it (our floating origin: the engine only ever sees small
 //! f32 camera-relative coordinates).
 
+use crate::commands::keys::{pressed, Action};
 use crate::commands::{InputContext, Keys};
 use crate::relations;
 use crate::state::SimState;
@@ -198,12 +199,12 @@ pub fn read_input(
     if !ctx.allows(Keys::Flight) {
         return;
     }
-    if keys.just_pressed(KeyCode::Backquote) {
+    if pressed(&keys, Action::FocusShip) {
         rig.focus = Focus::Ship;
         // The per-frame placement keeps it clear of the ground.
         rig.distance = default_distance(focus_radius(&sim, Focus::Ship));
     }
-    if keys.just_pressed(KeyCode::KeyF) {
+    if pressed(&keys, Action::FocusBody) {
         if let Some(body) = nearest_body(&sim) {
             focus_body_near_ship(&mut rig, &sim, body);
         }

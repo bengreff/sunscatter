@@ -3,11 +3,11 @@
 //! overlay. Where everything goes is pure rules in [`layout`] (D080:
 //! designated places, nothing is dragged).
 
+pub mod action_bar;
 pub mod events;
 pub mod help;
 pub mod layout;
 pub mod menus;
-pub mod mini_panel;
 pub mod part_card;
 pub mod pause;
 pub mod stage_bar;

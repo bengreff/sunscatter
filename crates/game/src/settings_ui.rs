@@ -41,13 +41,8 @@ pub struct SettingsUi {
     frames: VecDeque<f64>,
 }
 
-pub fn toggle(keys: Res<ButtonInput<KeyCode>>, time: Res<Time>, mut ui: ResMut<SettingsUi>) {
-    if keys.just_pressed(KeyCode::F3) {
-        ui.open = !ui.open;
-    }
-    if keys.just_pressed(KeyCode::F4) {
-        ui.overlay = !ui.overlay;
-    }
+/// Keeps the recent frame times (the performance overlay).
+pub fn record_frames(time: Res<Time>, mut ui: ResMut<SettingsUi>) {
     ui.frames.push_back(time.delta_secs_f64());
     while ui.frames.len() > 240 {
         ui.frames.pop_front();
@@ -126,7 +121,7 @@ pub fn draw(
 
 /// The performance overlay and the benchmark of the look's parts.
 fn performance(ui_: &mut egui::Ui, ui: &mut SettingsUi, bench: &mut Bench) {
-    ui_.checkbox(&mut ui.overlay, "Performance overlay (F4)");
+    ui_.checkbox(&mut ui.overlay, "Performance overlay (also in the Esc menu)");
     if !bench.running() && ui_.button("Measure the look and what each part costs, from this view").clicked() {
         bench.start("interactive");
     }
@@ -178,7 +173,7 @@ fn interface_tab(ui: &mut egui::Ui, s: &mut InterfaceSettings) {
             crate::interface::menus::Dock::Left => "left",
             crate::interface::menus::Dock::Right => "right",
         };
-        if ui.checkbox(&mut open, format!("{} ({}, {side} dock)", m.title(), m.key_label())).changed() {
+        if ui.checkbox(&mut open, m.with_key(&format!("{}, {side} dock", m.title()))).changed() {
             s.menus.set_open(m, open);
         }
     }

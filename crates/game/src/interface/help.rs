@@ -1,7 +1,8 @@
-//! The key help overlay (H), replacing the old Controls window. The same
+//! The key help overlay (`?`), replacing the old Controls window. The same
 //! list is shown in Settings → Controls.
 
 use super::theme;
+use crate::commands::keys::{pressed, Action};
 use bevy::prelude::*;
 use bevy_egui::input::EguiWantsInput;
 use bevy_egui::{egui, EguiContexts};
@@ -11,7 +12,10 @@ pub struct Help {
     pub open: bool,
 }
 
-/// (keys, what they do), grouped.
+/// (keys, what they do), grouped: every binding of
+/// `commands::keys::BINDINGS`, the held flight keys and the menus' keys
+/// (tests in `commands::keys` and `menus`). Hold modes and a craft's
+/// functions are clicked (on the navball and the action bar).
 pub const KEYS: &[(&str, &[(&str, &str)])] = &[
     (
         "Flight",
@@ -19,21 +23,18 @@ pub const KEYS: &[(&str, &[(&str, &str)])] = &[
             ("Shift / Ctrl", "throttle up / down (hold Alt: fine)"),
             ("Z / X", "full / cut throttle"),
             ("W S / A D / Q E", "pitch / yaw / roll"),
-            ("T", "SAS on / off"),
-            ("1–6", "hold: stability, prograde, retrograde, target, anti-target, maneuver"),
+            ("I K / J L / H N", "translate up / down, left / right, forward / back (RCS on)"),
+            ("T", "SAS on / off (hold modes: click them on the navball)"),
+            ("R", "RCS on / off"),
             ("P", "parachutes: drogue now, mains low"),
             ("Space", "activate the next stage (a craft of parts: its sequence)"),
-            ("R R", "reset to the pad (press twice; Esc > New flight picks the craft)"),
         ],
     ),
     (
         "Menus",
         &[
-            ("O", "Orbital: the orbit, the target, maneuvers"),
-            ("L", "Landing / Reentry: impact, braking, entry, parachute (shows the impact marker)"),
-            ("U", "Utilities: propellant, thermal, comms"),
-            ("G", "Staging: the stage stack"),
-            ("N", "burn planner"),
+            ("1", "Orbital: the orbit, the target, maneuvers (the burn planner)"),
+            ("2", "Landing / Reentry: impact, braking, entry, parachute (shows the impact marker)"),
         ],
     ),
     (
@@ -41,7 +42,7 @@ pub const KEYS: &[(&str, &[(&str, &str)])] = &[
         &[
             (". / ,", "warp up / down; , at 1x stops time, . runs it again"),
             ("/", "warp 1x (rails warp needs no thrust)"),
-            ("Esc", "pause menu"),
+            ("Esc", "pause menu: settings, saves, reset to the pad, help, performance overlay"),
         ],
     ),
     (
@@ -58,14 +59,10 @@ pub const KEYS: &[(&str, &[(&str, &str)])] = &[
         "Game",
         &[
             ("[ / ]", "previous / next vessel"),
-            ("F7", "tracking station"),
-            ("F8", "systems screen: the craft by layer, its commands, stages and functions"),
-            ("F5 / F9", "quicksave / quickload"),
-            ("F6", "saves"),
-            ("F3", "settings"),
-            ("F4", "performance overlay"),
-            ("F2", "spawn 10 test ships"),
-            ("H", "this help"),
+            ("M", "tracking station"),
+            ("Tab", "systems screen: the craft by layer, its commands, stages and functions"),
+            ("Cmd+S / Cmd+L", "quicksave / quickload (Ctrl+Alt+S / Ctrl+Alt+L on Windows and Linux)"),
+            ("?", "this help"),
         ],
     ),
 ];
@@ -86,7 +83,7 @@ pub fn key_grid(ui: &mut egui::Ui) {
 }
 
 pub fn keys(keys: Res<ButtonInput<KeyCode>>, egui: Res<EguiWantsInput>, mut help: ResMut<Help>) {
-    if keys.just_pressed(KeyCode::KeyH) && !egui.wants_any_keyboard_input() {
+    if pressed(&keys, Action::Help) && !egui.wants_any_keyboard_input() {
         help.open = !help.open;
     }
 }
@@ -97,7 +94,7 @@ pub fn draw(mut contexts: EguiContexts, mut help: ResMut<Help>) -> Result {
     }
     let ctx = contexts.ctx_mut()?;
     let mut open = true;
-    egui::Window::new("Keys (H)")
+    egui::Window::new("Keys (?)")
         .open(&mut open)
         .collapsible(false)
         .resizable(false)

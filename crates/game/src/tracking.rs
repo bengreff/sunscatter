@@ -12,6 +12,7 @@
 //! orbit lines (the active vessel always does).
 
 use crate::camera::{self, CameraRig, Focus};
+use crate::commands::keys::{self, pressed};
 use crate::commands::{GameCommand, InputContext, Keys};
 use crate::format::{distance as fmt_dist, duration as fmt_duration};
 use crate::state::{Prediction, SimState, WARP_LEVELS};
@@ -128,7 +129,7 @@ pub fn delete_vessel(sim: &mut SimState, tracked: &mut Tracked, rig: &mut Camera
     true
 }
 
-/// Keys (F7, `[`, `]`), id bookkeeping, and entering/leaving the station.
+/// Keys (M, `[`, `]`), id bookkeeping, and entering/leaving the station.
 #[allow(clippy::too_many_arguments)]
 pub fn update(
     keys: Res<ButtonInput<KeyCode>>,
@@ -138,16 +139,16 @@ pub fn update(
     mut ts: ResMut<TrackingStation>,
     mut commands: MessageWriter<GameCommand>,
 ) {
-    if ctx.allows(Keys::Menus) && keys.just_pressed(KeyCode::F7) {
+    if ctx.allows(Keys::Menus) && pressed(&keys, keys::Action::TrackingStation) {
         ts.open = !ts.open;
     }
     if ctx.allows(Keys::Flight) {
         let n = sim.fleet.len();
         let id = |i: usize| sim.fleet[i % n].id();
-        if keys.just_pressed(KeyCode::BracketRight) {
+        if pressed(&keys, keys::Action::NextVessel) {
             commands.write(GameCommand::Switch(id(sim.active + 1)));
         }
-        if keys.just_pressed(KeyCode::BracketLeft) {
+        if pressed(&keys, keys::Action::PreviousVessel) {
             commands.write(GameCommand::Switch(id(sim.active + n - 1)));
         }
     }

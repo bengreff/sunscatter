@@ -51,7 +51,7 @@ pub fn menu(ui: &mut egui::Ui, menu: MenuId, sections: &[Section], settings: &Me
         ui.label(RichText::new(menu.title()).monospace().strong().color(theme::ACCENT));
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             let close = egui::Button::new(RichText::new("×").color(theme::DIM)).frame(false);
-            if ui.add(close).on_hover_text(format!("Close ({})", menu.key_label())).clicked() {
+            if ui.add(close).on_hover_text(menu.with_key("Close")).clicked() {
                 input.close = true;
             }
             ui.label(RichText::new(menu.key_label()).monospace().small().color(theme::DIM));
@@ -207,7 +207,7 @@ pub fn bar(ctx: &egui::Context, settings: &MenuSettings) -> Option<MenuId> {
                 for m in MenuId::ALL {
                     let open = settings.is_open(m);
                     let verb = if open { "Close" } else { "Open" };
-                    let r = bar_item(ui, m, open).on_hover_text(format!("{verb} {} ({})", m.title(), m.key_label()));
+                    let r = bar_item(ui, m, open).on_hover_text(m.with_key(&format!("{verb} {}", m.title())));
                     if r.clicked() {
                         clicked = Some(m);
                     }

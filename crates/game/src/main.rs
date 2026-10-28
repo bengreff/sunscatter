@@ -108,9 +108,9 @@ fn main() {
                 commands::update_context,
                 interface::pause::keys,
                 interface::help::keys,
-                state::read_controls,
+                commands::keys::read_controls,
                 hud::measure_fps,
-                settings_ui::toggle,
+                settings_ui::record_frames,
                 demo::run.run_if(move || !touring),
                 tour::run.run_if(move || touring),
                 bench::run,
@@ -125,7 +125,7 @@ fn main() {
         )
         .add_systems(
             Update,
-            (saves::keys, tracking::update, planner::keys, agent::serve, commands::apply)
+            (saves::keys, tracking::update, agent::serve, commands::apply)
                 .chain()
                 .after(hud::pick_bodies)
                 .in_set(Stage::Input),
@@ -232,14 +232,14 @@ fn body_plugins() -> (
 }
 
 /// The flight view's instruments and screens: the navball cluster, the
-/// task menus, the profiler, the systems screen, the mini systems panel,
+/// task menus, the profiler, the systems screen, the action-group bar,
 /// the staging bar and the part cards.
 fn interface_plugins() -> (
     navball::NavballPlugin,
     interface::menus::view::MenusPlugin,
     profile::ProfilePlugin,
     systems_screen::SystemsPlugin,
-    interface::mini_panel::MiniPanelPlugin,
+    interface::action_bar::ActionBarPlugin,
     interface::stage_bar::StageBarPlugin,
     interface::part_card::PartCardPlugin,
 ) {
@@ -248,7 +248,7 @@ fn interface_plugins() -> (
         interface::menus::view::MenusPlugin,
         profile::ProfilePlugin,
         systems_screen::SystemsPlugin,
-        interface::mini_panel::MiniPanelPlugin,
+        interface::action_bar::ActionBarPlugin,
         interface::stage_bar::StageBarPlugin,
         interface::part_card::PartCardPlugin,
     )

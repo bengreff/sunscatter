@@ -1,7 +1,7 @@
 //! The stage and function editors' rules (D107; rule 8): the commands a
 //! craft takes (the pick list), and edits to a list of named command lists
 //! (the stage sequence or the saved functions: add, remove, rename, move,
-//! add and remove commands, keys and pins). The editors work on a draft
+//! add and remove commands, pins). The editors work on a draft
 //! and send it whole (`GameCommand::SetStages`, `SetFunctions`); the sim
 //! checks every command and refuses the whole list with its reasons.
 
@@ -80,8 +80,7 @@ pub enum Edit {
     AddAction(usize, ShipCommand),
     RemoveAction(usize, usize),
     ActionUp(usize, usize),
-    /// A function's key (`None`: none) and whether it is pinned.
-    Key(usize, Option<String>),
+    /// Whether a function is pinned to the action bar.
     Pin(usize, bool),
 }
 
@@ -101,7 +100,6 @@ pub fn apply(list: &mut Vec<Stage>, edit: Edit) {
             list[i].actions.remove(j);
         }
         Edit::ActionUp(i, j) if i < n && j > 0 && j < list[i].actions.len() => list[i].actions.swap(j - 1, j),
-        Edit::Key(i, key) if i < n => list[i].key = key.filter(|k| !k.trim().is_empty()),
         Edit::Pin(i, on) if i < n => list[i].pinned = on,
         _ => {}
     }
@@ -173,10 +171,7 @@ mod tests {
             vec![Stage { actions: vec![ShipCommand::ArmChutes, ShipCommand::ReleaseClamps], ..stage("A", 0) }];
         apply(&mut list, Edit::ActionUp(0, 1));
         assert_eq!(list[0].actions[0], ShipCommand::ReleaseClamps);
-        apply(&mut list, Edit::Key(0, Some("K".into())));
         apply(&mut list, Edit::Pin(0, true));
-        assert_eq!((list[0].key.as_deref(), list[0].pinned), (Some("K"), true));
-        apply(&mut list, Edit::Key(0, Some("  ".into())));
-        assert_eq!(list[0].key, None, "a blank key is none");
+        assert!(list[0].pinned);
     }
 }

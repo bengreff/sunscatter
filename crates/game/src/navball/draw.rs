@@ -10,7 +10,7 @@ use crate::commands::GameCommand;
 use crate::format::{duration as fmt_duration, DASH};
 use crate::interface::layout::InterfaceSettings;
 use crate::interface::theme;
-use crate::state::{SimState, HOLD_KEYS};
+use crate::state::SimState;
 use crate::tracking::TrackingStation;
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
@@ -180,7 +180,7 @@ fn readouts(ui: &mut egui::Ui, s: &NavState) {
     });
 }
 
-/// SAS, the hold modes with their keys, and the throttle bar.
+/// SAS, the hold modes (click only, D111), and the throttle bar.
 fn controls(ui: &mut egui::Ui, sim: &SimState, s: &NavState, height: f32, actions: &mut Vec<Action>) {
     let c = sim.controls;
     ui.horizontal_top(|ui| {
@@ -192,10 +192,10 @@ fn controls(ui: &mut egui::Ui, sim: &SimState, s: &NavState, height: f32, action
                 actions.push(Action::Command(GameCommand::SetSas(!c.sas)));
             }
             let has_burn = s.maneuver.is_some();
-            for (key, mode) in HOLD_KEYS {
+            for mode in HoldMode::ALL {
                 let active = c.sas && c.hold == mode;
                 let enabled = active || rules::hold_available(mode, s.target.is_some(), has_burn);
-                let r = hold_button(ui, short(mode), key_label(key), active, enabled);
+                let r = hold_button(ui, short(mode), "", active, enabled);
                 if r.on_hover_text(mode.label()).clicked() {
                     actions.push(Action::Command(GameCommand::SetHold(mode)));
                 }
@@ -218,8 +218,8 @@ fn controls(ui: &mut egui::Ui, sim: &SimState, s: &NavState, height: f32, action
     });
 }
 
-/// A hold button: the mode on the left, its key dim on the right, lit
-/// when active.
+/// A hold button: the mode on the left, a key (if any) dim on the right,
+/// lit when active.
 fn hold_button(ui: &mut egui::Ui, name: &str, key: &str, lit: bool, enabled: bool) -> egui::Response {
     let colour = if lit { theme::TEXT } else { theme::DIM };
     let atoms = (
@@ -239,19 +239,6 @@ fn short(mode: HoldMode) -> &'static str {
         HoldMode::Target => "TGT",
         HoldMode::AntiTarget => "ANTI",
         HoldMode::Maneuver => "MNV",
-    }
-}
-
-/// The key a hold mode is on, as shown on its button.
-fn key_label(key: KeyCode) -> &'static str {
-    match key {
-        KeyCode::Digit1 => "1",
-        KeyCode::Digit2 => "2",
-        KeyCode::Digit3 => "3",
-        KeyCode::Digit4 => "4",
-        KeyCode::Digit5 => "5",
-        KeyCode::Digit6 => "6",
-        _ => "",
     }
 }
 

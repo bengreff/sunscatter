@@ -11,7 +11,6 @@ use super::inspect::{self, Selection};
 use super::rules::{self, Layer};
 use super::view::SystemsView;
 use super::{Drafts, SystemsScreen, Tab};
-use crate::commands::keys::{bind_keys, key_label};
 use crate::commands::GameCommand;
 use crate::interface::theme;
 use crate::staging::parts::label;
@@ -208,7 +207,7 @@ fn editors(
     let Some(mut drafts) = screen.drafts.take() else { return };
     ui.horizontal(|ui| {
         for (tab, name) in
-            [(Tab::Stages, "STAGES (Space runs the next)"), (Tab::Functions, "FUNCTIONS (pinned: the mini panel)")]
+            [(Tab::Stages, "STAGES (Space runs the next)"), (Tab::Functions, "FUNCTIONS (pinned: the action bar)")]
         {
             if ui.selectable_label(screen.tab == tab, name).clicked() {
                 screen.tab = tab;
@@ -218,11 +217,6 @@ fn editors(
     let functions = screen.tab == Tab::Functions;
     let k = usize::from(functions);
     let list = if functions { &mut drafts.functions } else { &mut drafts.stages };
-    let keys: Vec<Option<KeyCode>> = {
-        let pinned: Vec<Option<&str>> = list.iter().filter(|s| s.pinned).map(|s| s.key.as_deref()).collect();
-        let mut bound = bind_keys(&pinned).into_iter();
-        list.iter().map(|s| if s.pinned { bound.next().flatten() } else { None }).collect()
-    };
     let catalogue = edit::catalogue(def);
     let mut edits: Vec<Edit> = Vec::new();
     let mut run: Option<Vec<sim::craft::command::ShipCommand>> = None;
@@ -230,7 +224,7 @@ fn editors(
         ui,
         |ui| {
             for (i, s) in list.iter().enumerate() {
-                entry(ui, i, s, functions, keys[i], &catalogue, &mut edits, &mut run);
+                entry(ui, i, s, functions, &catalogue, &mut edits, &mut run);
             }
         },
     );
@@ -275,7 +269,6 @@ fn entry(
     i: usize,
     s: &Stage,
     function: bool,
-    key: Option<KeyCode>,
     catalogue: &[sim::craft::command::ShipCommand],
     edits: &mut Vec<Edit>,
     run: &mut Option<Vec<sim::craft::command::ShipCommand>>,
@@ -298,14 +291,6 @@ fn entry(
             let mut pinned = s.pinned;
             if ui.checkbox(&mut pinned, "pinned").changed() {
                 edits.push(Edit::Pin(i, pinned));
-            }
-            let mut text = s.key.clone().unwrap_or_default();
-            ui.label("key");
-            if ui.add(egui::TextEdit::singleline(&mut text).desired_width(22.0).char_limit(1)).changed() {
-                edits.push(Edit::Key(i, Some(text)));
-            }
-            if let Some(k) = key {
-                ui.label(egui::RichText::new(format!("runs on {}", key_label(k))).color(theme::ACCENT));
             }
             if ui.button("run").clicked() {
                 *run = Some(s.actions.clone());

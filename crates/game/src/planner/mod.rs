@@ -186,24 +186,8 @@ pub fn nearest_on_screen(run: &[(Epoch, Vec2)], cursor: Vec2, max_px: f32) -> Op
 
 pub use view::pick_on_line;
 
-/// Toggles the planner (N) for the active vessel.
-pub fn keys(
-    keys: Res<ButtonInput<KeyCode>>,
-    ctx: Res<crate::commands::InputContext>,
-    sim: Res<SimState>,
-    mut planner: ResMut<Planner>,
-) {
-    if ctx.allows(crate::commands::Keys::Menus) && keys.just_pressed(KeyCode::KeyN) {
-        if planner.open {
-            planner.open = false;
-        } else {
-            planner.open_for(sim.ship(), sim.clock);
-        }
-    }
-}
-
 impl Planner {
-    /// Opens the planner on `vessel`'s plan (N, or Orbital ▸ Maneuvers).
+    /// Opens the planner on `vessel`'s plan (the Orbit menu's Maneuvers).
     /// Already open on it, the draft is kept: unsent edits are not lost.
     pub fn open_for(&mut self, vessel: &Vessel, now: Epoch) {
         if self.open && self.vessel == Some(vessel.id()) {

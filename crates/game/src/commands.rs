@@ -7,11 +7,10 @@
 //! add an origin (a control location, D067).
 //!
 //! Continuous flight input (throttle, rotation) stays in `SimState::controls`,
-//! written by `state::read_controls` in the input stage.
+//! written by `keys::read_controls` in the input stage.
 //!
 //! `InputContext` says which keys act this frame (review game 2): one rule,
-//! read by every key system; [`keys`] which keys the game takes and the
-//! keys a craft's pinned functions get.
+//! read by every key system; [`keys`] which keys the game takes.
 
 pub mod keys;
 
@@ -66,7 +65,7 @@ pub enum GameCommand {
     NextStage,
     /// Run a craft of parts' next stage (its sequence), sent to it.
     Stage(VesselId),
-    /// Run a craft of parts' saved function by name (the mini panel), sent
+    /// Run a craft of parts' saved function by name (the action-group bar), sent
     /// to it.
     Function {
         vessel: VesselId,
@@ -368,15 +367,14 @@ pub enum InputContext {
 /// Groups of keys, by what they act on.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Keys {
-    /// Throttle, rotation, SAS, chute, reset to the pad, vessel switching.
+    /// Throttle, rotation, translation, SAS, RCS, chute, staging, vessel
+    /// switching, the camera's focus.
     Flight,
     /// Time warp.
     Warp,
     /// Quicksave, quickload, the save list, the tracking station, settings.
     Menus,
-    /// Debug keys (F2).
-    Debug,
-    /// The flight view's task menus (O, L, U, G): also while paused.
+    /// The flight view's task menus (1–6): also while paused.
     Hud,
 }
 
@@ -401,7 +399,7 @@ impl InputContext {
     pub fn allows(self, keys: Keys) -> bool {
         use InputContext as C;
         match keys {
-            Keys::Flight | Keys::Debug => self == C::Flight,
+            Keys::Flight => self == C::Flight,
             Keys::Warp => matches!(self, C::Flight | C::Station | C::Systems),
             Keys::Menus => self != C::TextEntry,
             Keys::Hud => matches!(self, C::Flight | C::Paused),
@@ -486,19 +484,18 @@ mod tests {
     #[test]
     fn keys_by_context() {
         use InputContext as C;
-        // (context, flight, warp, menus, debug, hud)
+        // (context, flight, warp, menus, hud)
         let table = [
-            (C::Flight, true, true, true, true, true),
-            (C::Station, false, true, true, false, false),
-            (C::Systems, false, true, true, false, false),
-            (C::Paused, false, false, true, false, true),
-            (C::TextEntry, false, false, false, false, false),
+            (C::Flight, true, true, true, true),
+            (C::Station, false, true, true, false),
+            (C::Systems, false, true, true, false),
+            (C::Paused, false, false, true, true),
+            (C::TextEntry, false, false, false, false),
         ];
-        for (c, flight, warp, menus, debug, hud) in table {
+        for (c, flight, warp, menus, hud) in table {
             assert_eq!(c.allows(Keys::Flight), flight, "{c:?} flight");
             assert_eq!(c.allows(Keys::Warp), warp, "{c:?} warp");
             assert_eq!(c.allows(Keys::Menus), menus, "{c:?} menus");
-            assert_eq!(c.allows(Keys::Debug), debug, "{c:?} debug");
             assert_eq!(c.allows(Keys::Hud), hud, "{c:?} hud");
         }
     }

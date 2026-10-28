@@ -67,23 +67,29 @@ impl MenuId {
         }
     }
 
-    /// The key that opens and closes it.
-    pub fn key(self) -> KeyCode {
+    /// The number key that opens and closes it (D111: 1–0), if any.
+    pub fn key(self) -> Option<KeyCode> {
         match self {
-            MenuId::Orbital => KeyCode::KeyO,
-            MenuId::Landing => KeyCode::KeyL,
-            MenuId::Utilities => KeyCode::KeyU,
-            MenuId::Staging => KeyCode::KeyG,
+            MenuId::Orbital => Some(KeyCode::Digit1),
+            MenuId::Landing => Some(KeyCode::Digit2),
+            MenuId::Utilities | MenuId::Staging => None,
         }
     }
 
-    /// The key as shown (the menu bar, the help).
+    /// The key as shown (the menu bar, the help); empty without one.
     pub fn key_label(self) -> &'static str {
         match self {
-            MenuId::Orbital => "O",
-            MenuId::Landing => "L",
-            MenuId::Utilities => "U",
-            MenuId::Staging => "G",
+            MenuId::Orbital => "1",
+            MenuId::Landing => "2",
+            MenuId::Utilities | MenuId::Staging => "",
+        }
+    }
+
+    /// `text` with the menu's key after it, if it has one: "Close (1)".
+    pub fn with_key(self, text: &str) -> String {
+        match self.key_label() {
+            "" => text.to_string(),
+            k => format!("{text} ({k})"),
         }
     }
 
@@ -309,12 +315,15 @@ mod tests {
 
     #[test]
     fn every_menu_has_a_unique_key_and_a_dock() {
-        let keys: BTreeSet<_> = MenuId::ALL.iter().map(|m| m.key_label()).collect();
-        assert_eq!(keys.len(), MenuId::ALL.len(), "unique keys");
-        let codes: std::collections::HashSet<_> = MenuId::ALL.iter().map(|m| m.key()).collect();
-        assert_eq!(codes.len(), MenuId::ALL.len());
+        let keyed: Vec<MenuId> = MenuId::ALL.into_iter().filter(|m| m.key().is_some()).collect();
+        let keys: BTreeSet<_> = keyed.iter().map(|m| m.key_label()).collect();
+        assert_eq!(keys.len(), keyed.len(), "unique keys");
+        let codes: std::collections::HashSet<_> = keyed.iter().map(|m| m.key()).collect();
+        assert_eq!(codes.len(), keyed.len());
         for m in MenuId::ALL {
-            assert_eq!(format!("{:?}", m.key()), format!("Key{}", m.key_label()), "{m:?}");
+            let code = m.key().map(|k| format!("{k:?}"));
+            let label = (!m.key_label().is_empty()).then(|| format!("Digit{}", m.key_label()));
+            assert_eq!(code, label, "{m:?}");
             assert!(matches!(m.dock(), Dock::Left | Dock::Right));
             assert!(!m.title().is_empty() && !m.short().is_empty());
         }
@@ -329,7 +338,7 @@ mod tests {
         let tokens = |keys: &str| -> Vec<String> {
             keys.split(|c: char| c.is_whitespace() || c == '/').filter(|t| !t.is_empty()).map(str::to_string).collect()
         };
-        for m in MenuId::ALL {
+        for m in MenuId::ALL.into_iter().filter(|m| m.key().is_some()) {
             let mut listed = 0;
             for (group, keys) in crate::interface::help::KEYS {
                 for (k, _) in *keys {

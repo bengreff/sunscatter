@@ -6,6 +6,7 @@
 //! are not saved: loading resets warp to 1x and tracks every vessel.
 
 use crate::camera::{CameraRig, Focus};
+use crate::commands::keys::{pressed, Action};
 use crate::commands::{GameCommand, InputContext, Keys};
 use crate::interface::toasts::Toasts;
 use crate::persist::Persist;
@@ -189,13 +190,13 @@ pub fn keys(
     }
     let now = time.elapsed_secs_f64();
     let path = save_path(&persist.dirs.saves, QUICKSAVE);
-    if keys.just_pressed(KeyCode::F5) {
+    if pressed(&keys, Action::QuickSave) {
         match save(&sim, &path) {
             Ok(()) => ui.notify(&mut toasts, now, "Quicksaved".into(), false),
             Err(e) => ui.notify(&mut toasts, now, format!("Quicksave failed: {e}"), true),
         }
     }
-    if keys.just_pressed(KeyCode::F9) {
+    if pressed(&keys, Action::QuickLoad) {
         match read(&sim, &path) {
             Ok(save) => {
                 commands.write(GameCommand::Restore(Box::new(save)));
@@ -203,10 +204,6 @@ pub fn keys(
             }
             Err(e) => ui.notify(&mut toasts, now, format!("Quickload failed: {e}"), true),
         }
-    }
-    if keys.just_pressed(KeyCode::F6) {
-        ui.open = !ui.open;
-        ui.stale = true;
     }
 }
 

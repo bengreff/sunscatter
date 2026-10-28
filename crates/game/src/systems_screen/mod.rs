@@ -3,10 +3,11 @@
 //! (physical, structural, thermal, plumbing, electrical, data, health),
 //! every part and component can be inspected and commanded, and the stage
 //! sequence and saved functions are edited (saved with the vessel, D107:
-//! vessel state, not settings) and pinned to the mini systems panel.
+//! vessel state, not settings) and pinned to the action-group bar.
 //!
-//! F8 opens and closes it (also the mini panel's SYSTEMS button); Esc
-//! closes it. While it is open the clock runs, warp keys act and flight
+//! Tab opens and closes it; the action bar's SYSTEMS button, the menus'
+//! links and the part cards' "more" open it at a layer and a part
+//! ([`SystemsScreen::open_at`]); Esc closes it. While it is open the clock runs, warp keys act and flight
 //! keys do not (`commands::InputContext::Systems`).
 //!
 //! Pure rules: [`rules`] (facts, layer colours, tree, camera, pick),
@@ -20,6 +21,7 @@ pub mod rules;
 mod ui;
 pub mod view;
 
+use crate::commands::keys::{pressed, Action};
 use crate::commands::{InputContext, Keys};
 use bevy::prelude::*;
 use inspect::Selection;
@@ -106,6 +108,21 @@ impl Default for SystemsScreen {
     }
 }
 
+impl SystemsScreen {
+    /// Opens the screen, at `layer` and with `part` selected when given
+    /// (the one way in from the flight view: the action bar, the menus'
+    /// links, the part cards).
+    pub fn open_at(&mut self, layer: Option<Layer>, part: Option<u32>) {
+        self.open = true;
+        if let Some(layer) = layer {
+            self.layer = layer;
+        }
+        if let Some(part) = part {
+            self.selected = Some(Selection::Part(part));
+        }
+    }
+}
+
 /// The screen's resources and systems.
 pub struct SystemsPlugin;
 
@@ -114,15 +131,18 @@ impl Plugin for SystemsPlugin {
         app.init_resource::<SystemsScreen>()
             .init_gizmo_group::<view::NetworkGizmos>()
             .add_systems(Startup, (view::setup, view::setup_gizmos))
-            .add_systems(Update, keys.after(crate::commands::update_context).before(crate::state::read_controls))
+            .add_systems(
+                Update,
+                keys.after(crate::commands::update_context).before(crate::commands::keys::read_controls),
+            )
             .add_systems(Update, view::update.after(crate::state::advance))
             .add_systems(bevy_egui::EguiPrimaryContextPass, ui::draw.after(crate::hud::draw));
     }
 }
 
-/// F8 opens and closes the screen (not while paused or typing).
+/// Tab opens and closes the screen (not while paused or typing).
 pub fn keys(keys: Res<ButtonInput<KeyCode>>, ctx: Res<InputContext>, mut screen: ResMut<SystemsScreen>) {
-    if keys.just_pressed(KeyCode::F8) && ctx.allows(Keys::Menus) && *ctx != InputContext::Paused {
+    if pressed(&keys, Action::SystemsScreen) && ctx.allows(Keys::Menus) && *ctx != InputContext::Paused {
         screen.open = !screen.open;
     }
 }
@@ -153,5 +173,16 @@ mod tests {
         assert_eq!((other.stages[0].name.as_str(), other.dirty), ("X", [false; 2]));
         let other = Drafts::sync(Some(d), v, "c@1", &[s("Y")], &[]);
         assert_eq!(other.stages[0].name, "Y");
+    }
+
+    /// `open_at` opens at the layer and part given, and keeps the others.
+    #[test]
+    fn open_at_a_layer_and_a_part() {
+        let mut screen = SystemsScreen { selected: Some(Selection::Part(3)), ..SystemsScreen::default() };
+        screen.open_at(None, None);
+        assert!(screen.open);
+        assert_eq!((screen.layer, screen.selected), (Layer::Physical, Some(Selection::Part(3))));
+        screen.open_at(Some(Layer::Electrical), Some(9));
+        assert_eq!((screen.layer, screen.selected), (Layer::Electrical, Some(Selection::Part(9))));
     }
 }

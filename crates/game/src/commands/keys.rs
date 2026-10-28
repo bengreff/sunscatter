@@ -1,253 +1,339 @@
-//! Which keys the game takes, and the keys a craft's pinned functions get
-//! (D107: the mini systems panel's functions run by a click or a key). A
-//! function keeps the key its craft file or the systems screen gave it when
-//! no game key uses it and no earlier pinned function took it; otherwise
-//! it gets the first free key of [`FREE_KEYS`] (shown on the panel), so a
-//! function key never shadows a flight key (`3` is a hold mode, `G` the
-//! Staging menu, `A` yaw).
+//! Which keys the game takes (D111): one table, [`BINDINGS`], from a key
+//! (with its modifiers) to what it does, read by every system that acts on
+//! a key ([`pressed`]); the flight keys ([`read_controls`]); the task
+//! menus' number keys (`MenuId::key`). No function keys (they need fn on a
+//! Mac) and no craft-specific keys: a craft's pinned functions are clicked
+//! on the action-group bar, its hold modes on the navball.
+//!
+//! Quicksave and quickload are Cmd+S / Cmd+L on a Mac and Ctrl+Alt+S /
+//! Ctrl+Alt+L elsewhere (Ctrl alone is throttle down); while such a chord
+//! is held the flight keys under it do not act (S would pitch). Help is
+//! `?` (Shift+/): the throttle Shift ramped on the way is put back.
 
-use bevy::prelude::KeyCode;
+use crate::commands::{GameCommand, InputContext, Keys};
+use crate::state::{throttle_after, SimState};
+use bevy::prelude::*;
+use glam::DVec3;
 
-/// Every key the game acts on (the key help's, `interface::help::KEYS`,
-/// plus F8, the systems screen): what a function key may not take.
-pub const RESERVED: &[KeyCode] = &[
-    KeyCode::ShiftLeft,
-    KeyCode::ShiftRight,
-    KeyCode::ControlLeft,
-    KeyCode::ControlRight,
-    KeyCode::AltLeft,
-    KeyCode::AltRight,
-    KeyCode::KeyZ,
-    KeyCode::KeyX,
-    KeyCode::KeyW,
-    KeyCode::KeyS,
-    KeyCode::KeyA,
-    KeyCode::KeyD,
-    KeyCode::KeyQ,
-    KeyCode::KeyE,
-    KeyCode::KeyT,
-    KeyCode::Digit1,
-    KeyCode::Digit2,
-    KeyCode::Digit3,
-    KeyCode::Digit4,
-    KeyCode::Digit5,
-    KeyCode::Digit6,
-    KeyCode::KeyP,
-    KeyCode::Space,
-    KeyCode::KeyR,
-    KeyCode::KeyO,
-    KeyCode::KeyL,
-    KeyCode::KeyU,
-    KeyCode::KeyG,
-    KeyCode::KeyN,
-    KeyCode::Period,
-    KeyCode::Comma,
-    KeyCode::Slash,
-    KeyCode::Escape,
-    KeyCode::KeyF,
-    KeyCode::Backquote,
-    KeyCode::BracketLeft,
-    KeyCode::BracketRight,
-    KeyCode::F2,
-    KeyCode::F3,
-    KeyCode::F4,
-    KeyCode::F5,
-    KeyCode::F6,
-    KeyCode::F7,
-    KeyCode::F8,
-    KeyCode::F9,
-    KeyCode::KeyH,
-];
+/// What a key does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Action {
+    /// Flight.
+    ThrottleFull,
+    ThrottleCut,
+    Sas,
+    /// RCS on or off (and its menu with it).
+    Rcs,
+    Chutes,
+    NextStage,
+    PreviousVessel,
+    NextVessel,
+    /// Time: one level up (from stopped time, 1×), one down (at 1×, time
+    /// stops), 1×.
+    WarpUp,
+    WarpDown,
+    Warp1x,
+    /// Screens.
+    SystemsScreen,
+    TrackingStation,
+    QuickSave,
+    QuickLoad,
+    Help,
+    /// Camera.
+    FocusBody,
+    FocusShip,
+}
 
-/// Keys given, in order, to pinned functions whose own key is taken or
-/// missing.
-pub const FREE_KEYS: &[KeyCode] = &[
-    KeyCode::Digit7,
-    KeyCode::Digit8,
-    KeyCode::Digit9,
-    KeyCode::Digit0,
-    KeyCode::KeyB,
-    KeyCode::KeyC,
-    KeyCode::KeyV,
-    KeyCode::KeyY,
-    KeyCode::KeyI,
-    KeyCode::KeyJ,
-    KeyCode::KeyK,
-    KeyCode::KeyM,
-];
+/// A key and the modifiers it needs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Chord {
+    pub key: KeyCode,
+    pub with: Modifier,
+}
 
-const LETTERS: [KeyCode; 26] = [
-    KeyCode::KeyA,
-    KeyCode::KeyB,
-    KeyCode::KeyC,
-    KeyCode::KeyD,
-    KeyCode::KeyE,
-    KeyCode::KeyF,
-    KeyCode::KeyG,
-    KeyCode::KeyH,
-    KeyCode::KeyI,
-    KeyCode::KeyJ,
-    KeyCode::KeyK,
-    KeyCode::KeyL,
-    KeyCode::KeyM,
-    KeyCode::KeyN,
-    KeyCode::KeyO,
-    KeyCode::KeyP,
-    KeyCode::KeyQ,
-    KeyCode::KeyR,
-    KeyCode::KeyS,
-    KeyCode::KeyT,
-    KeyCode::KeyU,
-    KeyCode::KeyV,
-    KeyCode::KeyW,
-    KeyCode::KeyX,
-    KeyCode::KeyY,
-    KeyCode::KeyZ,
-];
-const DIGITS: [KeyCode; 10] = [
-    KeyCode::Digit0,
-    KeyCode::Digit1,
-    KeyCode::Digit2,
-    KeyCode::Digit3,
-    KeyCode::Digit4,
-    KeyCode::Digit5,
-    KeyCode::Digit6,
-    KeyCode::Digit7,
-    KeyCode::Digit8,
-    KeyCode::Digit9,
-];
+/// The modifier a chord needs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Modifier {
+    None,
+    /// Shift (`?` is Shift+/).
+    Shift,
+    /// Cmd on a Mac, Ctrl+Alt elsewhere: the saves' chords.
+    Command,
+}
 
-/// A function key as a craft file writes it: one letter or digit, either
-/// case (`None` for anything else).
-pub fn key_code(name: &str) -> Option<KeyCode> {
-    let mut chars = name.trim().chars();
-    let (c, rest) = (chars.next()?, chars.next());
-    if rest.is_some() {
-        return None;
+/// The modifiers held now.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Held {
+    pub shift: bool,
+    pub ctrl: bool,
+    pub alt: bool,
+    /// Cmd (the Super key).
+    pub command: bool,
+}
+
+impl Held {
+    pub fn of(keys: &ButtonInput<KeyCode>) -> Held {
+        let any = |a, b| keys.pressed(a) || keys.pressed(b);
+        Held {
+            shift: any(KeyCode::ShiftLeft, KeyCode::ShiftRight),
+            ctrl: any(KeyCode::ControlLeft, KeyCode::ControlRight),
+            alt: any(KeyCode::AltLeft, KeyCode::AltRight),
+            command: any(KeyCode::SuperLeft, KeyCode::SuperRight),
+        }
     }
-    let c = c.to_ascii_uppercase();
-    match c {
-        'A'..='Z' => Some(LETTERS[(c as u8 - b'A') as usize]),
-        '0'..='9' => Some(DIGITS[(c as u8 - b'0') as usize]),
+
+    /// A saves' chord is held (Cmd, or Ctrl+Alt): the flight keys under
+    /// it do not act.
+    pub fn chord(&self) -> bool {
+        self.command || (self.ctrl && self.alt)
+    }
+}
+
+impl Modifier {
+    /// Whether `held` satisfies it. A plain key does not act under a
+    /// saves' chord; Shift does not stop it (Shift is the throttle, held
+    /// while flying).
+    pub fn matches(self, held: Held) -> bool {
+        match self {
+            Modifier::None => !held.chord(),
+            Modifier::Shift => held.shift && !held.chord(),
+            Modifier::Command => held.chord(),
+        }
+    }
+}
+
+const fn plain(key: KeyCode) -> Chord {
+    Chord { key, with: Modifier::None }
+}
+
+/// Every key binding but the held flight keys (throttle, rotation,
+/// translation: [`read_controls`]) and the menus' (`MenuId::key`).
+pub const BINDINGS: &[(Chord, Action)] = &[
+    (plain(KeyCode::KeyZ), Action::ThrottleFull),
+    (plain(KeyCode::KeyX), Action::ThrottleCut),
+    (plain(KeyCode::KeyT), Action::Sas),
+    (plain(KeyCode::KeyR), Action::Rcs),
+    (plain(KeyCode::KeyP), Action::Chutes),
+    (plain(KeyCode::Space), Action::NextStage),
+    (plain(KeyCode::BracketLeft), Action::PreviousVessel),
+    (plain(KeyCode::BracketRight), Action::NextVessel),
+    (plain(KeyCode::Period), Action::WarpUp),
+    (plain(KeyCode::Comma), Action::WarpDown),
+    (plain(KeyCode::Slash), Action::Warp1x),
+    (plain(KeyCode::Tab), Action::SystemsScreen),
+    (plain(KeyCode::KeyM), Action::TrackingStation),
+    (Chord { key: KeyCode::KeyS, with: Modifier::Command }, Action::QuickSave),
+    (Chord { key: KeyCode::KeyL, with: Modifier::Command }, Action::QuickLoad),
+    (Chord { key: KeyCode::Slash, with: Modifier::Shift }, Action::Help),
+    (plain(KeyCode::KeyF), Action::FocusBody),
+    (plain(KeyCode::Backquote), Action::FocusShip),
+];
+
+/// The held flight keys: pitch, yaw, roll (W S, A D, Q E) and translation
+/// along X, Y, Z (L J, K I, H N), each as (positive, negative).
+pub const ROTATE: [(KeyCode, KeyCode); 3] =
+    [(KeyCode::KeyS, KeyCode::KeyW), (KeyCode::KeyD, KeyCode::KeyA), (KeyCode::KeyE, KeyCode::KeyQ)];
+/// Body axes: +X right (L), +Y the bottom (K: down; −Y is the top), +Z the
+/// nose (H: forward).
+pub const TRANSLATE: [(KeyCode, KeyCode); 3] =
+    [(KeyCode::KeyL, KeyCode::KeyJ), (KeyCode::KeyK, KeyCode::KeyI), (KeyCode::KeyH, KeyCode::KeyN)];
+
+/// The action of `key` pressed with `held`, if any.
+pub fn action(key: KeyCode, held: Held) -> Option<Action> {
+    // A chord with its modifier wins over the plain key (Shift+/ is help,
+    // not 1×).
+    let matching = || BINDINGS.iter().filter(|(c, _)| c.key == key && c.with.matches(held));
+    matching().find(|(c, _)| c.with != Modifier::None).or_else(|| matching().next()).map(|(_, a)| *a)
+}
+
+/// Whether `what` was pressed this frame.
+pub fn pressed(keys: &ButtonInput<KeyCode>, what: Action) -> bool {
+    let held = Held::of(keys);
+    keys.get_just_pressed().any(|k| action(*k, held) == Some(what))
+}
+
+/// The axis of two held keys: +1, −1 or 0.
+fn axis(keys: &ButtonInput<KeyCode>, (pos, neg): (KeyCode, KeyCode)) -> f64 {
+    f64::from(u8::from(keys.pressed(pos))) - f64::from(u8::from(keys.pressed(neg)))
+}
+
+/// The time keys' command at warp `level` (`stopped`: time stopped): `,`
+/// at 1× stops time, `.` from stopped time runs it at 1×.
+pub fn warp_command(what: Action, level: usize, stopped: bool) -> Option<GameCommand> {
+    match what {
+        Action::WarpUp if stopped => Some(GameCommand::SetWarp(0)),
+        Action::WarpUp => Some(GameCommand::SetWarp(level + 1)),
+        Action::WarpDown if stopped => None,
+        Action::WarpDown if level == 0 => Some(GameCommand::PauseTime),
+        Action::WarpDown => Some(GameCommand::SetWarp(level - 1)),
+        Action::Warp1x => Some(GameCommand::SetWarp(0)),
         _ => None,
     }
 }
 
-/// A key as the panel shows it (`KeyB` → `B`, `Digit7` → `7`).
-pub fn key_label(k: KeyCode) -> String {
-    let text = format!("{k:?}");
-    text.strip_prefix("Key").or_else(|| text.strip_prefix("Digit")).unwrap_or(&text).to_string()
-}
-
-/// The key each of a craft's pinned functions runs from, in order, given
-/// the keys they ask for (see the module): `None` only when every free key
-/// is taken.
-pub fn bind_keys(requested: &[Option<&str>]) -> Vec<Option<KeyCode>> {
-    let mut taken: Vec<KeyCode> = Vec::new();
-    let mut out: Vec<Option<KeyCode>> = (requested.iter())
-        .map(|r| {
-            let k = r.and_then(key_code).filter(|k| !RESERVED.contains(k) && !taken.contains(k))?;
-            taken.push(k);
-            Some(k)
-        })
-        .collect();
-    for slot in out.iter_mut().filter(|s| s.is_none()) {
-        // Keys asked for by later functions stay theirs.
-        let asked: Vec<KeyCode> = requested.iter().filter_map(|r| r.and_then(key_code)).collect();
-        let free = FREE_KEYS.iter().find(|k| !taken.contains(k) && !asked.contains(k)).copied();
-        let free = free.or_else(|| FREE_KEYS.iter().find(|k| !taken.contains(k)).copied());
-        if let Some(k) = free {
-            taken.push(k);
-            *slot = Some(k);
+/// Keyboard → controls and warp (in the input stage; the discrete
+/// changes as commands).
+pub fn read_controls(
+    keys: Res<ButtonInput<KeyCode>>,
+    time: Res<Time>,
+    ctx: Res<InputContext>,
+    mut sim: ResMut<SimState>,
+    mut commands: MessageWriter<GameCommand>,
+    mut shift_from: Local<Option<f64>>,
+) {
+    let held = Held::of(&keys);
+    let just: Vec<Action> = keys.get_just_pressed().filter_map(|k| action(*k, held)).collect();
+    if ctx.allows(Keys::Warp) {
+        let (level, stopped) = (sim.effective_warp(), sim.paused);
+        for c in just.iter().filter_map(|a| warp_command(*a, level, stopped)) {
+            commands.write(c);
         }
     }
-    out
+    let c = &mut sim.controls;
+    // Typing in a text field, the pause menu and the tracking station do
+    // not fly the ship.
+    if !ctx.allows(Keys::Flight) {
+        c.rotate = DVec3::ZERO;
+        c.translate = DVec3::ZERO;
+        return;
+    }
+    // `?` is Shift+/: the throttle Shift ramped on the way is put back.
+    if keys.just_pressed(KeyCode::ShiftLeft) || keys.just_pressed(KeyCode::ShiftRight) {
+        *shift_from = Some(c.throttle);
+    }
+    if just.contains(&Action::Help) {
+        c.throttle = shift_from.unwrap_or(c.throttle);
+    }
+    let free = !held.chord() && !keys.pressed(KeyCode::Slash);
+    if free {
+        c.throttle = throttle_after(c.throttle, held.shift, held.ctrl, held.alt, time.delta_secs_f64());
+    }
+    for a in &just {
+        match a {
+            Action::ThrottleFull => c.throttle = 1.0,
+            Action::ThrottleCut => c.throttle = 0.0,
+            Action::Sas => c.sas = !c.sas,
+            Action::Rcs => c.rcs.on = !c.rcs.on,
+            Action::Chutes => c.chute = true,
+            Action::NextStage => {
+                commands.write(GameCommand::NextStage);
+            }
+            _ => {}
+        }
+    }
+    let on = |set: [(KeyCode, KeyCode); 3]| {
+        if free {
+            DVec3::new(axis(&keys, set[0]), axis(&keys, set[1]), axis(&keys, set[2]))
+        } else {
+            DVec3::ZERO
+        }
+    };
+    c.rotate = on(ROTATE);
+    c.translate = on(TRANSLATE);
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::interface::menus::MenuId;
 
-    #[test]
-    fn function_keys_never_shadow_a_game_key() {
-        // The Falcon 9's functions ask for 3, 1, 0, G, L, C, N and A.
-        let asked = [Some("3"), Some("1"), Some("0"), Some("G"), Some("L"), Some("C"), Some("N"), Some("a")];
-        let got: Vec<String> = bind_keys(&asked).into_iter().map(|k| key_label(k.unwrap())).collect();
-        // 0 and C are free and kept; the rest take free keys in order,
-        // skipping those asked for.
-        assert_eq!(got, ["7", "8", "0", "9", "B", "C", "V", "Y"]);
-        // (asked, bound)
-        type Case<'a> = (&'a [Option<&'a str>], &'a [Option<KeyCode>]);
-        let table: [Case; 4] = [
-            (&[Some("k"), Some("K")], &[Some(KeyCode::KeyK), Some(KeyCode::Digit7)]),
-            (&[None, Some("7")], &[Some(KeyCode::Digit8), Some(KeyCode::Digit7)]),
-            (&[Some("F10"), Some("")], &[Some(KeyCode::Digit7), Some(KeyCode::Digit8)]),
-            (&[], &[]),
-        ];
-        for (asked, want) in table {
-            assert_eq!(bind_keys(asked), want, "{asked:?}");
-        }
-        for k in bind_keys(&[Some("Z"); 20]).into_iter().flatten() {
-            assert!(!RESERVED.contains(&k));
-        }
-        assert_eq!(bind_keys(&[None; 13]).iter().filter(|k| k.is_none()).count(), 1, "12 free keys");
-    }
+    const NONE: Held = Held { shift: false, ctrl: false, alt: false, command: false };
 
+    /// No two bindings share a chord, no function key is used, and no
+    /// binding uses a held flight key or a menu's number key.
     #[test]
-    fn keys_parse_and_print() {
-        // (text, key)
-        let table = [("a", Some(KeyCode::KeyA)), ("Z", Some(KeyCode::KeyZ)), ("7", Some(KeyCode::Digit7))];
-        for (text, key) in table {
-            assert_eq!(key_code(text), key, "{text}");
-        }
-        for bad in ["", "ab", "F1", "-", "é"] {
-            assert_eq!(key_code(bad), None, "{bad}");
-        }
-        assert_eq!((key_label(KeyCode::KeyB), key_label(KeyCode::Digit0)), ("B".into(), "0".into()));
-    }
-
-    /// Every key the help lists is reserved, and no free key is.
-    #[test]
-    fn the_reserved_keys_cover_the_help() {
-        let named = |t: &str| -> Option<KeyCode> {
-            Some(match t {
-                "Space" => KeyCode::Space,
-                "Esc" => KeyCode::Escape,
-                "." => KeyCode::Period,
-                "," => KeyCode::Comma,
-                "/" => KeyCode::Slash,
-                "[" => KeyCode::BracketLeft,
-                "]" => KeyCode::BracketRight,
-                "`" => KeyCode::Backquote,
-                "Shift" => KeyCode::ShiftLeft,
-                "Ctrl" => KeyCode::ControlLeft,
-                "Alt" => KeyCode::AltLeft,
-                t if t.starts_with('F') && t.len() > 1 => [
-                    KeyCode::F2,
-                    KeyCode::F3,
-                    KeyCode::F4,
-                    KeyCode::F5,
-                    KeyCode::F6,
-                    KeyCode::F7,
-                    KeyCode::F8,
-                    KeyCode::F9,
-                ][t[1..].parse::<usize>().ok()?.checked_sub(2)?.min(7)],
-                t => key_code(t)?,
-            })
-        };
-        let mut seen = 0;
-        for (_, keys) in crate::interface::help::KEYS {
-            for (k, _) in *keys {
-                let tokens = k.split(|c: char| c.is_whitespace() || c == '/').filter(|t| !t.is_empty());
-                for t in tokens.flat_map(|t| if t == "1–6" { vec!["1", "6"] } else { vec![t] }) {
-                    if let Some(code) = named(t) {
-                        assert!(RESERVED.contains(&code), "{t} ({k}) is not reserved");
-                        seen += 1;
-                    }
-                }
+    fn every_key_does_one_thing() {
+        for (i, (a, _)) in BINDINGS.iter().enumerate() {
+            for (b, _) in &BINDINGS[i + 1..] {
+                assert!(a != b, "{a:?} twice");
+            }
+            assert!(!format!("{:?}", a.key).starts_with('F') || a.key == KeyCode::KeyF, "{a:?}");
+            if a.with == Modifier::None {
+                let held = ROTATE.iter().chain(&TRANSLATE).any(|(p, n)| *p == a.key || *n == a.key);
+                assert!(!held, "{a:?} is a held flight key");
+                assert!(MenuId::ALL.iter().all(|m| m.key() != Some(a.key)), "{a:?} opens a menu");
             }
         }
-        assert!(seen > 30, "{seen}");
-        assert!(FREE_KEYS.iter().all(|k| !RESERVED.contains(k)));
+    }
+
+    /// The chords (table): a plain key under no modifier or Shift, not
+    /// under Cmd or Ctrl+Alt; the saves under Cmd or Ctrl+Alt; `?`.
+    #[test]
+    fn chords_and_modifiers() {
+        let shift = Held { shift: true, ..NONE };
+        let cmd = Held { command: true, ..NONE };
+        let ctrl_alt = Held { ctrl: true, alt: true, ..NONE };
+        let ctrl = Held { ctrl: true, ..NONE };
+        // (key, held, action)
+        let table = [
+            (KeyCode::KeyZ, NONE, Some(Action::ThrottleFull)),
+            (KeyCode::KeyZ, shift, Some(Action::ThrottleFull)),
+            (KeyCode::KeyZ, cmd, None),
+            (KeyCode::KeyS, NONE, None),
+            (KeyCode::KeyS, cmd, Some(Action::QuickSave)),
+            (KeyCode::KeyS, ctrl_alt, Some(Action::QuickSave)),
+            (KeyCode::KeyS, ctrl, None),
+            (KeyCode::KeyL, cmd, Some(Action::QuickLoad)),
+            (KeyCode::KeyL, NONE, None),
+            (KeyCode::Slash, NONE, Some(Action::Warp1x)),
+            (KeyCode::Slash, shift, Some(Action::Help)),
+            (KeyCode::Tab, NONE, Some(Action::SystemsScreen)),
+            (KeyCode::KeyM, NONE, Some(Action::TrackingStation)),
+            (KeyCode::KeyR, NONE, Some(Action::Rcs)),
+            (KeyCode::Digit1, NONE, None),
+            (KeyCode::F8, NONE, None),
+        ];
+        for (key, held, want) in table {
+            assert_eq!(action(key, held), want, "{key:?} {held:?}");
+        }
+    }
+
+    /// The time keys (table): `,` at 1× stops time, `.` from there runs it
+    /// at 1×, `/` at 1× from anywhere.
+    #[test]
+    fn time_keys_stop_and_resume() {
+        use Action::*;
+        // (key, level, stopped, command)
+        let table = [
+            (WarpUp, 0, false, Some(GameCommand::SetWarp(1))),
+            (WarpUp, 3, true, Some(GameCommand::SetWarp(0))),
+            (WarpDown, 3, false, Some(GameCommand::SetWarp(2))),
+            (WarpDown, 0, false, Some(GameCommand::PauseTime)),
+            (WarpDown, 0, true, None),
+            (Warp1x, 7, false, Some(GameCommand::SetWarp(0))),
+            (Warp1x, 0, true, Some(GameCommand::SetWarp(0))),
+            (Sas, 0, false, None),
+        ];
+        for (what, level, stopped, want) in table {
+            assert_eq!(warp_command(what, level, stopped), want, "{what:?} {level} {stopped}");
+        }
+    }
+
+    /// The help lists every binding's key, and every menu's.
+    #[test]
+    fn the_help_lists_every_key() {
+        let text: Vec<&str> =
+            crate::interface::help::KEYS.iter().flat_map(|(_, keys)| keys.iter().map(|(k, _)| *k)).collect();
+        let listed = |label: &str| text.iter().any(|k| *k == label || k.split([' ', '/']).any(|t| t == label));
+        let label = |c: &Chord| match c.key {
+            KeyCode::Space => "Space".to_string(),
+            KeyCode::Tab => "Tab".to_string(),
+            KeyCode::Period => ".".to_string(),
+            KeyCode::Comma => ",".to_string(),
+            KeyCode::Slash if c.with == Modifier::Shift => "?".to_string(),
+            KeyCode::Slash => "/".to_string(),
+            KeyCode::BracketLeft => "[".to_string(),
+            KeyCode::BracketRight => "]".to_string(),
+            KeyCode::Backquote => "`".to_string(),
+            k => format!("{k:?}").trim_start_matches("Key").to_string(),
+        };
+        for (c, a) in BINDINGS {
+            let l = label(c);
+            let l = if c.with == Modifier::Command { format!("Cmd+{l}") } else { l };
+            assert!(listed(&l), "{a:?} ({l}) is not in the help");
+        }
+        for m in MenuId::ALL.iter().filter(|m| m.key().is_some()) {
+            assert!(text.iter().any(|k| k.contains(m.key_label())), "{m:?}");
+        }
     }
 }

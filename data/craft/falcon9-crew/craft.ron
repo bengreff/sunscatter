@@ -222,7 +222,7 @@
         (name: "Landing legs", key: "L", pinned: true, actions: [Deploy("s1.leg#*")]),
         (name: "Parachutes", key: "C", actions: [ArmChutes]),
         (name: "Nosecone", key: "N", actions: [Deploy("dragon.nose")]),
-        (name: "Launch abort", key: "A", actions: [Separate("dragon separation"), Select("superdraco"), Ignite("superdraco")]),
+        (name: "Launch abort", key: "A", pinned: true, actions: [Separate("dragon separation"), Select("superdraco"), Ignite("superdraco")]),
     ],
     checks: [
         (name: "Falcon 9 first stage dry mass (Block 5, legs and grid fins)", parts: ["s1."],

@@ -16,7 +16,10 @@ pub struct MenusPlugin;
 impl Plugin for MenusPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<super::FlightData>()
-            .add_systems(Update, keys.after(crate::commands::update_context).before(crate::state::read_controls))
+            .add_systems(
+                Update,
+                keys.after(crate::commands::update_context).before(crate::commands::keys::read_controls),
+            )
             .add_systems(
                 Update,
                 super::data::update
@@ -31,13 +34,14 @@ impl Plugin for MenusPlugin {
     }
 }
 
-/// O, L, U and G open and close their menus (also while paused).
+/// The number keys open and close their menus (also while paused; not
+/// under a saves' chord).
 pub fn keys(keys: Res<ButtonInput<KeyCode>>, ctx: Res<InputContext>, mut iface: ResMut<InterfaceSettings>) {
-    if !ctx.allows(Keys::Hud) {
+    if !ctx.allows(Keys::Hud) || crate::commands::keys::Held::of(&keys).chord() {
         return;
     }
     for m in MenuId::ALL {
-        if keys.just_pressed(m.key()) {
+        if m.key().is_some_and(|k| keys.just_pressed(k)) {
             iface.menus.toggle(m);
         }
     }
@@ -68,7 +72,7 @@ pub fn draw(
     let rect = |id: &str| ctx.memory(|m| m.area_rect(egui::Id::new(id)));
     let overlay = if settings_ui.overlay || bench.running() { rect("perf") } else { None };
     // The navball cluster and the mini systems panel above it.
-    let cluster = match (rect(crate::navball::AREA), rect(crate::interface::mini_panel::AREA)) {
+    let cluster = match (rect(crate::navball::AREA), rect(crate::interface::action_bar::AREA)) {
         (Some(c), Some(m)) => Some(c.union(m)),
         (c, m) => c.or(m),
     };

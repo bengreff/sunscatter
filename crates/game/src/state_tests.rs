@@ -40,13 +40,6 @@ fn throttle_keys_ramp_and_clamp() {
 }
 
 #[test]
-fn reset_needs_a_second_press() {
-    assert!(!reset_confirmed(None, 10.0));
-    assert!(reset_confirmed(Some(9.0), 10.0));
-    assert!(!reset_confirmed(Some(7.0), 10.0));
-}
-
-#[test]
 fn remote_controls_arrive_after_the_delay_and_not_without_signal() {
     let t = sol::sol_epoch();
     let mut rc = RemoteControls::default();
