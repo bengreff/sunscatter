@@ -50,8 +50,15 @@ pub mod theme {
 }
 
 /// Applies the theme and the UI scale (every frame is cheap: egui only
-/// rebuilds when they change).
-pub fn apply_style(mut contexts: EguiContexts, iface: Res<InterfaceSettings>, mut styled: Local<bool>) -> Result {
+/// rebuilds when they change). An offscreen demo's Retina-sized image
+/// draws the interface at the reference Mac's scale
+/// (`demo_views::offscreen_scale`).
+pub fn apply_style(
+    mut contexts: EguiContexts,
+    iface: Res<InterfaceSettings>,
+    demo: Option<Res<crate::demo::Demo>>,
+    mut styled: Local<bool>,
+) -> Result {
     let ctx = contexts.ctx_mut()?;
     if !*styled {
         *styled = true;
@@ -64,8 +71,11 @@ pub fn apply_style(mut contexts: EguiContexts, iface: Res<InterfaceSettings>, mu
         v.override_text_color = Some(theme::TEXT);
         ctx.set_visuals(v);
     }
-    if (ctx.zoom_factor() - iface.ui_scale).abs() > 1e-3 {
-        ctx.set_zoom_factor(iface.ui_scale);
+    let offscreen = demo.is_some_and(|d| d.offscreen.is_some());
+    let native = if offscreen { crate::demo_views::offscreen_scale(crate::demo_views::offscreen_size()) } else { 1.0 };
+    let zoom = iface.ui_scale * native;
+    if (ctx.zoom_factor() - zoom).abs() > 1e-3 {
+        ctx.set_zoom_factor(zoom);
     }
     Ok(())
 }

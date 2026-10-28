@@ -188,6 +188,17 @@ pub fn offscreen_size() -> (u32, u32) {
     std::env::var("SUNSCATTER_DEMO_SIZE").ok().and_then(|s| parse_size(&s)).unwrap_or((1600, 900))
 }
 
+/// The interface's scale in an offscreen image of `size`: the reference
+/// Mac's (2) for a Retina-sized image (2400 px wide or more, its full
+/// screen 3024×1964), else 1 (the image's pixels are the interface's).
+pub fn offscreen_scale(size: (u32, u32)) -> f32 {
+    if size.0 >= 2400 {
+        2.0
+    } else {
+        1.0
+    }
+}
+
 /// Where the plunge is, from `SUNSCATTER_PLUNGE_OVER=<lat>,<lon>[,<km>]`
 /// (degrees; km above the ground there): a developer's measure of other
 /// ground (land, mountains, many zone edges; close up).
@@ -253,6 +264,15 @@ mod tests {
         assert!((r2.length() - re - 2_000.0).abs() < 1e-6);
         let fall = -v2.dot(r2.normalize());
         assert!((2_000.0 / fall - PLUNGE_ALTITUDE / PLUNGE_FALL).abs() < 1e-9, "{fall}");
+    }
+
+    #[test]
+    fn a_retina_sized_image_draws_the_interface_at_scale_2() {
+        // (size, scale)
+        let table = [((1600, 900), 1.0), ((1920, 1080), 1.0), ((3024, 1964), 2.0), ((2560, 1600), 2.0)];
+        for (size, want) in table {
+            assert_eq!(offscreen_scale(size), want, "{size:?}");
+        }
     }
 
     #[test]
