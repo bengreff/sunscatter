@@ -1,4 +1,5 @@
-//! Demo diagnostics: fail the run on shader compile errors, on a map view
+//! Demo diagnostics: fail the run on shader compile errors, on an interface
+//! not drawn over the main camera, on a map view
 //! the map-view rule (D054) must not show, or on an impact marker drawn
 //! while the Landing/Reentry menu is closed (D080), and log frame rate,
 //! altitude and terrain chunks during the scripted flight.
@@ -19,6 +20,7 @@ pub struct DemoChecksPlugin;
 impl Plugin for DemoChecksPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(bevy_egui::EguiPrimaryContextPass, check_impact_marker.after(crate::landing::draw));
+        app.add_systems(Update, check_interface_camera);
         if let Some(render_app) = app.get_sub_app_mut(bevy::render::RenderApp) {
             render_app.add_systems(bevy::render::Render, fail_on_shader_errors);
         }
@@ -82,6 +84,22 @@ fn check_impact_marker(
         *drawn = true;
         info!("demo: impact marker drawn with Landing open; hidden in {} frames with an impact while closed", *hidden);
     }
+}
+
+/// The interface is drawn over the main camera's view: the one primary
+/// egui context sits on it. bevy_egui once took the systems screen's hidden
+/// camera and every menu, the navball and the HUD vanished (2026-10-27): the
+/// demo's shots showed it and nothing checked them. A body tour shoots
+/// without the interface.
+fn check_interface_camera(
+    primary: Query<Has<crate::camera::MainCamera>, With<bevy_egui::PrimaryEguiContext>>,
+    tour: Option<Res<crate::tour::Tour>>,
+) {
+    if tour.is_some() {
+        return;
+    }
+    let on: Vec<bool> = primary.iter().collect();
+    assert!(on == [true], "demo: the interface must be drawn over the main camera (primary egui contexts: {on:?})");
 }
 
 fn fail_on_shader_errors(cache: Res<bevy::render::render_resource::PipelineCache>) {
