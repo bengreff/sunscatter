@@ -1,101 +1,52 @@
-# Flight view: the navball and task menus
+# Flight view: the navball, the action bar and task menus
 
-**Status:** *playable*, built 2026-10-25 (commits 0d91f56 to 6ac5c4d; not yet seen on screen); Staging is a *skeleton*. From the owner's feedback ([record](../plans/interview-2026-10-25.md)); decision D080. What was decided while building it is at the end.
+**Status:** *playable*, built 2026-10-25, reworked for D111 on 2026-10-27 (keys without F-keys 4ea9027, navball G / ALT / RCS cb6f4c8, flat menus 75dd74a, the RCS menu e549bae, Crew and Power dc8781b, the dock's full height 8092fb5); first seen on screen in the NAV demo of 2026-10-27 (`parts_ui_pad`, `_ascent`, `_separation`: `SUNSCATTER_CRAFT=falcon9-crew` with the demo). Decisions D080, D111, D112 (RCS); the owner's answers are in [interview-2026-10-27-flight-ui.md](../plans/interview-2026-10-27-flight-ui.md) 21–35, 43–46.
 
-**Goal:** "Designated, elegant locations for menus; completely cut unnecessary information." The flight view always shows time and warp, the navball cluster, and a menu bar. Everything else lives in task menus that the player opens. The menus are hierarchical, so anything can be pulled up, and new tasks add new menus.
+**Goal:** "Designated, elegant locations for menus; completely cut unnecessary information." The flight view always shows time and warp, the menu bar, the navball cluster with the action bar above it, and the staging bar on the right edge. Everything else lives in task menus the player opens; each fulfils one task and links into the systems screen for the rest.
 
 ## Screen
 
 ```
-┌ time / warp ┐          ┌ ORBITAL O · LANDING L · UTILITIES U · STAGING G ┐
-└─────────────┘          └─────────────────────────────────────────────────┘
-┌ left dock ──┐                       (toasts)                ┌ right dock ──┐
-│ ORBITAL     │                                               │ UTILITIES    │
-│ LANDING     │                                               │ STAGING      │
-│ (DOCKING…)  │                                               │ (CREW…)      │
-└─────────────┘              ┌ navball cluster ┐              └──────────────┘
-                             └─────────────────┘
+┌ time / warp ┐   ┌ ORBITAL 1 · LANDING 2 · MANEUVER 3 · CREW 4 · POWER 5 · COMMS 6 ┐   ┌ staging ┐
+└─────────────┘   └─────────────────────────────────────────────────────────────────┘   │ bar     │
+┌ left dock ──┐                          (toasts)                          (part cards) │ (BAR)   │
+│ RCS         │  while RCS is on                                                       │         │
+│ ORBITAL …   │                    ┌ action bar ┐                                      │         │
+└─────────────┘                    ┌ navball cluster ┐                                 └─────────┘
 ```
 
-- **Fixed places.** Time and warp sit top left. The menu bar is top centre. The navball cluster is bottom centre. Two docks hold the menus: the **left dock** for flight tasks (Orbital, Landing/Reentry, later Docking) and the **right dock** for the ship (Utilities, Staging, later Crew, Cargo, Science).
-- **Docks.** A dock stacks its open menus top to bottom in menu order, at a fixed width (~300 logical px). It scrolls if they do not fit above the navball cluster. Panels are not dragged (designated places). Dragging and saved positions go away; open menus and expanded sections are saved in `settings.ron`.
-- **Toasts** sit under the menu bar, centred. The perf overlay (F4) stays where it is but must not cover a dock.
-- **Style.** Clean sci-fi, function first (the existing `interface::theme`). Labels are dim small caps, values are monospace and right-aligned, warnings use the theme's WARN and alert colours. Every value has its unit.
+- **Fixed places.** One dock on the left (300 px) stacks the open menus in menu order and always scrolls within its height (`layout::dock_place`: below the time panel and the menu bar, above the navball cluster where they would overlap). The right edge is the staging bar's (BAR, `interface::stage_bar`).
+- **Flat pages (D111).** A menu is one page: its summary, then every section under a ruled heading, nothing collapsed; a section with nothing to show is not drawn. A craft of parts' page ends with a link into the systems screen at its layer (`MenuId::layer`, `SystemsScreen::open_at`).
+- **Keys (D111, `commands::keys`).** Number keys toggle menus (1 Orbital, 2 Landing, 3 Maneuver, 4 Crew, 5 Power, 6 Comms; 7 kept for Docking). R turns RCS on and off; its menu has no key. No F-keys: Tab the systems screen, M tracking, `?` help, Cmd+S / Cmd+L saves (Ctrl+Alt elsewhere), Esc the pause menu (reset to the pad, help, the performance overlay).
+- **Style.** `interface::theme`: labels dim small monospace, values monospace right-aligned in their tone (normal, dim, good, warn amber, alert red); every value has its unit and reads through what the craft knows (D106: a dash for what it cannot measure).
 
-## The navball cluster (always on)
+## The navball cluster and the action bar
 
-Essentials only:
-- **Above the ball:** the speed in large type, under a three-way switch `ORBIT | SURFACE | TARGET` (click one; AUTO stays as a small toggle). The reference body is named in the switch's label (`ORBIT · Earth`).
-- **Left of the ball:** altitude (`ALT` above sea level in orbit mode, radar altitude in surface mode, as now), V/S, Ap and Pe (altitude and time to each), all from `trajectory::apsides` (D076).
-- **Right of the ball:** SAS on/off, plus the hold modes as a column of buttons with their keys (STAB 1, PRO 2, RETRO 3, TGT 4, ANTI 5, MNV 6), with the active one lit. Then the throttle as a vertical bar with its percentage, which can be dragged (the old slider's change gate stays: send only real interaction).
-- **One state line:** FLIGHT, POWERED, ON PARACHUTE, LANDED, or the destruction cause (`hud::live_word`). A small DEBUG badge goes in the time panel.
-- **Removed from the cluster:** HDG, PITCH and ROLL (the ball shows them; they move to Landing ▸ Attitude), AoA, SLIP and G (to Landing ▸ Reentry), REF (now in the switch label), Burn in (to Orbital ▸ Maneuvers), THR (now the throttle bar).
+- Speed and its ORBIT / SURFACE / TARGET switch above the ball; ALT (with its datum switch, `navball::altitude`), Ap and Pe on the left; SAS, the hold modes (click only), the RCS button and the throttle bar on the right.
+- **G row** (`navball::g_meter`): the load now, its direction (▲ ▼ ◀ ▶), and on hover the g-limit and what sets it (a joint, or the crew along an axis; `sim::systems::g_limit`); amber from 80 % of the limit, red at it.
+- **Action bar** (`interface::action_bar`) above the cluster: SYSTEMS, then the craft's saved functions (click only), the Falcon 9's launch abort pinned.
 
 ## Menus
 
-Each menu is a list of **sections**. The first is the summary, always expanded. The rest expand on click, and their state is saved. A section with nothing to show is not drawn (no "n/a" rows), except where noted.
+- **RCS** (shown while RCS is on, at the top of the dock; its × turns RCS off). Mode (translate and rotate / translate only / rotate only), fine control (inputs at a tenth), blocks on; authority per direction with its key (RIGHT L, LEFT J, DOWN K, UP I, FORWARD H, BACK N) in m/s², amber with a note where the line of thrust misses the centre of mass by over 0.1 m, and per axis in °/s²; every feed's propellant (kg / kg, measured); every thruster block a checkbox (`ShipCommand::Rcs`) reading on / disabled / dry / failed with its nozzles × thrust and its part's measured skin. The craft file's thruster sequence stands (the owner): the Falcon 9's booster cold gas and Dragon's Dracos read *disabled* until their stage enables them. Layer: Plumbing.
+- **Orbital** (1): Ap, Pe, period, inclination, eccentricity; the elements about the body's equator; the target; the ship's clock. No layer.
+- **Landing / Reentry** (2): impact, braking, entry and reentry, thermal (the parts nearest their limits), parachute, attitude; the impact marker is drawn only while it is open. Layer: Thermal.
+- **Maneuver** (3): the planned burns and the planner. No layer.
+- **Crew / ECLSS** (4): crew aboard; the cabin's total pressure (amber under 90 kPa, red under 70), O₂ (amber under 18 kPa, red under 16), CO₂ (amber from 1 kPa, the sim's alarm, red from 2), temperature; life support working or out and why; injuries (axis, g held, its limit). Layer: Health.
+- **Power** (5): each bus (volts, load, solar, ground power; red at no voltage), each battery's charge (Wh and %, amber under 20 %, red empty, a dash unmeasured), everything without power and why. Layer: Electrical.
+- **Comms** (6): the link home and a probe's control delay. Layer: Data.
 
-### Orbital (key O, left dock)
-- **Summary:** Ap and Pe (altitude, time to each; from apsides), period, inclination and eccentricity about the dominant body.
-- **Elements** (osculating, about the dominant body; labelled so): semi-major axis, LAN, argument of periapsis, true anomaly, orbital speed, the body.
-- **Target** (the target selector moves here from its old top-right panel): distance and relative speed; closest approach (distance, time to it, relative speed; `rendezvous`); relative inclination when both orbit the same body.
-- **Maneuvers:** each planned burn (Δv, time to ignition, duration), plus a button that opens the planner (N). Advanced maneuver tools will go here.
+## Code and tests
 
-### Landing/Reentry (key L, left dock)
-- **The impact marker is drawn only while this menu is open.** This is a pure rule with a table test.
-- **Summary:** impact in, impact speed (vertical, horizontal), position (lat, lon), radar altitude, V/S, horizontal speed. Without a predicted impact: "no impact predicted".
-- **Braking** (with a predicted impact): local TWR, burn in, ignite at, or "cannot stop".
-- **Reentry** (inside an atmosphere, or Pe inside one): dynamic pressure, Mach, g-load, AoA, sideslip, skin max against its limit.
-- **Parachute:** stage, plus q against the design opening q (`hud::chute_line`), with a "safe to deploy" or "too fast" state.
-- **Attitude:** heading, pitch, roll.
+- `game::interface::menus`: `MenuId` (the registry: title, key, layer; `ALL` in dock order, `BAR` what the bar, keys and settings open), `Section` / `Item` (row, note, pick list, button, switch) / `Tone`, `MenuAction` (target, planner, systems screen, a ship command, the RCS mode), `MenuSettings` (`in_order(rcs)`), content per menu (`orbital`, `landing`, `maneuver`, `rcs`, `crew`, `power`, `comms`), `data::FlightData` (the snapshot, ten times a second; `rcs_data`, `crew::gather`, `power::gather`), `render` (one renderer), `view` (the Bevy systems).
+- Tests: each menu's sections from table data (tones at their thresholds, a dash unmeasured), the registry's keys against the help, the dock's place at 1600×900 and 1512×982, a click on a bar item, a button and a switch, no NaN before the first snapshot.
 
-### Utilities (key U, right dock)
-- **Summary**, a brief status line per system the craft has: propellant (kg, %, Δv vacuum), thermal (skin max and interior max against their limits), comms (`<station>: <signal, delay>`).
-- **Propulsion:** TWR (vacuum), mass, engine thrust and Isp, RCS (couples, propellant use).
-- **Thermal:** the hottest cells against their limits.
-- **Clock:** the ship clock offset (relativity).
-- Power and life support are not modelled yet. The summary ends with one dim line saying so, and the sections arrive with the systems.
-
-### Staging (key G, right dock)
-- The craft's stage stack, newest stage at the top. Each stage lists its parts and their state. Space activates the next stage; P stays as the parachute key.
-- The test craft has one stage plus the parachute event: `ENGINE (running / off, throttle)` and `PARACHUTES: 2 drogues, 4 mains (stowed / armed / drogue reefed / …)`. Its sub-rows follow the D079 sequence. Status: *skeleton* until the parts model brings real stages.
-
-## Code
-
-- `game::interface::menus` (new): `MenuId` (Orbital, Landing, Utilities, Staging) with `title`, `key`, `dock` and `ALL` in order. This is the one registry; a new menu is one entry plus its content function.
-- **Content is pure:** `fn sections(&FlightData) -> Vec<Section>` per menu. `FlightData` is a plain snapshot filled by one system from `SimState`, `Apsides`, `LandingPrediction`, `Rendezvous` and `Comms`. A `Section` has an id, a title and `Row { label, value, tone }`. One generic egui renderer draws sections for every menu. Rule 8: what each menu shows is a table-tested pure function; Bevy systems only wire it up.
-- `interface::layout`: the docks and the menu bar become pure layout rules (positions from the window size and panel heights, the stacking order), with tests. `PanelId::{Flight, Target}` and the standalone landing window are removed.
-- `help::KEYS` and Settings → Interface are updated: menus replace the panel checkboxes, and the navball size stays.
-- **Duplicates removed** (inventory 2026-10-25):
-  - TWR is computed two ways. Keep vacuum TWR in Utilities and local TWR in Braking, each labelled.
-  - The impact shown came from two sources. Landing uses `LandingPrediction`; apsides' impact feeds only the map.
-- The demo opens the menus a step needs before its screenshot (Orbital in orbit, Landing for the deorbit and the parachute) and checks in code that the marker is hidden while Landing is closed.
-
-## Tests
-
-- Menu registry: unique keys, which must not clash with any key in `help::KEYS`; every menu has a dock.
-- Dock layout: stacking positions and scroll threshold from the window size (table).
-- The sections per menu from a `FlightData` table: target present or absent, impact or none, in atmosphere or not, chute states.
-- The impact marker rule; the throttle bar's interaction gate.
-
-## Acceptance
-
-- Screenshots (Minimal) at the pad, ascent, orbit (Orbital open), deorbit (Landing open, marker on), and the parachute. With every menu closed, the view is the time panel, the menu bar and the navball cluster only.
-
-## As built: choices where this doc was silent (2026-10-25)
-
-**Code map.** `interface::menus` (registry `MenuId`, `Section`/`Item`/`Tone`, `MenuSettings`), one file of content per menu (`orbital`, `landing`, `utilities`, `staging`), `menus::data` (`FlightData` and its gather, refreshed at 10 Hz), `menus::render` (the one renderer, the docks, the menu bar), `menus::view` (`MenusPlugin`: keys, gather, draw). Places are rules in `interface::layout`; the cluster is `navball::draw` (ball painting in `navball::ball`); the stage stack is `game::staging`.
-
-**Places.** Margin 10 px, gap 8 px, docks 300 px wide. Both docks start below the time panel and the menu bar, whichever reaches lower; the right dock also below the F4 overlay while it shows. A dock reaches the bottom margin unless it would overlap the navball cluster horizontally (a narrow window), then it stops 8 px above it; it is never shorter than 120 px and scrolls past its height. Toasts are centred under the menu bar. Old `settings.ron` files load; their panel positions are ignored.
-
-**Menu bar.** Each name in 13 px monospace with its key in a small outlined badge; an open menu has an amber wash and underline, a closed one a muted light grey.
-
-**Keys.** O, L, U, G toggle their menus in flight and while paused (not in the tracking station, not while typing). The help lists them under Menus, with N (the planner). Settings → Interface lists the menus as checkboxes (with key and dock), and has "Collapse all sections" and "Reset to defaults"; "Reset layout" is gone.
+## As built (2026-10-25, still true)
 
 **Navball cluster.**
 - The switch's caption says what the speed is relative to: `ORBIT · Earth`, `SURFACE · Earth`, `TARGET · <target>`. TARGET is disabled without a target; AUTO/LOCK is a small text toggle after the switch; clicking the ball still cycles the mode. AUTO switches where rails warp stops (the reference body's rails floor, D062: SURFACE below, ORBIT above), and a mode picked by hand holds until the next crossing; LOCK never switches (D089). The active vessel's orbit line is drawn in the switch's frame: about the body, over its ground, or about the target body (D089).
 - Ap and Pe always take two rows each (altitude, then `in` time), shown as `—` when absent, so the column never jumps; an apsis about another body names it (`Ap Moon`).
-- SAS and the holds: `SAS ON` / `SAS OFF` (T), then STAB 1, PRO 2, RETRO 3, TGT 4, ANTI 5, MNV 6, the active one lit only while SAS is on. TGT and ANTI need a target and MNV a planned burn (disabled otherwise; the keys still pick them). The SAS button's tooltip states the hold in full with prograde's speed reference (D075, `rules::sas_label`).
+- SAS and the holds: `SAS ON` / `SAS OFF` (T), then STAB, PRO, RETRO, TGT, ANTI, MNV (click only since D111), the active one lit only while SAS is on. TGT and ANTI need a target and MNV a planned burn (disabled otherwise; the keys still pick them). The SAS button's tooltip states the hold in full with prograde's speed reference (D075, `rules::sas_label`).
 - The throttle bar fills amber while the engine runs, dim otherwise; ticks at quarters; it sends `SetThrottle` only while pressed (`rules::throttle_from_bar`).
 - The state line says FLIGHT for any unpowered free flight, coasting on rails included (the old COASTING word is gone); POWERED also covers a planned burn on rails (`scene::engine_on`).
 - The time panel shows the origin's clock (D088): the launch site's proper time, labelled TT with the site's name. The DEBUG badge sits after it.
@@ -111,13 +62,6 @@ Each menu is a list of **sections**. The first is the summary, always expanded. 
 - Summary: on the ground it says only `on the ground`. Impact in turns amber within a minute.
 - Braking needs a predicted impact; BURN IN turns amber under 10 s; "cannot stop" is an alert.
 - Reentry shows from the moment the predicted path enters an atmosphere. Before entry: the entry interface (the atmosphere's top) and the time to it where the stored coast marks the entry (`Segment::entry`), the periapsis when one lies inside the atmosphere, or just the interface for an impact on a body with one (`menus::data::entry_ahead`); then SKIN MAX. In the air: q, Mach, g-load, AoA, sideslip, SKIN MAX. Temperatures are amber from 90 % of their limit and red at it, everywhere.
-- Parachute: the canopies' rows are the Staging menu's parts (one owner of the D079 words, `staging`; `hud::chute_line` is gone), then `q / DESIGN q`, and before the command `safe to deploy (P or Space)`, `too fast: the canopy may tear` or, outside the air, `no air: deploy after entry`. The canopy counts (2 drogues, 4 mains) are not in the craft data, so they are not shown.
+- Parachute: the canopies' rows are the stage parts' words (one owner of the D079 words, `staging`), then `q / DESIGN q`, and before the command `safe to deploy (P or Space)`, `too fast: the canopy may tear` or, outside the air, `no air: deploy after entry`. The canopy counts (2 drogues, 4 mains) are not in the craft data, so they are not shown.
 
-**Utilities.** Summary: propellant (kg and %, amber under 10 %, red when empty, never in debug mode), Δv (vac), skin max and interior max against their limits, `COMMS <mission control>: <delay>` (or no signal), the probe line for an uncrewed vessel, a DEBUG MODE row in debug mode, and one dim line that power and life support are not modelled yet. Sections: Propulsion (TWR in the dominant body's gravity, mass, thrust, Isp vac and SL, RCS couples and their propellant use), Thermal (per part of the craft, its skin cell nearest its own limit, the four nearest first, and the interior; part names are the craft's geometry primitives), Comms (delay, rate, relays), Clock (the ship clock against the origin's clock, the time shown: D088), Diagnostics (anchor, fps, vessels: the old Debug panel).
-
-**Staging of a craft of parts (2026-10-27, GAME; D107).** The craft's own sequence (the vessel's `ShipState::stages`, edited in the systems screen): numbered as KSP does (the first stage the highest), stage 0 listed first, each stage `STAGE n · NAME` with NEXT on the next one and ACTIVE on those run; under each, its commands (`IGNITE s1`, `RELEASE CLAMPS`, `SEPARATE stage separation`…) with the state now of what they act on (`9/9 running`, `holding`/`released`, `attached`/`separated`, `deployed`/`stowed`…; `staging::parts`). Space and the button run `Vessel::next_stage` with a toast naming the stage; nothing is locked on the ground (the sequence launches the craft). The Landing menu's parachute rows stay the test craft's. Above the navball cluster the mini systems panel holds the pinned functions ([systems-screen.md](systems-screen.md)).
-
-**Staging (skeleton).** Numbered as KSP does: stage 1 the engine (active since launch: the throttle lights it), stage 0 the parachutes above it, listed stage 0 first. A stage is NEXT (amber) until activated, then ACTIVE. Space (or the menu's button) activates the next stage through `GameCommand::NextStage`: for the test craft it arms the parachutes, as P does; with none left a toast says so. Staging is locked on the ground (landed or wrecked): Space there only says "On the ground: staging locked (P still deploys the parachutes)", and the menu shows that note instead of its button, because KSP players press Space to launch. P is never locked (D079). Part states: DROGUES and MAINS stowed, armed (the mains "opens below 3350 m" behind a drogue), open or open · reefed, cut away, TORN; ENGINE running at its throttle, off, or off with no propellant.
-
-**Not done.** Power and life support (not modelled); the MCP does not expose the menus; the owner has not seen the layout.
-
+**Not done.** Notifications as a scrollable corner window with links (D111; toasts still sit under the menu bar); the Ap / Pe radius from the centre beside the altitude; the part cards' "more" link; the MCP does not expose the menus.
