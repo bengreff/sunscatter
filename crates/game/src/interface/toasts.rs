@@ -162,16 +162,32 @@ pub fn draw(
         return Ok(());
     }
     let active = sim.ship().id();
+    let clicked = window(ctx, &mut toasts, how, now, active);
+    match clicked.map(|l| go(l, active)) {
+        Some(Go::Switch(id)) => {
+            cmds.write(GameCommand::Switch(id));
+        }
+        Some(Go::Systems) => systems.open_at(None, None),
+        None => {}
+    }
+    Ok(())
+}
+
+/// Draws the window as `how` says; returns the link clicked.
+pub fn window(ctx: &egui::Context, toasts: &mut Toasts, how: Shown, now: f64, active: VesselId) -> Option<Link> {
     let mut clicked = None;
     egui::Area::new(egui::Id::new(AREA))
         .order(egui::Order::Foreground)
         .anchor(egui::Align2::LEFT_BOTTOM, [layout::MARGIN, -layout::MARGIN])
         .movable(false)
         .show(ctx, |ui| {
+            // An area lays out within its remembered size: room for the
+            // list to grow to its height.
+            ui.set_max_height(LIST_HEIGHT + 60.0);
             theme::panel_frame().inner_margin(egui::Margin::same(6)).show(ui, |ui| {
                 ui.set_width(layout::DOCK_WIDTH - 2.0 * 6.0 - 2.0);
                 ui.spacing_mut().item_spacing = egui::vec2(4.0, 2.0);
-                header(ui, &mut toasts, how);
+                header(ui, toasts, how);
                 let list: Vec<&Toast> = match how {
                     Shown::Open => toasts.history().collect(),
                     _ => toasts.newest_fresh(now).into_iter().collect(),
@@ -185,23 +201,17 @@ pub fn draw(
                 });
             });
         });
-    match clicked.map(|l| go(l, active)) {
-        Some(Go::Switch(id)) => {
-            cmds.write(GameCommand::Switch(id));
-        }
-        Some(Go::Systems) => systems.open_at(None, None),
-        None => {}
-    }
-    Ok(())
+    clicked
 }
 
-/// The window's title, the count and the fold switch.
+/// The window's title, the count and the fold switch (the window grows
+/// upwards: ▲ shows the history, ▼ folds it).
 fn header(ui: &mut egui::Ui, toasts: &mut Toasts, how: Shown) {
     ui.horizontal(|ui| {
         let count = toasts.items.len();
         ui.label(egui::RichText::new(format!("NOTIFICATIONS  {count}")).small().color(theme::DIM));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let (glyph, tip) = if how == Shown::Open { ("▾", "Fold") } else { ("▸", "Show the history") };
+            let (glyph, tip) = if how == Shown::Open { ("▼", "Fold") } else { ("▲", "Show the history") };
             let b = ui.add(egui::Button::new(egui::RichText::new(glyph).small().color(theme::DIM)).frame(false));
             if b.on_hover_text(tip).clicked() {
                 toasts.folded = how == Shown::Open;
@@ -268,6 +278,37 @@ mod tests {
             assert_eq!(go(link, active), want, "{link:?}");
             assert_eq!(link_text(link, active), (label.to_string(), hover.to_string()), "{link:?}");
         }
+    }
+
+    /// Open, the list grows message by message to its height, then
+    /// scrolls (an egui area kept it at the height it first had, a few
+    /// lines); folded, the header and the newest message alone.
+    #[test]
+    fn the_window_grows_to_its_list_height() {
+        use egui::{Pos2, RawInput, Rect};
+        let pass = |ctx: &egui::Context, q: &mut Toasts, how: Shown| {
+            let input = RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(1600.0, 900.0))),
+                ..Default::default()
+            };
+            ctx.begin_pass(input);
+            window(ctx, q, how, 1.0, VesselId(1));
+            ctx.end_pass().drop_without_applying_deltas();
+        };
+        let rect = |ctx: &egui::Context| ctx.memory(|m| m.area_rect(egui::Id::new(AREA))).expect("drawn");
+        let (ctx, mut q) = (egui::Context::default(), Toasts::default());
+        for k in 0..30 {
+            q.push_linked(0.0, format!("event {k}"), false, Some(Link::Vessel(VesselId(1))));
+            pass(&ctx, &mut q, Shown::Open);
+            pass(&ctx, &mut q, Shown::Open);
+        }
+        let open = rect(&ctx);
+        assert!((open.bottom() - (900.0 - layout::MARGIN)).abs() < 1.0, "{open:?}");
+        assert!(open.height() > LIST_HEIGHT && open.height() < LIST_HEIGHT + 50.0, "{open:?}");
+        for _ in 0..3 {
+            pass(&ctx, &mut q, Shown::Folded);
+        }
+        assert!(rect(&ctx).height() < 70.0, "{:?}", rect(&ctx));
     }
 
     #[test]
