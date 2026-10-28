@@ -97,6 +97,13 @@ impl Comms {
     }
 }
 
+/// Whether `vessel`'s plasma sheath cuts a link at `frequency_hz` (D109,
+/// `sim::comms::blacked_out`): the sheath's plasma frequency and the link's.
+pub fn sheath_cut(vessel: &sim::vessel::Vessel, frequency_hz: f64) -> Option<(f64, f64)> {
+    let n_e = vessel.thermal().shock.map_or(0.0, |s| s.electron_density);
+    sim::comms::blacked_out(frequency_hz, n_e).then(|| (sim::comms::plasma_frequency(n_e), frequency_hz))
+}
+
 /// One line about a signal: "21 ms via Canberra · 4.3 Mbit/s", "aboard", or
 /// "no signal".
 pub fn describe(signal: Option<&Signal>) -> String {
@@ -156,7 +163,9 @@ pub fn update(sim: Res<SimState>, station: Res<TrackingStation>, mut comms: ResM
                     && node.is_some_and(|n| (n.pos - pos).length() < comms.data.link.umbilical_range_m)
             });
         let min_elevation_deg = comms.data.link.min_elevation_deg;
-        nodes.push(Node { pos, antenna: Some(VESSEL_ANTENNA), ground, min_elevation_deg, wired });
+        // In blackout the plasma sheath reflects the link (D109).
+        let antenna = sheath_cut(v, comms.data.link.frequency_hz).is_none().then_some(VESSEL_ANTENNA);
+        nodes.push(Node { pos, antenna, ground, min_elevation_deg, wired });
         names.push(format!("Vessel {}", v.id().0));
     }
     let occluders: Vec<_> = bodies.iter().map(|b| b.1).collect();

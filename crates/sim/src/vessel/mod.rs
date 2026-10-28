@@ -60,7 +60,8 @@ mod systems;
 mod trajectory;
 
 pub use aerothermal::{
-    air_at, coast_sunlight, in_atmosphere, AeroTick, Air, VesselThermal, LATTICE, LEAVE_ATMOSPHERE, MAX_SKIP,
+    air_at, coast_sunlight, in_atmosphere, AeroTick, Air, ShockLayer, VesselThermal, LATTICE, LEAVE_ATMOSPHERE,
+    MAX_SKIP,
 };
 pub use coast::{solve_units, POINT_UNITS, STEP_UNITS, SYSTEMS_UNITS};
 pub use coast_heat::{coast_air, coast_suns, CoastSun};

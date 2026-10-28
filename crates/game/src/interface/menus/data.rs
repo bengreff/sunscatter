@@ -211,6 +211,10 @@ pub struct CraftData {
     /// with their limits (K).
     pub skin: (f64, f64),
     pub interior: (f64, f64),
+    /// The shock layer at the nose this tick (D109), and the highest
+    /// stagnation flux so far (W/m²).
+    pub shock: Option<sim::vessel::ShockLayer>,
+    pub peak_heating: f64,
     /// The parts nearest their limits: name, temperature, limit (K).
     pub hottest: Vec<(String, f64, f64)>,
     /// Ship clock minus the origin's clock, the time shown (s, D012, D088).
@@ -226,6 +230,9 @@ pub struct CommsData {
     /// An uncrewed probe: the delay its controls arrive after (`None`: no
     /// signal, they do not arrive).
     pub probe: Option<Option<f64>>,
+    /// The plasma sheath cuts the link (D109): its plasma frequency and the
+    /// link's (Hz).
+    pub blackout: Option<(f64, f64)>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -498,6 +505,8 @@ fn craft(sim: &SimState, body: sim::frame::NodeId) -> CraftData {
     });
     let (node, _) = ship.max_node_temperature();
     CraftData {
+        shock: ship.thermal().shock,
+        peak_heating: ship.thermal().peak_heating,
         debug: ship.debug(),
         propellant: ship.propellant(),
         full: ship.craft.initial_propellant.max(1.0),
@@ -520,6 +529,7 @@ fn comms(s: &Sources) -> CommsData {
         home: s.comms.data.sites[s.comms.mission_control].name.clone(),
         link: s.comms.home.clone(),
         probe: (ship.crew() == 0).then(|| s.comms.signal(ship.id()).map(|sig| sig.delay)),
+        blackout: crate::comms::sheath_cut(ship, s.comms.data.link.frequency_hz),
     }
 }
 

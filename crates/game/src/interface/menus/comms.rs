@@ -27,6 +27,10 @@ fn summary(c: &CommsData) -> Section {
             }
         }
     }
+    if let Some((plasma, link)) = c.blackout {
+        let text = format!("plasma {:.1} GHz above the link's {:.1} GHz", plasma / 1e9, link / 1e9);
+        s.toned("BLACKOUT", text, Tone::Warn);
+    }
     if let Some(delay) = c.probe {
         let text = delay.map_or("no signal: controls do not arrive".to_string(), |t| {
             format!("controls arrive after {}", fmt_delay(t))
@@ -45,7 +49,7 @@ mod tests {
     #[test]
     fn the_link_home_and_the_probe() {
         let link = Signal { delay: 0.0213, rate: 4.26e6, via: vec!["Canberra".into()] };
-        let mut c = CommsData { home: "Houston".into(), link: Some(link), probe: None };
+        let mut c = CommsData { home: "Houston".into(), link: Some(link), probe: None, blackout: None };
         assert_eq!(summary(&c).rows(), [("HOUSTON", "21 ms"), ("  RATE", "4.3 Mbit/s"), ("  VIA", "Canberra")]);
         c.link = None;
         c.probe = Some(None);
@@ -54,5 +58,13 @@ mod tests {
         assert_eq!(s.value("PROBE"), Some("no signal: controls do not arrive"));
         c.probe = Some(Some(1.28));
         assert_eq!(summary(&c).value("PROBE"), Some("controls arrive after 1.28 s"));
+        // In blackout the sheath's plasma frequency is named against the link's.
+        assert_eq!(summary(&c).value("BLACKOUT"), None);
+        c.blackout = Some((1.23e10, 8.4e9));
+        let s = summary(&c);
+        assert_eq!(
+            (s.value("BLACKOUT"), s.tone("BLACKOUT")),
+            (Some("plasma 12.3 GHz above the link's 8.4 GHz"), Some(Tone::Warn))
+        );
     }
 }

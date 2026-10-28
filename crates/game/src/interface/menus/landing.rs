@@ -106,7 +106,26 @@ fn reentry(d: &FlightData) -> Section {
     let (t, limit) = d.craft.skin;
     let k = &d.known;
     s.toned("SKIN MAX", k.or_dash(k.temperatures, || crate::hud::temperature(t, limit)), heat_tone(t, limit));
+    for (label, value) in shock_rows(d.craft.shock.as_ref(), d.craft.peak_heating) {
+        s.row(label, k.or_dash(k.temperatures, || value));
+    }
     s
+}
+
+/// The shock layer's rows (D109): its temperature where the gas has an
+/// equilibrium model, the stagnation heating now, the peak so far.
+pub fn shock_rows(shock: Option<&sim::vessel::ShockLayer>, peak: f64) -> Vec<(&'static str, String)> {
+    let mut rows = Vec::new();
+    if let Some(s) = shock {
+        if s.temperature > 0.0 {
+            rows.push(("SHOCK LAYER", format!("{:.0} K", s.temperature)));
+        }
+        rows.push(("HEATING", format!("{:.1} W/cm²", (s.convective + s.radiative) / 1e4)));
+    }
+    if peak > 0.0 {
+        rows.push(("  PEAK", format!("{:.1} W/cm²", peak / 1e4)));
+    }
+    rows
 }
 
 /// How a temperature against its limit reads.
@@ -265,6 +284,21 @@ mod tests {
         // A braking solution without an impact (stale) is not shown.
         let stale = FlightData { impact: None, ..falling() };
         assert!(!ids(&stale).contains(&"braking"));
+    }
+
+    #[test]
+    fn the_shock_layer_rows() {
+        // (shock, peak) → rows.
+        assert!(shock_rows(None, 0.0).is_empty());
+        assert_eq!(shock_rows(None, 2.5e6), vec![("  PEAK", "250.0 W/cm²".to_string())]);
+        let s =
+            sim::vessel::ShockLayer { temperature: 10_571.4, convective: 1e6, radiative: 2e5, ..Default::default() };
+        let rows = shock_rows(Some(&s), 1.5e6);
+        assert_eq!(rows[0], ("SHOCK LAYER", "10571 K".to_string()));
+        assert_eq!(rows[1], ("HEATING", "120.0 W/cm²".to_string()));
+        // CO₂ has no equilibrium model: no temperature, the heating still.
+        let co2 = sim::vessel::ShockLayer { temperature: 0.0, ..s };
+        assert_eq!(shock_rows(Some(&co2), 0.0).len(), 1);
     }
 
     #[test]
