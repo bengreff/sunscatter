@@ -40,6 +40,10 @@ pub struct Parts {
     /// The 3D view at the resolution the policy picks (`render_scale`);
     /// off: at half of it (the benchmark's row for the policy's floor).
     pub native: bool,
+    /// Engine exhaust (D109's toggle, `persist::VisualSettings`): the
+    /// benchmark draws it whatever the toggle, so its row is its cost
+    /// (`scene::exhaust::drawn`).
+    pub exhaust: bool,
 }
 
 impl Default for Parts {
@@ -57,6 +61,7 @@ impl Default for Parts {
             planetshine: true,
             flare: true,
             native: true,
+            exhaust: true,
         }
     }
 }
@@ -78,6 +83,7 @@ impl Parts {
             ("planetshine", Parts { planetshine: false, ..on }),
             ("flare", Parts { flare: false, ..on }),
             ("full resolution (half)", Parts { native: false, ..on }),
+            ("exhaust", Parts { exhaust: false, ..on }),
         ]
     }
 }
@@ -113,7 +119,7 @@ mod tests {
     fn the_benchmark_turns_off_one_part_at_a_time() {
         let on = Parts::default();
         let parts = Parts::each_off();
-        assert_eq!(parts.len(), 12);
+        assert_eq!(parts.len(), 13);
         for (name, p) in &parts {
             // Exactly one part differs from the look.
             let flags = |p: &Parts| {
@@ -130,6 +136,7 @@ mod tests {
                     p.planetshine,
                     p.flare,
                     p.native,
+                    p.exhaust,
                 ]
             };
             let off = flags(p).iter().zip(flags(&on)).filter(|(a, b)| **a != *b).count();

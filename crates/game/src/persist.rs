@@ -63,14 +63,34 @@ impl Default for ControlsSettings {
     }
 }
 
-/// The settings file. There are no graphics settings (one look, D073):
-/// `graphics` and `graphics_version` in older files are ignored.
+/// The toggles for heavy visuals that are not vital (D109; Settings ▸
+/// Visuals), each off by default.
+#[derive(Resource, Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct VisualSettings {
+    /// Engine exhaust drawn from each engine's state at its nozzle exit and
+    /// the air (`scene::exhaust`); off: the flame cone (`scene::parts::flame`).
+    pub exhaust: bool,
+}
+
+impl VisualSettings {
+    /// The demo's (it loads no settings): off, or as `SUNSCATTER_EXHAUST`
+    /// says (`1` on, `0` off).
+    pub fn demo(exhaust: Option<&str>) -> Self {
+        VisualSettings { exhaust: exhaust.is_some_and(|v| v.trim() != "0" && !v.trim().is_empty()) }
+    }
+}
+
+/// The settings file. There are no graphics settings (one look, D073), only
+/// D109's toggles (`visuals`): `graphics` and `graphics_version` in older
+/// files are ignored.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct SettingsFile {
     pub controls: ControlsSettings,
     pub interface: InterfaceSettings,
     pub orbits: OrbitSettings,
+    pub visuals: VisualSettings,
 }
 
 impl SettingsFile {
@@ -123,8 +143,12 @@ impl Plugin for PersistPlugin {
     fn build(&self, app: &mut App) {
         let dirs = Dirs::resolve();
         let enabled = std::env::var_os("SUNSCATTER_DEMO").is_none();
-        let loaded = if enabled { load(&dirs.settings_file) } else { SettingsFile::default() };
+        let mut loaded = if enabled { load(&dirs.settings_file) } else { SettingsFile::default() };
+        if !enabled {
+            loaded.visuals = VisualSettings::demo(std::env::var("SUNSCATTER_EXHAUST").ok().as_deref());
+        }
         app.insert_resource(loaded.controls)
+            .insert_resource(loaded.visuals)
             .insert_resource(loaded.interface.clone().sanitized())
             .insert_resource(loaded.orbits.clone())
             .insert_resource(Persist { dirs, enabled, saved: loaded, last_write: f64::NEG_INFINITY })
@@ -152,9 +176,11 @@ fn save_settings(
     controls: Res<ControlsSettings>,
     interface: Res<InterfaceSettings>,
     orbits: Res<OrbitSettings>,
+    visuals: Res<VisualSettings>,
     mut persist: ResMut<Persist>,
 ) {
-    let current = SettingsFile { controls: *controls, interface: interface.clone(), orbits: orbits.clone() };
+    let current =
+        SettingsFile { controls: *controls, interface: interface.clone(), orbits: orbits.clone(), visuals: *visuals };
     let now = time.elapsed_secs_f64();
     if !persist.enabled || current == persist.saved || now - persist.last_write < WRITE_INTERVAL {
         return;
@@ -201,6 +227,7 @@ mod tests {
                 invert_y: true,
             },
             interface: InterfaceSettings { ui_scale: 1.5, ..InterfaceSettings::default() },
+            visuals: VisualSettings { exhaust: true },
             orbits: OrbitSettings {
                 vessel_line: VesselLine::TwoRevolutions,
                 hidden_bodies: ["Pluto".to_string()].into(),
@@ -238,5 +265,16 @@ mod tests {
         assert!(s.controls.invert_y, "other settings are kept");
         assert_eq!(s.interface, InterfaceSettings::default());
         assert!(!SettingsFile::default().to_ron().contains("graphics"));
+    }
+
+    #[test]
+    fn the_exhaust_is_off_unless_turned_on() {
+        assert!(!SettingsFile::default().visuals.exhaust);
+        assert!(!SettingsFile::from_ron("(controls: ())").unwrap().visuals.exhaust);
+        assert!(SettingsFile::from_ron("(visuals: (exhaust: true))").unwrap().visuals.exhaust);
+        // The demo's, from SUNSCATTER_EXHAUST.
+        for (env, on) in [(None, false), (Some("0"), false), (Some(""), false), (Some("1"), true), (Some("on"), true)] {
+            assert_eq!(VisualSettings::demo(env).exhaust, on, "{env:?}");
+        }
     }
 }

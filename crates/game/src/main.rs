@@ -218,6 +218,7 @@ fn body_plugins() -> (
     clouds::CloudsPlugin,
     ship_light::ShipLightPlugin,
     render_scale::RenderScalePlugin,
+    scene::exhaust::ExhaustPlugin,
 ) {
     (
         lighting::LightingPlugin,
@@ -228,6 +229,7 @@ fn body_plugins() -> (
         clouds::CloudsPlugin,
         ship_light::ShipLightPlugin,
         render_scale::RenderScalePlugin,
+        scene::exhaust::ExhaustPlugin,
     )
 }
 

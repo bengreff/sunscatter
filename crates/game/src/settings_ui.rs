@@ -18,16 +18,19 @@ pub enum SettingsTab {
     Orbits,
     Controls,
     Interface,
+    Visuals,
 }
 
 impl SettingsTab {
-    const ALL: [SettingsTab; 3] = [SettingsTab::Orbits, SettingsTab::Controls, SettingsTab::Interface];
+    const ALL: [SettingsTab; 4] =
+        [SettingsTab::Orbits, SettingsTab::Controls, SettingsTab::Interface, SettingsTab::Visuals];
 
     fn name(self) -> &'static str {
         match self {
             SettingsTab::Orbits => "Orbits",
             SettingsTab::Controls => "Controls",
             SettingsTab::Interface => "Interface",
+            SettingsTab::Visuals => "Visuals",
         }
     }
 }
@@ -56,6 +59,7 @@ pub fn draw(
     mut controls: ResMut<ControlsSettings>,
     mut iface: ResMut<InterfaceSettings>,
     mut orbits: ResMut<crate::trajectory::settings::OrbitSettings>,
+    mut visuals: ResMut<crate::persist::VisualSettings>,
     sim: Res<crate::state::SimState>,
     mut bench: ResMut<Bench>,
     terrain: Res<crate::terrain::Terrain>,
@@ -124,6 +128,11 @@ pub fn draw(
                 ui_.separator();
                 performance(ui_, &mut ui, &mut bench);
             }
+            SettingsTab::Visuals => {
+                let mut v = *visuals;
+                visuals_tab(ui_, &mut v);
+                visuals.set_if_neq(v);
+            }
         });
     });
     ui.open = open;
@@ -151,6 +160,13 @@ fn performance(ui_: &mut egui::Ui, ui: &mut SettingsUi, bench: &mut Bench) {
             ui_.end_row();
         }
     });
+}
+
+/// D109's toggles: heavy visuals that are not vital, each off by default.
+fn visuals_tab(ui: &mut egui::Ui, v: &mut crate::persist::VisualSettings) {
+    ui.checkbox(&mut v.exhaust, "Engine exhaust").on_hover_text(
+        "Each engine's plume from its state at the nozzle exit and the air around it. Off: a flame cone.",
+    );
 }
 
 fn controls_tab(ui: &mut egui::Ui, c: &mut ControlsSettings) {

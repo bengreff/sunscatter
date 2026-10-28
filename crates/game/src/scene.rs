@@ -2,6 +2,7 @@
 //! the per-body visual definitions, all placed camera-relative from f64
 //! simulation state every frame. Surfaces are drawn by `terrain`.
 
+pub mod exhaust;
 pub mod parts;
 pub mod pick;
 pub mod ships;

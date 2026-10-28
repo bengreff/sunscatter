@@ -187,6 +187,7 @@ fn every_shader_composes_validates_and_compiles_for_metal() {
         "sky/render_sky.wgsl",
         "sky/aerial_view_lut.wgsl",
         "upscale.wgsl",
+        "scene/exhaust.wgsl",
     ] {
         compile(&mut c, file, &defs);
     }
@@ -205,6 +206,11 @@ fn the_shaders_structs_match_the_rust_types() {
             "ShipLight",
             span(&compile(&mut c, "ship.wgsl", &defs), "ShipLight"),
             crate::ship_light::ShipLight::min_size().get(),
+        ),
+        (
+            "PlumeParams",
+            span(&compile(&mut c, "scene/exhaust.wgsl", &defs), "PlumeParams"),
+            crate::scene::exhaust::PlumeParams::min_size().get(),
         ),
     ];
     for (name, shader, rust) in cases {
