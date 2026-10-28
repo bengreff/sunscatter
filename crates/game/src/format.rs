@@ -231,6 +231,31 @@ pub fn rate(bps: f64) -> String {
     }
 }
 
+/// From this fraction of its limit a value reads amber.
+pub const WARN_FRACTION: f64 = 0.8;
+
+/// How a value reads against its limit.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Level {
+    #[default]
+    Normal,
+    /// From [`WARN_FRACTION`] of the limit.
+    Warn,
+    /// At or over the limit.
+    Over,
+}
+
+/// The one rule for a value against its limit (the navball's G row, the
+/// systems screen's `value / limit` rows, the part cards): amber from
+/// [`WARN_FRACTION`] of it, red at it, normal without one.
+pub fn limit_level(value: f64, limit: Option<f64>) -> Level {
+    match limit {
+        Some(l) if value >= l => Level::Over,
+        Some(l) if value >= WARN_FRACTION * l => Level::Warn,
+        _ => Level::Normal,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -341,6 +366,22 @@ mod tests {
         ];
         for (s, expected) in cases {
             assert_eq!(duration(s), expected, "{s}");
+        }
+    }
+
+    /// A value against its limit (table): amber from 80 % of it, red at
+    /// it, normal without one.
+    #[test]
+    fn amber_from_eighty_percent_red_at_the_limit() {
+        let table = [
+            (1.0, Some(7.5), Level::Normal),
+            (6.0, Some(7.5), Level::Warn),
+            (7.5, Some(7.5), Level::Over),
+            (9.0, Some(7.5), Level::Over),
+            (30.0, None, Level::Normal),
+        ];
+        for (v, limit, want) in table {
+            assert_eq!(limit_level(v, limit), want, "{v} {limit:?}");
         }
     }
 }

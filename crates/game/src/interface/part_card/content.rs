@@ -36,6 +36,9 @@ pub struct Section {
 pub struct Line {
     pub label: String,
     pub value: Value,
+    /// How it reads against its limit (`format::limit_level`; normal when
+    /// it has none or is not measured).
+    pub level: format::Level,
 }
 
 /// A value as shown, or unknown with the sensor that would measure it.
@@ -79,7 +82,16 @@ impl Live<'_> {
 }
 
 fn line(label: &str, value: Value) -> Line {
-    Line { label: label.to_string(), value }
+    Line { label: label.to_string(), value, level: format::Level::Normal }
+}
+
+/// A line against a limit: `x` (when measured) of `limit` sets its level.
+fn against(label: &str, value: Value, x: f64, limit: f64) -> Line {
+    let level = match value {
+        Value::Shown(_) => format::limit_level(x, Some(limit)),
+        Value::Unknown(_) => format::Level::Normal,
+    };
+    Line { level, ..line(label, value) }
 }
 
 fn shown(label: &str, text: impl Into<String>) -> Line {
@@ -117,10 +129,11 @@ pub fn card(live: &Live, part: u32) -> Option<Card> {
     }
     let k = live.kelvin.iter().find(|(p, _)| *p == part).map_or(f64::NAN, |x| x.1);
     let rated = info.ratings.rated_k.map(|r| format!(" (rated {r:.0} K)")).unwrap_or_default();
-    own.push(line(
-        "temperature",
-        live.value(Quantity::PartTemperature(part), k, |r| format!("{}{rated}", scaled(r, 1.0, 0, "K"))),
-    ));
+    let temperature = live.value(Quantity::PartTemperature(part), k, |r| format!("{}{rated}", scaled(r, 1.0, 0, "K")));
+    own.push(match info.ratings.rated_k {
+        Some(r) => against("temperature", temperature, k, r),
+        None => line("temperature", temperature),
+    });
     sections.push(Section { heading: format!("PART {}", info.id), lines: own });
     Some(Card { title: info.id.clone(), entry: info.entry.clone(), sections, commands: commands(live, part) })
 }
@@ -172,7 +185,8 @@ fn tank(live: &Live, t: usize) -> Section {
     let pressure =
         live.value(Quantity::TankPressure(i), p, |r| format!("{} of {rated:.1} bar", scaled(r, 1e5, 2, "bar")));
     let temperature = live.value(Quantity::TankTemperature(i), s.liquid_k, |r| scaled(r, 1.0, 1, "K"));
-    let lines = vec![line("contents", level), line("pressure", pressure), line("temperature", temperature)];
+    let pressure = against("pressure", pressure, p, d.burst);
+    let lines = vec![line("contents", level), pressure, line("temperature", temperature)];
     Section { heading: format!("TANK {} · {}", d.id, d.fluid), lines }
 }
 
@@ -186,7 +200,8 @@ fn stores(live: &Live, part: u32, out: &mut Vec<Section>) {
         let v = live.value(Quantity::BottlePressure(j as u32), p, |r| {
             format!("{} of {rated:.0} bar", scaled(r, 1e5, 0, "bar"))
         });
-        out.push(Section { heading: format!("BOTTLE {} · {}", b.id, b.gas), lines: vec![line("pressure", v)] });
+        let lines = vec![against("pressure", v, p, b.burst)];
+        out.push(Section { heading: format!("BOTTLE {} · {}", b.id, b.gas), lines });
     }
     for (j, b) in def.batteries.iter().enumerate().filter(|(_, b)| b.part == part) {
         let cap = b.item.capacity.max(1.0);

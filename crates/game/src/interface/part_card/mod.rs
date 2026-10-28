@@ -185,7 +185,7 @@ fn draw(ui: &mut egui::Ui, card: &Card, open: &mut Open) -> Option<Click> {
         for s in &card.sections {
             ui.label(egui::RichText::new(&s.heading).small().color(theme::MUTED));
             for l in &s.lines {
-                line(ui, &l.label, &l.value);
+                line(ui, &l.label, &l.value, l.level);
             }
         }
         let more = ui.add(egui::Button::new(egui::RichText::new("more ›").small().color(theme::ACCENT)).frame(false));
@@ -224,12 +224,12 @@ fn draw(ui: &mut egui::Ui, card: &Card, open: &mut Open) -> Option<Click> {
 
 /// A label and its value; an unknown value is a dash whose tooltip, after
 /// [`DASH_HOVER_S`] of hovering, names the sensor that would measure it.
-fn line(ui: &mut egui::Ui, label: &str, value: &Value) {
+fn line(ui: &mut egui::Ui, label: &str, value: &Value, level: crate::format::Level) {
     ui.horizontal(|ui| {
         ui.label(egui::RichText::new(label).small().color(theme::DIM));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| match value {
             Value::Shown(text) => {
-                ui.label(egui::RichText::new(text).small().monospace());
+                ui.label(egui::RichText::new(text).small().monospace().color(theme::level_colour(level)));
             }
             Value::Unknown(sensor) => {
                 let dash = ui.add(

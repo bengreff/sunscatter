@@ -191,11 +191,7 @@ fn readouts(ui: &mut egui::Ui, s: &NavState, actions: &mut Vec<Action>) {
         ui.label(dim("G"));
         let known = k.knows(Quantity::Acceleration);
         let limit = s.g.limit.as_ref().map(|(l, _)| *l);
-        let colour = match g_meter::level(s.g.load, limit) {
-            g_meter::Level::Normal => theme::TEXT,
-            g_meter::Level::Warn => theme::ACCENT,
-            g_meter::Level::Over => theme::ALERT,
-        };
+        let colour = theme::level_colour(crate::format::limit_level(s.g.load, limit));
         let text = if known { g_meter::text(&s.g) } else { DASH.to_string() };
         value(ui, text, if known { colour } else { theme::TEXT }).on_hover_text(g_meter::hover(&s.g));
         ui.end_row();

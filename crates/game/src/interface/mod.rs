@@ -35,6 +35,15 @@ pub mod theme {
     /// Text that is there but not active (a closed menu's name).
     pub const MUTED: Color32 = Color32::from_rgb(180, 194, 208);
 
+    /// A value's colour against its limit (`format::limit_level`).
+    pub fn level_colour(l: crate::format::Level) -> Color32 {
+        match l {
+            crate::format::Level::Normal => TEXT,
+            crate::format::Level::Warn => ACCENT,
+            crate::format::Level::Over => ALERT,
+        }
+    }
+
     pub fn panel_frame() -> Frame {
         Frame::new()
             .fill(PANEL)

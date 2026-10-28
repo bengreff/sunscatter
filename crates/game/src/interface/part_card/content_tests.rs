@@ -113,3 +113,27 @@ fn what_cannot_be_undone_is_confirmed() {
         [Look::Idle, Look::Armed, Look::Running, Look::Failed, Look::Spent].map(chute_words).to_vec();
     assert_eq!(words, ["stowed", "armed", "open", "torn", "cut away"]);
 }
+
+/// A part's temperature against its rating colours by the one rule
+/// (`format::limit_level`), only where it is measured.
+#[test]
+fn a_hot_part_reads_amber_then_red() {
+    let (def, state) = falcon9();
+    let mvac = part(&def, "s2.mvac");
+    let rated = def.parts.iter().find(|p| p.part == mvac).unwrap().ratings.rated_k.expect("rated");
+    // (temperature as a share of its rating, knowledge, level)
+    let table = [
+        (0.5, Knowledge::perfect(), format::Level::Normal),
+        (0.9, Knowledge::perfect(), format::Level::Warn),
+        (1.1, Knowledge::perfect(), format::Level::Over),
+        (1.1, Knowledge::default(), format::Level::Normal),
+    ];
+    for (share, k, want) in table {
+        let kelvin = [(mvac, share * rated)];
+        let live = Live { def: &def, state: &state, knowledge: &k, thrusts: &[], kelvin: &kelvin, chute: None };
+        let card = card(&live, mvac).unwrap();
+        let s = card.sections.iter().find(|s| s.heading.starts_with("PART")).unwrap();
+        let line = s.lines.iter().find(|l| l.label == "temperature").unwrap();
+        assert_eq!(line.level, want, "{share} {}", k.perfect);
+    }
+}

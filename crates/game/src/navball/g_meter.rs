@@ -1,15 +1,13 @@
 //! The navball's G row (D111): the proper acceleration in g, the way it
 //! pushes the crew (towards the nose, the tail, a side, the top or the
 //! bottom), and for a craft of parts accelerating the limit and what sets
-//! it (`sim::systems::g_limit`): amber from 80 % of the limit, red at it.
+//! it (`sim::systems::g_limit`): amber from 80 % of the limit, red at it
+//! (`format::limit_level`, the one rule for every value against a limit).
 //! Pure (rule 8), table-tested below.
 
 use super::rules::G0;
 use glam::DVec3;
 use sim::systems::g_limit::{GLimit, Limiter};
-
-/// From this fraction of the limit the row is amber.
-pub const WARN_FRACTION: f64 = 0.8;
 
 /// Where the proper acceleration points, in body axes (+Z the nose, +X
 /// the right side, −Y the top).
@@ -71,25 +69,6 @@ impl Toward {
             Toward::Top => "towards the top",
             Toward::Bottom => "towards the bottom",
         }
-    }
-}
-
-/// How the row reads against the limit.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Level {
-    Normal,
-    /// From [`WARN_FRACTION`] of the limit.
-    Warn,
-    /// At or over the limit.
-    Over,
-}
-
-/// The row's level for a load of `g` against `limit` (g), if any.
-pub fn level(g: f64, limit: Option<f64>) -> Level {
-    match limit {
-        Some(l) if g >= l => Level::Over,
-        Some(l) if g >= WARN_FRACTION * l => Level::Warn,
-        _ => Level::Normal,
     }
 }
 
@@ -178,22 +157,6 @@ mod tests {
         ];
         for (a, want) in table {
             assert_eq!(Toward::of(a), want, "{a}");
-        }
-    }
-
-    /// The level (table): amber from 80 % of the limit, red at it, normal
-    /// without one.
-    #[test]
-    fn amber_from_eighty_percent_red_at_the_limit() {
-        let table = [
-            (1.0, Some(7.5), Level::Normal),
-            (6.0, Some(7.5), Level::Warn),
-            (7.5, Some(7.5), Level::Over),
-            (9.0, Some(7.5), Level::Over),
-            (30.0, None, Level::Normal),
-        ];
-        for (g, limit, want) in table {
-            assert_eq!(level(g, limit), want, "{g} {limit:?}");
         }
     }
 
