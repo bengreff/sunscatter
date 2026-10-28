@@ -8,7 +8,8 @@
 //! (D076), never osculating; the elements from `relations` (about the
 //! body's equator); impact and braking from `sim::landing` through
 //! `landing::LandingPrediction`; closest approaches from `rendezvous`;
-//! stages from `staging`; the RCS from `rcs_data`.
+//! stages from `staging`; the RCS from `rcs_data`, the crew and power from
+//! their menus' modules.
 
 use crate::comms::{Comms, Signal};
 use crate::landing::Landing;
@@ -51,8 +52,11 @@ pub struct FlightData {
     pub craft: CraftData,
     pub comms: CommsData,
     pub stages: Vec<crate::staging::Stage>,
-    /// The RCS menu's (`rcs_data`).
+    /// The RCS menu's (`rcs_data`), the Crew and Power menus' (a craft of
+    /// parts with a cabin, with buses).
     pub rcs: super::rcs::RcsData,
+    pub crew: Option<super::crew::CrewData>,
+    pub power: Option<super::power::PowerData>,
     pub diagnostics: Diagnostics,
     /// What the craft knows (D106): every readout through it.
     pub known: crate::format::Known,
@@ -311,6 +315,8 @@ pub fn gather(s: &Sources) -> FlightData {
         comms: comms(s),
         stages: crate::staging::stack_of(ship, &sim.controls),
         rcs: super::rcs_data::gather(ship, sim.controls.rcs),
+        crew: super::crew::gather(ship),
+        power: super::power::gather(ship),
         known: crate::format::Known::of(ship),
         parts: ship.ship().is_some(),
         diagnostics: Diagnostics {

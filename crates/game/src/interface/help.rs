@@ -36,6 +36,8 @@ pub const KEYS: &[(&str, &[(&str, &str)])] = &[
             ("1", "Orbital: the orbit now, the target, the ship's clock"),
             ("2", "Landing / Reentry: impact, braking, entry, heat, parachute (shows the impact marker)"),
             ("3", "Maneuver: the planned burns, the burn planner"),
+            ("4", "Crew / ECLSS: the crew, the cabin's air, life support, injuries"),
+            ("5", "Power: the buses, batteries, what has no power"),
             ("6", "Comms: the link home, a probe's control delay"),
         ],
     ),

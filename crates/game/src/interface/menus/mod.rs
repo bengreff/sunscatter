@@ -11,11 +11,13 @@
 //! `settings.ron` ([`MenuSettings`]).
 
 mod comms;
+pub mod crew;
 pub mod data;
 mod hottest;
 mod landing;
 mod maneuver;
 mod orbital;
+pub mod power;
 pub mod rcs;
 mod rcs_data;
 pub mod render;
@@ -41,6 +43,10 @@ pub enum MenuId {
     Landing,
     /// The planned burns and the planner.
     Maneuver,
+    /// The crew, the cabin's air, life support, injuries.
+    Crew,
+    /// The buses, batteries and what has no power.
+    Power,
     /// The links home and the probe's control delay (the old Utilities and
     /// Staging menus open it from older settings).
     #[serde(alias = "Utilities", alias = "Staging")]
@@ -49,10 +55,12 @@ pub enum MenuId {
 
 impl MenuId {
     /// Every menu, in dock order.
-    pub const ALL: [MenuId; 5] = [MenuId::Rcs, MenuId::Orbital, MenuId::Landing, MenuId::Maneuver, MenuId::Comms];
+    pub const ALL: [MenuId; 7] =
+        [MenuId::Rcs, MenuId::Orbital, MenuId::Landing, MenuId::Maneuver, MenuId::Crew, MenuId::Power, MenuId::Comms];
     /// The menus the bar, their keys and the settings open and close (the
     /// RCS menu follows RCS).
-    pub const BAR: [MenuId; 4] = [MenuId::Orbital, MenuId::Landing, MenuId::Maneuver, MenuId::Comms];
+    pub const BAR: [MenuId; 6] =
+        [MenuId::Orbital, MenuId::Landing, MenuId::Maneuver, MenuId::Crew, MenuId::Power, MenuId::Comms];
 
     /// The menu's title (its panel).
     pub fn title(self) -> &'static str {
@@ -61,6 +69,8 @@ impl MenuId {
             MenuId::Orbital => "ORBITAL",
             MenuId::Landing => "LANDING / REENTRY",
             MenuId::Maneuver => "MANEUVER",
+            MenuId::Crew => "CREW / ECLSS",
+            MenuId::Power => "POWER",
             MenuId::Comms => "COMMS",
         }
     }
@@ -69,6 +79,7 @@ impl MenuId {
     pub fn short(self) -> &'static str {
         match self {
             MenuId::Landing => "LANDING",
+            MenuId::Crew => "CREW",
             m => m.title(),
         }
     }
@@ -79,6 +90,8 @@ impl MenuId {
             MenuId::Orbital => Some(KeyCode::Digit1),
             MenuId::Landing => Some(KeyCode::Digit2),
             MenuId::Maneuver => Some(KeyCode::Digit3),
+            MenuId::Crew => Some(KeyCode::Digit4),
+            MenuId::Power => Some(KeyCode::Digit5),
             MenuId::Comms => Some(KeyCode::Digit6),
             MenuId::Rcs => None,
         }
@@ -90,6 +103,8 @@ impl MenuId {
             MenuId::Orbital => "1",
             MenuId::Landing => "2",
             MenuId::Maneuver => "3",
+            MenuId::Crew => "4",
+            MenuId::Power => "5",
             MenuId::Comms => "6",
             MenuId::Rcs => "",
         }
@@ -110,6 +125,8 @@ impl MenuId {
             MenuId::Landing => Some(Layer::Thermal),
             MenuId::Comms => Some(Layer::Data),
             MenuId::Rcs => Some(Layer::Plumbing),
+            MenuId::Crew => Some(Layer::Health),
+            MenuId::Power => Some(Layer::Electrical),
         }
     }
 
@@ -121,6 +138,8 @@ impl MenuId {
             MenuId::Orbital => orbital::sections(d),
             MenuId::Landing => landing::sections(d),
             MenuId::Maneuver => maneuver::sections(d),
+            MenuId::Crew => crew::sections(d.crew.as_ref(), &d.known),
+            MenuId::Power => power::sections(d.power.as_ref()),
             MenuId::Comms => comms::sections(d),
         };
         if d.parts {
