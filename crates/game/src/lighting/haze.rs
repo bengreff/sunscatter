@@ -174,13 +174,6 @@ pub fn air_mass(r_over_h: f64, mu: f64) -> f64 {
     (r_over_h * r_over_h * mu * mu + 2.0 * r_over_h + 1.0).sqrt() - r_over_h * mu
 }
 
-/// The direct beam's transmittance per channel from `above_m` over a
-/// body's mean radius towards a star at zenith cosine `mu`
-/// ([`ray_transmittance`]).
-pub fn direct_transmittance(def: &crate::body_visual::AtmosphereDef, radius: f64, above_m: f64, mu: f64) -> [f64; 3] {
-    ray_transmittance(def, radius, radius + above_m, mu)
-}
-
 /// A profile's density at height `h` (m) relative to its densest: the
 /// shape whose column `share_above` integrates (an exponential's from the
 /// ground; a tent's triangle, its column half its width).
@@ -300,11 +293,11 @@ mod tests {
             ("at 185 km: none lost", 185_000.0, 0.0, (0.999, 1.0)),
         ];
         for (case, h, mu, (lo, hi)) in cases {
-            let t = direct_transmittance(&earth, r, h, mu);
+            let t = ray_transmittance(&earth, r, r + h, mu);
             assert!(t[1] >= lo && t[1] <= hi, "{case}: {t:?}");
         }
         // Red gets through best near the horizon (the sunset's colour).
-        let low = direct_transmittance(&earth, r, 0.0, 0.05);
+        let low = ray_transmittance(&earth, r, r, 0.05);
         assert!(low[0] > low[1] && low[1] > low[2], "{low:?}");
         // A ship at 262 km seeing the Sun set through the limb: the ray's
         // lowest point (tangent height) sets the light: clear at 100 km; at
