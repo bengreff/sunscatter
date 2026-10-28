@@ -1,7 +1,7 @@
 //! The profiler (`SUNSCATTER_PROFILE=1`): every few seconds, a ranked table
 //! of where the frame goes, printed to the terminal, appended to
 //! `profile.log` (next to `settings.ron`, or in the demo's directory) and
-//! summarised in Utilities ▸ Diagnostics.
+//! summarised in the performance overlay (Esc menu).
 //!
 //! - CPU time per system (ours by name, Bevy's by name when they cost
 //!   something, else grouped by crate), per schedule, and per thread (the
@@ -57,7 +57,7 @@ pub fn layer(_app: &mut App) -> Option<BoxedLayer> {
 /// The profiler's state in the main world.
 #[derive(Resource, Default)]
 pub struct Profile {
-    /// The latest report's summary (Utilities ▸ Diagnostics).
+    /// The latest report's summary (the performance overlay).
     pub summary: Vec<(String, String)>,
     /// The latest report.
     pub last: String,

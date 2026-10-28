@@ -134,7 +134,7 @@ pub fn run(
         (state.frames, state.real, state.worst, state.benched) = (0, 0.0, 0.0, false);
         sim.warp = 0;
         pause.0 = false;
-        iface.menus.show_only(None, &[]);
+        iface.menus.show_only(None);
         rig.focus = Focus::Ship;
         (rig.distance, rig.pitch) = (60.0, 1.2);
         profile.restart("plunge: 185 km, falling 2.3 km/s, looking down");

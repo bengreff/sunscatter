@@ -1,15 +1,15 @@
 //! Interface settings and the flight view's layout rules (D080), as pure
 //! data and functions: the UI scale, the navball size, which menus are open
-//! and which sections expanded (persisted in `settings.ron`, `interface`),
-//! and where the fixed panels and the docks go for a window size.
+//! (persisted in `settings.ron`, `interface`), and where the fixed panels
+//! and the dock go for a window size.
 //!
 //! The places are designated, nothing is dragged: the time panel top left,
-//! the menu bar top centre, the navball cluster bottom centre, flight-task
-//! menus in the left dock and the ship's in the right one, each stacking
-//! its open menus top to bottom and scrolling when they do not fit above
-//! the cluster.
+//! the menu bar top centre, the navball cluster bottom centre with the
+//! action bar above it, the staging bar on the right edge
+//! (`interface::stage_bar`), and every open menu in the left dock, stacked
+//! top to bottom and scrolling within the dock's height.
 
-use crate::interface::menus::{Dock, MenuSettings};
+use crate::interface::menus::MenuSettings;
 use bevy::prelude::Resource;
 use bevy_egui::egui::Rect;
 use serde::{Deserialize, Serialize};
@@ -36,7 +36,7 @@ pub struct InterfaceSettings {
     pub navball_size: f32,
     /// Frame rate shown in the time panel.
     pub show_fps: bool,
-    /// The open menus and their expanded sections.
+    /// The open menus.
     pub menus: MenuSettings,
     /// The MCP server for the player's AI agent (D044, D069): off by default.
     pub agent: AgentSettings,
@@ -98,52 +98,25 @@ pub struct DockPlace {
     pub max_height: f32,
 }
 
-/// The top of a dock: below the time panel and the menu bar, and for the
-/// right dock below the performance overlay (F4) when it shows, whichever
+/// The top of the dock: below the time panel and the menu bar, whichever
 /// reaches lowest (rects as last drawn; `None` if not drawn).
-pub fn dock_top(dock: Dock, time: Option<Rect>, bar: Option<Rect>, overlay: Option<Rect>) -> f32 {
-    let overlay = overlay.filter(|_| dock == Dock::Right);
-    let bottom = [time, bar, overlay].into_iter().flatten().fold(MARGIN, |b, r| b.max(r.max.y));
+pub fn dock_top(time: Option<Rect>, bar: Option<Rect>) -> f32 {
+    let bottom = [time, bar].into_iter().flatten().fold(MARGIN, |b, r| b.max(r.max.y));
     bottom + GAP
 }
 
-/// A dock's place in `screen`: at the left or right margin, from `top` to
-/// the bottom margin, or to above the navball cluster where the dock would
+/// The dock's place in `screen`: at the left margin, from `top` to the
+/// bottom margin, or to above the navball cluster where the dock would
 /// overlap it (a narrow window), never shorter than [`MIN_DOCK_HEIGHT`].
-pub fn dock_place(dock: Dock, screen: Rect, top: f32, cluster: Option<Rect>) -> DockPlace {
-    let x = match dock {
-        Dock::Left => screen.min.x + MARGIN,
-        Dock::Right => screen.max.x - MARGIN - DOCK_WIDTH,
-    };
+/// Its menus scroll within that height.
+pub fn dock_place(screen: Rect, top: f32, cluster: Option<Rect>) -> DockPlace {
+    let x = screen.min.x + MARGIN;
     let overlaps = |c: &Rect| x < c.max.x && x + DOCK_WIDTH > c.min.x;
     let bottom = match cluster.filter(overlaps) {
         Some(c) => c.min.y - GAP,
         None => screen.max.y - MARGIN,
     };
     DockPlace { x, top, max_height: (bottom - top).max(MIN_DOCK_HEIGHT) }
-}
-
-/// A dock's menus stacked top to bottom: where each starts (relative to the
-/// dock's top), the stack's height, and whether it scrolls.
-#[derive(Clone, Debug, PartialEq)]
-pub struct Stack {
-    pub tops: Vec<f32>,
-    pub height: f32,
-    pub scrolls: bool,
-}
-
-/// Stacks menus of `heights` with [`GAP`] between them.
-pub fn stack(heights: &[f32], max_height: f32) -> Stack {
-    let mut tops = Vec::with_capacity(heights.len());
-    let mut y = 0.0;
-    for (k, h) in heights.iter().enumerate() {
-        if k > 0 {
-            y += GAP;
-        }
-        tops.push(y);
-        y += h;
-    }
-    Stack { tops, height: y, scrolls: y > max_height }
 }
 
 /// Whether a mark at `r` falls behind any of the HUD's panels (`hud`, as
@@ -168,46 +141,42 @@ mod tests {
     }
 
     #[test]
-    fn docks_start_below_the_top_panels_and_the_overlay_moves_only_the_right_one() {
+    fn the_dock_starts_below_the_top_panels() {
         let time = Some(rect(10.0, 10.0, 260.0, 76.0));
         let bar = Some(rect(400.0, 10.0, 880.0, 42.0));
-        let overlay = Some(rect(1000.0, 10.0, 1270.0, 120.0));
-        // (dock, time, bar, overlay, top)
-        let table = [
-            (Dock::Left, time, bar, None, 84.0),
-            (Dock::Right, time, bar, None, 84.0),
-            (Dock::Left, time, bar, overlay, 84.0),
-            (Dock::Right, time, bar, overlay, 128.0),
-            (Dock::Left, None, None, None, MARGIN + GAP),
-        ];
-        for (dock, t, b, o, want) in table {
-            assert_eq!(dock_top(dock, t, b, o), want, "{dock:?} {o:?}");
+        // (time, bar, top)
+        let table = [(time, bar, 84.0), (None, bar, 50.0), (None, None, MARGIN + GAP)];
+        for (t, b, want) in table {
+            assert_eq!(dock_top(t, b), want, "{t:?} {b:?}");
         }
     }
 
+    /// The dock (table): from its top to the bottom margin at 1600×900 and
+    /// the reference Mac (3024×1964 physical, 1512×982 logical at scale
+    /// 2), above the navball cluster where it would cover it; its menus
+    /// scroll within that height whatever they hold.
     #[test]
-    fn docks_reach_the_bottom_unless_they_would_cover_the_navball_cluster() {
+    fn the_dock_reaches_the_bottom_unless_it_would_cover_the_navball_cluster() {
         let top = 84.0;
         // The cluster: ~470 px wide, centred, 250 px tall at the bottom.
         let cluster = |w: f32, h: f32| rect(w / 2.0 - 235.0, h - 258.0, w / 2.0 + 235.0, h - 8.0);
-        // (window w, h, dock, x, max height, scrolls a 600 px stack)
+        // (window w, h, max height)
         let table = [
-            (1280.0, 800.0, Dock::Left, 10.0, 706.0, false),
-            (1280.0, 800.0, Dock::Right, 970.0, 706.0, false),
-            (1920.0, 1080.0, Dock::Right, 1610.0, 986.0, false),
-            // Narrow: the docks overlap the cluster and stop above it.
-            (900.0, 800.0, Dock::Left, 10.0, 450.0, true),
-            (900.0, 800.0, Dock::Right, 590.0, 450.0, true),
+            (1600.0, 900.0, 806.0),
+            (1512.0, 982.0, 888.0),
+            (1280.0, 800.0, 706.0),
+            // Narrow: the dock overlaps the cluster and stops above it.
+            (900.0, 800.0, 450.0),
             // Tiny: never shorter than the minimum.
-            (700.0, 300.0, Dock::Left, 10.0, MIN_DOCK_HEIGHT, true),
+            (700.0, 300.0, MIN_DOCK_HEIGHT),
         ];
-        for (w, h, dock, x, max_height, scrolls) in table {
-            let place = dock_place(dock, rect(0.0, 0.0, w, h), top, Some(cluster(w, h)));
-            assert_eq!(place, DockPlace { x, top, max_height }, "{w}x{h} {dock:?}");
-            assert_eq!(stack(&[350.0, 242.0], place.max_height).scrolls, scrolls, "{w}x{h} {dock:?}");
+        for (w, h, max_height) in table {
+            let place = dock_place(rect(0.0, 0.0, w, h), top, Some(cluster(w, h)));
+            assert_eq!(place, DockPlace { x: MARGIN, top, max_height }, "{w}x{h}");
+            assert!(place.top + place.max_height <= h - MARGIN || max_height == MIN_DOCK_HEIGHT, "{w}x{h} fits");
         }
         // Without the cluster drawn (the tracking station), to the bottom.
-        assert_eq!(dock_place(Dock::Left, rect(0.0, 0.0, 900.0, 800.0), top, None).max_height, 706.0);
+        assert_eq!(dock_place(rect(0.0, 0.0, 900.0, 800.0), top, None).max_height, 706.0);
     }
 
     #[test]
@@ -232,22 +201,9 @@ mod tests {
     }
 
     #[test]
-    fn menus_stack_top_to_bottom_with_a_gap() {
-        assert_eq!(stack(&[], 500.0), Stack { tops: vec![], height: 0.0, scrolls: false });
-        assert_eq!(
-            stack(&[200.0, 100.0, 50.0], 500.0),
-            Stack { tops: vec![0.0, 208.0, 316.0], height: 366.0, scrolls: false }
-        );
-        assert!(stack(&[300.0, 300.0], 600.0).scrolls, "608 px past 600");
-        assert!(!stack(&[300.0, 292.0], 600.0).scrolls, "exactly 600 fits");
-        assert_eq!(toasts_top(Some(rect(400.0, 10.0, 880.0, 42.0))), 50.0);
-    }
-
-    #[test]
     fn round_trips_through_ron_and_sanitizes() {
         let mut s = InterfaceSettings { ui_scale: 1.25, ..Default::default() };
         s.menus.toggle(crate::interface::menus::MenuId::Landing);
-        s.menus.toggle_section(crate::interface::menus::MenuId::Landing, "reentry");
         let text = ron::to_string(&s).unwrap();
         assert_eq!(ron::from_str::<InterfaceSettings>(&text).unwrap(), s);
         let wild = InterfaceSettings { ui_scale: 40.0, navball_size: f32::NAN, ..Default::default() }.sanitized();

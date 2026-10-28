@@ -15,7 +15,6 @@ use crate::camera::{CameraRig, Focus};
 use crate::commands::GameCommand;
 use crate::demo::{Demo, Step};
 use crate::interface::layout::InterfaceSettings;
-use crate::interface::menus::MenuId;
 use crate::state::SimState;
 use crate::systems_screen::{inspect::Selection, rules::Layer, SystemsScreen};
 use bevy::prelude::*;
@@ -138,7 +137,7 @@ pub fn run(
     match script.phase {
         Phase::Pad => {
             if t < 1.0 {
-                iface.menus.show_only(Some(MenuId::Staging), &[]);
+                iface.menus.show_only(None);
                 return;
             }
             if let Some(&(name, distance, pitch, yaw)) = PAD_VIEWS.get(script.view) {

@@ -282,7 +282,7 @@ pub fn system_ms(spans: &[(Kind, String, Acc)], name: &str, frames: u64) -> f64 
         .sum()
 }
 
-/// The few lines the Utilities ▸ Diagnostics section shows.
+/// The few lines the performance overlay shows.
 pub fn summary(w: &Window) -> Vec<(String, String)> {
     let f = w.frames.frames;
     let fs = &w.frames;

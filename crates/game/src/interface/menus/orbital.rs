@@ -1,14 +1,15 @@
-//! The Orbital menu (key O, left dock): the orbit in full, the target and
-//! the planned burns. Advanced maneuver tools will come here.
+//! The Orbital menu (key 1): the orbit in full, the target and the ship's
+//! clock. The planned burns are the Maneuver menu's.
 
-use super::data::{Burn, Elements, FlightData, TargetData};
+use super::data::{Elements, FlightData, TargetData};
 use super::{MenuAction, Section, Tone};
 use crate::format::{duration as fmt_duration, Known};
+use crate::hud::clock_offset;
 use crate::navball::ApsisReadout;
 use sim::systems::Quantity::{Position, Velocity};
 
 pub fn sections(d: &FlightData) -> Vec<Section> {
-    vec![summary(d), elements(d), target(&d.target, &d.known), maneuvers(&d.burns)]
+    vec![summary(d), elements(d), target(&d.target, &d.known), clock(d)]
 }
 
 /// Ap and Pe from the predicted trajectory (D076), then the osculating
@@ -83,23 +84,11 @@ fn target(t: &TargetData, k: &Known) -> Section {
 }
 
 /// Each planned burn, and the planner (N).
-fn maneuvers(burns: &[Burn]) -> Section {
-    let title = match burns.len() {
-        0 => "MANEUVERS".to_string(),
-        1 => "MANEUVERS · 1 burn".to_string(),
-        n => format!("MANEUVERS · {n} burns"),
-    };
-    let mut s = Section::new("maneuvers", title);
-    if burns.is_empty() {
-        s.note("no burns planned", Tone::Dim);
-    }
-    for (k, b) in burns.iter().enumerate() {
-        let dv = b.dv.map_or("fixed time".to_string(), |dv| format!("Δv {dv:.1} m/s"));
-        s.row(format!("BURN {}", k + 1), dv);
-        s.toned("  IGNITION IN", fmt_duration(b.in_s), if b.in_s < 60.0 { Tone::Warn } else { Tone::Normal });
-        s.row("  DURATION", fmt_duration(b.duration));
-    }
-    s.button("Open the burn planner  (N)", MenuAction::OpenPlanner);
+/// The ship's own clock against the origin's (relativity).
+fn clock(d: &FlightData) -> Section {
+    let mut s = Section::new("clock", "SHIP CLOCK");
+    s.row("PROPER − ORIGIN", clock_offset(d.craft.clock_offset));
+    s.note("the ship's proper time minus the origin's clock, the time shown", Tone::Dim);
     s
 }
 
@@ -234,23 +223,8 @@ mod tests {
     }
 
     #[test]
-    fn maneuvers_list_each_burn_and_open_the_planner() {
-        let s = maneuvers(&[]);
-        assert_eq!(s.title, "MANEUVERS");
-        assert!(s.items.contains(&Item::Note("no burns planned".into(), Tone::Dim)));
-        let burns =
-            [Burn { dv: Some(3_150.0), in_s: 1_200.0, duration: 330.0 }, Burn { dv: None, in_s: 30.0, duration: 12.0 }];
-        let s = maneuvers(&burns);
-        assert_eq!(s.title, "MANEUVERS · 2 burns");
-        assert_eq!(s.value("BURN 1"), Some("Δv 3150.0 m/s"));
-        assert_eq!(s.value("BURN 2"), Some("fixed time"));
-        let tones: Vec<_> = (s.items.iter())
-            .filter_map(|i| match i {
-                Item::Row(r) if r.label == "  IGNITION IN" => Some(r.tone),
-                _ => None,
-            })
-            .collect();
-        assert_eq!(tones, [Tone::Normal, Tone::Warn], "a burn within a minute warns");
-        assert!(matches!(s.items.last(), Some(Item::Button { action: MenuAction::OpenPlanner, .. })));
+    fn the_ship_clock_is_its_own_section() {
+        let s = sections(&orbit());
+        assert!(find(&s, "clock").is_some_and(|c| c.value("PROPER − ORIGIN").is_some()));
     }
 }

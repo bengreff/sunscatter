@@ -71,13 +71,12 @@ pub fn apply_style(mut contexts: EguiContexts, iface: Res<InterfaceSettings>, mu
 }
 
 /// Where the HUD's panels were drawn last frame (the navball cluster, the
-/// docks with menus in them, the time panel, the menu bar), for marks that
+/// dock with menus in it, the time panel, the menu bar), for marks that
 /// must not show through them.
 pub fn hud_rects(ctx: &egui::Context) -> Vec<egui::Rect> {
     let ids = [
         egui::Id::new(crate::navball::AREA),
-        menus::render::dock_area(menus::Dock::Left),
-        menus::render::dock_area(menus::Dock::Right),
+        menus::render::dock_area(),
         egui::Id::new(layout::TIME_AREA),
         egui::Id::new(layout::BAR_AREA),
     ];

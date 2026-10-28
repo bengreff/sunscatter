@@ -1,16 +1,17 @@
-//! One renderer for every menu (D080): a panel with the menu's title, its
-//! summary, and a header per section that expands on click; the docks that
-//! stack the open menus at their designated places; the menu bar. Labels
+//! One renderer for every menu (D080, D111): a panel with the menu's
+//! title, its summary, and every section under its heading (flat: nothing
+//! collapses); the left dock that stacks the open menus and always scrolls
+//! within its height; the menu bar. Labels
 //! are dim small monospace, values monospace and right-aligned in the
 //! tone's colour.
 
-use super::{Dock, Item, MenuAction, MenuId, MenuSettings, Section, Tone, SUMMARY};
+use super::{Item, MenuAction, MenuId, MenuSettings, Section, Tone, SUMMARY};
 use crate::interface::layout::{self, DockPlace, BAR_AREA, DOCK_WIDTH, GAP};
 use crate::interface::theme;
 use bevy_egui::egui::{self, pos2, vec2, Align, Align2, Color32, Layout, RichText, Sense, Stroke};
 
-/// Height of a section header (px).
-const HEADER_PX: f32 = 20.0;
+/// Height of a section heading (px).
+const HEADER_PX: f32 = 18.0;
 /// Width of a pick list's box.
 const CHOICE_PX: f32 = 170.0;
 
@@ -18,8 +19,6 @@ const CHOICE_PX: f32 = 170.0;
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct MenuInput {
     pub close: bool,
-    /// Sections whose header was clicked.
-    pub toggled: Vec<&'static str>,
     pub actions: Vec<MenuAction>,
 }
 
@@ -27,21 +26,15 @@ pub fn tone_colour(t: Tone) -> Color32 {
     match t {
         Tone::Normal => theme::TEXT,
         Tone::Dim => theme::DIM,
-        Tone::Accent => theme::ACCENT,
         Tone::Good => theme::GOOD,
         Tone::Warn => theme::WARN,
         Tone::Alert => theme::ALERT,
     }
 }
 
-/// The egui id of a section's header.
-pub fn header_id(menu: MenuId, section: &str) -> egui::Id {
-    egui::Id::new(("menu_section", menu, section))
-}
-
-/// Draws one menu: the title bar, the summary, then each section's header
-/// and, when expanded, its items.
-pub fn menu(ui: &mut egui::Ui, menu: MenuId, sections: &[Section], settings: &MenuSettings) -> MenuInput {
+/// Draws one menu: the title bar, the summary, then each section under its
+/// heading.
+pub fn menu(ui: &mut egui::Ui, menu: MenuId, sections: &[Section]) -> MenuInput {
     let mut input = MenuInput::default();
     ui.spacing_mut().item_spacing = vec2(6.0, 2.0);
     // A section's items sit just inside its header's text (egui's default
@@ -59,42 +52,22 @@ pub fn menu(ui: &mut egui::Ui, menu: MenuId, sections: &[Section], settings: &Me
     });
     ui.add_space(2.0);
     for s in sections {
-        if s.id == SUMMARY {
-            items(ui, menu, s, &mut input);
-            continue;
+        if s.id != SUMMARY && !s.title.is_empty() {
+            heading(ui, &s.title);
         }
-        let open = settings.is_expanded(menu, s.id);
-        if header(ui, header_id(menu, s.id), &s.title, open) {
-            input.toggled.push(s.id);
-        }
-        if open {
-            ui.indent(("menu_indent", menu, s.id), |ui| items(ui, menu, s, &mut input));
-        }
+        items(ui, menu, s, &mut input);
     }
     input
 }
 
-/// A full-width section header with a disclosure triangle; true when
-/// clicked.
-fn header(ui: &mut egui::Ui, id: egui::Id, title: &str, open: bool) -> bool {
+/// A full-width section heading: a rule and the title, dim.
+fn heading(ui: &mut egui::Ui, title: &str) {
     ui.add_space(3.0);
-    let width = ui.available_width();
-    let (rect, _) = ui.allocate_exact_size(vec2(width, HEADER_PX), Sense::hover());
-    let response = ui.interact(rect, id, Sense::click());
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), HEADER_PX), Sense::hover());
     let painter = ui.painter();
     painter.line_segment([rect.left_top(), rect.right_top()], Stroke::new(1.0, theme::BORDER));
-    let colour = if response.hovered() || open { theme::TEXT } else { theme::DIM };
-    // The triangle: pointing right when closed, down when open.
-    let c = pos2(rect.left() + 6.0, rect.center().y + 1.0);
-    let pts = if open {
-        vec![c + vec2(-4.0, -2.5), c + vec2(4.0, -2.5), c + vec2(0.0, 3.0)]
-    } else {
-        vec![c + vec2(-2.5, -4.0), c + vec2(3.0, 0.0), c + vec2(-2.5, 4.0)]
-    };
-    painter.add(egui::Shape::convex_polygon(pts, colour, Stroke::NONE));
     let font = egui::FontId::monospace(11.0);
-    painter.text(pos2(rect.left() + 16.0, rect.center().y + 1.0), Align2::LEFT_CENTER, title, font, colour);
-    response.clicked()
+    painter.text(pos2(rect.left(), rect.center().y + 1.0), Align2::LEFT_CENTER, title, font, theme::DIM);
 }
 
 fn items(ui: &mut egui::Ui, menu: MenuId, s: &Section, input: &mut MenuInput) {
@@ -108,10 +81,6 @@ fn items(ui: &mut egui::Ui, menu: MenuId, s: &Section, input: &mut MenuInput) {
                         ui.add(egui::Label::new(value).truncate());
                     });
                 });
-            }
-            Item::Heading(text, tone) => {
-                ui.add_space(3.0);
-                ui.label(RichText::new(text).monospace().small().strong().color(tone_colour(*tone)));
             }
             Item::Note(text, tone) => {
                 ui.add(egui::Label::new(RichText::new(text).small().color(tone_colour(*tone))).wrap());
@@ -150,48 +119,31 @@ fn inner_width() -> f32 {
     DOCK_WIDTH - f32::from(m.left) - f32::from(m.right) - 2.0
 }
 
-/// The egui area of a dock.
-pub fn dock_area(dock: Dock) -> egui::Id {
-    egui::Id::new(("menu_dock", dock == Dock::Left))
+/// The egui area of the dock.
+pub fn dock_area() -> egui::Id {
+    egui::Id::new("menu_dock")
 }
 
-/// Draws a dock's open menus stacked from `place`, scrolling past its
-/// height ([`layout::stack`]); returns what the player did in each.
-pub fn dock(
-    ctx: &egui::Context,
-    dock: Dock,
-    place: DockPlace,
-    menus: &[(MenuId, Vec<Section>)],
-    settings: &MenuSettings,
-) -> Vec<(MenuId, MenuInput)> {
-    let id = dock_area(dock);
-    let heights_id = id.with("heights");
-    let last: Vec<f32> = ctx.data(|d| d.get_temp(heights_id)).unwrap_or_default();
-    let stack = layout::stack(&last, place.max_height);
+/// Draws the open menus stacked from `place`, in a scroll area of its
+/// height (always: deciding by last frame's height cut menus off).
+pub fn dock(ctx: &egui::Context, place: DockPlace, menus: &[(MenuId, Vec<Section>)]) -> Vec<(MenuId, MenuInput)> {
     let mut out = Vec::new();
-    let mut heights = Vec::new();
-    egui::Area::new(id).fixed_pos(pos2(place.x, place.top)).show(ctx, |ui| {
+    egui::Area::new(dock_area()).fixed_pos(pos2(place.x, place.top)).show(ctx, |ui| {
         ui.set_width(DOCK_WIDTH);
-        let mut body = |ui: &mut egui::Ui| {
+        egui::ScrollArea::vertical().id_salt("menu_dock_scroll").max_height(place.max_height).show(ui, |ui| {
+            ui.set_width(DOCK_WIDTH);
             for (k, (m, sections)) in menus.iter().enumerate() {
                 if k > 0 {
                     ui.add_space(GAP);
                 }
                 let shown = theme::panel_frame().show(ui, |ui| {
                     ui.set_width(inner_width());
-                    menu(ui, *m, sections, settings)
+                    menu(ui, *m, sections)
                 });
-                heights.push(shown.response.rect.height());
                 out.push((*m, shown.inner));
             }
-        };
-        if stack.scrolls {
-            egui::ScrollArea::vertical().id_salt(id).max_height(place.max_height).show(ui, |ui| body(ui));
-        } else {
-            body(ui);
-        }
+        });
     });
-    ctx.data_mut(|d| d.insert_temp(heights_id, heights));
     out
 }
 
@@ -267,7 +219,7 @@ mod tests {
     }
 
     /// One frame drawing the Orbital menu in a fixed area, with `events`.
-    fn frame(ctx: &egui::Context, settings: &MenuSettings, events: Vec<Event>) -> MenuInput {
+    fn frame(ctx: &egui::Context, events: Vec<Event>) -> MenuInput {
         let input = RawInput {
             screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1000.0, 800.0))),
             events,
@@ -277,7 +229,7 @@ mod tests {
         ctx.begin_pass(input);
         egui::Area::new(egui::Id::new("test_menu")).fixed_pos(pos2(10.0, 10.0)).show(ctx, |ui| {
             ui.set_width(280.0);
-            out = menu(ui, MenuId::Orbital, &sections(), settings);
+            out = menu(ui, MenuId::Orbital, &sections());
         });
         ctx.end_pass().drop_without_applying_deltas();
         out
@@ -312,39 +264,26 @@ mod tests {
         for _ in 0..4 {
             run(vec![]);
         }
-        let item = ctx.read_response(bar_item_id(MenuId::Utilities)).expect("drawn");
+        let item = ctx.read_response(bar_item_id(MenuId::Comms)).expect("drawn");
         assert!(item.rect.height() >= 24.0, "readable: {:?}", item.rect);
         let [press, release] = click(item.rect.center());
         run(press);
-        assert_eq!(run(release), Some(MenuId::Utilities));
+        assert_eq!(run(release), Some(MenuId::Comms));
     }
 
+    /// Flat pages: every section's items are drawn, so the last
+    /// section's button acts at once.
     #[test]
-    fn a_header_click_toggles_its_section_and_collapsed_items_are_not_drawn() {
+    fn every_section_is_drawn_and_its_buttons_act() {
         let ctx = egui::Context::default();
-        let mut settings = MenuSettings::default();
         // An area's first frame only measures it: not hit yet.
-        frame(&ctx, &settings, vec![]);
-        frame(&ctx, &settings, vec![]);
-        let header = ctx.read_response(header_id(MenuId::Orbital, "elements")).expect("the header is drawn");
-        let [press, release] = click(header.rect.center());
-        frame(&ctx, &settings, press);
-        let input = frame(&ctx, &settings, release);
-        assert_eq!(input.toggled, ["elements"]);
-        assert!(!input.close && input.actions.is_empty());
-        // Collapsed: the target's button is not drawn, so it cannot be hit.
-        let target = ctx.read_response(header_id(MenuId::Orbital, "target")).expect("drawn");
-        let below = target.rect.center() + vec2(0.0, HEADER_PX);
-        let [press, release] = click(below);
-        frame(&ctx, &settings, press);
-        assert!(frame(&ctx, &settings, release).actions.is_empty());
-        // Expanded, the button acts.
-        settings.toggle_section(MenuId::Orbital, "target");
-        frame(&ctx, &settings, vec![]);
-        frame(&ctx, &settings, vec![]);
-        let target = ctx.read_response(header_id(MenuId::Orbital, "target")).expect("drawn");
-        let [press, release] = click(target.rect.center() + vec2(0.0, HEADER_PX));
-        frame(&ctx, &settings, press);
-        assert_eq!(frame(&ctx, &settings, release).actions, [MenuAction::OpenPlanner]);
+        frame(&ctx, vec![]);
+        frame(&ctx, vec![]);
+        let button = ctx.read_response(egui::Id::new("test_menu")).map(|r| r.rect).expect("drawn");
+        // The button is the panel's last line.
+        let at = pos2(button.center().x, button.bottom() - 8.0);
+        let [press, release] = click(at);
+        frame(&ctx, press);
+        assert_eq!(frame(&ctx, release).actions, [MenuAction::OpenPlanner]);
     }
 }

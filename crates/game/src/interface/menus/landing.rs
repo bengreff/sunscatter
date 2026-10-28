@@ -1,11 +1,12 @@
-//! The Landing/Reentry menu (key L, left dock): the predicted impact and
-//! the surface motion, the braking burn, the entry, the parachute and the
-//! attitude. While it is open the impact marker is drawn
+//! The Landing/Reentry menu (key 2): the predicted impact and the surface
+//! motion, the braking burn, the entry, the parts nearest their heat
+//! limits, the parachute and the attitude. While it is open the impact marker is drawn
 //! (`landing::impact_marker_shown`).
 
 use super::data::{Brake, ChuteData, FlightData};
 use super::{Section, Tone};
 use crate::format::{distance as fmt_dist, duration as fmt_duration, Known, DASH};
+use crate::hud::temperature;
 use sim::systems::Quantity::{Acceleration, Altitude, Attitude, Position, Velocity};
 
 /// A signed speed as the craft knows it (`+12.3 m/s`).
@@ -19,7 +20,7 @@ fn signed(k: &Known, v: f64) -> String {
 }
 
 pub fn sections(d: &FlightData) -> Vec<Section> {
-    vec![summary(d), braking(d), reentry(d), parachute(d), attitude(d)]
+    vec![summary(d), braking(d), reentry(d), thermal(d), parachute(d), attitude(d)]
 }
 
 /// The impact (`sim::landing`'s prediction), then the motion over the
@@ -139,7 +140,31 @@ pub fn opening(q: Option<f64>, design_q: f64) -> Opening {
     }
 }
 
-/// The canopies in their sequence (the Staging menu's parts), and before
+/// The parts nearest their limits, and the interior (the old Utilities
+/// menu's).
+fn thermal(d: &FlightData) -> Section {
+    let mut s = Section::new("thermal", "THERMAL");
+    let k = &d.known;
+    for (name, t, limit) in &d.craft.hottest {
+        s.toned(name.to_uppercase(), k.or_dash(k.temperatures, || temperature(*t, *limit)), heat_tone(*t, *limit));
+    }
+    if !s.items.is_empty() {
+        let (node, limit) = d.craft.interior;
+        s.toned("INTERIOR", k.or_dash(k.temperatures, || temperature(node, limit)), heat_tone(node, limit));
+    }
+    s
+}
+
+/// How a part's state reads in a menu.
+fn part_tone(t: crate::staging::PartTone) -> Tone {
+    match t {
+        crate::staging::PartTone::Idle => Tone::Dim,
+        crate::staging::PartTone::Working => Tone::Good,
+        crate::staging::PartTone::Failed => Tone::Alert,
+    }
+}
+
+/// The canopies in their sequence (the test craft's parachute stage), and before
 /// the command the q against the design opening q.
 fn parachute(d: &FlightData) -> Section {
     let mut s = Section::new("parachute", "PARACHUTE");
@@ -147,7 +172,7 @@ fn parachute(d: &FlightData) -> Section {
     // The test craft's parachute stage (a craft of parts arms its chutes by a command).
     let chutes = d.stages.iter().find(|st| st.number == 0 && st.name.is_none());
     for p in chutes.map(|st| st.parts.as_slice()).unwrap_or_default() {
-        s.toned(p.name.clone(), &p.state, super::staging::part_tone(p.tone));
+        s.toned(p.name.clone(), &p.state, part_tone(p.tone));
     }
     let q_text = q.map_or("—".to_string(), |q| format!("{:.1}", q / 1e3));
     s.row("q / DESIGN q", format!("{q_text} / {:.1} kPa", design_q / 1e3));
@@ -341,5 +366,19 @@ mod tests {
             find(&s, "attitude").unwrap().rows(),
             [("HEADING", "007.3°"), ("PITCH", "+89.9°"), ("ROLL", "-3.0°")]
         );
+    }
+
+    /// The hottest parts against their limits (amber near one), then the
+    /// interior; nothing without parts.
+    #[test]
+    fn thermal_lists_the_hottest_parts() {
+        let mut d = FlightData::default();
+        assert!(thermal(&d).items.is_empty());
+        d.craft.hottest = vec![("engine bell".into(), 1_500.0, 1_640.0), ("body".into(), 310.0, 1_100.0)];
+        d.craft.interior = (295.0, 400.0);
+        let t = thermal(&d);
+        assert_eq!(t.rows()[0], ("ENGINE BELL", "1500 K / 1640 K !"));
+        assert_eq!(t.tone("ENGINE BELL"), Some(Tone::Warn));
+        assert_eq!(t.value("INTERIOR"), Some("295 K / 400 K"));
     }
 }

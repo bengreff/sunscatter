@@ -60,6 +60,7 @@ pub fn draw(
     mut bench: ResMut<Bench>,
     terrain: Res<crate::terrain::Terrain>,
     fps: Res<crate::hud::FpsMeter>,
+    flight: Res<crate::interface::menus::FlightData>,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
     if ui.overlay || bench.running() {
@@ -70,6 +71,16 @@ pub fn draw(
             egui::Frame::popup(ui_.style()).show(ui_, |ui_| {
                 ui_.monospace(format!("{} fps  {:.2} ms (worst {:.1})", fps.text(), avg * 1e3, worst * 1e3));
                 ui_.monospace(format!("terrain chunks: {}", terrain.drawn));
+                // The old Utilities ▸ Diagnostics (D111): the anchor, the
+                // fleet, the profiler's summary.
+                let g = &flight.diagnostics;
+                ui_.monospace(format!("anchor {} · {} vessels", g.anchor, g.vessels));
+                if g.profile.is_empty() {
+                    ui_.monospace("profiler off (SUNSCATTER_PROFILE=1)");
+                }
+                for (k, v) in &g.profile {
+                    ui_.monospace(format!("{k}: {v}"));
+                }
                 if bench.running() {
                     let (d, t) = bench.progress();
                     ui_.monospace(format!("benchmark {d}/{t}…"));
@@ -169,11 +180,7 @@ fn interface_tab(ui: &mut egui::Ui, s: &mut InterfaceSettings) {
     ui.label("Menus (the menu bar, or their keys; places are fixed):");
     for m in MenuId::ALL {
         let mut open = s.menus.is_open(m);
-        let side = match m.dock() {
-            crate::interface::menus::Dock::Left => "left",
-            crate::interface::menus::Dock::Right => "right",
-        };
-        if ui.checkbox(&mut open, m.with_key(&format!("{}, {side} dock", m.title()))).changed() {
+        if ui.checkbox(&mut open, m.with_key(m.title())).changed() {
             s.menus.set_open(m, open);
         }
     }
@@ -193,9 +200,6 @@ fn interface_tab(ui: &mut egui::Ui, s: &mut InterfaceSettings) {
     }
     ui.separator();
     ui.horizontal(|ui| {
-        if ui.button("Collapse all sections").clicked() {
-            s.menus.collapse_all();
-        }
         if ui.button("Reset to defaults").clicked() {
             *s = InterfaceSettings::default();
         }

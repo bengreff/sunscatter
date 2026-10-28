@@ -3,8 +3,8 @@
 //! applied afterwards. The rules are elsewhere: content in each menu's
 //! module, places in `interface::layout`.
 
-use super::{render, Dock, MenuAction, MenuId};
-use crate::commands::{GameCommand, InputContext, Keys};
+use super::{render, MenuAction, MenuId};
+use crate::commands::{InputContext, Keys};
 use crate::interface::layout::{self, InterfaceSettings, BAR_AREA, TIME_AREA};
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
@@ -54,12 +54,10 @@ pub fn draw(
     data: Res<super::FlightData>,
     mut iface: ResMut<InterfaceSettings>,
     station: Res<crate::tracking::TrackingStation>,
-    settings_ui: Res<crate::settings_ui::SettingsUi>,
-    bench: Res<crate::bench::Bench>,
+    mut systems: ResMut<crate::systems_screen::SystemsScreen>,
     sim: Res<crate::state::SimState>,
     mut nav: ResMut<crate::navball::Navball>,
     mut planner: ResMut<crate::planner::Planner>,
-    mut commands: MessageWriter<GameCommand>,
 ) -> Result {
     if station.open {
         return Ok(());
@@ -70,28 +68,21 @@ pub fn draw(
         menus.toggle(m);
     }
     let rect = |id: &str| ctx.memory(|m| m.area_rect(egui::Id::new(id)));
-    let overlay = if settings_ui.overlay || bench.running() { rect("perf") } else { None };
-    // The navball cluster and the mini systems panel above it.
+    // The navball cluster and the action bar above it.
     let cluster = match (rect(crate::navball::AREA), rect(crate::interface::action_bar::AREA)) {
         (Some(c), Some(m)) => Some(c.union(m)),
         (c, m) => c.or(m),
     };
     let screen = ctx.content_rect();
     let mut actions = Vec::new();
-    for dock in [Dock::Left, Dock::Right] {
-        let open = menus.in_dock(dock);
-        if open.is_empty() {
-            continue;
-        }
-        let top = layout::dock_top(dock, rect(TIME_AREA), rect(BAR_AREA), overlay);
-        let place = layout::dock_place(dock, screen, top, cluster);
+    let open = menus.in_order();
+    if !open.is_empty() {
+        let top = layout::dock_top(rect(TIME_AREA), rect(BAR_AREA));
+        let place = layout::dock_place(screen, top, cluster);
         let content: Vec<_> = open.iter().map(|m| (*m, m.sections(&data))).collect();
-        for (m, input) in render::dock(ctx, dock, place, &content, &menus) {
+        for (m, input) in render::dock(ctx, place, &content) {
             if input.close {
                 menus.set_open(m, false);
-            }
-            for s in input.toggled {
-                menus.toggle_section(m, s);
             }
             actions.extend(input.actions);
         }
@@ -103,9 +94,7 @@ pub fn draw(
         match action {
             MenuAction::SetTarget(t) => nav.set_target(t),
             MenuAction::OpenPlanner => planner.open_for(sim.ship(), sim.clock),
-            MenuAction::NextStage => {
-                commands.write(GameCommand::NextStage);
-            }
+            MenuAction::OpenSystems(layer, part) => systems.open_at(layer, part),
         }
     }
     Ok(())

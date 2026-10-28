@@ -1,4 +1,4 @@
-//! The parts nearest their temperature limits (Utilities ▸ Thermal): per
+//! The parts nearest their temperature limits (Landing ▸ Thermal): per
 //! part, the skin cell nearest its own limit; for a craft of parts each
 //! part by its craft-file id (the design's `cell_part`), for the test craft
 //! each of its geometry's primitives by name.

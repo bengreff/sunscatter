@@ -375,7 +375,7 @@ pub fn run(
         Step::Orbit => {
             if !demo.shot_taken {
                 demo.shot_taken = true;
-                iface.menus.show_only(Some(MenuId::Orbital), &["elements"]);
+                iface.menus.show_only(Some(MenuId::Orbital));
                 demo.capture("orbit_day");
                 // A playtest start in low orbit, out of debug mode.
                 let mut fleet = sim.fleet.clone();
@@ -403,10 +403,10 @@ pub fn run(
         Step::OrbitDown => {
             if !demo.shot_taken {
                 demo.shot_taken = true;
-                iface.menus.show_only(None, &[]);
+                iface.menus.show_only(None);
                 demo.capture("orbit_down");
             } else {
-                iface.menus.show_only(Some(MenuId::Orbital), &["elements"]);
+                iface.menus.show_only(Some(MenuId::Orbital));
                 (rig.distance, rig.pitch) = (2.5e7, 0.9);
                 demo.next(Step::Map);
             }
@@ -540,7 +540,7 @@ pub fn run(
                     sim.fleet.truncate(1);
                     // Landing stays closed through the burn: the impact
                     // marker must not show (demo_checks).
-                    iface.menus.show_only(None, &[]);
+                    iface.menus.show_only(None);
                     rig.distance = 60.0;
                     sim.warp = 3;
                     sim.controls.throttle = 1.0;
@@ -559,7 +559,7 @@ pub fn run(
         Step::Fall if !demo.deorbit_done => {
             // Landing/Reentry open, the clock held, Earth in view from afar
             // until the impact marker is drawn (at most 6 s), then a shot.
-            iface.menus.show_only(Some(MenuId::Landing), &["braking", "reentry", "parachute"]);
+            iface.menus.show_only(Some(MenuId::Landing));
             pause.0 = true;
             (rig.distance, rig.pitch) = (1.2e7, 0.8);
             if marker.drawn || demo.timer > 6.0 {

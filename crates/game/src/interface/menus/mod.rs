@@ -1,61 +1,57 @@
-//! The flight view's task menus (D080). One registry ([`MenuId`]: title,
-//! key, dock, order), pure content per menu (`sections(&FlightData) ->
-//! Vec<Section>`, table-tested, rule 8) and one generic renderer
+//! The flight view's task menus (D080, D111). One registry ([`MenuId`]:
+//! title, number key, order), pure content per menu (`sections(&FlightData)
+//! -> Vec<Section>`, table-tested, rule 8) and one generic renderer
 //! ([`render`]) for every menu. A new task is one more `MenuId` and its
-//! content function: docking gets a Docking menu, advanced maneuvers go in
-//! Orbital.
+//! content function: docking gets a Docking menu on 7.
 //!
-//! Each menu is a list of sections: the first is its summary, always
-//! shown; the others expand on click and their state is saved with the open
-//! menus in `settings.ron` ([`MenuSettings`]). A section with nothing to
-//! show is not drawn.
+//! Each menu is one flat page (D111): its summary, then every section under
+//! its heading, nothing collapsed; a section with nothing to show is not
+//! drawn. All of them stack in one dock on the left that always scrolls
+//! (the right edge is the staging bar's). Which are open is saved in
+//! `settings.ron` ([`MenuSettings`]).
 
+mod comms;
 pub mod data;
 mod hottest;
 mod landing;
+mod maneuver;
 mod orbital;
 pub mod render;
-mod staging;
-mod utilities;
 pub mod view;
 
 pub use data::FlightData;
 
+use crate::systems_screen::rules::Layer;
 use bevy::prelude::KeyCode;
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeSet;
 
-/// A task menu.
+/// A task menu, in dock order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum MenuId {
-    /// Advanced orbital data, the target, maneuvers.
+    /// The orbit now, the target, the ship's clock.
     Orbital,
-    /// Impact, braking, entry, parachute, attitude.
+    /// Impact, braking, entry, thermal, parachute, attitude.
     Landing,
-    /// A brief status of the ship's systems.
-    Utilities,
-    /// The stage stack.
-    Staging,
-}
-
-/// Where a menu sits: flight tasks on the left, the ship on the right.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Dock {
-    Left,
-    Right,
+    /// The planned burns and the planner.
+    Maneuver,
+    /// The links home and the probe's control delay (the old Utilities and
+    /// Staging menus open it from older settings).
+    #[serde(alias = "Utilities", alias = "Staging")]
+    Comms,
 }
 
 impl MenuId {
     /// Every menu, in menu-bar and dock order.
-    pub const ALL: [MenuId; 4] = [MenuId::Orbital, MenuId::Landing, MenuId::Utilities, MenuId::Staging];
+    pub const ALL: [MenuId; 4] = [MenuId::Orbital, MenuId::Landing, MenuId::Maneuver, MenuId::Comms];
 
     /// The menu's title (its panel).
     pub fn title(self) -> &'static str {
         match self {
             MenuId::Orbital => "ORBITAL",
             MenuId::Landing => "LANDING / REENTRY",
-            MenuId::Utilities => "UTILITIES",
-            MenuId::Staging => "STAGING",
+            MenuId::Maneuver => "MANEUVER",
+            MenuId::Comms => "COMMS",
         }
     }
 
@@ -72,7 +68,8 @@ impl MenuId {
         match self {
             MenuId::Orbital => Some(KeyCode::Digit1),
             MenuId::Landing => Some(KeyCode::Digit2),
-            MenuId::Utilities | MenuId::Staging => None,
+            MenuId::Maneuver => Some(KeyCode::Digit3),
+            MenuId::Comms => Some(KeyCode::Digit6),
         }
     }
 
@@ -81,7 +78,8 @@ impl MenuId {
         match self {
             MenuId::Orbital => "1",
             MenuId::Landing => "2",
-            MenuId::Utilities | MenuId::Staging => "",
+            MenuId::Maneuver => "3",
+            MenuId::Comms => "6",
         }
     }
 
@@ -93,21 +91,31 @@ impl MenuId {
         }
     }
 
-    pub fn dock(self) -> Dock {
+    /// The systems screen's layer its page links to at its end.
+    pub fn layer(self) -> Option<Layer> {
         match self {
-            MenuId::Orbital | MenuId::Landing => Dock::Left,
-            MenuId::Utilities | MenuId::Staging => Dock::Right,
+            MenuId::Orbital | MenuId::Maneuver => None,
+            MenuId::Landing => Some(Layer::Thermal),
+            MenuId::Comms => Some(Layer::Data),
         }
     }
 
-    /// What the menu shows, summary first.
+    /// What the menu shows, summary first, then the link into the systems
+    /// screen at its layer.
     pub fn sections(self, d: &FlightData) -> Vec<Section> {
-        let all = match self {
+        let mut all = match self {
             MenuId::Orbital => orbital::sections(d),
             MenuId::Landing => landing::sections(d),
-            MenuId::Utilities => utilities::sections(d),
-            MenuId::Staging => staging::sections(d),
+            MenuId::Maneuver => maneuver::sections(d),
+            MenuId::Comms => comms::sections(d),
         };
+        if d.parts {
+            let mut more = Section::new("more", "");
+            let layer = self.layer();
+            let label = layer.map_or("The systems screen".to_string(), |l| format!("The systems screen: {}", l.name()));
+            more.button(label, MenuAction::OpenSystems(layer, None));
+            all.push(more);
+        }
         all.into_iter().filter(|s| !s.items.is_empty()).collect()
     }
 }
@@ -118,8 +126,6 @@ pub enum Tone {
     #[default]
     Normal,
     Dim,
-    /// Highlighted (the next stage).
-    Accent,
     Good,
     /// Near a limit, or something to act on.
     Warn,
@@ -140,15 +146,14 @@ pub struct Row {
 pub enum MenuAction {
     SetTarget(Option<crate::navball::NavTarget>),
     OpenPlanner,
-    NextStage,
+    /// Opens the systems screen at a layer and a part (`SystemsScreen::open_at`).
+    OpenSystems(Option<Layer>, Option<u32>),
 }
 
 /// One line of a section.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Item {
     Row(Row),
-    /// A sub-heading (a stage of the stack).
-    Heading(String, Tone),
     /// A line of text: an explanation, "no impact predicted".
     Note(String, Tone),
     /// A pick list: the label, the current choice, and each option with
@@ -200,11 +205,6 @@ impl Section {
         self
     }
 
-    pub fn heading(&mut self, text: impl Into<String>, tone: Tone) -> &mut Self {
-        self.items.push(Item::Heading(text.into(), tone));
-        self
-    }
-
     pub fn button(&mut self, label: impl Into<String>, action: MenuAction) -> &mut Self {
         self.items.push(Item::Button { label: label.into(), action });
         self
@@ -244,14 +244,13 @@ pub fn find<'a>(sections: &'a [Section], id: &str) -> Option<&'a Section> {
     sections.iter().find(|s| s.id == id)
 }
 
-/// Which menus are open and which of their sections are expanded (saved
-/// in `settings.ron`). Nothing is open by default: the flight view is the
-/// time panel, the menu bar and the navball cluster.
+/// Which menus are open (saved in `settings.ron`; older settings' expanded
+/// sections are ignored). Nothing is open by default: the flight view is
+/// the time panel, the menu bar and the navball cluster.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct MenuSettings {
     pub open: BTreeSet<MenuId>,
-    pub expanded: BTreeMap<MenuId, BTreeSet<String>>,
 }
 
 impl MenuSettings {
@@ -271,41 +270,16 @@ impl MenuSettings {
         self.set_open(menu, !self.is_open(menu));
     }
 
-    /// The summary is always expanded.
-    pub fn is_expanded(&self, menu: MenuId, section: &str) -> bool {
-        section == SUMMARY || self.expanded.get(&menu).is_some_and(|s| s.contains(section))
-    }
-
-    pub fn toggle_section(&mut self, menu: MenuId, section: &str) {
-        let set = self.expanded.entry(menu).or_default();
-        if !set.remove(section) {
-            set.insert(section.to_string());
-        }
-        if set.is_empty() {
-            self.expanded.remove(&menu);
-        }
-    }
-
-    pub fn collapse_all(&mut self) {
-        self.expanded.clear();
-    }
-
-    /// Opens only `menu` (or none) with `sections` expanded (the demo's
-    /// views).
-    pub fn show_only(&mut self, menu: Option<MenuId>, sections: &[&str]) {
+    /// Opens only `menu`, or none (the demo's views).
+    pub fn show_only(&mut self, menu: Option<MenuId>) {
         for m in MenuId::ALL {
             self.set_open(m, Some(m) == menu);
         }
-        for (m, s) in menu.iter().flat_map(|m| sections.iter().map(move |s| (*m, *s))) {
-            if !self.is_expanded(m, s) {
-                self.toggle_section(m, s);
-            }
-        }
     }
 
-    /// The open menus of `dock`, top to bottom (menu order).
-    pub fn in_dock(&self, dock: Dock) -> Vec<MenuId> {
-        MenuId::ALL.into_iter().filter(|m| m.dock() == dock && self.is_open(*m)).collect()
+    /// The open menus, top to bottom (menu order).
+    pub fn in_order(&self) -> Vec<MenuId> {
+        MenuId::ALL.into_iter().filter(|m| self.is_open(*m)).collect()
     }
 }
 
@@ -314,21 +288,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn every_menu_has_a_unique_key_and_a_dock() {
+    fn every_menu_has_a_unique_number_key() {
         let keyed: Vec<MenuId> = MenuId::ALL.into_iter().filter(|m| m.key().is_some()).collect();
         let keys: BTreeSet<_> = keyed.iter().map(|m| m.key_label()).collect();
         assert_eq!(keys.len(), keyed.len(), "unique keys");
-        let codes: std::collections::HashSet<_> = keyed.iter().map(|m| m.key()).collect();
-        assert_eq!(codes.len(), keyed.len());
         for m in MenuId::ALL {
             let code = m.key().map(|k| format!("{k:?}"));
             let label = (!m.key_label().is_empty()).then(|| format!("Digit{}", m.key_label()));
             assert_eq!(code, label, "{m:?}");
-            assert!(matches!(m.dock(), Dock::Left | Dock::Right));
             assert!(!m.title().is_empty() && !m.short().is_empty());
         }
-        let left: Vec<_> = MenuId::ALL.into_iter().filter(|m| m.dock() == Dock::Left).collect();
-        assert_eq!(left, [MenuId::Orbital, MenuId::Landing], "flight tasks on the left");
+    }
+
+    /// Older settings load: the old menus' names open Comms, expanded
+    /// sections are ignored.
+    #[test]
+    fn older_settings_still_load() {
+        let old = "(open: [Orbital, Utilities, Staging], expanded: {Landing: [\"reentry\"]})";
+        let s: MenuSettings = ron::from_str(old).expect("loads");
+        assert_eq!(s.in_order(), [MenuId::Orbital, MenuId::Comms]);
     }
 
     /// The menu keys are listed in the help once each, under Menus, and no
@@ -353,33 +331,33 @@ mod tests {
     }
 
     #[test]
-    fn menus_open_close_and_keep_their_sections() {
+    fn menus_open_close_in_menu_order() {
         let mut s = MenuSettings::default();
         assert!(MenuId::ALL.iter().all(|m| !s.is_open(*m)), "nothing open by default");
-        s.toggle(MenuId::Staging);
+        s.toggle(MenuId::Comms);
         s.toggle(MenuId::Orbital);
-        s.toggle(MenuId::Utilities);
-        assert_eq!(s.in_dock(Dock::Left), [MenuId::Orbital]);
-        assert_eq!(s.in_dock(Dock::Right), [MenuId::Utilities, MenuId::Staging], "menu order, not opening order");
-        s.toggle(MenuId::Utilities);
-        assert_eq!(s.in_dock(Dock::Right), [MenuId::Staging]);
-        assert!(s.is_expanded(MenuId::Orbital, SUMMARY), "the summary always shows");
-        assert!(!s.is_expanded(MenuId::Orbital, "elements"));
-        s.toggle_section(MenuId::Orbital, "elements");
-        assert!(s.is_expanded(MenuId::Orbital, "elements"));
-        assert!(!s.is_expanded(MenuId::Landing, "elements"), "per menu");
+        assert_eq!(s.in_order(), [MenuId::Orbital, MenuId::Comms], "menu order, not opening order");
+        s.toggle(MenuId::Comms);
+        assert_eq!(s.in_order(), [MenuId::Orbital]);
         let text = ron::to_string(&s).unwrap();
         assert_eq!(ron::from_str::<MenuSettings>(&text).unwrap(), s);
-        s.toggle_section(MenuId::Orbital, "elements");
-        assert_eq!(s.expanded, BTreeMap::new());
-        s.toggle_section(MenuId::Orbital, "target");
-        s.collapse_all();
-        assert!(!s.is_expanded(MenuId::Orbital, "target"));
-        s.show_only(Some(MenuId::Landing), &["reentry", "reentry"]);
+        s.show_only(Some(MenuId::Landing));
         assert_eq!(s.open, BTreeSet::from([MenuId::Landing]));
-        assert!(s.is_expanded(MenuId::Landing, "reentry"), "expanded once, not toggled back");
-        s.show_only(None, &[]);
-        assert!(s.open.is_empty() && s.is_expanded(MenuId::Landing, "reentry"));
+        s.show_only(None);
+        assert!(s.open.is_empty());
+    }
+
+    /// A craft of parts' pages end with a link into the systems screen at
+    /// their layer; the test craft's do not.
+    #[test]
+    fn pages_link_into_the_systems_screen() {
+        let mut d = FlightData::default();
+        assert!(MenuId::Landing.sections(&d).iter().all(|s| s.id != "more"));
+        d.parts = true;
+        let s = MenuId::Landing.sections(&d);
+        let more = s.last().unwrap();
+        let want = MenuAction::OpenSystems(Some(Layer::Thermal), None);
+        assert!(more.items.iter().any(|i| matches!(i, Item::Button { action, .. } if *action == want)));
     }
 
     /// Before the first snapshot (and in any degenerate state) no value
