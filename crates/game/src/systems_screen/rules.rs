@@ -404,41 +404,11 @@ pub fn craft_to_view() -> Quat {
     Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)
 }
 
-/// The nearest hit of a ray (origin, unit direction) with a triangle
-/// (Möller–Trumbore): the distance along the ray.
-fn hit(o: Vec3, d: Vec3, a: Vec3, b: Vec3, c: Vec3) -> Option<f32> {
-    let (e1, e2) = (b - a, c - a);
-    let p = d.cross(e2);
-    let det = e1.dot(p);
-    if det.abs() < 1e-9 {
-        return None;
-    }
-    let inv = 1.0 / det;
-    let s = o - a;
-    let u = s.dot(p) * inv;
-    let q = s.cross(e1);
-    let v = d.dot(q) * inv;
-    let t = e2.dot(q) * inv;
-    (u >= 0.0 && v >= 0.0 && u + v <= 1.0 && t > 0.0).then_some(t)
-}
-
 /// The part a ray from the camera first hits: each part's mesh with its
 /// transform into the view's world (`parts`: (mesh, transform)); the index
-/// of the nearest.
+/// of the nearest (`scene::pick`, the one owner of rays against craft).
 pub fn pick(origin: Vec3, dir: Vec3, parts: &[(&RenderMesh, Transform)]) -> Option<usize> {
-    let mut best: Option<(f32, usize)> = None;
-    for (k, (mesh, t)) in parts.iter().enumerate() {
-        let m = t.to_matrix();
-        let at = |i: u32| m.transform_point3(Vec3::from_array(mesh.positions[i as usize]));
-        for tri in mesh.indices.as_chunks::<3>().0 {
-            if let Some(d) = hit(origin, dir, at(tri[0]), at(tri[1]), at(tri[2])) {
-                if best.is_none_or(|(b, _)| d < b) {
-                    best = Some((d, k));
-                }
-            }
-        }
-    }
-    best.map(|(_, k)| k)
+    crate::scene::pick::ray_hit(origin, dir, Transform::IDENTITY, parts).map(|(k, _)| k)
 }
 
 /// Where the screen's regions go (logical px): the title and layer bar

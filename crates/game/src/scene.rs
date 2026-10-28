@@ -3,6 +3,7 @@
 //! simulation state every frame. Surfaces are drawn by `terrain`.
 
 pub mod parts;
+pub mod pick;
 pub mod ships;
 
 pub use ships::{ShipModels, ShipVisual};
