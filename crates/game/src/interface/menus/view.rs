@@ -4,7 +4,7 @@
 //! module, places in `interface::layout`.
 
 use super::{render, MenuAction, MenuId};
-use crate::commands::{InputContext, Keys};
+use crate::commands::{GameCommand, InputContext, Keys};
 use crate::interface::layout::{self, InterfaceSettings, BAR_AREA, TIME_AREA};
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
@@ -40,7 +40,7 @@ pub fn keys(keys: Res<ButtonInput<KeyCode>>, ctx: Res<InputContext>, mut iface: 
     if !ctx.allows(Keys::Hud) || crate::commands::keys::Held::of(&keys).chord() {
         return;
     }
-    for m in MenuId::ALL {
+    for m in MenuId::BAR {
         if m.key().is_some_and(|k| keys.just_pressed(k)) {
             iface.menus.toggle(m);
         }
@@ -58,6 +58,7 @@ pub fn draw(
     sim: Res<crate::state::SimState>,
     mut nav: ResMut<crate::navball::Navball>,
     mut planner: ResMut<crate::planner::Planner>,
+    mut cmds: MessageWriter<GameCommand>,
 ) -> Result {
     if station.open {
         return Ok(());
@@ -75,13 +76,15 @@ pub fn draw(
     };
     let screen = ctx.content_rect();
     let mut actions = Vec::new();
-    let open = menus.in_order();
+    let open = menus.in_order(sim.controls.rcs.on);
     if !open.is_empty() {
         let top = layout::dock_top(rect(TIME_AREA), rect(BAR_AREA));
         let place = layout::dock_place(screen, top, cluster);
         let content: Vec<_> = open.iter().map(|m| (*m, m.sections(&data))).collect();
         for (m, input) in render::dock(ctx, place, &content) {
-            if input.close {
+            if input.close && m == MenuId::Rcs {
+                actions.push(MenuAction::SetRcs(sim::systems::rcs::RcsMode { on: false, ..sim.controls.rcs }));
+            } else if input.close {
                 menus.set_open(m, false);
             }
             actions.extend(input.actions);
@@ -95,6 +98,12 @@ pub fn draw(
             MenuAction::SetTarget(t) => nav.set_target(t),
             MenuAction::OpenPlanner => planner.open_for(sim.ship(), sim.clock),
             MenuAction::OpenSystems(layer, part) => systems.open_at(layer, part),
+            MenuAction::Ship(c) => {
+                cmds.write(GameCommand::Ship { vessel: sim.ship().id(), commands: vec![c] });
+            }
+            MenuAction::SetRcs(mode) => {
+                cmds.write(GameCommand::SetRcs(mode));
+            }
         }
     }
     Ok(())

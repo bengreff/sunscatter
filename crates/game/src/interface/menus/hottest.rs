@@ -46,6 +46,17 @@ pub fn parts(ship: &sim::vessel::Vessel, n: usize) -> Vec<(String, f64, f64)> {
     out
 }
 
+/// Part `part`'s (`Part::id`) skin cell nearest its own limit: (K, limit K).
+pub fn skin_of(ship: &sim::vessel::Vessel, part: u32) -> Option<(f64, f64)> {
+    let design = ship.craft.design();
+    let skin = &ship.thermal().state.skin;
+    let k = design.parts.iter().position(|p| p.id == part)? as u32;
+    (design.cell_part.iter().enumerate())
+        .filter(|(_, &p)| p == k)
+        .filter_map(|(i, _)| Some((*skin.get(i)?, *design.skin_max.get(i)?)))
+        .max_by(|a, b| (a.0 / a.1).total_cmp(&(b.0 / b.1)))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

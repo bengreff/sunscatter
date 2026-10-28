@@ -8,7 +8,7 @@
 //! (D076), never osculating; the elements from `relations` (about the
 //! body's equator); impact and braking from `sim::landing` through
 //! `landing::LandingPrediction`; closest approaches from `rendezvous`;
-//! stages from `staging`.
+//! stages from `staging`; the RCS from `rcs_data`.
 
 use crate::comms::{Comms, Signal};
 use crate::landing::Landing;
@@ -51,6 +51,8 @@ pub struct FlightData {
     pub craft: CraftData,
     pub comms: CommsData,
     pub stages: Vec<crate::staging::Stage>,
+    /// The RCS menu's (`rcs_data`).
+    pub rcs: super::rcs::RcsData,
     pub diagnostics: Diagnostics,
     /// What the craft knows (D106): every readout through it.
     pub known: crate::format::Known,
@@ -201,10 +203,6 @@ pub struct CraftData {
     pub thrust_vac: f64,
     pub isp_vac: f64,
     pub isp_sl: f64,
-    /// RCS couples (pitch, yaw, roll; N·m) and their propellant use at
-    /// full command (kg/s).
-    pub rcs_torque: [f64; 3],
-    pub rcs_flow: [f64; 3],
     /// The skin cell nearest its own limit, and the hottest interior node,
     /// with their limits (K).
     pub skin: (f64, f64),
@@ -312,6 +310,7 @@ pub fn gather(s: &Sources) -> FlightData {
         craft: craft(sim, body),
         comms: comms(s),
         stages: crate::staging::stack_of(ship, &sim.controls),
+        rcs: super::rcs_data::gather(ship, sim.controls.rcs),
         known: crate::format::Known::of(ship),
         parts: ship.ship().is_some(),
         diagnostics: Diagnostics {
@@ -502,8 +501,6 @@ fn craft(sim: &SimState, body: sim::frame::NodeId) -> CraftData {
         thrust_vac: engine.thrust_vac,
         isp_vac: engine.isp_vac,
         isp_sl: engine.isp_sl,
-        rcs_torque: ship.craft.torque.to_array(),
-        rcs_flow: ship.craft.rcs_flow.to_array(),
         skin: ship.skin_nearest_limit(),
         interior: (node, ship.craft.thermal.internal_max_k),
         hottest: super::hottest::parts(ship, HOTTEST),

@@ -44,7 +44,9 @@ pub fn menu(ui: &mut egui::Ui, menu: MenuId, sections: &[Section]) -> MenuInput 
         ui.label(RichText::new(menu.title()).monospace().strong().color(theme::ACCENT));
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             let close = egui::Button::new(RichText::new("×").color(theme::DIM)).frame(false);
-            if ui.add(close).on_hover_text(menu.with_key("Close")).clicked() {
+            // The RCS menu follows RCS: closing it turns RCS off.
+            let hover = if menu == MenuId::Rcs { "RCS off (R)".to_string() } else { menu.with_key("Close") };
+            if ui.add(close).on_hover_text(hover).clicked() {
                 input.close = true;
             }
             ui.label(RichText::new(menu.key_label()).monospace().small().color(theme::DIM));
@@ -102,6 +104,19 @@ fn items(ui: &mut egui::Ui, menu: MenuId, s: &Section, input: &mut MenuInput) {
                     });
                 });
             }
+            Item::Toggle { label, on, value, tone, action } => {
+                ui.horizontal(|ui| {
+                    let mut checked = *on;
+                    let text = RichText::new(label).monospace().small().color(theme::DIM);
+                    if ui.checkbox(&mut checked, text).clicked() {
+                        input.actions.push(action.clone());
+                    }
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        let value = RichText::new(value).monospace().small().color(tone_colour(*tone));
+                        ui.add(egui::Label::new(value).truncate());
+                    });
+                });
+            }
             Item::Button { label, action } => {
                 ui.add_space(2.0);
                 let button = egui::Button::new(RichText::new(label).small()).min_size(vec2(ui.available_width(), 0.0));
@@ -156,7 +171,7 @@ pub fn bar(ctx: &egui::Context, settings: &MenuSettings) -> Option<MenuId> {
         theme::bar_frame().show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 2.0;
-                for m in MenuId::ALL {
+                for m in MenuId::BAR {
                     let open = settings.is_open(m);
                     let verb = if open { "Close" } else { "Open" };
                     let r = bar_item(ui, m, open).on_hover_text(m.with_key(&format!("{verb} {}", m.title())));
@@ -220,6 +235,10 @@ mod tests {
 
     /// One frame drawing the Orbital menu in a fixed area, with `events`.
     fn frame(ctx: &egui::Context, events: Vec<Event>) -> MenuInput {
+        frame_of(ctx, &sections(), events)
+    }
+
+    fn frame_of(ctx: &egui::Context, sections: &[Section], events: Vec<Event>) -> MenuInput {
         let input = RawInput {
             screen_rect: Some(Rect::from_min_size(Pos2::ZERO, vec2(1000.0, 800.0))),
             events,
@@ -229,7 +248,7 @@ mod tests {
         ctx.begin_pass(input);
         egui::Area::new(egui::Id::new("test_menu")).fixed_pos(pos2(10.0, 10.0)).show(ctx, |ui| {
             ui.set_width(280.0);
-            out = menu(ui, MenuId::Orbital, &sections());
+            out = menu(ui, MenuId::Orbital, sections);
         });
         ctx.end_pass().drop_without_applying_deltas();
         out
@@ -285,5 +304,22 @@ mod tests {
         let [press, release] = click(at);
         frame(&ctx, press);
         assert_eq!(frame(&ctx, release).actions, [MenuAction::OpenPlanner]);
+    }
+
+    /// A switch acts on a click on its box, not on drawing.
+    #[test]
+    fn a_switch_acts_when_clicked() {
+        let ctx = egui::Context::default();
+        let mut s = Section::new("blocks", "THRUSTERS");
+        let flip = MenuAction::SetRcs(sim::systems::rcs::RcsMode::default());
+        s.toggle("RCS#1", true, "on", Tone::Good, flip.clone());
+        let all = [s];
+        frame_of(&ctx, &all, vec![]);
+        assert!(frame_of(&ctx, &all, vec![]).actions.is_empty(), "drawing does nothing");
+        let panel = ctx.read_response(egui::Id::new("test_menu")).map(|r| r.rect).expect("drawn");
+        // The box is at the left of the panel's last line.
+        let [press, release] = click(pos2(panel.left() + 6.0, panel.bottom() - 8.0));
+        frame_of(&ctx, &all, press);
+        assert_eq!(frame_of(&ctx, &all, release).actions, [flip]);
     }
 }

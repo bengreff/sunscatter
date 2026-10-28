@@ -16,6 +16,8 @@ mod hottest;
 mod landing;
 mod maneuver;
 mod orbital;
+pub mod rcs;
+mod rcs_data;
 pub mod render;
 pub mod view;
 
@@ -29,6 +31,10 @@ use std::collections::BTreeSet;
 /// A task menu, in dock order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum MenuId {
+    /// The pilot's RCS: its mode, authority, propellant and every thruster
+    /// block (D111, D112). No key and not in the bar: shown while RCS is on
+    /// (the navball's button, R), at the top of the dock.
+    Rcs,
     /// The orbit now, the target, the ship's clock.
     Orbital,
     /// Impact, braking, entry, thermal, parachute, attitude.
@@ -42,12 +48,16 @@ pub enum MenuId {
 }
 
 impl MenuId {
-    /// Every menu, in menu-bar and dock order.
-    pub const ALL: [MenuId; 4] = [MenuId::Orbital, MenuId::Landing, MenuId::Maneuver, MenuId::Comms];
+    /// Every menu, in dock order.
+    pub const ALL: [MenuId; 5] = [MenuId::Rcs, MenuId::Orbital, MenuId::Landing, MenuId::Maneuver, MenuId::Comms];
+    /// The menus the bar, their keys and the settings open and close (the
+    /// RCS menu follows RCS).
+    pub const BAR: [MenuId; 4] = [MenuId::Orbital, MenuId::Landing, MenuId::Maneuver, MenuId::Comms];
 
     /// The menu's title (its panel).
     pub fn title(self) -> &'static str {
         match self {
+            MenuId::Rcs => "RCS",
             MenuId::Orbital => "ORBITAL",
             MenuId::Landing => "LANDING / REENTRY",
             MenuId::Maneuver => "MANEUVER",
@@ -70,6 +80,7 @@ impl MenuId {
             MenuId::Landing => Some(KeyCode::Digit2),
             MenuId::Maneuver => Some(KeyCode::Digit3),
             MenuId::Comms => Some(KeyCode::Digit6),
+            MenuId::Rcs => None,
         }
     }
 
@@ -80,6 +91,7 @@ impl MenuId {
             MenuId::Landing => "2",
             MenuId::Maneuver => "3",
             MenuId::Comms => "6",
+            MenuId::Rcs => "",
         }
     }
 
@@ -97,6 +109,7 @@ impl MenuId {
             MenuId::Orbital | MenuId::Maneuver => None,
             MenuId::Landing => Some(Layer::Thermal),
             MenuId::Comms => Some(Layer::Data),
+            MenuId::Rcs => Some(Layer::Plumbing),
         }
     }
 
@@ -104,6 +117,7 @@ impl MenuId {
     /// screen at its layer.
     pub fn sections(self, d: &FlightData) -> Vec<Section> {
         let mut all = match self {
+            MenuId::Rcs => rcs::sections(&d.rcs),
             MenuId::Orbital => orbital::sections(d),
             MenuId::Landing => landing::sections(d),
             MenuId::Maneuver => maneuver::sections(d),
@@ -148,6 +162,10 @@ pub enum MenuAction {
     OpenPlanner,
     /// Opens the systems screen at a layer and a part (`SystemsScreen::open_at`).
     OpenSystems(Option<Layer>, Option<u32>),
+    /// A command to the active vessel (a thruster block on or off).
+    Ship(sim::craft::command::ShipCommand),
+    /// The pilot's RCS mode (`GameCommand::SetRcs`).
+    SetRcs(sim::systems::rcs::RcsMode),
 }
 
 /// One line of a section.
@@ -165,6 +183,15 @@ pub enum Item {
     },
     Button {
         label: String,
+        action: MenuAction,
+    },
+    /// A switch: a checkbox and its label, a value right-aligned in its
+    /// tone; a click does `action`.
+    Toggle {
+        label: String,
+        on: bool,
+        value: String,
+        tone: Tone,
         action: MenuAction,
     },
 }
@@ -210,13 +237,26 @@ impl Section {
         self
     }
 
-    /// The rows as (label, value) pairs.
+    pub fn toggle(
+        &mut self,
+        label: impl Into<String>,
+        on: bool,
+        value: impl Into<String>,
+        tone: Tone,
+        action: MenuAction,
+    ) -> &mut Self {
+        self.items.push(Item::Toggle { label: label.into(), on, value: value.into(), tone, action });
+        self
+    }
+
+    /// The rows (and switches) as (label, value) pairs.
     #[cfg(test)]
     pub fn rows(&self) -> Vec<(&str, &str)> {
         self.items
             .iter()
             .filter_map(|i| match i {
                 Item::Row(r) => Some((r.label.as_str(), r.value.as_str())),
+                Item::Toggle { label, value, .. } => Some((label.as_str(), value.as_str())),
                 _ => None,
             })
             .collect()
@@ -233,6 +273,7 @@ impl Section {
     pub fn tone(&self, label: &str) -> Option<Tone> {
         self.items.iter().find_map(|i| match i {
             Item::Row(r) if r.label == label => Some(r.tone),
+            Item::Toggle { label: l, tone, .. } if l == label => Some(*tone),
             _ => None,
         })
     }
@@ -272,14 +313,16 @@ impl MenuSettings {
 
     /// Opens only `menu`, or none (the demo's views).
     pub fn show_only(&mut self, menu: Option<MenuId>) {
-        for m in MenuId::ALL {
+        for m in MenuId::BAR {
             self.set_open(m, Some(m) == menu);
         }
     }
 
-    /// The open menus, top to bottom (menu order).
-    pub fn in_order(&self) -> Vec<MenuId> {
-        MenuId::ALL.into_iter().filter(|m| self.is_open(*m)).collect()
+    /// The open menus, top to bottom (menu order): the RCS menu first while
+    /// RCS is on (`rcs`), never from the settings.
+    pub fn in_order(&self, rcs: bool) -> Vec<MenuId> {
+        let shown = |m: MenuId| if m == MenuId::Rcs { rcs } else { self.is_open(m) };
+        MenuId::ALL.into_iter().filter(|m| shown(*m)).collect()
     }
 }
 
@@ -306,7 +349,7 @@ mod tests {
     fn older_settings_still_load() {
         let old = "(open: [Orbital, Utilities, Staging], expanded: {Landing: [\"reentry\"]})";
         let s: MenuSettings = ron::from_str(old).expect("loads");
-        assert_eq!(s.in_order(), [MenuId::Orbital, MenuId::Comms]);
+        assert_eq!(s.in_order(false), [MenuId::Orbital, MenuId::Comms]);
     }
 
     /// The menu keys are listed in the help once each, under Menus, and no
@@ -336,9 +379,14 @@ mod tests {
         assert!(MenuId::ALL.iter().all(|m| !s.is_open(*m)), "nothing open by default");
         s.toggle(MenuId::Comms);
         s.toggle(MenuId::Orbital);
-        assert_eq!(s.in_order(), [MenuId::Orbital, MenuId::Comms], "menu order, not opening order");
+        assert_eq!(s.in_order(false), [MenuId::Orbital, MenuId::Comms], "menu order, not opening order");
         s.toggle(MenuId::Comms);
-        assert_eq!(s.in_order(), [MenuId::Orbital]);
+        assert_eq!(s.in_order(false), [MenuId::Orbital]);
+        // The RCS menu follows RCS, on top, whatever the settings say.
+        assert_eq!(s.in_order(true), [MenuId::Rcs, MenuId::Orbital]);
+        s.set_open(MenuId::Rcs, true);
+        assert_eq!(s.in_order(false), [MenuId::Orbital]);
+        s.set_open(MenuId::Rcs, false);
         let text = ron::to_string(&s).unwrap();
         assert_eq!(ron::from_str::<MenuSettings>(&text).unwrap(), s);
         s.show_only(Some(MenuId::Landing));

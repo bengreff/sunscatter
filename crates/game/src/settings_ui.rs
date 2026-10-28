@@ -178,7 +178,7 @@ fn interface_tab(ui: &mut egui::Ui, s: &mut InterfaceSettings) {
     ui.checkbox(&mut s.show_fps, "Frame rate in the time panel");
     ui.separator();
     ui.label("Menus (the menu bar, or their keys; places are fixed):");
-    for m in MenuId::ALL {
+    for m in MenuId::BAR {
         let mut open = s.menus.is_open(m);
         if ui.checkbox(&mut open, m.with_key(m.title())).changed() {
             s.menus.set_open(m, open);
