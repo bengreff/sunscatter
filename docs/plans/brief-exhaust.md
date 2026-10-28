@@ -16,14 +16,12 @@ Read first: D109 and D073 (and the "one look" line that D109 revises) in `docs/d
 - Check the other agent's files in `git status` before editing (`settings_ui.rs` was NAV's).
 - See it: the demo (pad, ascent, after separation for the Merlin Vacuum; `SUNSCATTER_CRAFT=falcon9-crew`) under the demo lock, with the toggle on and off. Visuals come from physics, never for their own sake (D109): if the model cannot show something, leave it out and say so.
 
-## State (EXHAUST, stopped at its context budget, 2026-10-27)
+## State (second EXHAUST agent, stopped at its context budget, 2026-10-28)
 
-Landed (see the commit "The exhaust seed"): wanted 1, the seed in `sim::systems::exhaust` (`exit_state`, `NozzleSpec::of` / `of_engine`, `jet`, `propellants()`), the table `data/propellants.ron`, `EngineData::throat_area`, five table tests; the spec [exhaust.md](../features/exhaust.md) with the render model's and the toggle's design.
+Landed: the seed (cfe86da); the architecture row for the seed (31c2b7d); the render model and the toggle (80e471e: `game::scene::exhaust` rules and table tests, `exhaust.wgsl`, `persist::VisualSettings`, Settings ▸ Visuals, `look::Parts::exhaust`); the parts demo's benchmark at max-Q and `SUNSCATTER_DEMO_FAR` (221d2f1); docs (spec *playable*, architecture rows, plan row). Seen in the demo on and off (pad, max-Q, upper stage; shots best in a tall window `SUNSCATTER_DEMO_SIZE=1000x2000`): Merlin plumes with diamonds at max-Q, the MVac's vacuum plume drawn but near-invisible in daylight. Benchmark: the exhaust row is inside the noise at max-Q.
 
 Left, in order:
-1. The `docs/architecture.md` row (SYSTEMS had the file open; add it after it commits): "The exhaust seed (D109): each engine's exit state from its thrust, Isp, nozzle and the propellant pair (`exit_state`, `NozzleSpec`), the jet in the local air (`jet`: pressure ratio, expanded Mach and radius, lip turning, shock-cell length); the pairs' table `data/propellants.ron` | `sim::systems::exhaust` | what flames are drawn from; never read by the trajectory".
-2. The toggle (wanted 3): `VisualSettings { exhaust: bool }` (default false) as `visuals` in `persist::SettingsFile` (the test that the file never says "graphics" must still pass), a checkbox in `settings_ui` (ask the agent holding it first).
-3. The render model (wanted 2) in a new `game::scene::exhaust` (rules, table tests) wired in `scene::ships::update_parts`: per flame, `NozzleSpec::of(&def.engines[e].data)`, the level from its thrust (`NozzleSpec::level`), the seed, `jet` at the vessel's ambient pressure (already computed there); the cone stays when the toggle is off. The test craft: `NozzleSpec::of_engine` with the LOX/RP-1 row (it has no propellants: an assumption, say so). Then a `look::Parts` row (`exhaust`) and the demo (pad, ascent, after separation; `SUNSCATTER_CRAFT=falcon9-crew`) with the toggle on and off.
-4. The plan's row and the spec's status words once each lands.
-
-Open for the owner (written in the plan): the propellant data lives in a pair table beside `fluids.ron`, not in the engine entries (γ, molar mass and composition belong to the propellants and their mixture; an engine's own figures, CRUCIBLE's, would come as a per-engine exit state later). Exit pressure is derived (thrust-consistent), not a new published field.
+1. Check `data/propellants.ron`'s γ, molar mass and chamber temperatures (written from memory as Sutton & Biblarz Table 5-5) against a source that can be opened (NASA CEA runs, e.g. the CEA web/`cea` results at each row's MR and 1,000 psia, or published papers), cite what was checked in each row's `source`, and flag what could not be.
+2. The render model's placeholders (spec, "Light" and "Temperature"): the afterburning temperature and weights, soot's optical constants and mass fraction, the core-length correlation; find sources or mark them for CRUCIBLE.
+3. Measure a close-up of nine plumes (the §1.6 worst case) with the benchmark; the bound is a cylinder (a cone would be tighter for vacuum fans).
+4. Owner's eye: the sea-level plume at liftoff is mostly hidden by the ground; plumes of nine engines do not merge.

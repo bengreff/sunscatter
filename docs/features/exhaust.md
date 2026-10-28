@@ -1,6 +1,6 @@
 # Engine exhaust (D109)
 
-Status: the seed is *skeleton* (sim, tested, not yet drawn); the render model and the toggle are *design*. Research: [research-2026-10-27-visuals.md](../plans/research-2026-10-27-visuals.md) §1.
+Status: the seed is *skeleton* (sim, tested); the render model and the toggle are *playable* (drawn, tested, seen in the demo; several constants are placeholders, below). Research: [research-2026-10-27-visuals.md](../plans/research-2026-10-27-visuals.md) §1.
 
 ## The seed (`sim::systems::exhaust`)
 
@@ -14,16 +14,17 @@ Each engine's exhaust at its nozzle exit, a pure function of its data and flow l
 - CRUCIBLE (the owner's testbench, `~/inquiry-project`) will give each engine's exit state; it replaces `exit_state`'s inputs, never `ExitState`, so the render side does not change.
 - Not covered: the Dracos (RCS thrusters have no nozzle geometry in their files and no flame today); Merlin 1D's separate gas-generator exhaust pipe; condensation trails.
 
-## The render model (design, game)
+## The render model (`game::scene::exhaust`, *playable*)
 
-One continuous function of the seed and the local air (ambient pressure and density at the vessel, `sim::forces::ambient_pressure`), every rule a pure function with table tests in `game::scene::exhaust` (to write), one bounded draw per engine:
+Per running engine, every frame: the seed at its flow level (`NozzleSpec::level` from its thrust), the jet at the vessel's ambient pressure, then `plume` (pure, table tests; the shader `exhaust.wgsl` mirrors `boundary` and `temperature`). One draw per engine: a cylinder bound as long as the plume is visible, back faces only when the camera is inside, 16 samples crowded toward the ray's closest approach to the exit (a 150 m chord through a vacuum fan still samples its 1 m core). Premultiplied: rgb the light, alpha the soot's opacity.
 
-- **Shape:** radius along the axis from the exit radius to the jet's fully expanded radius over one shock-cell length, the lip angle the jet's `turn` (inward when overexpanded, the vacuum fan's wide angle in vacuum); length to where radiance falls below the exposure's visibility floor.
-- **Shock diamonds:** brightness × `1 + A·cos(2πx/cell)`, `A ∝ |ln NPR|·(1 − exp(−ρₐ/ρ_ref))`: zero when matched and in vacuum.
-- **Afterburning:** an additive glow rising then falling with ambient density, scaled by `unburned` (never a monotonic fade with altitude, research §1.7 risk 1).
-- **Colour:** soot's Planck colour at the exit temperature weighted by `soot`, else a pale gas-emission tint.
-- **Cost:** a bounded raymarch (8–16 steps) or 2–4 nested shells, a point sprite below a pixel footprint; measured as a row in the look's benchmark (`look::Parts`); budget ≤ 0.3 ms with 1–3 plumes, ≤ 1.5 ms for nine Merlins close.
+- **Shape:** `R(x) = r₀ + x·k·Δ/(Δ + x·k)`: slope `k = tan(turn)` at the lip (the jet's Prandtl–Meyer turning), tending to the expanded radius `r₀ + Δ`; continuous through matched (no regime branch). Overexpanded at sea level the Merlin plume narrows; in vacuum the MVac fan leaves the lip at ~68°. Turnings past 75° (`MAX_TURN`, the backflow) are left out.
+- **Temperature on the axis:** isentropic cooling as the gas spreads (`ρ ∝ (r₀/R)²`, `T ∝ ρ^(γ−1)`); reheating behind the shock cells by the normal-shock ratio at the jet's Mach, `1 + A·(S−1)·(1 − cos 2πx/λ)/2`, fading over 6 cells (`CELLS`, approximation), `A = tanh|ln NPR|·(1 − e^(−pₐ/pₑ))`: zero when matched and in vacuum; afterburning toward 2,400 K (`AFTERBURN_TEMPERATURE`, **placeholder, no source**) weighted by `(1 − e^(−pₐ/pₑ))·(1 − e^(−unburned/0.1))` (the weights are placeholders; the research's rise-then-fall with density is not modelled: no source found for the fall).
+- **Light:** soot only. Extinction `6π·E(m)·f_v/λ` (Rayleigh limit; E(m) 0.26, soot density 1,800 kg/m³, λ 550 nm, albedo 0.2: usual figures from the soot literature, **not checked**), thinning as `(r₀/R)²` across a Simons radial profile `cos^(2/(γ−1))` and along the supersonic core length `Dⱼ(4.2 + 1.1Mⱼ²)` (Lau, Morris & Fisher 1979, **cited from memory**). Emission: Planck at 610/550/465 nm, white at 6,504 K, absolute in nits (the platinum point, 2,042 K = 6.0e5 cd/m²; tested within 30 % of Planck × V(λ) from 1,200 to 5,772 K), times the camera's exposure: day and night follow D087 with no boost. Scattering: the brightest star's light at the craft (eclipses and air included), isotropic.
+- **What it shows:** sea level: an opaque plume, bright where it burns in air (mostly hidden by the ground on the pad); max-Q: each Merlin's plume a thin orange streak with bright diamonds; vacuum (MVac): drawn but nearly invisible in daylight (it darkens the Earth behind by ~5 %): soot at 780 K glows below the visible and scatters little.
+- **Not shown (left out, say so):** ice and water condensation in vacuum plumes (the bright fans in photographs are mostly sunlit condensate), chemiluminescence, hydrolox and hypergolic plumes (no soot: not drawn, near-invisible in reality), the gas-generator exhaust, the plumes of nine engines merging, plume–ground interaction.
+- **Cost** (the look's benchmark, `bench_max_q.md` from the parts demo, 1600×900, nine plumes at 150 m): the "exhaust" row is inside the benchmark's noise (±1 ms; −0.77 ms measured), under §1.6's budget. A close-up of nine plumes is not yet measured.
 
-## The toggle (design)
+## The toggle (*playable*)
 
-`exhaust` in a `visuals` section of `settings.ron` (`persist`), shown in the settings screen (`settings_ui`), default off: off draws today's flame cone (`scene::parts::flame`), on the render model (D109, interview answer 6).
+`VisualSettings { exhaust }` in `persist` (`visuals` in `settings.ron`), a checkbox in Settings ▸ Visuals, off by default: off draws the flame cone (`scene::parts::flame`). The look's benchmark draws plumes whatever the toggle (`exhaust::drawn`), so its "exhaust" row is their cost. The demo loads no settings: `SUNSCATTER_EXHAUST=1` turns it on there; `SUNSCATTER_DEMO_FAR=<factor>` frames the parts demo's burning shots farther so the plumes show clear of the interface (or use a tall window, `SUNSCATTER_DEMO_SIZE=1000x2000`).
