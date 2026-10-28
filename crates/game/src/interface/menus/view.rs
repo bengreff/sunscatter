@@ -79,7 +79,8 @@ pub fn draw(
     let open = menus.in_order(sim.controls().rcs.on);
     if !open.is_empty() {
         let top = layout::dock_top(rect(TIME_AREA), rect(BAR_AREA));
-        let place = layout::dock_place(screen, top, cluster);
+        let corner = rect(crate::interface::toasts::AREA);
+        let place = layout::dock_place(screen, top, cluster, corner);
         let content: Vec<_> = open.iter().map(|m| (*m, m.sections(&data))).collect();
         for (m, input) in render::dock(ctx, place, &content) {
             if input.close && m == MenuId::Rcs {

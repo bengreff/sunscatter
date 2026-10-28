@@ -1,9 +1,10 @@
-//! The ship's event log as toasts (`Vessel::ship_events`, the systems'
-//! log: stages and functions run, clamps armed and released, failures,
-//! aborts): each new event of the active vessel once, bad news as an
-//! alert. Switching to a vessel does not replay its history.
+//! The ship's event log as notifications (`Vessel::ship_events`, the
+//! systems' log: stages and functions run, clamps armed and released,
+//! failures, aborts): each new event of the active vessel once, linked to
+//! the vessel, bad news as an alert. Switching to a vessel does not replay
+//! its history.
 
-use super::toasts::Toasts;
+use super::toasts::{Link, Toasts};
 use crate::state::SimState;
 use bevy::prelude::*;
 use sim::systems::Event;
@@ -26,7 +27,17 @@ pub fn unseen<'a>(events: &'a [Event], seen: Option<&(Epoch, String)>) -> &'a [E
     }
 }
 
-/// Toasts the active vessel's new events.
+/// An event's text as notified: a stage run reads "Stage: Ignition", but
+/// a stage whose name says it is one reads by its name alone ("Stage
+/// separation", not "Stage: Stage separation").
+pub fn wording(text: &str) -> String {
+    match text.strip_prefix("Stage: ") {
+        Some(name) if name.to_lowercase().split_whitespace().any(|w| w == "stage") => name.to_string(),
+        _ => text.to_string(),
+    }
+}
+
+/// Notifies the active vessel's new events.
 pub fn toast_events(
     sim: Res<SimState>,
     time: Res<Time>,
@@ -38,7 +49,7 @@ pub fn toast_events(
     let known = seen.contains_key(&v.id());
     if known {
         for e in unseen(events, seen.get(&v.id())) {
-            toasts.push(time.elapsed_secs_f64(), format!("Vessel {}: {}", v.id().0, e.text), e.alarm);
+            toasts.push_linked(time.elapsed_secs_f64(), wording(&e.text), e.alarm, Some(Link::Vessel(v.id())));
         }
     }
     match events.last() {
@@ -55,6 +66,22 @@ pub fn toast_events(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_stage_named_as_one_is_not_called_a_stage_twice() {
+        // (event, notified)
+        let table = [
+            ("Stage: Ignition", "Stage: Ignition"),
+            ("Stage: Stage separation", "Stage separation"),
+            ("Stage: Second stage ignition", "Second stage ignition"),
+            ("Stage: Upstage", "Stage: Upstage"),
+            ("Function: Grid fins", "Function: Grid fins"),
+            ("Liftoff: the clamps released at full thrust", "Liftoff: the clamps released at full thrust"),
+        ];
+        for (event, want) in table {
+            assert_eq!(wording(event), want);
+        }
+    }
 
     #[test]
     fn each_event_once_and_no_history_replayed() {

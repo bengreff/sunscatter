@@ -6,8 +6,9 @@
 //! The places are designated, nothing is dragged: the time panel top left,
 //! the menu bar top centre, the navball cluster bottom centre with the
 //! action bar above it, the staging bar on the right edge
-//! (`interface::stage_bar`), and every open menu in the left dock, stacked
-//! top to bottom and scrolling within the dock's height.
+//! (`interface::stage_bar`), every open menu in the left dock, stacked
+//! top to bottom and scrolling within the dock's height, and the
+//! notifications window (`interface::toasts`) under the dock, bottom left.
 
 use crate::interface::menus::MenuSettings;
 use bevy::prelude::Resource;
@@ -106,16 +107,18 @@ pub fn dock_top(time: Option<Rect>, bar: Option<Rect>) -> f32 {
 }
 
 /// The dock's place in `screen`: at the left margin, from `top` to the
-/// bottom margin, or to above the navball cluster where the dock would
-/// overlap it (a narrow window), never shorter than [`MIN_DOCK_HEIGHT`].
+/// bottom margin, or to above the notifications window (`corner`, bottom
+/// left) and the navball cluster where the dock would overlap them (the
+/// cluster in a narrow window), never shorter than [`MIN_DOCK_HEIGHT`].
 /// Its menus scroll within that height.
-pub fn dock_place(screen: Rect, top: f32, cluster: Option<Rect>) -> DockPlace {
+pub fn dock_place(screen: Rect, top: f32, cluster: Option<Rect>, corner: Option<Rect>) -> DockPlace {
     let x = screen.min.x + MARGIN;
     let overlaps = |c: &Rect| x < c.max.x && x + DOCK_WIDTH > c.min.x;
-    let bottom = match cluster.filter(overlaps) {
-        Some(c) => c.min.y - GAP,
-        None => screen.max.y - MARGIN,
-    };
+    let bottom = [cluster, corner]
+        .into_iter()
+        .flatten()
+        .filter(overlaps)
+        .fold(screen.max.y - MARGIN, |b, c| b.min(c.min.y - GAP));
     DockPlace { x, top, max_height: (bottom - top).max(MIN_DOCK_HEIGHT) }
 }
 
@@ -124,11 +127,6 @@ pub fn dock_place(screen: Rect, top: f32, cluster: Option<Rect>) -> DockPlace {
 /// their translucent backgrounds.
 pub fn covered(r: Rect, hud: &[Rect]) -> bool {
     hud.iter().any(|h| h.intersects(r))
-}
-
-/// The top of the toasts: centred under the menu bar.
-pub fn toasts_top(bar: Option<Rect>) -> f32 {
-    bar.map_or(MARGIN + 40.0, |b| b.max.y + GAP)
 }
 
 #[cfg(test)]
@@ -171,12 +169,35 @@ mod tests {
             (700.0, 300.0, MIN_DOCK_HEIGHT),
         ];
         for (w, h, max_height) in table {
-            let place = dock_place(rect(0.0, 0.0, w, h), top, Some(cluster(w, h)));
+            let place = dock_place(rect(0.0, 0.0, w, h), top, Some(cluster(w, h)), None);
             assert_eq!(place, DockPlace { x: MARGIN, top, max_height }, "{w}x{h}");
             assert!(place.top + place.max_height <= h - MARGIN || max_height == MIN_DOCK_HEIGHT, "{w}x{h} fits");
         }
         // Without the cluster drawn (the tracking station), to the bottom.
-        assert_eq!(dock_place(rect(0.0, 0.0, 900.0, 800.0), top, None).max_height, 706.0);
+        assert_eq!(dock_place(rect(0.0, 0.0, 900.0, 800.0), top, None, None).max_height, 706.0);
+    }
+
+    /// The notifications window in the bottom-left corner: the dock ends
+    /// above it, and above the cluster too where both are in the way.
+    #[test]
+    fn the_dock_ends_above_the_notifications() {
+        let top = 84.0;
+        let corner = |h: f32, tall: f32| rect(MARGIN, h - MARGIN - tall, MARGIN + DOCK_WIDTH, h - MARGIN);
+        let screen = |w: f32, h: f32| rect(0.0, 0.0, w, h);
+        let narrow_cluster = rect(200.0, 542.0, 700.0, 792.0);
+        // (screen, cluster, corner, max height)
+        let table = [
+            (screen(1600.0, 900.0), None, Some(corner(900.0, 140.0)), 900.0 - MARGIN - 140.0 - GAP - top),
+            // A narrow window: the cluster reaches higher than the window.
+            (screen(900.0, 800.0), Some(narrow_cluster), Some(corner(800.0, 140.0)), 542.0 - GAP - top),
+            // The window elsewhere (not in the dock's column): no effect.
+            (screen(1600.0, 900.0), None, Some(rect(900.0, 700.0, 1200.0, 890.0)), 900.0 - MARGIN - top),
+            // A tall window on a short screen: the dock keeps its minimum.
+            (screen(1280.0, 300.0), None, Some(corner(300.0, 140.0)), MIN_DOCK_HEIGHT),
+        ];
+        for (s, cluster, c, want) in table {
+            assert_eq!(dock_place(s, top, cluster, c).max_height, want, "{s:?} {c:?}");
+        }
     }
 
     #[test]

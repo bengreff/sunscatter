@@ -15,7 +15,7 @@
 //!   toast.
 
 use crate::camera::CameraRig;
-use crate::interface::toasts::Toasts;
+use crate::interface::toasts::{Link, Toasts};
 use crate::state::SimState;
 use crate::tracking::{self, Tracked};
 use bevy::prelude::*;
@@ -127,7 +127,8 @@ pub fn update(
                 .is_some_and(|b| !b.separated.is_empty() && b.destroyed.is_empty() && b.torn.is_empty());
             let pieces = sim.fleet[i].split(&sim.world, &plan, &crafts, &mut sim.vessel_ids);
             if let Some((text, alert)) = breakup_toast(id, &plan, pieces.len(), separation) {
-                toasts.push(now, text, alert);
+                // Linked to the (first) new vessel.
+                toasts.push_linked(now, text, alert, pieces.first().map(|p| Link::Vessel(p.id())));
             }
             sim.fleet.extend(pieces);
         } else if !is(next, id, epoch) {
