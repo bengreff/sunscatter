@@ -186,7 +186,7 @@ fn systems_continue_bit_for_bit_after_a_save_between_lattice_points() {
     assert!(s.systems.epoch.unwrap() < mid, "between lattice points");
     let mut ids = VesselIds::default();
     ids.allocate();
-    let text = SaveGame::capture(&w, mid, std::slice::from_ref(&s), ids, 0, controls).to_ron();
+    let text = SaveGame::capture(&w, mid, std::slice::from_ref(&s), ids, 0).to_ron();
     let mut loaded = SaveGame::from_ron(&text).unwrap().vessels.remove(0);
     assert_eq!(loaded, s);
     let end = t0().add_seconds(2.0 * DAY);
@@ -223,7 +223,7 @@ fn a_low_thrust_burn_continues_bit_for_bit_after_save_and_load() {
     assert!(matches!(s.segment().unwrap().kind, SegmentKind::Burn(_)), "mid-burn");
     let mut ids = VesselIds::default();
     ids.allocate();
-    let text = SaveGame::capture(&w, mid, std::slice::from_ref(&s), ids, 0, controls).to_ron();
+    let text = SaveGame::capture(&w, mid, std::slice::from_ref(&s), ids, 0).to_ron();
     let mut loaded = SaveGame::from_ron(&text).unwrap().vessels.remove(0);
     assert_eq!(loaded, s);
     let end = t0().add_seconds(12.0 * DAY);

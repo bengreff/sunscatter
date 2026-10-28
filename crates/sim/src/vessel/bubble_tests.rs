@@ -142,7 +142,7 @@ fn save_and_load_mid_contact_continue_bit_for_bit() {
     while ids.issued(VesselId(1)) && !ids.issued(VesselId(3)) || !ids.issued(VesselId(1)) {
         ids.allocate();
     }
-    let save = crate::save::SaveGame::capture(&w, fleet[0].time, &fleet, ids, 0, Controls::default());
+    let save = crate::save::SaveGame::capture(&w, fleet[0].time, &fleet, ids, 0);
     let mut loaded = crate::save::SaveGame::from_ron(&save.to_ron()).expect("loads").vessels;
     assert_eq!(loaded, fleet, "the save round-trips");
     let resume = fleet[0].time;

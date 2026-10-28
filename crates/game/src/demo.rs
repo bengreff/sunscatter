@@ -380,14 +380,8 @@ pub fn run(
                 // A playtest start in low orbit, out of debug mode.
                 let mut fleet = sim.fleet.clone();
                 fleet[sim.active].set_debug(&sim.world, false);
-                let save = sim::save::SaveGame::capture(
-                    &sim.world,
-                    sim.clock,
-                    &fleet,
-                    sim.vessel_ids,
-                    sim.active,
-                    sim::vessel::Controls { throttle: 0.0, ..sim.controls },
-                );
+                *fleet[sim.active].controls_mut() = sim::vessel::Controls { throttle: 0.0, ..sim.controls };
+                let save = sim::save::SaveGame::capture(&sim.world, sim.clock, &fleet, sim.vessel_ids, sim.active);
                 if let Err(e) = save.write(&demo.dir.join("orbit_save.ron")) {
                     warn!("demo: orbit save failed: {e:?}");
                 }

@@ -283,8 +283,7 @@ fn land_with_saves(w: &World, save_every: Option<usize>) -> Vessel {
         if save_every.is_some_and(|n| k % n == 0) {
             let mut ids = VesselIds::default();
             ids.allocate();
-            let text =
-                SaveGame::capture(w, ship.time, std::slice::from_ref(&ship), ids, 0, Controls::default()).to_ron();
+            let text = SaveGame::capture(w, ship.time, std::slice::from_ref(&ship), ids, 0).to_ron();
             ship = SaveGame::from_ron(&text).unwrap().vessels.remove(0);
         }
     }
@@ -469,7 +468,7 @@ fn the_rocket_stands_on_the_pad_at_spawn_and_after_save_and_load() {
     let Phase::Landed { fixed, .. } = ship.phase else { panic!("{:?}", ship.phase) };
     let mut ids = VesselIds::default();
     ids.allocate();
-    let text = SaveGame::capture(&w, t, std::slice::from_ref(&ship), ids, 0, Controls::default()).to_ron();
+    let text = SaveGame::capture(&w, t, std::slice::from_ref(&ship), ids, 0).to_ron();
     let mut loaded = SaveGame::from_ron(&text).unwrap().vessels.remove(0);
     assert_eq!(loaded, ship);
     // After the load its pose is checked again: it holds, so it stays.

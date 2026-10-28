@@ -276,9 +276,10 @@ fn a_vessel_saved_mid_turn_continues_bit_identically() {
     ship.advance(&w, b.t_start.add_seconds(-5.0), &controls, usize::MAX);
     let mut ids = VesselIds::default();
     ids.allocate();
-    let text = SaveGame::capture(&w, ship.time, std::slice::from_ref(&ship), ids, 0, controls).to_ron();
+    *ship.controls_mut() = controls;
+    let text = SaveGame::capture(&w, ship.time, std::slice::from_ref(&ship), ids, 0).to_ron();
     let save = SaveGame::from_ron(&text).unwrap();
-    assert_eq!(save.controls, controls);
+    assert_eq!(save.vessels[0].controls(), &controls);
     let mut loaded = save.vessels[0].clone();
     assert_eq!(loaded, ship);
     let end = t0().add_seconds(900.0);

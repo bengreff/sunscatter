@@ -381,7 +381,7 @@ fn a_split_fleet_continues_bit_for_bit_after_a_save() {
     let pieces = a.split(&w, &plan, &plan.crafts(), &mut ids);
     let mut fleet = vec![a];
     fleet.extend(pieces);
-    let text = SaveGame::capture(&w, at, &fleet, ids, 0, Controls::default()).to_ron();
+    let text = SaveGame::capture(&w, at, &fleet, ids, 0).to_ron();
     let mut loaded = SaveGame::from_ron(&text).unwrap().vessels;
     assert_eq!(loaded, fleet);
     let end = at.add_seconds(5_000.0);

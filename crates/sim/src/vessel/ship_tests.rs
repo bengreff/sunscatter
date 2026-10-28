@@ -151,7 +151,7 @@ fn saves_round_trip_and_frames_equal_one_jump() {
     v.advance(&w, t0().add_seconds(1.0), &full(0.7), usize::MAX);
     let mut ids = VesselIds::default();
     assert_eq!(ids.allocate(), v.id());
-    let text = SaveGame::capture(&w, v.time, std::slice::from_ref(&v), ids, 0, full(0.7)).to_ron();
+    let text = SaveGame::capture(&w, v.time, std::slice::from_ref(&v), ids, 0).to_ron();
     let mut loaded = SaveGame::from_ron(&text).unwrap().vessels.remove(0);
     assert_eq!(loaded, v);
     let mut frames = v.clone();
@@ -256,7 +256,7 @@ fn the_falcon_9_stands_on_the_pad_and_lifts_off() {
     assert_eq!(v.next_stage(&w).unwrap().0, "Second stage ignition");
     // Saved and loaded, both pieces are the same.
     let fleet = vec![v.clone(), booster.clone()];
-    let text = SaveGame::capture(&w, v.time, &fleet, ids, 0, full(1.0)).to_ron();
+    let text = SaveGame::capture(&w, v.time, &fleet, ids, 0).to_ron();
     assert_eq!(SaveGame::from_ron(&text).unwrap().vessels, fleet);
 }
 
@@ -328,7 +328,14 @@ fn the_falcon_9_stages_separate_without_touching() {
     let plan = v.plan_breakup().unwrap();
     let mut ids = VesselIds::default();
     ids.allocate();
+    let flying = Controls { throttle: 1.0, hold: crate::vessel::HoldMode::Prograde, ..Controls::idle() };
+    *v.controls_mut() = flying;
     let booster = v.split(&w, &plan, &plan.crafts(), &mut ids).remove(0);
+    // Each piece starts from the craft's controls (D112): the upper stage
+    // (Dragon's piece keeps the id) all of them, the booster its hold with
+    // the throttle closed.
+    assert_eq!((v.controls(), booster.controls()), (&flying, &flying.for_piece()));
+    assert_eq!((v.crew() > 0, booster.crew()), (true, 0));
     let rel = booster.state(&w).2 - v.state(&w).2;
     println!("parting at {:.2} m/s", rel.length());
     assert!((rel.length() - 0.5).abs() < 0.15, "{}", rel.length());

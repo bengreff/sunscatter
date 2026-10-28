@@ -247,7 +247,7 @@ fn a_burn_saved_mid_way_continues_bit_identically() {
     assert!(ship.burn().is_some());
     let mut ids = VesselIds::default();
     ids.allocate();
-    let text = SaveGame::capture(&w, ship.time, std::slice::from_ref(&ship), ids, 0, Controls::default()).to_ron();
+    let text = SaveGame::capture(&w, ship.time, std::slice::from_ref(&ship), ids, 0).to_ron();
     let mut loaded = SaveGame::from_ron(&text).unwrap().vessels.remove(0);
     assert_eq!(loaded, ship);
     let end = t0().add_seconds(1_000.0);

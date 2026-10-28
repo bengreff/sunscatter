@@ -44,6 +44,7 @@ mod coast_heat;
 mod create;
 pub mod debris;
 mod flown;
+mod helm;
 mod hold;
 mod id;
 mod live;
@@ -71,6 +72,7 @@ pub use burn::{
 };
 pub use clock::{landed_rate, ShipClock, SiteClock, LANDED_STEP};
 pub use flown::BurnCraft;
+pub use helm::{fleet_controls, Helm};
 pub use hold::{hold_direction, hold_reference, laplace_radius, primary, turn_lead};
 pub use hold::{HoldInputs, HoldMode, SpeedReference, TargetState};
 pub use id::{VesselId, VesselIds};
@@ -255,6 +257,10 @@ pub struct Vessel {
     /// clear (a stage's engine starts inside the interstage it leaves).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     clear_of: Vec<VesselId>,
+    /// Its own controls, whichever vessel is active (D112), and what has
+    /// reached it when uncrewed (D034; `helm`).
+    #[serde(default)]
+    helm: Helm,
 }
 
 /// Rotation matrix taking body-fixed axes of `body` to inertial axes at `t`.

@@ -269,6 +269,7 @@ impl Vessel {
                 piece.id = ids.allocate();
                 piece.plan = Default::default();
                 piece.control = AttitudeControl::default();
+                piece.start_helm_as_piece();
             } else {
                 piece.control.base = None;
             }

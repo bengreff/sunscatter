@@ -141,7 +141,7 @@ fn debug_mode_and_propellant_are_saved() {
     let mut ship = Vessel::coasting(&w, ids.allocate(), t0(), earth.node, r, v, test_craft());
     ship.set_debug(&w, true);
     ship.set_propellant(&w, 1234.5);
-    let save = SaveGame::capture(&w, t0(), std::slice::from_ref(&ship), ids, 0, Controls::default());
+    let save = SaveGame::capture(&w, t0(), std::slice::from_ref(&ship), ids, 0);
     let back = SaveGame::from_ron(&save.to_ron()).unwrap();
     assert_eq!(back.vessels[0], ship);
     assert!(back.vessels[0].debug() && back.vessels[0].propellant() == 1234.5);

@@ -261,7 +261,7 @@ fn main() {
     let clock = fly(&w, &mut ships, &controls, t0, end, threads, 30.0 * DAY);
     // Save and load at scale: the same bits, and the same bits flown on.
     let c = Instant::now();
-    let save = SaveGame::capture(&w, clock, &ships, ids, 0, controls[0]);
+    let save = SaveGame::capture(&w, clock, &ships, ids, 0);
     let text = save.to_ron();
     let loaded = SaveGame::from_ron(&text).expect("the save reads back");
     loaded.check_world(&w).expect("same ephemeris");

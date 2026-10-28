@@ -7,7 +7,7 @@ use sim::kepler::Elements;
 use sim::save::{SaveError, SaveGame};
 use sim::sol;
 use sim::time::Epoch;
-use sim::vessel::{CoastStart, Controls, Phase, Segment, Vessel, VesselId, VesselIds};
+use sim::vessel::{CoastStart, Controls, HoldMode, Phase, Segment, Vessel, VesselId, VesselIds};
 use sim::world::World;
 use std::sync::Arc;
 
@@ -37,14 +37,13 @@ fn ids_up_to(n: u64) -> VesselIds {
 }
 
 /// Saves the fleet to text and loads it back.
-fn through_save(w: &World, clock: Epoch, fleet: &[Vessel], controls: Controls) -> Vec<Vessel> {
-    let text = SaveGame::capture(w, clock, fleet, ids_up_to(2), 0, controls).to_ron();
+fn through_save(w: &World, clock: Epoch, fleet: &[Vessel]) -> Vec<Vessel> {
+    let text = SaveGame::capture(w, clock, fleet, ids_up_to(2), 0).to_ron();
     let save = SaveGame::from_ron(&text).unwrap();
     save.check_world(w).unwrap();
     assert_eq!(save.clock, clock);
-    assert_eq!(save.controls, controls);
     // Saving the loaded state gives the same text.
-    assert_eq!(SaveGame::capture(w, clock, &save.vessels, save.vessel_ids, 0, controls).to_ron(), text);
+    assert_eq!(SaveGame::capture(w, clock, &save.vessels, save.vessel_ids, 0).to_ron(), text);
     save.vessels
 }
 
@@ -70,7 +69,7 @@ fn coasting_vessel_continues_bit_identically_after_load() {
     let mid = t0().add_seconds(1_234.567);
     fly(&w, &mut ship, t0(), mid, 0.25, &controls);
     assert!(ship.segment().unwrap().samples.len() > 2, "save holds future samples");
-    let mut loaded = through_save(&w, mid, std::slice::from_ref(&ship), controls).remove(0);
+    let mut loaded = through_save(&w, mid, std::slice::from_ref(&ship)).remove(0);
     assert_eq!(loaded, ship);
     let end = t0().add_seconds(30_000.0);
     fly(&w, &mut ship, mid, end, 7.0, &controls);
@@ -110,7 +109,7 @@ fn landed_vessel_lifts_off_identically_after_load() {
     let mut a = pad.clone();
     let wait = t0().add_seconds(100.0);
     fly(&w, &mut a, t0(), wait, 1.0, &idle);
-    let mut b = through_save(&w, wait, std::slice::from_ref(&a), idle).remove(0);
+    let mut b = through_save(&w, wait, std::slice::from_ref(&a)).remove(0);
     let burn = Controls { throttle: 1.0, sas: true, ..Default::default() };
     let end = wait.add_seconds(30.0);
     fly(&w, &mut a, wait, end, 1.0 / 60.0, &burn);
@@ -130,7 +129,7 @@ fn powered_flight_continues_identically_after_load() {
     fly(&w, &mut a, t0(), mid, 1.0 / 60.0, &burn);
     assert!(matches!(a.phase, Phase::Powered { .. }));
     assert!(a.time < mid);
-    let mut b = through_save(&w, mid, std::slice::from_ref(&a), burn).remove(0);
+    let mut b = through_save(&w, mid, std::slice::from_ref(&a)).remove(0);
     let end = mid.add_seconds(40.0);
     fly(&w, &mut a, mid, end, 1.0 / 60.0, &burn);
     fly(&w, &mut b, mid, end, 1.0 / 60.0, &burn);
@@ -151,7 +150,7 @@ fn save_files_round_trip_and_check_the_ephemeris() {
     let ship = Vessel::coasting(&w, ids.allocate(), t0(), earth, r, v, sim::craft::test_craft());
     let pad = Vessel::landed_at(&w, ids.allocate(), "Moon", 0.67, 23.47, t0(), sim::craft::test_craft());
     let fleet = [ship, pad];
-    let save = SaveGame::capture(&w, t0(), &fleet, ids, 1, Controls::default());
+    let save = SaveGame::capture(&w, t0(), &fleet, ids, 1);
     let dir = std::env::temp_dir().join(format!("sunscatter-save-{}", std::process::id()));
     let path = dir.join("quicksave.ron");
     save.write(&path).unwrap();
@@ -169,13 +168,44 @@ fn save_files_round_trip_and_check_the_ephemeris() {
     std::fs::remove_dir_all(dir).unwrap();
 }
 
+/// Each vessel keeps its own controls through a save (D112), and an
+/// uncrewed vessel the settings still on their way to it (D034): after the
+/// load it acts on the same controls at the same instants.
+#[test]
+fn every_vessels_controls_and_settings_in_flight_round_trip() {
+    let w = world();
+    let (earth, r, v) = leo(&w);
+    let mut ids = VesselIds::default();
+    let craft = sim::craft::test_craft();
+    let mut fleet: Vec<Vessel> = (0..3)
+        .map(|k| Vessel::coasting(&w, ids.allocate(), t0(), earth, r + DVec3::Z * (1e4 * k as f64), v, craft))
+        .collect();
+    fleet[2].set_crew(0);
+    *fleet[0].controls_mut() = Controls { throttle: 0.25, hold: HoldMode::Prograde, ..Controls::idle() };
+    *fleet[1].controls_mut() = Controls { sas: false, ..Controls::idle() };
+    *fleet[2].controls_mut() = Controls { throttle: 1.0, hold: HoldMode::Retrograde, ..Controls::idle() };
+    // The probe's new setting leaves now and arrives in 1.5 s.
+    let delay = Some(1.5);
+    assert_eq!(fleet[2].acting_controls(t0(), delay), Controls::idle());
+    assert_eq!(fleet[2].controls_in_flight(), 1);
+    let save = SaveGame::from_ron(&SaveGame::capture(&w, t0(), &fleet, ids, 1).to_ron()).unwrap();
+    assert_eq!(save.vessels, fleet);
+    let mut loaded = save.vessels;
+    assert_eq!(loaded[0].controls().throttle, 0.25);
+    assert!(!loaded[1].controls().sas);
+    for t in [1.0, 1.5, 2.0] {
+        let now = t0().add_seconds(t);
+        let (a, b) = (fleet[2].acting_controls(now, delay), loaded[2].acting_controls(now, delay));
+        assert_eq!(a, b, "at {t} s");
+        assert_eq!(a.throttle, if t < 1.5 { 0.0 } else { 1.0 }, "at {t} s");
+    }
+}
+
 #[test]
 fn saves_with_duplicate_or_unissued_vessel_ids_are_rejected() {
     let w = world();
     let pad = |id| Vessel::landed_at(&w, id, "Moon", 0.67, 23.47, t0(), sim::craft::test_craft());
-    let load = |fleet: &[Vessel], ids| {
-        SaveGame::from_ron(&SaveGame::capture(&w, t0(), fleet, ids, 0, Controls::default()).to_ron())
-    };
+    let load = |fleet: &[Vessel], ids| SaveGame::from_ron(&SaveGame::capture(&w, t0(), fleet, ids, 0).to_ron());
     assert!(load(&[pad(VesselId(1)), pad(VesselId(2))], ids_up_to(2)).is_ok());
     let dup = load(&[pad(VesselId(1)), pad(VesselId(1))], ids_up_to(2));
     assert!(matches!(dup, Err(SaveError::Format(_))), "duplicate id accepted");

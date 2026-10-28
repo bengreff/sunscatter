@@ -177,7 +177,7 @@ fn save_and_load_preserve_the_clock() {
     ids.allocate();
     ids.allocate();
     let fleet = [sat, ground];
-    let text = SaveGame::capture(&w, mid, &fleet, ids, 0, Controls::default()).to_ron();
+    let text = SaveGame::capture(&w, mid, &fleet, ids, 0).to_ron();
     let loaded = SaveGame::from_ron(&text).unwrap().vessels;
     let end = t0().add_seconds(86_400.0);
     for (mut before, mut after) in fleet.into_iter().zip(loaded) {

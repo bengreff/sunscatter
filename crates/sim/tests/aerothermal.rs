@@ -228,7 +228,7 @@ fn a_descent_continues_bit_identically_after_save_and_load() {
     ship.advance(&w, mid, &controls, usize::MAX);
     let mut ids = VesselIds::default();
     ids.allocate();
-    let text = SaveGame::capture(&w, mid, std::slice::from_ref(&ship), ids, 0, controls).to_ron();
+    let text = SaveGame::capture(&w, mid, std::slice::from_ref(&ship), ids, 0).to_ron();
     let mut loaded = SaveGame::from_ron(&text).unwrap().vessels.remove(0);
     assert_eq!(loaded, ship);
     let end = t0().add_seconds(60.0);

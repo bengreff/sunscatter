@@ -18,14 +18,14 @@
 
 use crate::ephem::{fnv1a64, Ephemeris};
 use crate::time::Epoch;
-use crate::vessel::{Controls, SiteClock, Vessel, VesselIds};
+use crate::vessel::{SiteClock, Vessel, VesselIds};
 use crate::world::World;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::path::Path;
 
 /// Version of the save format. Loading any other version is an error.
-pub const SAVE_VERSION: u32 = 12;
+pub const SAVE_VERSION: u32 = 13;
 
 /// Which ephemeris a save was made against. Vessel states are only
 /// meaningful (and only reproducible) with the same body motions.
@@ -52,10 +52,9 @@ pub struct SaveGame {
     pub vessels: Vec<Vessel>,
     /// The vessel id counter, so ids of deleted vessels are never reused.
     pub vessel_ids: VesselIds,
-    /// Index of the active vessel in `vessels`.
+    /// Index of the active vessel in `vessels`. Each vessel carries its
+    /// own controls (D112).
     pub active: usize,
-    /// The controls latched for the active vessel.
-    pub controls: Controls,
     /// The origin's clock (D088), a pure function of time kept here so a
     /// late save loads without integrating it from its epoch again.
     /// Absent in older saves: then it is integrated.
@@ -107,14 +106,7 @@ impl From<std::io::Error> for SaveError {
 
 impl SaveGame {
     /// Captures the state (clones the vessels).
-    pub fn capture(
-        world: &World,
-        clock: Epoch,
-        vessels: &[Vessel],
-        vessel_ids: VesselIds,
-        active: usize,
-        controls: Controls,
-    ) -> Self {
+    pub fn capture(world: &World, clock: Epoch, vessels: &[Vessel], vessel_ids: VesselIds, active: usize) -> Self {
         SaveGame {
             version: SAVE_VERSION,
             ephemeris: EphemerisId::of(&world.eph),
@@ -122,7 +114,6 @@ impl SaveGame {
             vessels: vessels.to_vec(),
             vessel_ids,
             active,
-            controls,
             site_clock: None,
             seed: 0,
         }

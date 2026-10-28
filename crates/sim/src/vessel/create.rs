@@ -46,6 +46,7 @@ impl Vessel {
             bubble: Default::default(),
             ship: None,
             clear_of: Vec::new(),
+            helm: Default::default(),
         };
         vessel.init_ship();
         vessel
