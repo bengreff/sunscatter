@@ -27,14 +27,12 @@ pub fn unseen<'a>(events: &'a [Event], seen: Option<&(Epoch, String)>) -> &'a [E
     }
 }
 
-/// An event's text as notified: a stage run reads "Stage: Ignition", but
-/// a stage whose name says it is one reads by its name alone ("Stage
-/// separation", not "Stage: Stage separation").
+/// An event's text as notified: a stage run reads by the stage's name
+/// alone ("MECO", "Stage separation"; the log's "Stage: " prefix is the
+/// sim's, and the notification is already the vessel's); everything else
+/// as logged.
 pub fn wording(text: &str) -> String {
-    match text.strip_prefix("Stage: ") {
-        Some(name) if name.to_lowercase().split_whitespace().any(|w| w == "stage") => name.to_string(),
-        _ => text.to_string(),
-    }
+    text.strip_prefix("Stage: ").unwrap_or(text).to_string()
 }
 
 /// Notifies the active vessel's new events.
@@ -68,13 +66,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_stage_named_as_one_is_not_called_a_stage_twice() {
+    fn a_stage_reads_by_its_name() {
         // (event, notified)
         let table = [
-            ("Stage: Ignition", "Stage: Ignition"),
+            ("Stage: Ignition", "Ignition"),
+            ("Stage: MECO", "MECO"),
             ("Stage: Stage separation", "Stage separation"),
             ("Stage: Second stage ignition", "Second stage ignition"),
-            ("Stage: Upstage", "Stage: Upstage"),
+            ("Stage: Upstage", "Upstage"),
             ("Function: Grid fins", "Function: Grid fins"),
             ("Liftoff: the clamps released at full thrust", "Liftoff: the clamps released at full thrust"),
         ];

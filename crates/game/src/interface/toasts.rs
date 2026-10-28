@@ -205,13 +205,14 @@ pub fn window(ctx: &egui::Context, toasts: &mut Toasts, how: Shown, now: f64, ac
 }
 
 /// The window's title, the count and the fold switch (the window grows
-/// upwards: ▲ shows the history, ▼ folds it).
+/// upwards: ⏶ shows the history, ⏷ folds it; the proportional
+/// font has no ▲ ▼, the icon font has these).
 fn header(ui: &mut egui::Ui, toasts: &mut Toasts, how: Shown) {
     ui.horizontal(|ui| {
         let count = toasts.items.len();
         ui.label(egui::RichText::new(format!("NOTIFICATIONS  {count}")).small().color(theme::DIM));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            let (glyph, tip) = if how == Shown::Open { ("▼", "Fold") } else { ("▲", "Show the history") };
+            let (glyph, tip) = if how == Shown::Open { ("⏷", "Fold") } else { ("⏶", "Show the history") };
             let b = ui.add(egui::Button::new(egui::RichText::new(glyph).small().color(theme::DIM)).frame(false));
             if b.on_hover_text(tip).clicked() {
                 toasts.folded = how == Shown::Open;

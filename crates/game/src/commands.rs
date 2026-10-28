@@ -162,12 +162,13 @@ pub fn apply(
                 Route::Now => 0.0,
                 Route::After(delay) => delay,
                 Route::NoSignal => {
-                    toasts.push(now, format!("Vessel {}: no signal, the command cannot reach it", id.0), true);
+                    toasts.push_linked(now, "No signal: the command cannot reach it", true, to(id));
                     continue;
                 }
             };
             if delay >= 1.0 {
-                toasts.push(now, format!("Sent to Vessel {} ({})", id.0, crate::format::delay(delay)), false);
+                let text = format!("Command sent ({})", crate::format::delay(delay));
+                toasts.push_linked(now, text, false, to(id));
             }
             // Orders carry their epoch: the vessel applies them at its tick
             // (`Vessel::order_at`), whatever the frames.
@@ -221,11 +222,11 @@ pub fn apply(
             }
             GameCommand::SetStages { vessel, stages } => {
                 let done = sim.index_of(*vessel).map(|i| sim.fleet[i].set_stages(stages.clone()));
-                edited(&mut toasts, time.elapsed_secs_f64(), *vessel, "stages", done);
+                edited(&mut toasts, time.elapsed_secs_f64(), *vessel, "Stages", done);
             }
             GameCommand::SetFunctions { vessel, functions } => {
                 let done = sim.index_of(*vessel).map(|i| sim.fleet[i].set_functions(functions.clone()));
-                edited(&mut toasts, time.elapsed_secs_f64(), *vessel, "functions", done);
+                edited(&mut toasts, time.elapsed_secs_f64(), *vessel, "Functions", done);
             }
             GameCommand::SpawnTestShips(n) => sim.spawn_test_ships(*n),
             GameCommand::SetPlan { vessel, plan } => {
@@ -234,10 +235,8 @@ pub fn apply(
                 match sim.index_of(*vessel) {
                     None => toasts.push(now, format!("Plan for Vessel {}: no such vessel", vessel.0), true),
                     Some(i) => match sim.fleet[i].set_plan(&sim.world, plan.clone()) {
-                        Ok(()) => toasts.push(now, format!("Vessel {} accepted its flight plan", vessel.0), false),
-                        Err(e) => {
-                            toasts.push(now, format!("Vessel {} rejected its flight plan: {e:?}", vessel.0), true)
-                        }
+                        Ok(()) => toasts.push_linked(now, "Flight plan accepted", false, to(*vessel)),
+                        Err(e) => toasts.push_linked(now, format!("Flight plan rejected: {e:?}"), true, to(*vessel)),
                     },
                 }
             }
@@ -380,11 +379,11 @@ fn place(
         let none_left = sim.fleet[i].ship().is_some_and(crate::staging::no_stage_left);
         if matches!(kind, OrderKind::Stage) && none_left {
             let message = crate::staging::Refusal::NoStageLeft.message();
-            toasts.push(now, format!("Vessel {}: {}", id.0, message.to_lowercase()), false);
+            toasts.push_linked(now, message, false, to(id));
             continue;
         }
         if let Err(e) = sim.fleet[i].order_at(at, kind) {
-            toasts.push(now, format!("Vessel {}: {e}", id.0), true);
+            toasts.push_linked(now, e.to_string(), true, to(id));
         }
     }
     if arms && i == sim.active && delay == 0.0 {
@@ -402,8 +401,8 @@ fn edited(
     done: Option<Result<(), Vec<String>>>,
 ) {
     match done {
-        Some(Ok(())) => toasts.push(now, format!("Vessel {}: {what} saved", vessel.0), false),
-        Some(Err(e)) => toasts.push(now, format!("Vessel {}: {what} refused: {}", vessel.0, e.join("; ")), true),
+        Some(Ok(())) => toasts.push_linked(now, format!("{what} saved"), false, to(vessel)),
+        Some(Err(e)) => toasts.push_linked(now, format!("{what} refused: {}", e.join("; ")), true, to(vessel)),
         None => toasts.push(now, format!("Vessel {}: no such vessel", vessel.0), true),
     }
 }
@@ -476,6 +475,11 @@ pub fn update_context(
 ) {
     let context = InputContext::from_state(egui.wants_any_keyboard_input(), menu.open, station.open, systems.open);
     ctx.set_if_neq(context);
+}
+
+/// A notification's link to vessel `id`.
+fn to(id: VesselId) -> Option<crate::interface::toasts::Link> {
+    Some(crate::interface::toasts::Link::Vessel(id))
 }
 
 #[cfg(test)]
