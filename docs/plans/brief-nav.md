@@ -32,10 +32,9 @@ The NAV workstream of [flight-ui-2026-10-27.md](flight-ui-2026-10-27.md) (D111, 
 
 ## Left to do (in order)
 
-1. **Elements wording** (`menus/orbital.rs`): "ORBIT NOW · two-body · about Earth's centre" instead of "ELEMENTS · OSCULATING"; "SEMI-MAJOR AXIS (from the centre)"; Ap/Pe rows with `ApsisReadout::distance` beside the altitude, also in the navball's hover.
-2. **The part cards' "more" link** (`interface/part_card/`) calling `SystemsScreen::open_at(None, Some(part))`.
-3. **Docs**: `docs/features/flight-menus.md` is rewritten for D111 (update its "Not done" as these land); `docs/architecture.md` rows still missing: g_limit, the rcs pilot rule, produces_thrust, `navball::{altitude, g_meter}`, `commands::keys`, the action bar, `SystemsScreen::open_at`, notifications (`interface::toasts`, `events::wording`).
-4. **Smaller, seen in the demo**: the RCS menu (its thrusters list) fills most of the dock at 982 px logical, squeezing the menus under it to a line or two (they scroll, but a first look shows little); `commands.rs` messages ("Vessel 1: …") could carry `Link::Vessel`; a link to a systems-screen layer needs the sim's events to say which system they come from; the staging bar's scroll area may show the same remembered-size limit the notifications had (`ui.set_max_height` before the scroll area) when stages are added in flight.
+Done by SYSTEMS (2026-10-27): 1 the orbit menu's wording (`ORBIT NOW · two-body · about Earth's centre`, `SEMI-MAJOR AXIS (from the centre)`, `FROM CENTRE` under Ap and Pe, the navball's Ap/Pe hover: `navball::rules::apsis_hover`); 2 the part cards' "more" (`SystemsScreen::open_at(None, Some(part))`); 3 the architecture rows; 4 the commands' replies linked to their vessel, the notifications' fold glyphs (⏶ ⏷: the proportional font has no ▲ ▼), "MECO" without "Stage:", the hover texts' ▸ and the card's → (boxes in the proportional font).
+
+Still open, handed to SYSTEMS's brief: the RCS menu's thruster list squeezing the dock; links from events to a layer (the sim's events do not say which system they come from); the staging bar's scroll area and `set_max_height` when stages are added in flight.
 
 Rules: `docs/plans/agent-rules.md` (offscreen demos allowed one at a time: `mkdir target/demo.lock`, `rmdir` after).
 
