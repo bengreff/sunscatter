@@ -23,7 +23,7 @@
 ## The navball cluster and the action bar
 
 - Speed and its ORBIT / SURFACE / TARGET switch above the ball; ALT (with its datum switch, `navball::altitude`), Ap and Pe on the left; SAS, the hold modes (click only), the RCS button and the throttle bar on the right.
-- **G row** (`navball::g_meter`): the load now, its direction (▲ ▼ ◀ ▶), and on hover the g-limit and what sets it (a joint, or the crew along an axis; `sim::systems::g_limit`); amber from 80 % of the limit, red at it.
+- **G row** (`navball::g_meter`): the load now, its direction (▲ ▼ ◀ ▶), and on hover the g-limit and what sets it (a joint, or the crew along an axis; `sim::systems::g_limit`), given from 0.01 g (coasting, couples and thin air load the joints and a limit scaled from them means nothing); amber from 80 % of the limit, red at it.
 - **Action bar** (`interface::action_bar`) above the cluster: SYSTEMS, then the craft's saved functions (click only), the Falcon 9's launch abort pinned.
 
 ## Menus
