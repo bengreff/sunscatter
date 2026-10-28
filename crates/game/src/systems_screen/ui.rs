@@ -197,9 +197,13 @@ fn groups(
     groups: &[Group],
     open: &mut Option<Selection>,
 ) {
+    // A long value (an unmodelled mass's reason) wraps within the width
+    // left of the labels instead of widening the column or the pop-up.
+    let widest = (ui.available_width() * 0.62).max(120.0);
     for g in groups {
         ui.label(egui::RichText::new(&g.title).color(theme::ACCENT));
-        egui::Grid::new((id, g.title.as_str())).num_columns(2).spacing([12.0, 2.0]).show(ui, |ui| {
+        let grid = egui::Grid::new((id, g.title.as_str())).num_columns(2).spacing([12.0, 2.0]);
+        grid.max_col_width(widest).show(ui, |ui| {
             for r in &g.rows {
                 let label = ui.label(egui::RichText::new(&r.label).color(theme::DIM));
                 if let Some(h) = &r.hover {
@@ -213,7 +217,7 @@ fn groups(
                         }
                     }
                     None => {
-                        ui.label(value);
+                        ui.add(egui::Label::new(value).wrap());
                     }
                 }
                 ui.end_row();
@@ -436,6 +440,7 @@ mod tests {
         for k in 0..40 {
             g.row(&format!("row {k}"), "12.3 bar / 45.6 bar").opens(Selection::Component(k));
             g.row("ullage pressure", "12.3 bar / 45.6 bar");
+            g.row("unmodelled", "2503.4 kg (Falcon 9 first stage dry mass (Block 5, legs and grid fins): brackets, ring frames, harnesses and margins)");
         }
         let sel = Selection::Part(3);
         let mut rect = egui::Rect::NOTHING;
