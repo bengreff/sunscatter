@@ -2,51 +2,44 @@
 
 A SessionStart hook loads this file automatically after `/clear` or at startup. It is kept current by `/handoff`.
 
-*Updated 2026-10-27 (late evening), mid-way through the flight-interface round.*
+*Updated 2026-10-28 (early morning), after the overnight run of 2026-10-27/28 (10 agent runs, 2 at a time; all finished, nothing running).*
 
 ## Your first job
 
-1. Read [flight-ui-2026-10-27.md](flight-ui-2026-10-27.md) (the plan and its status table: the source of truth) and the owner's answers in [interview-2026-10-27-flight-ui.md](interview-2026-10-27-flight-ui.md) (D109–D113, and the follow-ups at its end).
-2. **NAV (second agent)** may still be running, from [brief-nav.md](brief-nav.md): keys without F-keys and the Esc menu, the action bar (Launch abort pinned), the navball (G row with its limit, altitude switch, RCS button), flat menus on 1–6 in one always-scrolling left dock, the RCS menu, notifications bottom-left, the elements' wording, docs; then BAR's two leftovers (delete the Staging menu G; the part cards' "more" link via `SystemsScreen::open_at`). Check `git log`, `git status` (unfinished files in the shared tree are its) and the brief. If it has stopped with work left, launch a fresh agent from the updated brief; never redo landed work.
-3. **BAR stopped** with everything landed (estimates, sequence edits, `scene::pick`, the staging bar, part cards: *playable*, not yet seen on screen); [brief-bar.md](brief-bar.md).
-4. When NAV has landed: ONE offscreen demo with `SUNSCATTER_CRAFT=falcon9-crew` (the owner allows "a couple" of runs, never many windows): the pad, after liftoff, after separation; check the bar, the cards (manual), the navball, the dock at 1600×900 and the reference Mac's size; fix what shows.
-
-## What is next (the owner's order)
-
-1. Finish and see the flight interface (above).
-2. **VESSEL** (lead): per-vessel controls in the save (D112: each vessel keeps its throttle, SAS, holds, RCS mode; a script may fly an inactive vessel; the booster stays controllable after separation).
-3. **The systems screen's redesign** (owner's answer 37): with a layer selected, everything about that layer as a whole; part stats clearer and organised; pop-ups welcome; links from the flight menus and cards land on a layer or part.
-4. **Exhaust** (D109, a toggle, off = today's cone): a fast render model from the exit state (placeholders from published engines; later the owner's CRUCIBLE) and the local air; `research-2026-10-27-visuals.md` has the physics and budgets.
-5. **Reentry glow** (a toggle) and the aerothermal upgrade it needs (shock-layer temperature, ionisation, comms blackout).
-6. **Clouds** (D113, a toggle, off by default): deterministic weather from the seed, one continuous volume.
-7. The Crew mission's next steps: ISS rendezvous and docking, Dragon's entry, splashdown.
-8. Smaller, recorded in the plan: terrain relief does not shadow craft; a craft's shadow on the ground still comes from the camera-fitted cascades; parachutes as meshes that collide with the craft (D109).
+1. Read [flight-ui-2026-10-27.md](flight-ui-2026-10-27.md): the status table (source of truth) and **"Open for the owner"**: nine logical defaults the agents chose overnight, for the owner to confirm (sensors on the Falcon 9, Crew menu limits, script controls and separation controls, propellant data's home, the vacuum plume, blackout at the nose, …).
+2. Show the owner the night's shots (they may be gone after a reboot; re-shoot with the parts demo, `SUNSCATTER_CRAFT=falcon9-crew`): flight interface `scratchpad/nav4/`, systems screen `scratchpad/systems/shots3`, `shots3024` (07–09_parts_systems_*), exhaust on/off `scratchpad/exhaust/on3`, `off3` (scratchpad = `/private/tmp/claude-501/-Users-ben-sunscatter/d7be5f55-…/scratchpad/`).
+3. Ask the owner what to look at in the game first: the booster after separation (switch with `[`/`]`: it should hold its SAS; switching back, Dragon at its throttle), the exhaust toggle (Settings ▸ Visuals), the systems screen (Tab), an entry with the Comms BLACKOUT and Reentry rows (`./run play`, deorbit).
 
 ## State
 
-- **2026-10-27 afternoon/evening:** the owner played the Falcon 9 and asked for the craft's own lighting, a new flight interface and physical visuals; answers recorded, D109–D113, research reports (`research-2026-10-27-flight-ui.md`, `research-2026-10-27-visuals.md`).
-- **LIGHT done** (eff70d7, 57cd4df, 4fcbd68): shadows fitted to each craft (not the camera), the Sun's light through the air on the craft's own line (orbital sunset on the whole craft at once), planetshine from patches of the lit surface seen, the craft's own sky light, the flare hidden by craft. Seen in two demos.
-- **NAV's first agent landed** the g-limit (63eef21), the pilot's RCS mode and authority (0d8467f) and WARP (47ba9d1: rails warp refused by thrust, not the throttle; `,` at 1× stops time).
-- The demo fails if the interface is not drawn over the main camera (25073d7).
-- Owner's follow-ups: plain 1–0 open menus, hold modes and functions click-only; the Falcon 9 keeps its real RCS configuration (disabled blocks enabled by its sequence).
-- **Usage budget** (CLAUDE.md, owner, 2026-10-27): hand off at ~150–200k context, at most 3 agents, ≤ 20 % of the weekly limit per night.
-- Disk is tight (~24 GB free on 2026-10-27): `target/prepush` ~18 GB, agents' dirs ~12 GB each; delete incremental caches and finished agents' dirs (`target/agents/bar` can go if no BAR agent follows).
-- Windows not checked since 2026-10-26 (backhouse's certificate problem).
+- **Flight interface (D111): *playable*, seen in demos, not yet by the owner.** No F-keys (one key table, Esc menu), action bar, navball G row (limit from 0.01 g), ALT switch, RCS button; flat menus Orbital 1 … Comms 6 in one left dock with fair heights; RCS menu; notifications window (links to vessels); staging bar and part cards (`more ›` into the systems screen); "ORBIT NOW" wording. [brief-nav.md](brief-nav.md) is complete.
+- **VESSEL (D112): *playable*.** Each vessel's controls live in its `sim::vessel::Helm` (save version 13; D034 delay per vessel); `SimState::controls()`/`controls_mut()`; `SimState::step`; scripts fly any vessel (`GameCommand::SetControls`, MCP `set_controls` with `id`, `stage`); `[`/`]` nearest first. Not seen on screen. Left: D112's "joined by data" vessel; showing another vessel's controls.
+- **Systems screen: *playable*.** Layer summaries (`systems_screen/summary.rs`), one part layout with `value / limit` rows (`format::limit_level`), pop-ups, `open_at`. Left in [brief-systems.md](brief-systems.md): crew and comms summaries, pressurant/vent flows, links from events to a layer, the Power menu's "no buses" on the pad (before the first systems step).
+- **Exhaust (D109): *playable*.** Seed `sim::systems::exhaust` + `data/propellants.ron`; plume `game::scene::exhaust` + `exhaust.wgsl`; toggle Settings ▸ Visuals (off by default). Left in [brief-exhaust.md](brief-exhaust.md): check the propellant table and the render placeholders against sources that can be opened (they were written from memory); the nine-plume close-up cost.
+- **Reentry: sim side *playable*, glow *design*.** `aero::equilibrium`, `aero::shock`, `comms::blacked_out`, Comms/Reentry rows (79a6a2d, 9767d61). Left in [brief-glow.md](brief-glow.md) "State": the `reentry_glow` toggle, the glow shell, blackout notifications, a reentry view in the demo.
+- CI: green through 79a6a2d; 9767d61 and cfbf718 were running at handoff (`gh run list --limit 3`).
+- Disk ~32 GB free; `target/agents/glow` kept (warm for the next GLOW agent).
 
-## Open for the owner
+## What is next (the owner's order)
 
-- Earlier items still open: U/E data in `falcon9.md`, Dragon's CO₂ removal, the Moon's field degree, the 1,000-year ephemeris (D005), the rails floor vs q-based boundary, backhouse's certificate.
-- Engine exhaust's exit state comes from the owner's CRUCIBLE (`~/inquiry-project`) later; placeholders from published engines now.
+1. The owner's look and answers (above); fix what they see.
+2. GLOW's rest ([brief-glow.md](brief-glow.md) State), then CLOUDS ([brief-clouds.md](brief-clouds.md), not started).
+3. The systems screen's and exhaust's leftovers (their briefs).
+4. The Crew mission: ISS rendezvous and docking, Dragon's entry, splashdown.
+5. Smaller: terrain relief does not shadow craft; a craft's ground shadow still comes from the camera-fitted cascades; parachutes as colliding meshes (D109).
+
+## Open for the owner (older)
+
+U/E data in `falcon9.md`, Dragon's CO₂ removal, the Moon's field degree, the 1,000-year ephemeris (D005), the rails floor vs q-based boundary, backhouse's certificate (Windows not checked since 2026-10-26). Engine exit states later from the owner's CRUCIBLE (`~/inquiry-project`).
 
 ## Gotchas
 
-- **Agents in one checkout share one local `main`: a local commit is public**, since any agent's push sends it. Commit only from a tree whose base is the current HEAD (check right before committing), through a private index (`GIT_INDEX_FILE=… git read-tree HEAD; git update-index --add <paths>`), and push at once; then update the shared index for those paths. Two red CI runs on 2026-10-27 came from this.
-- **The disk fills:** each agent's target dir is 5–17 GB, the pre-push mirror (`target/prepush`) ~27 GB, `target/debug` ~19 GB. Delete finished agents' dirs, incremental caches (`*/debug/incremental`) and old exports/traces; check `df -h` before long runs. ENOSPC hit twice on 2026-10-27.
-- **Agents die on a full context** (GFX and RUNTIME did): keep briefs focused; a dead agent's uncommitted work is in the shared tree; commit it on its behalf after reading it, or brief a fresh agent from the diff.
-- Temporary files go in each agent's own scratchpad subfolder (a shared commit-message file was overwritten on 2026-10-26).
-- GPU pass times: Metal's timestamps between passes are meaningless; use `xcrun xctrace record --template 'Metal System Trace'` (`tools/gpu_trace.py` parses it); `--env` and its value are two arguments.
-- `git archive | tar -x` keeps commit mtimes: use `tar -x -m` so cargo rebuilds.
-- `cargo test` stops at the first failing binary unless `--no-fail-fast` (CI and the stop hook use it). The stop hook tests the shared working tree, so other agents' unfinished work shows there.
-- `cargo fmt --all` fails while another agent has a half-written module; use `cargo fmt -p <crate>` or `rustfmt` on your files.
-- egui widgets can report `changed()` from their own rounding: gate commands on real interaction.
-- Saves are not compatible across versions (D063). The playtest save embeds `CraftParams` and the ephemeris id: when either changes, regenerate it from the demo's Orbit step (`orbit_save.ron`).
+- **Overnight agents follow [agent-rules.md](agent-rules.md)** (shared checkout, private-index commits, demo lock, ~150k context stop, report ≤ 15 lines); each workstream has a `brief-<name>.md` with a "State" section a fresh agent continues from. Agents overshoot their budget (several ended at 200–290k): say "stop at 150k" plainly.
+- **Demos:** the owner allows fewer than 10 windows in a burst, and agents may run offscreen demos, one at a time under `target/demo.lock` (take it only if `mkdir` succeeds; remove only your own: an agent removed another's on 2026-10-27).
+- **Agents in one checkout share one local `main`: a local commit is public** (another agent's push sends it). Commit only your paths through a private index from the current HEAD; push at once.
+- The egui proportional font lacks ▲ ▼ ▸ →: use ⏶ ⏷ or test the glyph in a demo shot. egui areas default to 400 px tall: set the max height before a scroll area.
+- **The disk fills:** each agent's target dir 10–13 GB, `target/prepush` ~19 GB, `target/debug` ~22 GB; delete finished agents' dirs and `incremental` caches; `df -h` before long runs.
+- `cargo test` stops at the first failing binary unless `--no-fail-fast`. The stop hook tests the shared tree, so an agent's unfinished work shows there.
+- `cargo fmt --all` fails while another agent has a half-written module: use `cargo fmt -p <crate>` or `rustfmt` on your files.
+- GPU pass times on Metal: `xcrun xctrace record --template 'Metal System Trace'` + `tools/gpu_trace.py`. `git archive | tar -x -m` so cargo rebuilds.
+- Saves are not compatible across versions (D063). The playtest save embeds `CraftParams`, the ephemeris id and the save version (13): regenerate it from the demo's Orbit step (`orbit_save.ron`) when they change.
