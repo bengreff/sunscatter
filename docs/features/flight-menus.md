@@ -9,15 +9,17 @@
 ```
 ┌ time / warp ┐   ┌ ORBITAL 1 · LANDING 2 · MANEUVER 3 · CREW 4 · POWER 5 · COMMS 6 ┐   ┌ staging ┐
 └─────────────┘   └─────────────────────────────────────────────────────────────────┘   │ bar     │
-┌ left dock ──┐                          (toasts)                          (part cards) │ (BAR)   │
+┌ left dock ──┐                                                     (part cards) │ (BAR)   │
 │ RCS         │  while RCS is on                                                       │         │
 │ ORBITAL …   │                    ┌ action bar ┐                                      │         │
-└─────────────┘                    ┌ navball cluster ┐                                 └─────────┘
+└─────────────┘                    ┌ navball cluster ┐                                 │         │
+┌ notifications ┐                  │                 │                                 └─────────┘
 ```
 
-- **Fixed places.** One dock on the left (300 px) stacks the open menus in menu order and always scrolls within its height (`layout::dock_place`: below the time panel and the menu bar, above the navball cluster where they would overlap). The right edge is the staging bar's (BAR, `interface::stage_bar`).
+- **Fixed places.** One dock on the left (300 px) stacks the open menus in menu order and always scrolls within its height (`layout::dock_place`: below the time panel and the menu bar, above the notifications window and above the navball cluster where they would overlap). The right edge is the staging bar's (BAR, `interface::stage_bar`).
 - **Flat pages (D111).** A menu is one page: its summary, then every section under a ruled heading, nothing collapsed; a section with nothing to show is not drawn. A craft of parts' page ends with a link into the systems screen at its layer (`MenuId::layer`, `SystemsScreen::open_at`).
 - **Keys (D111, `commands::keys`).** Number keys toggle menus (1 Orbital, 2 Landing, 3 Maneuver, 4 Crew, 5 Power, 6 Comms; 7 kept for Docking). R turns RCS on and off; its menu has no key. No F-keys: Tab the systems screen, M tracking, `?` help, Cmd+S / Cmd+L saves (Ctrl+Alt elsewhere), Esc the pause menu (reset to the pad, help, the performance overlay).
+- **Notifications (D111, `interface::toasts`).** Every message (saves, loads, errors, commands sent, the active vessel's events, separations) goes into one history of 200, shown bottom left under the dock, the dock's width, newest at the bottom and bright for 4 s, scrolling past about six lines; ▼ folds it to its header and the newest message, ▲ opens it. A message about a vessel ends with a link: a click switches to that vessel, or opens the systems screen for the active vessel's own. Outside the flight view it shows only while a message is new. A stage named as one is not called a stage twice (`events::wording`: "Stage separation", not "Stage: Stage separation").
 - **Style.** `interface::theme`: labels dim small monospace, values monospace right-aligned in their tone (normal, dim, good, warn amber, alert red); every value has its unit and reads through what the craft knows (D106: a dash for what it cannot measure).
 
 ## The navball cluster and the action bar
@@ -64,4 +66,4 @@
 - Reentry shows from the moment the predicted path enters an atmosphere. Before entry: the entry interface (the atmosphere's top) and the time to it where the stored coast marks the entry (`Segment::entry`), the periapsis when one lies inside the atmosphere, or just the interface for an impact on a body with one (`menus::data::entry_ahead`); then SKIN MAX. In the air: q, Mach, g-load, AoA, sideslip, SKIN MAX. Temperatures are amber from 90 % of their limit and red at it, everywhere.
 - Parachute: the canopies' rows are the stage parts' words (one owner of the D079 words, `staging`), then `q / DESIGN q`, and before the command `safe to deploy (P or Space)`, `too fast: the canopy may tear` or, outside the air, `no air: deploy after entry`. The canopy counts (2 drogues, 4 mains) are not in the craft data, so they are not shown.
 
-**Not done.** Notifications as a scrollable corner window with links (D111; toasts still sit under the menu bar); the Ap / Pe radius from the centre beside the altitude; the part cards' "more" link; the MCP does not expose the menus.
+**Not done.** Links to a layer of the systems screen (the sim's events do not say which system they come from) and on the commands' messages (`commands.rs` pushes plain text); the Ap / Pe radius from the centre beside the altitude; the part cards' "more" link; the MCP does not expose the menus.
