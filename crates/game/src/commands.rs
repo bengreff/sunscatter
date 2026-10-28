@@ -27,8 +27,11 @@ use sim::vessel::{FlightPlan, HoldMode, VesselId};
 
 #[derive(Message, Clone, Debug, PartialEq)]
 pub enum GameCommand {
-    /// Requested warp level (index into `WARP_LEVELS`).
+    /// Requested warp level (index into `WARP_LEVELS`); resumes stopped
+    /// time.
     SetWarp(usize),
+    /// Stops time (D111: `,` at 1×); a warp command resumes it.
+    PauseTime,
     /// Make a vessel active.
     Switch(VesselId),
     /// Delete a non-active vessel.
@@ -167,7 +170,11 @@ pub fn apply(
             }
         }
         match &c {
-            GameCommand::SetWarp(level) => sim.warp = (*level).min(WARP_LEVELS.len() - 1),
+            GameCommand::SetWarp(level) => {
+                sim.warp = (*level).min(WARP_LEVELS.len() - 1);
+                sim.paused = false;
+            }
+            GameCommand::PauseTime => sim.paused = true,
             GameCommand::Switch(i) => {
                 let left = sim.active;
                 tracking::switch_to(&mut sim, &mut rig, &mut pred, *i);

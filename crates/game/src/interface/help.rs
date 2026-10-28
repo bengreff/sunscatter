@@ -36,7 +36,14 @@ pub const KEYS: &[(&str, &[(&str, &str)])] = &[
             ("N", "burn planner"),
         ],
     ),
-    ("Time", &[(". / ,", "warp up / down"), ("/", "warp 1x (rails warp needs throttle 0)"), ("Esc", "pause menu")]),
+    (
+        "Time",
+        &[
+            (". / ,", "warp up / down; , at 1x stops time, . runs it again"),
+            ("/", "warp 1x (rails warp needs no thrust)"),
+            ("Esc", "pause menu"),
+        ],
+    ),
     (
         "Camera",
         &[

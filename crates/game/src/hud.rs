@@ -87,8 +87,9 @@ pub fn pick_bodies(
 /// Why warp is lower than requested.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum WarpLimit {
-    /// Rails warp needs the throttle closed and the ship not under thrust.
-    Throttle,
+    /// Rails warp needs the ship to produce no thrust (D111:
+    /// `state::produces_thrust`), whatever the throttle.
+    Thrust,
     /// Coast integration can't keep up at this warp.
     Compute,
     /// Below a body's rails floor (D062): the floor altitude (m).
@@ -115,7 +116,7 @@ pub fn warp_status(
 ) -> (usize, bool, Option<WarpLimit>) {
     let rails = effective > MAX_PHYSICS_WARP;
     let limit = if effective < requested {
-        Some(floor.map_or(WarpLimit::Throttle, WarpLimit::Floor))
+        Some(floor.map_or(WarpLimit::Thrust, WarpLimit::Floor))
     } else if compute_limited {
         Some(WarpLimit::Compute)
     } else {
@@ -174,15 +175,15 @@ pub fn draw(
         };
         let (level, rails, mut limit) = warp_status(sim.warp, sim.effective_warp(), sim.compute_limited, floor);
         match block {
-            Some(crate::state::RailsBlock::Live) if limit == Some(WarpLimit::Throttle) => limit = Some(WarpLimit::Live),
-            Some(crate::state::RailsBlock::OtherLive(id)) if limit == Some(WarpLimit::Throttle) => {
+            Some(crate::state::RailsBlock::Live) if limit == Some(WarpLimit::Thrust) => limit = Some(WarpLimit::Live),
+            Some(crate::state::RailsBlock::OtherLive(id)) if limit == Some(WarpLimit::Thrust) => {
                 limit = Some(WarpLimit::OtherLive(id.0));
             }
-            Some(crate::state::RailsBlock::Near(id)) if limit == Some(WarpLimit::Throttle) => {
+            Some(crate::state::RailsBlock::Near(id)) if limit == Some(WarpLimit::Thrust) => {
                 limit = Some(WarpLimit::Near(id.0));
             }
-            Some(crate::state::RailsBlock::Held) if limit == Some(WarpLimit::Throttle) => limit = Some(WarpLimit::Held),
-            Some(crate::state::RailsBlock::OtherHeld(id)) if limit == Some(WarpLimit::Throttle) => {
+            Some(crate::state::RailsBlock::Held) if limit == Some(WarpLimit::Thrust) => limit = Some(WarpLimit::Held),
+            Some(crate::state::RailsBlock::OtherHeld(id)) if limit == Some(WarpLimit::Thrust) => {
                 limit = Some(WarpLimit::OtherHeld(id.0));
             }
             _ => {}
@@ -206,7 +207,7 @@ pub fn draw(
         });
         let kind = if rails { "rails" } else { "physics" };
         let why = match limit {
-            Some(WarpLimit::Throttle) => "  limited: throttle".to_string(),
+            Some(WarpLimit::Thrust) => "  limited: thrust".to_string(),
             Some(WarpLimit::Compute) => format!("  limited: compute, {} achieved", warp_label(sim.achieved_warp)),
             Some(WarpLimit::Floor(f)) => format!("  limited: below {}", crate::format::distance(f)),
             Some(WarpLimit::Live) => "  limited: flying live".to_string(),
@@ -217,7 +218,12 @@ pub fn draw(
             None => String::new(),
         };
         ui_.horizontal(|ui_| {
-            ui_.monospace(format!("warp {} ({kind})", warp_label(WARP_LEVELS[level])));
+            if sim.paused {
+                let stopped = egui::RichText::new("TIME STOPPED").monospace().strong().color(theme::WARN);
+                ui_.label(stopped).on_hover_text("`.` (or any warp) runs it again at 1x");
+            } else {
+                ui_.monospace(format!("warp {} ({kind})", warp_label(WARP_LEVELS[level])));
+            }
             if !why.is_empty() {
                 ui_.label(egui::RichText::new(why).monospace().small().color(theme::WARN));
             }
@@ -454,7 +460,7 @@ mod tests {
             (0, 0, false, (0, false, None)),
             (3, 3, false, (3, false, None)),
             (6, 6, false, (6, true, None)),
-            (6, 3, false, (3, false, Some(WarpLimit::Throttle))),
+            (6, 3, false, (3, false, Some(WarpLimit::Thrust))),
             (9, 9, true, (9, true, Some(WarpLimit::Compute))),
         ];
         for (req, eff, compute, expected) in cases {

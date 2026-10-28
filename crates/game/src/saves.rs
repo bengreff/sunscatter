@@ -135,6 +135,7 @@ pub fn restore(sim: &mut SimState, save: SaveGame) {
     sim.controls = save.controls;
     sim.seed = save.seed;
     sim.warp = 0;
+    sim.paused = false;
     sim.compute_limited = false;
     sim.refresh_dominance();
     // The origin's clock is a pure function of time: the saved one only

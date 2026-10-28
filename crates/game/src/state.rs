@@ -88,6 +88,9 @@ pub struct SimState {
     pub active: usize,
     pub clock: Epoch,
     pub warp: usize,
+    /// Time stopped by the player (`,` at 1×, D111): the clock does not
+    /// advance; any warp command resumes it. Not saved (a load runs at 1×).
+    pub paused: bool,
     pub controls: Controls,
     /// Frames where the clock was held back by integration budget.
     pub compute_limited: bool,
@@ -186,6 +189,7 @@ impl SimState {
             active: 0,
             clock,
             warp: 0,
+            paused: false,
             controls: Controls { sas: true, ..Default::default() },
             compute_limited: false,
             achieved_warp: 1.0,
@@ -246,8 +250,8 @@ impl SimState {
     }
 
     /// The warp actually applied: rails warp only while coasting or landed
-    /// with the throttle closed (and not held live on the pad); otherwise
-    /// capped at physics warp.
+    /// producing no thrust (and not held live on the pad); otherwise capped
+    /// at physics warp.
     pub fn effective_warp(&self) -> usize {
         if self.rails_allowed() {
             self.warp
@@ -264,7 +268,11 @@ impl SimState {
     /// Why rails warp is not allowed right now, if it is not.
     pub fn rails_block(&self) -> Option<RailsBlock> {
         let ship = self.ship();
-        if self.controls.throttle != 0.0 {
+        // Held on the pad with its systems live: the most telling reason.
+        if held_live(ship) {
+            return Some(RailsBlock::Held);
+        }
+        if produces_thrust(ship, &self.controls) {
             return Some(RailsBlock::Thrust);
         }
         if matches!(ship.phase, Phase::Powered { .. }) {
@@ -370,12 +378,13 @@ pub fn read_controls(
 ) {
     let dt = time.delta_secs_f64();
     if ctx.allows(Keys::Warp) {
-        let level = sim.effective_warp();
+        // `,` at 1× stops time; `.` runs it again at 1× (D111).
+        let (level, stopped) = (sim.effective_warp(), sim.paused);
         if keys.just_pressed(KeyCode::Period) {
-            commands.write(GameCommand::SetWarp(level + 1));
+            commands.write(GameCommand::SetWarp(if stopped { 0 } else { level + 1 }));
         }
-        if keys.just_pressed(KeyCode::Comma) {
-            commands.write(GameCommand::SetWarp(level.saturating_sub(1)));
+        if keys.just_pressed(KeyCode::Comma) && !stopped {
+            commands.write(if level == 0 { GameCommand::PauseTime } else { GameCommand::SetWarp(level - 1) });
         }
         if keys.just_pressed(KeyCode::Slash) {
             commands.write(GameCommand::SetWarp(0));
@@ -477,7 +486,7 @@ pub fn advance(
     mut sim: ResMut<SimState>,
     mut turn: Local<usize>,
 ) {
-    if pause.0 || menu.open {
+    if pause.0 || menu.open || sim.paused {
         return;
     }
     let level = sim.effective_warp();
@@ -579,7 +588,7 @@ impl RemoteControls {
 /// Why rails warp is not allowed.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum RailsBlock {
-    /// The throttle is open.
+    /// The active vessel produces thrust ([`produces_thrust`]).
     Thrust,
     /// Flown in live ticks (near the ground, or thrust just ended).
     Live,
@@ -593,6 +602,16 @@ pub enum RailsBlock {
     Held,
     /// Another vessel is held on the pad with its systems live.
     OtherHeld(VesselId),
+}
+
+/// Whether vessel `v` produces thrust under controls `c` (D111: what
+/// refuses rails warp, not where the throttle sits): an engine of a craft
+/// of parts lit, in its tail-off or settling its propellant (the
+/// thrusters' push), the test craft's engine with its throttle open and
+/// propellant (or in debug mode), or the pilot's RCS translation on a
+/// craft of parts (`systems::rcs::pilot`).
+pub fn produces_thrust(v: &Vessel, c: &Controls) -> bool {
+    v.engine_running(c) || (v.ship().is_some() && sim::systems::rcs::pilot(c).translate != DVec3::ZERO)
 }
 
 /// Whether vessel `v` is held on the pad's clamps with its systems needing

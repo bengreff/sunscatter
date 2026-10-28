@@ -82,7 +82,8 @@ pub fn tools() -> Vec<Tool> {
         t(
             "set_warp",
             &format!(
-                "Time warp level 0–{} (factors {:?}). Levels above 3 are rails warp.",
+                "Time warp level 0–{} (factors {:?}). Levels above 3 are rails warp. Setting a level resumes time the \
+                 player stopped (`time_stopped` in get_state).",
                 WARP_LEVELS.len() - 1,
                 WARP_LEVELS
             ),
@@ -215,7 +216,9 @@ fn run(
                 "clock": epoch_text(sim.clock),
                 "site_clock": {"site": sim.origin, "time": site_text(sim.site_time()),
                                "active_ship_clock_offset_s": sim.ship_clock_offset(sim.active)},
-                "warp_level": sim.effective_warp(), "warp_factor": WARP_LEVELS[sim.effective_warp()],
+                "warp_level": sim.effective_warp(),
+                "warp_factor": if sim.paused { 0.0 } else { WARP_LEVELS[sim.effective_warp()] },
+                "time_stopped": sim.paused,
                 "location": comms.location_name(), "active_vessel": sim.ship().id().0, "vessels": vessels,
             });
             (v, Vec::new())

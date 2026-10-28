@@ -215,3 +215,40 @@ fn a_craft_held_live_on_the_pad_refuses_rails_warp() {
     let idle = SimState::with_craft(&craft_or_test("falcon9-crew"));
     assert!(idle.ship().clamped() && !held_live(idle.ship()));
 }
+
+/// D111: rails warp is refused once thrust is produced, not by where the
+/// throttle sits (table): the test craft's engine with its throttle open
+/// and propellant; a craft of parts only with an engine lit (or settling)
+/// or the pilot's RCS translation with RCS on.
+#[test]
+fn thrust_not_the_throttle_refuses_rails_warp() {
+    use sim::systems::rcs::RcsMode;
+    let test = SimState::new();
+    let w = test.world.clone();
+    let mut dry = test.ship().clone();
+    dry.set_propellant(&w, 0.0);
+    let f9 = SimState::with_craft(&craft_or_test("falcon9-crew"));
+    let mut lit = f9.ship().clone();
+    lit.next_stage(&w).expect("the ignition");
+    let open = Controls { throttle: 1.0, ..Controls::default() };
+    let rcs = RcsMode { on: true, ..RcsMode::default() };
+    let translate = Controls { translate: DVec3::Z, ..Controls::default() };
+    // (vessel, controls, produces thrust)
+    let table = [
+        (test.ship(), Controls::default(), false),
+        (test.ship(), open, true),
+        (&dry, open, false),
+        (f9.ship(), open, false),
+        (&lit, Controls::default(), true),
+        (f9.ship(), translate, false),
+        (f9.ship(), Controls { rcs, ..translate }, true),
+    ];
+    for (i, (v, c, want)) in table.into_iter().enumerate() {
+        assert_eq!(produces_thrust(v, &c), want, "case {i}");
+    }
+    // The throttle open with nothing lit on the Falcon 9 on its pad: rails
+    // warp is allowed.
+    let mut f9 = f9;
+    f9.controls.throttle = 1.0;
+    assert_eq!(f9.rails_block(), None);
+}
