@@ -92,7 +92,7 @@ fn top_bar(ui: &mut egui::Ui, screen: &mut SystemsScreen, name: &str, vessel: u6
             }
         }
         ui.add_space(16.0);
-        if ui.button("close (F8 / Esc)").clicked() {
+        if ui.button("close (Tab / Esc)").clicked() {
             screen.open = false;
         }
     });

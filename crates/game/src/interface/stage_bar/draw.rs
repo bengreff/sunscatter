@@ -33,6 +33,10 @@ pub fn bar(ctx: &egui::Context, rows: &[Row], bar: &mut StageBar) -> Vec<Action>
         .anchor(Align2::RIGHT_BOTTOM, [-layout::MARGIN, -layout::MARGIN])
         .movable(false)
         .show(ctx, |ui| {
+            // An area lays out within its remembered size (egui's default
+            // is 400 px tall): without this, stages added in flight would
+            // not grow the scroll area past it (the notifications' bug).
+            ui.set_max_height(screen.height() - 2.0 * layout::MARGIN);
             theme::panel_frame().inner_margin(egui::Margin::same(6)).show(ui, |ui| {
                 ui.set_width(inner());
                 ui.spacing_mut().item_spacing = vec2(4.0, 3.0);
