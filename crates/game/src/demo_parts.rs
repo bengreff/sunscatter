@@ -9,7 +9,12 @@
 //! separation, of the upper stage after its engine lights and of the
 //! booster after a switch to it; on the pad, at max-Q and at separation the
 //! flight interface too (`parts_ui_*`: menus open, RCS on).
-//! `SUNSCATTER_DEMO_STOP_AFTER=Pad` ends after the pad's shots. Every stage goes through `GameCommand::NextStage`,
+//! The look's benchmark runs at max-Q, the booster's plumes in view
+//! (`bench_max_q.md`; off with `SUNSCATTER_DEMO_NO_BENCH`).
+//! `SUNSCATTER_DEMO_STOP_AFTER=Pad` ends after the pad's shots;
+//! `SUNSCATTER_DEMO_FAR=<factor>` moves the camera that much farther for the
+//! ignition, max-Q and upper-stage shots, so the plumes show clear of the
+//! interface (`SUNSCATTER_EXHAUST=1`, D109). Every stage goes through `GameCommand::NextStage`,
 //! the player's Space.
 
 use crate::camera::{CameraRig, Focus};
@@ -91,6 +96,8 @@ pub struct Script {
     upper: Option<VesselId>,
     /// The demo time from which the script goes on after a shot.
     resume_at: f64,
+    /// The look's benchmark is due (after the max-Q shots).
+    bench_due: bool,
     /// The interface shot under way.
     ui: Ui,
 }
@@ -109,6 +116,12 @@ enum Ui {
 /// How long the script waits after a capture ends before it changes the
 /// view (s): the screenshot is written from a frame drawn after it.
 const AFTER_SHOT: f64 = 0.5;
+
+/// How much farther the camera frames the burning shots
+/// (`SUNSCATTER_DEMO_FAR`, default 1).
+fn far() -> f64 {
+    std::env::var("SUNSCATTER_DEMO_FAR").ok().and_then(|v| v.parse::<f64>().ok()).filter(|f| *f > 0.0).unwrap_or(1.0)
+}
 
 /// Captures `name` (the clock frozen meanwhile); the script waits until
 /// the shot is written.
@@ -186,6 +199,7 @@ pub fn run(
     mut cmds: MessageWriter<GameCommand>,
     mut systems: ResMut<SystemsScreen>,
     mut cards: ResMut<PartCards>,
+    mut bench: ResMut<crate::bench::Bench>,
     mut script: Local<Script>,
 ) {
     let Some(mut demo) = demo else { return };
@@ -196,6 +210,13 @@ pub fn run(
     }
     let card = sim.ship().ship_def().and_then(|d| d.part_named("s1.tank")).map(|p| (sim.ship().id(), p));
     if interface_shot(&mut demo, &mut script, &mut iface, &mut cmds, &mut cards, card) {
+        return;
+    }
+    // The benchmark after the max-Q shots (the demo pauses the clock).
+    if script.bench_due {
+        script.bench_due = false;
+        bench.start("max_q");
+        demo.benching = true;
         return;
     }
     let t = demo.timer;
@@ -237,7 +258,7 @@ pub fn run(
             }
             sim.controls_mut().throttle = 1.0;
             cmds.write(GameCommand::NextStage);
-            (rig.distance, rig.pitch) = (180.0, 0.05);
+            (rig.distance, rig.pitch) = (180.0 * far(), 0.05);
             script.phase = Phase::Ignition;
             (demo.timer, script.resume_at) = (0.0, 0.0);
         }
@@ -263,8 +284,9 @@ pub fn run(
                     alt / 1e3,
                     since(&script)
                 );
-                (rig.distance, rig.pitch) = (150.0, 0.15);
+                (rig.distance, rig.pitch) = (150.0 * far(), 0.15);
                 shoot(&mut demo, &mut script, "parts_max_q");
+                script.bench_due = demo.bench;
                 return;
             }
             let share = feeding_share(sim.ship()).unwrap_or(0.0);
@@ -307,7 +329,7 @@ pub fn run(
         }
         Phase::Upper(at, lit) => {
             if lit && t - at > 8.0 {
-                (rig.distance, rig.pitch) = (160.0, 0.2);
+                (rig.distance, rig.pitch) = (160.0 * far(), 0.2);
                 shoot(&mut demo, &mut script, "parts_upper_stage");
                 script.phase = Phase::Booster(t, false);
             }
