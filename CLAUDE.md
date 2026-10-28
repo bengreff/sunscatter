@@ -43,3 +43,10 @@ Real-scale 3D spaceflight, mission-design and logistics game in Rust. Being rebu
 7. Describe features honestly: *design / skeleton / playable / polished*.
 8. **Game rules are pure functions with table tests** (visibility, hover, camera limits, lighting, orbit-line length); Bevy systems only wire them up. One owner per rule (`docs/architecture.md`).
 9. **Superseded decisions are deleted**, and everything citing them is updated in the same commit (CI checks the citations).
+
+## Usage budget (owner's rule, 2026-10-27)
+Two overnight swarms (26-27 Oct) used about half of a week's limit in two days: about 35 agents, many running at 500k-975k context, re-reading about 6 billion tokens to write about 2 million. Every call re-reads the whole context, so cost scales with context size times the number of calls.
+1. **Cap context.** Lead sessions and agents hand off or start fresh at about 150-200k tokens (`/handoff` then `/clear`; for an agent, write its brief to a file and launch a fresh one). Never run an agent past 300k.
+2. **Cap agents.** One lead plus at most 3 parallel agents, non-branching (no sub-agents of agents). Reviewers count toward the 3. Prefer one strong agent per workstream over many small ones; swarms leave patchwork.
+3. **Cap a night.** An unattended run spends at most 20% of the weekly limit. Check `/usage` before launching and stop launching new agents at the cap.
+4. **Agents read files, not transcripts.** Give each agent a short brief that points at docs and files, not a pasted history. Large logs go through `head`/`grep`, never whole into context.
