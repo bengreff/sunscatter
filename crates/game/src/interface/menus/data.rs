@@ -297,6 +297,7 @@ pub fn update(
     };
     let mut d = gather(&sources);
     d.diagnostics.profile.clone_from(&profile.summary);
+    steady(&mut d, &data, &sim);
     data.set_if_neq(d);
 }
 
@@ -470,6 +471,13 @@ fn landing(s: &Sources) -> FlightData {
     }
 }
 
+/// Nothing flickers (`interface::steady`): the hottest parts change only
+/// past a margin over those listed before.
+pub fn steady(d: &mut FlightData, before: &FlightData, sim: &SimState) {
+    let listed: Vec<String> = before.craft.hottest.iter().map(|h| h.0.clone()).collect();
+    d.craft.hottest = super::hottest::listed(sim.ship(), &listed, HOTTEST);
+}
+
 /// The next periapsis, if it is inside an atmosphere: its altitude and the
 /// atmosphere's top.
 fn periapsis_inside(sim: &SimState, aps: &Apsides) -> Option<(f64, f64)> {
@@ -518,7 +526,7 @@ fn craft(sim: &SimState, body: sim::frame::NodeId) -> CraftData {
         isp_sl: engine.isp_sl,
         skin: ship.skin_nearest_limit(),
         interior: (node, ship.craft.thermal.internal_max_k),
-        hottest: super::hottest::parts(ship, HOTTEST),
+        hottest: super::hottest::listed(ship, &[], HOTTEST),
         clock_offset: sim.ship_clock_offset(sim.active),
     }
 }

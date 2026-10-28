@@ -127,6 +127,22 @@ pub fn best_path(g: &Graph, from: usize, to: usize) -> Option<Path> {
     Some(Path { nodes, delay: delay[to], rate })
 }
 
+/// The path along `nodes` (first the sender) now, if every link on it is
+/// still usable: a route kept from before, costed again (the game keeps it
+/// over a best path only marginally faster, so the route does not flicker).
+pub fn along(g: &Graph, nodes: &[usize]) -> Option<Path> {
+    if nodes.len() < 2 || nodes.iter().any(|&n| n >= g.edges.len()) {
+        return None;
+    }
+    let (mut delay, mut rate) = (0.0, f64::INFINITY);
+    for w in nodes.windows(2) {
+        let e = g.edges[w[0]].iter().find(|e| e.to == w[1])?;
+        delay += e.delay;
+        rate = f64::min(rate, e.rate);
+    }
+    Some(Path { nodes: nodes.to_vec(), delay, rate })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -211,5 +227,19 @@ mod tests {
         let g = Graph::new(&[lander, relay, far], &[moon], &params());
         assert!(!g.linked(0, 2));
         assert_eq!(best_path(&g, 0, 2).expect("relayed").nodes, vec![0, 1, 2]);
+    }
+
+    /// A route kept from before is costed again along its links, and is
+    /// gone once one of them is.
+    #[test]
+    fn a_route_is_costed_again_along_its_links() {
+        let nodes = [site(0.0, true), site(30.0, true), craft(DVec3::new(R + 400e3, 0.0, 0.0))];
+        let g = Graph::new(&nodes, &[Occluder::sphere(DVec3::ZERO, R)], &params());
+        let best = best_path(&g, 1, 2).expect("a path");
+        assert_eq!(along(&g, &best.nodes), Some(best.clone()));
+        let direct = along(&g, &[1, 0]).expect("the ground network");
+        assert!(direct.rate.is_infinite() && direct.delay > 0.0);
+        assert_eq!(along(&g, &[1]), None);
+        assert_eq!(along(&g, &[2, 7]), None);
     }
 }

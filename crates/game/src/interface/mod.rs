@@ -11,6 +11,7 @@ pub mod menus;
 pub mod part_card;
 pub mod pause;
 pub mod stage_bar;
+pub mod steady;
 pub mod toasts;
 
 use bevy::prelude::*;

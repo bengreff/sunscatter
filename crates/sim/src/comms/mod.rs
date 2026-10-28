@@ -23,7 +23,7 @@ mod world;
 
 pub use light::light_time;
 pub use link::{clear_line_of_sight, rate_bps, Occluder};
-pub use network::{best_path, Graph, Node, Path};
+pub use network::{along, best_path, Graph, Node, Path};
 pub use world::{occluders, site_nodes};
 
 use crate::body::BodyPhysical;

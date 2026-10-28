@@ -21,10 +21,13 @@ pub mod power;
 pub mod rcs;
 mod rcs_data;
 pub mod render;
+#[cfg(test)]
+mod steady_tests;
 pub mod view;
 
 pub use data::FlightData;
 
+use crate::interface::steady;
 use crate::systems_screen::rules::Layer;
 use bevy::prelude::KeyCode;
 use serde::{Deserialize, Serialize};
@@ -298,6 +301,61 @@ impl Section {
     }
 }
 
+/// A menu as shown (`interface::steady`, the one rule: nothing flickers):
+/// a section or a line that vanished less than `steady::HOLD` ago stays,
+/// in its place, with its last content.
+#[derive(Clone, Debug, Default)]
+pub struct Steady {
+    shown: Vec<Section>,
+    sections: steady::Seen<&'static str>,
+    items: steady::Seen<(&'static str, String)>,
+}
+
+impl Steady {
+    /// What to draw now, given the menu's sections now (`now`: real
+    /// seconds, so the hold runs while paused).
+    pub fn update(&mut self, new: Vec<Section>, now: f64) -> &[Section] {
+        let items = &mut self.items;
+        self.shown = steady::hold(
+            &self.shown,
+            new,
+            |s| s.id,
+            |old, mut s| {
+                let id = s.id;
+                let before = old.map_or_else(Vec::new, |o| keyed(&o.items));
+                let held = steady::hold(&before, keyed(&s.items), |k| (id, k.0.clone()), |_, k| k, items, now);
+                s.items = held.into_iter().map(|k| k.1).collect();
+                s
+            },
+            &mut self.sections,
+            now,
+        );
+        &self.shown
+    }
+}
+
+/// A section's lines with their keys: a row, switch, pick list or button by
+/// its label, a note by its place among the notes (its text changes).
+fn keyed(items: &[Item]) -> Vec<(String, Item)> {
+    let mut notes = 0;
+    items
+        .iter()
+        .map(|i| {
+            let key = match i {
+                Item::Row(r) => format!("row {}", r.label),
+                Item::Toggle { label, .. } => format!("switch {label}"),
+                Item::Choice { label, .. } => format!("pick {label}"),
+                Item::Button { label, .. } => format!("button {label}"),
+                Item::Note(..) => {
+                    notes += 1;
+                    format!("note {notes}")
+                }
+            };
+            (key, i.clone())
+        })
+        .collect()
+}
+
 /// The section `id` of `sections`, if drawn.
 #[cfg(test)]
 pub fn find<'a>(sections: &'a [Section], id: &str) -> Option<&'a Section> {
@@ -412,6 +470,31 @@ mod tests {
         assert_eq!(s.open, BTreeSet::from([MenuId::Landing]));
         s.show_only(None);
         assert!(s.open.is_empty());
+    }
+
+    /// A row that comes and goes between refreshes stays drawn (the Comms
+    /// menu's VIA on the pad).
+    #[test]
+    fn a_menu_holds_a_row_that_comes_and_goes() {
+        let page = |via: bool| {
+            let mut s = Section::summary();
+            s.row("HOUSTON", "12 ms");
+            if via {
+                s.row("  VIA", "Cape Canaveral");
+            }
+            s.row("  RATE", "4 Mbit/s");
+            vec![s]
+        };
+        let mut steady = Steady::default();
+        let mut shown = Vec::new();
+        for k in 0..20 {
+            let drawn = steady.update(page(k % 2 == 0), 0.1 * k as f64);
+            shown.push(drawn[0].rows().iter().map(|r| r.0.to_string()).collect::<Vec<_>>());
+        }
+        assert!(shown.iter().all(|r| *r == ["HOUSTON", "  VIA", "  RATE"]), "{shown:?}");
+        // Gone for good: it goes after the hold.
+        let drawn = steady.update(page(false), 2.0 + steady::HOLD);
+        assert_eq!(drawn[0].rows().len(), 2);
     }
 
     /// A craft of parts' pages end with a link into the systems screen at

@@ -59,6 +59,8 @@ pub fn draw(
     mut nav: ResMut<crate::navball::Navball>,
     mut planner: ResMut<crate::planner::Planner>,
     mut cmds: MessageWriter<GameCommand>,
+    real: Res<Time<Real>>,
+    mut steady: Local<std::collections::HashMap<MenuId, super::Steady>>,
 ) -> Result {
     if station.open {
         return Ok(());
@@ -81,7 +83,10 @@ pub fn draw(
         let top = layout::dock_top(rect(TIME_AREA), rect(BAR_AREA));
         let corner = rect(crate::interface::toasts::AREA);
         let place = layout::dock_place(screen, top, cluster, corner);
-        let content: Vec<_> = open.iter().map(|m| (*m, m.sections(&data))).collect();
+        // Nothing flickers (`interface::steady`): each menu as held.
+        let now = real.elapsed_secs_f64();
+        let content: Vec<_> =
+            open.iter().map(|m| (*m, steady.entry(*m).or_default().update(m.sections(&data), now).to_vec())).collect();
         for (m, input) in render::dock(ctx, place, &content) {
             if input.close && m == MenuId::Rcs {
                 actions.push(MenuAction::SetRcs(sim::systems::rcs::RcsMode { on: false, ..sim.controls().rcs }));

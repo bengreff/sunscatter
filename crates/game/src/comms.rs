@@ -64,6 +64,28 @@ pub struct Comms {
     pub last_contact: HashMap<VesselId, Epoch>,
     /// The active vessel's link to mission control, wherever the player is.
     pub home: Option<Signal>,
+    /// The routes found last frame (network nodes, sender first): kept over
+    /// a best path only marginally faster ([`ROUTE_MARGIN`]), so a route
+    /// (and its VIA) does not flicker between near-equal ones.
+    routes: HashMap<VesselId, Vec<usize>>,
+    home_route: Vec<usize>,
+}
+
+/// How much faster (share of the delay) a new route must be to replace the
+/// one in use (`interface::steady::keep`): on the pad the umbilical and the
+/// ground network give near-equal routes whose order rounding decides.
+pub const ROUTE_MARGIN: f64 = 0.01;
+
+/// The best path from `from` to `to`, or the route used before (`before`)
+/// while it is usable and no more than [`ROUTE_MARGIN`] slower.
+pub fn steady_path(graph: &Graph, from: usize, to: usize, before: &[usize]) -> Option<comms::Path> {
+    let best = comms::best_path(graph, from, to)?;
+    let kept =
+        (before.first() == Some(&from) && before.last() == Some(&to)).then(|| comms::along(graph, before)).flatten();
+    match kept {
+        Some(k) if crate::interface::steady::keep(Some(k.delay), best.delay, ROUTE_MARGIN) => Some(k),
+        _ => Some(best),
+    }
 }
 
 impl Comms {
@@ -81,6 +103,8 @@ impl Comms {
             signals: HashMap::new(),
             last_contact: HashMap::new(),
             home: None,
+            routes: HashMap::new(),
+            home_route: Vec::new(),
         }
     }
 
@@ -126,8 +150,14 @@ pub fn retarded(r: DVec3, v: DVec3, delay: f64) -> DVec3 {
 
 /// Rebuilds the network and every vessel's signal at the location.
 pub fn update(sim: Res<SimState>, station: Res<TrackingStation>, mut comms: ResMut<Comms>) {
+    refresh(&sim, station.open, &mut comms);
+}
+
+/// [`update`]'s work: the network now and every vessel's signal at the
+/// location, each route kept while near the best (`steady_path`).
+pub fn refresh(sim: &SimState, station_open: bool, comms: &mut Comms) {
     let active = sim.ship().id();
-    comms.location = location_rule(station.open, active, sim.ship().crew() > 0, comms.mission_control);
+    comms.location = location_rule(station_open, active, sim.ship().crew() > 0, comms.mission_control);
     let t = sim.clock;
     let (anchor, _, _) = sim.ship().state_at(&sim.world, t);
     let bodies = comms::occluders(&sim.world, t, anchor);
@@ -175,12 +205,18 @@ pub fn update(sim: Res<SimState>, station: Res<TrackingStation>, mut comms: ResM
         Location::Vessel(id) => sim.index_of(id).map(|i| first_vessel + i),
     };
     let mut signals = HashMap::new();
+    let mut routes = HashMap::new();
     for (i, v) in sim.fleet.iter().enumerate() {
         let to = first_vessel + i;
         let signal = if from == Some(to) {
             Some(Signal { delay: 0.0, rate: f64::INFINITY, via: Vec::new() })
         } else {
-            from.and_then(|f| comms::best_path(&graph, f, to)).map(|p| to_signal(&p, &names))
+            let before = comms.routes.get(&v.id()).map_or(&[][..], Vec::as_slice);
+            let path = from.and_then(|f| steady_path(&graph, f, to, before));
+            if let Some(p) = &path {
+                routes.insert(v.id(), p.nodes.clone());
+            }
+            path.map(|p| to_signal(&p, &names))
         };
         if let Some(s) = &signal {
             comms.last_contact.insert(v.id(), t.add_seconds(-s.delay));
@@ -188,9 +224,11 @@ pub fn update(sim: Res<SimState>, station: Res<TrackingStation>, mut comms: ResM
         signals.insert(v.id(), signal);
     }
     comms.signals = signals;
-    comms.home = site_node[comms.mission_control]
-        .and_then(|f| comms::best_path(&graph, f, first_vessel + sim.active))
-        .map(|p| to_signal(&p, &names));
+    comms.routes = routes;
+    let home = site_node[comms.mission_control]
+        .and_then(|f| steady_path(&graph, f, first_vessel + sim.active, &comms.home_route));
+    comms.home_route = home.as_ref().map_or_else(Vec::new, |p| p.nodes.clone());
+    comms.home = home.map(|p| to_signal(&p, &names));
 }
 
 fn to_signal(p: &comms::Path, names: &[String]) -> Signal {

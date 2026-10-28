@@ -3,6 +3,21 @@
 //! part by its craft-file id (the design's `cell_part`), for the test craft
 //! each of its geometry's primitives by name.
 
+/// How much nearer its limit (share of it) a part must be to take a listed
+/// one's place, or to pass it (`interface::steady::top`): on the pad every
+/// part sits near the same share and the list would change every refresh.
+pub const MARGIN: f64 = 0.02;
+
+/// The `n` parts nearest their limits, given those listed before
+/// (`listed`, by name): nearest first, but a listed part stays and keeps
+/// its place until another is nearer by [`MARGIN`] (nothing flickers).
+pub fn listed(ship: &sim::vessel::Vessel, listed: &[String], n: usize) -> Vec<(String, f64, f64)> {
+    let all = parts(ship, usize::MAX);
+    let scores: Vec<(String, f64)> = all.iter().map(|(name, t, limit)| (name.clone(), t / limit)).collect();
+    let keep = crate::interface::steady::top(listed, &scores, n, MARGIN);
+    keep.iter().filter_map(|k| all.iter().find(|p| p.0 == *k).cloned()).collect()
+}
+
 /// The `n` parts nearest their limits, nearest first: (name, K, limit K).
 pub fn parts(ship: &sim::vessel::Vessel, n: usize) -> Vec<(String, f64, f64)> {
     let design = ship.craft.design();
@@ -41,7 +56,8 @@ pub fn parts(ship: &sim::vessel::Vessel, n: usize) -> Vec<(String, f64, f64)> {
             Some((names.get(p).cloned().unwrap_or_else(|| format!("part {}", p + 1)), t, limit))
         })
         .collect();
-    out.sort_by(|a, b| (b.1 / b.2).total_cmp(&(a.1 / a.2)));
+    // Ties by name (a stable order).
+    out.sort_by(|a, b| (b.1 / b.2).total_cmp(&(a.1 / a.2)).then_with(|| a.0.cmp(&b.0)));
     out.truncate(n);
     out
 }
