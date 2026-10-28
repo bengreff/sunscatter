@@ -163,7 +163,7 @@ fn feed_hold(mut sim: ResMut<SimState>, nav: Res<Navball>) {
             Some(TargetState { anchor, epoch: t, r, v })
         }
     });
-    let c = &mut sim.controls;
+    let c = sim.controls_mut();
     c.speed = rules::speed_reference(nav.mode);
     c.reference = None;
     c.target = target;
@@ -285,7 +285,7 @@ pub fn nav_state(sim: &SimState, tracked: &Tracked, aps: &Apsides, nav: &mut Nav
 /// The G row of `vessel` (the active one): its proper acceleration in
 /// body axes and, for a craft of parts, its g-limit.
 fn g_readout(sim: &SimState, vessel: &Vessel, t: Epoch) -> g_meter::GReadout {
-    let a = vessel.attitude.q.inverse() * proper_accel(&sim.world, t, vessel, sim.controls.throttle);
+    let a = vessel.attitude.q.inverse() * proper_accel(&sim.world, t, vessel, sim.controls().throttle);
     let def = vessel.ship_def();
     let limit = def.as_ref().zip(vessel.ship()).and_then(|(d, s)| sim::systems::g_limit::g_limit(d, s));
     g_meter::readout(a, limit, |j| def.as_ref().and_then(|d| d.joints.get(j)).map(|j| j.name.clone()))

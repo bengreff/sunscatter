@@ -296,7 +296,7 @@ pub fn run(
                     // its own propellant.
                     let s = &mut *sim;
                     s.fleet[s.active].set_debug(&s.world, true);
-                    sim.controls.throttle = 1.0;
+                    sim.controls_mut().throttle = 1.0;
                     sim.warp = 3;
                     (rig.pitch, rig.distance) = (0.25, 40.0);
                     demo.next(Step::Ascent);
@@ -344,7 +344,7 @@ pub fn run(
                 demo.capture("ascent_20km");
             }
             if el.apoapsis() - re > 300_000.0 {
-                sim.controls.throttle = 0.0;
+                sim.controls_mut().throttle = 0.0;
                 sim.warp = 5;
                 demo.next(Step::Coast);
             }
@@ -361,10 +361,10 @@ pub fn run(
         Step::Circularize => {
             let (up, h) = (r.normalize(), crate::demo_checks::horizontal(r, v));
             let v_circ = (earth.gm / r.length()).sqrt();
-            sim.controls.throttle = ((v_circ - v.dot(h)) / 60.0).clamp(0.05, 1.0);
+            sim.controls_mut().throttle = ((v_circ - v.dot(h)) / 60.0).clamp(0.05, 1.0);
             point(&mut sim, h + up * (-v.dot(up) / 100.0).clamp(-0.2, 0.5));
             if el.periapsis() - re > 250_000.0 {
-                sim.controls.throttle = 0.0;
+                sim.controls_mut().throttle = 0.0;
                 sim.warp = 0;
                 rig.focus = Focus::Ship;
                 rig.distance = 60.0;
@@ -380,7 +380,7 @@ pub fn run(
                 // A playtest start in low orbit, out of debug mode.
                 let mut fleet = sim.fleet.clone();
                 fleet[sim.active].set_debug(&sim.world, false);
-                *fleet[sim.active].controls_mut() = sim::vessel::Controls { throttle: 0.0, ..sim.controls };
+                fleet[sim.active].controls_mut().throttle = 0.0;
                 let save = sim::save::SaveGame::capture(&sim.world, sim.clock, &fleet, sim.vessel_ids, sim.active);
                 if let Err(e) = save.write(&demo.dir.join("orbit_save.ron")) {
                     warn!("demo: orbit save failed: {e:?}");
@@ -537,7 +537,7 @@ pub fn run(
                     iface.menus.show_only(None);
                     rig.distance = 60.0;
                     sim.warp = 3;
-                    sim.controls.throttle = 1.0;
+                    sim.controls_mut().throttle = 1.0;
                     demo.next(Step::Deorbit);
                 }
             }
@@ -545,7 +545,7 @@ pub fn run(
         Step::Deorbit => {
             point(&mut sim, -v);
             if el.periapsis() - re < 30_000.0 {
-                sim.controls.throttle = 0.0;
+                sim.controls_mut().throttle = 0.0;
                 sim.warp = 6;
                 demo.next(Step::Fall);
             }
@@ -579,7 +579,7 @@ pub fn run(
                 4
             };
             if alt < 12_000.0 {
-                sim.controls.chute = true;
+                sim.controls_mut().chute = true;
                 if !demo.shot_taken && alt < 3_000.0 {
                     rig.distance = 150.0;
                     demo.shot(&mut commands, "parachute");

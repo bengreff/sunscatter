@@ -94,7 +94,7 @@ pub fn update(time: Res<Time>, sim: Res<SimState>, mut pred: ResMut<LandingPredi
         return;
     }
     pred.since_last = 0.0;
-    let Some(start) = start_of(&sim.world, ship, &sim.controls) else {
+    let Some(start) = start_of(&sim.world, ship, sim.controls()) else {
         pred.latest = None;
         return;
     };

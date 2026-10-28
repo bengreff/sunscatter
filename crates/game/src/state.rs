@@ -1,5 +1,6 @@
 //! Simulation state owned by the app: the world, the fleet, the clock and
-//! time warp, the player's controls, and trajectory predictions.
+//! time warp, the step that moves the fleet on each vessel's own controls,
+//! and trajectory predictions.
 
 use crate::relations::Dominance;
 use crate::trajectory::{self, settings::OrbitSettings};
@@ -90,7 +91,6 @@ pub struct SimState {
     /// Time stopped by the player (`,` at 1×, D111): the clock does not
     /// advance; any warp command resumes it. Not saved (a load runs at 1×).
     pub paused: bool,
-    pub controls: Controls,
     /// Frames where the clock was held back by integration budget.
     pub compute_limited: bool,
     /// The warp actually achieved (simulated over real seconds, smoothed
@@ -102,8 +102,6 @@ pub struct SimState {
     /// How far the clock moved last frame (s): a compute-limited frame asks
     /// only a little more of the next ([`crate::fleet::frame_span`]).
     pub last_advance: f64,
-    /// Controls on their way to an uncrewed active vessel (D034).
-    pub remote: RemoteControls,
     /// The display rule for "which body is this about" (D056), rebuilt when
     /// the clock has moved by more than `DOMINANCE_REFRESH` (its radii
     /// change slowly). Display only (rule 1).
@@ -189,12 +187,10 @@ impl SimState {
             clock,
             warp: 0,
             paused: false,
-            controls: Controls { sas: true, ..Default::default() },
             compute_limited: false,
             achieved_warp: 1.0,
             sim_ms: 0.0,
             last_advance: 0.0,
-            remote: RemoteControls::default(),
             site,
             origin,
             seed,
@@ -243,6 +239,19 @@ impl SimState {
         &self.fleet[self.active]
     }
 
+    /// The active vessel's controls as set (D112: each vessel keeps its
+    /// own; what the navball, the menus and the keys show and change).
+    pub fn controls(&self) -> &Controls {
+        self.fleet[self.active].controls()
+    }
+
+    /// Sets the active vessel's controls (an uncrewed one acts on them once
+    /// they reach it, D034).
+    pub fn controls_mut(&mut self) -> &mut Controls {
+        let active = self.active;
+        self.fleet[active].controls_mut()
+    }
+
     /// The fleet index of vessel `id`, if it exists.
     pub fn index_of(&self, id: VesselId) -> Option<usize> {
         self.fleet.iter().position(|v| v.id() == id)
@@ -271,13 +280,13 @@ impl SimState {
         if held_live(ship) {
             return Some(RailsBlock::Held);
         }
-        if produces_thrust(ship, &self.controls) {
+        if produces_thrust(ship, self.controls()) {
             return Some(RailsBlock::Thrust);
         }
         if matches!(ship.phase, Phase::Powered { .. }) {
             // Held live near a live controllable craft (D082), else flown
             // live: thrusting, in the atmosphere or in contact.
-            if ship.in_bubble() && !ship.leads(&self.world, &self.controls) {
+            if ship.in_bubble() && !ship.leads(&self.world, self.controls()) {
                 if let Some(id) = self.bubble_leader() {
                     return Some(RailsBlock::Near(id));
                 }
@@ -325,9 +334,38 @@ impl SimState {
         let id = self.vessel_ids.allocate();
         let mut ship = Vessel::landed_at(&self.world, id, "Earth", PAD_LAT, PAD_LON, self.clock, craft);
         ship.seed_fates(self.seed);
+        // A new vessel's helm is idle (SAS on, throttle closed).
         self.fleet[self.active] = self.synchronised(ship);
-        self.controls = Controls { sas: true, ..Default::default() };
         self.warp = 0;
+    }
+
+    /// Advances every vessel towards `target` (the end of the ephemeris at
+    /// most), each on its own controls (D112): an uncrewed one's as they
+    /// reach it with one-way delay `delay_of(id)` from its operator (D034;
+    /// `None`: no signal), a crewed one's at once. Rotation inputs count
+    /// only at physics warp. The 10 km bubble (D082) first flies craft near
+    /// a live controllable craft tick for tick; the fleet then moves the
+    /// rest, in parallel, until `deadline`. Returns the clock reached (held
+    /// back when compute runs out) and sets it.
+    pub fn step(
+        &mut self,
+        target: Epoch,
+        delay_of: impl Fn(VesselId) -> Option<f64>,
+        deadline: Option<std::time::Instant>,
+    ) -> Epoch {
+        let target = if target > self.world.end() { self.world.end() } else { target };
+        let rails = self.effective_warp() > MAX_PHYSICS_WARP;
+        let mut acting = sim::vessel::fleet_controls(&mut self.fleet, self.clock, delay_of);
+        if rails {
+            acting.iter_mut().for_each(|c| c.rotate = DVec3::ZERO);
+        }
+        let controls = |i: usize| acting[i];
+        sim::vessel::bubble::advance(&self.world, &mut self.fleet, &controls, target);
+        let adv = crate::fleet::advance_fleet(&self.world, &mut self.fleet, &controls, target, deadline);
+        let clock = crate::fleet::clock_after(&adv, target);
+        self.compute_limited = clock < target;
+        self.clock = clock;
+        clock
     }
 
     /// Debug: spawn `n` coasting test ships in low Earth orbit (performance).
@@ -386,42 +424,18 @@ pub fn advance(
     if pause.0 || menu.open || sim.paused {
         return;
     }
-    let level = sim.effective_warp();
-    let warp = WARP_LEVELS[level];
-    // A probe acts on the controls that have reached it (D034).
-    let mut active_controls = if sim.ship().crew() > 0 {
-        sim.controls
-    } else {
-        let delay = comms.signal(sim.ship().id()).map(|s| s.delay);
-        let (clock, controls) = (sim.clock, sim.controls);
-        sim.remote.step(clock, controls, delay)
-    };
-    // Rotation input is only honoured at physics warp.
-    if level > MAX_PHYSICS_WARP {
-        active_controls.rotate = DVec3::ZERO;
-    }
+    let warp = WARP_LEVELS[sim.effective_warp()];
     let dt = time.delta_secs_f64().min(0.1);
-    // Nothing is simulated past the ephemeris window: the clock stops there.
-    let end = sim.world.end();
     let span = crate::fleet::frame_span(dt * warp, sim.compute_limited, sim.last_advance);
     let target = sim.clock.add_seconds(span);
-    let target = if target > end { end } else { target };
-    let sim = &mut *sim;
-    let passive = Controls { sas: true, ..Default::default() };
-    let active = sim.active;
-    let controls = move |i: usize| if i == active { active_controls } else { passive };
     // Vessels are independent: advanced in parallel within the frame's
     // time for the simulation, the slowest first (`crate::fleet`).
     let start = std::time::Instant::now();
     let deadline = start + std::time::Duration::from_secs_f64(crate::fleet::SIM_FRAME_TIME);
     let before = sim.clock;
-    // The 10 km bubble (D082): craft near a live controllable craft fly
-    // live with it, tick for tick; the fleet then moves the rest.
-    sim::vessel::bubble::advance(&sim.world, &mut sim.fleet, &controls, target);
-    let adv = crate::fleet::advance_fleet(&sim.world, &mut sim.fleet, &controls, target, Some(deadline));
-    let clock = crate::fleet::clock_after(&adv, target);
-    sim.compute_limited = clock < target;
-    sim.clock = clock;
+    // A probe acts on the controls that have reached it (D034).
+    let clock = sim.step(target, |id| comms.signal(id).map(|s| s.delay), Some(deadline));
+    let sim = &mut *sim;
     sim.achieved_warp = crate::fleet::achieved_warp(sim.achieved_warp, clock.seconds_since(before), dt);
     sim.last_advance = clock.seconds_since(before);
     let ms = start.elapsed().as_secs_f64() * 1e3;
@@ -452,34 +466,6 @@ pub fn advance(
 /// at `turn` (wrapping); `None` if the active vessel is alone.
 pub fn lookahead_turn(turn: usize, fleet: usize, active: usize) -> Option<usize> {
     (0..fleet).map(|k| (turn + k) % fleet).find(|&i| i != active)
-}
-
-/// The controls an uncrewed vessel acts on: the operator's inputs, each
-/// arriving after the signal's light delay (or never, without a signal).
-#[derive(Clone, Debug, Default)]
-pub struct RemoteControls {
-    queue: std::collections::VecDeque<(Epoch, Controls)>,
-    /// What the vessel last received.
-    pub received: Controls,
-}
-
-impl RemoteControls {
-    /// Sends the operator's `controls` at `now` with one-way `delay` (s),
-    /// or nothing without a signal; returns what the vessel has at `now`.
-    pub fn step(&mut self, now: Epoch, controls: Controls, delay: Option<f64>) -> Controls {
-        if let Some(d) = delay {
-            self.queue.push_back((now.add_seconds(d), controls));
-        }
-        while self.queue.front().is_some_and(|(t, _)| now.seconds_since(*t) >= 0.0) {
-            self.received = self.queue.pop_front().expect("front").1;
-        }
-        self.received
-    }
-
-    /// Forgets everything in flight (switching vessels, loading).
-    pub fn reset(&mut self) {
-        *self = RemoteControls::default();
-    }
 }
 
 /// Why rails warp is not allowed.
@@ -569,7 +555,7 @@ pub fn update_prediction(
     pred.since_last += time.delta_secs_f64();
     if pred.task.is_none() && pred.since_last > 0.25 {
         pred.since_last = 0.0;
-        let (world, vessel, controls, orbits) = (sim.world.clone(), ship.clone(), sim.controls, orbits.clone());
+        let (world, vessel, controls, orbits) = (sim.world.clone(), ship.clone(), *sim.controls(), orbits.clone());
         pred.task = Some(
             AsyncComputeTaskPool::get()
                 .spawn(async move { trajectory::predict::path(&world, &vessel, &controls, &orbits) }),

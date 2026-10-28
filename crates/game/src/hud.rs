@@ -377,7 +377,7 @@ pub fn state_line(sim: &SimState) -> (String, bool) {
         s.engines.iter().any(|e| matches!(e.status, Starting | Running))
     };
     let pad = ship.ship().filter(|_| ship.clamped());
-    let pad = pad.map(|s| pad_state(lit(s), s.runtime.release_armed, sim.controls.throttle));
+    let pad = pad.map(|s| pad_state(lit(s), s.runtime.release_armed, sim.controls().throttle));
     state_word(destroyed, pad, landed, crate::scene::engine_on(sim, sim.active), ship.chute.open())
 }
 

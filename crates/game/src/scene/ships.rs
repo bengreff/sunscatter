@@ -435,7 +435,7 @@ fn plain_fraction(sim: &SimState, i: usize) -> f64 {
 /// none for the others (they fly with passive controls).
 fn throttle_of(sim: &SimState, i: usize) -> f64 {
     if i == sim.active {
-        sim.controls.throttle
+        sim.controls().throttle
     } else {
         0.0
     }

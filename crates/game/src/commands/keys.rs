@@ -189,7 +189,7 @@ pub fn read_controls(
             commands.write(c);
         }
     }
-    let c = &mut sim.controls;
+    let c = sim.controls_mut();
     // Typing in a text field, the pause menu and the tracking station do
     // not fly the ship.
     if !ctx.allows(Keys::Flight) {

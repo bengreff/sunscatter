@@ -225,7 +225,7 @@ pub fn run(
                 demo.next(Step::Done);
                 return;
             }
-            sim.controls.throttle = 1.0;
+            sim.controls_mut().throttle = 1.0;
             cmds.write(GameCommand::NextStage);
             (rig.distance, rig.pitch) = (180.0, 0.05);
             script.phase = Phase::Ignition;
@@ -328,7 +328,7 @@ pub fn run(
 /// ring: the loads were real for that flight.)
 fn fly_turn(sim: &mut SimState, t: f64, r: DVec3, v: DVec3) {
     let q = sim.fleet[sim.active].attitude.q;
-    let c = &mut sim.controls;
+    let c = sim.controls_mut();
     c.rotate = DVec3::ZERO;
     if t < KICK_AT {
         (c.sas, c.hold) = (true, HoldMode::Stability);
@@ -352,7 +352,7 @@ mod tests {
         let mut sim = SimState::with_craft(&craft);
         let a = sim.active;
         assert_eq!(feeding_share(&sim.fleet[a]), None, "nothing runs: no share");
-        sim.controls.throttle = 1.0;
+        sim.controls_mut().throttle = 1.0;
         let s = &mut sim;
         s.fleet[a].next_stage(&s.world).expect("the ignition");
         let share = feeding_share(&sim.fleet[a]).unwrap();

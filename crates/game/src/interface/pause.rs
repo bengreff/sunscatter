@@ -138,7 +138,7 @@ pub fn keys(
 /// game is captured at most once per simulated second, so a revert returns
 /// to within a second before liftoff.
 pub fn track_launch(sim: Res<SimState>, mut snapshot: ResMut<LaunchSnapshot>) {
-    if matches!(sim.ship().phase, Phase::Landed { .. }) && sim.controls.throttle > 0.0 {
+    if matches!(sim.ship().phase, Phase::Landed { .. }) && sim.controls().throttle > 0.0 {
         let fresh = snapshot.0.as_ref().is_none_or(|s| {
             let age = sim.clock.seconds_since(s.clock);
             !(0.0..1.0).contains(&age)

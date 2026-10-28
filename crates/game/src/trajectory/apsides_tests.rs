@@ -258,7 +258,7 @@ fn fly_an_orbit(el: Elements, warp: f64, frames: usize) -> Vec<(Epoch, Shown)> {
     sim.fleet.push(Vessel::coasting(&sim.world, id, sim.clock, earth.node, r, v, sim::craft::test_craft()));
     sim.active = sim.fleet.len() - 1;
     let (orbits, pred, controls) =
-        (crate::trajectory::settings::OrbitSettings::default(), Prediction::default(), sim.controls);
+        (crate::trajectory::settings::OrbitSettings::default(), Prediction::default(), *sim.controls());
     let mut aps = Apsides::default();
     let mut out = Vec::new();
     for _ in 0..frames {

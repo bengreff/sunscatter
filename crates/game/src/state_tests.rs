@@ -40,21 +40,6 @@ fn throttle_keys_ramp_and_clamp() {
 }
 
 #[test]
-fn remote_controls_arrive_after_the_delay_and_not_without_signal() {
-    let t = sol::sol_epoch();
-    let mut rc = RemoteControls::default();
-    let full = Controls { throttle: 1.0, ..Default::default() };
-    assert_eq!(rc.step(t, full, Some(1.3)).throttle, 0.0);
-    assert_eq!(rc.step(t.add_seconds(1.0), full, Some(1.3)).throttle, 0.0);
-    assert_eq!(rc.step(t.add_seconds(1.3), Controls::default(), Some(1.3)).throttle, 1.0);
-    // No signal: the vessel keeps what it last received.
-    assert_eq!(rc.step(t.add_seconds(10.0), Controls::default(), None).throttle, 0.0);
-    let mut rc = RemoteControls::default();
-    rc.step(t, full, None);
-    assert_eq!(rc.step(t.add_seconds(100.0), full, None).throttle, 0.0, "nothing sent without signal");
-}
-
-#[test]
 fn lookahead_takes_turns_and_skips_the_active_vessel() {
     assert_eq!(lookahead_turn(0, 1, 0), None);
     assert_eq!(lookahead_turn(0, 3, 0), Some(1));
@@ -101,9 +86,9 @@ fn only_live_craft_refuse_rails_warp_and_limbo_craft_do_not() {
     sim.fleet.push(entering);
     assert_eq!(sim.rails_block(), Some(RailsBlock::OtherLive(id)));
     // The active vessel's own reasons come first.
-    sim.controls.throttle = 0.5;
+    sim.controls_mut().throttle = 0.5;
     assert_eq!(sim.rails_block(), Some(RailsBlock::Thrust));
-    sim.controls.throttle = 0.0;
+    sim.controls_mut().throttle = 0.0;
     sim.active = sim.fleet.len() - 1;
     assert_eq!(sim.rails_block(), Some(RailsBlock::Live));
 }
@@ -190,7 +175,7 @@ fn a_craft_held_live_on_the_pad_refuses_rails_warp() {
     // Ignition with the throttle closed: the nine engines spool to their minimum.
     let s = &mut sim;
     s.fleet[a].next_stage(&s.world).expect("the ignition");
-    assert_eq!(sim.controls.throttle, 0.0);
+    assert_eq!(sim.controls().throttle, 0.0);
     assert!(held_live(sim.ship()));
     assert_eq!(sim.rails_block(), Some(RailsBlock::Held));
     sim.warp = WARP_LEVELS.len() - 1;
@@ -242,6 +227,6 @@ fn thrust_not_the_throttle_refuses_rails_warp() {
     // The throttle open with nothing lit on the Falcon 9 on its pad: rails
     // warp is allowed.
     let mut f9 = f9;
-    f9.controls.throttle = 1.0;
+    f9.controls_mut().throttle = 1.0;
     assert_eq!(f9.rails_block(), None);
 }

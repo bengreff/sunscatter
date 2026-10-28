@@ -109,7 +109,7 @@ pub fn show(
         let (anchor, r, _) = v.state_at(&sim.world, sim.clock);
         sim::forces::ambient_pressure(&sim.world, &sim.world.snapshot(sim.clock), anchor, r)
     };
-    let thrusts = v.engine_thrusts(sim.controls.throttle, p).unwrap_or_default();
+    let thrusts = v.engine_thrusts(sim.controls().throttle, p).unwrap_or_default();
     let kelvin = v.part_kelvin();
     let chute_parts: Vec<u32> = v.craft.design().parts.iter().filter(|p| p.chute).map(|p| p.id).collect();
     let words = content::chute_words(stage_bar::icons::chute_look(&v.chute));

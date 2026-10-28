@@ -103,7 +103,6 @@ pub fn save(sim: &SimState, path: &Path) -> Result<(), SaveError> {
 /// The game as a save (with the origin's clock, D088).
 pub fn capture(sim: &SimState) -> SaveGame {
     let mut save = SaveGame::capture(&sim.world, sim.clock, &sim.fleet, sim.vessel_ids, sim.active);
-    *save.vessels[sim.active].controls_mut() = sim.controls;
     save.site_clock = Some(sim.site);
     save.seed = sim.seed;
     save
@@ -134,7 +133,6 @@ pub fn restore(sim: &mut SimState, save: SaveGame) {
     sim.vessel_ids = save.vessel_ids;
     sim.active = save.active;
     sim.clock = save.clock;
-    sim.controls = *sim.fleet[sim.active].controls();
     sim.seed = save.seed;
     sim.warp = 0;
     sim.paused = false;

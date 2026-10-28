@@ -313,8 +313,8 @@ pub fn gather(s: &Sources) -> FlightData {
         attitude: nav.map(|n| [n.angles.heading, n.angles.pitch, n.angles.roll]),
         craft: craft(sim, body),
         comms: comms(s),
-        stages: crate::staging::stack_of(ship, &sim.controls),
-        rcs: super::rcs_data::gather(ship, sim.controls.rcs),
+        stages: crate::staging::stack_of(ship, sim.controls()),
+        rcs: super::rcs_data::gather(ship, sim.controls().rcs),
         crew: super::crew::gather(ship),
         power: super::power::gather(ship),
         known: crate::format::Known::of(ship),
@@ -443,7 +443,7 @@ fn landing(s: &Sources) -> FlightData {
     let entry = entry.flatten().filter(|_| !grounded);
     let spec = &ship.craft.chute;
     let chute = ChuteData {
-        commanded: sim.controls.chute,
+        commanded: sim.controls().chute,
         state: ship.chute,
         q: air.as_ref().map(sim::vessel::Air::q),
         design_q: spec.drogue.as_ref().unwrap_or(&spec.main).deploy_max_q,

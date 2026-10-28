@@ -232,18 +232,18 @@ pub fn apply(
                 }
             }
             GameCommand::SetHold(mode) => {
-                sim.controls.hold = *mode;
-                sim.controls.sas = true;
+                sim.controls_mut().hold = *mode;
+                sim.controls_mut().sas = true;
             }
-            GameCommand::SetThrottle(t) => sim.controls.throttle = t.clamp(0.0, 1.0),
-            GameCommand::SetSas(on) => sim.controls.sas = *on,
-            GameCommand::SetRcs(mode) => sim.controls.rcs = *mode,
+            GameCommand::SetThrottle(t) => sim.controls_mut().throttle = t.clamp(0.0, 1.0),
+            GameCommand::SetSas(on) => sim.controls_mut().sas = *on,
+            GameCommand::SetRcs(mode) => sim.controls_mut().rcs = *mode,
             GameCommand::NextStage => {
-                let mut controls = sim.controls;
+                let mut controls = *sim.controls();
                 let ship = sim.ship();
-                let inputs = crate::staging::StageInputs::of(ship, &sim.controls);
+                let inputs = crate::staging::StageInputs::of(ship, sim.controls());
                 let done = crate::staging::activate_next(&inputs, crate::staging::grounded(ship), &mut controls);
-                sim.controls = controls;
+                *sim.controls_mut() = controls;
                 if let Err(why) = done {
                     toasts.push(time.elapsed_secs_f64(), why.message(), false);
                 }
@@ -280,7 +280,7 @@ pub fn route(aboard: bool, delay: Option<f64>) -> Route {
 
 /// The vessel a command travels to: a craft of parts' commands, its next
 /// stage, its edited stages and functions (flight plans are routed by the
-/// planner; controls by `state::RemoteControls`).
+/// planner; controls by each vessel's helm, `sim::vessel::helm`).
 pub fn addressee(c: &GameCommand) -> Option<VesselId> {
     match c {
         GameCommand::Ship { vessel, .. }
@@ -332,7 +332,7 @@ fn place(
         }
     }
     if arms && i == sim.active && delay == 0.0 {
-        sim.controls.chute = true;
+        sim.controls_mut().chute = true;
     }
 }
 

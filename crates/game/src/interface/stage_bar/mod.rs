@@ -94,7 +94,7 @@ pub fn refresh(sim: Res<SimState>, time: Res<Time>, mut bar: ResMut<StageBar>) {
     let inputs = Inputs {
         hull: &hull,
         knowledge: &knowledge,
-        throttle: sim.controls.throttle,
+        throttle: sim.controls().throttle,
         p: if bar.vacuum { 0.0 } else { motion.map_or(0.0, |m| m.pressure) },
         g: motion.map(|m| m.gravity).filter(|_| known),
     };
@@ -132,7 +132,7 @@ pub fn show(
             rows::rows(&def, state, &cache.estimates, (&chute_parts, icons::chute_look(&v.chute)))
         }
         // The test craft: its engine and parachutes (`staging::stack`).
-        _ => rows::plain(&crate::staging::stack_of(v, &sim.controls)),
+        _ => rows::plain(&crate::staging::stack_of(v, sim.controls())),
     };
     let ctx = contexts.ctx_mut()?;
     let out = draw::bar(ctx, &rows, &mut bar);

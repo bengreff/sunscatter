@@ -20,7 +20,7 @@ use crate::trajectory::apsides::Apsides;
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 use sim::frame::NodeId;
-use sim::vessel::{Controls, Phase, VesselId};
+use sim::vessel::{Phase, VesselId};
 use std::collections::HashSet;
 
 /// Camera distance when the tracking station opens (m): Earth with the
@@ -89,16 +89,17 @@ impl TrackingStation {
     }
 }
 
-/// Makes vessel `id` active. Its controls start from throttle 0 with SAS
-/// on; the camera follows it.
+/// Makes vessel `id` active; the camera follows it. Each vessel keeps its
+/// own controls (D112): the one left keeps its throttle, SAS and hold, the
+/// pilot's keys let go of it.
 pub fn switch_to(sim: &mut SimState, rig: &mut CameraRig, pred: &mut Prediction, id: VesselId) {
     let Some(i) = sim.index_of(id) else { return };
     if i == sim.active {
         return;
     }
+    let old = sim.controls_mut();
+    *old = old.released();
     sim.active = i;
-    sim.controls = Controls { sas: true, ..Default::default() };
-    sim.remote.reset();
     *pred = Prediction::default();
     rig.focus = Focus::Ship;
 }
@@ -501,11 +502,18 @@ mod tests {
         sim.spawn_test_ships(3);
         let (mut rig, mut pred, mut tracked) = (CameraRig::default(), Prediction::default(), Tracked::default());
         let ids: Vec<VesselId> = sim.fleet.iter().map(|v| v.id()).collect();
-        sim.controls.throttle = 0.7;
+        sim.controls_mut().throttle = 0.7;
+        sim.controls_mut().rotate = glam::DVec3::X;
         switch_to(&mut sim, &mut rig, &mut pred, ids[2]);
         assert_eq!(sim.active, 2);
-        assert_eq!(sim.controls.throttle, 0.0);
-        assert!(sim.controls.sas);
+        assert_eq!((sim.controls().throttle, sim.controls().sas), (0.0, true), "its own controls (idle)");
+        sim.controls_mut().throttle = 0.3;
+        let left = sim.fleet[0].controls();
+        assert_eq!(left.throttle, 0.7, "the vessel left keeps its throttle (D112)");
+        assert_eq!(left.rotate, glam::DVec3::ZERO, "the pilot's keys let go of it");
+        switch_to(&mut sim, &mut rig, &mut pred, ids[0]);
+        assert_eq!((sim.controls().throttle, sim.fleet[2].controls().throttle), (0.7, 0.3), "both sets kept");
+        switch_to(&mut sim, &mut rig, &mut pred, ids[2]);
         assert_eq!(left_lit_notice(&sim.fleet[0]), None, "the test craft: no engines of parts");
         rig.focus = Focus::Vessel(ids[3]);
         tracked.set_tracked(ids[0], false);

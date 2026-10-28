@@ -186,7 +186,7 @@ pub fn engine_on(sim: &SimState, i: usize) -> bool {
     if let Some(seg) = v.trajectory().and_then(|tr| tr.segment_at(sim.clock)) {
         return matches!(seg.kind, sim::vessel::SegmentKind::Burn(_));
     }
-    i == sim.active && matches!(v.phase, sim::vessel::Phase::Powered { .. }) && v.engine_running(&sim.controls)
+    i == sim.active && matches!(v.phase, sim::vessel::Phase::Powered { .. }) && v.engine_running(sim.controls())
 }
 
 /// Drag coefficient of a round canopy on its nominal area (Knacke,

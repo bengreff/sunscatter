@@ -365,7 +365,7 @@ fn get_vessel(
 fn landing_json(sim: &SimState) -> Value {
     let ship = sim.ship();
     let name = |n: sim::frame::NodeId| sim.world.eph.node(n).name.clone();
-    let Some(start) = crate::landing::start_of(&sim.world, ship, &sim.controls) else {
+    let Some(start) = crate::landing::start_of(&sim.world, ship, sim.controls()) else {
         return json!({"impact": null, "braking": null, "surface": null});
     };
     let l = crate::landing::predict(&sim.world, &ship.craft, ship.id(), &start);
@@ -509,10 +509,10 @@ pub fn serve(
                 Effect::Send { delay, command } => in_flight.send(sim.clock, delay, command),
                 Effect::Controls { throttle, sas } => {
                     if let Some(t) = throttle {
-                        sim.controls.throttle = t;
+                        sim.controls_mut().throttle = t;
                     }
                     if let Some(s) = sas {
-                        sim.controls.sas = s;
+                        sim.controls_mut().sas = s;
                     }
                 }
             }
