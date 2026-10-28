@@ -37,7 +37,7 @@ fn summary(d: &FlightData) -> Section {
 
 fn apsis(s: &mut Section, label: &str, a: Option<&ApsisReadout>, k: &Known) {
     if let Some(a) = a {
-        let altitude = k.distance(Position, a.altitude);
+        let altitude = k.distance(Position, a.above_datum);
         let value = match &a.other_body {
             Some(b) => format!("{altitude} · {b}"),
             None => altitude,
@@ -111,8 +111,20 @@ mod tests {
     use crate::navball::NavTarget;
 
     fn orbit() -> FlightData {
-        let ap = ApsisReadout { altitude: 301_200.0, in_s: 725.0, other_body: None };
-        let pe = ApsisReadout { altitude: 280_000.0, in_s: 3_490.0, other_body: None };
+        let ap = ApsisReadout {
+            altitude: 301_200.0,
+            above_datum: 301_200.0,
+            distance: 6_378_137.0 + 301_200.0,
+            in_s: 725.0,
+            other_body: None,
+        };
+        let pe = ApsisReadout {
+            altitude: 280_000.0,
+            above_datum: 280_000.0,
+            distance: 6_378_137.0 + 280_000.0,
+            in_s: 3_490.0,
+            other_body: None,
+        };
         FlightData {
             body: "Earth".into(),
             ap: Some(ap),
@@ -170,7 +182,13 @@ mod tests {
         assert_eq!(summary.value("PERIOD"), None);
         assert!(summary.items.contains(&Item::Note("escaping Earth".into(), Tone::Dim)));
         // An apsis about another body names it.
-        d.pe = Some(ApsisReadout { altitude: 110_000.0, in_s: 2.6e5, other_body: Some("Moon".into()) });
+        d.pe = Some(ApsisReadout {
+            altitude: 110_000.0,
+            above_datum: 110_000.0,
+            distance: 6_378_137.0 + 110_000.0,
+            in_s: 2.6e5,
+            other_body: Some("Moon".into()),
+        });
         assert_eq!(find(&sections(&d), "summary").unwrap().value("PERIAPSIS"), Some("110.0 km · Moon"));
     }
 

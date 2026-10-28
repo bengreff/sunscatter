@@ -1,11 +1,13 @@
 //! The navball cluster (D080), always on, at a fixed place bottom centre:
-//! the speed under its `ORBIT | SURFACE | TARGET` switch, the altitude,
-//! V/S, Ap and Pe left of the ball, SAS with its hold modes and the
-//! throttle bar right of it, and the flight state under it. Everything
+//! the speed under its `ORBIT | SURFACE | TARGET` switch, the altitude
+//! (its label the datum / terrain switch), G (load, direction, limit), Ap
+//! and Pe left of the ball, SAS with its hold modes, RCS and the throttle
+//! bar right of it, and the flight state under it. Everything
 //! else is in the task menus. Hidden in the tracking station.
 
+use super::altitude::AltitudeRef;
 use super::rules::{self, Mode};
-use super::{ApsisReadout, NavState, Navball};
+use super::{g_meter, ApsisReadout, NavState, Navball};
 use crate::commands::GameCommand;
 use crate::format::{duration as fmt_duration, DASH};
 use crate::interface::layout::InterfaceSettings;
@@ -33,6 +35,7 @@ enum Action {
     SetMode(Mode),
     ToggleLock,
     CycleMode,
+    ToggleAltitude,
     Command(GameCommand),
 }
 
@@ -67,7 +70,7 @@ pub fn draw(
         });
         ui.add_space(2.0);
         ui.horizontal_top(|ui| {
-            fixed_column(ui, SIDE_PX, ball, |ui| readouts(ui, &shown));
+            fixed_column(ui, SIDE_PX, ball, |ui| readouts(ui, &shown, &mut actions));
             let (rect, response) = ui.allocate_exact_size(vec2(ball, ball), egui::Sense::click());
             super::ball::paint_ball(ui.painter(), rect, &state);
             if response.on_hover_text("Click to change the speed mode").clicked() {
@@ -87,6 +90,7 @@ pub fn draw(
             Action::SetMode(mode) => nav.mode = mode,
             Action::ToggleLock => nav.locked = !nav.locked,
             Action::CycleMode => nav.mode = nav.mode.next(nav.target.is_some()),
+            Action::ToggleAltitude => nav.altitude = nav.altitude.other(),
             Action::Command(c) => {
                 commands.write(c);
             }
@@ -145,36 +149,58 @@ fn switch(ui: &mut egui::Ui, mode: Mode, locked: bool, has_target: bool, actions
     }
 }
 
-/// Altitude, V/S, Ap and Pe with the time to each (D076), as the craft
-/// knows them (D106: a dash for what it cannot measure).
-fn readouts(ui: &mut egui::Ui, s: &NavState) {
-    let (alt_label, alt) = s.altitude;
+/// Altitude (its label the switch), G, Ap and Pe with the time to each
+/// (D076), as the craft knows them (D106: a dash for what it cannot
+/// measure).
+fn readouts(ui: &mut egui::Ui, s: &NavState, actions: &mut Vec<Action>) {
     let k = &s.known;
     let orbit = k.orbit();
     let apsis = |name: &str, a: &Option<ApsisReadout>| match a {
         Some(a) => [
             (
                 a.other_body.as_ref().map_or(name.to_string(), |b| format!("{name} {b}")),
-                k.distance(Quantity::Position, a.altitude),
+                k.distance(Quantity::Position, a.above_datum),
             ),
             ("  in".to_string(), k.or_dash(orbit, || fmt_duration(a.in_s))),
         ],
         None => [(name.to_string(), DASH.to_string()), ("  in".to_string(), DASH.to_string())],
     };
-    // Above the terrain from an altimeter (or a fix), above sea level from the position.
-    let alt_q = if s.mode == Mode::Surface { Quantity::Altitude } else { Quantity::Position };
-    let vs = k.speed(Quantity::Velocity, s.vertical_speed);
-    let vs = if vs == DASH || s.vertical_speed < 0.0 { vs } else { format!("+{vs}") };
-    let mut rows = vec![(alt_label.to_string(), k.distance(alt_q, alt)), ("V/S".into(), vs)];
+    // Above the terrain from an altimeter (or a fix), above the datum from the position.
+    let alt_q = if s.altitude_ref == AltitudeRef::Terrain { Quantity::Altitude } else { Quantity::Position };
+    let mut rows = vec![];
     rows.extend(apsis("Ap", &s.ap));
     rows.extend(apsis("Pe", &s.pe));
     ui.add_space(10.0);
+    let dim = |text: &str| RichText::new(text).monospace().small().color(theme::DIM);
+    let value = |ui: &mut egui::Ui, text: String, colour: Color32| {
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.label(RichText::new(text).monospace().color(colour))
+        })
+        .inner
+    };
     egui::Grid::new("nav_readouts").num_columns(2).spacing([8.0, 3.0]).min_col_width(40.0).show(ui, |ui| {
-        for (label, value) in rows {
-            ui.label(RichText::new(label).monospace().small().color(theme::DIM));
-            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.label(RichText::new(value).monospace().color(theme::TEXT));
-            });
+        let switch = ui.add(egui::Button::new(dim(&s.altitude.0)).frame(false));
+        let hint = "Click: above the datum (sea level; without a sea the lowest ground; on a giant its 1-bar \
+                    level) or above the terrain under the craft (TER). Ap and Pe are above the datum.";
+        if switch.on_hover_text(hint).clicked() {
+            actions.push(Action::ToggleAltitude);
+        }
+        value(ui, k.distance(alt_q, s.altitude.1), theme::TEXT);
+        ui.end_row();
+        ui.label(dim("G"));
+        let known = k.knows(Quantity::Acceleration);
+        let limit = s.g.limit.as_ref().map(|(l, _)| *l);
+        let colour = match g_meter::level(s.g.load, limit) {
+            g_meter::Level::Normal => theme::TEXT,
+            g_meter::Level::Warn => theme::ACCENT,
+            g_meter::Level::Over => theme::ALERT,
+        };
+        let text = if known { g_meter::text(&s.g) } else { DASH.to_string() };
+        value(ui, text, if known { colour } else { theme::TEXT }).on_hover_text(g_meter::hover(&s.g));
+        ui.end_row();
+        for (label, text) in rows {
+            ui.label(dim(&label));
+            value(ui, text, theme::TEXT);
             ui.end_row();
         }
     });
@@ -190,6 +216,13 @@ fn controls(ui: &mut egui::Ui, sim: &SimState, s: &NavState, height: f32, action
             // The hold stated in full, with prograde's speed reference (D075).
             if sas.on_hover_text(format!("SAS: {}", rules::sas_label(&c, &s.body))).clicked() {
                 actions.push(Action::Command(GameCommand::SetSas(!c.sas)));
+            }
+            let rcs = hold_button(ui, if c.rcs.on { "RCS ON" } else { "RCS OFF" }, "R", c.rcs.on, true);
+            let hint = "RCS: the thrusters translate (I K / J L / H N) and turn the craft; off, the rotation keys \
+                        use gimbals and fins only (SAS still fires them). Its menu: blocks, feeds, modes.";
+            if rcs.on_hover_text(hint).clicked() {
+                let mode = sim::systems::rcs::RcsMode { on: !c.rcs.on, ..c.rcs };
+                actions.push(Action::Command(GameCommand::SetRcs(mode)));
             }
             let has_burn = s.maneuver.is_some();
             for mode in HoldMode::ALL {

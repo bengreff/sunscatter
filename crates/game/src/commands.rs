@@ -59,6 +59,8 @@ pub enum GameCommand {
     SetThrottle(f64),
     /// SAS on or off (the navball's SAS button; T toggles it directly).
     SetSas(bool),
+    /// The pilot's RCS mode (D111: on, translation or rotation only, fine).
+    SetRcs(sim::systems::rcs::RcsMode),
     /// Activate the active vessel's next stage (Space, the Staging menu);
     /// for a craft of parts it becomes [`GameCommand::Stage`] of that
     /// vessel, sent to it.
@@ -235,6 +237,7 @@ pub fn apply(
             }
             GameCommand::SetThrottle(t) => sim.controls.throttle = t.clamp(0.0, 1.0),
             GameCommand::SetSas(on) => sim.controls.sas = *on,
+            GameCommand::SetRcs(mode) => sim.controls.rcs = *mode,
             GameCommand::NextStage => {
                 let mut controls = sim.controls;
                 let ship = sim.ship();

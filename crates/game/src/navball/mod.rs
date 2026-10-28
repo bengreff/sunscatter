@@ -9,8 +9,10 @@
 //! the throttle, the flight state) and [`ball`] paints the ball (an egui
 //! mesh, no extra camera).
 
+pub mod altitude;
 mod ball;
 mod draw;
+pub mod g_meter;
 pub mod rules;
 
 pub use draw::AREA;
@@ -59,6 +61,10 @@ pub struct Navball {
     /// frame: crossing it switches the mode (D089).
     side: Option<(sim::vessel::VesselId, Side)>,
     pub target: Option<NavTarget>,
+    /// What ALT reads above (the readout's switch, D111).
+    pub altitude: altitude::AltitudeRef,
+    /// Each body's datum, found once (a heightmap's lowest point).
+    datums: std::collections::HashMap<NodeId, altitude::Datum>,
     /// The state this frame (`update`), for the cluster and the menus.
     pub now: Option<NavState>,
     /// Readouts as last shown, and when (app seconds).
@@ -70,6 +76,12 @@ pub struct Navball {
 pub struct ApsisReadout {
     /// Above the body's reference ellipsoid under it (m).
     pub altitude: f64,
+    /// Above its body's datum (m; `altitude::altitude`: the ground under
+    /// an apsis ahead is not known): what the readouts show.
+    pub above_datum: f64,
+    /// From its body's centre (m): the orbit's own size, shown beside the
+    /// altitude.
+    pub distance: f64,
     /// Seconds from now.
     pub in_s: f64,
     /// Its body's name when it is not the reference body.
@@ -87,12 +99,14 @@ pub struct NavState {
     /// Speed in the current mode (m/s), relative to the reference body (its
     /// surface or centre) or the target.
     pub speed: f64,
-    /// Altitude for the current mode, with its label.
-    pub altitude: (&'static str, f64),
-    pub vertical_speed: f64,
+    /// Altitude as the switch reads it (`ALT SEA`, `ALT TER`, …), the
+    /// switch's setting.
+    pub altitude: (String, f64),
+    pub altitude_ref: altitude::AltitudeRef,
     /// Angle of attack and sideslip (deg), in an atmosphere only.
     pub aoa_sideslip: Option<(f64, f64)>,
-    pub g_load: f64,
+    /// The G row: load, direction and the craft's limit (D111).
+    pub g: g_meter::GReadout,
     /// The next apsides (D076), never osculating.
     pub ap: Option<ApsisReadout>,
     pub pe: Option<ApsisReadout>,
@@ -200,7 +214,8 @@ pub fn nav_state(sim: &SimState, tracked: &Tracked, aps: &Apsides, nav: &mut Nav
     let v_srf = v_orb - p.rotation.omega(t).raw().cross(rel);
     let fixed = p.rotation.to_fixed(sim::frame::Vec3::from_raw(rel), t);
     let alt = p.altitude(fixed);
-    let above_terrain = p.altitude_above_surface(fixed);
+    let ground = alt - p.altitude_above_surface(fixed);
+    let datum = nav.datum(body, p);
 
     let target = nav.target.and_then(|tg| target_state(sim, tracked, tg, anchor, t));
     if nav.target.is_some() && target.is_none() {
@@ -222,9 +237,19 @@ pub fn nav_state(sim: &SimState, tracked: &Tracked, aps: &Apsides, nav: &mut Nav
     let grounded = matches!(vessel.phase, Phase::Landed { .. } | Phase::Crashed { .. });
     // The next apsides on the predicted trajectory (D076).
     let (next_ap, next_pe) = aps.get(vessel.id()).map_or((None, None), |a| a.next_after(t));
+    let datums: Vec<(NodeId, altitude::Datum)> = [next_ap, next_pe]
+        .iter()
+        .flatten()
+        .filter_map(|a| Some((a.body, nav.datum(a.body, sim.world.source(a.body)?.physical.as_ref()?))))
+        .collect();
     let readout = |a: Option<&crate::trajectory::apsides::Apsis>| {
         a.map(|a| ApsisReadout {
             altitude: a.altitude,
+            distance: a.distance,
+            above_datum: {
+                let d = datums.iter().find(|(b, _)| *b == a.body).map_or(datum, |(_, d)| *d);
+                altitude::altitude(altitude::AltitudeRef::Datum, a.altitude, d, None)
+            },
             in_s: a.t.seconds_since(t),
             other_body: (a.body != body).then(|| sim.world.eph.node(a.body).name.clone()),
         })
@@ -240,10 +265,10 @@ pub fn nav_state(sim: &SimState, tracked: &Tracked, aps: &Apsides, nav: &mut Nav
         },
         angles: rules::attitude_angles(&ship, &local),
         speed: v_mode.length(),
-        altitude: rules::mode_altitude(nav.mode, above_terrain, alt),
-        vertical_speed: rules::vertical_speed(rel, v_srf),
+        altitude: (altitude::label(nav.altitude, datum), altitude::altitude(nav.altitude, alt, datum, Some(ground))),
+        altitude_ref: nav.altitude,
         aoa_sideslip: if in_atmosphere { rules::aoa_sideslip(&ship, v_srf) } else { None },
-        g_load: rules::g_load(proper_accel(&sim.world, t, vessel, sim.controls.throttle)),
+        g: g_readout(sim, vessel, t),
         ap: readout(next_ap),
         pe: readout(next_pe),
         body: src.name.clone(),
@@ -255,6 +280,15 @@ pub fn nav_state(sim: &SimState, tracked: &Tracked, aps: &Apsides, nav: &mut Nav
         }),
         known: crate::format::Known::of(vessel),
     })
+}
+
+/// The G row of `vessel` (the active one): its proper acceleration in
+/// body axes and, for a craft of parts, its g-limit.
+fn g_readout(sim: &SimState, vessel: &Vessel, t: Epoch) -> g_meter::GReadout {
+    let a = vessel.attitude.q.inverse() * proper_accel(&sim.world, t, vessel, sim.controls.throttle);
+    let def = vessel.ship_def();
+    let limit = def.as_ref().zip(vessel.ship()).and_then(|(d, s)| sim::systems::g_limit::g_limit(d, s));
+    g_meter::readout(a, limit, |j| def.as_ref().and_then(|d| d.joints.get(j)).map(|j| j.name.clone()))
 }
 
 /// Refreshes [`Navball::now`] (and the auto mode) after the simulation
@@ -285,9 +319,16 @@ impl Navball {
         }
     }
 
-    /// The readouts to show: `state` at most every [`READOUT_PERIOD`].
+    /// The datum of `body` (found once per body).
+    fn datum(&mut self, body: NodeId, p: &sim::body::BodyPhysical) -> altitude::Datum {
+        *self.datums.entry(body).or_insert_with(|| altitude::body_datum(p))
+    }
+
+    /// The readouts to show: `state` at most every [`READOUT_PERIOD`], at
+    /// once when the mode or the altitude's switch changes.
     fn readouts(&mut self, now: f64, state: &NavState) -> &NavState {
-        let stale = self.shown.as_ref().is_none_or(|(t, s)| now - t >= READOUT_PERIOD || s.mode != state.mode);
+        let changed = |s: &NavState| s.mode != state.mode || s.altitude_ref != state.altitude_ref;
+        let stale = self.shown.as_ref().is_none_or(|(t, s)| now - t >= READOUT_PERIOD || changed(s));
         if stale {
             self.shown = Some((now, state.clone()));
         }
@@ -314,20 +355,20 @@ mod tests {
         let w = world();
         let t = sim::sol::sol_epoch();
         let pad = Vessel::landed_at(&w, VesselId(1), "Earth", 28.6, -80.6, t, test_craft());
-        let g = rules::g_load(proper_accel(&w, t, &pad, 0.0));
+        let g = proper_accel(&w, t, &pad, 0.0).length() / rules::G0;
         assert!((g - 1.0).abs() < 0.01, "pad {g}");
 
         let earth = w.find("Earth").expect("Earth").clone();
         let el = Elements { a: 6_778_137.0, e: 0.001, i: 0.9, raan: 0.3, argp: 0.0, mean_anomaly: 1.0 };
         let (r, v) = el.to_state(earth.gm);
         let leo = Vessel::coasting(&w, VesselId(1), t, earth.node, r, v, test_craft());
-        let g = rules::g_load(proper_accel(&w, t, &leo, 0.0));
+        let g = proper_accel(&w, t, &leo, 0.0).length() / rules::G0;
         assert!(g < 1e-6, "coasting in vacuum {g}");
 
         let mut burn = leo.clone();
         burn.phase = Phase::Powered { anchor: earth.node, r, v };
         let expected = burn.craft.engine.thrust_vac / burn.mass() / rules::G0;
-        let g = rules::g_load(proper_accel(&w, t, &burn, 1.0));
+        let g = proper_accel(&w, t, &burn, 1.0).length() / rules::G0;
         assert!((g - expected).abs() < 1e-6, "full thrust {g} vs {expected}");
     }
 }

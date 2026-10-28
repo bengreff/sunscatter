@@ -2,7 +2,7 @@
 //!
 //! All vectors share one set of inertial axes (the vessel's anchor frame);
 //! only directions and differences matter. Ship body axes follow the
-//! controls in `state::read_controls`: +Z is the nose, +X the right side
+//! controls in `commands::keys::read_controls`: +Z is the nose, +X the right side
 //! (D yaws the nose towards it), −Y the top (W pitches the nose down, towards
 //! +Y).
 
@@ -205,16 +205,6 @@ pub fn aoa_sideslip(ship: &Ship, v_air: DVec3) -> Option<(f64, f64)> {
     Some((aoa, slip))
 }
 
-/// Vertical speed: the rate of change of distance from the body's centre.
-pub fn vertical_speed(r: DVec3, v: DVec3) -> f64 {
-    v.dot(r.normalize())
-}
-
-/// g-load from the proper (non-gravitational) acceleration.
-pub fn g_load(proper_accel: DVec3) -> f64 {
-    proper_accel.length() / G0
-}
-
 /// Where direction `d` appears on the ball, viewed from behind the ship: `x`
 /// right and `y` up on the unit disc, and depth (> 0: front hemisphere). The
 /// ball's centre is the nose; up on screen is the ship's top.
@@ -252,15 +242,6 @@ pub fn ball_colour(el: f64) -> [f32; 3] {
     let ground = lerp([156.0, 98.0, 52.0], [74.0, 42.0, 20.0], (-el).max(0.0));
     let t = ((el as f64 / HORIZON_BLEND + 1.0) * 0.5).clamp(0.0, 1.0) as f32;
     lerp(ground, sky, t)
-}
-
-/// The altitude shown above the ball, with its label: above the ground in
-/// surface mode, above sea level (the reference ellipsoid) otherwise.
-pub fn mode_altitude(mode: Mode, above_terrain: f64, above_sea_level: f64) -> (&'static str, f64) {
-    match mode {
-        Mode::Surface => ("ALT TERRAIN", above_terrain),
-        Mode::Orbit | Mode::Target => ("ALT SEA", above_sea_level),
-    }
 }
 
 /// The throttle's caption under its bar: its percentage, or "min" at zero

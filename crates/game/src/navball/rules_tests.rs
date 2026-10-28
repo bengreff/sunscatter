@@ -215,27 +215,6 @@ fn angle_of_attack_and_sideslip() {
 }
 
 #[test]
-fn vertical_speed_and_g_load() {
-    let r = DVec3::new(0.0, 6.4e6, 0.0);
-    assert!(close(vertical_speed(r, DVec3::new(50.0, 12.0, -3.0)), 12.0, EPS));
-    assert!(close(g_load(DVec3::new(0.0, 0.0, -G0 * 3.0)), 3.0, EPS));
-    assert_eq!(g_load(DVec3::ZERO), 0.0);
-}
-
-#[test]
-fn altitude_follows_the_speed_mode() {
-    // (mode, expected label and value) for 1,200 m above the ground, 1,500 m above the sea.
-    let cases = [
-        (Mode::Surface, ("ALT TERRAIN", 1200.0)),
-        (Mode::Orbit, ("ALT SEA", 1500.0)),
-        (Mode::Target, ("ALT SEA", 1500.0)),
-    ];
-    for (mode, expected) in cases {
-        assert_eq!(mode_altitude(mode, 1200.0, 1500.0), expected, "{mode:?}");
-    }
-}
-
-#[test]
 fn sky_is_blue_and_ground_is_brown() {
     let [r, _, b] = ball_colour(0.5);
     assert!(b > r, "sky");
