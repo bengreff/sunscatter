@@ -83,3 +83,7 @@ The owner's request after playing the Falcon 9 (verbatim, with a screenshot of t
 **Next**
 47. After this round. — [the Crew mission]
 48. The night's open items. — "One thing I noticed is the derived masses were terrible. Of course, we can't make generalizations until we have data on hundreds of systems across aerospace. That system will come later, just keep in mind that eventually we will have a system that creates realistic, tech-dependent part stats procedually, tuned on comprehensive research over hundreds or thousands of published rocket systems. That is part of the procedual part system, we don't dive into that now, for now we stay with real life parts with the assumption that we might edit internal elements of them later to work with procedual generation."
+
+**Follow-ups (2026-10-27 evening)**
+- The number keys: plain 1–0 open menus; the hold modes and pinned functions? — "No need for hold modes on 1-6. Not everything needs a key."
+- The Falcon 9 starts its booster's cold gas and Dragon's Dracos disabled (its sequence enables them); does "all on by default" override it? — "Use the real default RCS config and whatever is logical."
