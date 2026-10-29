@@ -107,3 +107,41 @@ fn a_launch_abort_on_the_pad_leaves_liftoff_next() {
         assert!(!p.ship().unwrap().clamped, "{:?}: nothing holds it", p.craft.id);
     }
 }
+
+/// Editing the stages in flight (the systems screen sends the whole list,
+/// D107) keeps those already run as they were (D111: only stages still to
+/// run change): a list that changes, drops or adds one before them is
+/// refused whole, so the index still counts exactly them and no stage is
+/// skipped or run twice; stages still to run change freely.
+#[test]
+fn editing_the_stages_keeps_those_already_run() {
+    use crate::craft::command::Stage;
+    let w = world();
+    let mut v = falcon9(&w);
+    v.next_stage(&w).unwrap();
+    v.next_stage(&w).unwrap();
+    let all = v.ship().unwrap().stages.clone();
+    let named = |name: &str| Stage { name: name.into(), key: None, actions: Vec::new(), pinned: false };
+    type Edit = fn(&mut Vec<Stage>, Stage);
+    let edits: [(&str, Edit); 6] = [
+        ("delete a stage run", |s, _| drop(s.remove(0))),
+        ("add one before them", |s, n| s.insert(0, n)),
+        ("rename one", |s, _| s[1].name = "Release".into()),
+        ("cut the list to one", |s, _| s.truncate(1)),
+        ("delete MECO", |s, _| drop(s.remove(2))),
+        ("add one next", |s, n| s.insert(2, n)),
+    ];
+    // (accepted, the next stage)
+    let want =
+        [(false, "MECO"), (false, "MECO"), (false, "MECO"), (false, "MECO"), (true, "Stage separation"), (true, "New")];
+    for ((what, edit), (ok, next)) in edits.into_iter().zip(want) {
+        let mut v = v.clone();
+        let mut stages = all.clone();
+        edit(&mut stages, named("New"));
+        assert_eq!(v.set_stages(stages).is_ok(), ok, "{what}");
+        let s = v.ship().unwrap();
+        assert_eq!(s.sequence, 2, "{what}");
+        assert_eq!(s.stages[..2], all[..2], "{what}: the stages run stay");
+        assert_eq!(s.stages[2].name, next, "{what}");
+    }
+}

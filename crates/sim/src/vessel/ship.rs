@@ -172,14 +172,20 @@ impl Vessel {
     }
 
     /// Replaces the stage sequence (the systems screen, D107): every
-    /// command must name something this craft has, else nothing changes and
-    /// the errors are returned. The sequence's position stays (at most the
-    /// new length).
+    /// command must name something this craft has, and the stages already
+    /// run must stay as they were, first and in order (D111: only stages
+    /// still to run change), else nothing changes and the errors are
+    /// returned. The sequence's position stays: it counts exactly the
+    /// stages run.
     pub fn set_stages(&mut self, stages: Vec<Stage>) -> Result<(), Vec<String>> {
         let def = self.ship_def().ok_or_else(|| vec!["not a craft of parts".to_string()])?;
         check_stages(&def, &stages)?;
         let state = self.ship.as_mut().ok_or_else(|| vec!["no ship state".to_string()])?;
-        state.sequence = state.sequence.min(stages.len() as u32);
+        let run = &state.stages[..(state.sequence as usize).min(state.stages.len())];
+        if !stages.starts_with(run) {
+            let run = if run.len() == 1 { "stage 1 has".into() } else { format!("stages 1 to {} have", run.len()) };
+            return Err(vec![format!("{run} run: only the stages after can change")]);
+        }
         state.stages = stages;
         Ok(())
     }

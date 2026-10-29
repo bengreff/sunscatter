@@ -22,8 +22,9 @@ Yours: `crates/sim/src/vessel/*`, `crates/sim/src/systems/{command,runtime,propu
 
 (Update as you land: commits with hashes, what is left.)
 
-- **1, pad abort past Liftoff: done** (this commit). The path was the pad's own abort (`propulsion::release`: an engine stopped before full thrust), not a function: Liftoff had run, so the index stayed past it. Also a split while the release was armed (the "Launch abort" function on the pad) disarmed it silently. Now `propulsion::disarm` (both paths, with an event) puts the sequence back to the last stage run that releases the clamps (`command::release_undone`); the capsule leaving the pad is no longer marked clamped (`ShipState::partition`). Functions never moved the sequence (tested). Rule chosen, for the owner: see below.
-- Left, in order: 2 (`set_stages`), 3 (release with no engine lit), 4 (fin deflections at a split), 5 (aborted bubble tick).
+- **1, pad abort past Liftoff: done** (1f9f5b3; reverted by the lead's b48bc21, a commit from the stale shared index, restored in 0a5fc91). The path was the pad's own abort (`propulsion::release`: an engine stopped before full thrust), not a function: Liftoff had run, so the index stayed past it. Also a split while the release was armed (the "Launch abort" function on the pad) disarmed it silently. Now `propulsion::disarm` (both paths, with an event) puts the sequence back to the last stage run that releases the clamps (`command::release_undone`); the capsule leaving the pad is no longer marked clamped (`ShipState::partition`). Functions never moved the sequence (tested). Rule chosen, for the owner: see below.
+- **2, `set_stages` keeps the index: done** (this commit). A whole list (the systems screen's) whose first stages are not exactly those already run is refused with a reason; the index stays and counts them. The systems screen's editor still lets the player edit stages already run in its draft (it then gets the refusal toast): the lead may want it to lock them.
+- Left, in order: 3 (release with no engine lit), 4 (fin deflections at a split), 5 (aborted bubble tick).
 
 ### Open for the owner (to copy into fixes-2026-10-28.md once the lead has committed it)
 
