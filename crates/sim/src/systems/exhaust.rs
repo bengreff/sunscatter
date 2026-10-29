@@ -8,10 +8,16 @@
 //!   expansion ratio ε the exit Mach `Mₑ` follows from ε and γ alone (the
 //!   area–Mach relation), and `pₑ·Aₑ/(ṁ·vₑ) = 1/(γ·Mₑ²)`, so
 //!   `vₑ = c/(1 + 1/(γ·Mₑ²))`, `ρₑ = ṁ/(vₑ·Aₑ)`, `pₑ = ρₑ·vₑ²/(γ·Mₑ²)`,
-//!   `Tₑ = pₑ/(ρₑ·R)`: consistent with the thrust the trajectory flies
-//!   (`F_vac = ṁ·vₑ + pₑ·Aₑ`, exactly). γ and the molar mass are the
-//!   propellant pair's (`data/propellants.ron`, handbook placeholders); the
-//!   chamber temperature they imply is checked against the handbook's.
+//!   consistent with the thrust the trajectory flies (`F_vac = ṁ·vₑ +
+//!   pₑ·Aₑ`, exactly). γ and the molar mass are the propellant pair's
+//!   (`data/propellants.ron`, handbook placeholders); the chamber
+//!   temperature they imply is checked against the handbook's.
+//! * **Exit temperature.** Not the single-γ (frozen) figure: the gas
+//!   recombines as it expands (shifting equilibrium), which keeps it
+//!   hotter (LOX/RP-1 at ε 16: ~1,800 K, not 1,330 K). From the pair's
+//!   chamber temperature down the pressure ratio,
+//!   `Tₑ = T_c·(pₑ/p_c)^((γₛ−1)/γₛ)`, with `γₛ` fitted to CEA-method runs
+//!   and `p_c/pₑ` the isentropic ratio at `Mₑ`.
 //! * **Throttle.** As the steady map (`propulsion::steady`, an ideal
 //!   nozzle): the flow and the exit pressure and density scale with the
 //!   level, the velocity and temperature do not.
@@ -54,8 +60,13 @@ pub struct Products {
     pub gamma: f64,
     /// Mean molar mass of the products (g/mol).
     pub molar_mass: f64,
-    /// The handbook's chamber temperature (K) at its mixture ratio: a check.
+    /// The handbook's chamber temperature (K) at its mixture ratio: a
+    /// check of γ, and where the exit temperature starts.
     pub chamber_temperature: f64,
+    /// The exponent of temperature against pressure through the nozzle in
+    /// shifting equilibrium (`T ∝ p^((γₛ−1)/γₛ)`), fitted to CEA-method
+    /// runs: what sets the exit temperature.
+    pub shifting_gamma: f64,
     pub mixture_ratio: f64,
     /// Oxidizer to fuel mass ratio that burns the fuel completely.
     pub stoichiometric_ratio: f64,
@@ -75,10 +86,12 @@ impl Propellants {
     pub fn parse(text: &str) -> Result<Self, String> {
         let rows: BTreeMap<String, Products> = ron::from_str(text).map_err(|e| e.to_string())?;
         for (k, p) in &rows {
-            let ok = p.gamma > 1.0 && p.molar_mass > 0.0 && p.stoichiometric_ratio > 0.0;
+            let ok = p.gamma > 1.0 && p.shifting_gamma > 1.0 && p.molar_mass > 0.0 && p.stoichiometric_ratio > 0.0;
             let fractions = [p.water, p.soot, p.alumina].iter().all(|f| (0.0..=1.0).contains(f));
             if !ok || !fractions {
-                return Err(format!("{k}: needs gamma > 1, molar mass and ratio > 0, fractions in [0, 1]"));
+                return Err(format!(
+                    "{k}: needs gamma and shifting_gamma > 1, molar mass and ratio > 0, fractions in [0, 1]"
+                ));
             }
         }
         Ok(Propellants(rows))
@@ -218,7 +231,9 @@ pub fn exit_state(n: &NozzleSpec, products: &Products, mixture_ratio: f64, level
     let mdot = n.mdot_full * level.max(0.0);
     let density = mdot / (velocity * n.exit_area);
     let pressure = density * velocity * velocity / (gamma * mach * mach);
-    let temperature = velocity * velocity / (gamma * R_UNIVERSAL / products.molar_mass * mach * mach);
+    let stagnation = 1.0 + 0.5 * (gamma - 1.0) * mach * mach;
+    let gs = products.shifting_gamma;
+    let temperature = products.chamber_temperature * math::pow(stagnation, -gamma / (gamma - 1.0) * (gs - 1.0) / gs);
     let composition = Composition {
         water: products.water,
         soot: products.soot,
@@ -240,10 +255,13 @@ pub fn exit_state(n: &NozzleSpec, products: &Products, mixture_ratio: f64, level
     }
 }
 
-/// The chamber temperature (K) an exit state implies (isentropic, at rest
-/// in the chamber).
+/// The chamber temperature (K) an exit state's velocity implies through
+/// its single γ (isentropic, at rest in the chamber; the frozen exit
+/// temperature `vₑ²/(γ·R·Mₑ²)` times the stagnation ratio): the check of
+/// γ and the molar mass against the handbook.
 pub fn chamber_temperature(s: &ExitState) -> f64 {
-    s.temperature * (1.0 + 0.5 * (s.gamma - 1.0) * s.mach * s.mach)
+    let frozen = s.velocity * s.velocity / (s.gamma * R_UNIVERSAL / s.molar_mass * s.mach * s.mach);
+    frozen * (1.0 + 0.5 * (s.gamma - 1.0) * s.mach * s.mach)
 }
 
 /// The jet an exit state makes in air at pressure `ambient` (Pa).

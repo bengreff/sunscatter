@@ -22,7 +22,7 @@ fn the_table_has_the_craft_files_propellants() {
     }
     assert!(t.pair("RP-1", "LOX").is_none(), "oxidizer first");
     assert!(Propellants::parse(
-        "{\"X/Y\": (gamma: 0.9, molar_mass: 20.0, chamber_temperature: 3000.0, \
+        "{\"X/Y\": (gamma: 0.9, molar_mass: 20.0, chamber_temperature: 3000.0, shifting_gamma: 1.2, \
          mixture_ratio: 2.0, stoichiometric_ratio: 3.0, water: 0.3, soot: 0.0, alumina: 0.0, source: \"\")}"
     )
     .is_err());
@@ -68,14 +68,18 @@ fn the_seed_gives_the_published_thrust() {
 /// Each engine at full flow: (exit pressure kPa range, exit temperature K
 /// range, exit Mach range). Merlin 1D's ~0.7–0.8 atm is the figure quoted
 /// for it (SpaceX does not publish it); the vacuum bell's few kPa;
-/// SuperDraco (an abort engine) near matched at sea level.
+/// SuperDraco (an abort engine) near matched at sea level. The exit
+/// temperatures against CEA-method shifting-equilibrium runs (NASA Glenn
+/// thermodynamic data, chamber 9.7 MPa, the engines' mixture ratios;
+/// features/exhaust.md): Merlin 1D 1,791 K at ε 16, MVac 1,281 K at ε 165
+/// (frozen: 1,386 K and 745 K).
 #[test]
 fn the_seed_table() {
     let (m1d, mvac, superdraco) = engines();
     let cases = [
-        (&m1d, (60.0, 90.0), (1200.0, 1500.0), (3.6, 3.9)),
-        (&mvac, (2.5, 5.0), (650.0, 900.0), (5.5, 5.8)),
-        (&superdraco, (60.0, 200.0), (700.0, 1300.0), (3.2, 3.6)),
+        (&m1d, (60.0, 90.0), (1_791.0 * 0.95, 1_791.0 * 1.05), (3.6, 3.9)),
+        (&mvac, (2.5, 5.0), (1_281.0 * 0.9, 1_281.0 * 1.1), (5.5, 5.8)),
+        (&superdraco, (60.0, 200.0), (1_400.0, 2_000.0), (3.2, 3.6)), // NTO/MMH ε 16: 1,684 K
     ];
     for (d, p, t, m) in cases {
         let s = seed(d, 1.0);

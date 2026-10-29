@@ -8,6 +8,11 @@
 // Biblarz, Rocket Propulsion Elements, 9th ed., Table 5-5); the seed derives
 // the exit state from each engine's own thrust, Isp and nozzle with gamma and
 // molar_mass, and checks itself against chamber_temperature.
+// shifting_gamma: the exponent of temperature against pressure through the
+// nozzle in shifting equilibrium, T ∝ p^((γs−1)/γs), the exit temperature
+// from chamber_temperature (E: fitted to CEA-method runs, NASA Glenn
+// thermodynamic data via Cantera 3.2, chamber 6.9–9.7 MPa, ε 16 and 165;
+// features/exhaust.md). A single gamma (frozen) leaves kerolox 400 K colder.
 // stoichiometric_ratio: the oxidizer-to-fuel mass ratio that burns the fuel
 // completely to CO2 and H2O (D: from the formulas); an engine run below it
 // leaves fuel (CO, H2) that afterburns in air.
@@ -16,6 +21,7 @@
 {
     "LOX/RP-1": (
         gamma: 1.24, molar_mass: 23.3, chamber_temperature: 3677.0, mixture_ratio: 2.56,
+        shifting_gamma: 1.162,        // E: MR 2.33 ε 16 1.167, MR 2.58 ε 165 1.157 (the Falcon 9's engines); 1.13 at MR 2.56 ε 16
         stoichiometric_ratio: 3.41,   // D: RP-1 as CH1.95 (H/C of the NIST surrogate, Huber et al. 2009), 1.4875 O2 per CH1.95
         water: 0.30,                  // E: shifting-equilibrium products of kerolox near MR 2.5 (CEA class), not re-run
         soot: 0.005,                  // U: kerolox plumes are visibly sooty (most from the fuel-rich turbine exhaust); no published fraction found
@@ -24,6 +30,7 @@
     ),
     "NTO/MMH": (
         gamma: 1.25, molar_mass: 21.5, chamber_temperature: 3398.0, mixture_ratio: 2.15,
+        shifting_gamma: 1.17,         // E: MR 2.15 ε 16 1.167, ε 165 1.195
         stoichiometric_ratio: 2.50,   // D: CH6N2 + 1.25 N2O4 -> CO2 + 3 H2O + 3.5 N2
         water: 0.35,                  // E: CEA class, not re-run
         soot: 0.0,
@@ -32,6 +39,7 @@
     ),
     "LOX/LH2": (
         gamma: 1.26, molar_mass: 10.0, chamber_temperature: 2999.0, mixture_ratio: 4.02,
+        shifting_gamma: 1.25,         // E: MR 4.02 ε 16 1.238, ε 165 1.27
         stoichiometric_ratio: 7.94,   // D: 2 H2 + O2 -> 2 H2O
         water: 0.60,                  // E: CEA class, not re-run
         soot: 0.0,
