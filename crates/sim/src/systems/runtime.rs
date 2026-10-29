@@ -125,7 +125,8 @@ pub struct Runtime {
     /// if one fails (the real pad's rule, falcon9.md §1.2, §4.2).
     pub release_armed: bool,
     /// The engines (indices into `ShipDef::engines`) the armed release
-    /// waits for: those lit when it was armed (or first lit after).
+    /// waits for: those lit when it was armed, or at the end of that tick
+    /// (with none lit then, nor one settling to start, it is disarmed).
     #[serde(default)]
     pub release_engines: Vec<u32>,
     /// The pilot's throttle at the last step: closing it (open to 0) shuts

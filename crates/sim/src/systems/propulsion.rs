@@ -26,8 +26,9 @@
 //! * **The pad's rule** (falcon9.md §1.2, §4.2): an armed release lets the
 //!   clamps go at the first tick every engine it waits for runs at its
 //!   rated thrust; an engine that fails or stops first aborts the launch
-//!   (every engine shut down, the clamps kept). A release disarmed without
-//!   letting go did not happen: its stage is next again ([`disarm`]).
+//!   (every engine shut down, the clamps kept); armed with none lit, it is
+//!   disarmed. A release disarmed without letting go did not happen: its
+//!   stage is next again ([`disarm`]).
 
 use super::plumbing::Feed;
 use crate::catalog::EngineData;
@@ -448,6 +449,11 @@ fn release(def: &ShipDef, state: &mut ShipState, at: Epoch) -> Vec<Effect> {
     if state.runtime.release_engines.is_empty() {
         state.runtime.release_engines = lit(state);
         if state.runtime.release_engines.is_empty() {
+            // None lit (one waiting for its propellant to settle is about
+            // to): armed, it would hold the vessel in live ticks for ever.
+            if !state.runtime.engines.iter().any(|r| r.settling.is_some()) {
+                disarm(state, at, "Clamps: release disarmed: no engine lit; clamps held".into(), true);
+            }
             return Vec::new();
         }
     }

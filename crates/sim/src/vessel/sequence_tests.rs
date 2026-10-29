@@ -145,3 +145,39 @@ fn editing_the_stages_keeps_those_already_run() {
         assert_eq!(s.stages[2].name, next, "{what}");
     }
 }
+
+/// A release armed with no engine lit (Liftoff run before the ignition) is
+/// disarmed at its first tick, with an event: the vessel is not held in
+/// live ticks for ever (rails warp was refused), and Liftoff is next again.
+/// When the engines it waits for stop (the throttle closed on the pad,
+/// D114), it is disarmed too (the pad abort); AGAIN on Ignition relights
+/// them, and Liftoff run again re-arms it.
+#[test]
+fn a_release_with_no_engine_lit_is_disarmed() {
+    let w = world();
+    let mut v = falcon9(&w);
+    let liftoff = stage(&v, "Liftoff");
+    v.ship.as_mut().unwrap().sequence = liftoff;
+    v.next_stage(&w).unwrap();
+    assert!(v.ship().unwrap().runtime.release_armed && v.ship_needs_ticks());
+    v.advance(&w, t0().add_seconds(1.0), &full(), usize::MAX);
+    let s = v.ship().unwrap();
+    assert!(!s.runtime.release_armed && !v.ship_needs_ticks(), "disarmed: {:?}", s.runtime.events);
+    let event = s.runtime.events.iter().find(|e| e.text.starts_with("Clamps: release disarmed")).expect("an event");
+    assert!(event.text.contains("no engine lit") && event.alarm, "{}", event.text);
+    assert_eq!(s.sequence, liftoff);
+    assert!(v.clamped() && matches!(v.phase, Phase::Landed { .. }));
+    // The engines stop while it waits: the throttle closed.
+    let t = v.time;
+    v.order_at(t, OrderKind::Again(stage(&v, "Ignition"))).unwrap();
+    v.order_at(t, OrderKind::Stage).unwrap();
+    v.advance(&w, t.add_seconds(1.0), &full(), usize::MAX);
+    assert!(v.ship().unwrap().runtime.release_armed);
+    let closed = Controls { throttle: 0.0, ..full() };
+    v.advance(&w, t.add_seconds(1.1), &closed, usize::MAX);
+    let s = v.ship().unwrap();
+    assert!(!s.runtime.release_armed && s.sequence == liftoff, "{:?}", s.runtime.events);
+    assert!(s.runtime.events.iter().any(|e| e.text.starts_with("Pad abort")));
+    v.advance(&w, t.add_seconds(6.0), &closed, usize::MAX);
+    assert!(!v.ship_needs_ticks() && v.clamped());
+}
