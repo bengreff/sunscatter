@@ -10,7 +10,9 @@
 //! * **Shape** ([`boundary`]): from the exit radius toward the jet's fully
 //!   expanded radius, leaving the lip at the jet's Prandtl–Meyer turning
 //!   (narrowing when overexpanded, the wide fan in vacuum; turnings past
-//!   [`MAX_TURN`], the vacuum fan's backflow, are left out).
+//!   [`MAX_TURN`], the vacuum fan's backflow, are left out), widened by
+//!   the turbulent mixing layer with the air ([`mixing_rate`]): the nine
+//!   jets of a cluster merge a few metres behind it.
 //! * **Potential core** ([`potential_core`]): on the axis the gas keeps
 //!   its exit state until the fan from the lip reaches it.
 //! * **Across the jet** ([`profile`]): the gas fills the exit evenly, so
@@ -69,6 +71,18 @@ pub const SOOT_ALBEDO: f64 = 0.2;
 /// The plume is drawn out to where its optical depth across falls below
 /// this, at most [`MAX_LENGTH`] exit diameters.
 pub const TAU_FLOOR: f64 = 0.01;
+/// The mixing layer: incompressible growth `dδ/dx` of a shear layer's
+/// vorticity thickness for a jet into still air with the density ratio 1
+/// (Brown & Roshko 1974, ~0.17), and the compressibility factor at
+/// convective Mach above ~1 (Papamoschou & Roshko 1988: 0.2–0.3); the
+/// rocket jet's is ~2.4 at sea level.
+pub const MIXING_LAYER: f64 = 0.17;
+pub const COMPRESSIBILITY: f64 = 0.25;
+/// The air the jet mixes with: its molar mass (g/mol) and a temperature
+/// (K) for the stratosphere and below (216–288 K; it enters as a square
+/// root).
+pub const AIR_MOLAR_MASS: f64 = 28.96;
+pub const AIR_TEMPERATURE: f64 = 250.0;
 pub const MAX_LENGTH: f64 = 150.0;
 
 /// Whether plumes are drawn: the player's toggle, or always while the
@@ -87,6 +101,8 @@ pub struct Plume {
     pub r0: f64,
     pub slope: f64,
     pub spread: f64,
+    /// The mixing layer's widening of the boundary (m per m, [`mixing_rate`]).
+    pub mixing: f64,
     /// Shock-cell length and the peak temperature rise behind the shocks
     /// (share of the local temperature).
     pub cell: f64,
@@ -110,12 +126,29 @@ pub struct Plume {
 }
 
 /// The boundary's radius at `x`: `r₀ + x·k·Δ/(Δ + x·k)`, slope `k` at the
-/// lip, tending to `r₀ + Δ`; continuous through matched (`k`, `Δ` → 0).
+/// lip, tending to `r₀ + Δ`; continuous through matched (`k`, `Δ` → 0);
+/// plus the mixing layer's growth `x·m`.
 pub fn boundary(p: &Plume, x: f64) -> f64 {
     let (k, d) = (p.slope, p.spread);
     let den = d + x * k;
     let guard = if den < 0.0 { -1e-9 } else { 1e-9 } * p.r0.max(1e-3);
-    p.r0 + x * k * d / (den + guard)
+    p.r0 + x * k * d / (den + guard) + x * p.mixing
+}
+
+/// How fast the jet of exit state `s` widens in air at `ambient` Pa by
+/// its turbulent mixing layer (m per m of the boundary, one side):
+/// Papamoschou & Roshko's `½·C·Φ·(1 + √s)` for a jet into still air, `s`
+/// the air's density over the jet's at the same pressure,
+/// `(M_air/M)·(Tⱼ/T_air)`, `Tⱼ` the jet's expanded to the ambient. Half
+/// the layer's growth widens the boundary (the layer straddles the lip
+/// line). In vacuum (`s` → 0) it falls to `½·C·Φ`, small beside the
+/// lip's fan.
+pub fn mixing_rate(s: &ExitState, ambient: f64) -> f64 {
+    let g = s.gamma;
+    let ratio = (ambient.max(0.0) / s.pressure.max(1e-12)).min(1e6);
+    let tj = s.temperature * ratio.powf((g - 1.0) / g);
+    let density = AIR_MOLAR_MASS / s.molar_mass * tj / AIR_TEMPERATURE;
+    0.5 * MIXING_LAYER * COMPRESSIBILITY * (1.0 + density.sqrt())
 }
 
 /// The normal-shock static temperature ratio at Mach `m` (≥ 1).
@@ -210,6 +243,7 @@ pub fn plume(s: &ExitState, j: &Jet, ambient: f64) -> Plume {
         r0,
         slope: j.turn.clamp(-MAX_TURN, MAX_TURN).tan(),
         spread: rj - r0,
+        mixing: mixing_rate(s, ambient),
         cell,
         shock: shock_strength(j.pressure_ratio) * (normal_shock_temperature(j.mach, g) - 1.0),
         potential: potential_core(r0, s.mach),
@@ -287,7 +321,7 @@ pub struct PlumeParams {
     pub light: Vec4,
     /// rgb: the blackbody scale per channel (nits), w: [`CELLS`].
     pub planck: Vec4,
-    /// x: the potential core's length; yzw unused.
+    /// x: the potential core's length; y: the mixing layer's widening; zw unused.
     pub core: Vec4,
 }
 
@@ -307,7 +341,7 @@ impl PlumeParams {
             soot: Vec4::new(f(p.kappa), f(p.profile), f(p.core), f(SOOT_ALBEDO)),
             light: Vec3::from_array(starlight).extend(f(AFTERBURN_TEMPERATURE)),
             planck: Vec4::new(f(unit[0] * white[0]), f(unit[1] * white[1]), f(unit[2] * white[2]), f(CELLS)),
-            core: Vec4::new(f(p.potential), 0.0, 0.0, 0.0),
+            core: Vec4::new(f(p.potential), f(p.mixing), 0.0, 0.0),
         }
     }
 }

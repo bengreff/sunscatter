@@ -19,7 +19,8 @@ struct PlumeParams {
     light: vec4<f32>,
     // rgb: the blackbody scale per channel (nits); w: the cells the shocks fade over.
     planck: vec4<f32>,
-    // x: the potential core's length (the axis keeps the exit state).
+    // x: the potential core's length (the axis keeps the exit state); y: the
+    // mixing layer's widening (m per m).
     core: vec4<f32>,
 }
 
@@ -36,7 +37,7 @@ fn boundary(x: f32) -> f32 {
     let d = plume.shape.y;
     let den = d + x * k;
     let guard = select(1e-9, -1e-9, den < 0.0) * max(plume.origin.w, 1e-3);
-    return plume.origin.w + x * k * d / (den + guard);
+    return plume.origin.w + x * k * d / (den + guard) + x * plume.core.y;
 }
 
 // r₀/R on the axis: 1 in the potential core, then as the boundary widens.

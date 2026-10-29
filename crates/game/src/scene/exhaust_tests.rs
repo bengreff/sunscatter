@@ -95,7 +95,8 @@ fn merlin_plumes_narrow_at_sea_level_fan_out_in_vacuum_and_never_pop() {
     let sea = at(&m1d, SEA_LEVEL);
     assert!(sea.slope < 0.0 && sea.spread < 0.0, "overexpanded at sea level: {sea:?}");
     assert!(sea.shock > 0.05 && sea.burn > 0.5, "diamonds and afterburning low: {sea:?}");
-    assert!(sea.length > 5.0 * sea.r0 && sea.width < 1.5 * sea.r0, "{sea:?}");
+    // The inviscid jet narrows; the mixing layer outgrows it at sea level.
+    assert!(sea.length > 5.0 * sea.r0 && sea.width <= sea.r0 + sea.mixing * sea.length + 1e-9, "{sea:?}");
     let vac = at(&mvac, 0.0);
     // The lip turns the vacuum jet by ~68°, within what is drawn.
     assert!(vac.slope > 60f64.to_radians().tan() && vac.slope <= MAX_TURN.tan(), "the vacuum fan: {vac:?}");
@@ -214,5 +215,46 @@ fn the_jet_fills_the_exit_and_narrows_to_its_profile() {
         assert!(
             profile(&plume, mid, 0.6 * r0) < 1.0 && profile(&plume, mid, 0.6 * r0) > profile(&plume, mid, 0.9 * r0)
         );
+    }
+}
+
+/// The mixing layer: Papamoschou & Roshko's growth for the jet's density
+/// against the air's, a few degrees at sea level and to the stratosphere,
+/// its floor in vacuum (where the fan is far wider).
+#[test]
+fn the_mixing_layer_widens_the_jet_in_air() {
+    let (m1d, mvac, _) = engines();
+    let floor = 0.5 * MIXING_LAYER * COMPRESSIBILITY;
+    // (engine, ambient Pa, rate at least, at most)
+    for (d, p, lo, hi) in [
+        (&m1d, SEA_LEVEL, 0.06, 0.09),
+        (&m1d, 19_000.0, 0.06, 0.09), // max-Q, 12 km
+        (&m1d, 1_200.0, 0.045, 0.08), // 30 km
+        (&mvac, 0.0, floor, floor * 1.001),
+    ] {
+        let m = at(d, p).mixing;
+        assert!((lo..=hi).contains(&m), "{p} Pa: {m}");
+    }
+}
+
+/// The Falcon 9's nine Merlins: each plume leaves its own bell and has
+/// reached the gap to its neighbour (half the nearest spacing) within a
+/// few metres, at sea level and at max-Q: one plume from there on, as in
+/// photographs.
+#[test]
+fn the_merlin_plumes_merge_a_few_metres_behind_the_octaweb() {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/craft/falcon9-crew");
+    let ship = sim::craft::load_definition(&path).unwrap().ship.unwrap();
+    let merlins: Vec<_> = ship.engines.iter().filter(|e| e.data.isp_vac == 311.0).map(|e| e.data.pos).collect();
+    assert_eq!(merlins.len(), 9);
+    let spacing = (merlins.iter().enumerate())
+        .flat_map(|(i, a)| merlins[i + 1..].iter().map(move |b| (*a - *b).length()))
+        .fold(f64::INFINITY, f64::min);
+    let (m1d, _, _) = engines();
+    for p in [SEA_LEVEL, 19_000.0] {
+        let plume = at(&m1d, p);
+        assert!(boundary(&plume, 0.0) < 0.5 * spacing, "{p} Pa: separate at the bells");
+        let merge = (1..200).map(|i| f64::from(i) * 0.05).find(|&x| boundary(&plume, x) >= 0.5 * spacing);
+        assert!(merge.is_some_and(|x| x < 4.0), "{p} Pa: merged at {merge:?} m (spacing {spacing} m)");
     }
 }
