@@ -19,6 +19,8 @@ struct PlumeParams {
     light: vec4<f32>,
     // rgb: the blackbody scale per channel (nits); w: the cells the shocks fade over.
     planck: vec4<f32>,
+    // x: the potential core's length (the axis keeps the exit state).
+    core: vec4<f32>,
 }
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(0) var<uniform> plume: PlumeParams;
@@ -37,9 +39,14 @@ fn boundary(x: f32) -> f32 {
     return plume.origin.w + x * k * d / (den + guard);
 }
 
-fn temperature(x: f32, r: f32) -> f32 {
+// r₀/R on the axis: 1 in the potential core, then as the boundary widens.
+fn spread_ratio(x: f32) -> f32 {
+    return plume.origin.w / boundary(max(x - plume.core.x, 0.0));
+}
+
+fn temperature(x: f32) -> f32 {
     let cell = plume.shape.z;
-    let iso = plume.heat.x * pow(plume.origin.w / r, plume.heat.y);
+    let iso = plume.heat.x * pow(spread_ratio(x), plume.heat.y);
     let cells = 0.5 * (1.0 - cos(2.0 * PI * x / cell)) * exp(-x / (plume.planck.w * cell));
     let shocked = iso * (1.0 + plume.heat.z * cells);
     return shocked + (plume.light.w - shocked) * plume.heat.w * (1.0 - exp(-x / cell));
@@ -115,10 +122,10 @@ fn fragment(in: VertexOutput, @builtin(front_facing) front: bool) -> @location(0
         if u >= 1.0 {
             continue;
         }
-        let ratio = plume.origin.w / r;
+        let ratio = spread_ratio(x);
         let kappa = plume.soot.x * ratio * ratio * exp(-x / plume.soot.z) * pow(cos(0.5 * PI * u), plume.soot.y);
         let absorbed = 1.0 - exp(-kappa * ds);
-        let source = (1.0 - albedo) * planck(temperature(x, r)) + albedo * scatter;
+        let source = (1.0 - albedo) * planck(temperature(x)) + albedo * scatter;
         radiance += trans * absorbed * source;
         trans *= 1.0 - absorbed;
     }

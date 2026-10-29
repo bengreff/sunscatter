@@ -11,6 +11,8 @@
 //!   expanded radius, leaving the lip at the jet's Prandtl–Meyer turning
 //!   (narrowing when overexpanded, the wide fan in vacuum; turnings past
 //!   [`MAX_TURN`], the vacuum fan's backflow, are left out).
+//! * **Potential core** ([`potential_core`]): on the axis the gas keeps
+//!   its exit state until the fan from the lip reaches it.
 //! * **Temperature** ([`temperature`]): isentropic cooling as the gas
 //!   spreads (density `∝ (r₀/R)²`, `T ∝ ρ^(γ−1)`); reheating behind the
 //!   shock cells (the normal-shock ratio at the jet's Mach, its strength
@@ -45,6 +47,14 @@ pub const CELLS: f64 = 6.0;
 pub const AFTERBURN_TEMPERATURE: f64 = 2_400.0;
 /// The unburned share at which the afterburning is near full (placeholder).
 pub const UNBURNED_SCALE: f64 = 0.1;
+/// The ambient pressure (Pa) that scales the afterburning,
+/// `1 − exp(−pₐ/P)`: near full to 20 km (5.5 kPa), half at 30 km, a tenth
+/// at 45 km, gone by 60 km: kerolox plumes' afterburning ceases at 40–50 km
+/// (CFD of LOX/kerosene plumes against altitude, "Study on the Influence of
+/// Flight Altitude on the Rocket Plume Radiation Enhancement Effect Caused
+/// by Afterburning", 2021). It once used the exit pressure (`pₐ/pₑ`), which
+/// put out the Merlin's afterburning by 15 km.
+pub const AFTERBURN_PRESSURE: f64 = 1_400.0;
 /// Soot: material density (kg/m³), the absorption function E(m) of its
 /// refractive index, the wavelength of its extinction (m) and its
 /// single-scattering albedo (small particles; placeholders from the soot
@@ -78,6 +88,9 @@ pub struct Plume {
     /// (share of the local temperature).
     pub cell: f64,
     pub shock: f64,
+    /// The potential core's length ([`potential_core`]): the axis keeps
+    /// the exit state this far.
+    pub potential: f64,
     /// Exit temperature and the cooling exponent `2(γ − 1)`.
     pub temperature: f64,
     pub cooling: f64,
@@ -126,10 +139,26 @@ pub fn soot_extinction(rho: f64, soot: f64) -> f64 {
     6.0 * PI * SOOT_E_M * soot * rho / SOOT_DENSITY / SOOT_WAVELENGTH
 }
 
+/// The potential core's length (m) of a jet leaving exit radius `r0` at
+/// Mach `mach`: the first characteristic from the lip (at the Mach angle,
+/// `tan μ = 1/√(M² − 1)`) reaches the axis at `r₀·√(M² − 1)`; upstream of
+/// it the axis has not felt the lip, whatever the air outside (method of
+/// characteristics; Anderson, *Modern Compressible Flow*, ch. 11).
+pub fn potential_core(r0: f64, mach: f64) -> f64 {
+    r0 * (mach * mach - 1.0).max(0.0).sqrt()
+}
+
+/// The gas's spreading on the axis at `x`, `r₀/R` with `R` the boundary
+/// a potential core downstream: 1 in the core, then falling as the
+/// boundary widens.
+pub fn spread_ratio(p: &Plume, x: f64) -> f64 {
+    p.r0 / boundary(p, (x - p.potential).max(0.0))
+}
+
 /// Temperature on the axis at `x` (the shader's, mirrored for its tests).
 #[cfg_attr(not(test), allow(dead_code))]
 pub fn temperature(p: &Plume, x: f64) -> f64 {
-    let iso = p.temperature * (p.r0 / boundary(p, x)).powf(p.cooling);
+    let iso = p.temperature * spread_ratio(p, x).powf(p.cooling);
     let cells = 0.5 * (1.0 - (2.0 * PI * x / p.cell).cos()) * (-x / (CELLS * p.cell)).exp();
     let shocked = iso * (1.0 + p.shock * cells);
     shocked + (AFTERBURN_TEMPERATURE - shocked) * p.burn * (1.0 - (-x / p.cell).exp())
@@ -137,7 +166,13 @@ pub fn temperature(p: &Plume, x: f64) -> f64 {
 
 /// Soot extinction (1/m) on the axis at `x`.
 pub fn extinction(p: &Plume, x: f64) -> f64 {
-    p.kappa * (p.r0 / boundary(p, x)).powi(2) * (-x / p.core).exp()
+    p.kappa * spread_ratio(p, x).powi(2) * (-x / p.core).exp()
+}
+
+/// The afterburning's weight (0..1) in air at `ambient` Pa of exhaust
+/// with `unburned` share of its fuel left: none in vacuum or without fuel.
+pub fn afterburning(ambient: f64, unburned: f64) -> f64 {
+    (1.0 - (-ambient.max(0.0) / AFTERBURN_PRESSURE).exp()) * (1.0 - (-unburned / UNBURNED_SCALE).exp())
 }
 
 /// The plume of exit state `s` and its jet `j` in air at `ambient` Pa.
@@ -146,14 +181,14 @@ pub fn plume(s: &ExitState, j: &Jet, ambient: f64) -> Plume {
     let r0 = s.radius;
     let rj = j.radius.min(r0 * MAX_SPREAD);
     let cell = j.cell.min(core_length(rj, j.mach)).max(r0);
-    let burn =
-        (1.0 - (-ambient / s.pressure.max(1e-9)).exp()) * (1.0 - (-s.composition.unburned / UNBURNED_SCALE).exp());
+    let burn = afterburning(ambient, s.composition.unburned);
     let mut p = Plume {
         r0,
         slope: j.turn.clamp(-MAX_TURN, MAX_TURN).tan(),
         spread: rj - r0,
         cell,
         shock: shock_strength(j.pressure_ratio) * (normal_shock_temperature(j.mach, g) - 1.0),
+        potential: potential_core(r0, s.mach),
         temperature: s.temperature,
         cooling: 2.0 * (g - 1.0),
         burn,
@@ -228,6 +263,8 @@ pub struct PlumeParams {
     pub light: Vec4,
     /// rgb: the blackbody scale per channel (nits), w: [`CELLS`].
     pub planck: Vec4,
+    /// x: the potential core's length; yzw unused.
+    pub core: Vec4,
 }
 
 impl PlumeParams {
@@ -246,6 +283,7 @@ impl PlumeParams {
             soot: Vec4::new(f(p.kappa), f(p.profile), f(p.core), f(SOOT_ALBEDO)),
             light: Vec3::from_array(starlight).extend(f(AFTERBURN_TEMPERATURE)),
             planck: Vec4::new(f(unit[0] * white[0]), f(unit[1] * white[1]), f(unit[2] * white[2]), f(CELLS)),
+            core: Vec4::new(f(p.potential), 0.0, 0.0, 0.0),
         }
     }
 }

@@ -119,8 +119,67 @@ fn merlin_plumes_narrow_at_sea_level_fan_out_in_vacuum_and_never_pop() {
 fn the_plume_is_bright_where_shocked_or_burning_and_fades_with_altitude() {
     let (m1d, _, _) = engines();
     let hottest = |p: &Plume| (0..200).map(|i| temperature(p, p.length * f64::from(i) / 200.0)).fold(0.0, f64::max);
-    let (sea, high) = (at(&m1d, SEA_LEVEL), at(&m1d, 100.0));
+    // High: 10 Pa (~65 km), past the afterburning's end.
+    let (sea, high) = (at(&m1d, SEA_LEVEL), at(&m1d, 10.0));
     assert!(hottest(&sea) > 1.2 * sea.temperature, "{}", hottest(&sea));
     assert!(hottest(&high) <= high.temperature * 1.01);
     assert!(luminance(planck_rgb(hottest(&sea))) > 10.0 * luminance(planck_rgb(hottest(&high))));
+}
+
+#[test]
+fn the_axis_keeps_the_exit_state_through_the_potential_core_at_every_altitude() {
+    // Mach 1: no core; the Merlin 1D's Mach 3.76: 3.6 exit radii.
+    assert_eq!(potential_core(1.0, 1.0), 0.0);
+    assert!((potential_core(1.0, 3.76) - 3.62).abs() < 0.01);
+    let (m1d, mvac, _) = engines();
+    for (d, p) in [(&m1d, SEA_LEVEL), (&m1d, 5_500.0), (&m1d, 20.0), (&mvac, 0.0)] {
+        let plume = at(d, p);
+        assert!(plume.potential > 3.0 * plume.r0, "{p} Pa: {plume:?}");
+        // Inside the core: the exit temperature, unshocked and unburnt there.
+        let x = 0.5 * plume.potential;
+        assert!((spread_ratio(&plume, x) - 1.0).abs() < 1e-12, "{p} Pa");
+        assert!(temperature(&plume, 0.0) >= plume.temperature * 0.999, "{p} Pa");
+        // Beyond it the gas cools as it spreads (when it does).
+        let far = plume.potential + 10.0 * plume.r0;
+        if plume.spread > 0.0 {
+            assert!(spread_ratio(&plume, far) < 1.0, "{p} Pa");
+        }
+    }
+}
+
+#[test]
+fn afterburning_lasts_to_the_stratosphere_and_ceases_by_fifty_km() {
+    // (ambient Pa: ~altitude, at least, at most) for the Merlin's unburned 0.32.
+    for (p, lo, hi) in [
+        (SEA_LEVEL, 0.95, 1.0),
+        (5_500.0, 0.9, 1.0), // 20 km
+        (1_200.0, 0.4, 0.7), // 30 km
+        (150.0, 0.05, 0.15), // 45 km
+        (22.0, 0.0, 0.02),   // 60 km
+        (0.0, 0.0, 0.0),     // vacuum
+    ] {
+        let w = afterburning(p, 0.32);
+        assert!((lo..=hi).contains(&w), "{p} Pa: {w}");
+    }
+    assert_eq!(afterburning(SEA_LEVEL, 0.0), 0.0, "no fuel left, no afterburning");
+}
+
+#[test]
+fn the_plume_starts_at_the_nozzle_exit_with_its_radius() {
+    // The bound (the unit cylinder, centred) runs from the exit down the
+    // exhaust, and the boundary at the exit is the exit radius: attached
+    // at every altitude, whatever the exhaust's direction.
+    let (m1d, mvac, _) = engines();
+    for (d, p) in [(&m1d, SEA_LEVEL), (&m1d, 1_200.0), (&mvac, 20.0), (&mvac, 0.0)] {
+        let plume = at(d, p);
+        let radius = (d.exit_area / std::f64::consts::PI).sqrt();
+        assert!((plume.r0 - radius).abs() < 1e-9 && (boundary(&plume, 0.0) - radius).abs() < 1e-9, "{p} Pa");
+        for dir in [glam::DVec3::NEG_Z, glam::DVec3::new(0.1, 0.0, -1.0).normalize()] {
+            let n = super::super::parts::Nozzle { exit: glam::DVec3::new(0.3, 0.0, -12.0), exhaust: dir, radius };
+            let t = bound(&n, &plume);
+            // The cylinder's near cap (local y = −0.5).
+            let start = t.transform_point(Vec3::new(0.0, -0.5, 0.0)).as_dvec3();
+            assert!((start - n.exit).length() < 1e-3 * plume.length.max(1.0), "{p} Pa {dir}: {start} vs {}", n.exit);
+        }
+    }
 }
