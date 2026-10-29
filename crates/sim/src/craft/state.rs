@@ -338,8 +338,9 @@ impl ShipState {
 
     /// The state of the piece holding the parts `kept` (`Part::id`s, its
     /// definition `piece`): every entry of those parts, in order; joints
-    /// within the piece; the cabin if its part is kept; the clamps as they
-    /// were. Its stages and functions keep the commands that name something
+    /// within the piece; the cabin if its part is kept; held by the clamps
+    /// if it was and keeps their joint (a capsule leaving the pad is not).
+    /// Its stages and functions keep the commands that name something
     /// the piece has (and those that name nothing: the clamps, the chutes),
     /// stages and functions left empty go, and the sequence's position
     /// counts the stages kept before it.
@@ -371,7 +372,7 @@ impl ShipState {
             power: by(&self.power, |x| x.part, kept),
             cabin: self.cabin.clone().filter(|c| kept.contains(&c.part)),
             fates: by(&self.fates, |x| x.part, kept),
-            clamped: self.clamped,
+            clamped: self.clamped && piece.joints.iter().any(|j| j.kind == super::assembly::JointKind::HoldDown),
             sequence,
             stages: stages.into_iter().flatten().collect(),
             functions: mine(&self.functions).into_iter().flatten().collect(),
