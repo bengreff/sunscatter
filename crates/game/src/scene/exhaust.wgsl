@@ -44,6 +44,18 @@ fn spread_ratio(x: f32) -> f32 {
     return plume.origin.w / boundary(max(x - plume.core.x, 0.0));
 }
 
+// The soot's share across the jet at `rho` from the axis, boundary `r`
+// (`exhaust::profile`): even in a core from the exit's radius at the lip
+// to the axis at the potential core's end, Simons' outside it.
+fn profile(x: f32, rho: f32, r: f32) -> f32 {
+    let core = min(plume.origin.w * clamp(1.0 - x / max(plume.core.x, 1e-6), 0.0, 1.0), r);
+    if rho <= core {
+        return 1.0;
+    }
+    let s = min((rho - core) / max(r - core, 1e-6), 1.0);
+    return pow(cos(0.5 * PI * s), plume.soot.y);
+}
+
 fn temperature(x: f32) -> f32 {
     let cell = plume.shape.z;
     let iso = plume.heat.x * pow(spread_ratio(x), plume.heat.y);
@@ -118,12 +130,12 @@ fn fragment(in: VertexOutput, @builtin(front_facing) front: bool) -> @location(0
             continue;
         }
         let r = boundary(x);
-        let u = length(pt - x * a) / r;
-        if u >= 1.0 {
+        let rho = length(pt - x * a);
+        if rho >= r {
             continue;
         }
         let ratio = spread_ratio(x);
-        let kappa = plume.soot.x * ratio * ratio * exp(-x / plume.soot.z) * pow(cos(0.5 * PI * u), plume.soot.y);
+        let kappa = plume.soot.x * ratio * ratio * exp(-x / plume.soot.z) * profile(x, rho, r);
         let absorbed = 1.0 - exp(-kappa * ds);
         let source = (1.0 - albedo) * planck(temperature(x)) + albedo * scatter;
         radiance += trans * absorbed * source;

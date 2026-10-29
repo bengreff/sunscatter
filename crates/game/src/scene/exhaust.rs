@@ -13,6 +13,9 @@
 //!   [`MAX_TURN`], the vacuum fan's backflow, are left out).
 //! * **Potential core** ([`potential_core`]): on the axis the gas keeps
 //!   its exit state until the fan from the lip reaches it.
+//! * **Across the jet** ([`profile`]): the gas fills the exit evenly, so
+//!   the plume leaves the lip as wide as the bell; its even core shrinks to
+//!   the axis over the potential core, with Simons' profile outside it.
 //! * **Temperature** ([`temperature`]): isentropic cooling as the gas
 //!   spreads (density `∝ (r₀/R)²`, `T ∝ ρ^(γ−1)`); reheating behind the
 //!   shock cells (the normal-shock ratio at the jet's Mach, its strength
@@ -162,6 +165,27 @@ pub fn temperature(p: &Plume, x: f64) -> f64 {
     let cells = 0.5 * (1.0 - (2.0 * PI * x / p.cell).cos()) * (-x / (CELLS * p.cell)).exp();
     let shocked = iso * (1.0 + p.shock * cells);
     shocked + (AFTERBURN_TEMPERATURE - shocked) * p.burn * (1.0 - (-x / p.cell).exp())
+}
+
+/// The soot's share across the jet at `rho` from the axis at `x` (0..1,
+/// times the axis's [`extinction`]). Within an even core it is 1. The core
+/// is the exit's radius at the lip and shrinks to the axis over the
+/// potential core, as the mixing layer from the lip grows. Outside it,
+/// out to the boundary, Simons' `cos(π/2·s)^(2/(γ−1))` applies. That is a
+/// far-field profile: applied across the exit too, it drew the jet a third
+/// as wide as the bell (the owner's "gap/thickness discrepancy",
+/// 2026-10-29). The shader's, mirrored for its tests.
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn profile(p: &Plume, x: f64, rho: f64) -> f64 {
+    let r = boundary(p, x);
+    let core = (p.r0 * (1.0 - x / p.potential.max(1e-6)).clamp(0.0, 1.0)).min(r);
+    if rho <= core {
+        return 1.0;
+    }
+    if rho >= r {
+        return 0.0;
+    }
+    (0.5 * PI * (rho - core) / (r - core)).cos().powf(p.profile)
 }
 
 /// Soot extinction (1/m) on the axis at `x`.

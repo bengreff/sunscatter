@@ -183,3 +183,36 @@ fn the_plume_starts_at_the_nozzle_exit_with_its_radius() {
         }
     }
 }
+
+/// Across the jet: at the lip the soot fills the exit evenly (the plume as
+/// wide as the bell's exit), the even core shrinking to the axis over the
+/// potential core; past it Simons' profile over the boundary, as before.
+#[test]
+fn the_jet_fills_the_exit_and_narrows_to_its_profile() {
+    let (m1d, mvac, _) = engines();
+    for (d, p) in [(&m1d, SEA_LEVEL), (&mvac, 0.0)] {
+        let plume = at(d, p);
+        let (r0, core) = (plume.r0, plume.potential);
+        assert!(core > r0, "{p} Pa: a potential core of {core} m");
+        // (x, rho, share): even at the lip; half way, the core's half
+        // radius even, then falling; past the core, Simons' alone.
+        let r = |x: f64| boundary(&plume, x);
+        let simons = |x: f64, rho: f64| (0.5 * PI * rho / r(x)).cos().powf(plume.profile);
+        let table = [
+            (0.0, 0.0, 1.0),
+            (0.0, 0.99 * r0, 1.0),
+            (0.5 * core, 0.49 * r0, 1.0),
+            (2.0 * core, 0.0, 1.0),
+            (2.0 * core, 0.3 * r(2.0 * core), simons(2.0 * core, 0.3 * r(2.0 * core))),
+            (2.0 * core, r(2.0 * core), 0.0),
+        ];
+        for (x, rho, want) in table {
+            assert!((profile(&plume, x, rho) - want).abs() < 1e-9, "{p} Pa at {x}, {rho}: {}", profile(&plume, x, rho));
+        }
+        // Falling outward everywhere, and below 1 just outside the core.
+        let mid = 0.5 * core;
+        assert!(
+            profile(&plume, mid, 0.6 * r0) < 1.0 && profile(&plume, mid, 0.6 * r0) > profile(&plume, mid, 0.9 * r0)
+        );
+    }
+}
