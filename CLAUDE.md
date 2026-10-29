@@ -31,7 +31,7 @@ Real-scale 3D spaceflight, mission-design and logistics game in Rust. Being rebu
 - CI: a fast `sim` job (no Bevy; fmt, file sizes, decision references, clippy, tests) and a separate `game` job, on macOS and Windows. `tools/check_decision_refs.sh` fails on citations of deleted (superseded) decisions.
 - Windows: at the end of a big session, try `ssh backhouse` (the owner's PC) and run the demo there (procedure: `docs/windows.md`); if it doesn't connect, skip it.
 - Hooks (`.claude/settings.json`, scripts in `tools/hooks/`): the handoff is loaded at session start, `cargo check` of the owning crate runs after editing a `.rs` file, and `cargo test -p sim` runs on stop. Failures are fed back (exit 2).
-- Git pre-push hook (`tools/git-hooks/pre-push`; enable per checkout with `git config core.hooksPath tools/git-hooks`): runs CI's checks on the exact commit being pushed, in a private mirror, and refuses a push that would fail CI (a night of red pushes flooded the owner's inbox, 2026-10-26).
+- Git pre-push hook (`tools/git-hooks/pre-push`; enable per checkout with `git config core.hooksPath tools/git-hooks`): runs CI's checks on the exact commit being pushed, in a private mirror, and refuses a push that would fail CI (a night of red pushes flooded the owner's inbox, 2026-10-26). Its pre-commit hook refuses a commit from a stale index, one that would revert HEAD's version of a file the work tree still has (after an agent's private-index commit; `git reset -q -- <file>`).
 
 ## Non-negotiable rules
 1. **Physics has no reference bodies.** Anchors/frames exist only for precision or display; changing them must not change trajectories (invariance tests enforce this). Never add SOI logic.

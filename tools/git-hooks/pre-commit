@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Refuses a commit that would revert HEAD's version of a file the work tree
+# still has: the shared index went stale after an agent's private-index
+# commit (agent-rules.md), and committing from it silently undoes their work
+# (b48bc21 reverted 1f9f5b3, 2026-10-29). Fix: git reset -q -- <file>.
+stale=()
+while IFS= read -r f; do
+  [ -f "$f" ] || continue
+  head=$(git rev-parse -q --verify "HEAD:$f") || continue
+  [ "$(git hash-object -- "$f")" = "$head" ] && stale+=("$f")
+done < <(git diff --cached --name-only --diff-filter=M)
+if [ ${#stale[@]} -gt 0 ]; then
+  echo "pre-commit: the index is stale (it would revert HEAD's version, which the work tree still has):" >&2
+  printf '  %s\n' "${stale[@]}" >&2
+  echo "  run: git reset -q -- <file>  (or git reset -q to refresh the whole index)" >&2
+  exit 1
+fi
