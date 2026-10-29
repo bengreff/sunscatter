@@ -1,0 +1,23 @@
+# Brief: SEQUENCE, the sequence bug sweep (2026-10-29)
+
+The owner's queue, item 2 ([interview-2026-10-29.md](interview-2026-10-29.md); the bugs are listed in [open-issues.md](open-issues.md), "From the night's review"). Follow [agent-rules.md](agent-rules.md). Your name is SEQUENCE; your target dir is `target/agents/sequence`. The lead stays out of `crates/sim` while you run.
+
+## The work, in order
+
+Each bug gets a failing test first (in the owning module's tests), then the fix, then one commit.
+
+1. **Pad abort past Liftoff.** After a pad abort the sequence index is past Liftoff, so Space would then run MECO and stage separation on the pad. Find the path: the Falcon 9's "Launch abort" function, and whatever moves `ShipState::sequence` (`sim::systems::command`). A function must never move the sequence. If an abort on the pad does need to change it, record the rule you chose under "Open for the owner" in [fixes-2026-10-28.md](fixes-2026-10-28.md).
+2. **`Vessel::set_stages` keeps the index.** Editing the stages in flight only shortens the index, so stages can be skipped or repeated. The stages already run must stay as they were (D111: `edit_sequence` edits only stages not yet run), and the index must still count exactly those.
+3. **A release armed with no engine lit stays armed.** The vessel is then held in live ticks forever, and rails warp is refused. The real pad's rule: the clamps let go only at full thrust, and when the engines stop, the release is disarmed (with an event in the log). Keep D114: AGAIN on Ignition relights the engines on the pad, and running Liftoff again re-arms the release.
+4. **Grid-fin deflections after a split.** `Runtime::partition` copies them whole, so they can misalign. Partition them by each piece's fins.
+5. **An aborted bubble tick** does not restore the `ShipState` changes made in `begin_tick`. Restore them, or make `begin_tick` not mutate before the tick commits.
+
+The rules that matter here (CLAUDE.md): determinism (`sim::math`, no `mul_add`), one owner per piece of math, and the stored trajectory is the truth. Run `cargo test -p sim` after each fix, and `cargo clippy -p sim --all-targets -- -D warnings`.
+
+## Files
+
+Yours: `crates/sim/src/vessel/*`, `crates/sim/src/systems/{command,runtime,propulsion}.rs`, `crates/sim/src/craft/state*.rs`, and this brief. Docs: remove each fixed bug from `open-issues.md`; update `docs/architecture.md` rows where an owner changes.
+
+## State
+
+(Update as you land: commits with hashes, what is left.)
