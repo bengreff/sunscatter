@@ -59,9 +59,9 @@ The Crew menu's limits (rough physiology or NASA-STD-3001), U/E data in `falcon9
 ## Gotchas
 
 - **Agents follow [agent-rules.md](agent-rules.md)** (shared checkout, private-index commits, demo lock, stop at ~150k, report ≤ 15 lines). After their private-index commits the shared index goes stale: once they have finished, `git reset -q` (it keeps the tree). An agent can stall at the stream watchdog (PLUME did after ~45 min); `SendMessage` resumes it.
-- **The machine:** two agents plus the lead building at once took the load average to ~47, and a `cargo check -p game` took over 10 minutes. Plan an hour as ~40 minutes of work. `target/agents/menus` is the renamed warm copy of the old glow dir.
+- **The machine:** two agents plus the lead building at once took the load average to ~47, and a `cargo check -p game` took over 10 minutes. Plan an hour as ~40 minutes of work. `target/agents/menus` (22 GB) is the one warm copy for the next agent.
 - **Demos:** fewer than 10 windows in a burst; one at a time under `target/demo.lock` (take it only if `mkdir` succeeds; remove only your own).
 - The egui proportional font lacks ▲ ▼ ▸ →: use ⏶ ⏷ or test the glyph in a demo shot. egui areas default to 400 px tall: set the max height before a scroll area.
-- **The disk fills:** each agent's target dir is 10–19 GB, `target/prepush` ~22 GB, `target/debug` ~23 GB; `df -h` before long runs.
+- **The disk** was 96 % full on 2026-10-29 (now ~80 GB free after a cleanup). Follow the disk hygiene rules in `docs/process.md`: keep ≥ 30 GB free, delete finished agents' dirs, never set `CARGO_TARGET_DIR=target/debug`. The SessionStart hook prints the state.
 - `cargo test` stops at the first failing binary unless `--no-fail-fast`. The stop hook tests the shared tree, so an agent's unfinished work shows there.
 - Saves are not compatible across versions (D063). The playtest save (version 14, the test craft in low orbit, no launch save: its revert makes a new craft on the pad) embeds `CraftParams` and the ephemeris id. Regenerate it from the demo's Orbit step (`orbit_save.ron`) when they change. `./run play`, then Cmd+L.

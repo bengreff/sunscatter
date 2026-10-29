@@ -10,5 +10,6 @@ Prepare this session for a context reset (the owner will run /clear next; a Sess
    Remove anything that is now stale. Stable knowledge goes in its proper home (spec, `decisions.md`, `architecture.md`, CLAUDE.md), not in the handoff.
 2. Make sure every decision or spec agreed in this conversation is written in the repo; the new session will not see the conversation.
 3. Run `tools/check_decision_refs.sh`, `cargo fmt --all --check`, and the tests for any code changed but not yet committed. Commit (small commits, one purpose each) and push.
-4. Reply in 3–5 lines: what the next session will start on, and "Run /clear to continue."
+4. Disk hygiene (`docs/process.md`): delete `target/agents/<name>` for every agent whose work has landed (keep at most one warm copy handed to a next agent), any `target/debug/debug`, and stray demo output in the repo. Report `df -h .` in the reply.
+5. Reply in 3–5 lines: what the next session will start on, and "Run /clear to continue."
 $ARGUMENTS

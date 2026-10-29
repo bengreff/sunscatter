@@ -12,7 +12,7 @@ Each agent has one brief (`brief-<name>.md`); these rules apply to all of them. 
 ## The machine
 
 - Your own target dir: `CARGO_TARGET_DIR=target/agents/<name>`. `cargo -j 4`, one cargo command at a time. Release builds only for a demo.
-- Check `df -h .` before long builds; under 10 GB free, delete `target/agents/<name>/*/incremental`.
+- Check `df -h .` before long builds; under 10 GB free, delete `target/agents/<name>/*/incremental`. Never point `CARGO_TARGET_DIR` at `target/debug`. Shots and logs go to your scratchpad. The lead deletes your target dir when your work has landed (disk hygiene: `docs/process.md`).
 - **Demos are allowed** (owner, 2026-10-27: fewer than 10 windows in a burst is fine), offscreen preferred (`SUNSCATTER_DEMO_OFFSCREEN=1`), **one game or demo at a time on the machine**: take the lock with `mkdir target/demo.lock` (if it fails, do other work and try later; a lock older than an hour with no `game` process running is stale and can be removed), `rmdir target/demo.lock` when done. Run nothing unless your own `mkdir` succeeded, and remove only the lock you made. Use `SUNSCATTER_DEMO_STOP_AFTER`, `SUNSCATTER_DEMO_ONLY` and `SUNSCATTER_DEMO_NO_BENCH=1` to keep runs short, and write the shots to your scratchpad. Look at them with the Read tool. Kill your own leftover game or cargo processes.
 - No sub-agents.
 
