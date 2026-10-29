@@ -72,7 +72,8 @@ pub struct TerrainPlugin;
 impl Plugin for TerrainPlugin {
     fn build(&self, app: &mut App) {
         embedded_asset!(app, "terrain.wgsl");
-        app.add_plugins(MaterialPlugin::<TerrainMaterial>::default());
+        // The loading screen waits mostly for the terrain (`Terrain::loading`).
+        app.add_plugins((MaterialPlugin::<TerrainMaterial>::default(), crate::scene::loading::LoadingPlugin));
     }
 }
 
@@ -140,6 +141,16 @@ impl Terrain {
     /// Each terrain body's frame data (lighting, fog), to fill this frame.
     pub fn frames_mut(&mut self) -> impl Iterator<Item = (NodeId, &mut TerrainFrame)> {
         self.bodies.iter_mut().map(|b| (b.node, &mut b.frame))
+    }
+
+    /// Chunks being built and surface maps (colour, water, zones) loading,
+    /// over every body: what the loading screen waits for
+    /// (`loading::Counts`).
+    pub fn loading(&self) -> (usize, usize) {
+        let chunks = self.bodies.iter().map(|b| b.pending.len()).sum();
+        let maps =
+            self.bodies.iter().map(|b| usize::from(b.color_task.is_some()) + usize::from(b.zone_task.is_some())).sum();
+        (chunks, maps)
     }
 
     /// Chunks or surface maps are still being built.

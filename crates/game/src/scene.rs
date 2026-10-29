@@ -3,6 +3,7 @@
 //! simulation state every frame. Surfaces are drawn by `terrain`.
 
 pub mod exhaust;
+pub mod loading;
 pub mod parts;
 pub mod pick;
 pub mod ships;
