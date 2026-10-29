@@ -479,6 +479,18 @@ The player flies everything by hand for now (including a booster landing). Scrip
 - Earth's clouds move smoothly and follow large-scale weather trends. Any time and place can be queried cheaply from the save's seed, and the detail is fractal. No gameplay effect yet.
 - The atmosphere and weather model stays open to exotic conditions: the seasons of an eccentric orbit, or an atmosphere that freezes out.
 
+**D114: One revert, from a launch save; a closed throttle shuts engines down; stages run again.** *Decided, 2026-10-28 (owner).*
+- "Reverting flight to launch/to the pad should be ONE function, and it should RESET EVERYTHING to the last time the current active vessel was launched from the pad." When a vessel is placed on the pad the game writes a launch save to disk; every piece that splits from it keeps the link. Revert loads that file directly: the whole game as it was, fuelled, throttle closed. A save records its active vessel and the screen showing.
+- "Throttling down to 0% should automatically shut off any engine currently running": closing the throttle (from open to 0) shuts every starting or running engine down (its tail-off). An engine lit with the throttle already closed runs at its minimum until the throttle is opened and closed again.
+- "It should be possible to run stages multiple times, activating the functions that can be activated and doing nothing otherwise": a stage already run can be run again; its commands that can act do (an engine with an ignition left starts), the rest do nothing. Opening the throttle again does not relight an engine: a restart is a stage run again (owner, 2026-10-29).
+
+**D115: The ship model follows the real vehicle: its sensors only, published figures over derived ones, adaptive flight software but no autopilot.** *Decided, 2026-10-29 (owner; [interview-2026-10-29.md](plans/interview-2026-10-29.md)).*
+- Sensors: "ONLY add things the real vehicle has." What nothing real measures shows as a dash outside debug mode.
+- Published wins: where a derived value disagrees with a sourced one, the model's inputs change until it reproduces the source (recorded). Inconsistencies with the real Falcon 9 are bugs.
+- Readings carry real noise, drift and outages only where they matter; elsewhere a value shown to its sensor's significant figures stands for its uncertainty. "I really would not like flat out wrong measurements in most cases." Estimates where appropriate.
+- Built-in flight software is adaptive functions reacting to the vehicle's state (engine-out re-trim, launch-commit checks, propellant utilisation, the navigation filter), not guidance: the player flies.
+- Fidelity next: powered components heat their parts (an engine off heats nothing), Dragon's coolant loop and radiators; per-engine gimbals with the engine-out response and hard starts; O₂ / N₂ tanks through regulators and leaks, suits abstract.
+
 ## Open questions
 
 1. What kind of organization the player leads (D027).
