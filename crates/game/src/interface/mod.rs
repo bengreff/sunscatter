@@ -97,9 +97,7 @@ pub fn apply_style(
 /// itself (the plumes at max-Q sit behind the navball cluster).
 fn demo_ui_scale() -> Option<f32> {
     static SCALE: std::sync::OnceLock<Option<f32>> = std::sync::OnceLock::new();
-    *SCALE.get_or_init(|| {
-        std::env::var("SUNSCATTER_DEMO_UI_SCALE").ok()?.parse::<f32>().ok().filter(|s| *s > 0.0)
-    })
+    *SCALE.get_or_init(|| std::env::var("SUNSCATTER_DEMO_UI_SCALE").ok()?.parse::<f32>().ok().filter(|s| *s > 0.0))
 }
 
 /// Where the HUD's panels were drawn last frame (the navball cluster, the
