@@ -653,6 +653,8 @@ impl Vessel {
 }
 
 #[cfg(test)]
+mod sequence_tests;
+#[cfg(test)]
 mod ship_loads_tests;
 #[cfg(test)]
 mod ship_systems_tests;

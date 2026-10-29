@@ -210,6 +210,12 @@ impl Vessel {
         let capacity = self.craft.mass.capacity;
         let fill = if capacity > 0.0 { self.propellant / capacity } else { 0.0 };
         let (q, omega) = (self.attitude.q, self.attitude.omega);
+        // A split disarms the pad's armed release: the launch did not
+        // happen (its stage is next again in every piece).
+        if let Some(state) = self.ship.as_mut().filter(|s| s.clamped) {
+            let text = "Clamps: release disarmed by the separation; clamps held".to_string();
+            crate::systems::propulsion::disarm(state, self.time, text, true);
+        }
         let total = Shares::of(&old.parts);
         let mut crew = self.crew;
         let mut pieces: Vec<Vessel> = Vec::new();
