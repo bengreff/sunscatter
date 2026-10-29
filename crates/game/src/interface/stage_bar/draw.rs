@@ -1,6 +1,6 @@
 //! Drawing the staging bar with egui (its rules are `rows` and `icons`):
 //! the rows in a scroll area that keeps the next stage in view, the active
-//! stage, the air switch; dragging and dropping stages and commands,
+//! stage, the stages run before it (one line each), the air switch; dragging and dropping stages and commands,
 //! deleting a stage with a confirmation, clicking an icon.
 
 use super::icons::{self, SIZE};
@@ -30,7 +30,8 @@ fn inner() -> f32 {
 pub fn bar(ctx: &egui::Context, rows: &[Row], bar: &mut StageBar) -> Vec<Action> {
     let mut out = Vec::new();
     let screen = ctx.content_rect();
-    let room = (screen.height() - 2.0 * layout::MARGIN - 240.0).max(120.0);
+    let done = rows.iter().filter(|r| r.place == Place::Done).count() as f32;
+    let room = (screen.height() - 2.0 * layout::MARGIN - 240.0 - DONE_HEIGHT * done).max(120.0);
     egui::Area::new(Id::new(AREA))
         .anchor(Align2::RIGHT_BOTTOM, [-layout::MARGIN, -layout::MARGIN])
         .movable(false)
@@ -42,7 +43,8 @@ pub fn bar(ctx: &egui::Context, rows: &[Row], bar: &mut StageBar) -> Vec<Action>
             theme::panel_frame().inner_margin(egui::Margin::same(6)).show(ui, |ui| {
                 ui.set_width(inner());
                 ui.spacing_mut().item_spacing = vec2(4.0, 3.0);
-                let pending: Vec<&Row> = rows.iter().filter(|r| r.place != Place::Active).collect();
+                let pending: Vec<&Row> =
+                    rows.iter().filter(|r| matches!(r.place, Place::Next | Place::Later)).collect();
                 if pending.is_empty() {
                     ui.label(RichText::new("no stage left").small().color(theme::DIM));
                 }
@@ -55,12 +57,41 @@ pub fn bar(ctx: &egui::Context, rows: &[Row], bar: &mut StageBar) -> Vec<Action>
                     ui.add_space(2.0);
                     stage(ui, row, bar, &mut out);
                 }
+                for row in rows.iter().filter(|r| r.place == Place::Done) {
+                    done_line(ui, row, &mut out);
+                }
                 ui.add_space(2.0);
                 switch(ui, bar);
             });
         });
     dragged(ctx, rows);
     out
+}
+
+/// The height of a stage run before the active one (one line).
+const DONE_HEIGHT: f32 = 19.0;
+
+/// A stage run before the active one: its number and name, and AGAIN.
+fn done_line(ui: &mut egui::Ui, row: &Row, out: &mut Vec<Action>) {
+    let Some(j) = row.stage else { return };
+    ui.horizontal(|ui| {
+        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+            again(ui, j, out);
+            let number = row.number.map(|n| format!("{n}  ")).unwrap_or_default();
+            let text = RichText::new(format!("{number}{}", row.name)).small().color(theme::DIM);
+            ui.add(egui::Label::new(text).truncate());
+        });
+    });
+}
+
+/// The AGAIN button of stage `j` (D114).
+fn again(ui: &mut egui::Ui, j: usize, out: &mut Vec<Action>) {
+    let button = ui.add(egui::Button::new(RichText::new("AGAIN").small().color(theme::GOOD)).small());
+    let hint =
+        "Run this stage again: what can act does (an engine off with an ignition left starts), the rest does nothing";
+    if button.on_hover_text(hint).clicked() {
+        out.push(Action::Again(j as u32));
+    }
 }
 
 /// What is being dragged, shown at the pointer.
@@ -98,11 +129,11 @@ fn switch(ui: &mut egui::Ui, bar: &mut StageBar) {
 /// One stage: its header, figures and icons; drops onto it edit the
 /// sequence.
 fn stage(ui: &mut egui::Ui, row: &Row, bar: &mut StageBar, out: &mut Vec<Action>) {
-    let editable = row.place != Place::Active && row.stage.is_some();
+    let editable = matches!(row.place, Place::Next | Place::Later) && row.stage.is_some();
     let border = match row.place {
         Place::Next => theme::ACCENT,
         Place::Active => theme::GOOD,
-        Place::Later => theme::BORDER,
+        Place::Later | Place::Done => theme::BORDER,
     };
     let frame =
         egui::Frame::new().stroke(Stroke::new(1.0, border)).corner_radius(4).inner_margin(egui::Margin::same(4));
@@ -134,6 +165,7 @@ fn header(ui: &mut egui::Ui, row: &Row, editable: bool, bar: &mut StageBar, out:
         Place::Next => theme::ACCENT,
         Place::Active => theme::GOOD,
         Place::Later => theme::TEXT,
+        Place::Done => theme::DIM,
     };
     ui.horizontal(|ui| header_line(ui, row, editable, colour, bar, out));
     let Some(j) = row.stage.filter(|&j| bar.confirm == Some(j)) else { return };
@@ -174,11 +206,7 @@ fn header_line(
         if row.place == Place::Active {
             ui.label(RichText::new("ACTIVE").small().color(theme::GOOD));
             if let Some(j) = row.stage {
-                let again = ui.add(egui::Button::new(RichText::new("AGAIN").small().color(theme::GOOD)).small());
-                let hint = "Run this stage again: what can act does (an engine off with an ignition left starts), the rest does nothing";
-                if again.on_hover_text(hint).clicked() {
-                    out.push(Action::Again(j as u32));
-                }
+                again(ui, j, out);
             }
         }
         let number = row.number.map(|n| format!("{n}  ")).unwrap_or_default();

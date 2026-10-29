@@ -339,6 +339,18 @@ mod tests {
         assert_eq!(name, state.stages[0].name);
         assert!(lit.iter().all(|&i| state.engines[i].status == EngineStatus::Starting));
         assert_eq!(state.sequence, sequence);
+        // Off the pad, only the engines with a charge left relight (the
+        // Falcon 9's E1, E5 and E9); the rest do nothing.
+        state.clamped = false;
+        for &i in &lit {
+            state.engines[i].status = EngineStatus::Off;
+        }
+        again(&def, &mut state, 0, at).unwrap();
+        for &i in &lit {
+            let want = if state.engines[i].ignitions > 0 { EngineStatus::Starting } else { EngineStatus::Off };
+            assert_eq!(state.engines[i].status, want, "{}", def.engines[i].id);
+        }
+        assert_eq!(lit.iter().filter(|&&i| state.engines[i].status == EngineStatus::Starting).count(), 3);
     }
 
     /// The sequence is edited in flight (D111) through the ship's commands:

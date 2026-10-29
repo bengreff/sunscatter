@@ -59,6 +59,30 @@ fn the_active_stage_shows_the_burn_now() {
     assert!(twr > 1.0, "{twr}");
 }
 
+/// The stages run before the active one follow it, the latest first,
+/// as names only: each can be run again (D114; the owner could not
+/// relight the Merlins once Liftoff was the active stage).
+#[test]
+fn the_stages_run_before_follow_the_active_one() {
+    let (def, mut state, hull) = falcon9();
+    // (stages run, the rows after the next one: name and place)
+    let table: [(u32, &[(&str, Place)]); 3] = [
+        (1, &[("Ignition", Place::Active)]),
+        (2, &[("Liftoff", Place::Active), ("Ignition", Place::Done)]),
+        (3, &[("MECO", Place::Active), ("Liftoff", Place::Done), ("Ignition", Place::Done)]),
+    ];
+    for (run, want) in table {
+        state.sequence = run;
+        let rows = bar(&def, &state, &hull, &Knowledge::perfect());
+        let next = rows.iter().position(|r| r.place == Place::Next).unwrap();
+        let got: Vec<(&str, Place)> = rows[next + 1..].iter().map(|r| (r.name.as_str(), r.place)).collect();
+        assert_eq!(got, want, "{run} run");
+        let done = rows.iter().filter(|r| r.place == Place::Done);
+        assert!(done.clone().all(|r| r.items.is_empty() && r.figures.is_none() && r.stage.is_some()));
+        assert_eq!(done.count() as u32, run - 1);
+    }
+}
+
 #[test]
 fn what_is_not_measured_is_a_dash() {
     let (def, state, hull) = falcon9();

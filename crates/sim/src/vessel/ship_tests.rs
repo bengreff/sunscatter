@@ -398,3 +398,33 @@ fn the_pilots_rcs_mode_gates_the_thrusters() {
     let a = v.rcs_authority().unwrap();
     assert!(a.translate[dir].0 > 0.0 && a.rotate.x > 0.0, "{a:?}");
 }
+
+/// Closing the throttle on the pad shuts the nine Merlins down (D114), and
+/// running Ignition again lights them all from the ground's supply, the
+/// order going through the vessel's queue as the staging bar's AGAIN does.
+#[test]
+fn the_throttle_shuts_the_merlins_down_and_again_relights_them() {
+    let w = world();
+    let craft = craft_of(&CraftId("falcon9-crew".into()));
+    let mut v = Vessel::landed_at(&w, VesselId(1), "Earth", 28.6084, -80.6043, t0(), &craft);
+    let merlins = |x: &Vessel| -> Vec<EngineStatus> {
+        let def = x.ship_def().unwrap();
+        (def.engines.iter().zip(&x.ship().unwrap().engines))
+            .filter(|(d, _)| d.owner.starts_with("s1.merlin"))
+            .map(|(_, e)| e.status)
+            .collect()
+    };
+    assert_eq!(v.next_stage(&w).unwrap().0, "Ignition");
+    v.advance(&w, t0().add_seconds(3.0), &full(1.0), usize::MAX);
+    assert_eq!(merlins(&v), [EngineStatus::Running; 9]);
+    v.advance(&w, t0().add_seconds(6.0), &full(0.0), usize::MAX);
+    assert_eq!(merlins(&v), [EngineStatus::Off; 9], "the throttle closed");
+    v.advance(&w, t0().add_seconds(7.0), &full(1.0), usize::MAX);
+    assert_eq!(merlins(&v), [EngineStatus::Off; 9], "opening it does not relight");
+    v.order_at(v.time, crate::systems::runtime::OrderKind::Again(0)).unwrap();
+    v.advance(&w, t0().add_seconds(7.1), &full(1.0), usize::MAX);
+    assert!(merlins(&v).iter().all(|s| *s != EngineStatus::Off), "{:?}", merlins(&v));
+    v.advance(&w, t0().add_seconds(10.0), &full(1.0), usize::MAX);
+    assert_eq!(merlins(&v), [EngineStatus::Running; 9]);
+    assert!(v.clamped(), "Liftoff has not run");
+}

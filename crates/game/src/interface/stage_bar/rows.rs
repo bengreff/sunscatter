@@ -1,7 +1,8 @@
 //! The staging bar's rows (D111) as pure data with table tests (rule 8):
 //! the stages still to run, the last at the top and the next at the
 //! bottom, then the active stage (the last one run, or what burns now when
-//! none has). Each row shows, where it applies, one bar per propellant
+//! none has), then the stages run before it, the latest first, each with
+//! only its name (all can be run again, D114). Each row shows, where it applies, one bar per propellant
 //! (kg/kg of the tanks its engines draw on), the burnout time and the Δv
 //! (`sim::systems::estimate`); the active row also the thrust, the
 //! thrust-to-weight ratio, the mass now and at burnout and the mean Isp.
@@ -25,6 +26,8 @@ pub enum Place {
     /// Space runs it.
     Next,
     Later,
+    /// Run before the active stage: only its name and AGAIN.
+    Done,
 }
 
 /// One of a stage's commands and the icons of what it acts on.
@@ -117,6 +120,14 @@ pub fn rows(def: &ShipDef, state: &ShipState, est: &Estimates, chute: (&[u32], L
         }),
         (None, None) => {}
     }
+    out.extend((0..next.saturating_sub(1).min(n)).rev().map(|j| Row {
+        stage: Some(j),
+        number: Some((n - 1 - j) as u32),
+        name: state.stages[j].name.clone(),
+        place: Place::Done,
+        items: Vec::new(),
+        figures: None,
+    }));
     out
 }
 
