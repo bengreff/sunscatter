@@ -55,15 +55,16 @@ pub struct PartCards {
 }
 
 impl PartCards {
-    /// Opens part `part`'s card (or moves the open one to where it is now
-    /// asked from).
+    /// A click on part `part` (on the ship or its staging bar icon): opens
+    /// its card, or closes it when it is open (the owner, 2026-10-28).
     pub fn open(&mut self, vessel: VesselId, part: u32, from: From) {
+        if let Some(k) = self.open.iter().position(|c| c.vessel == vessel && c.part == part) {
+            self.open.remove(k);
+            return;
+        }
         self.serial += 1;
         let serial = self.serial;
-        match self.open.iter_mut().find(|c| c.vessel == vessel && c.part == part) {
-            Some(c) => (c.from, c.serial) = (from, serial),
-            None => self.open.push(Open { vessel, part, from, confirm: None, serial }),
-        }
+        self.open.push(Open { vessel, part, from, confirm: None, serial });
     }
 }
 
@@ -253,4 +254,24 @@ fn line(ui: &mut egui::Ui, label: &str, value: &Value, level: crate::format::Lev
             }
         });
     });
+}
+
+#[cfg(test)]
+mod toggle_tests {
+    use super::*;
+
+    /// (clicks on parts, cards open after them): a second click on a part
+    /// closes its card; others stay.
+    #[test]
+    fn a_click_on_an_open_cards_part_closes_it() {
+        let table: [(&[u32], &[u32]); 4] = [(&[3], &[3]), (&[3, 3], &[]), (&[3, 5], &[3, 5]), (&[3, 5, 3], &[5])];
+        for (clicks, want) in table {
+            let mut cards = PartCards::default();
+            for p in clicks {
+                cards.open(VesselId(1), *p, From::Bar);
+            }
+            let open: Vec<u32> = cards.open.iter().map(|c| c.part).collect();
+            assert_eq!(open, want, "{clicks:?}");
+        }
+    }
 }
