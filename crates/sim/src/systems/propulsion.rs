@@ -26,8 +26,7 @@
 //! * **The pad's rule** (falcon9.md §1.2, §4.2): an armed release lets the
 //!   clamps go at the first tick every engine it waits for runs at its
 //!   rated thrust; an engine that fails or stops first aborts the launch
-//!   (every engine shut down, the clamps kept). A release disarmed without
-//!   letting go did not happen: its stage is next again ([`disarm`]).
+//!   (every engine shut down, the clamps kept).
 
 use super::plumbing::Feed;
 use crate::catalog::EngineData;
@@ -426,19 +425,6 @@ fn step_engine(def: &ShipDef, state: &mut ShipState, i: usize, env: &Env) {
     }
 }
 
-/// Disarms the pad's armed release without letting go, with the event
-/// `text`: the release's stage is next again
-/// (`command::release_undone`). Nothing if it is not armed.
-pub fn disarm(state: &mut ShipState, at: Epoch, text: String, alarm: bool) {
-    if !state.runtime.release_armed {
-        return;
-    }
-    state.runtime.release_armed = false;
-    state.runtime.release_engines.clear();
-    state.sequence = super::command::release_undone(&state.stages, state.sequence);
-    state.runtime.event(at, text, alarm);
-}
-
 /// The pad's armed release (see the module).
 fn release(def: &ShipDef, state: &mut ShipState, at: Epoch) -> Vec<Effect> {
     if !state.runtime.release_armed || !state.clamped {
@@ -463,7 +449,9 @@ fn release(def: &ShipDef, state: &mut ShipState, at: Epoch) -> Vec<Effect> {
             run.cutoff = run.level;
             run.reason = Some("pad abort".into());
         }
-        disarm(state, at, format!("Pad abort: {} {why}; clamps held", def.engines[i].id), true);
+        state.runtime.release_armed = false;
+        state.runtime.release_engines.clear();
+        state.runtime.event(at, format!("Pad abort: {} {why}; clamps held", def.engines[i].id), true);
         return Vec::new();
     }
     let rated = |i: usize| {

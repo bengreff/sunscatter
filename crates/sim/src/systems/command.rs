@@ -186,18 +186,6 @@ pub fn edit_sequence(stages: &mut Vec<Stage>, sequence: u32, edit: &SequenceEdit
     Ok(())
 }
 
-/// The sequence's position once a clamp release that did not let go is
-/// undone (a pad abort, a split while it was armed; the clamps still hold
-/// the vessel): the last stage run that releases the clamps is next again,
-/// and the stages run after it are to run again too (review 2026-10-27:
-/// after a pad abort, Space ran MECO and the stage separation on the pad).
-/// AGAIN on the ignition relights the engines (D114). `sequence` itself if
-/// no stage run releases them. A function never moves the sequence.
-pub fn release_undone(stages: &[Stage], sequence: u32) -> u32 {
-    let run = &stages[..(sequence as usize).min(stages.len())];
-    run.iter().rposition(|s| s.actions.contains(&ShipCommand::ReleaseClamps)).map_or(sequence, |k| k as u32)
-}
-
 /// Whether an engine named by `s` waits for its propellant to settle.
 fn settling(def: &ShipDef, state: &ShipState, s: &str) -> bool {
     let waits = |i: usize| state.runtime.engines.get(i).is_some_and(|r| r.settling.is_some());
@@ -301,27 +289,6 @@ pub fn carry_out(def: &ShipDef, state: &mut ShipState, kind: &OrderKind, at: Epo
 mod tests {
     use super::*;
     use crate::systems::runtime::Lost;
-
-    /// A release undone puts the sequence back to the last stage run that
-    /// releases the clamps; without one, it stays.
-    #[test]
-    fn a_release_undone_is_next_again() {
-        let stage = |actions: Vec<ShipCommand>| Stage { name: String::new(), key: None, actions, pinned: false };
-        let ignite = || ShipCommand::Ignite("s1".into());
-        let stages = vec![
-            stage(vec![ignite()]),
-            stage(vec![ShipCommand::ReleaseClamps]),
-            stage(vec![ShipCommand::Shutdown("s1".into())]),
-            stage(vec![ignite(), ShipCommand::ReleaseClamps]),
-            stage(vec![]),
-        ];
-        // (sequence, after)
-        let cases = [(0, 0), (1, 1), (2, 1), (3, 1), (4, 3), (5, 3), (9, 3)];
-        for (sequence, want) in cases {
-            assert_eq!(release_undone(&stages, sequence), want, "{sequence}");
-        }
-        assert_eq!(release_undone(&stages[..1], 1), 1, "no release run");
-    }
 
     /// Without power to the second stage's flight computer the MVac cannot
     /// be started (its start goes through it); with it, it starts.

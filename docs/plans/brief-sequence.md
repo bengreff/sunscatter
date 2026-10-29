@@ -21,10 +21,3 @@ Yours: `crates/sim/src/vessel/*`, `crates/sim/src/systems/{command,runtime,propu
 ## State
 
 (Update as you land: commits with hashes, what is left.)
-
-- **1, pad abort past Liftoff: done** (this commit). The path was the pad's own abort (`propulsion::release`: an engine stopped before full thrust), not a function: Liftoff had run, so the index stayed past it. Also a split while the release was armed (the "Launch abort" function on the pad) disarmed it silently. Now `propulsion::disarm` (both paths, with an event) puts the sequence back to the last stage run that releases the clamps (`command::release_undone`); the capsule leaving the pad is no longer marked clamped (`ShipState::partition`). Functions never moved the sequence (tested). Rule chosen, for the owner: see below.
-- Left, in order: 2 (`set_stages`), 3 (release with no engine lit), 4 (fin deflections at a split), 5 (aborted bubble tick).
-
-### Open for the owner (to copy into fixes-2026-10-28.md once the lead has committed it)
-
-- **After a pad abort, Liftoff is next again** (SEQUENCE, logical default): a release that did not let go (a pad abort, the vessel split while it was armed) did not happen, so the sequence goes back to the stage that armed it, and stages run after it (MECO pressed during the spool-up) are to run again. The Ignition stage counts as run: AGAIN on it relights the Merlins from the pad's supply (D114), then Space runs Liftoff. The alternative was to recycle to the Ignition stage (Space, Space as at first).
