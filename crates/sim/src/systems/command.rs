@@ -95,15 +95,7 @@ pub fn apply(def: &ShipDef, state: &mut ShipState, command: &ShipCommand, cx: Co
                 return none();
             }
             for i in picked {
-                state.runtime.engines[i].settling = None;
-                let e = &mut state.engines[i];
-                if matches!(e.status, EngineStatus::Starting | EngineStatus::Running) {
-                    e.status = EngineStatus::ShuttingDown;
-                    e.timer = 0.0;
-                    let run = &mut state.runtime.engines[i];
-                    run.cutoff = run.level;
-                    run.reason = Some("commanded".into());
-                }
+                super::propulsion::shut_down(state, i, "commanded");
             }
             Ok(Vec::new())
         }
@@ -148,7 +140,9 @@ pub fn apply(def: &ShipDef, state: &mut ShipState, command: &ShipCommand, cx: Co
             }
             Ok(Vec::new())
         }
-        ShipCommand::ReleaseClamps if cx.sequence && state.clamped => {
+        // Released already (a stage run again, D114): nothing to do.
+        ShipCommand::ReleaseClamps if !state.clamped => Ok(Vec::new()),
+        ShipCommand::ReleaseClamps if cx.sequence => {
             state.runtime.release_armed = true;
             state.runtime.release_engines = super::propulsion::lit(state);
             state.runtime.event(cx.at, "Clamps armed: release at full thrust", false);
@@ -224,6 +218,19 @@ pub fn next_stage(def: &ShipDef, state: &mut ShipState, at: Epoch) -> Option<(St
     Some((stage.name.clone(), run(def, state, &stage, cx)))
 }
 
+/// Runs stage `k` of the sequence again (D114), one already run: each of
+/// its commands that can act does (an engine with an ignition left starts),
+/// the rest do nothing (a joint already parted, clamps let go, a mechanism
+/// where it is); the sequence stays. `None` for a stage not yet run.
+pub fn again(def: &ShipDef, state: &mut ShipState, k: u32, at: Epoch) -> Option<(String, Vec<Effect>)> {
+    if k >= state.sequence {
+        return None;
+    }
+    let stage = state.stages.get(k as usize)?.clone();
+    let cx = Context { at, sequence: true };
+    Some((stage.name.clone(), run(def, state, &stage, cx)))
+}
+
 /// Runs a saved function by name; `None` if there is none.
 pub fn function(def: &ShipDef, state: &mut ShipState, name: &str, at: Epoch) -> Option<Vec<Effect>> {
     let stage = state.functions.iter().find(|f| f.name == name)?.clone();
@@ -254,6 +261,16 @@ pub fn carry_out(def: &ShipDef, state: &mut ShipState, kind: &OrderKind, at: Epo
                 e
             }
             None => Vec::new(),
+        },
+        OrderKind::Again(k) => match again(def, state, *k, at) {
+            Some((name, e)) => {
+                state.runtime.event(at, format!("Stage again: {name}"), false);
+                e
+            }
+            None => {
+                state.runtime.event(at, format!("Stage {} has not run yet", k + 1), true);
+                Vec::new()
+            }
         },
         OrderKind::Function(name) => match function(def, state, name, at) {
             Some(e) => {
@@ -295,6 +312,33 @@ mod tests {
             matches!(state.engines[mvac].status, EngineStatus::Starting)
                 || state.runtime.engines[mvac].settling.is_some()
         );
+    }
+
+    /// A stage run again (D114) starts the engines that are off and can
+    /// start, does nothing to those lit, and leaves the sequence; a stage
+    /// not yet run is refused.
+    #[test]
+    fn a_stage_runs_again() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/craft/falcon9-crew");
+        let def = crate::craft::load_definition(&path).unwrap().ship.unwrap();
+        let at = Epoch::new(1_000_000_000, 0.0);
+        let mut state = ShipState::initial(&def);
+        next_stage(&def, &mut state, at).unwrap();
+        let lit: Vec<usize> =
+            (0..def.engines.len()).filter(|&i| state.engines[i].status != EngineStatus::Off).collect();
+        assert!(!lit.is_empty(), "the first stage lights engines");
+        let sequence = state.sequence;
+        assert!(again(&def, &mut state, sequence, at).is_none(), "not run yet");
+        let before = state.engines.clone();
+        again(&def, &mut state, 0, at).unwrap();
+        assert_eq!(state.engines, before, "lit engines: nothing");
+        for &i in &lit {
+            state.engines[i].status = EngineStatus::Off;
+        }
+        let (name, _) = again(&def, &mut state, 0, at).unwrap();
+        assert_eq!(name, state.stages[0].name);
+        assert!(lit.iter().all(|&i| state.engines[i].status == EngineStatus::Starting));
+        assert_eq!(state.sequence, sequence);
     }
 
     /// The sequence is edited in flight (D111) through the ship's commands:

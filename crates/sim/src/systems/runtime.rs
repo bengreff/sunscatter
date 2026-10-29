@@ -74,6 +74,9 @@ pub enum OrderKind {
     Command(ShipCommand),
     /// The next stage of the sequence (Space).
     Stage,
+    /// Stage `k` of the sequence again, one already run (D114): what can
+    /// act does, the rest does nothing; the sequence stays where it is.
+    Again(u32),
     /// A saved function by name.
     Function(String),
 }
@@ -125,6 +128,10 @@ pub struct Runtime {
     /// waits for: those lit when it was armed (or first lit after).
     #[serde(default)]
     pub release_engines: Vec<u32>,
+    /// The pilot's throttle at the last step: closing it (open to 0) shuts
+    /// the engines down (D114).
+    #[serde(default)]
+    pub throttle_was: f64,
     /// The last tick's proper acceleration at the centre of mass, angular
     /// velocity and angular acceleration (body axes): what the liquids,
     /// joints and accelerometers felt.

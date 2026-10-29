@@ -262,6 +262,11 @@ pub struct Vessel {
     /// reached it when uncrewed (D034; `helm`).
     #[serde(default)]
     helm: Helm,
+    /// The launch it comes from (D114): the id it had when placed on the
+    /// pad, kept by every piece split from it; the game names its launch
+    /// save by it. `None`: never on the pad (spawned in orbit).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub launch: Option<VesselId>,
 }
 
 /// Rotation matrix taking body-fixed axes of `body` to inertial axes at `t`.

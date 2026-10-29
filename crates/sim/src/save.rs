@@ -25,7 +25,7 @@ use std::fmt;
 use std::path::Path;
 
 /// Version of the save format. Loading any other version is an error.
-pub const SAVE_VERSION: u32 = 13;
+pub const SAVE_VERSION: u32 = 14;
 
 /// Which ephemeris a save was made against. Vessel states are only
 /// meaningful (and only reproducible) with the same body motions.
@@ -65,6 +65,22 @@ pub struct SaveGame {
     /// saves: 0.
     #[serde(default)]
     pub seed: u64,
+    /// The screen showing when it was saved, so a load comes back to it
+    /// (D114; the game's business, the sim ignores it). A launch save's is
+    /// the flight.
+    #[serde(default)]
+    pub screen: Screen,
+}
+
+/// Which of the game's screens shows (see [`SaveGame::screen`]).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Screen {
+    #[default]
+    Flight,
+    /// The systems screen (Tab).
+    Systems,
+    /// The tracking station (M).
+    TrackingStation,
 }
 
 #[derive(Debug)]
@@ -116,6 +132,7 @@ impl SaveGame {
             active,
             site_clock: None,
             seed: 0,
+            screen: Screen::Flight,
         }
     }
 

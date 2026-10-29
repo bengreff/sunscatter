@@ -166,7 +166,7 @@ Bodies' lines come from the ephemeris with the same revolution rule. The ship's 
 - Settings;
 - Save;
 - Load (the save list);
-- Revert flight to launch;
+- Revert to launch (D114: the one way back to the pad; it loads the launch save written when the active vessel, or the vessel it split from, was placed on the pad, so the whole game is as it was then: fuelled, throttle closed; a vessel without one gets a new craft of its kind on the pad);
 - Tracking station;
 - Quit to desktop.
 

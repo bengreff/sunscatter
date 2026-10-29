@@ -47,6 +47,7 @@ impl Vessel {
             ship: None,
             clear_of: Vec::new(),
             helm: Default::default(),
+            launch: None,
         };
         vessel.init_ship();
         vessel

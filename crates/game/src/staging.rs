@@ -184,8 +184,8 @@ pub fn activate_next(s: &StageInputs, grounded: bool, controls: &mut Controls) -
 }
 
 /// Whether orders arm the parachutes (a craft of parts): a command that
-/// does, the next stage of the vessel's sequence or a saved function with
-/// one. Arming them is the pilot's parachute command (D079).
+/// does, the next stage of the vessel's sequence (or one run again) or a
+/// saved function with one. Arming them is the pilot's parachute command (D079).
 pub fn arms_chutes(state: &sim::craft::state::ShipState, kinds: &[sim::systems::OrderKind]) -> bool {
     use sim::craft::command::ShipCommand::ArmChutes;
     use sim::systems::OrderKind;
@@ -193,6 +193,7 @@ pub fn arms_chutes(state: &sim::craft::state::ShipState, kinds: &[sim::systems::
     kinds.iter().any(|k| match k {
         OrderKind::Command(c) => *c == ArmChutes,
         OrderKind::Stage => state.stages.get(state.sequence as usize).is_some_and(|s| has(&s.actions)),
+        OrderKind::Again(k) => state.stages.get(*k as usize).is_some_and(|s| has(&s.actions)),
         OrderKind::Function(name) => state.functions.iter().any(|f| f.name == *name && has(&f.actions)),
     })
 }

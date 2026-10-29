@@ -17,6 +17,8 @@ pub enum Action {
     /// Open the card of the part (`Part::id`).
     Open(u32),
     NextStage,
+    /// Run stage `.0` again (D114).
+    Again(u32),
 }
 
 /// The inner width of a row (logical px).
@@ -171,6 +173,13 @@ fn header_line(
         }
         if row.place == Place::Active {
             ui.label(RichText::new("ACTIVE").small().color(theme::GOOD));
+            if let Some(j) = row.stage {
+                let again = ui.add(egui::Button::new(RichText::new("AGAIN").small().color(theme::GOOD)).small());
+                let hint = "Run this stage again: what can act does (an engine off with an ignition left starts), the rest does nothing";
+                if again.on_hover_text(hint).clicked() {
+                    out.push(Action::Again(j as u32));
+                }
+            }
         }
         let number = row.number.map(|n| format!("{n}  ")).unwrap_or_default();
         let text = RichText::new(format!("{number}{}", row.name)).small().strong().color(colour);

@@ -116,6 +116,9 @@ pub struct SimState {
     /// The game's seed, made once per new game and saved with it: the
     /// failure fates of the vessels it creates are drawn from it (D105).
     pub seed: u64,
+    /// The active vessel was just placed on the pad: its launch save is to
+    /// be written before it flies (D114, `saves::record_launch`). Not saved.
+    pub launch_pending: bool,
 }
 
 /// A new game's seed: the wall clock and the process, mixed (tests: 0, so
@@ -177,6 +180,7 @@ impl SimState {
         ship.set_clock_offset(&world, site.offset_at(&world, clock));
         let seed = new_game_seed();
         ship.seed_fates(seed);
+        ship.launch = Some(ship.id());
         SimState {
             dominance: Dominance::new(&world.eph, clock),
             dominance_at: clock,
@@ -194,6 +198,7 @@ impl SimState {
             site,
             origin,
             seed,
+            launch_pending: true,
         }
     }
 
@@ -334,6 +339,9 @@ impl SimState {
         let id = self.vessel_ids.allocate();
         let mut ship = Vessel::landed_at(&self.world, id, "Earth", PAD_LAT, PAD_LON, self.clock, craft);
         ship.seed_fates(self.seed);
+        // Its launch (D114): the save written now is what a revert loads.
+        ship.launch = Some(id);
+        self.launch_pending = true;
         // A new vessel's helm is idle (SAS on, throttle closed).
         self.fleet[self.active] = self.synchronised(ship);
         self.warp = 0;

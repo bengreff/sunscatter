@@ -125,16 +125,14 @@ fn main() {
         )
         .add_systems(
             Update,
-            (saves::keys, tracking::update, agent::serve, commands::apply)
+            (saves::keys, tracking::update, agent::serve, commands::apply, saves::record_launch)
                 .chain()
                 .after(hud::pick_bodies)
                 .in_set(Stage::Input),
         )
         .add_systems(
             Update,
-            (interface::pause::track_launch, state::advance, debris::update, state::update_prediction, landing::update)
-                .chain()
-                .in_set(Stage::Simulate),
+            (state::advance, debris::update, state::update_prediction, landing::update).chain().in_set(Stage::Simulate),
         )
         .add_systems(
             Update,
@@ -280,7 +278,6 @@ impl Plugin for GameState {
             .init_resource::<hud::UiState>()
             .init_resource::<hud::FpsMeter>()
             .init_resource::<interface::pause::PauseMenu>()
-            .init_resource::<interface::pause::LaunchSnapshot>()
             .init_resource::<interface::help::Help>()
             .init_resource::<interface::toasts::Toasts>()
             .init_resource::<debris::Breakups>()

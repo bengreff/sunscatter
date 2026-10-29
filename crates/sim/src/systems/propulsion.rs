@@ -5,7 +5,8 @@
 //!   ground's supply on the pad, else one of its charges; thrust and flows
 //!   ramp over its start time as a smooth step) → *running* (its throttle
 //!   held within its range: a running engine cannot go below its minimum;
-//!   zero throttle is not off) → *shutting down* (the tail-off: thrust
+//!   zero throttle is not off, but closing the throttle to 0 shuts it down,
+//!   D114) → *shutting down* (the tail-off: thrust
 //!   decays exponentially with the published shutdown impulse,
 //!   τ = I / F_vac) → *off*; or *failed*.
 //! * **Steady map**: at flow level τ (a fraction of full flow) and ambient
@@ -304,6 +305,7 @@ pub fn stop(def: &ShipDef, state: &mut ShipState, i: usize, why: Stop, at: Epoch
 /// effects the vessel acts on (the clamps' release).
 pub fn step(def: &ShipDef, state: &mut ShipState, env: &Env, feeds: &[Feed]) -> Vec<Effect> {
     state.runtime.refit(def);
+    close_throttle(def, state, env);
     settle_or_start(def, state, env);
     for i in 0..def.engines.len() {
         if !env.debug && inlet_trouble(def, state, i, env, feeds) {
@@ -312,6 +314,43 @@ pub fn step(def: &ShipDef, state: &mut ShipState, env: &Env, feeds: &[Feed]) -> 
         step_engine(def, state, i, env);
     }
     release(def, state, env.at)
+}
+
+/// Starts engine `i`'s shutdown (its tail-off) for `why`, and drops a
+/// start waiting for its propellant; nothing for an engine not lit.
+pub fn shut_down(state: &mut ShipState, i: usize, why: &str) {
+    state.runtime.engines[i].settling = None;
+    let e = &mut state.engines[i];
+    if matches!(e.status, EngineStatus::Starting | EngineStatus::Running) {
+        e.status = EngineStatus::ShuttingDown;
+        e.timer = 0.0;
+        let run = &mut state.runtime.engines[i];
+        run.cutoff = run.level;
+        run.reason = Some(why.into());
+    }
+}
+
+/// Closing the pilot's throttle (open at the last step, 0 now) shuts every
+/// lit engine down (D114); an engine lit with it closed runs at its minimum.
+fn close_throttle(def: &ShipDef, state: &mut ShipState, env: &Env) {
+    let closed = env.throttle <= 0.0 && state.runtime.throttle_was > 0.0;
+    state.runtime.throttle_was = env.throttle;
+    if !closed {
+        return;
+    }
+    let lit: Vec<usize> = (0..def.engines.len())
+        .filter(|&i| {
+            matches!(state.engines[i].status, EngineStatus::Starting | EngineStatus::Running)
+                || state.runtime.engines[i].settling.is_some()
+        })
+        .collect();
+    for &i in &lit {
+        shut_down(state, i, "throttle closed");
+    }
+    if !lit.is_empty() {
+        let text = format!("Throttle closed: {} engine{} shut down", lit.len(), if lit.len() == 1 { "" } else { "s" });
+        state.runtime.event(env.at, text, false);
+    }
 }
 
 /// An engine starting or running on a tank whose outlet is not covered

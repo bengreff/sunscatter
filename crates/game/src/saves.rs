@@ -1,9 +1,16 @@
 //! Saving and loading games (game side of `sim::save`).
 //!
-//! F5 quicksaves to `quicksave.ron`, F9 loads it, F6 opens the save list
-//! (load, delete, save as). Saves are `sim::save::SaveGame` RON files in
-//! `persist::Dirs::saves`. Warp, camera and the tracked set are game state and
-//! are not saved: loading resets warp to 1x and tracks every vessel.
+//! Cmd+S quicksaves to `quicksave.ron`, Cmd+L loads it (Ctrl+Alt off a
+//! Mac), the Esc menu's Save and Load open the save list (load, delete,
+//! save as). Saves are `sim::save::SaveGame` RON files in
+//! `persist::Dirs::saves`, with the active vessel and the screen showing
+//! (D114). Warp, camera and the tracked set are game state and are not
+//! saved: loading resets warp to 1x and tracks every vessel.
+//!
+//! **Launch saves** (D114): when a vessel is placed on the pad (a new game,
+//! a new flight) the whole game is written to `launches/` beside the saves
+//! ([`record_launch`]); every piece split from that vessel keeps its
+//! `launch`, and "Revert to launch" loads that file ([`launch_of`]).
 
 use crate::camera::{CameraRig, Focus};
 use crate::commands::keys::{pressed, Action};
@@ -14,7 +21,8 @@ use crate::state::{Prediction, SimState};
 use crate::tracking::Tracked;
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
-use sim::save::{SaveError, SaveGame};
+use sim::save::{SaveError, SaveGame, Screen};
+use sim::vessel::VesselId;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
@@ -96,16 +104,62 @@ pub fn save_path(dir: &Path, name: &str) -> PathBuf {
     dir.join(format!("{name}.ron"))
 }
 
-pub fn save(sim: &SimState, path: &Path) -> Result<(), SaveError> {
-    capture(sim).write(path)
+pub fn save(sim: &SimState, screen: Screen, path: &Path) -> Result<(), SaveError> {
+    SaveGame { screen, ..capture(sim) }.write(path)
 }
 
-/// The game as a save (with the origin's clock, D088).
+/// The game as a save (with the origin's clock, D088), on the flight screen.
 pub fn capture(sim: &SimState) -> SaveGame {
     let mut save = SaveGame::capture(&sim.world, sim.clock, &sim.fleet, sim.vessel_ids, sim.active);
     save.site_clock = Some(sim.site);
     save.seed = sim.seed;
     save
+}
+
+/// The screen showing, as a save records it (the tracking station over the
+/// systems screen: it is the one in front).
+pub fn screen_of(systems_open: bool, tracking_open: bool) -> Screen {
+    match (systems_open, tracking_open) {
+        (_, true) => Screen::TrackingStation,
+        (true, false) => Screen::Systems,
+        (false, false) => Screen::Flight,
+    }
+}
+
+/// The launch save of launch `launch` in the game of `seed` (D114): in
+/// `launches/` beside the saves, so the save list does not show it; the
+/// seed keeps launches of different games apart (ids restart per game).
+pub fn launch_path(saves: &Path, seed: u64, launch: VesselId) -> PathBuf {
+    saves.join("launches").join(format!("{seed:016x}-{}.ron", launch.0))
+}
+
+/// The launch save the active vessel reverts to, if there is one.
+pub fn launch_of(sim: &SimState, saves: &Path) -> Option<PathBuf> {
+    let path = launch_path(saves, sim.seed, sim.ship().launch?);
+    path.is_file().then_some(path)
+}
+
+/// Writes the launch save of a vessel just placed on the pad (D114), before
+/// it flies: the whole game, on the flight screen.
+pub fn write_launch(sim: &SimState, saves: &Path) -> Result<PathBuf, SaveError> {
+    let launch = sim.ship().launch.expect("a vessel placed on the pad has its launch");
+    let path = launch_path(saves, sim.seed, launch);
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(SaveError::Io)?;
+    }
+    capture(sim).write(&path)?;
+    Ok(path)
+}
+
+/// Writes the pending launch save (`SimState::launch_pending`): right after
+/// the commands, before the sim steps.
+pub fn record_launch(mut sim: ResMut<SimState>, persist: Res<Persist>, time: Res<Time>, mut toasts: ResMut<Toasts>) {
+    if !std::mem::take(&mut sim.launch_pending) {
+        return;
+    }
+    if let Err(e) = write_launch(&sim, &persist.dirs.saves) {
+        toasts.push(time.elapsed_secs_f64(), format!("Launch save failed (no revert): {e}"), true);
+    }
 }
 
 /// Reads and checks a save for `sim`'s world (a load is then a
@@ -134,6 +188,8 @@ pub fn restore(sim: &mut SimState, save: SaveGame) {
     sim.active = save.active;
     sim.clock = save.clock;
     sim.seed = save.seed;
+    // A launch save loaded is already on disk.
+    sim.launch_pending = false;
     sim.warp = 0;
     sim.paused = false;
     sim.compute_limited = false;
@@ -182,6 +238,7 @@ pub fn keys(
     mut ui: ResMut<SaveUi>,
     mut toasts: ResMut<Toasts>,
     sim: Res<SimState>,
+    screens: (Res<crate::systems_screen::SystemsScreen>, Res<crate::tracking::TrackingStation>),
     mut commands: MessageWriter<GameCommand>,
 ) {
     if !ctx.allows(Keys::Menus) {
@@ -190,7 +247,7 @@ pub fn keys(
     let now = time.elapsed_secs_f64();
     let path = save_path(&persist.dirs.saves, QUICKSAVE);
     if pressed(&keys, Action::QuickSave) {
-        match save(&sim, &path) {
+        match save(&sim, screen_of(screens.0.open, screens.1.open), &path) {
             Ok(()) => ui.notify(&mut toasts, now, "Quicksaved".into(), false),
             Err(e) => ui.notify(&mut toasts, now, format!("Quicksave failed: {e}"), true),
         }
@@ -215,6 +272,7 @@ pub fn draw(
     mut ui: ResMut<SaveUi>,
     mut toasts: ResMut<Toasts>,
     sim: Res<SimState>,
+    screens: (Res<crate::systems_screen::SystemsScreen>, Res<crate::tracking::TrackingStation>),
     mut commands: MessageWriter<GameCommand>,
 ) -> Result {
     let ctx = contexts.ctx_mut()?;
@@ -232,7 +290,7 @@ pub fn draw(
         }
     }
     let (mut open, mut save_as, mut to_load, mut to_delete) = (true, false, None, None);
-    egui::Window::new("Saves (F6)").open(&mut open).default_width(360.0).show(ctx, |w| {
+    egui::Window::new("Saves").open(&mut open).default_width(360.0).show(ctx, |w| {
         w.horizontal(|w| {
             if w.text_edit_singleline(&mut ui.name).changed() {
                 ui.name_is_default = false;
@@ -242,7 +300,7 @@ pub fn draw(
         w.label(egui::RichText::new(dir.display().to_string()).weak().small());
         w.separator();
         if ui.list.is_empty() {
-            w.label("No saves yet (F5 quicksaves).");
+            w.label("No saves yet (Cmd+S quicksaves).");
         }
         egui::Grid::new("saves").striped(true).show(w, |w| {
             for (k, e) in ui.list.iter().enumerate() {
@@ -261,7 +319,7 @@ pub fn draw(
     ui.open = open;
     if save_as {
         match sanitize(&ui.name) {
-            Some(name) => match save(&sim, &save_path(&dir, &name)) {
+            Some(name) => match save(&sim, screen_of(screens.0.open, screens.1.open), &save_path(&dir, &name)) {
                 Ok(()) => ui.notify(&mut toasts, now, format!("Saved \"{name}\""), false),
                 Err(e) => ui.notify(&mut toasts, now, format!("Save failed: {e}"), true),
             },
@@ -308,6 +366,46 @@ mod tests {
     }
 
     #[test]
+    fn a_save_records_the_screen_in_front() {
+        // (systems screen open, tracking station open, screen)
+        let cases = [
+            (false, false, Screen::Flight),
+            (true, false, Screen::Systems),
+            (false, true, Screen::TrackingStation),
+            (true, true, Screen::TrackingStation),
+        ];
+        for (systems, tracking, screen) in cases {
+            assert_eq!(screen_of(systems, tracking), screen, "{systems} {tracking}");
+        }
+    }
+
+    /// A vessel placed on the pad has its launch save written (D114); a
+    /// revert finds it by the active vessel's launch and the game's seed,
+    /// and loading it gives the game as it was then.
+    #[test]
+    fn the_launch_save_is_the_game_on_the_pad() {
+        let dir = std::env::temp_dir().join(format!("sunscatter-test-{}-launches", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut sim = SimState::new();
+        assert!(sim.launch_pending && sim.ship().launch == Some(sim.ship().id()));
+        assert_eq!(launch_of(&sim, &dir), None, "not written yet");
+        let path = write_launch(&sim, &dir).unwrap();
+        assert_eq!(launch_of(&sim, &dir), Some(path.clone()));
+        assert!(list_saves(&dir).is_empty(), "the save list does not show launches");
+        let at_launch = sim.fleet.clone();
+        sim.seed ^= 1;
+        assert_eq!(launch_of(&sim, &dir), None, "another game's launches are not this one's");
+        sim.seed ^= 1;
+        sim.launch_pending = false;
+        sim.new_flight(&crate::state::craft_or_test("test-craft"));
+        assert!(sim.launch_pending && sim.ship().launch == Some(sim.ship().id()));
+        assert_eq!(launch_of(&sim, &dir), None, "a new flight is a new launch");
+        let save = read(&sim, &path).unwrap();
+        assert_eq!((save.vessels, save.screen), (at_launch, Screen::Flight));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn file_times_format_as_utc() {
         let t = SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1_790_000_000);
         assert_eq!(fmt_time(t), "2026-09-21 14:13 UTC");
@@ -324,7 +422,7 @@ mod tests {
         sim.warp = 5;
         sim.seed = 0x5eed;
         let path = save_path(&dir, "a");
-        save(&sim, &path).unwrap();
+        save(&sim, Screen::Systems, &path).unwrap();
         let expected = sim.fleet.clone();
         let clock = sim.clock;
 
@@ -335,6 +433,7 @@ mod tests {
         assert_eq!(other.fleet, expected);
         assert_eq!((other.active, other.clock, other.warp), (1, clock, 0));
         assert_eq!(other.seed, 0x5eed, "the game's seed (the fates') is saved");
+        assert_eq!(read(&other, &path).unwrap().screen, Screen::Systems, "and the screen showing");
 
         let list = list_saves(&dir);
         assert_eq!(list.len(), 1);

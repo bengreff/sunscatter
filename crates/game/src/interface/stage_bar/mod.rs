@@ -146,6 +146,9 @@ pub fn show(
             draw::Action::NextStage => {
                 cmds.write(GameCommand::NextStage);
             }
+            draw::Action::Again(stage) => {
+                cmds.write(GameCommand::StageAgain { vessel: v.id(), stage });
+            }
         }
     }
     Ok(())

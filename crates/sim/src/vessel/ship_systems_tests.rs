@@ -625,3 +625,24 @@ fn the_legs_stay_stowed_while_the_clamps_hold() {
     }
     assert!(v.ship_events().iter().any(|e| e.text.contains("cannot deploy while the clamps hold")));
 }
+
+/// Closing the throttle shuts the lit engines down (D114): open to 0 starts
+/// their tail-off; lit with the throttle already closed, an engine runs at
+/// its minimum until the throttle is opened and closed again.
+#[test]
+fn closing_the_throttle_shuts_the_engines_down() {
+    let w = world();
+    let mut v = rocket(&w);
+    let closed = Controls { throttle: 0.0, ..full() };
+    v.order_at(t0(), OrderKind::Stage).unwrap();
+    v.advance(&w, t0().add_seconds(2.0), &closed, usize::MAX);
+    assert!(statuses(&v).iter().all(|s| *s == EngineStatus::Running), "lit at 0: {:?}", statuses(&v));
+    v.advance(&w, t0().add_seconds(3.0), &full(), usize::MAX);
+    assert!(statuses(&v).iter().all(|s| *s == EngineStatus::Running));
+    v.advance(&w, t0().add_seconds(3.1), &closed, usize::MAX);
+    let off = |s: &EngineStatus| matches!(s, EngineStatus::ShuttingDown | EngineStatus::Off);
+    assert!(statuses(&v).iter().all(off), "closed: {:?}", statuses(&v));
+    let n = statuses(&v).len();
+    let text = format!("Throttle closed: {n} engines shut down");
+    assert!(v.ship_events().iter().any(|e| e.text == text), "{:?}", v.ship_events());
+}

@@ -324,6 +324,7 @@ fn the_falcon_9_stages_separate_without_touching() {
         }
     }
     v.propellant = ship.consumables(&def);
+    v.launch = Some(VesselId(1));
     v.command(&w, &ShipCommand::Separate("stage separation".into())).unwrap();
     let plan = v.plan_breakup().unwrap();
     let mut ids = VesselIds::default();
@@ -336,6 +337,9 @@ fn the_falcon_9_stages_separate_without_touching() {
     // the throttle closed.
     assert_eq!((v.controls(), booster.controls()), (&flying, &flying.for_piece()));
     assert_eq!((v.crew() > 0, booster.crew()), (true, 0));
+    // Both keep the launch they come from (D114: a revert from either goes
+    // back to the same pad).
+    assert_eq!((v.launch, booster.launch), (Some(VesselId(1)), Some(VesselId(1))));
     let rel = booster.state(&w).2 - v.state(&w).2;
     println!("parting at {:.2} m/s", rel.length());
     assert!((rel.length() - 0.5).abs() < 0.15, "{}", rel.length());

@@ -39,7 +39,8 @@ pub enum GameCommand {
     Delete(VesselId),
     /// Replace the game with a (checked, non-empty) save: load or revert.
     Restore(Box<SaveGame>),
-    /// Put the active vessel back on the pad (a new craft of its kind).
+    /// Put the active vessel back on the pad (a new craft of its kind):
+    /// the revert of a vessel without a launch save (D114).
     Reset,
     /// A new flight: the active vessel replaced by a new craft `.0` (a
     /// directory under `data/craft`) on the pad.
@@ -78,6 +79,12 @@ pub enum GameCommand {
     NextStage,
     /// Run a craft of parts' next stage (its sequence), sent to it.
     Stage(VesselId),
+    /// Run stage `stage` of a craft of parts' sequence again, one already
+    /// run (D114: the staging bar), sent to it.
+    StageAgain {
+        vessel: VesselId,
+        stage: u32,
+    },
     /// Run a craft of parts' saved function by name (the action-group bar), sent
     /// to it.
     Function {
@@ -141,6 +148,7 @@ pub fn apply(
     mut pred: ResMut<Prediction>,
     mut tracked: ResMut<Tracked>,
     mut ts: ResMut<TrackingStation>,
+    mut systems: ResMut<crate::systems_screen::SystemsScreen>,
     mut in_flight: ResMut<InFlight>,
     mut toasts: ResMut<crate::interface::toasts::Toasts>,
     comms: Res<crate::comms::Comms>,
@@ -207,6 +215,9 @@ pub fn apply(
                 crate::saves::after_load(&mut pred, &mut tracked, &mut rig);
                 // Indices in the station may now name other vessels.
                 ts.clear_selection();
+                // Back on the screen it was saved on (D114).
+                systems.open = save.screen == sim::save::Screen::Systems;
+                ts.open = save.screen == sim::save::Screen::TrackingStation;
             }
             GameCommand::Reset => {
                 sim.reset();
@@ -216,7 +227,10 @@ pub fn apply(
                 sim.new_flight(&crate::state::craft_or_test(craft));
                 rig.focus = Focus::Ship;
             }
-            GameCommand::Ship { vessel, .. } | GameCommand::Stage(vessel) | GameCommand::Function { vessel, .. } => {
+            GameCommand::Ship { vessel, .. }
+            | GameCommand::Stage(vessel)
+            | GameCommand::StageAgain { vessel, .. }
+            | GameCommand::Function { vessel, .. } => {
                 let kinds = orders(&c).unwrap_or_default();
                 place(&mut sim, &mut toasts, now, *vessel, kinds, 0.0);
             }
@@ -340,6 +354,7 @@ pub fn addressee(c: &GameCommand) -> Option<VesselId> {
     match c {
         GameCommand::Ship { vessel, .. }
         | GameCommand::Function { vessel, .. }
+        | GameCommand::StageAgain { vessel, .. }
         | GameCommand::SetStages { vessel, .. }
         | GameCommand::SetFunctions { vessel, .. } => Some(*vessel),
         GameCommand::Stage(id) | GameCommand::SetControls { vessel: id, .. } => Some(*id),
@@ -352,6 +367,7 @@ pub fn orders(c: &GameCommand) -> Option<Vec<OrderKind>> {
     match c {
         GameCommand::Ship { commands, .. } => Some(commands.iter().cloned().map(OrderKind::Command).collect()),
         GameCommand::Stage(_) => Some(vec![OrderKind::Stage]),
+        GameCommand::StageAgain { stage, .. } => Some(vec![OrderKind::Again(*stage)]),
         GameCommand::Function { name, .. } => Some(vec![OrderKind::Function(name.clone())]),
         _ => None,
     }
