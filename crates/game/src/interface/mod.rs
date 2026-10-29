@@ -81,13 +81,25 @@ pub fn apply_style(
         v.override_text_color = Some(theme::TEXT);
         ctx.set_visuals(v);
     }
+    let in_demo = demo.is_some();
     let offscreen = demo.is_some_and(|d| d.offscreen.is_some());
     let native = if offscreen { crate::demo_views::offscreen_scale(crate::demo_views::offscreen_size()) } else { 1.0 };
-    let zoom = iface.ui_scale * native;
+    let scale = in_demo.then(demo_ui_scale).flatten().unwrap_or(iface.ui_scale);
+    let zoom = scale * native;
     if (ctx.zoom_factor() - zoom).abs() > 1e-3 {
         ctx.set_zoom_factor(zoom);
     }
     Ok(())
+}
+
+/// The demo's interface scale (`SUNSCATTER_DEMO_UI_SCALE`, e.g. 0.2): the
+/// panels shrunk to specks at the screen's edges, for shots of the scene
+/// itself (the plumes at max-Q sit behind the navball cluster).
+fn demo_ui_scale() -> Option<f32> {
+    static SCALE: std::sync::OnceLock<Option<f32>> = std::sync::OnceLock::new();
+    *SCALE.get_or_init(|| {
+        std::env::var("SUNSCATTER_DEMO_UI_SCALE").ok()?.parse::<f32>().ok().filter(|s| *s > 0.0)
+    })
 }
 
 /// Where the HUD's panels were drawn last frame (the navball cluster, the
