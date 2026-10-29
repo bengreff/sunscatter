@@ -2,44 +2,66 @@
 
 A SessionStart hook loads this file automatically after `/clear` or at startup. It is kept current by `/handoff`.
 
-*Updated 2026-10-28 (early morning), after the overnight run of 2026-10-27/28 (10 agent runs, 2 at a time; all finished, nothing running).*
+*Updated 2026-10-29, after the owner's fix hour (2026-10-28) and the interview of 2026-10-29. Nothing running.*
 
 ## Your first job
 
-1. Read [flight-ui-2026-10-27.md](flight-ui-2026-10-27.md): the status table (source of truth) and **"Open for the owner"**: nine logical defaults the agents chose overnight, for the owner to confirm (sensors on the Falcon 9, Crew menu limits, script controls and separation controls, propellant data's home, the vacuum plume, blackout at the nose, …).
-2. Show the owner the night's shots (they may be gone after a reboot; re-shoot with the parts demo, `SUNSCATTER_CRAFT=falcon9-crew`): flight interface `scratchpad/nav4/`, systems screen `scratchpad/systems/shots3`, `shots3024` (07–09_parts_systems_*), exhaust on/off `scratchpad/exhaust/on3`, `off3` (scratchpad = `/private/tmp/claude-501/-Users-ben-sunscatter/d7be5f55-…/scratchpad/`).
-3. Ask the owner what to look at in the game first: the booster after separation (switch with `[`/`]`: it should hold its SAS; switching back, Dragon at its throttle), the exhaust toggle (Settings ▸ Visuals), the systems screen (Tab), an entry with the Comms BLACKOUT and Reentry rows (`./run play`, deorbit).
+1. Look at the fixes on screen. Nothing in this round has been seen in a demo yet. Run the parts demo (`SUNSCATTER_CRAFT=falcon9-crew SUNSCATTER_EXHAUST=1`, offscreen, shots in your scratchpad) and check:
+   - the plume above 15 km: faint is right, grey is wrong, its colour comes from the propellant (owner, 2026-10-29);
+   - the loading screen at start;
+   - the pad's menus (Comms Via, Landing ▸ Thermal, the chute's q / DESIGN q) holding still while landed;
+   - the AGAIN button on the staging bar.
+   In the game, check Revert to launch: fuelled, throttle closed, the whole game back.
+2. Finish [fixes-2026-10-28.md](fixes-2026-10-28.md) (its rows are the source of truth), in order:
+   - the parachute q / DESIGN q root cause ("The flickers happen when landed on the launchpad");
+   - the hold (`interface::steady`) for the part cards, the staging bar and the systems screen;
+   - the action bar ("systems mini-tab") to the top right at `stage_bar::WIDTH`;
+   - the systems screen's two panels (left: system-wide / parts list, system-wide by default; right: the selected part, no pop-up);
+   - the nozzle gap, if the shots still show it (the plume-start tests pass, so look at the drawn bell).
 
 ## State
 
-- **Flight interface (D111): *playable*, seen in demos, not yet by the owner.** No F-keys (one key table, Esc menu), action bar, navball G row (limit from 0.01 g), ALT switch, RCS button; flat menus Orbital 1 … Comms 6 in one left dock with fair heights; RCS menu; notifications window (links to vessels); staging bar and part cards (`more ›` into the systems screen); "ORBIT NOW" wording. [brief-nav.md](brief-nav.md) is complete.
-- **VESSEL (D112): *playable*.** Each vessel's controls live in its `sim::vessel::Helm` (save version 13; D034 delay per vessel); `SimState::controls()`/`controls_mut()`; `SimState::step`; scripts fly any vessel (`GameCommand::SetControls`, MCP `set_controls` with `id`, `stage`); `[`/`]` nearest first. Not seen on screen. Left: D112's "joined by data" vessel; showing another vessel's controls.
-- **Systems screen: *playable*.** Layer summaries (`systems_screen/summary.rs`), one part layout with `value / limit` rows (`format::limit_level`), pop-ups, `open_at`. Left in [brief-systems.md](brief-systems.md): crew and comms summaries, pressurant/vent flows, links from events to a layer, the Power menu's "no buses" on the pad (before the first systems step).
-- **Exhaust (D109): *playable*.** Seed `sim::systems::exhaust` + `data/propellants.ron`; plume `game::scene::exhaust` + `exhaust.wgsl`; toggle Settings ▸ Visuals (off by default). Left in [brief-exhaust.md](brief-exhaust.md): check the propellant table and the render placeholders against sources that can be opened (they were written from memory); the nine-plume close-up cost.
-- **Reentry: sim side *playable*, glow *design*.** `aero::equilibrium`, `aero::shock`, `comms::blacked_out`, Comms/Reentry rows (79a6a2d, 9767d61). Left in [brief-glow.md](brief-glow.md) "State": the `reentry_glow` toggle, the glow shell, blackout notifications, a reentry view in the demo.
-- CI: green through 79a6a2d; 9767d61 and cfbf718 were running at handoff (`gh run list --limit 3`).
-- Disk ~32 GB free; `target/agents/glow` kept (warm for the next GLOW agent).
+- **Revert, throttle, stages (D114): *playable*, not seen on screen.**
+  - Launch saves go to `saves/launches/<seed>-<id>.ron` when a vessel is placed on the pad (`saves::record_launch`, `launch_of`). `Vessel::launch` is kept by every piece.
+  - The pause menu has one "Revert to launch…". A vessel with no launch save gets a new craft on the pad instead.
+  - The save records its screen (`sim::save::Screen`; save version 14, new fields default).
+  - Closing the throttle shuts the engines down (`propulsion::close_throttle`). Opening it again does not relight; AGAIN on the ACTIVE stage does (`OrderKind::Again`, `GameCommand::StageAgain`).
+- **Menus:** the flicker rule is in (f57da59, `interface::steady`), and a second click on a part or its icon closes its card. Holding ≥ 1.5 s, the route margin 1 % and the hottest-parts margin 2 % are logical defaults. Left: see "Your first job" 2.
+- **Plume and loading:**
+  - Afterburning now scales with ambient pressure and stops at 40–50 km. The axis keeps the exit temperature for 3.6 exit radii (`potential_core`, mirrored in `exhaust.wgsl`). There are tests that the plume starts at the exit.
+  - The loading screen is `game::scene::loading`: a pure `ready(Counts)` that holds `Stage::Simulate`.
+  - Above ~50 km the colour rests on the seed's 1,330 K exit temperature (frozen γ), and there is no condensate. The brief's State has the rest.
+- **Interview 2026-10-29** ([interview-2026-10-29.md](interview-2026-10-29.md)) → D115, and D114's "no relight on throttle-up".
+- CI: green through f57da59 (88bfdbd's red was a macOS runner that never started). Check `gh run list --limit 3` for this round's pushes.
 
 ## What is next (the owner's order)
 
-1. The owner's look and answers (above); fix what they see.
-2. GLOW's rest ([brief-glow.md](brief-glow.md) State), then CLOUDS ([brief-clouds.md](brief-clouds.md), not started).
-3. The systems screen's and exhaust's leftovers (their briefs).
-4. The Crew mission: ISS rendezvous and docking, Dragon's entry, splashdown.
-5. Smaller: terrain relief does not shadow craft; a craft's ground shadow still comes from the camera-fitted cascades; parachutes as colliding meshes (D109).
+1. The fixes' rest (above).
+2. The interview's queue:
+   - the sequence bug sweep (open-issues.md: pad abort past liftoff, `set_stages` index, a release armed with no engine lit, grid fins after a split, an aborted bubble tick);
+   - planned burns for craft of parts (`PlanError::PartsUnsupported`);
+   - the booster after MECO (no vacuum relight; separation inside 1 s of MECO);
+   - inconsistencies with the real Falcon 9, where published wins (D115; the legs 173 kg derived against ~500 kg published, and the U/E rows of `falcon9.md`).
+3. D115's fidelity:
+   - only the sensors the real vehicle has;
+   - adaptive functions: engine-out re-trim, launch-commit checks, propellant utilisation, the navigation filter;
+   - powered components heating their parts, and Dragon's coolant loop and radiators. **This revises D077** (an engine that is off heats nothing): update D077 and everything citing it in the same commit;
+   - per-engine gimbals, the engine-out response, hard starts;
+   - O₂ / N₂ tanks and leaks, suits abstract;
+   - noise and drift only where needed: significant figures stand for uncertainty, never "flat out wrong measurements".
+4. Then the earlier order: GLOW's rest ([brief-glow.md](brief-glow.md)), CLOUDS ([brief-clouds.md](brief-clouds.md)), the systems screen's and exhaust's leftovers (their briefs), the Crew mission (docking first: none exists).
+5. Smaller: terrain relief does not shadow craft; the ground's craft shadow comes from the camera-fitted cascades; parachutes as colliding meshes.
 
 ## Open for the owner (older)
 
-U/E data in `falcon9.md`, Dragon's CO₂ removal, the Moon's field degree, the 1,000-year ephemeris (D005), the rails floor vs q-based boundary, backhouse's certificate (Windows not checked since 2026-10-26). Engine exit states later from the owner's CRUCIBLE (`~/inquiry-project`).
+The Crew menu's limits (rough physiology or NASA-STD-3001), U/E data in `falcon9.md`, Dragon's CO₂ removal, the Moon's field degree, the 1,000-year ephemeris (D005), the rails floor against a q-based boundary, backhouse's certificate (Windows not checked since 2026-10-26). Engine exit states later from the owner's CRUCIBLE (`~/inquiry-project`).
 
 ## Gotchas
 
-- **Overnight agents follow [agent-rules.md](agent-rules.md)** (shared checkout, private-index commits, demo lock, ~150k context stop, report ≤ 15 lines); each workstream has a `brief-<name>.md` with a "State" section a fresh agent continues from. Agents overshoot their budget (several ended at 200–290k): say "stop at 150k" plainly.
-- **Demos:** the owner allows fewer than 10 windows in a burst, and agents may run offscreen demos, one at a time under `target/demo.lock` (take it only if `mkdir` succeeds; remove only your own: an agent removed another's on 2026-10-27).
-- **Agents in one checkout share one local `main`: a local commit is public** (another agent's push sends it). Commit only your paths through a private index from the current HEAD; push at once.
+- **Agents follow [agent-rules.md](agent-rules.md)** (shared checkout, private-index commits, demo lock, stop at ~150k, report ≤ 15 lines). After their private-index commits the shared index goes stale: once they have finished, `git reset -q` (it keeps the tree). An agent can stall at the stream watchdog (PLUME did after ~45 min); `SendMessage` resumes it.
+- **The machine:** two agents plus the lead building at once took the load average to ~47, and a `cargo check -p game` took over 10 minutes. Plan an hour as ~40 minutes of work. `target/agents/menus` is the renamed warm copy of the old glow dir.
+- **Demos:** fewer than 10 windows in a burst; one at a time under `target/demo.lock` (take it only if `mkdir` succeeds; remove only your own).
 - The egui proportional font lacks ▲ ▼ ▸ →: use ⏶ ⏷ or test the glyph in a demo shot. egui areas default to 400 px tall: set the max height before a scroll area.
-- **The disk fills:** each agent's target dir 10–13 GB, `target/prepush` ~19 GB, `target/debug` ~22 GB; delete finished agents' dirs and `incremental` caches; `df -h` before long runs.
+- **The disk fills:** each agent's target dir is 10–19 GB, `target/prepush` ~22 GB, `target/debug` ~23 GB; `df -h` before long runs.
 - `cargo test` stops at the first failing binary unless `--no-fail-fast`. The stop hook tests the shared tree, so an agent's unfinished work shows there.
-- `cargo fmt --all` fails while another agent has a half-written module: use `cargo fmt -p <crate>` or `rustfmt` on your files.
-- GPU pass times on Metal: `xcrun xctrace record --template 'Metal System Trace'` + `tools/gpu_trace.py`. `git archive | tar -x -m` so cargo rebuilds.
-- Saves are not compatible across versions (D063). The playtest save embeds `CraftParams`, the ephemeris id and the save version (13): regenerate it from the demo's Orbit step (`orbit_save.ron`) when they change.
+- Saves are not compatible across versions (D063). The playtest save (version 14, the test craft in low orbit, no launch save: its revert makes a new craft on the pad) embeds `CraftParams` and the ephemeris id. Regenerate it from the demo's Orbit step (`orbit_save.ron`) when they change. `./run play`, then Cmd+L.

@@ -12,4 +12,9 @@ Verify each on screen with short offscreen demos (one at a time, `target/demo.lo
 
 ## State
 
-(Update before you stop: landed with hashes, what is left.)
+(PLUME, 2026-10-28, filled in at the end; hashes below.)
+
+- **Colour at altitude:** diagnosed from the parts demo (max-Q 12 km, MECO 74 km, upper stage 88 km) and the rules' numbers (exhaust.md, "The colour at altitude"): the afterburning was put out by 15 km (`1 − e^(−pₐ/pₑ)`) and the core cooled from the lip, leaving grey soot scattering. Fixed in the render model: afterburning against ambient pressure, ceasing at 40–50 km as CFD of kerolox plumes finds (`afterburning`, `AFTERBURN_PRESSURE`); the potential core (`potential_core`, `spread_ratio`, mirrored in `exhaust.wgsl`). Left: above ~50 km the core's colour is the seed's 1,330 K (frozen γ; shifting equilibrium would be hotter: a CEA run), no condensate, no nine-plume interaction.
+- **Gap:** a table test of the plume's start (`the_plume_starts_at_the_nozzle_exit_with_its_radius`: the bound's near cap at the exit, the boundary there the exit radius, at four altitudes and two directions): it holds, so the gap is not in the bound. Not found yet; candidates: the drawn bell's exit vs the catalog's `exit_area` (a test of the bell's rim against the exit radius was drafted, not run), the vacuum fan too faint near the lip (the potential core now keeps it dense there). Not seen on screen after the fix (no demo shot taken).
+- **Loading screen:** `game::scene::loading` (`ready` from `Counts`, table tests), added by the terrain's plugin; holds `Stage::Simulate`; shown at start and after `Restore`/`Reset`/`NewFlight`. Not seen on screen (no demo run after it); check the parts demo still runs.
+- Left, in order: look at both fixes in the parts demo (`SUNSCATTER_EXHAUST=1`, max-Q, MECO, upper stage); the gap; the exit temperature from a CEA run.
