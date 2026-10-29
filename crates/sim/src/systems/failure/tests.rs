@@ -89,7 +89,7 @@ fn a_seed_redraws_the_fates() {
     assert!(a.fates.iter().zip(&fresh.fates).all(|(x, y)| x.threshold == y.threshold));
     assert!(a.fates.iter().zip(&launched(&def).fates).all(|(x, y)| x.threshold != y.threshold));
     let kept: Vec<u32> = def.parts.iter().filter(|p| p.id.starts_with("s1.")).map(|p| p.part).collect();
-    assert_eq!(a.partition(&kept, &def.subset(&kept)).runtime.seed, 42);
+    assert_eq!(a.partition(&kept, &def, &def.subset(&kept)).runtime.seed, 42);
 }
 
 /// The same running from the same launch: the same hazards to the bit; a

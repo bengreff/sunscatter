@@ -143,7 +143,7 @@ pub struct Runtime {
     /// `None` until they first run): the actuators move it at their rate.
     pub thrust_dir: Option<DVec3>,
     /// Each aero surface's deflection (rad; aligned with
-    /// `ShipDef::surfaces`, kept by every piece: a fin is on one).
+    /// `ShipDef::surfaces`, or empty before any deflects).
     #[serde(default)]
     pub fins: Vec<f64>,
     /// The failure fates' seed (the save's) and the launch epoch they are
@@ -191,11 +191,12 @@ impl Runtime {
         }
     }
 
-    /// The state of the piece holding the parts `kept`: each item of those
-    /// parts, joints within the piece; the orders, the motion, the seed and
-    /// the events go with every piece (an order naming what a piece lacks
-    /// does nothing there).
-    pub fn partition(&self, kept: &[u32]) -> Runtime {
+    /// The state of the piece holding the parts `kept` (`def` the whole
+    /// ship's definition, which the per-item lists align with): each item
+    /// of those parts, joints within the piece, the deflections of its aero
+    /// surfaces; the orders, the motion, the seed and the events go with
+    /// every piece (an order naming what a piece lacks does nothing there).
+    pub fn partition(&self, kept: &[u32], def: &ShipDef) -> Runtime {
         fn by<T: Clone>(items: &[T], part: impl Fn(&T) -> u32, kept: &[u32]) -> Vec<T> {
             items.iter().filter(|x| kept.contains(&part(x))).cloned().collect()
         }
@@ -205,6 +206,10 @@ impl Runtime {
             joints: by(&self.joints, |j| if kept.contains(&j.parent) { j.child } else { u32::MAX }, kept),
             lost: by(&self.lost, |l| l.part, kept),
             unpowered: by(&self.unpowered, |l| l.part, kept),
+            fins: (self.fins.iter().zip(&def.surfaces))
+                .filter(|(_, s)| kept.contains(&s.part))
+                .map(|(&d, _)| d)
+                .collect(),
             release_armed: false,
             release_engines: Vec::new(),
             ..self.clone()
@@ -288,6 +293,31 @@ mod tests {
         assert_eq!(names(r.due(t0.add_seconds(1.0))), ["a", "b"]);
         assert_eq!(names(r.due(t0.add_seconds(9.0))), ["c", "d"]);
         assert_eq!(r.next_order(), None);
+    }
+
+    /// Each piece of a split keeps its own aero surfaces' deflections,
+    /// aligned with its own definition's surfaces (review, 2026-10-27: they
+    /// were copied whole, so a piece's fin read another's); never deflected,
+    /// none.
+    #[test]
+    fn a_split_partitions_the_fin_deflections() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/craft/falcon9-crew");
+        let def = crate::craft::load_definition(&path).unwrap().ship.unwrap();
+        let mut whole = Runtime::initial(&def);
+        assert!(whole.partition(&[], &def).fins.is_empty(), "never deflected");
+        whole.fins = (0..def.surfaces.len()).map(|i| 0.01 * (i + 1) as f64).collect();
+        let booster: Vec<u32> = (def.surfaces.iter()).filter(|s| s.id.starts_with("s1.")).map(|s| s.part).collect();
+        let rest: Vec<u32> = (def.surfaces.iter()).filter(|s| !s.id.starts_with("s1.")).map(|s| s.part).collect();
+        assert!(!booster.is_empty() && !rest.is_empty(), "the grid fins and Dragon's");
+        for kept in [booster, rest] {
+            let piece = def.subset(&kept);
+            let fins = whole.partition(&kept, &def).fins;
+            assert_eq!(fins.len(), piece.surfaces.len());
+            for (s, d) in piece.surfaces.iter().zip(&fins) {
+                let i = def.surfaces.iter().position(|w| w.id == s.id).unwrap();
+                assert_eq!(*d, whole.fins[i], "{}", s.id);
+            }
+        }
     }
 
     #[test]

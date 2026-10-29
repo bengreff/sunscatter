@@ -230,11 +230,11 @@ impl Vessel {
             let mut piece = self.clone();
             piece.craft = craft.params();
             let capacity = piece.craft.mass.capacity;
-            match (&self.ship, &craft.ship) {
+            match (&self.ship, &craft.ship, old.ship.as_deref()) {
                 // A craft of parts: each tank and bottle goes with its part.
-                (Some(state), Some(def)) => {
+                (Some(state), Some(def), Some(whole)) => {
                     let ids: Vec<u32> = design.parts.iter().map(|p| p.id).collect();
-                    let mut mine = state.partition(&ids, def);
+                    let mut mine = state.partition(&ids, whole, def);
                     // Orders were sent to the vessel, which keeps the first piece.
                     if k > 0 {
                         mine.runtime.orders.clear();

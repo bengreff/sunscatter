@@ -293,7 +293,7 @@ fn ship_definitions_and_states_partition_by_part() {
     let upper: Vec<u32> = vec![0];
     let lower: Vec<u32> = (1..11).collect();
     let (du, dl) = (ship.subset(&upper), ship.subset(&lower));
-    let (su, sl) = (state.partition(&upper, &du), state.partition(&lower, &dl));
+    let (su, sl) = (state.partition(&upper, &ship, &du), state.partition(&lower, &ship, &dl));
     assert_eq!(du.tanks.len() + dl.tanks.len(), ship.tanks.len());
     assert_eq!((su.tanks.len(), sl.tanks.len()), (du.tanks.len(), dl.tanks.len()));
     assert_eq!((su.engines.len(), sl.engines.len()), (0, 4));
@@ -314,7 +314,7 @@ fn ship_definitions_and_states_partition_by_part() {
     let mut flown = state.clone();
     flown.next_stage(&ship).unwrap();
     flown.next_stage(&ship).unwrap();
-    let (fu, fl) = (flown.partition(&upper, &du), flown.partition(&lower, &dl));
+    let (fu, fl) = (flown.partition(&upper, &ship, &du), flown.partition(&lower, &ship, &dl));
     assert!(fu.stages.is_empty() && fu.functions.is_empty() && fu.sequence == 0);
     let names: Vec<(&str, usize)> = fl.stages.iter().map(|s| (s.name.as_str(), s.actions.len())).collect();
     assert_eq!(names, [("Ignition", 1), ("Separation", 1)]);
