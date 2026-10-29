@@ -189,7 +189,7 @@ fn the_regions_tile_the_screen_and_keep_the_view_wide() {
     use bevy_egui::egui::{pos2, Rect};
     // (width, height, left width, view width)
     let table =
-        [(1920.0, 1080.0, 280.0, 1260.0), (1280.0, 800.0, 280.0, 620.0), (900.0, 600.0, 280.0 * 600.0 / 660.0, 300.0)];
+        [(1920.0, 1080.0, 380.0, 1180.0), (1280.0, 800.0, 380.0, 540.0), (900.0, 600.0, 380.0 * 600.0 / 740.0, 300.0)];
     for (w, h, left, view) in table {
         let r = regions(Rect::from_min_max(pos2(0.0, 0.0), pos2(w, h)));
         assert!((r.left.width() - left).abs() < 1e-3, "{w}: {}", r.left.width());

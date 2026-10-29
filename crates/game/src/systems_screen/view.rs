@@ -173,7 +173,6 @@ pub fn update(
         // stays); a component's index may name another after a split.
         let kept = |s: &Selection| matches!(s, Selection::Part(id) if craft.parts.iter().any(|p| p.id == *id));
         screen.selected = screen.selected.filter(kept);
-        screen.popups.retain(kept);
     }
     // What each part is now, and its colour in the layer shown.
     let colours = parts::part_colours(&craft, &def, sim::materials::materials());

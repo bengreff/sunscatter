@@ -1,7 +1,7 @@
 //! The systems screen's layer summaries (D107; rule 8): a layer shown as
 //! a whole before any part, in the inspector's groups and rows (a row
 //! against a limit coloured by `format::limit_level`; a row about a part
-//! opens its pop-up).
+//! selects it).
 //!
 //! * **Structure**: the mass and centre of mass now, the g-limit and what
 //!   sets it (`sim::systems::g_limit`), the joints nearest their ultimate.

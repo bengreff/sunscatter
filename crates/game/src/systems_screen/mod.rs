@@ -10,10 +10,11 @@
 //! ([`SystemsScreen::open_at`]); Esc closes it. While it is open the clock runs, warp keys act and flight
 //! keys do not (`commands::InputContext::Systems`).
 //!
-//! A layer selected shows that layer as a whole ([`summary`], the right
-//! column); a click on a part (in the list, the view or a summary's row)
-//! opens its pop-up, everything about it in one layout ([`inspect`]), and
-//! several can be open at once.
+//! The left column shows the layer as a whole ([`summary`], by default) or
+//! the parts list, by its switch ([`Left`]). A click on a part (in the
+//! list, the view or a summary's row) selects it, and the right column
+//! shows everything about it in one layout ([`inspect`]); there are no
+//! pop-ups (owner, 2026-10-28).
 //!
 //! Pure rules: [`rules`] (facts, layer colours, tree, camera, pick),
 //! [`summary`] (each layer as a whole), [`inspect`] (everything about a
@@ -35,6 +36,15 @@ use inspect::Selection;
 use rules::Layer;
 use sim::craft::command::Stage;
 use sim::vessel::VesselId;
+
+/// What the left column shows.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Left {
+    /// The craft as a whole in the layer shown.
+    #[default]
+    SystemWide,
+    Parts,
+}
 
 /// The editors' tab.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -96,15 +106,11 @@ pub struct SystemsScreen {
     pub click: Option<Vec2>,
     pub tab: Tab,
     pub drafts: Option<Drafts>,
-    /// The open pop-ups, the latest last.
-    pub popups: Vec<Selection>,
+    pub left: Left,
     /// Opened at a part without a layer: show the part's main layer once
     /// its facts are known ([`SystemsScreen::settle_layer`]).
     pub pick_layer: bool,
 }
-
-/// At most this many pop-ups are open (the oldest closes).
-pub const MAX_POPUPS: usize = 4;
 
 impl Default for SystemsScreen {
     fn default() -> Self {
@@ -119,15 +125,15 @@ impl Default for SystemsScreen {
             click: None,
             tab: Tab::Stages,
             drafts: None,
-            popups: Vec::new(),
+            left: Left::SystemWide,
             pick_layer: false,
         }
     }
 }
 
 impl SystemsScreen {
-    /// Opens the screen, at `layer` and with `part` selected and its
-    /// pop-up open when given; a part without a layer shows the part's
+    /// Opens the screen, at `layer` and with `part` selected (shown in the
+    /// right column) when given; a part without a layer shows the part's
     /// main layer (`Layer::main`). The one way in from the flight view:
     /// the action bar, the menus' links, the part cards' "more".
     pub fn open_at(&mut self, layer: Option<Layer>, part: Option<u32>) {
@@ -141,17 +147,10 @@ impl SystemsScreen {
         self.pick_layer = layer.is_none() && part.is_some();
     }
 
-    /// Selects `sel` (highlighted in the view and the list) and opens its
-    /// pop-up, or brings it last (on top); `None` clears the selection.
+    /// Selects `sel`: highlighted in the view and the list, and shown in
+    /// the right column; `None` clears the selection.
     pub fn select(&mut self, sel: Option<Selection>) {
         self.selected = sel;
-        if let Some(s) = sel {
-            self.popups.retain(|p| *p != s);
-            self.popups.push(s);
-            if self.popups.len() > MAX_POPUPS {
-                self.popups.remove(0);
-            }
-        }
     }
 
     /// Shows the selected part's main layer once its facts are known, if
@@ -223,9 +222,8 @@ mod tests {
         assert_eq!(other.stages[0].name, "Y");
     }
 
-    /// `open_at` opens at the layer and part given (the part's pop-up
-    /// open), and keeps the others; a part without a layer picks its main
-    /// layer once its facts are known.
+    /// `open_at` opens at the layer and part given (the part selected); a
+    /// part without a layer picks its main layer once its facts are known.
     #[test]
     fn open_at_a_layer_and_a_part() {
         let mut screen = SystemsScreen { selected: Some(Selection::Part(3)), ..SystemsScreen::default() };
@@ -234,7 +232,6 @@ mod tests {
         assert_eq!((screen.layer, screen.selected), (Layer::Physical, Some(Selection::Part(3))));
         screen.open_at(Some(Layer::Electrical), Some(9));
         assert_eq!((screen.layer, screen.selected), (Layer::Electrical, Some(Selection::Part(9))));
-        assert_eq!(screen.popups, [Selection::Part(9)]);
         // A part alone: its main layer (a tank: plumbing) once its facts are there.
         screen.open_at(None, Some(4));
         assert!(screen.pick_layer);
@@ -242,21 +239,23 @@ mod tests {
         assert_eq!(screen.layer, Layer::Electrical, "not known yet");
         let tank = rules::PartFacts { id: 4, tanks: vec![("LOX".into(), None, 1.0)], ..Default::default() };
         screen.settle_layer(&[tank]);
-        assert_eq!((screen.layer, screen.pick_layer), (Layer::Plumbing, false));
-        assert_eq!(screen.popups, [Selection::Part(9), Selection::Part(4)]);
+        assert_eq!(
+            (screen.layer, screen.pick_layer, screen.selected),
+            (Layer::Plumbing, false, Some(Selection::Part(4)))
+        );
     }
 
-    /// Selecting opens a pop-up, or brings it on top; at most
-    /// [`MAX_POPUPS`], the oldest closing.
+    /// The left column starts on the craft as a whole; a selection is one
+    /// part or component (no pop-ups), the last one clicked.
     #[test]
-    fn pop_ups_open_on_selection() {
+    fn the_left_starts_system_wide_and_one_thing_is_selected() {
         let mut screen = SystemsScreen::default();
-        for p in [1, 2, 1, 3, 4, 5] {
+        assert_eq!(screen.left, Left::SystemWide);
+        for p in [1, 2, 1, 3] {
             screen.select(Some(Selection::Part(p)));
         }
-        let want: Vec<Selection> = [2, 1, 3, 4, 5].map(Selection::Part)[1..].to_vec();
-        assert_eq!(screen.popups, want);
+        assert_eq!(screen.selected, Some(Selection::Part(3)));
         screen.select(None);
-        assert_eq!((screen.selected, screen.popups.len()), (None, MAX_POPUPS));
+        assert_eq!(screen.selected, None);
     }
 }

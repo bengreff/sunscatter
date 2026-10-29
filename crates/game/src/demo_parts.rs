@@ -243,7 +243,6 @@ pub fn run(
             }
             if let Some(&(name, layer, part)) = SYSTEMS_VIEWS.get(script.view - PAD_VIEWS.len()) {
                 let def = sim.ship().ship_def();
-                systems.popups.clear();
                 systems.selected = None;
                 systems.open_at(Some(layer), part.and_then(|p| def.as_ref()?.part_named(p)));
                 script.view += 1;

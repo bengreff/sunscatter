@@ -43,7 +43,7 @@ pub struct Row {
     pub level: Level,
     /// What the label means (a hover; [`term`]).
     pub hover: Option<String>,
-    /// What it is about: a click opens its pop-up.
+    /// What it is about: a click selects it.
     pub open: Option<Selection>,
 }
 
@@ -296,7 +296,7 @@ fn part_groups(def: &ShipDef, state: &ShipState, id: u32, f: Option<&PartFacts>,
     }
     out.push(ratings(&info.ratings));
     out.extend(failures(&info.failures));
-    // Its components last, each a link to its own pop-up.
+    // Its components last, each a link to its own details.
     let components: Vec<usize> = (0..def.components.len()).filter(|&i| def.components[i].part == id).collect();
     let mut g = Group::new(format!("COMPONENTS · {}", components.len()));
     for &i in &components {

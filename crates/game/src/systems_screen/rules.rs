@@ -439,13 +439,18 @@ pub struct Regions {
     pub view: bevy_egui::egui::Rect,
 }
 
+/// The side columns' widths (logical px): the summary or the parts list on
+/// the left, the selection's details on the right.
+pub const LEFT_WIDTH: f32 = 380.0;
+pub const RIGHT_WIDTH: f32 = 360.0;
+
 /// The regions of a screen: fixed sizes, the side columns narrowed on a
 /// small screen so the view keeps at least a third of the width.
 pub fn regions(screen: bevy_egui::egui::Rect) -> Regions {
     use bevy_egui::egui::{pos2, Rect};
     let (w, h) = (screen.width(), screen.height());
-    let shrink = (w * 2.0 / 3.0 / (280.0 + 380.0)).min(1.0);
-    let (left_w, right_w) = (280.0 * shrink, 380.0 * shrink);
+    let shrink = (w * 2.0 / 3.0 / (LEFT_WIDTH + RIGHT_WIDTH)).min(1.0);
+    let (left_w, right_w) = (LEFT_WIDTH * shrink, RIGHT_WIDTH * shrink);
     let top_h = 70.0_f32.min(h * 0.2);
     let bottom_h = 250.0_f32.min(h * 0.35);
     let (x0, y0, x1, y1) = (screen.min.x, screen.min.y, screen.max.x, screen.max.y);
