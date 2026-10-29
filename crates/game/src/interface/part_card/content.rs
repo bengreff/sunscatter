@@ -4,11 +4,13 @@
 //! temperature), bottles, batteries, mechanisms, separation joint or the
 //! pad's clamps, thruster blocks, valves, the cabin, the parachutes, its
 //! temperature against its rating — and its commands, the irreversible
-//! ones confirmed. Components show only where they matter to the live
-//! state (not sensors). What the craft cannot measure is unknown, with the
+//! ones confirmed. What its components carry is summed by kind
+//! (`inside`), never listed one by one; their commands are on the systems
+//! screen. What the craft cannot measure is unknown, with the
 //! sensor that would measure it (D106: the card shows a dash, its tooltip
 //! names the sensor); debug mode knows everything.
 
+use super::inside::Inside;
 use crate::format;
 use crate::systems_screen::inspect::{self, Selection};
 use sim::craft::assembly::JointKind;
@@ -73,7 +75,7 @@ pub struct Live<'a> {
 impl Live<'_> {
     /// A value of `q` (true value `truth`) as `show` writes its reading,
     /// else unknown with its sensor.
-    fn value(&self, q: Quantity, truth: f64, show: impl Fn(sim::systems::Reading) -> String) -> Value {
+    pub(super) fn value(&self, q: Quantity, truth: f64, show: impl Fn(sim::systems::Reading) -> String) -> Value {
         match self.knowledge.read(q, truth) {
             Some(r) => Value::Shown(show(r)),
             None => Value::Unknown(sensor_for(self.def, q)),
@@ -81,12 +83,12 @@ impl Live<'_> {
     }
 }
 
-fn line(label: &str, value: Value) -> Line {
+pub(super) fn line(label: &str, value: Value) -> Line {
     Line { label: label.to_string(), value, level: format::Level::Normal }
 }
 
 /// A line against a limit: `x` (when measured) of `limit` sets its level.
-fn against(label: &str, value: Value, x: f64, limit: f64) -> Line {
+pub(super) fn against(label: &str, value: Value, x: f64, limit: f64) -> Line {
     let level = match value {
         Value::Shown(_) => format::limit_level(x, Some(limit)),
         Value::Unknown(_) => format::Level::Normal,
@@ -94,12 +96,12 @@ fn against(label: &str, value: Value, x: f64, limit: f64) -> Line {
     Line { level, ..line(label, value) }
 }
 
-fn shown(label: &str, text: impl Into<String>) -> Line {
+pub(super) fn shown(label: &str, text: impl Into<String>) -> Line {
     line(label, Value::Shown(text.into()))
 }
 
 /// A reading in a unit of `scale` SI units with at most `max` decimals.
-fn scaled(r: sim::systems::Reading, scale: f64, max: usize, unit: &str) -> String {
+pub(super) fn scaled(r: sim::systems::Reading, scale: f64, max: usize, unit: &str) -> String {
     format!("{:.*} {unit}", format::decimals(r.precision, scale, max), r.shown() / scale)
 }
 
@@ -107,15 +109,17 @@ fn scaled(r: sim::systems::Reading, scale: f64, max: usize, unit: &str) -> Strin
 pub fn card(live: &Live, part: u32) -> Option<Card> {
     let def = live.def;
     let info = def.parts.iter().find(|p| p.part == part)?;
+    let inside = Inside::of(def, part, &info.id);
     let mut sections = Vec::new();
-    for i in (0..def.engines.len()).filter(|&i| def.engines[i].part == part) {
+    for i in (0..def.engines.len()).filter(|&i| def.engines[i].part == part && !inside.engines.contains(&i)) {
         sections.push(engine(live, i));
     }
-    for t in (0..def.tanks.len()).filter(|&t| def.tanks[t].part == part) {
+    for t in (0..def.tanks.len()).filter(|&t| def.tanks[t].part == part && !inside.tanks.contains(&t)) {
         sections.push(tank(live, t));
     }
-    stores(live, part, &mut sections);
-    joints_and_mechanisms(live, part, &mut sections);
+    stores(live, part, &inside, &mut sections);
+    joints_and_mechanisms(live, part, &inside, &mut sections);
+    sections.extend(super::inside::sections(live, &inside));
     let mut own = vec![];
     if let Some(c) = live.state.cabin.as_ref().filter(|c| c.part == part) {
         let kpa = |r: sim::systems::Reading| scaled(r, 1e3, 1, "kPa");
@@ -143,14 +147,7 @@ pub fn card(live: &Live, part: u32) -> Option<Card> {
 fn engine(live: &Live, i: usize) -> Section {
     let (d, s) = (&live.def.engines[i], &live.state.engines[i]);
     let run = live.state.runtime.engines.get(i);
-    let state = match s.status {
-        EngineStatus::Off if run.is_some_and(|r| r.settling.is_some()) => "waiting for settled propellant",
-        EngineStatus::Off => "off",
-        EngineStatus::Starting => "starting",
-        EngineStatus::Running => "running",
-        EngineStatus::ShuttingDown => "shutting down",
-        EngineStatus::Failed => "FAILED",
-    };
+    let state = engine_words(live, i);
     let thrust = live.thrusts.get(i).copied().unwrap_or(0.0);
     let rated = format::force(Some(sim::systems::Reading { value: d.data.thrust_vac, precision: 0.0 }));
     let q = Quantity::EngineThrust(i as u32);
@@ -172,6 +169,19 @@ fn engine(live: &Live, i: usize) -> Section {
     Section { heading: format!("ENGINE {}", d.id), lines }
 }
 
+/// Engine `i`'s state in words.
+pub(super) fn engine_words(live: &Live, i: usize) -> &'static str {
+    let run = live.state.runtime.engines.get(i);
+    match live.state.engines[i].status {
+        EngineStatus::Off if run.is_some_and(|r| r.settling.is_some()) => "waiting for settled propellant",
+        EngineStatus::Off => "off",
+        EngineStatus::Starting => "starting",
+        EngineStatus::Running => "running",
+        EngineStatus::ShuttingDown => "shutting down",
+        EngineStatus::Failed => "FAILED",
+    }
+}
+
 /// A tank's liquid against its capacity, ullage pressure against its
 /// rating, the liquid's temperature.
 fn tank(live: &Live, t: usize) -> Section {
@@ -190,10 +200,11 @@ fn tank(live: &Live, t: usize) -> Section {
     Section { heading: format!("TANK {} · {}", d.id, d.fluid), lines }
 }
 
-/// The part's bottles, batteries, thruster blocks and valves.
-fn stores(live: &Live, part: u32, out: &mut Vec<Section>) {
+/// The part's own bottles, batteries, thruster blocks and valves (not
+/// those `inside` it).
+fn stores(live: &Live, part: u32, inside: &Inside, out: &mut Vec<Section>) {
     let (def, state) = (live.def, live.state);
-    for (j, b) in def.bottles.iter().enumerate().filter(|(_, b)| b.part == part) {
+    for (j, b) in def.bottles.iter().enumerate().filter(|(j, b)| b.part == part && !inside.bottles.contains(j)) {
         let s = &state.bottles[j];
         let p = sim::fluids::pressure(s.moles, b.volume, s.k);
         let rated = b.pressure / 1e5;
@@ -203,7 +214,7 @@ fn stores(live: &Live, part: u32, out: &mut Vec<Section>) {
         let lines = vec![against("pressure", v, p, b.burst)];
         out.push(Section { heading: format!("BOTTLE {} · {}", b.id, b.gas), lines });
     }
-    for (j, b) in def.batteries.iter().enumerate().filter(|(_, b)| b.part == part) {
+    for (j, b) in def.batteries.iter().enumerate().filter(|(j, b)| b.part == part && !inside.batteries.contains(j)) {
         let cap = b.item.capacity.max(1.0);
         let charge = state.batteries[j].charge;
         let v = live.value(Quantity::BatteryCharge(j as u32), charge, |r| format!("{:.0} %", r.shown() / cap * 100.0));
@@ -213,7 +224,7 @@ fn stores(live: &Live, part: u32, out: &mut Vec<Section>) {
             lines: vec![line("charge", v), shown("capacity", wh)],
         });
     }
-    for (j, t) in def.thrusters.iter().enumerate().filter(|(_, t)| t.part == part) {
+    for (j, t) in def.thrusters.iter().enumerate().filter(|(j, t)| t.part == part && !inside.thrusters.contains(j)) {
         let lost = state.runtime.out(&t.id);
         let on = state.thrusters.get(j).is_some_and(|s| s.enabled);
         let words = if lost {
@@ -225,18 +236,18 @@ fn stores(live: &Live, part: u32, out: &mut Vec<Section>) {
         };
         out.push(Section { heading: format!("RCS {}", t.id), lines: vec![shown("state", words)] });
     }
-    for (j, v) in def.valves.iter().enumerate().filter(|(_, v)| v.part == part) {
+    for (j, v) in def.valves.iter().enumerate().filter(|(j, v)| v.part == part && !inside.valves.contains(j)) {
         let s = &state.valves[j];
         let words = format!("{}{}", if s.open { "open" } else { "closed" }, if s.stuck { " · STUCK" } else { "" });
         out.push(Section { heading: format!("VALVE {}", v.id), lines: vec![shown("state", words)] });
     }
 }
 
-/// The part's mechanisms (angle and where it is going) and the joint that
-/// holds it to its parent when it is a separation or the pad's clamps.
-fn joints_and_mechanisms(live: &Live, part: u32, out: &mut Vec<Section>) {
+/// The part's own mechanisms (angle and where it is going) and the joint
+/// that holds it to its parent when it is a separation or the pad's clamps.
+fn joints_and_mechanisms(live: &Live, part: u32, inside: &Inside, out: &mut Vec<Section>) {
     let (def, state) = (live.def, live.state);
-    for (j, m) in def.mechanisms.iter().enumerate().filter(|(_, m)| m.part == part) {
+    for (j, m) in def.mechanisms.iter().enumerate().filter(|(j, m)| m.part == part && !inside.mechanisms.contains(j)) {
         let s = &state.mechanisms[j];
         let words = if (s.angle - s.target).abs() > 0.5 {
             format!("moving: {:.0}° to {:.0}°", s.angle, s.target)
@@ -264,15 +275,11 @@ fn joints_and_mechanisms(live: &Live, part: u32, out: &mut Vec<Section>) {
     }
 }
 
-/// The part's commands and its components' (the systems screen's, without
-/// power switches), and arming the parachutes it carries.
+/// The part's own commands (its components' are on the systems screen)
+/// and arming the parachutes it carries.
 fn commands(live: &Live, part: u32) -> Vec<Command> {
     let (def, state) = (live.def, live.state);
     let mut list = inspect::commands(def, state, Selection::Part(part));
-    for i in (0..def.components.len()).filter(|&i| def.components[i].part == part) {
-        let own = inspect::commands(def, state, Selection::Component(i));
-        list.extend(own.into_iter().filter(|(_, c)| !matches!(c, ShipCommand::Power(..))));
-    }
     if live.chute.is_some_and(|(parts, words)| parts.contains(&part) && words == "stowed") {
         list.push((crate::staging::parts::label(&ShipCommand::ArmChutes), ShipCommand::ArmChutes));
     }

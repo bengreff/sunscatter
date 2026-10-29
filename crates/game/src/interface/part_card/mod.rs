@@ -10,6 +10,7 @@
 //! (`SystemsScreen::open_at`): everything about it, by layer.
 
 pub mod content;
+pub mod inside;
 pub mod place;
 
 use crate::commands::GameCommand;

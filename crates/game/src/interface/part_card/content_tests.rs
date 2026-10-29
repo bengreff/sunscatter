@@ -47,11 +47,56 @@ fn a_tank_card_shows_what_the_craft_measures() {
     let live = Live { def: &def, state: &state, knowledge: &k, thrusts: &[], kelvin: &[], chute: None };
     let s1 = card(&live, part(&def, "s1.tank")).unwrap();
     assert!(matches!(value(&s1, "TANK s1.tank:lox", "contents"), Value::Shown(t) if t.ends_with(" t")), "{s1:?}");
-    // Dragon's tanks have no level sensor (falcon9.md §5.2).
+    // Dragon's tanks have no level sensor (falcon9.md §5.2): their total
+    // on the capsule's card is a dash naming it.
     let t = def.tanks.iter().position(|t| t.id.starts_with("dragon")).unwrap();
     let dragon = card(&live, def.tanks[t].part).unwrap();
-    let heading = format!("TANK {}", def.tanks[t].id);
-    assert_eq!(value(&dragon, &heading, "contents"), &Value::Unknown("a level sensor in the tank: none fitted".into()));
+    let fluid = def.tanks[t].fluid.as_str();
+    assert_eq!(value(&dragon, "TANKS", fluid), &Value::Unknown("a level sensor in the tank: none fitted".into()));
+}
+
+/// The capsule's card is the part and its totals (owner, 2026-10-29: "those
+/// components should not be listed"): one section per kind of what its
+/// components carry, none per component, and none of their commands.
+#[test]
+fn the_capsules_card_sums_what_it_carries() {
+    let (def, state) = falcon9();
+    let k = Knowledge::perfect();
+    let thrusts = vec![0.0; def.engines.len()];
+    let live = Live { def: &def, state: &state, knowledge: &k, thrusts: &thrusts, kelvin: &[], chute: None };
+    let capsule = part(&def, "dragon.capsule");
+    let card = card(&live, capsule).unwrap();
+    let headings: Vec<&str> = card.sections.iter().map(|s| s.heading.as_str()).collect();
+    let on = |f: &dyn Fn(usize) -> bool, len: usize| (0..len).filter(|&i| f(i)).count();
+    let engines = on(&|i| def.engines[i].part == capsule, def.engines.len());
+    let tanks = on(&|i| def.tanks[i].part == capsule, def.tanks.len());
+    let thrusters = on(&|i| def.thrusters[i].part == capsule, def.thrusters.len());
+    assert_eq!(engines, 8, "four SuperDraco pods of two");
+    let want = [format!("ENGINES · {engines}"), format!("TANKS · {tanks}"), format!("RCS · {thrusters} blocks")];
+    for w in &want {
+        assert!(headings.contains(&w.as_str()), "{w} in {headings:?}");
+    }
+    for one in ["ENGINE ", "TANK ", "BOTTLE ", "BATTERY ", "RCS dragon", "VALVE ", "MECHANISM "] {
+        assert!(headings.iter().all(|h| !h.starts_with(one)), "{one} listed: {headings:?}");
+    }
+    assert_eq!(value(&card, "ENGINES", "state"), &Value::Shown("8 off".into()));
+    assert!(matches!(value(&card, "BATTERIES", "charge"), Value::Shown(t) if t.ends_with('%')), "{card:?}");
+    assert!(card.sections.last().unwrap().heading.starts_with("PART"));
+    assert!(card.commands.iter().all(|c| !matches!(c.command, ShipCommand::Rcs(..) | ShipCommand::Ignite(..))));
+    // A part's own items keep their sections (the booster's tank's two).
+    let s1 = super::card(&live, part(&def, "s1.tank")).unwrap();
+    assert!(s1.sections.iter().any(|s| s.heading.starts_with("TANK s1.tank:lox")));
+}
+
+#[test]
+fn counts_read_in_the_order_met() {
+    use crate::interface::part_card::inside::counts;
+    // (words, text)
+    let table: [(&[&str], &str); 3] =
+        [(&["off"; 8], "8 off"), (&["running", "off", "running"], "2 running · 1 off"), (&[], "")];
+    for (words, want) in table {
+        assert_eq!(counts(words.iter().copied()), want);
+    }
 }
 
 #[test]
