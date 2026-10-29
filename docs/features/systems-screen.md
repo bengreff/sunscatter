@@ -37,7 +37,7 @@ The owner: "Systems should be an entire new screen separate from flight. Flight 
 
 ## The action bar (`game::interface::action_bar`)
 
-Just above the navball cluster (D080, D111): SYSTEMS (Tab), then each function pinned in the editors as a button, run by a click. Nothing for the test craft.
+At the top right, the staging bar's width, the staging bar below it (D080, D111; owner, 2026-10-28): SYSTEMS (Tab), then each function pinned in the editors as a button, run by a click, wrapping. Nothing for the test craft.
 
 ## Tests
 

@@ -7,16 +7,16 @@
 ## Screen
 
 ```
-┌ time / warp ┐   ┌ ORBITAL 1 · LANDING 2 · MANEUVER 3 · CREW 4 · POWER 5 · COMMS 6 ┐   ┌ staging ┐
+┌ time / warp ┐   ┌ ORBITAL 1 · LANDING 2 · MANEUVER 3 · CREW 4 · POWER 5 · COMMS 6 ┐   ┌ action  ┐
 └─────────────┘   └─────────────────────────────────────────────────────────────────┘   │ bar     │
-┌ left dock ──┐                                                     (part cards) │ (BAR)   │
-│ RCS         │  while RCS is on                                                       │         │
-│ ORBITAL …   │                    ┌ action bar ┐                                      │         │
+┌ left dock ──┐                                                                        ┌ staging ┐
+│ RCS         │  while RCS is on                                         (part cards) │ bar     │
+│ ORBITAL …   │                                                                        │ (BAR)   │
 └─────────────┘                    ┌ navball cluster ┐                                 │         │
 ┌ notifications ┐                  │                 │                                 └─────────┘
 ```
 
-- **Fixed places.** One dock on the left (300 px) stacks the open menus in menu order and always scrolls within its height (`layout::dock_place`: below the time panel and the menu bar, above the notifications window and above the navball cluster where they would overlap). The right edge is the staging bar's (BAR, `interface::stage_bar`).
+- **Fixed places.** One dock on the left (300 px) stacks the open menus in menu order and always scrolls within its height (`layout::dock_place`: below the time panel and the menu bar, above the notifications window and above the navball cluster where they would overlap). The right edge is the action bar's at the top and the staging bar's below it (BAR, `interface::stage_bar`), the same width.
 - **Flat pages (D111).** A menu is one page: its summary, then every section under a ruled heading, nothing collapsed; a section with nothing to show is not drawn. A craft of parts' page ends with a link into the systems screen at its layer (`MenuId::layer`, `SystemsScreen::open_at`).
 - **Keys (D111, `commands::keys`).** Number keys toggle menus (1 Orbital, 2 Landing, 3 Maneuver, 4 Crew, 5 Power, 6 Comms; 7 kept for Docking). R turns RCS on and off; its menu has no key. No F-keys: Tab the systems screen, M tracking, `?` help, Cmd+S / Cmd+L saves (Ctrl+Alt elsewhere), Esc the pause menu (revert to launch, help, the performance overlay).
 - **Notifications (D111, `interface::toasts`).** Every message (saves, loads, errors, commands sent, the active vessel's events, separations) goes into one history of 200, shown bottom left under the dock, the dock's width, newest at the bottom and bright for 4 s, scrolling past about six lines; ⏷ folds it to its header and the newest message, ⏶ opens it (icon-font glyphs: the proportional font has no ▲ ▼). A message about a vessel ends with a link: a click switches to that vessel, or opens the systems screen for the active vessel's own. Outside the flight view it shows only while a message is new. A stage run reads by the stage's name alone (`events::wording`: "MECO", "Stage separation"); the commands' replies drop their "Vessel N:" prefix for the link.
@@ -26,7 +26,7 @@
 
 - Speed and its ORBIT / SURFACE / TARGET switch above the ball; ALT (with its datum switch, `navball::altitude`), Ap and Pe on the left; SAS, the hold modes (click only), the RCS button and the throttle bar on the right.
 - **G row** (`navball::g_meter`): the load now, its direction (▲ ▼ ◀ ▶), and on hover the g-limit and what sets it (a joint, or the crew along an axis; `sim::systems::g_limit`), given from 0.01 g (coasting, couples and thin air load the joints and a limit scaled from them means nothing); amber from 80 % of the limit, red at it.
-- **Action bar** (`interface::action_bar`) above the cluster: SYSTEMS, then the craft's saved functions (click only), the Falcon 9's launch abort pinned.
+- **Action bar** (`interface::action_bar`) at the top right, the staging bar's width (owner, 2026-10-28): SYSTEMS, then the craft's saved functions (click only), wrapping, the Falcon 9's launch abort pinned.
 
 ## Menus
 

@@ -1,8 +1,10 @@
-//! The action-group bar (D107, D111): in flight, just above the navball
-//! cluster, the active craft's functions pinned in the systems screen, each
-//! run by a click (no craft-specific keys: abort is one of them), and the
-//! way into the systems screen (Tab). Nothing for a craft without a ship
-//! definition (the test craft). The docks keep clear of it.
+//! The action-group bar (D107, D111): in flight, at the top right as wide
+//! as the staging bar below it (owner, 2026-10-28: "Move the systems
+//! mini-tab to the top right corner, same width as staging"), the way into
+//! the systems screen (Tab) and the active craft's functions pinned in the
+//! systems screen, each run by a click (no craft-specific keys: abort is one
+//! of them), wrapping onto more lines. Nothing for a craft without a ship
+//! definition (the test craft). The staging bar stops below it.
 
 use super::{layout, theme};
 use crate::commands::GameCommand;
@@ -61,17 +63,14 @@ pub fn draw(
         return Ok(());
     }
     let ctx = contexts.ctx_mut()?;
-    let cluster = ctx.memory(|m| m.area_rect(egui::Id::new(crate::navball::AREA)));
-    let screen = ctx.content_rect();
-    let at = cluster.map_or(egui::pos2(screen.center().x, screen.max.y - 270.0), |c| {
-        egui::pos2(c.center().x, c.min.y - layout::GAP)
-    });
     let entries = entries(&state.functions);
     let mut clicked: Option<usize> = None;
-    egui::Area::new(AREA.into()).pivot(egui::Align2::CENTER_BOTTOM).fixed_pos(at).show(ctx, |ui| {
-        theme::bar_frame().show(ui, |ui| {
+    let corner = [-layout::MARGIN, layout::MARGIN];
+    egui::Area::new(AREA.into()).anchor(egui::Align2::RIGHT_TOP, corner).movable(false).show(ctx, |ui| {
+        let pad = super::stage_bar::draw::PAD as i8;
+        theme::panel_frame().inner_margin(egui::Margin::same(pad)).show(ui, |ui| {
+            ui.set_width(super::stage_bar::draw::inner());
             ui.horizontal_wrapped(|ui| {
-                ui.set_max_width(560.0);
                 let into = ui.button(egui::RichText::new("SYSTEMS  Tab").color(theme::ACCENT));
                 if into.on_hover_text("The systems screen: every part by layer, stages and functions").clicked() {
                     systems.open_at(None, None);

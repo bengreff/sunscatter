@@ -21,17 +21,25 @@ pub enum Action {
     Again(u32),
 }
 
-/// The inner width of a row (logical px).
-fn inner() -> f32 {
-    WIDTH - 2.0 * 6.0 - 2.0
+/// The inner width of a panel the staging bar's width (logical px): its
+/// rows, and the action bar above it.
+pub fn inner() -> f32 {
+    WIDTH - 2.0 * PAD - 2.0
 }
+
+/// A panel's inner margin (logical px).
+pub const PAD: f32 = 6.0;
 
 /// Draws the bar (see the module) and returns what was asked of it.
 pub fn bar(ctx: &egui::Context, rows: &[Row], bar: &mut StageBar) -> Vec<Action> {
     let mut out = Vec::new();
     let screen = ctx.content_rect();
     let done = rows.iter().filter(|r| r.place == Place::Done).count() as f32;
-    let room = (screen.height() - 2.0 * layout::MARGIN - 240.0 - DONE_HEIGHT * done).max(120.0);
+    // Up to below the action bar (top right) when it is drawn.
+    let top = ctx.memory(|m| m.area_rect(Id::new(crate::interface::action_bar::AREA)));
+    let top = top.map_or(screen.min.y + layout::MARGIN, |r| r.max.y + layout::GAP);
+    let tall = screen.max.y - layout::MARGIN - top;
+    let room = (tall - 240.0 - DONE_HEIGHT * done).max(120.0);
     egui::Area::new(Id::new(AREA))
         .anchor(Align2::RIGHT_BOTTOM, [-layout::MARGIN, -layout::MARGIN])
         .movable(false)
@@ -39,8 +47,8 @@ pub fn bar(ctx: &egui::Context, rows: &[Row], bar: &mut StageBar) -> Vec<Action>
             // An area lays out within its remembered size (egui's default
             // is 400 px tall): without this, stages added in flight would
             // not grow the scroll area past it (the notifications' bug).
-            ui.set_max_height(screen.height() - 2.0 * layout::MARGIN);
-            theme::panel_frame().inner_margin(egui::Margin::same(6)).show(ui, |ui| {
+            ui.set_max_height(tall);
+            theme::panel_frame().inner_margin(egui::Margin::same(PAD as i8)).show(ui, |ui| {
                 ui.set_width(inner());
                 ui.spacing_mut().item_spacing = vec2(4.0, 3.0);
                 let pending: Vec<&Row> =

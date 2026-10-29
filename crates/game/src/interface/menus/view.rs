@@ -71,11 +71,8 @@ pub fn draw(
         menus.toggle(m);
     }
     let rect = |id: &str| ctx.memory(|m| m.area_rect(egui::Id::new(id)));
-    // The navball cluster and the action bar above it.
-    let cluster = match (rect(crate::navball::AREA), rect(crate::interface::action_bar::AREA)) {
-        (Some(c), Some(m)) => Some(c.union(m)),
-        (c, m) => c.or(m),
-    };
+    // The navball cluster (the action bar is at the top right).
+    let cluster = rect(crate::navball::AREA);
     let screen = ctx.content_rect();
     let mut actions = Vec::new();
     let open = menus.in_order(sim.controls().rcs.on);
