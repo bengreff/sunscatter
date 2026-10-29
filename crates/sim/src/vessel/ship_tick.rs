@@ -60,20 +60,22 @@ impl Vessel {
     /// allocated to deflections at their actuators' rate, their real force
     /// and torque, the flow's incidence included, in its place). Their
     /// torques go into the command's, their forces (body axes) into the
-    /// tick's constant acceleration `lift` (inertial), which is returned.
+    /// tick's constant acceleration `lift` (inertial), which is returned
+    /// with the fins' deflections (aligned with the tick's fins; held when
+    /// the tick commits, [`Self::hold_effectors`]).
     pub(super) fn ship_effectors(
-        &mut self,
+        &self,
         ship: Option<&ShipTick>,
         cmd: &mut super::attitude::Command,
         lift: DVec3,
         props: &crate::craft::MassProps,
         dt: f64,
-    ) -> DVec3 {
-        let Some(t) = ship else { return lift };
+    ) -> (DVec3, Vec<f64>) {
+        let Some(t) = ship else { return (lift, Vec::new()) };
         let q = self.attitude.q;
         cmd.torque += t.push.torque;
         let mut lift = lift + q * t.push.force / props.mass;
-        if let (Some(flow), Some(def), Some(state)) = (t.fin_flow, self.ship_def(), self.ship.as_mut()) {
+        if let (Some(flow), Some(state)) = (t.fin_flow, self.ship.as_ref()) {
             if !t.fins.is_empty() {
                 use crate::systems::fins;
                 let want = cmd.u * t.fin_auth;
@@ -82,17 +84,23 @@ impl Vessel {
                 let (force, torque) = fins::forces(&t.fins, &flow, props.com, &d);
                 cmd.torque += torque - want;
                 lift += q * force / props.mass;
-                fins::hold(&def, state, &t.fins, &d);
+                return (lift, d);
             }
         }
-        lift
+        (lift, Vec::new())
     }
 
-    /// Where a craft of parts' gimbal holds the thrust after a tick's
-    /// command (its actuators start the next tick from it).
-    pub(super) fn hold_gimbal(&mut self, cmd: &super::attitude::Command) {
-        if let Some(s) = self.ship.as_mut() {
-            s.runtime.thrust_dir = Some(cmd.thrust_dir);
+    /// A committed tick's effectors: the grid fins hold their deflections
+    /// (`fins`, aligned with the tick's), and the gimbal the thrust where
+    /// the command left it (its actuators start the next tick from it).
+    pub(super) fn hold_effectors(&mut self, ship: Option<&ShipTick>, cmd: &super::attitude::Command, fins: &[f64]) {
+        let def = self.ship_def();
+        let Some(s) = self.ship.as_mut() else { return };
+        s.runtime.thrust_dir = Some(cmd.thrust_dir);
+        if let (Some(t), Some(def)) = (ship, def) {
+            if !fins.is_empty() {
+                crate::systems::fins::hold(&def, s, &t.fins, fins);
+            }
         }
     }
 }

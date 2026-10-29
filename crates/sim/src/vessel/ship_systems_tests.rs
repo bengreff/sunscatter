@@ -646,3 +646,45 @@ fn closing_the_throttle_shuts_the_engines_down() {
     let text = format!("Throttle closed: {n} engines shut down");
     assert!(v.ship_events().iter().any(|e| e.text == text), "{:?}", v.ship_events());
 }
+
+/// A live tick begun but not committed (a bubble's joint tick aborted,
+/// `bubble::together`, which restores the attitude and its control) leaves
+/// the ship state as it was (review, 2026-10-27): `begin_tick` holds the
+/// grid fins' deflections and the gimbal only when the tick commits, so
+/// the tick tried again starts from the same state. Committed, the tick is
+/// the vessel's own.
+#[test]
+fn a_tick_begun_changes_no_ship_state_until_it_commits() {
+    use super::hold::{HoldMode, SpeedReference};
+    let w = world();
+    let mut v = booster(&w, 12_000.0, 300.0, 0.05);
+    let tilt = super::attitude::quat_from_rotvec(DVec3::X * 0.09);
+    v.set_attitude(Attitude { q: v.attitude.q * tilt, omega: DVec3::ZERO });
+    v.command(&w, &ShipCommand::Deploy("s1.gridfin#*".into())).unwrap();
+    let hold = Controls { sas: true, hold: HoldMode::Retrograde, speed: SpeedReference::Surface, ..Default::default() };
+    let mut ids = VesselIds::default();
+    ids.allocate();
+    ids.allocate();
+    let start = v.time;
+    for k in 1..=8 {
+        v.advance(&w, start.add_seconds(k as f64), &hold, usize::MAX);
+        if let Some(plan) = v.plan_breakup() {
+            v.split(&w, &plan, &plan.crafts(), &mut ids);
+        }
+    }
+    assert!(matches!(v.phase, Phase::Powered { .. }));
+    assert!(v.ship().unwrap().runtime.fins.iter().any(|d| *d != 0.0), "the fins steer");
+    let (before, mut alone) = (v.ship.clone(), v.clone());
+    let design = v.craft.design().clone();
+    let until = v.time.add_seconds(TICK);
+    let tick = v.begin_tick(&w, &hold, &design, (TICK, until)).unwrap();
+    let (att, control) = tick.before;
+    let mut aborted = v.clone();
+    (aborted.attitude, aborted.control) = (att, control);
+    assert!(aborted.ship == before, "begun: the ship state as it was");
+    let end = v.fly_tick(&w, &tick).unwrap();
+    v.finish_tick(&w, tick, end, &hold);
+    alone.advance(&w, until, &hold, usize::MAX);
+    assert!(v.ship == alone.ship, "committed: the vessel's own tick");
+    assert!(v.ship != before);
+}

@@ -31,6 +31,23 @@ use crate::world::World;
 use glam::DVec3;
 
 impl Vessel {
+    /// After a tick: destroyed if a temperature is above its limit (not in
+    /// debug mode, D064).
+    pub(super) fn check_overheat(&mut self) {
+        if self.debug || self.destroyed.is_some() {
+            return;
+        }
+        let (design, t) = (self.craft.design(), &self.craft.thermal);
+        let Some(hot) = crate::thermal::check(&self.thermal.state, &design.skin_max, t.internal_max_k) else {
+            return;
+        };
+        let temperature = match hot {
+            Overheat::Cell(i) => self.thermal.state.skin[i as usize],
+            Overheat::Node(j) => self.thermal.state.nodes[j as usize],
+        };
+        self.destroy(Destruction::Overheat { at: hot, temperature });
+    }
+
     /// After a live tick with the tick's `flow` (body axes, if in air) and
     /// the ground `contact` (anchor, body) of its substeps: the parts over a
     /// limit break (a one-part craft overheats whole, D065).

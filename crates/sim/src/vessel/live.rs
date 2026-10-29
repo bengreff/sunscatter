@@ -93,6 +93,12 @@ pub(super) struct TickStart<'d> {
     out: EngineOutput,
     /// A craft of parts: what the tick draws from each tank and bottle.
     ship: Option<super::ship::ShipTick>,
+    /// What the tick commits ([`Vessel::finish_tick`]; nothing changes
+    /// before, so a tick that fails or is aborted leaves the vessel as it
+    /// was): the parachutes stepped, the grid fins' deflections (aligned
+    /// with `ship`'s fins).
+    chute: crate::chute::ChuteState,
+    fins_held: Vec<f64>,
     pub(super) cmd: Command,
     /// Attitude and control before the command (restored if the tick fails).
     pub(super) before: (Attitude, AttitudeControl),
@@ -398,9 +404,11 @@ impl Vessel {
     }
 
     /// Starts a live tick of `dt` ending at `until` with `controls`: the
-    /// parachutes step, the air and the attitude command are found. `None`:
-    /// the vessel returns to a coast instead (never while a bubble holds it
-    /// live, D082).
+    /// parachutes step, the air and the attitude command are found. Only the
+    /// attitude control changes (restored from `before` if the tick fails);
+    /// the rest is committed by [`Self::finish_tick`]. `None`: the vessel
+    /// returns to a coast instead (never while a bubble holds it live,
+    /// D082).
     pub(super) fn begin_tick<'d>(
         &mut self,
         world: &World,
@@ -420,14 +428,15 @@ impl Vessel {
         let props = self.mass_props();
         let p = ambient_pressure(world, &snap, anchor, r);
         let air = air_at(world, &snap, anchor, r, v);
+        let mut chute_now = self.chute;
         if self.destroyed.is_none() {
             let speed = air.as_ref().map_or(0.0, |a| a.wind.length());
             let q = air.as_ref().map_or(0.0, |a| 0.5 * a.rho * speed * speed);
             let height = near.map_or(f64::INFINITY, |(_, h)| h);
             let flow = chute::Flow { q, speed, height };
-            self.chute.step(&self.craft.chute, controls.chute, flow, dt, self.debug);
+            chute_now.step(&self.craft.chute, controls.chute, flow, dt, self.debug);
         }
-        let chute_area = self.chute.cd_area(&self.craft.chute);
+        let chute_area = chute_now.cd_area(&self.craft.chute);
         let chute = (chute_area > 0.0).then_some((chute_area, self.craft.chute.mount));
         let aero = (air.as_ref().and_then(|a| AeroTick::new(design, a, props.com, chute)))
             .map(|t| t.with_layer(self.attitude.q, &self.thermal.state.skin));
@@ -445,8 +454,7 @@ impl Vessel {
         let before = (self.attitude, self.control);
         let aim = self.aim(world, &snap, (anchor, r, v), controls);
         let mut cmd = attitude::command(&self.attitude, &props.inertia, &mut self.control, controls, &act, &aim, dt);
-        let lift = self.ship_effectors(ship.as_ref(), &mut cmd, lift, &props, dt);
-        self.hold_gimbal(&cmd);
+        let (lift, fins_held) = self.ship_effectors(ship.as_ref(), &mut cmd, lift, &props, dt);
         let compensate = self.bubble.member;
         Some(TickStart {
             anchor,
@@ -469,6 +477,8 @@ impl Vessel {
             p,
             out,
             ship,
+            chute: chute_now,
+            fins_held,
             cmd,
             before,
         })
@@ -531,9 +541,13 @@ impl Vessel {
             att0,
             sun_body,
             ship,
+            chute: chute_now,
+            fins_held,
             ..
         } = s;
         let TickEnd { r: r1, lo, v: v1, touching, delta } = end;
+        self.chute = chute_now;
+        self.hold_effectors(ship.as_ref(), &cmd, &fins_held);
         let (engine_heat, propellant, effects) = match &ship {
             Some(tick) => {
                 let aero_loads = aero.as_ref().map(|a| a.loads(att0));
@@ -591,23 +605,6 @@ impl Vessel {
             }
         }
         false
-    }
-
-    /// After a tick: destroyed if a temperature is above its limit (not in
-    /// debug mode, D064).
-    pub(super) fn check_overheat(&mut self) {
-        if self.debug || self.destroyed.is_some() {
-            return;
-        }
-        let (design, t) = (self.craft.design(), &self.craft.thermal);
-        let Some(hot) = crate::thermal::check(&self.thermal.state, &design.skin_max, t.internal_max_k) else {
-            return;
-        };
-        let temperature = match hot {
-            crate::thermal::Overheat::Cell(i) => self.thermal.state.skin[i as usize],
-            crate::thermal::Overheat::Node(j) => self.thermal.state.nodes[j as usize],
-        };
-        self.destroy(Destruction::Overheat { at: hot, temperature });
     }
 
     /// Counts rest ticks after a contact tick; freezes into `Landed` (a
