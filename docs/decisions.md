@@ -491,11 +491,19 @@ The player flies everything by hand for now (including a booster landing). Scrip
 - Built-in flight software is adaptive functions reacting to the vehicle's state (engine-out re-trim, launch-commit checks, propellant utilisation, the navigation filter), not guidance: the player flies.
 - Fidelity next: powered components heat their parts (an engine off heats nothing), Dragon's coolant loop and radiators; per-engine gimbals with the engine-out response and hard starts; O₂ / N₂ tanks through regulators and leaks, suits abstract.
 
+**D116: Crew limits are doses: integrated over time, lethal past a threshold drawn for each crew member, no injuries.** *Decided, 2026-10-29 (owner); the numbers are the lead's logical defaults.*
+- "Rough physiology+NASA data is fine, just get something consistent (no instant deaths, statistical and time integrated for radiation and g's. No injuries, the crew members just die past a threshold."
+- **One rule for every hazard:** each crew member carries a dose per hazard. It grows by `dt / T(x)`, where `T(x)` is how long level `x` can be survived, and it does not shrink. They die when it passes their threshold. Below that they are well: no injuries and no impairment, only the alarms and the menus' readings as it rises.
+- **Thresholds are statistical.** Each crew member draws one per hazard when the craft is placed on the pad: lognormal around 1, σ 0.3 (E), seeded like failures (D105), so a flight replays the same. No instant deaths: every `T` is finite, so even a spike takes time to kill.
+- **Acceleration:** `T(g)` by axis is NASA-STD-3001 Vol. 2's limit duration for that level, times 3 (E: the standard is the no-injury limit, and the lethal one is rougher). Sideways is still judged against the more tolerant axis.
+- **Radiation:** the absorbed dose (Gy), integrated, against LD50/60 ≈ 4.5 Gy (E, untreated acute radiation syndrome). It lands when radiation enters the ship model (open question 2).
+- **Air:** the same rule for low O₂ partial pressure and high CO₂ (E: minutes at the red limits of the Crew menu, which are rough physiology).
+
 ## Open questions
 
 1. What kind of organization the player leads (D027).
 2. Radiation in the ship model (dose, single-event upsets), and how the career's knowledge of a design's reliability grows (D105).
-3. The crew model.
+3. The crew model beyond its limits (D116): skills, tasks, who flies.
 4. The colony design (D019).
 5. Which model the player's AI agent uses and what it costs the player (D044).
 6. Motion-model tunables: the cutoff threshold, opening angle, anchor hysteresis, and choice of coast integrator.
