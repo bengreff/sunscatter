@@ -25,13 +25,13 @@ A thin column (`stage_bar::WIDTH`, 184 px) at the flight view's right edge, anch
 │ burnout · Δv · thrust │   mean Isp
 │ TWR · mass · mean Isp │
 ├──────────────────────┤
-│ [CURRENT AIR] [VACUUM]│   the figures' air: now, or vacuum
+│ [CURRENT AIR] [VACUUM]│   the figures' air: vacuum (default), or now
 └──────────────────────┘
 ```
 
 - **Stages** are the vessel's own sequence (`ShipState::stages`; each step of the Falcon 9's sequence is a stage) in its view (`sim::craft::program`: every piece of a split keeps the whole program and shows the stages and commands that act on it; Space skips the others), numbered as KSP does within the view (the first the highest). The stages still to run stack from the last (top) to the next (bottom, with a SPACE button); below them the **active** stage, the last one run (or "Now" when engines burn before any stage ran). Stages already run before the active one are history and not shown.
 - **Figures, where they apply** (a stage has a burn when engines burn after its commands): one bar per propellant with what its tanks hold of their capacity, the burnout time (the first propellant out, at the throttle now, with no further input; ∞ when the setting gives no flow) and the Δv. The active stage also shows thrust, TWR (local gravity), mass now → at burnout and mean Isp. Other stages show only these and nothing more (answer 13).
-- **The switch** under the bar: thrust and Δv in the current air (the ambient pressure now, held over every burn) or in vacuum.
+- **The switch** under the bar: thrust and Δv in vacuum, the default (D120: "Delta v should be vacuum by default"), or in the current air (the ambient pressure now, held over every burn; on the pad, at a closed throttle, the second stage's vacuum nozzle gives no thrust in sea-level air, so its Δv reads 0 there). One switch for every stage: no stage takes its own air (`stage_bar::Air`, `ambient`).
 - **Icons** (`stage_bar::icons`): one simple monochrome glyph per thing a command acts on, its type only — engine, decoupler, clamp, leg, grid fin, RCS block, valve, parachute, servo (any other mechanism), power switch, throttle/selection — coloured by its state: idle (grey), armed (amber: a release armed, a start waiting for settled propellant, a mechanism moving, parachutes armed), running (green), failed (red), spent (dark: separated, released, out of ignitions or propellant). Hover: the command and the item's id. Click: the part's card.
 - **Editing in flight** (answer 14): drag a stage by its name onto another stage's place to move it; drag an icon onto another stage to move its command there (to the end); × deletes a stage after a confirmation. Only stages still to run change. Each edit is a ship command (`ShipCommand::Sequence(SequenceEdit::{Move, MoveAction, Delete})`, D108), sent by the commands' route (aboard at once; from the ground after the light time) and refused whole by the sim if it names a stage already run.
 - **The test craft** (no part system) shows its stage stack (`staging::stack`: the engine, the parachutes) with icons and no figures.

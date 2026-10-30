@@ -1,10 +1,11 @@
 //! The staging bar (D111): a thin column at the flight view's right edge,
 //! the stages still to run stacked last to next (the next at the bottom),
-//! then the active stage, then the switch between the current air's and
-//! the vacuum's figures. Each stage shows where it applies a bar per
-//! propellant, the burnout time and the Δv; the active one also thrust,
-//! TWR, mass now and at burnout, mean Isp (`sim::systems::estimate`, asked
-//! a few times a second, never per frame). Each lists what its commands
+//! then the active stage, then the switch between the vacuum's figures
+//! (the default, D120) and the current air's. Each stage shows where it
+//! applies a bar per propellant, the burnout time and the Δv; the active
+//! one also thrust, TWR, mass now and at burnout, mean Isp
+//! (`sim::systems::estimate`, asked a few times a second, never per
+//! frame). Each lists what its commands
 //! act on as icons (`icons`): a click opens the part's card
 //! (`interface::part_card`), a drag moves the command to another stage; a
 //! stage's header drags the stage; × deletes it (confirmed). Edits are ship
@@ -32,13 +33,31 @@ pub const AREA: &str = "stage_bar";
 /// How often the estimates are taken again (s of real time).
 const REFRESH: f64 = 0.25;
 
+/// The air the figures are taken in (D120: vacuum by default, the current
+/// air a choice; never chosen stage by stage).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Air {
+    #[default]
+    Vacuum,
+    /// The ambient pressure now, held over every burn.
+    Current,
+}
+
+/// The ambient pressure the estimates take (Pa) in `air`, the pressure
+/// around the vessel now being `now`.
+pub fn ambient(air: Air, now: f64) -> f64 {
+    match air {
+        Air::Vacuum => 0.0,
+        Air::Current => now,
+    }
+}
+
 /// The bar's state: the air switch, the last estimates, a delete waiting
 /// for its confirmation, and where each icon was drawn (for the cards'
 /// lines).
 #[derive(Resource, Default)]
 pub struct StageBar {
-    /// Vacuum figures instead of the current air's.
-    pub vacuum: bool,
+    pub air: Air,
     pub cache: Option<Cached>,
     /// The stage (index into the sequence) whose delete waits.
     pub confirm: Option<usize>,
@@ -50,17 +69,17 @@ pub struct StageBar {
 pub struct Cached {
     pub vessel: VesselId,
     pub at: f64,
-    pub vacuum: bool,
+    pub air: Air,
     pub sequence: u32,
     pub stages: Vec<Stage>,
     pub estimates: Estimates,
 }
 
-/// Whether estimates taken from (`vessel`, `sequence`, `stages`, `vacuum`)
+/// Whether estimates taken from (`vessel`, `sequence`, `stages`, `air`)
 /// at `at` still stand at `now`: the same vessel, sequence and switch, and
 /// younger than [`REFRESH`].
-pub fn fresh(c: &Cached, vessel: VesselId, sequence: u32, stages: &[Stage], vacuum: bool, now: f64) -> bool {
-    c.vessel == vessel && c.sequence == sequence && c.vacuum == vacuum && c.stages == stages && now - c.at < REFRESH
+pub fn fresh(c: &Cached, vessel: VesselId, sequence: u32, stages: &[Stage], air: Air, now: f64) -> bool {
+    c.vessel == vessel && c.sequence == sequence && c.air == air && c.stages == stages && now - c.at < REFRESH
 }
 
 pub struct StageBarPlugin;
@@ -81,7 +100,7 @@ pub fn refresh(sim: Res<SimState>, time: Res<Time>, mut bar: ResMut<StageBar>) {
         return;
     };
     let now = time.elapsed_secs_f64();
-    if bar.cache.as_ref().is_some_and(|c| fresh(c, v.id(), state.sequence, &state.stages, bar.vacuum, now)) {
+    if bar.cache.as_ref().is_some_and(|c| fresh(c, v.id(), state.sequence, &state.stages, bar.air, now)) {
         return;
     }
     let (anchor, r, v_rel) = v.state_at(&sim.world, sim.clock);
@@ -95,15 +114,15 @@ pub fn refresh(sim: Res<SimState>, time: Res<Time>, mut bar: ResMut<StageBar>) {
         hull: &hull,
         knowledge: &knowledge,
         throttle: sim.controls().throttle,
-        p: if bar.vacuum { 0.0 } else { motion.map_or(0.0, |m| m.pressure) },
+        p: ambient(bar.air, motion.map_or(0.0, |m| m.pressure)),
         g: motion.map(|m| m.gravity).filter(|_| known),
     };
     let estimates = estimate::estimate(&def, state, &inputs);
-    let vacuum = bar.vacuum;
+    let air = bar.air;
     bar.cache = Some(Cached {
         vessel: v.id(),
         at: now,
-        vacuum,
+        air,
         sequence: state.sequence,
         stages: state.stages.clone(),
         estimates,
@@ -164,28 +183,41 @@ mod tests {
         let c = Cached {
             vessel: VesselId(1),
             at: 10.0,
-            vacuum: false,
+            air: Air::Vacuum,
             sequence: 0,
             stages: stages.clone(),
             estimates: Estimates::default(),
         };
         let mut other = stages.clone();
         other[0].name = "b".into();
-        // (vessel, sequence, stages, vacuum, now, fresh)
+        // (vessel, sequence, stages, air, now, fresh)
         let table = [
-            (1, 0, &stages, false, 10.1, true),
-            (1, 0, &stages, false, 10.3, false),
-            (2, 0, &stages, false, 10.1, false),
-            (1, 1, &stages, false, 10.1, false),
-            (1, 0, &other, false, 10.1, false),
-            (1, 0, &stages, true, 10.1, false),
+            (1, 0, &stages, Air::Vacuum, 10.1, true),
+            (1, 0, &stages, Air::Vacuum, 10.3, false),
+            (2, 0, &stages, Air::Vacuum, 10.1, false),
+            (1, 1, &stages, Air::Vacuum, 10.1, false),
+            (1, 0, &other, Air::Vacuum, 10.1, false),
+            (1, 0, &stages, Air::Current, 10.1, false),
         ];
-        for (vessel, sequence, s, vacuum, now, want) in table {
-            assert_eq!(
-                fresh(&c, VesselId(vessel), sequence, s, vacuum, now),
-                want,
-                "{vessel} {sequence} {vacuum} {now}"
-            );
+        for (vessel, sequence, s, air, now, want) in table {
+            assert_eq!(fresh(&c, VesselId(vessel), sequence, s, air, now), want, "{vessel} {sequence} {air:?} {now}");
+        }
+    }
+
+    /// D120: the bar opens in vacuum (the pad's air does not cut the second
+    /// stage's Δv to nothing); the current air is the switch's other side.
+    #[test]
+    fn the_figures_are_in_vacuum_by_default() {
+        assert_eq!(StageBar::default().air, Air::Vacuum);
+        // (air, pressure around the vessel now, the estimates' ambient)
+        let table = [
+            (Air::Vacuum, 101_325.0, 0.0),
+            (Air::Vacuum, 0.0, 0.0),
+            (Air::Current, 101_325.0, 101_325.0),
+            (Air::Current, 2_000.0, 2_000.0),
+        ];
+        for (air, now, want) in table {
+            assert_eq!(ambient(air, now), want, "{air:?} {now}");
         }
     }
 }

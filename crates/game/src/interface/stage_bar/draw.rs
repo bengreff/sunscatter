@@ -5,7 +5,7 @@
 
 use super::icons::{self, SIZE};
 use super::rows::{drop_edit, Drag, Figures, Place, Row};
-use super::{StageBar, AREA, WIDTH};
+use super::{Air, StageBar, AREA, WIDTH};
 use crate::interface::{layout, theme};
 use bevy_egui::egui::{self, vec2, Align, Align2, Color32, Id, Layout, RichText, Sense, Stroke, StrokeKind};
 use sim::craft::command::SequenceEdit;
@@ -121,14 +121,15 @@ fn dragged(ctx: &egui::Context, rows: &[Row]) {
     );
 }
 
-/// The switch between the current air's figures and the vacuum's.
+/// The switch between the current air's figures and the vacuum's (the
+/// default, D120).
 fn switch(ui: &mut egui::Ui, bar: &mut StageBar) {
     ui.horizontal(|ui| {
-        for (vacuum, label) in [(false, "CURRENT AIR"), (true, "VACUUM")] {
-            let on = bar.vacuum == vacuum;
+        for (air, label) in [(Air::Current, "CURRENT AIR"), (Air::Vacuum, "VACUUM")] {
+            let on = bar.air == air;
             let text = RichText::new(label).small().color(if on { theme::ACCENT } else { theme::DIM });
             if ui.add(egui::Button::new(text).selected(on)).clicked() && !on {
-                bar.vacuum = vacuum;
+                bar.air = air;
             }
         }
     });
