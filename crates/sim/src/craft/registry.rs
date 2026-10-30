@@ -6,6 +6,7 @@
 //! * a definition registered at run time ([`register`]: a craft made in the
 //!   game, later);
 //! * `stress-<n>`: the synthetic stress craft of n parts ([`super::stress`]);
+//! * `small-<name>`: a small craft of parts built in code ([`super::small`]);
 //! * a directory under `data/craft` ([`super::default_craft_dir`]), one
 //!   part for the whole ship;
 //!
@@ -75,6 +76,8 @@ pub fn definition(id: &CraftId) -> Result<CraftDef, String> {
         def.clone()
     } else if let Some(n) = base.strip_prefix("stress-").and_then(|n| n.parse::<usize>().ok()).filter(|&n| n > 0) {
         super::stress::layout(n).def()
+    } else if let Some(def) = super::small::definition(base) {
+        def?
     } else if base == super::TEST_CRAFT {
         super::test_craft().def()
     } else {

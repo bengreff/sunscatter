@@ -74,6 +74,15 @@ impl Vessel {
         }
         true
     }
+
+    /// Sets the liquid of every tank of a craft of parts to `fraction`
+    /// (clamped to [0, 1]) of its capacity ([`Self::set_tank`] for each).
+    pub fn set_fill(&mut self, world: &World, fraction: f64) {
+        let Some(def) = self.ship_def() else { return };
+        for (i, t) in def.tanks.iter().enumerate() {
+            self.set_tank(world, i, fraction.clamp(0.0, 1.0) * t.capacity);
+        }
+    }
 }
 
 /// A craft of parts' mass properties from its ship state: the dry parts of

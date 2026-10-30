@@ -27,6 +27,7 @@ pub mod place;
 pub mod program;
 pub mod registry;
 pub mod ship;
+pub mod small;
 pub mod state;
 #[cfg(test)]
 mod state_tests;
