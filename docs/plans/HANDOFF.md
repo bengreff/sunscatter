@@ -2,12 +2,17 @@
 
 A SessionStart hook loads this file automatically after `/clear` or at startup. It is kept current by `/handoff`.
 
-*Updated 2026-10-30 (day): F1–F3, D119 and D120 landed; the simplification interview recorded (D121–D124); ONEKIND, MISSION and DOCS running.*
+*Updated 2026-10-30 (evening): F1–F3 landed; DOCS and MISSION done; two interviews recorded (D121–D127, D043/D034 revised); ONEKIND, MISSION-2 and DOCS-2 running.*
 
 ## Your first job
 
-1. Check on the three agents: ONEKIND (D121: delete the test craft, [brief-onekind.md](brief-onekind.md)), MISSION (D122: MCP mission tests replace the demo, [brief-mission.md](brief-mission.md)) and DOCS (D124: docs by system, [brief-docs.md](brief-docs.md)). Agents wrap up at ~300k context.
-2. Then launch the next wave from "What is next".
+1. Check on the three agents:
+   - ONEKIND (D121: delete the test craft, [brief-onekind.md](brief-onekind.md));
+   - MISSION-2 (D122: fly the Falcon 9 through MCP and write the guide, [brief-mission.md](brief-mission.md));
+   - DOCS-2 (the system docs to today's decisions, [brief-docs.md](brief-docs.md)).
+
+   Agents wrap up at ~300k context.
+2. Then launch the next wave from "What is next". The docs moved (D124): read the README's reading guide; `owners.md` replaced `architecture.md`.
 
 ## State
 
@@ -28,7 +33,8 @@ A SessionStart hook loads this file automatically after `/clear` or at startup. 
 ## What is next
 
 1. **Running:** ONEKIND, MISSION, DOCS (above).
-2. **Next wave, after ONEKIND** (each touches the whole of `sim`, so one at a time or split by subsystem):
+2. **PLANNER, right after ONEKIND** (D126). Planned burns for craft of parts (`PlanError::PartsUnsupported`), run closed-loop to their target state as a flight-layer program: real starts, ullage settling, tail-off. Once the test craft goes, nothing else can plan a burn.
+3. **Next wave, after ONEKIND** (each touches the whole of `sim`, so one at a time or split by subsystem):
    - **STATE** (D121): merge `ShipState` and `Runtime` into one state grouped by subsystem; typed handles inside, strings only at the edges (the 46 linear id searches); the engine rule in one place (review F8).
    - **FIXES3:**
      - the function runner through `program::offered`;
@@ -45,23 +51,27 @@ A SessionStart hook loads this file automatically after `/clear` or at startup. 
      - geometry scans with a spatial index;
      - against the scale target: 5,000 parts live, 50 × 300 at 10⁶×.
    - **DEBRIS** (D121): the controllability check at separation; ballistic lumps; the planned pieces' designs at craft build; composed designs for unplanned pieces.
-3. **Then the two flights end to end, in parallel** (D117, D123):
+4. **Then the two flights end to end, in parallel** (D117, D123):
    - **Crew Dragon:** the capsule–trunk joint and the entry; a calm sea with water impact; D116's doses; docking with a rigid placeholder station, at three autonomy levels.
    - **The booster:** the vacuum relight; boostback and entry by a predictor–corrector; the landing burn by convex guidance; a landing zone first.
-   - Each is checked by a MISSION-style test flown through MCP.
-4. **Queued:**
+   - Every part is fully parameterised, and there is no ship-specific physics (D125). Ablation is one 1-D mechanism by material. Supersonic retropropulsion is thrust plus clean drag.
+   - Automation is a switch: chutes, burns and guidance run automatic, on a button, or off, and manual control is always possible (D126).
+   - Random failures stay off until both flights are clean (D123).
+   - Each flight is checked by a mission test flown through MCP (D122).
+   - v0.2 is complete with both flights plus D121's scale target (vision.md).
+5. **Queued:**
    - Dragon's helium bottles (recommendation 5, with thrust following feed pressure);
    - flow separation in vacuum nozzles at sea level;
    - planned burns for craft of parts;
    - the Falcon 9 inconsistencies (the legs' mass, falcon9.md's U/E rows).
-5. D115's fidelity after the flights:
+6. D115's fidelity after the flights:
    - sensors' noise only where needed;
    - the adaptive functions;
    - powered components' heat (revise D077 with it);
    - per-engine gimbals;
    - O₂ / N₂ tanks.
-6. **Frozen** (D123): visuals (the plume's rest, GLOW, CLOUDS).
-7. **Later roadmap:** the career as a startup (D027) and D118's components and factories.
+7. **Frozen** (D123): visuals (the plume's rest, GLOW, CLOUDS).
+8. **Later roadmap:** the career as a startup (D027) and D118's components and factories.
 
 ## Open for the owner, new (defaults in place)
 
