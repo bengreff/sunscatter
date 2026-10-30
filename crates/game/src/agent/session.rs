@@ -203,7 +203,8 @@ pub fn tools(dev: bool) -> Vec<Tool> {
         ),
         t(
             "load_game",
-            "Load the save `name` (from the save list, e.g. quicksave): time warp back to 1×.",
+            "Load the save `name` (from the save list, e.g. quicksave): time warp back to 1×, and time stopped \
+             if it was stopped (`pause` first to replay from the save exactly).",
             schema(json!({"name": {"type": "string"}}), &["name"]),
         ),
         t(
@@ -846,7 +847,12 @@ fn start(
                 crate::saves::read(sim, &path)
                     .map(|save| {
                         game.write(GameCommand::Restore(Box::new(save)));
-                        json!({"loaded": path})
+                        // Stopped time stays stopped, so a test replays
+                        // from the save exactly (the player's load runs it).
+                        if sim.paused {
+                            game.write(GameCommand::PauseTime);
+                        }
+                        json!({"loaded": path, "time_stopped": sim.paused})
                     })
                     .map_err(|e| format!("{}: {e}", path.display()))
             };
