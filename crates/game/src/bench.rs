@@ -45,18 +45,10 @@ impl Bench {
         self.current.is_some() || !self.queue.is_empty()
     }
 
-    /// Starts measuring every configuration, or only those whose labels
-    /// contain one of `only`'s fragments (a developer's filter), in that
-    /// order.
+    /// Starts measuring every configuration, or the whole look and those
+    /// whose labels contain one of `only`'s fragments ([`selected`]).
     pub fn start(&mut self, view: &str, only: &[String]) {
-        let mut q = configurations();
-        if !only.is_empty() {
-            let all = q;
-            q = only
-                .iter()
-                .filter_map(|want| all.iter().find(|(label, _)| label.contains(want.trim())).cloned())
-                .collect();
-        }
+        let mut q = selected(configurations(), only);
         q.reverse();
         self.queue = q;
         self.current = None;
@@ -119,9 +111,35 @@ pub fn markdown(bench: &Bench) -> String {
     out
 }
 
+/// The configurations a developer's filter keeps, in order: all of them
+/// without fragments, else the whole look (the cost column's reference,
+/// always measured) and every part whose label contains a fragment.
+pub fn selected<T>(all: Vec<(String, T)>, only: &[String]) -> Vec<(String, T)> {
+    if only.is_empty() {
+        return all;
+    }
+    all.into_iter()
+        .filter(|(label, _)| label == LOOK || only.iter().any(|w| !w.trim().is_empty() && label.contains(w.trim())))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_filter_keeps_the_whole_look_to_measure_costs_against() {
+        let all = || ["the look", "−atmosphere", "−relief", "−clouds"].map(|l| (l.to_string(), ())).to_vec();
+        let labels = |only: &[&str]| -> Vec<String> {
+            let only: Vec<String> = only.iter().map(|s| s.to_string()).collect();
+            selected(all(), &only).into_iter().map(|(l, ())| l).collect()
+        };
+        assert_eq!(labels(&[]), ["the look", "−atmosphere", "−relief", "−clouds"]);
+        assert_eq!(labels(&["atmo"]), ["the look", "−atmosphere"]);
+        assert_eq!(labels(&["re", "cl"]), ["the look", "−atmosphere", "−relief", "−clouds"]);
+        assert_eq!(labels(&["terrain"]), ["the look"], "no part matches: the look alone");
+        assert_eq!(labels(&[" ", "relief"]), ["the look", "−relief"]);
+    }
 
     #[test]
     fn the_table_gives_each_parts_cost_against_the_look() {
