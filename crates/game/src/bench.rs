@@ -2,7 +2,7 @@
 //! without each of its parts (`look::Parts::each_off`), measured in the
 //! running app from the current view: what each part costs. The parts are
 //! switched for the measurement only (never a setting). Started from
-//! Settings ▸ Interface or by the demo.
+//! Settings ▸ Interface or by a developer's agent (`agent::session`'s `bench`).
 
 use crate::look::Parts;
 use bevy::prelude::*;
@@ -45,15 +45,15 @@ impl Bench {
         self.current.is_some() || !self.queue.is_empty()
     }
 
-    /// Starts measuring every configuration, or only those named in
-    /// `SUNSCATTER_BENCH_ONLY` (a developer filter: comma-separated label
-    /// fragments, run in that order).
-    pub fn start(&mut self, view: &str) {
+    /// Starts measuring every configuration, or only those whose labels
+    /// contain one of `only`'s fragments (a developer's filter), in that
+    /// order.
+    pub fn start(&mut self, view: &str, only: &[String]) {
         let mut q = configurations();
-        if let Ok(only) = std::env::var("SUNSCATTER_BENCH_ONLY") {
+        if !only.is_empty() {
             let all = q;
             q = only
-                .split(',')
+                .iter()
                 .filter_map(|want| all.iter().find(|(label, _)| label.contains(want.trim())).cloned())
                 .collect();
         }

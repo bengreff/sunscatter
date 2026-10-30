@@ -73,6 +73,8 @@ pub enum GameCommand {
         throttle: Option<f64>,
         sas: Option<bool>,
         hold: Option<HoldMode>,
+        /// What prograde and retrograde follow (the navball's speed display).
+        speed: Option<sim::vessel::SpeedReference>,
     },
     /// Activate the active vessel's next stage (Space, the Staging menu);
     /// for a craft of parts it becomes [`GameCommand::Stage`] of that
@@ -262,8 +264,8 @@ pub fn apply(
             GameCommand::SetThrottle(t) => sim.controls_mut().throttle = t.clamp(0.0, 1.0),
             GameCommand::SetSas(on) => sim.controls_mut().sas = *on,
             GameCommand::SetRcs(mode) => sim.controls_mut().rcs = *mode,
-            GameCommand::SetControls { vessel, throttle, sas, hold } => match sim.index_of(*vessel) {
-                Some(i) => apply_controls(sim.fleet[i].controls_mut(), *throttle, *sas, *hold),
+            GameCommand::SetControls { vessel, throttle, sas, hold, speed } => match sim.index_of(*vessel) {
+                Some(i) => apply_controls_with(sim.fleet[i].controls_mut(), (*throttle, *sas, *hold), *speed),
                 None => toasts.push(now, format!("Controls for Vessel {}: no such vessel", vessel.0), true),
             },
             GameCommand::NextStage => {
@@ -346,6 +348,16 @@ pub fn apply_controls(c: &mut Controls, throttle: Option<f64>, sas: Option<bool>
     if let Some(h) = hold {
         (c.hold, c.sas) = (h, true);
     }
+}
+
+/// [`apply_controls`], and the speed reference prograde and retrograde follow.
+fn apply_controls_with(
+    c: &mut Controls,
+    (throttle, sas, hold): (Option<f64>, Option<bool>, Option<HoldMode>),
+    speed: Option<sim::vessel::SpeedReference>,
+) {
+    apply_controls(c, throttle, sas, hold);
+    c.speed = speed.unwrap_or(c.speed);
 }
 
 /// The vessel a command travels to: a craft of parts' commands, its next
@@ -534,7 +546,7 @@ mod tests {
             assert_eq!((c.throttle, c.sas, c.hold), want, "case {i}");
         }
         let v = VesselId(3);
-        let c = GameCommand::SetControls { vessel: v, throttle: Some(1.0), sas: None, hold: None };
+        let c = GameCommand::SetControls { vessel: v, throttle: Some(1.0), sas: None, hold: None, speed: None };
         assert_eq!(addressee(&c), Some(v), "sent to its vessel");
     }
 

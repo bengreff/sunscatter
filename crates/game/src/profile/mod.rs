@@ -1,6 +1,6 @@
 //! The profiler (`SUNSCATTER_PROFILE=1`): every few seconds, a ranked table
 //! of where the frame goes, printed to the terminal, appended to
-//! `profile.log` (next to `settings.ron`, or in the demo's directory) and
+//! `profile.log` (next to `settings.ron`) and
 //! summarised in the performance overlay (Esc menu).
 //!
 //! - CPU time per system (ours by name, Bevy's by name when they cost
@@ -65,7 +65,7 @@ pub struct Profile {
     dts: Vec<f64>,
     sums: Counts,
     label: String,
-    /// A report was asked for now (the demo, at the end of a view).
+    /// A report was asked for now (an agent's `profile`, at its window's end).
     cut: bool,
     file: Option<PathBuf>,
 }
@@ -93,11 +93,11 @@ pub struct ProfilePlugin;
 impl Plugin for ProfilePlugin {
     fn build(&self, app: &mut App) {
         let on = enabled();
-        let file = std::env::var_os("SUNSCATTER_DEMO")
+        let file = crate::persist::Dirs::resolve()
+            .settings_file
+            .parent()
             .map(PathBuf::from)
-            .unwrap_or_else(|| {
-                crate::persist::Dirs::resolve().settings_file.parent().map(PathBuf::from).unwrap_or_default()
-            })
+            .unwrap_or_default()
             .join("profile.log");
         app.insert_resource(Profile { file: on.then_some(file), label: "flight".into(), start: f64::NAN, ..default() })
             .init_resource::<gpu::GpuSink>();
@@ -189,7 +189,7 @@ fn mean(sum: &Counts, n: f64) -> Counts {
 }
 
 /// Gathers each frame and reports every [`PERIOD`] seconds (or when the
-/// demo cuts a window).
+/// an agent's `profile` cuts a window).
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 fn measure(
     time: Res<Time<Real>>,

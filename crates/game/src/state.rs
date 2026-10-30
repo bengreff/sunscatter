@@ -166,12 +166,6 @@ impl SimState {
         Self::starting_with(sol::sol_epoch().add_seconds(17.0 * 3600.0), craft)
     }
 
-    /// A new game whose clock starts at `clock` (the body tour's date),
-    /// with the test craft on the pad.
-    pub fn starting_at(clock: Epoch) -> Self {
-        Self::starting_with(clock, test_craft())
-    }
-
     fn starting_with(clock: Epoch, craft: &Craft) -> Self {
         let world = load_world();
         let (origin, mut site) = origin_clock(&world);
@@ -413,11 +407,12 @@ pub fn throttle_after(throttle: f64, up: bool, down: bool, fine: bool, dt: f64) 
     (throttle + step).clamp(0.0, 1.0)
 }
 
-/// Freezes the clock (used by the demo while it captures every graphics
-/// tier; the pause menu freezes it too).
+/// Freezes the clock (an agent's shot or benchmark holds it while it
+/// settles or measures; the pause menu freezes it too).
 #[derive(Resource, Default)]
 pub struct SimPause(pub bool);
 
+#[allow(clippy::too_many_arguments)]
 /// Advances every vessel to the new clock. Time warp only changes how far the
 /// clock moves per frame; each vessel's physics is independent of it.
 pub fn advance(
@@ -426,6 +421,7 @@ pub fn advance(
     menu: Res<crate::interface::pause::PauseMenu>,
     orbits: Res<OrbitSettings>,
     comms: Res<crate::comms::Comms>,
+    stop: Res<crate::agent::session::StopAt>,
     mut sim: ResMut<SimState>,
     mut turn: Local<usize>,
 ) {
@@ -435,7 +431,8 @@ pub fn advance(
     let warp = WARP_LEVELS[sim.effective_warp()];
     let dt = time.delta_secs_f64().min(0.1);
     let span = crate::fleet::frame_span(dt * warp, sim.compute_limited, sim.last_advance);
-    let target = sim.clock.add_seconds(span);
+    // An agent's step or run ends exactly at its stop (D044).
+    let target = crate::agent::session::clamp_to_stop(sim.clock.add_seconds(span), stop.0);
     // Vessels are independent: advanced in parallel within the frame's
     // time for the simulation, the slowest first (`crate::fleet`).
     let start = std::time::Instant::now();

@@ -180,6 +180,7 @@ pub fn read_controls(
     mut sim: ResMut<SimState>,
     mut commands: MessageWriter<GameCommand>,
     mut shift_from: Local<Option<f64>>,
+    agent: Res<crate::agent::HeldRotation>,
 ) {
     let held = Held::of(&keys);
     let just: Vec<Action> = keys.get_just_pressed().filter_map(|k| action(*k, held)).collect();
@@ -189,6 +190,7 @@ pub fn read_controls(
             commands.write(c);
         }
     }
+    let active = sim.ship().id();
     let c = sim.controls_mut();
     // Typing in a text field, the pause menu and the tracking station do
     // not fly the ship.
@@ -228,7 +230,8 @@ pub fn read_controls(
             DVec3::ZERO
         }
     };
-    c.rotate = on(ROTATE);
+    // An agent aboard holds the rotation keys like the pilot (D044).
+    c.rotate = (on(ROTATE) + agent.of(active)).clamp(DVec3::splat(-1.0), DVec3::splat(1.0));
     c.translate = on(TRANSLATE);
 }
 

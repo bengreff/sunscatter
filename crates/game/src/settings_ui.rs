@@ -143,7 +143,7 @@ pub fn draw(
 fn performance(ui_: &mut egui::Ui, ui: &mut SettingsUi, bench: &mut Bench) {
     ui_.checkbox(&mut ui.overlay, "Performance overlay (also in the Esc menu)");
     if !bench.running() && ui_.button("Measure the look and what each part costs, from this view").clicked() {
-        bench.start("interactive");
+        bench.start("interactive", &[]);
     }
     if bench.results.is_empty() {
         return;

@@ -11,12 +11,12 @@ completion (exact while the GPU is busy, i.e. when it is the limit).
 Record (it runs the game; one at a time on the shared machine):
 
     xcrun xctrace record --template 'Metal System Trace' --no-prompt \\
-        --output DIR/plunge.trace --env SUNSCATTER_DEMO=DIR \\
-        --env SUNSCATTER_DEMO_OFFSCREEN=1 --env SUNSCATTER_DEMO_SIZE=3024x1964 \\
-        --env SUNSCATTER_DEMO_ONLY=Plunge --env SUNSCATTER_DEMO_NO_BENCH=1 \\
+        --output DIR/view.trace --env SUNSCATTER_HOME=DIR \\
+        --env SUNSCATTER_OFFSCREEN=1 --env SUNSCATTER_AGENT=7777:dev \\
         --env SUNSCATTER_RENDER_SCALE=1 --launch -- target/release/game
 
-(each --env and its value are two arguments). Then:
+(each --env and its value are two arguments), and set the view meanwhile
+through MCP (`shoot` with a width and height, `set_camera`). Then:
 
     tools/gpu_trace.py DIR              # per second: GPU busy, frames, main pass
     tools/gpu_trace.py DIR 11 18        # and the passes between 11 and 18 s

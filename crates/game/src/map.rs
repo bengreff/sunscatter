@@ -41,10 +41,6 @@ impl MapView {
         self.objects.iter().position(|o| o.id == id).map_or_else(Visibility::default, |i| self.vis[i])
     }
 
-    pub fn in_map(&self, id: ObjectId) -> bool {
-        self.get(id).in_map
-    }
-
     /// Whether the object's orbit line is drawn (D054).
     pub fn line(&self, id: ObjectId) -> bool {
         self.get(id).line

@@ -111,8 +111,7 @@ pub const EV100: f32 = 14.5;
 
 pub fn setup(
     mut commands: Commands,
-    demo: Option<ResMut<crate::demo::Demo>>,
-    tour: Option<Res<crate::tour::Tour>>,
+    mut offscreen: ResMut<crate::offscreen::Offscreen>,
     mut images: ResMut<Assets<Image>>,
 ) {
     let mut cam = commands.spawn((
@@ -129,19 +128,12 @@ pub fn setup(
         bevy::camera::visibility::RenderLayers::from_layers(&[0, crate::lighting::shadows::CRAFT_LAYER]),
         Transform::IDENTITY,
     ));
-    // The interface draws over this camera's view (`tour::install` turns
-    // off bevy_egui's automatic choice); a body tour shoots without it.
-    if tour.is_none() {
-        cam.insert(bevy_egui::PrimaryEguiContext);
-    }
-    if let Some(mut demo) = demo {
-        if std::env::var_os("SUNSCATTER_DEMO_OFFSCREEN").is_some() {
-            use bevy::render::render_resource::TextureFormat;
-            let image = Image::new_target_texture(1600, 900, TextureFormat::Rgba8UnormSrgb, None);
-            let handle = images.add(image);
-            cam.insert(bevy::camera::RenderTarget::from(handle.clone()));
-            demo.offscreen = Some(handle);
-        }
+    // The interface draws over this camera's view (`main` turns off
+    // bevy_egui's automatic choice).
+    cam.insert(bevy_egui::PrimaryEguiContext);
+    // A headless game draws into an image (`offscreen`).
+    if let Some(handle) = crate::offscreen::target(&mut offscreen, &mut images) {
+        cam.insert(bevy::camera::RenderTarget::from(handle));
     }
 }
 

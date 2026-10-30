@@ -3,12 +3,12 @@
 //! Saves live in the platform data directory (`<data_dir>/saves/*.ron`) and
 //! settings in the platform config directory (`<config_dir>/settings.ron`),
 //! from the `directories` crate. `SUNSCATTER_HOME=<dir>` overrides both
-//! (`<dir>/saves`, `<dir>/settings.ron`) so tests and demos never touch the
-//! real directories.
+//! (`<dir>/saves`, `<dir>/settings.ron`) so tests and headless games never
+//! touch the real directories.
 //!
 //! Settings are loaded at startup (defaults on a missing or unreadable file,
-//! with a warning) and written when they change, at most once per second. The
-//! demo neither loads nor saves settings.
+//! with a warning) and written when they change, at most once per second. A
+//! headless game (`offscreen`) neither loads nor saves them.
 
 use crate::interface::layout::InterfaceSettings;
 use crate::trajectory::settings::OrbitSettings;
@@ -73,14 +73,6 @@ pub struct VisualSettings {
     pub exhaust: bool,
 }
 
-impl VisualSettings {
-    /// The demo's (it loads no settings): off, or as `SUNSCATTER_EXHAUST`
-    /// says (`1` on, `0` off).
-    pub fn demo(exhaust: Option<&str>) -> Self {
-        VisualSettings { exhaust: exhaust.is_some_and(|v| v.trim() != "0" && !v.trim().is_empty()) }
-    }
-}
-
 /// The settings file. There are no graphics settings (one look, D073), only
 /// D109's toggles (`visuals`): `graphics` and `graphics_version` in older
 /// files are ignored.
@@ -129,7 +121,8 @@ const WRITE_INTERVAL: f64 = 1.0;
 #[derive(Resource)]
 pub struct Persist {
     pub dirs: Dirs,
-    /// False in the demo: settings are neither loaded nor saved.
+    /// False in a headless game (`offscreen`, a mission test's): settings
+    /// are neither loaded nor saved, so a test starts from the defaults.
     enabled: bool,
     /// What is on disk (or was loaded).
     saved: SettingsFile,
@@ -142,11 +135,8 @@ pub struct PersistPlugin;
 impl Plugin for PersistPlugin {
     fn build(&self, app: &mut App) {
         let dirs = Dirs::resolve();
-        let enabled = std::env::var_os("SUNSCATTER_DEMO").is_none();
-        let mut loaded = if enabled { load(&dirs.settings_file) } else { SettingsFile::default() };
-        if !enabled {
-            loaded.visuals = VisualSettings::demo(std::env::var("SUNSCATTER_EXHAUST").ok().as_deref());
-        }
+        let enabled = !crate::offscreen::enabled();
+        let loaded = if enabled { load(&dirs.settings_file) } else { SettingsFile::default() };
         app.insert_resource(loaded.controls)
             .insert_resource(loaded.visuals)
             .insert_resource(loaded.interface.clone().sanitized())
@@ -272,9 +262,5 @@ mod tests {
         assert!(!SettingsFile::default().visuals.exhaust);
         assert!(!SettingsFile::from_ron("(controls: ())").unwrap().visuals.exhaust);
         assert!(SettingsFile::from_ron("(visuals: (exhaust: true))").unwrap().visuals.exhaust);
-        // The demo's, from SUNSCATTER_EXHAUST.
-        for (env, on) in [(None, false), (Some("0"), false), (Some(""), false), (Some("1"), true), (Some("on"), true)] {
-            assert_eq!(VisualSettings::demo(env).exhaust, on, "{env:?}");
-        }
     }
 }

@@ -7,6 +7,12 @@
 //! the UI; nothing is special-cased for the agent. Vessel-directed commands
 //! (burn plans, controls, stages) travel with the path's light delay; a
 //! script flies any vessel it has a signal to, active or not (D112).
+//!
+//! It is the only way an agent reaches the running game, the player's and
+//! a developer's alike (D044, D122): the session's tools ([`session`]: shots,
+//! the camera, time, flights, saves) are every agent's.
+
+pub mod session;
 
 use crate::commands::GameCommand;
 use crate::comms::{self, Comms, Location};
@@ -14,9 +20,11 @@ use crate::interface::layout::InterfaceSettings;
 use crate::state::{SimState, WARP_LEVELS};
 use crate::tracking::TrackingStation;
 use bevy::prelude::*;
+use glam::DVec3;
 use mcp::{Server, Tool, ToolResult};
 use serde_json::{json, Value};
-use sim::vessel::{HoldMode, Phase, VesselId};
+use sim::systems::Quantity;
+use sim::vessel::{HoldMode, Phase, SpeedReference, VesselId};
 
 /// What answering a call does besides answering.
 #[derive(Debug, PartialEq)]
@@ -29,7 +37,26 @@ pub enum Effect {
         delay: f64,
         command: GameCommand,
     },
+    /// The rotation input held on the active vessel ([`HeldRotation`]).
+    Rotate(VesselId, DVec3),
 }
+
+/// The rotation input an agent aboard holds on the active vessel, like the
+/// pilot's keys (`commands::keys::read_controls` adds it): body axes, each
+/// −1–1 (x pitch, y yaw, z roll), held until the agent changes it.
+#[derive(Resource, Default)]
+pub struct HeldRotation(pub Option<(VesselId, DVec3)>);
+
+impl HeldRotation {
+    /// The input held on vessel `id`.
+    pub fn of(&self, id: VesselId) -> DVec3 {
+        self.0.filter(|(v, _)| *v == id).map_or(DVec3::ZERO, |(_, r)| r)
+    }
+}
+
+/// The speed references by name (the `set_controls` tool).
+const SPEED_NAMES: [(&str, SpeedReference); 3] =
+    [("orbit", SpeedReference::Orbit), ("surface", SpeedReference::Surface), ("target", SpeedReference::Target)];
 
 /// The hold modes by name (the `set_controls` tool).
 const HOLD_NAMES: [(&str, HoldMode); 6] = [
@@ -45,8 +72,15 @@ fn schema(properties: Value, required: &[&str]) -> Value {
     json!({"type": "object", "properties": properties, "required": required})
 }
 
-/// The tools offered to the agent.
-pub fn tools() -> Vec<Tool> {
+/// The tools offered to the agent: the flight's here, the session's
+/// ([`session::tools`]), the developer's with `dev`.
+pub fn tools(dev: bool) -> Vec<Tool> {
+    let mut list = flight_tools();
+    list.extend(session::tools(dev));
+    list
+}
+
+fn flight_tools() -> Vec<Tool> {
     let t = |name: &str, description: &str, input_schema: Value| Tool {
         name: name.into(),
         description: description.into(),
@@ -128,17 +162,23 @@ pub fn tools() -> Vec<Tool> {
         ),
         t(
             "set_controls",
-            "Throttle (0–1), SAS and the attitude hold of a vessel (`id`, default the active one; each vessel \
-             keeps its own, active or not). From anywhere but aboard, the settings reach it after the signal's \
-             light delay (`arrives_in_s`); without a signal they cannot be sent. Prograde and retrograde follow \
-             the vessel's speed reference (orbit, surface or target, as last set on its navball) about its \
-             reference body; a planned burn is flown by the maneuver hold on its own.",
+            "Throttle (0–1), SAS, the attitude hold and the speed reference of a vessel (`id`, default the active \
+             one; each vessel keeps its own, active or not). From anywhere but aboard, the settings reach it after \
+             the signal's light delay (`arrives_in_s`); without a signal they cannot be sent. Prograde and \
+             retrograde follow the speed reference (orbit, surface or target, as on its navball) about its \
+             reference body; a planned burn is flown by the maneuver hold on its own. `rotate` is the pilot's \
+             rotation keys held (body axes, each −1–1: x pitch, y yaw, z roll; [0,0,0] lets go), aboard the active \
+             vessel only: for a short manoeuvre such as a pitch kick, flown from stopped time with `step` (agents \
+             fly by decisions, D044).",
             schema(
                 json!({
                     "id": id,
                     "throttle": {"type": "number", "minimum": 0, "maximum": 1},
                     "sas": {"type": "boolean"},
-                    "hold": {"type": "string", "enum": HOLD_NAMES.map(|(n, _)| n)}
+                    "hold": {"type": "string", "enum": HOLD_NAMES.map(|(n, _)| n)},
+                    "speed_reference": {"type": "string", "enum": SPEED_NAMES.map(|(n, _)| n)},
+                    "rotate": {"type": "array", "items": {"type": "number", "minimum": -1, "maximum": 1},
+                               "minItems": 3, "maxItems": 3}
                 }),
                 &[],
             ),
@@ -211,6 +251,7 @@ pub fn answer(
     }
 }
 
+#[allow(clippy::too_many_lines)]
 fn run(
     tool: &str,
     args: &Value,
@@ -259,6 +300,9 @@ fn run(
             let i = sim.index_of(id).ok_or("no such vessel")?;
             if comms.signal(id).is_none() {
                 return Err(format!("no signal from vessel {}", id.0));
+            }
+            if !crate::format::Known::of(&sim.fleet[i]).orbit() {
+                return Err(format!("vessel {} does not know its position and velocity", id.0));
             }
             let n = args.get("points").and_then(Value::as_u64).unwrap_or(100).clamp(2, 1000) as usize;
             // The line's segments from now: coasts and planned burns, and the
@@ -315,10 +359,36 @@ fn run(
                         .ok_or(format!("unknown hold `{name}`"))?,
                 ),
             };
-            let command = GameCommand::SetControls { vessel: id, throttle, sas, hold };
+            let speed = match args.get("speed_reference").and_then(Value::as_str) {
+                None => None,
+                Some(name) => Some(
+                    SPEED_NAMES
+                        .iter()
+                        .find(|(n, _)| *n == name)
+                        .map(|(_, s)| *s)
+                        .ok_or(format!("unknown speed reference `{name}`"))?,
+                ),
+            };
+            let mut effects = Vec::new();
+            if let Some(r) = args.get("rotate") {
+                let r: Vec<f64> =
+                    r.as_array().map(|a| a.iter().filter_map(Value::as_f64).collect()).unwrap_or_default();
+                let [x, y, z] = r[..] else { return Err("`rotate` is three numbers".into()) };
+                if [x, y, z].iter().any(|c| !(-1.0..=1.0).contains(c)) {
+                    return Err("`rotate`'s axes are each in −1–1".into());
+                }
+                if comms.location != Location::Vessel(id) || id != sim.ship().id() {
+                    return Err("the rotation keys are the pilot's: go aboard the active vessel".into());
+                }
+                effects.push(Effect::Rotate(id, DVec3::new(x, y, z)));
+            }
+            let command = GameCommand::SetControls { vessel: id, throttle, sas, hold, speed };
             let hold = hold.and_then(|m| HOLD_NAMES.iter().find(|(_, h)| *h == m)).map(|(n, _)| *n);
-            let reply = json!({"id": id.0, "throttle": throttle, "sas": sas, "hold": hold, "arrives_in_s": arrives});
-            (reply, vec![Effect::Command(command)])
+            let speed = speed.and_then(|m| SPEED_NAMES.iter().find(|(_, s)| *s == m)).map(|(n, _)| *n);
+            let reply = json!({"id": id.0, "throttle": throttle, "sas": sas, "hold": hold, "speed_reference": speed,
+                               "rotate": args.get("rotate"), "arrives_in_s": arrives});
+            effects.push(Effect::Command(command));
+            (reply, effects)
         }
         "stage" => {
             let (id, arrives) = reach(args, sim, comms)?;
@@ -377,21 +447,88 @@ fn get_vessel(
                "inclination_deg": o.elements.i.to_degrees(), "eccentricity": o.elements.e,
                "period_s": o.period()})
     });
+    // What the vessel knows (D106): a dash (null) where no working sensor
+    // measures it, and each value to its precision; the truth in debug mode.
+    let known = crate::format::Known::of(v);
+    // Above the reference ellipsoid (the equatorial radius reads −4.9 km on
+    // the pad at 28.6° N).
+    let physical = sim.world.source(body).and_then(|s| s.physical.as_ref());
+    let altitude = physical
+        .map_or(rel.length() - radius, |p| p.altitude(p.rotation.to_fixed(sim::frame::Vec3::from_raw(rel), sim.clock)));
+    let pole =
+        sim.world.source(body).and_then(|s| s.physical.as_ref()).map_or(DVec3::Z, |p| p.rotation.pole(sim.clock));
     let out = json!({
         "id": id.0, "status": status(&v.phase), "about": name(body), "seen_delay_s": signal.delay,
-        "position_m": rel.to_array(), "velocity_ms": v_rel.to_array(),
-        "altitude_m": rel.length() - radius, "orbit": orbit, "signal": signal_json(Some(signal)),
+        "debug": v.debug(),
+        "position_m": known_vec(&known, Quantity::Position, rel), "velocity_ms": known_vec(&known, Quantity::Velocity, v_rel),
+        "altitude_m": known_value(&known, Quantity::Altitude, altitude)
+            .or_else(|| known_value(&known, Quantity::Position, altitude)),
+        "orbit": orbit.filter(|_| known.orbit()), "attitude": attitude_json(&known, v.attitude.q, rel, pole),
+        "stages": stages_json(v, &known), "signal": signal_json(Some(signal)),
     });
     Ok((out, Vec::new()))
+}
+
+/// A value as the vessel knows it: shown to its precision, or null.
+fn known_value(known: &crate::format::Known, q: Quantity, truth: f64) -> Option<f64> {
+    known.knowledge.read(q, truth).map(|r| r.shown())
+}
+
+fn known_vec(known: &crate::format::Known, q: Quantity, a: DVec3) -> Value {
+    match a.to_array().map(|x| known_value(known, q, x)) {
+        [Some(x), Some(y), Some(z)] => json!([x, y, z]),
+        _ => Value::Null,
+    }
+}
+
+/// The navball's attitude (heading, pitch, roll, deg) and the body axes in
+/// the local frame (east, north, up): x the pitch axis, y the yaw axis
+/// (−y the top), z the nose. Null without an attitude reference.
+fn attitude_json(known: &crate::format::Known, q: glam::DQuat, rel: DVec3, pole: DVec3) -> Value {
+    use crate::navball::rules::{attitude_angles, local_frame, ship_axes};
+    if !known.knows(Quantity::Attitude) {
+        return Value::Null;
+    }
+    let local = local_frame(rel, pole);
+    let a = attitude_angles(&ship_axes(q), &local);
+    let enu = |d: DVec3| [d.dot(local.east), d.dot(local.north), d.dot(local.up)];
+    json!({"heading_deg": a.heading, "pitch_deg": a.pitch, "roll_deg": a.roll,
+           "axes_enu": {"x": enu(q * DVec3::X), "y": enu(q * DVec3::Y), "z": enu(q * DVec3::Z)}})
+}
+
+/// A craft of parts' sequence and propellant as it knows them: the next
+/// stage, each tank's level (kg, null where unmeasured) and each engine's
+/// state.
+fn stages_json(v: &sim::vessel::Vessel, known: &crate::format::Known) -> Value {
+    let (Some(def), Some(state)) = (v.ship_def(), v.ship()) else { return Value::Null };
+    let stack = crate::staging::stack_of(v, v.controls());
+    let next = crate::staging::next(&stack);
+    let next_name = stack.iter().find(|s| Some(s.number) == next).and_then(|s| s.name.clone());
+    let tanks: Vec<Value> = (def.tanks.iter().zip(&state.tanks))
+        .enumerate()
+        .map(|(i, (t, s))| {
+            json!({"id": t.id, "fluid": t.fluid, "capacity_kg": t.capacity,
+                   "liquid_kg": known_value(known, Quantity::TankLevel(i as u32), s.liquid)})
+        })
+        .collect();
+    let engines: Vec<Value> = (def.engines.iter().zip(&state.engines))
+        .map(|(e, s)| json!({"id": e.id, "main": e.main, "status": format!("{:?}", s.status), "throttle": s.throttle}))
+        .collect();
+    json!({"next": next, "next_name": next_name, "feeding_share": session::feeding_share(v),
+           "tanks": tanks, "engines": engines})
 }
 
 /// The `get_landing_prediction` tool: the landing panel's numbers.
 fn landing_json(sim: &SimState) -> Value {
     let ship = sim.ship();
     let name = |n: sim::frame::NodeId| sim.world.eph.node(n).name.clone();
-    let Some(start) = crate::landing::start_of(&sim.world, ship, sim.controls()) else {
-        return json!({"impact": null, "braking": null, "surface": null});
-    };
+    let known = crate::format::Known::of(ship);
+    let none = json!({"impact": null, "braking": null, "surface": null});
+    // The panel's numbers need the vessel's position and velocity (D106).
+    if !known.orbit() {
+        return none;
+    }
+    let Some(start) = crate::landing::start_of(&sim.world, ship, sim.controls()) else { return none };
     let l = crate::landing::predict(&sim.world, &ship.craft, ship.id(), &start);
     let (anchor, r, v) = ship.state_at(&sim.world, sim.clock);
     let snap = sim.world.snapshot(sim.clock);
@@ -409,10 +546,11 @@ fn landing_json(sim: &SimState) -> Value {
             "stop_in_s": b.t_stop.seconds_since(sim.clock), "stop_height_m": b.stop_height,
         })
     });
+    let twr = sim::landing::twr(&ship.craft, ship.propellant(), m.pressure, m.gravity);
     let surface = json!({
-        "body": name(start.body), "radar_altitude_m": m.height - ship.contact_height(),
+        "body": name(start.body), "radar_altitude_m": known_value(&known, Quantity::Altitude, m.height - ship.contact_height()),
         "vertical_ms": m.v_vertical, "horizontal_ms": m.v_horizontal,
-        "twr": sim::landing::twr(&ship.craft, ship.propellant(), m.pressure, m.gravity),
+        "twr": known.propellant.then_some(twr),
     });
     json!({"impact": impact, "braking": braking, "surface": surface})
 }
@@ -492,6 +630,8 @@ pub fn serve(
     mut station: ResMut<TrackingStation>,
     mut in_flight: ResMut<crate::commands::InFlight>,
     mut commands: MessageWriter<GameCommand>,
+    mut session: ResMut<session::Session>,
+    mut held: ResMut<HeldRotation>,
 ) {
     // `SUNSCATTER_AGENT=<port>:<token>` turns the server on (demos, tests).
     if state.server.is_none() && state.env.is_none() {
@@ -512,7 +652,7 @@ pub fn serve(
         state.server = None;
         state.error = None;
         if let Some(port) = want {
-            match Server::start(port, Some(iface.agent.token.clone()), tools()) {
+            match Server::start(port, Some(iface.agent.token.clone()), tools(session::developer())) {
                 Ok(s) => state.server = Some((s, port, iface.agent.token.clone())),
                 Err(e) => {
                     iface.agent.enabled = false;
@@ -523,6 +663,10 @@ pub fn serve(
     }
     let Some((server, _, _)) = &state.server else { return };
     for call in server.poll() {
+        if session::handles(&call.tool) {
+            session.incoming.push(call);
+            continue;
+        }
         let (result, effects) = answer(&call.tool, &call.arguments, &sim, &comms, &pred);
         for e in effects {
             match e {
@@ -531,6 +675,7 @@ pub fn serve(
                 }
                 Effect::Station(open) => station.open = open,
                 Effect::Send { delay, command } => in_flight.send(sim.clock, delay, command),
+                Effect::Rotate(id, r) => held.0 = (r != DVec3::ZERO).then_some((id, r)),
             }
         }
         call.reply(result);
@@ -557,7 +702,7 @@ mod tests {
     #[test]
     fn every_tool_has_an_object_schema_and_an_answer() {
         let (sim, comms) = setup();
-        for t in tools() {
+        for t in flight_tools() {
             assert_eq!(t.input_schema["type"], "object", "{}", t.name);
             // Every tool answers something (an error for missing arguments).
             let _ = answer(&t.name, &json!({}), &sim, &comms, &Default::default());
@@ -615,7 +760,7 @@ mod tests {
         let active = sim.ship().id();
         comms.location = Location::Vessel(active);
         let (r, e) = answer("set_controls", &json!({"throttle": 0.5, "sas": false}), &sim, &comms, &Default::default());
-        let set = |vessel, throttle, sas, hold| GameCommand::SetControls { vessel, throttle, sas, hold };
+        let set = |vessel, throttle, sas, hold| GameCommand::SetControls { vessel, throttle, sas, hold, speed: None };
         assert_eq!(e, vec![Effect::Command(set(active, Some(0.5), Some(false), None))]);
         assert!(matches!(r, ToolResult::Ok(v) if v["arrives_in_s"] == 0.0));
         // From mission control, an inactive probe's (D112): after the light
@@ -641,6 +786,75 @@ mod tests {
         assert!(matches!(r, ToolResult::Err(e) if e.contains("no signal")));
         let (r, _) = answer("set_controls", &json!({"id": 999}), &sim, &comms, &Default::default());
         assert!(matches!(r, ToolResult::Err(e) if e.contains("no such vessel")));
+    }
+
+    #[test]
+    fn the_rotation_keys_and_the_speed_reference() {
+        let (sim, mut comms) = setup();
+        let active = sim.ship().id();
+        comms.location = Location::Vessel(active);
+        let args = json!({"rotate": [0.04, 0.0, 0.0], "speed_reference": "surface"});
+        let (r, e) = answer("set_controls", &args, &sim, &comms, &Default::default());
+        assert!(matches!(r, ToolResult::Ok(v) if v["speed_reference"] == "surface"));
+        let set = GameCommand::SetControls {
+            vessel: active,
+            throttle: None,
+            sas: None,
+            hold: None,
+            speed: Some(SpeedReference::Surface),
+        };
+        assert_eq!(e, vec![Effect::Rotate(active, DVec3::new(0.04, 0.0, 0.0)), Effect::Command(set)]);
+        // (arguments, the error's words)
+        let bad = [
+            (json!({"rotate": [2.0, 0.0, 0.0]}), "−1–1"),
+            (json!({"rotate": [0.0, 0.0]}), "three numbers"),
+            (json!({"speed_reference": "galactic"}), "unknown speed reference"),
+        ];
+        for (args, words) in bad {
+            let (r, _) = answer("set_controls", &args, &sim, &comms, &Default::default());
+            assert!(matches!(&r, ToolResult::Err(e) if e.contains(words)), "{args}: {r:?}");
+        }
+        // Not from mission control: the keys are the pilot's.
+        comms.location = Location::Site(0);
+        comms.signals.insert(active, Some(comms::Signal { delay: 0.0, rate: 1e6, via: vec![] }));
+        let (r, _) = answer("set_controls", &json!({"rotate": [0.0, 0.1, 0.0]}), &sim, &comms, &Default::default());
+        assert!(matches!(r, ToolResult::Err(e) if e.contains("aboard")));
+        let held = HeldRotation(Some((active, DVec3::X)));
+        assert_eq!((held.of(active), held.of(VesselId(999))), (DVec3::X, DVec3::ZERO));
+    }
+
+    #[test]
+    fn the_agent_sees_what_the_vessel_knows() {
+        // A craft of parts with no sensors knows neither where it is nor its
+        // tanks; in debug mode it knows everything (D106).
+        let mut sim = SimState::with_craft(&crate::test_rocket::rocket());
+        let mut comms = Comms::load();
+        let id = sim.ship().id();
+        comms.location = Location::Vessel(id);
+        comms.signals.insert(id, Some(comms::Signal { delay: 0.0, rate: 1e6, via: vec![] }));
+        let get = |sim: &SimState| match answer("get_vessel", &json!({"id": id.0}), sim, &comms, &Default::default()) {
+            (ToolResult::Ok(v), _) => v,
+            (r, _) => panic!("{r:?}"),
+        };
+        let blind = get(&sim);
+        for key in ["position_m", "velocity_ms", "altitude_m", "orbit", "attitude"] {
+            assert!(blind[key].is_null(), "{key}: {}", blind[key]);
+        }
+        assert!(blind["stages"]["tanks"][0]["liquid_kg"].is_null());
+        assert!(blind["stages"]["tanks"][0]["capacity_kg"].as_f64().unwrap() > 0.0, "the design is known");
+        let (ToolResult::Ok(l), _) = answer("get_landing_prediction", &json!({}), &sim, &comms, &Default::default())
+        else {
+            panic!()
+        };
+        assert!(l["surface"].is_null());
+        let s = &mut sim;
+        s.fleet[s.active].set_debug(&s.world, true);
+        let seen = get(&sim);
+        assert_eq!(seen["position_m"].as_array().map(Vec::len), Some(3));
+        assert!(seen["altitude_m"].as_f64().is_some_and(|a| a.abs() < 100.0), "on the pad: {}", seen["altitude_m"]);
+        assert!(seen["attitude"]["pitch_deg"].as_f64().is_some_and(|p| p > 80.0), "upright: {}", seen["attitude"]);
+        assert!(seen["stages"]["tanks"][0]["liquid_kg"].as_f64().is_some());
+        assert!(seen["stages"]["next"].is_u64(), "{}", seen["stages"]);
     }
 
     #[test]

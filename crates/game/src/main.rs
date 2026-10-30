@@ -13,10 +13,6 @@ mod clouds;
 mod commands;
 mod comms;
 mod debris;
-mod demo;
-mod demo_checks;
-mod demo_parts;
-mod demo_views;
 mod fleet;
 mod format;
 mod hud;
@@ -27,6 +23,7 @@ mod look;
 mod map;
 mod map_view;
 mod navball;
+mod offscreen;
 mod pad;
 mod persist;
 mod planner;
@@ -48,7 +45,6 @@ mod systems_screen;
 mod terrain;
 #[cfg(test)]
 mod test_rocket;
-mod tour;
 mod tracking;
 mod trajectory;
 
@@ -66,13 +62,14 @@ enum Stage {
 
 /// Bevy's default plugins with the window and the thread pools
 /// ([`fleet::task_pools`]).
-fn default_plugins(demo_mode: bool, offscreen: bool) -> bevy::app::PluginGroupBuilder {
+fn default_plugins(measuring: bool, offscreen: bool) -> bevy::app::PluginGroupBuilder {
     DefaultPlugins
         .set(WindowPlugin {
             primary_window: Some(Window {
                 title: "Sunscatter v0.2 — Earth–Moon prototype".into(),
-                // The demo measures frame times: don't wait for the display.
-                present_mode: if demo_mode { PresentMode::AutoNoVsync } else { PresentMode::AutoVsync },
+                // A headless or developer's game measures frame times:
+                // don't wait for the display.
+                present_mode: if measuring { PresentMode::AutoNoVsync } else { PresentMode::AutoVsync },
                 visible: !offscreen,
                 ..default()
             }),
@@ -84,20 +81,20 @@ fn default_plugins(demo_mode: bool, offscreen: bool) -> bevy::app::PluginGroupBu
 
 fn main() {
     let mut app = App::new();
-    let demo = demo::Demo::from_env();
-    let demo_mode = demo.is_some();
-    // Offscreen demos render into an image: don't show an empty window.
-    let offscreen = demo_mode && std::env::var_os("SUNSCATTER_DEMO_OFFSCREEN").is_some();
-    if let Some(demo) = demo {
-        app.insert_resource(demo);
-    }
-    // A body tour replaces the demo's script.
-    let touring = tour::install(&mut app, demo_mode);
+    // A headless game renders into an image: don't show an empty window.
+    let offscreen = offscreen::enabled();
+    let measuring = offscreen || agent::session::developer();
+    // The interface belongs to the main camera (`camera::setup` gives it the
+    // primary egui context). Left automatic, bevy_egui took the first camera
+    // spawned, and the systems screen's own camera sometimes came first,
+    // which hid every menu, the navball and the HUD (2026-10-27).
+    app.insert_resource(bevy_egui::EguiGlobalSettings { auto_create_primary_context: false, ..default() });
     app.insert_resource(ClearColor(Color::BLACK))
-        .add_plugins(default_plugins(demo_mode, offscreen))
+        .add_plugins(default_plugins(measuring, offscreen))
         .add_plugins(EguiPlugin::default())
+        .add_plugins(offscreen::OffscreenPlugin)
         .add_plugins(body_plugins())
-        .add_plugins(GameState { craft: startup_craft(demo_mode) })
+        .add_plugins(GameState { craft: startup_craft() })
         // After the settings defaults: replaces them with the saved settings.
         .add_plugins(persist::PersistPlugin)
         .add_plugins(interface_plugins())
@@ -112,8 +109,6 @@ fn main() {
                 commands::keys::read_controls,
                 hud::measure_fps,
                 settings_ui::record_frames,
-                demo::run.run_if(move || !touring),
-                tour::run.run_if(move || touring),
                 bench::run,
                 look::apply,
                 atmosphere::configure_camera,
@@ -133,23 +128,20 @@ fn main() {
         )
         .add_systems(
             Update,
-            (state::advance, debris::update, pad::update, state::update_prediction, landing::update)
+            (
+                state::advance,
+                debris::update,
+                pad::update,
+                agent::session::run,
+                state::update_prediction,
+                landing::update,
+            )
                 .chain()
                 .in_set(Stage::Simulate),
         )
         .add_systems(
             Update,
-            (
-                camera::update,
-                tour::aim,
-                comms::update,
-                rendezvous::update,
-                map::update,
-                demo_checks::check_map_view,
-                demo_checks::log_fps,
-            )
-                .chain()
-                .in_set(Stage::Camera),
+            (camera::update, comms::update, rendezvous::update, map::update).chain().in_set(Stage::Camera),
         )
         .add_systems(
             Update,
@@ -202,9 +194,6 @@ fn main() {
                 .chain()
                 .after(hud::draw),
         );
-    if demo_mode {
-        app.add_plugins((demo_checks::DemoChecksPlugin, demo_views::DemoViewsPlugin));
-    }
     app.run();
 }
 
@@ -258,10 +247,10 @@ fn interface_plugins() -> (
 }
 
 /// The craft the game starts with: `SUNSCATTER_CRAFT`, else the first
-/// choice whose files exist (the test craft in the demo).
-fn startup_craft(demo_mode: bool) -> String {
+/// choice whose files exist.
+fn startup_craft() -> String {
     let available: Vec<&str> = state::craft_choices(state::craft_exists).iter().map(|c| c.0).collect();
-    state::startup_craft(std::env::var("SUNSCATTER_CRAFT").ok().as_deref(), &available, demo_mode)
+    state::startup_craft(std::env::var("SUNSCATTER_CRAFT").ok().as_deref(), &available, false)
 }
 
 /// The game's resources and messages (before the saved settings replace
@@ -299,6 +288,9 @@ impl Plugin for GameState {
             .add_message::<commands::GameCommand>()
             .init_resource::<commands::InFlight>()
             .init_resource::<planner::Planner>()
-            .init_resource::<rendezvous::Rendezvous>();
+            .init_resource::<rendezvous::Rendezvous>()
+            .init_resource::<agent::session::Session>()
+            .init_resource::<agent::session::StopAt>()
+            .init_resource::<agent::HeldRotation>();
     }
 }
