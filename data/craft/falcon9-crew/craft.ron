@@ -189,7 +189,8 @@
     ],
     // Densified propellants (P: LOX 66.5 K, RP-1 266.5 K); 3.5 bar flight ullage (E).
     // Dragon's tanks at 2,400 psi (E: SpaceX, 15 July 2019, as reported;
-    // falcon9.md §3.2), above the SuperDracos' 1,000 psi chambers.
+    // falcon9.md §3.2), above the SuperDracos' 1,000 psi chambers and below
+    // the tanks' 19.0 MPa relief (U).
     loading: [
         (tank: "s1.tank:lox", temperature_k: 66.5, pressure: 3.5e5, pressurant: "helium"),
         (tank: "s1.tank:rp1", temperature_k: 266.5, pressure: 3.5e5, pressurant: "helium"),

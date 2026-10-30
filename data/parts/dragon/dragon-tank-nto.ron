@@ -1,7 +1,9 @@
 // Catalog entry (D101; sim::catalog). Numbers from docs/features/falcon9.md
 // (DATA): P published, E estimate, D derived, U unknown (proposed value).
+// MEOP and relief 19.0 MPa (U: 115 % of the 16.5 MPa regulated feed, the
+// main tanks' rule; falcon9.md §3.2), so the loaded tank sits below it.
 (
     id: "dragon-tank-nto", name: "Dragon NTO tank (carbon-overwrapped titanium sphere)", era: 2019, provisional: true,
     generator: Component(envelope: Sphere(0.526),
-        equipment: Tank(fluid: "NTO", pressure: 1.65e7, safety_factor: 1.5, material: "ti-6al-4v", min_gauge: 0.0015, ullage: 0.10)),
+        equipment: Tank(fluid: "NTO", pressure: 1.9e7, safety_factor: 1.5, material: "ti-6al-4v", min_gauge: 0.0015, ullage: 0.10)),
 )

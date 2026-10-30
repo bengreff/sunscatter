@@ -109,11 +109,13 @@ fn a_booster_flip_on_cold_gas_moves_its_centre_of_mass_by_its_liquid() {
 /// stage with Dragon in a 400 km orbit, its LOX at saturation at its relief
 /// pressure with no pressurant, boils off what the sunlight brings (1.45 t).
 /// Each tank loses only what it vents (no share of a total): the RP-1,
-/// venting nothing, keeps its liquid to the bit; Dragon's NTO and MMH,
-/// held warm at their relief, vent grams. The vessel loses what its tanks
-/// vent. Its propellant is its ship state's consumables, bit for bit, flown
-/// in one jump and in frames (ten minutes at 60 fps, then uneven ones),
-/// which give the same vessel.
+/// venting nothing, keeps its liquid to the bit; so do Dragon's NTO and
+/// MMH, held by their heaters at their 16.5 MPa feed pressure below their
+/// 19.0 MPa relief (falcon9.md §3.2; at a relief equal to the feed
+/// pressure their vapour on top of the helium vented 11 g and 0.5 g). The
+/// vessel loses what its tanks vent. Its propellant is its ship state's
+/// consumables, bit for bit, flown in one jump and in frames (ten minutes
+/// at 60 fps, then uneven ones), which give the same vessel.
 #[test]
 fn a_days_boil_off_takes_from_each_tank_what_it_vents() {
     let w = world();
@@ -162,8 +164,9 @@ fn a_days_boil_off_takes_from_each_tank_what_it_vents() {
         let lost = start.tanks[i].liquid - s.tanks[i].liquid;
         assert!(lost <= vented[i] && vented[i] < 0.1, "{}: {lost} kg of liquid, {} kg vented", t.id, vented[i]);
     }
-    let rp1 = def.tanks.iter().position(|t| t.id == "s2.tank:rp1").unwrap();
-    assert_eq!((s.tanks[rp1].liquid, vented[rp1]), (start.tanks[rp1].liquid, 0.0), "the RP-1 vents nothing");
+    for (i, t) in def.tanks.iter().enumerate().filter(|(_, t)| t.id == "s2.tank:rp1" || t.id.starts_with("dragon.")) {
+        assert_eq!((s.tanks[i].liquid, vented[i]), (start.tanks[i].liquid, 0.0), "{} vents nothing", t.id);
+    }
     let all: f64 = vented.iter().sum();
     assert!((m0 - v.mass() - all).abs() < 1e-9 * m0, "the vessel loses what its tanks vent");
 }

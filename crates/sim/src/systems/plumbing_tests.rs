@@ -174,7 +174,10 @@ fn at_saturation_the_heat_boils_off() {
     let boiled = m0 - state.tanks[i].liquid;
     let expect = q * 60.0 / l.latent_heat;
     assert!((boiled / expect - 1.0).abs() < 0.02, "{boiled} kg vs Q·t/L {expect} kg");
-    assert!(vented >= boiled);
+    // What boiled is vented, to the rounding of the liquid's mass (no other
+    // tank vents: Dragon's sit below their relief).
+    let own = state.runtime.tanks[i].vented;
+    assert!((own - boiled).abs() <= 1e-12 * m0 && vented == own, "{own} kg vented of {vented}, {boiled} boiled");
 }
 
 #[test]
