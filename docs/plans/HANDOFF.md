@@ -2,15 +2,15 @@
 
 A SessionStart hook loads this file automatically after `/clear` or at startup. It is kept current by `/handoff`.
 
-*Updated 2026-10-30 (night). Two agents are running: ONEKIND-2 and MISSION-2. DOCS-2 has finished.*
+*Updated 2026-10-30 (night). One agent is running: ONEKIND-2. DOCS-2 and MISSION-2 have finished.*
 
 ## Your first job
 
 1. Take the three agents' reports as they arrive. Each reports through a message with its commits, what is left and its questions. Their briefs hold their State.
    - **ONEKIND-2** ([brief-onekind.md](brief-onekind.md)) moves the ~55 remaining test files off the test craft onto `craft::small` or the Falcon 9, and rebuilds `craft::stress` on parts. It does **not** delete the made-up path. The lead decided that comes only after PLANNER, so the game never loses planned burns.
-   - **MISSION-2** ([brief-mission.md](brief-mission.md)) flies the Falcon 9 through stage separation in a headless game via MCP, then writes the mission-test guide in `docs/technical/testing.md`.
+   - **MISSION-2: done.** It flew the Falcon 9 from the pad to a 189 × 600 km orbit at 28.7° through MCP, headless on the real flight software, and a replay from a save matched to the metre. The lead checked the max-Q and orbit shots. The guide is in `docs/technical/testing.md`, with the helper `tools/mcp.sh`. Every tool has now run in the game. Fixes: 1d33b69, 293d22d, 1df446b, 3a64fef.
    - **DOCS-2: done** (67bf95d, 5a930dc, ae6bf93, a068d59). The system docs match today's decisions, decided against built; `technical/ship-systems.md` is split into ten files; comms.md and proper-time.md were extracted. Its Left is in [brief-docs.md](brief-docs.md): the other archived specs, stale status lines, the README's images.
-2. A slot is free (cap: 3 agents plus the lead): launch **PLANNER** (next steps, item 1).
+2. Two slots are free (cap: 3 agents plus the lead): launch **PLANNER** (next steps, item 1).
 
 ## State
 
@@ -50,7 +50,13 @@ A SessionStart hook loads this file automatically after `/clear` or at startup. 
 4. **The two flights, in parallel** (D117, D123, D125, D126), each checked by an MCP mission test (D122):
    - **Crew Dragon:** the trunk joint, entry with 1-D ablation by material, the chutes' real logic as the automatic option, a calm sea, D116's doses, a rigid placeholder station.
    - **The booster:** relight, boostback and entry by predictor–corrector, convex landing guidance written as WASM-ready flight-layer code (D043), a landing zone first.
-5. **Queued:** Dragon's helium bottles; nozzle flow separation; the Falcon 9's U/E data. After the flights: D115's fidelity. **Frozen:** visuals. **The career:** after v0.3.
+5. **Small items:**
+   - in a mission test, orbit insertion becomes a planned burn once PLANNER lands (MISSION-2's default);
+   - the 11-vessel performance check needs a spawn tool once the test craft is gone;
+   - the render scale flips between 0.8 and 1.0 every half second in a headless game;
+   - stage 2's RP-1 reads 29.70 t against a 29.66 t capacity on the pad (densified load against nominal density?);
+   - `tools/gpu_trace.py` still launches the deleted plunge demo.
+6. **Queued:** Dragon's helium bottles; nozzle flow separation; the Falcon 9's U/E data. After the flights: D115's fidelity. **Frozen:** visuals. **The career:** after v0.3.
 
 ## Open for the owner
 
