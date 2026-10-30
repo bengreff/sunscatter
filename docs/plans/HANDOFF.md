@@ -2,15 +2,15 @@
 
 A SessionStart hook loads this file automatically after `/clear` or at startup. It is kept current by `/handoff`.
 
-*Updated 2026-10-30 (night). One agent is running: ONEKIND-2. DOCS-2 and MISSION-2 have finished.*
+*Updated 2026-10-30 (night). No agents are running. ONEKIND-2, DOCS-2 and MISSION-2 have finished.*
 
 ## Your first job
 
 1. Take the three agents' reports as they arrive. Each reports through a message with its commits, what is left and its questions. Their briefs hold their State.
-   - **ONEKIND-2** ([brief-onekind.md](brief-onekind.md)) moves the ~55 remaining test files off the test craft onto `craft::small` or the Falcon 9, and rebuilds `craft::stress` on parts. It does **not** delete the made-up path. The lead decided that comes only after PLANNER, so the game never loses planned burns.
+   - **ONEKIND-2: done** (09d44b8, 8a29ad3, e57e934, 3d79bff). It moved `frame_live_stop`, `scenario_launch`, `parts`' roughness check, `contact` and `aerothermal` onto `craft::small`. Configured vessels now start deployed, craft on legs no longer spawn in the air, and the small rocket's nozzle heat share is 1.7e-4 (it had run past C-103's melting point). The tests it weakened are in [brief-onekind.md](brief-onekind.md)'s State.
    - **MISSION-2: done.** It flew the Falcon 9 from the pad to a 189 × 600 km orbit at 28.7° through MCP, headless on the real flight software, and a replay from a save matched to the metre. The lead checked the max-Q and orbit shots. The guide is in `docs/technical/testing.md`, with the helper `tools/mcp.sh`. Every tool has now run in the game. Fixes: 1d33b69, 293d22d, 1df446b, 3a64fef.
    - **DOCS-2: done** (67bf95d, 5a930dc, ae6bf93, a068d59). The system docs match today's decisions, decided against built; `technical/ship-systems.md` is split into ten files; comms.md and proper-time.md were extracted. Its Left is in [brief-docs.md](brief-docs.md): the other archived specs, stale status lines, the README's images.
-2. Two slots are free (cap: 3 agents plus the lead): launch **PLANNER** (next steps, item 1).
+2. Every slot is free (cap: 3 agents plus the lead). Launch **PLANNER** (next steps, item 1) and **ONEKIND-3**'s first half (item 2) in parallel.
 
 ## State
 
@@ -25,14 +25,16 @@ A SessionStart hook loads this file automatically after `/clear` or at startup. 
   - MISSION: `./run headless`, the testing tools, the demo and tour deleted.
 - **Decisions recorded:** D117–D127, with D027, D034, D043, D044, D081, D114, D115 and D123 revised. The interviews are in `docs/archive/interviews/` (2026-10-29-next, 2026-10-30). v0.2 is complete with both flights plus D121's scale target (`vision.md`).
 - **Half done:**
-  - ONEKIND: `craft::small` (`small-rocket`) exists and six suites have moved. The test craft and the made-up path are still in the code. The owner confirmed a hard impact breaking a craft of parts apart is intended.
+  - ONEKIND: `craft::small` (`small-rocket`) exists and about a dozen suites have moved. The test craft and the made-up path are still in the code. The owner confirmed a hard impact breaking a craft of parts apart is intended. The small rocket's numbers are estimates (E) awaiting the owner: 400 N cold-gas blocks, 3e5 N/m and 1.8e4 N·s/m feet with a 0.35 m stroke, and the 1.7e-4 nozzle heat share.
   - MISSION: `step`, `run_until`, `new_flight`, saves, `bench` and `profile` have not been run in the game yet.
 - **CI:** green through 8ece779; the agents' last pushes were queued at handoff (`gh run list --limit 3`).
 
 ## Next steps
 
 1. **PLANNER** (D126): planned burns for craft of parts (`PlanError::PartsUnsupported`). Closed-loop to the target state, as a flight-layer program, with real starts, ullage settling and tail-off. Move the planned-burn tests (`planned_burns`, `hold_modes`' maneuver holds, the game's planner and predictions, `landing::model`) onto parts.
-2. **ONEKIND-3**, after PLANNER: delete the made-up path and the test craft. Fix D074, D064, D060, D078, D079, D100 and D104 and their citations. Regenerate the playtest save from a Falcon 9 flight (`save_game` in a headless run) or drop it.
+2. **ONEKIND-3** ([brief-onekind.md](brief-onekind.md), Left):
+   - now: move the remaining tests (`limbo`, `limbo_physics`, `limbo_regime`, `save_load`, the sim unit tests, the bench examples, the game tests), and rebuild `craft::stress` on parts with benchmark numbers at 300, 1,000 and 5,000 parts;
+   - after PLANNER: delete the made-up path and the test craft; fix D074, D064, D060, D078, D079, D100 and D104 and their citations; regenerate the playtest save from a Falcon 9 flight (`save_game` in a headless run) or drop it.
 3. **The next wave, one sim-wide agent at a time** (D121):
    - **STATE:** merge `ShipState` and `Runtime`; typed handles; the engine rule in one place.
    - **FIXES3:**
