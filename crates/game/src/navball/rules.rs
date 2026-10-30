@@ -9,6 +9,7 @@
 use crate::trajectory::LineFrame;
 use glam::{DQuat, DVec3};
 use sim::frame::NodeId;
+use sim::systems::flight::Sas;
 
 /// A vessel below the rails floor counts as low until it is this fraction
 /// of the floor above it (a band, so the mode cannot chatter there).
@@ -267,6 +268,23 @@ pub fn speed_reference(mode: Mode) -> sim::vessel::SpeedReference {
 
 /// The SAS readout: off, or the hold mode, with the speed reference and
 /// body for prograde and retrograde (stated, D075).
+/// The SAS button's label and hover: ON or OFF, or what the flight
+/// software says when it cannot do what is asked (F3,
+/// `sim::systems::flight::Sas`: "no attitude reference", with the hold in
+/// the hover).
+pub fn sas_button(controls: &sim::vessel::Controls, body: &str, status: Sas) -> (&'static str, String) {
+    let label = match status {
+        Sas::NoAttitude => "SAS NO REF",
+        Sas::NoNavigation => "SAS NO NAV",
+        Sas::NoComputer => "SAS NO CPU",
+        Sas::Holding | Sas::Off if controls.sas => "SAS ON",
+        Sas::Holding | Sas::Off => "SAS OFF",
+    };
+    let hold = sas_label(controls, body);
+    let hover = if status.degraded() { format!("SAS: {} ({hold})", status.text()) } else { format!("SAS: {hold}") };
+    (label, hover)
+}
+
 pub fn sas_label(controls: &sim::vessel::Controls, body: &str) -> String {
     use sim::vessel::{HoldMode, SpeedReference};
     if !controls.sas {

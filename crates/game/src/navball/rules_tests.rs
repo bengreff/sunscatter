@@ -263,6 +263,24 @@ fn sas_label_table() {
 }
 
 #[test]
+fn the_sas_button_says_what_the_flight_software_says() {
+    use sim::vessel::{Controls, HoldMode};
+    let on = Controls { sas: true, hold: HoldMode::Stability, ..Controls::default() };
+    let off = Controls::default();
+    // (controls, status, label, hover)
+    let cases = [
+        (on, Sas::Holding, "SAS ON", "SAS: STABILITY"),
+        (off, Sas::Off, "SAS OFF", "SAS: OFF"),
+        (on, Sas::NoAttitude, "SAS NO REF", "SAS: no attitude reference (STABILITY)"),
+        (on, Sas::NoNavigation, "SAS NO NAV", "SAS: no navigation solution: holding attitude (STABILITY)"),
+        (off, Sas::NoComputer, "SAS NO CPU", "SAS: no flight computer (OFF)"),
+    ];
+    for (controls, status, label, hover) in cases {
+        assert_eq!(sas_button(&controls, "Earth", status), (label, hover.to_string()), "{status:?}");
+    }
+}
+
+#[test]
 fn the_throttle_bar_sends_only_while_pressed() {
     // A bar from y = 100 (full) to y = 200 (closed).
     // (pressed, pointer y, expected)

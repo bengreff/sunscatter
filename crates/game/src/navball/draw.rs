@@ -212,9 +212,11 @@ fn controls(ui: &mut egui::Ui, sim: &SimState, s: &NavState, height: f32, action
     ui.horizontal_top(|ui| {
         ui.vertical(|ui| {
             ui.spacing_mut().item_spacing.y = 2.0;
-            let sas = hold_button(ui, if c.sas { "SAS ON" } else { "SAS OFF" }, "T", c.sas, true);
-            // The hold stated in full, with prograde's speed reference (D075).
-            if sas.on_hover_text(format!("SAS: {}", rules::sas_label(&c, &s.body))).clicked() {
+            // The hold stated in full, with prograde's speed reference (D075),
+            // and what the flight software says when it cannot hold (F3).
+            let (label, hover) = rules::sas_button(&c, &s.body, sim.ship().sas_status(&c));
+            let sas = hold_button(ui, label, "T", c.sas, true);
+            if sas.on_hover_text(hover).clicked() {
                 actions.push(Action::Command(GameCommand::SetSas(!c.sas)));
             }
             let rcs = hold_button(ui, if c.rcs.on { "RCS ON" } else { "RCS OFF" }, "R", c.rcs.on, true);
