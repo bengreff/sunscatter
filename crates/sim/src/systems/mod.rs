@@ -1,5 +1,5 @@
 //! A vessel's internal systems on a fixed time lattice
-//! (`docs/features/limbo.md` §3, D081, D033).
+//! (`docs/technical/limbo.md` §3, D081, D033).
 //!
 //! The systems step at the epochs `start + k·STEP`, whatever the frames:
 //! each step reads the vessel's state at its own lattice epoch (from the

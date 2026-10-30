@@ -7,7 +7,7 @@
 //!   point differs (CI: macOS + Windows).
 //! * Accuracy against JPL DE440 and Horizons is a regression guard, not a
 //!   requirement (D026: determinism matters, matching reality is a bonus).
-//!   Bounds sit just above the measured errors (docs/features/solar-system.md).
+//!   Bounds sit just above the measured errors (docs/technical/solar-system.md).
 
 use sim::ephem::{ChebTable, Ephemeris, Motion, Node};
 use sim::sol::{self, HorizonsReference, ReferenceFile};
@@ -117,7 +117,7 @@ fn accuracy_against_de440_is_within_recorded_bounds() {
 }
 
 /// Every Horizons reference state (2030 to 2080) within the worst error
-/// measured with a margin (docs/features/solar-system.md): the moons'
+/// measured with a margin (docs/technical/solar-system.md): the moons'
 /// initial states are fitted to JPL's satellite ephemerides over the whole
 /// window (ephem-tool fit), which trades the epoch's metre for no drift, so
 /// what remains is model differences (Charon 110 m, Titan 8 km, Mimas

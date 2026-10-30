@@ -193,7 +193,7 @@ fn deadlines_and_threads_change_the_clock_not_the_motion() {
     }
 }
 
-/// The frame loop with 50 craft (`docs/features/scale-performance.md`):
+/// The frame loop with 50 craft (`docs/technical/scale-performance.md`):
 /// BENCH's fleet (`sim/examples/bench_scale.rs`): ten limbo stand-ins
 /// tumbling (half 300-part stress craft, two on lunar transfers), 40 quiet
 /// craft holding attitude (20 test craft and 15 300-part craft in low
@@ -319,7 +319,7 @@ fn fleet_frames() {
 }
 
 /// Game-side per-frame costs with 50 vessels in low orbit, every one
-/// tracked and in map view (the worst case; `docs/features/scale-performance.md`):
+/// tracked and in map view (the worst case; `docs/technical/scale-performance.md`):
 /// the dominance radii, each vessel's line end (`trajectory::vessel_line_end`,
 /// drawn lines and the look-ahead), the map's per-vessel orbit sizes and the
 /// map-view rule over every body and vessel. Release:

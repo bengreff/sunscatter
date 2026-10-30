@@ -1,4 +1,4 @@
-//! Fluids (D104, `docs/design/ship-model.md` §3.2): propellants,
+//! Fluids (D104, `docs/technical/ship-model.md` §3.2): propellants,
 //! pressurants and the gases of a cabin. Tanks, bottles, engines and the
 //! plumbing read them.
 //!

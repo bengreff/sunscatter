@@ -1,7 +1,7 @@
 //! Sunscatter simulation core.
 //!
 //! Pure Rust, f64, deterministic, no engine dependencies. See
-//! `docs/design/motion-model.md` for the model this crate implements.
+//! `docs/technical/motion-model.md` for the model this crate implements.
 //!
 //! Rules for everything in this crate:
 //! * all transcendental math goes through [`math`] (libm-backed); no `mul_add`;

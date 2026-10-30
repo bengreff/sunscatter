@@ -1,4 +1,4 @@
-//! Materials (D101, `docs/design/ship-model.md` §3.1): what parts are made
+//! Materials (D101, `docs/technical/ship-model.md` §3.1): what parts are made
 //! of. Generators ([`crate::catalog`]) derive a part's mass, skin and
 //! strength from them; the structure and heat models read them.
 //!

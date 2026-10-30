@@ -127,7 +127,7 @@
         solid: true,
         // Rails warp is disabled below this altitude (m, D062): the top of the atmosphere.
         rails_floor: 950000.0,
-        // Terrain heights (m) above the reference spheroid, 2048×1024: procedural relief (no public-domain global DEM): IAU Gazetteer craters, a sparse crater population, regional fBm of 300 m RMS (docs/features/solar-visuals.md)
+        // Terrain heights (m) above the reference spheroid, 2048×1024: procedural relief (no public-domain global DEM): IAU Gazetteer craters, a sparse crater population, regional fBm of 300 m RMS (docs/technical/solar-visuals.md)
         // Baked by `asset-tool planets titan` (range -1425 .. 1113 m).
         heightmap: Some("height.png"),
         // Procedural detail below the heightmap (D059): RMS residual map (rms_m = value² / 64)

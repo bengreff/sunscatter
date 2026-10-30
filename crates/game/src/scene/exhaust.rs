@@ -1,4 +1,4 @@
-//! Engine exhaust drawn from the exhaust seed (D109; features/exhaust.md):
+//! Engine exhaust drawn from the exhaust seed (D109; technical/exhaust.md):
 //! each running engine's plume from its state at the nozzle exit
 //! (`sim::systems::exhaust`) and the air at the vessel, raymarched in a
 //! cylinder around it (`exhaust.wgsl`, one draw per engine). Drawn when the

@@ -1,5 +1,5 @@
 //! A vessel that goes live inside a rails-warp frame stops there
-//! (`Vessel::advance_frame`, D081; `docs/features/scale-performance.md`):
+//! (`Vessel::advance_frame`, D081; `docs/technical/scale-performance.md`):
 //! the game then caps the warp instead of flying thousands of live ticks in
 //! one frame (BENCH's lunar transfer that crashed inside one 1,000,000x
 //! frame took 16-18 s). The motion is the same as one jump.

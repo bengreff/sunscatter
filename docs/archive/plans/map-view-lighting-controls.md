@@ -1,0 +1,287 @@
+# Feature: map view, lighting and controls (fix round 1)
+
+**Status:** accepted direction (owner answers of 2026-09-26 are folded in; decisions D054–D056).
+- Items marked **Q** still wait on an answer.
+- Everything else is the plan; the owner can override any default.
+
+**Source:** owner feedback of 2026-09-26 after the visual pass ([plan review](v0.2-visual-pass-and-foundations.md#review)).
+
+**Decisions:** D054 (per-object map view, replacing D049 and D053), D055 (lighting), D056 (orbit-line length).
+
+## Scope
+
+In scope:
+1. Zoom speed.
+2. One rule that decides whether each object is in map view.
+3. Physical lighting from stars.
+4. A steady fps readout.
+5. Unified orbit-line length, with settings.
+6. A pause menu with a settings screen.
+7. Camera collision.
+8. Ground jitter while thrusting.
+9. Surface flicker and dark patches.
+10. Hover priority.
+11. A navball.
+12. A full-screen tracking station, and general GUI work.
+
+Out of scope: new content (craters, clouds), the burn planner.
+
+---
+
+## 1. Zoom speed
+
+Zoom half as fast as now, for both the wheel and the trackpad.
+- Wheel: 1.15 → 1.072 per line.
+- Trackpad: 0.25 → 0.125 lines per pixel; on 2026-10-26 the owner found it still five times too fast, so a trackpad pixel counts a fifth of the setting (`camera::rules::scroll_lines`).
+
+The speed is also a setting (§6), stored in `ControlsSettings`. The farthest zoom frames the farthest body from the focus (`camera::rules::max_distance`, with a margin), so every body is within reach (Sedna, ~84 AU in 2030: ~250 AU).
+
+## 2. Per-object map view (replaces the global map mode)
+
+### The rule
+
+Each object *o* is a body or a vessel. All sizes are measured with **one scale**: pixels per metre at the camera's distance to its **focus**, as the camera is placed (a surface can pull it in from the chosen distance: then it is the nearer one).
+
+    k = viewport_height_px / (2 · tan(fov/2) · focus_distance)
+
+Using one scale is the owner's wording, and it has a property we want. Objects in the same scene switch together however far they are from the camera, so the Moon doesn't flicker in and out as the camera orbits the Earth. It also makes the behaviour independent of perspective depth.
+
+- `sprite_px(o) = k · radius(o)`. A vessel uses its bounding radius, currently 10 m.
+- `orbit_px(o) = k · orbit_radius(o)`, where the orbit radius is the osculating semi-major axis about the object's primary, or the current distance to it if unbound.
+- **o is in map view ⇔ `sprite_px(o) < 1` and `orbit_px(o) ≥ 1`,** with hysteresis: it enters below 1 px and leaves above 2 px, and likewise for the orbit bound.
+- **o's orbit line is drawn ⇔ o is in map view and its orbit is seen from outside: `orbit_radius(o) ≤ focus_distance`** (it leaves above 1.5 times; revised 2026-10-26). From inside its orbit the camera sees the orbit wrap around it, a great circle across the sky: from the pad, every dwarf planet's line did that. The active vessel's line is exempt (it starts under the camera, the flight's own prediction); pinned objects in the tracking station too. Tested by a table (`map_view::tests::orbit_lines_appear_only_when_seen_as_orbits`): from the pad and from low orbit no heliocentric line and no Moon line; the Earth–Moon system the Moon's; the inner and outer Solar System the planets' that fit.
+
+### What depends on it
+
+This is the only place any of these behaviours are decided:
+
+| Thing | Shown when |
+|---|---|
+| Icon | o is in map view |
+| Orbit line of o | o is in map view and its orbit is seen from outside (the active vessel's always), and o's orbit lines are enabled (§6) |
+| Hover highlight ring and name | o is in map view |
+| Ap/Pe markers (vessels) | o is in map view |
+| The 3D model/terrain | always, from any distance (it just becomes sub-pixel) |
+
+There is no global "map mode" flag any more. The old ship test (<1 px) is the vessel case of the same rule.
+
+### Hover priority (item 9)
+
+Only objects in map view can be hovered: a body drawn at full size shows no ring and no name. A double-click on bodies (their menu) follows the same priority (`map_view::pick_body`), among bodies drawn at any size whose disc, at least 16 px across the centre, is under the cursor and that no nearer body's disc hides. Among the in-map-view objects under the cursor:
+1. the one with the **largest** mass wins, so a planet beats its moons when their icons overlap, and a star beats its planets;
+2. ties go to the nearest icon centre.
+
+A full-size body's disc blocks hovering on icons behind it.
+
+Moons are still reachable: zoom in until their icons separate. Icons whose screen distance to a heavier object's icon is under 6 px are hidden (the KSP convention), so hovering there shows the parent.
+
+### Tracking station (decided: full screen, KSP-like)
+
+The tracking station is its own full screen:
+- An object list on the left: bodies as a tree (star → planets → moons), vessels grouped by type/status, each with a track toggle.
+- Actions: focus, switch to, delete (with confirmation).
+- There is no flight HUD.
+
+The same per-object map-view rule applies, with the station's own camera, plus two differences:
+- every *tracked* object's icon and line is shown even when its orbit is under 1 px, drawn at a minimum icon size, so nothing tracked is ever invisible;
+- clicking an icon focuses it.
+
+### Tests (pure functions, no Bevy)
+
+`map_view::classify(objects, k) -> Vec<Visibility>` is one pure function, tested by a table:
+- a sub-pixel ship in LEO, seen from Earth-scale zoom, is in map view;
+- a ship with a 10 m sprite is not;
+- the Moon, seen from a Moon-scale zoom, is not in map view and its icon is gone;
+- at solar-system scale, Earth is in map view and the Moon is not (its orbit is under 1 px);
+- hysteresis: no flip-flop across a 1.5 px band;
+- hover priority: a planet beats its moon; a full-size disc blocks icons behind it and is not hoverable itself.
+
+## 3. Lighting from stars (physical, per body)
+
+### Why the Moon's night side is lit blue (image 2)
+
+The current Earthshine is one *directional light* whose strength is computed at the **camera**. From low Earth orbit that is ~25,000 lux (Earth fills half the sky), and a directional light applies it to *everything*, including the Moon 384,000 km away. The main sunlight has the same flaw: its 1/r² falloff is evaluated at the camera, not at each body. In an interstellar setting this is exactly KSP's single-sun problem.
+
+### Proposal
+
+- **Stars are data.** Each star gets a luminosity in `visual.ron` (Sun: 3.828e26 W; the lux conversion follows from its spectrum, about 93 lm/W). There is no separate "light" object.
+- **Per-body illumination.** Every frame, for each lit object (terrain body or vessel) and each star within range (flux above 1e-6 of the brightest), the CPU computes the **flux at that object's position**, `E = L/(4πd²)`, and its direction. The terrain shader and a ship material take up to 4 star directions and illuminances as uniforms and light the surface themselves: Lambert plus the existing PBR specular. The global `DirectionalLight` is used only for shadows. The illuminance stays physical everywhere: Earth 1 AU from the Sun gets 128,000 lux; a planet 5 AU from a second star gets its own value from its own distance.
+- **Reflected light** ("planetshine"). Each lit body is also a weak source: a Lambert sphere with albedo from data, whose flux is computed at each *receiving* object with the phase angle. That is Earthshine on the Moon and ships, and moonlight on Earth. 
+- **Exposure (revised: fixed, D055; eye adaptation was built and then removed on the owner's review).** With physical values, Earthshine on the Moon is 10,000× weaker than sunlight and invisible at a fixed exposure. We use Bevy's `AutoExposure` (histogram-based, compute) with slow adaptation and limits: a close-up of the Moon's night side adapts to show Earthshine, while a sunlit scene keeps night sides near-black. The tiers get auto exposure from Low up; Minimal keeps the fixed EV.
+- **Ambient.** The fixed floor (30) is removed. Night sides get only planetshine and the starlight background (about 0.001 lux).
+- **Eclipses.** An analytic sphere-occlusion factor per star per object on the CPU gives Earth's shadow on the Moon, a ship in Earth's shadow, and so on. Cheap, and consistent with the flare's occlusion test. It is in scope unless the owner says otherwise.
+
+**Tests:**
+- flux falls off as 1/r² between two positions;
+- two stars add;
+- the eclipse factor is 0 behind the planet's centre and 1 outside its shadow cone;
+- the Earthshine phase function peaks at a "full Earth";
+- the demo shows the Moon's night side at the same brightness wherever the camera is (it no longer depends on camera position).
+
+## 4. FPS readout
+
+The fps readout is the frame count over the last ≥ 0.5 s, divided by the elapsed time, updated every 0.5 s. It appears in both the HUD and the overlay.
+
+## 5. Orbit-line length (unified)
+
+### Default
+
+An object's line runs forward until it has completed **one full revolution about its dominant body**, with that body dominant the whole way.
+- Measure the angle swept about the current dominant body in the object's orbit plane.
+- Stop when it reaches 360° with no change of dominant body in that stretch.
+- If the dominant body changes, restart counting about the new one, so a transfer is drawn until one full revolution about the destination.
+- Hard caps prevent unbounded work:
+  - the computed segment horizon;
+  - a time cap (setting, default 1 year for vessels);
+  - for escape trajectories, until the object leaves the plot's region of interest.
+
+This is display logic only. Physics never uses "dominance" (rule 1).
+
+### Which body is dominant (decided: tidal, D056)
+
+The largest raw gravitational pull makes the **Sun** dominant for the Moon: it pulls the Moon about twice as hard as Earth does. The Moon's line would then be a year-long heliocentric loop.
+
+**Decided: relative (tidal) dominance.** The dominant body B for object o maximises *B's pull on o relative to B's pull on o's other candidate primaries*: the perturbation ratio used for Laplace spheres of influence. This makes Earth dominant for the Moon and ships in LEO, and the Sun for Earth. It is a display rule, not physics.
+
+### Settings (in the new settings screen)
+
+- **Vessel line length:** "1 revolution" (default), "2 revolutions", "until impact/escape", or a fixed time.
+- **Body line length:** "1 revolution" (default) or off.
+- **Per-body show/hide** (a list of bodies with checkboxes), plus "show only orbits in the current system".
+
+Bodies' lines come from the ephemeris with the same revolution rule. The ship's line needs its coast segment computed far enough ahead, so the look-ahead budget follows the rule instead of the old 1.5-orbit guess.
+
+**Tests:**
+- a circular LEO coast gives a line whose end angle is 360° ± 0.5°;
+- a Moon flyby trajectory changes its dominant body and ends after one revolution about the Moon (or at the cap);
+- the Moon's line is one lunar orbit about Earth (tidal dominance);
+- the settings round-trip.
+
+## 6. Pause menu, settings and general GUI
+
+### Pause menu
+
+**Esc** pauses (the sim clock stops, and a "PAUSED" banner shows) and opens a centred menu:
+- Resume;
+- Settings;
+- Save;
+- Load (the save list);
+- Revert to launch (D114: the one way back to the pad; it loads the launch save written when the active vessel, or the vessel it split from, was placed on the pad, so the whole game is as it was then: fuelled, throttle closed; a vessel without one gets a new craft of its kind on the pad);
+- Tracking station;
+- Quit to desktop.
+
+Revert and Quit ask for confirmation. Esc again resumes. While paused, the camera still works and the game ignores flight keys.
+
+### Settings screen
+
+Tabs, all persisted in `settings.ron`, each with "Reset to defaults":
+- **Graphics:** removed 2026-10-26 (one look, no graphics settings: D073); the benchmark of the look's parts is on the Interface tab.
+- **Orbits:** line length (§5), per-body show/hide, "only the current system".
+- **Controls:** zoom speed, trackpad zoom, mouse sensitivity, invert, and a key reference.
+- **Interface:** UI scale, fps readout, HUD elements.
+
+F3/F5/F6/F7/F9 stay as shortcuts; F3 opens Settings → Graphics.
+
+### General GUI
+
+Decided look: **clean sci-fi, but function first.**
+- Vital information is always visible; density is fine in menus.
+- Time-warp arrows sit at the top of the screen.
+- The flight view is the navball plus task menus (D080). Ship systems will get a separate ship-management view (a schematic, with no planets drawn) once ships exist; the Utilities menu is its brief summary.
+
+The following fix what is rough now:
+- **One style.** A shared egui theme module holds colours, fonts, spacing and window frames. Panels are dark and slightly translucent, with an accent colour for the active vessel, and nothing is left at egui's default look.
+- **HUD layout, no overlaps.**
+  - Top left: date, time and warp.
+  - Bottom left: the flight panel (altitude above terrain, speeds, Ap/Pe, throttle, SAS, chute).
+  - Top right: target/hover info.
+  - Right edge: messages.
+  - Debug lines (anchor, plot frame) move to an optional debug panel.
+- **Units and numbers.** One formatter for distance, speed and time: m, km, Mm, AU; s, min, h, d, y. Numbers are right-aligned monospace so they don't jiggle; rates update at most 10 times a second.
+- **Warp indicator.** Arrows show the level, with "physics"/"rails" and the reason warp is limited (throttle, compute).
+- **Messages.** One queue of short toasts: saves, loads, warp limited, crashed. They replace ad-hoc labels.
+- **Keys.** A help overlay (**H**) replaces the collapsible Controls window.
+- **Windows remember their position**; the UI scales with the display's DPI plus the UI-scale setting.
+
+## 7. Camera collision
+
+- **Bodies.** The camera never goes below `surface_height + max(2 m, 0.002 · focus_distance)` of the nearest body, using `sim`'s terrain sampling (the same surface as physics and rendering). A zoom or rotation that would violate it is clamped: the camera stops, as requested. For a body focus, the minimum distance is its radius plus that margin along the view direction.
+- **Ships.** The camera stays outside the ship's bounding sphere (1.2 × its radius) when it is the focus.
+- **Tests:** a pure function `clamp_camera(...)` with cases for zooming into terrain, orbiting below a mountain, and zooming into the ship.
+
+## 8. Ground jitter while thrusting (item 7)
+
+**Cause (confirmed in code):** a powered vessel advances in fixed ticks and reports its state at *its own* time, which trails the clock by up to one tick. Bodies are drawn at the clock time. The camera follows the ship, so the ground jumps by `v · Δt` every frame: up to metres at launch speeds. Landed vessels have the same mismatch in principle.
+
+**Fix:** the renderer asks for every vessel's state **at the clock time** (`Vessel::state_at(world, clock)`), interpolating between the last two powered ticks with the same quintic Hermite as coast segments. It never integrates (rule 4). Test: a powered vessel's rendered position is continuous across ticks.
+
+## 9. Surface flicker and dark patches (item 8)
+
+Likely causes, to be confirmed with repro captures before fixing:
+- **The water mask is per vertex at LOD resolution** (the blue square in image 3). A finer chunk samples points below −5 m that the coarser neighbour didn't, so a whole chunk turns into "water" and switches as the LOD changes. Fix: bake a water mask texture (from the colour map or an ETOPO land mask, at the asset tool) and look it up per fragment, like the colour map. This also resolves the question of an ocean mask for the Dead Sea (the plan's B3 note).
+- **LOD popping:** abrupt chunk swaps. Fix: morph vertices between levels (geomorphing) over the last 20 % of a node's range.
+- **The sky light and atmosphere mode switch abruptly at the atmosphere's top.** Fix: cross-fade over a band instead of switching.
+- **Aerial perspective ends at 400 km**, so distant ground can be darker. Fix: raise the limit or fade.
+
+**Tests:** the water mask is independent of LOD level (sample the same point via different chunk levels); demo captures during a zoom sweep (new demo step) are checked by eye.
+
+## 10. Navball (attitude indicator)
+
+Decided: build it in this round, modelled on KSP's, with more information. It is flight-view only.
+- **The ball.** A textured sphere in the bottom centre showing the horizon and heading relative to the local frame of the reference body. It rotates with the ship's attitude. It is rendered as a small 3D view into the HUD, or as a shader quad.
+- **Markers:**
+  - prograde / retrograde;
+  - normal / antinormal;
+  - radial in / out;
+  - target and anti-target (when a target exists);
+  - the maneuver (later, with the burn planner).
+- **Modes:** surface / orbit / target (click to cycle), with the matching speed readout above the ball. The mode switches automatically where rails warp stops (D089: the reference body's rails floor, Earth 150 km): surface below, orbit above; a mode picked by hand holds until the next crossing; the owner can lock it. The orbit line follows the mode (D089).
+- **More than KSP:**
+  - heading, pitch and roll numbers;
+  - angle of attack and sideslip in the atmosphere;
+  - vertical speed;
+  - g-load;
+  - the SAS mode;
+  - the time to Ap/Pe beside the ball.
+- **Tests:** the marker directions are pure functions of state (prograde equals the normalised velocity in the chosen frame; radial is perpendicular to it). The ball's orientation is right for known attitudes (nose up on the pad means the horizon is centred at 90° pitch).
+- **Implementation:** a separate agent in its own module (`game::navball`), touching only its own files plus one registration line.
+
+---
+
+## Open questions
+
+None open.
+
+
+Resolved:
+- Q1: tidal dominance.
+- Q2: no hover outside map view.
+- Q4: eye adaptation.
+- Q5: the pad crash was steered (not a bug).
+- Q3: full-screen, KSP-like tracking station.
+- Q6: clean sci-fi, function first; warp arrows on top; navball in this round.
+
+## How it is built
+
+**Refactor as we touch:** each item first moves its rule into a pure, table-tested function (map view, camera limits, lighting, orbit length, formatting), then changes behaviour. There is no big-bang rewrite.
+
+## Review (2026-09-26)
+
+Status per item, verified by tests and hidden offscreen demo runs (screenshots of every tier; the demo asserts the map-view rule at the pad, map and tracking-station views). Not yet played by the owner.
+
+| # | Item | Status | Notes |
+|---|---|---|---|
+| 1 | Zoom speed | playable | 1.072 per wheel line, 0.125 lines per trackpad px; settings. |
+| 2 | Per-object map view, hover priority | playable | `game::map_view`; occlusion by nearer discs; planets got `body.ron` sizes. |
+| 3 | Lighting | playable | Per-body flux, eclipses (per fragment on terrain, per ship), planetshine, starlight ambient, fixed exposure (eye adaptation removed on review: night sides must be dark). |
+| 4 | FPS readout | playable | 0.5 s windows. |
+| 5 | Orbit-line length | playable | D056 (dominance, revolutions, caps, settings). Not yet looked at closely in the demo. |
+| 6 | Pause menu, settings, GUI | playable | Esc menu, tabbed settings, movable saved panels, theme, help (H), toasts, one formatter, warp arrows. |
+| 7 | Camera collision | playable | Refuses moves into terrain; slides in when the ground rises; outside the ship. |
+| 8 | Ground jitter | playable | `Vessel::state_at` at the clock. |
+| 9 | Surface flicker, dark patches | playable | Water mask per fragment, geomorphing, sky light fades near the top. The owner's hard-edged dark patch was **not reproduced**; likely the old per-vertex water flag (coastline chunks). Aerial perspective ends at 400 km; raising it to 1,000 km changed nothing visible in the demo's 10 km, 20 km and orbit views, so it was kept. |
+| 10 | Hover priority | playable | Part of item 2. |
+| 11 | Navball | playable | Smaller, centred, altitude and speed above the ball, relative to the dominant body. |
+| 12 | Tracking station | playable | Full-height list, body tree, grouped vessels, click an icon to focus. |
+
+After the owner's second review: night sides are dark (a leaked sky light was lighting them), CC0 ground textures and water waves replace the old detail layer, and the pad moved onto land. Known gaps: the overall haze strength at 10–20 km (the ground looks fully blue; not the 400 km range, see item 9); the dark-patch repro; Ap/Pe markers still search the whole computed span (longer than the line in non-default modes); the orbit-line rescan per frame costs ~25 fps at 1,000,000x with 11 vessels (170 fps, fine against the 60 fps target).

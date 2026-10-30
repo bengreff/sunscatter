@@ -1,4 +1,4 @@
-//! Cost of the 10 km bubble (D082; `docs/features/proximity.md`): two
+//! Cost of the 10 km bubble (D082; `docs/technical/proximity.md`): two
 //! stress craft of `parts` parts touching in low orbit, held live by a
 //! test craft 2 km away burning at its least throttle. Release only:
 //!

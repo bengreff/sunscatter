@@ -1,4 +1,4 @@
-//! What splitting a craft of parts costs (`docs/features/parts.md`, D083):
+//! What splitting a craft of parts costs (`docs/technical/parts.md`, D083):
 //! the pieces' craft (union surface, cells, mass) and designs (aero bake,
 //! volume grid, thermal network), built fresh as the registry would, and
 //! the split itself once they exist. Stress craft (`sim::craft::stress`).

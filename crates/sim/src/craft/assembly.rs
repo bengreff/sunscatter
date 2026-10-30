@@ -1,4 +1,4 @@
-//! Craft files v2 (D102, `docs/design/ship-model.md` §3.4): a craft of
+//! Craft files v2 (D102, `docs/technical/ship-model.md` §3.4): a craft of
 //! catalog parts, `data/craft/<craft>/craft.ron` without a `geometry.ron`
 //! (the single-part craft file of [`super::file`] still loads as before).
 //!

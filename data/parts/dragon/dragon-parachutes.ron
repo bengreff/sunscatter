@@ -1,4 +1,4 @@
-// Catalog entry (D101; sim::catalog). Numbers from docs/features/falcon9.md
+// Catalog entry (D101; sim::catalog). Numbers from docs/vehicles/falcon9.md
 // (DATA): P published, E estimate, D derived, U unknown (proposed value).
 (
     id: "dragon-parachutes", name: "Crew Dragon parachutes (2 drogues Ø 5.8 m, 4 mains Ø 35.4 m)", era: 2019, provisional: true,

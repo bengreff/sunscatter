@@ -1,5 +1,5 @@
 //! Planets and moons with global maps beyond Earth and the Moon (LANDS,
-//! 2026-10-26; `docs/features/solar-visuals.md`): heights from a global DEM
+//! 2026-10-26; `docs/technical/solar-visuals.md`): heights from a global DEM
 //! and colour from a global mosaic, baked like the Moon's into
 //! `data/bodies/<body>/` (`height.png`, `color.jpg`), then roughness and
 //! zones from the committed maps. Every body is one [`Spec`] in [`SPECS`];
@@ -19,7 +19,7 @@
 //! **Colour.** 8-bit mosaics are taken as sRGB-coded and averaged in linear
 //! light; zero is no data where the mosaic says so. Grey mosaics are written
 //! grey: a zone's colour comes from its sourced albedo, the map only
-//! classifies and tints (`docs/features/crisp-surfaces.md`).
+//! classifies and tints (`docs/technical/crisp-surfaces.md`).
 
 use std::path::Path;
 

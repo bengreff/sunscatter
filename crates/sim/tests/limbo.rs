@@ -1,4 +1,4 @@
-//! Limbo (`docs/features/limbo.md`, D081): craft on rails under continuous
+//! Limbo (`docs/technical/limbo.md`, D081): craft on rails under continuous
 //! forces (low thrust, thin-air drag, radiation pressure) evolve to the same
 //! bits whatever the warp: one call, game frames at 1×, 1,000× and
 //! 1,000,000× (the game's budgets and look-ahead), and across a save.

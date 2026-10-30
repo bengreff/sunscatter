@@ -1,5 +1,5 @@
 //! Scale baseline (D081; results and reading in
-//! `docs/plans/scale-baseline-2026-10-26.md`): what the craft pipeline and
+//! `docs/archive/research/scale-baseline-2026-10-26.md`): what the craft pipeline and
 //! the game's frame loop cost as craft grow to 1,000 parts (synthetic stress
 //! craft, `sim::craft::stress`) and fleets to 50 craft. Release only:
 //!

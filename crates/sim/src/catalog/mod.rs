@@ -1,5 +1,5 @@
 //! The part catalog and its generators (D100, D101, D102;
-//! `docs/design/ship-model.md` §2–§3.3, `docs/features/parts.md`).
+//! `docs/technical/ship-model.md` §2–§3.3, `docs/technical/parts.md`).
 //!
 //! Every part and component comes from a **generator**: Rust code that
 //! turns parameters into primitives in the part's frame, mounting points,

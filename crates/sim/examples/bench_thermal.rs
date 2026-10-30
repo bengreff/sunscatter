@@ -1,6 +1,6 @@
 //! Cost and accuracy of the thermal network solve (hot spot 1 of
-//! `docs/plans/scale-baseline-2026-10-26.md`; results in
-//! `docs/features/scale-performance.md`), release only:
+//! `docs/archive/research/scale-baseline-2026-10-26.md`; results in
+//! `docs/technical/scale-performance.md`), release only:
 //!
 //! `cargo run -p sim --release --example bench_thermal [parts=0,50,300,1000] [runs=3] [solve]`
 //!

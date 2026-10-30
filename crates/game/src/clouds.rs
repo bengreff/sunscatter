@@ -1,4 +1,4 @@
-//! Opaque cloud decks seen from above (Venus; docs/features/solar-visuals.md#venus):
+//! Opaque cloud decks seen from above (Venus; docs/technical/solar-visuals.md#venus):
 //! a Lambert sphere at the deck's top (`CloudTopDef`), lit by the star's
 //! flux at the body. From above it hides the ground, and the sky is drawn
 //! with only the gas above it (`atmosphere::DeckMedia`): raymarching 30

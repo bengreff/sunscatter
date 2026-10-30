@@ -1,4 +1,4 @@
-// Materials (D101, docs/design/ship-model.md §3.1; read by sim::materials).
+// Materials (D101, docs/technical/ship-model.md §3.1; read by sim::materials).
 //
 // Units: density kg/m³, modulus and strength Pa, conductivity W/(m·K),
 // specific heat J/(kg·K), temperatures K, cost USD/kg of mill product,
@@ -158,7 +158,7 @@
             // Coated (R512E silicide) the service limit is ~1640 K (D077).
             service_k: 1644.0, destruction_k: 2620.0,
             fatigue_exponent: Some(10.0), cost_per_kg: 600.0, era: 1965,
-            sources: ["ATI, C-103 alloy technical data sheet", "D077 / docs/design/aero-thermal.md (coated C-103 limit)"],
+            sources: ["ATI, C-103 alloy technical data sheet", "D077 / docs/technical/aero-thermal.md (coated C-103 limit)"],
             verify: ["modulus", "strength", "conductivity", "specific_heat", "emissivity", "absorptivity", "fatigue_exponent", "cost_per_kg"],
         ),
         (
@@ -295,7 +295,7 @@
         (
             id: "silicide-coating", name: "Silicide oxidation coating (R512E) on niobium",
             emissivity: 0.8, absorptivity: 0.8, areal_mass: 0.2,
-            sources: ["D077 / docs/design/aero-thermal.md", "Hitemco R512E data"],
+            sources: ["D077 / docs/technical/aero-thermal.md", "Hitemco R512E data"],
             verify: ["absorptivity", "areal_mass"],
         ),
         (

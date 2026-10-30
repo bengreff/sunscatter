@@ -71,7 +71,7 @@ fn the_seed_gives_the_published_thrust() {
 /// SuperDraco (an abort engine) near matched at sea level. The exit
 /// temperatures against CEA-method shifting-equilibrium runs (NASA Glenn
 /// thermodynamic data, chamber 9.7 MPa, the engines' mixture ratios;
-/// features/exhaust.md): Merlin 1D 1,791 K at ε 16, MVac 1,281 K at ε 165
+/// technical/exhaust.md): Merlin 1D 1,791 K at ε 16, MVac 1,281 K at ε 165
 /// (frozen: 1,386 K and 745 K).
 #[test]
 fn the_seed_table() {

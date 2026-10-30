@@ -1,4 +1,4 @@
-//! Limbo regime changes (`docs/features/limbo.md`, review of 2026-10-26):
+//! Limbo regime changes (`docs/technical/limbo.md`, review of 2026-10-26):
 //! a perturbed coast restarts where its attitude regime changes, and those
 //! epochs never depend on the frames. A burn's turn forced by the maneuver
 //! hold, its settling, and a change of the hold's automatic reference body

@@ -1,4 +1,4 @@
-//! Stability at scale (D081; `docs/features/scale-performance.md`): 50
+//! Stability at scale (D081; `docs/technical/scale-performance.md`): 50
 //! craft flown for simulated years at 1,000,000x in the game's frames
 //! (`Vessel::advance_frame`, the clock held at the slowest vessel; physics
 //! warp while one is live), the vessels advanced in parallel. Every month

@@ -5,11 +5,11 @@ Real-scale 3D spaceflight, mission-design and logistics game in Rust. Being rebu
 ## Read first
 - `docs/plans/HANDOFF.md` — **start here in a fresh session** (auto-loaded by a SessionStart hook): reading order, current state, next steps. `/handoff` updates it before a `/clear`.
 - `docs/vision.md` — pillars and non-goals. `docs/decisions.md` — what is decided (check before proposing).
-- `docs/design/motion-model.md` — how bodies and ships move (no SOIs, frame tree, precision, determinism).
+- `docs/technical/motion-model.md` — how bodies and ships move (no SOIs, frame tree, precision, determinism).
 - `docs/plans/` — the current build plan; check items off as you go.
 - `docs/process.md` — doc types, research strategy (KSP mods, Principia, …), engineering rules.
-- `docs/architecture.md` — **who owns what** (search it before writing a new function about bodies, orbits, visibility, lighting or time), frame order, where tests live.
-- `docs/features/` — the spec for the feature you are building, if one exists.
+- `docs/owners.md` — **who owns what** (search it before writing a new function about bodies, orbits, visibility, lighting or time), frame order, where tests live.
+- `docs/technical/` — the detailed spec for the part you are building, if one exists.
 
 ## Layout
 - `crates/sim` — simulation core. **No engine dependencies.** f64, frame-typed, deterministic.
@@ -29,7 +29,7 @@ Real-scale 3D spaceflight, mission-design and logistics game in Rust. Being rebu
 - `cargo run -p ephem-tool --release -- sol` — regenerate the Solar System ephemeris (needs `data/external/de440s.bsp`; see the tool's docs). The golden tests fail if the shipped file and code disagree.
 - `cargo clippy -p sim -p ephem-tool -p asset-tool -p mcp --all-targets -- -D warnings`, `cargo fmt --all`, `tools/check_file_sizes.sh`.
 - CI: a fast `sim` job (no Bevy; fmt, file sizes, decision references, clippy, tests) and a separate `game` job, on macOS and Windows. `tools/check_decision_refs.sh` fails on citations of deleted (superseded) decisions.
-- Windows: at the end of a big session, try `ssh backhouse` (the owner's PC) and run the demo there (procedure: `docs/windows.md`); if it doesn't connect, skip it.
+- Windows: at the end of a big session, try `ssh backhouse` (the owner's PC) and run the demo there (procedure: `docs/technical/windows.md`); if it doesn't connect, skip it.
 - Hooks (`.claude/settings.json`, scripts in `tools/hooks/`): the handoff is loaded at session start, `cargo check` of the owning crate runs after editing a `.rs` file, and `cargo test -p sim` runs on stop. Failures are fed back (exit 2).
 - Git pre-push hook (`tools/git-hooks/pre-push`; enable per checkout with `git config core.hooksPath tools/git-hooks`): runs CI's checks on the exact commit being pushed, in a private mirror, and refuses a push that would fail CI (a night of red pushes flooded the owner's inbox, 2026-10-26). Its pre-commit hook refuses a commit from a stale index, one that would revert HEAD's version of a file the work tree still has (after an agent's private-index commit; `git reset -q -- <file>`).
 
@@ -41,7 +41,7 @@ Real-scale 3D spaceflight, mission-design and logistics game in Rust. Being rebu
 5. **One owner per piece of math** (one Kepler solver: `sim::kepler`).
 6. Tests come with the code. Small commits, one purpose each, pushed to `main`. Every commit passes fmt, clippy, tests.
 7. Describe features honestly: *design / skeleton / playable / polished*.
-8. **Game rules are pure functions with table tests** (visibility, hover, camera limits, lighting, orbit-line length); Bevy systems only wire them up. One owner per rule (`docs/architecture.md`).
+8. **Game rules are pure functions with table tests** (visibility, hover, camera limits, lighting, orbit-line length); Bevy systems only wire them up. One owner per rule (`docs/owners.md`).
 9. **Superseded decisions are deleted**, and everything citing them is updated in the same commit (CI checks the citations).
 
 ## Usage budget (owner's rule, 2026-10-27)

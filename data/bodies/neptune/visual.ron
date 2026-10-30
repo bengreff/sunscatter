@@ -1,7 +1,7 @@
 // Neptune's visuals (read by crates/game; physical data is in body.ron).
 // base_color: the mean of the colour map, sRGB (Lambert albedo 1.5 p from the geometric albedos in Sloan r', V, Sloan g':
 // Mallama et al. 2017, Icarus 282, 19); albedo: Bond albedo, NASA Planetary Fact Sheet (NSSDCA).
-// color_map: Hubble OPAL 2025 global maps, calibrated (`asset-tool giants`; docs/features/solar-visuals.md#giants).
+// color_map: Hubble OPAL 2025 global maps, calibrated (`asset-tool giants`; docs/technical/solar-visuals.md#giants).
 (
     base_color: (0.71, 0.83, 0.91),
     color_map: Some("color.jpg"),

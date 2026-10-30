@@ -1,4 +1,4 @@
-//! The part layer in flight (`docs/features/parts.md`, D032, D083): splits
+//! The part layer in flight (`docs/technical/parts.md`, D032, D083): splits
 //! conserve momentum and carry their state, a split is deterministic (frames
 //! equal one jump), breakage triggers, saves of craft of parts and of their
 //! pieces, and the debris rule over a fleet.

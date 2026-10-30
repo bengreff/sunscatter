@@ -1,6 +1,6 @@
 //! Each body's map sources and procedural parameters ([`crate::planets`]).
 //! Sources, licences and the statistics behind the procedural values are
-//! cited in `docs/features/solar-visuals.md` (LANDS section); in short:
+//! cited in `docs/technical/solar-visuals.md` (LANDS section); in short:
 //! USGS Astrogeology global DEMs and mosaics (public domain, NASA missions),
 //! crater densities as cumulative `N(>1 km)` per km² for a `D^−2` law
 //! (near empirical saturation, ~0.1, on the old icy satellites: Melosh 1989
@@ -438,7 +438,7 @@ pub const SPECS: &[Spec] = &[
         Colors::Procedural([188, 187, 187]),
         (512, 512, 512),
     ),
-    // Under thick air (agent SKY, docs/features/solar-visuals.md#venus-and-titan-surfaces).
+    // Under thick air (agent SKY, docs/technical/solar-visuals.md#venus-and-titan-surfaces).
     spec(
         "venus",
         // Magellan altimetry and stereo, global topography v2 (USGS, 4641 m): metres above a 6,051 km sphere.

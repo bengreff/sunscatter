@@ -117,7 +117,7 @@ pub struct VesselThermal {
 }
 
 /// A vessel's shock layer at its stagnation point (D109,
-/// `docs/features/reentry.md`).
+/// `docs/technical/reentry.md`).
 #[derive(Clone, Copy, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct ShockLayer {
     /// Equilibrium temperature behind the normal shock (K; zero where the

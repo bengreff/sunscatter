@@ -5,7 +5,7 @@
     albedo: 0.96,
     roughness: 0.95,
     icon_color: (1.00, 1.00, 1.00),
-    // Procedural surface (no global map exists; docs/features/solar-visuals.md): relief and colour
+    // Procedural surface (no global map exists; docs/technical/solar-visuals.md): relief and colour
     // baked by `asset-tool planets` from measured statistics. Zone albedo: linear reflectance at
     // ~645, 555, 470 nm from the geometric albedo 0.96 (Sicardy et al. 2011, Nature 478, 493); B-V 0.78, V-R 0.45 (MBOSS, Hainaut et al. 2012);
     // colour indices converted with the Sun's B-V 0.653, V-R 0.356. Fresh ejecta: 1.6x (assumed).

@@ -1,4 +1,4 @@
-//! Cost of ten limbo craft (`docs/features/limbo.md`, D081) in the game's
+//! Cost of ten limbo craft (`docs/technical/limbo.md`, D081) in the game's
 //! frame loop (release): perturbed coasts under thin-air drag (low orbits,
 //! held prograde), low thrust (0.5 N ion burns spiralling out), radiation
 //! pressure (a tumbling craft high up), each with its systems lattice and

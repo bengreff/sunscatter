@@ -1,4 +1,4 @@
-//! Perturbed coasts (`docs/features/limbo.md`, D081): what acts on a
+//! Perturbed coasts (`docs/technical/limbo.md`, D081): what acts on a
 //! coasting vessel besides gravity, evaluated at every integrator stage of
 //! its stored segment so that any warp only samples the result (rule 4).
 //!
@@ -48,7 +48,7 @@ use glam::DVec3;
 /// tick by tick (D075).
 pub const LOW_THRUST: f64 = 0.01;
 
-/// Where a coast hands over to live flight (`docs/features/limbo.md` §2):
+/// Where a coast hands over to live flight (`docs/technical/limbo.md` §2):
 /// any of these reached, inside an atmosphere's `top` (live flight sees no
 /// air above it). A live vessel coasts again once all are below half
 /// (hysteresis) or it is above the top.

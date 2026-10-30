@@ -43,7 +43,7 @@ mod recorded;
 /// 5th-order integrator, in a third of the force evaluations. The 3 h cap bounds the error from the ephemeris
 /// acceleration's kinks at Chebyshev segment boundaries on heliocentric
 /// arcs (14 m over a year, 56 m before). `examples/bench_integrator`,
-/// `docs/features/scale-performance.md`.
+/// `docs/technical/scale-performance.md`.
 pub fn coast_tolerance() -> Tolerance {
     Tolerance { abs_r: 1e-1, abs_v: 1e-5, rel: 1e-10, h_min: 1e-4, h_max: 3.0 * 3600.0 }
 }

@@ -1,4 +1,4 @@
-//! The ship state (D104, D105; `docs/design/ship-model.md` §2, §5):
+//! The ship state (D104, D105; `docs/technical/ship-model.md` §2, §5):
 //! everything about a craft of catalog parts that changes in flight, saved
 //! with the vessel as plain data — each tank's liquid and ullage, bottles,
 //! engines, thruster blocks, valves, batteries, mechanisms, joints, each

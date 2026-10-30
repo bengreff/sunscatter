@@ -1,4 +1,4 @@
-//! Ship commands (D107, D108; `docs/design/ship-model.md` §8): one data
+//! Ship commands (D107, D108; `docs/technical/ship-model.md` §8): one data
 //! type for everything that commands a craft of parts — the stage sequence
 //! and saved functions of its craft file, the systems screen, the MCP
 //! server and later scripts. A command names what it acts on by the craft

@@ -1,4 +1,4 @@
-//! The per-design aerodynamic bake (docs/design/aero-thermal.md, "The
+//! The per-design aerodynamic bake (docs/technical/aero-thermal.md, "The
 //! bake"): for every direction of a geodesic grid, which part of each cell
 //! the flow reaches first (its exposure), and the effective nose radius.
 //!

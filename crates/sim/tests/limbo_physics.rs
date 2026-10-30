@@ -1,4 +1,4 @@
-//! Limbo physics against references (`docs/features/limbo.md`): thin-air
+//! Limbo physics against references (`docs/technical/limbo.md`): thin-air
 //! drag decay (King-Hele's rate; an ISS-like ballistic number against the
 //! station's observed decay), radiation pressure on a flat plate, a
 //! low-thrust spiral against Edelbaum, the hand-over from a decaying coast

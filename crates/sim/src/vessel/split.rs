@@ -1,4 +1,4 @@
-//! Splitting a vessel (D032, D083; `docs/features/parts.md`): a set of its
+//! Splitting a vessel (D032, D083; `docs/technical/parts.md`): a set of its
 //! parts leaves as a new vessel, a full vessel with its own trajectory,
 //! aerodynamics and heating.
 //!

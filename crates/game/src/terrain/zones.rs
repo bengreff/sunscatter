@@ -1,4 +1,4 @@
-//! Surface zones (D073, `docs/features/crisp-surfaces.md`): the zone map
+//! Surface zones (D073, `docs/technical/crisp-surfaces.md`): the zone map
 //! baked by `asset-tool zones` (`zones.png`, 0 sea, 1..=N the zone list),
 //! drawn by `terrain.wgsl` so that coasts and zone edges are crisp at every
 //! distance and each zone is one consistent procedural texture.

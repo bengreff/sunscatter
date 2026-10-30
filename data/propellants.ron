@@ -12,7 +12,7 @@
 // nozzle in shifting equilibrium, T ∝ p^((γs−1)/γs), the exit temperature
 // from chamber_temperature (E: fitted to CEA-method runs, NASA Glenn
 // thermodynamic data via Cantera 3.2, chamber 6.9–9.7 MPa, ε 16 and 165;
-// features/exhaust.md). A single gamma (frozen) leaves kerolox 400 K colder.
+// technical/exhaust.md). A single gamma (frozen) leaves kerolox 400 K colder.
 // stoichiometric_ratio: the oxidizer-to-fuel mass ratio that burns the fuel
 // completely to CO2 and H2O (D: from the formulas); an engine run below it
 // leaves fuel (CO, H2) that afterburns in air.

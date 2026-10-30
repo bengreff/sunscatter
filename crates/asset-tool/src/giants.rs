@@ -1,5 +1,5 @@
 //! The giant planets' colour maps (agent SKY; sources and choices in
-//! docs/features/solar-visuals.md#giants): `asset-tool giants [jupiter saturn uranus neptune]`.
+//! docs/technical/solar-visuals.md#giants): `asset-tool giants [jupiter saturn uranus neptune]`.
 //!
 //! All four from the Hubble OPAL global maps of 2025 (Simon et al., DOI 10.17909/T9G593),
 //! three filters per planet as red, green and blue:

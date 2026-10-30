@@ -1,6 +1,6 @@
 // Falcon 9 Block 5 with Crew Dragon (D100): a craft of catalog parts
-// (docs/design/ship-model.md §3.4, docs/features/parts.md) from the data
-// sheet docs/features/falcon9.md (DATA; every number tagged P/E/D/U there;
+// (docs/technical/ship-model.md §3.4, docs/technical/parts.md) from the data
+// sheet docs/vehicles/falcon9.md (DATA; every number tagged P/E/D/U there;
 // the entries in data/parts carry the tags).
 //
 // Body axes: +Z up the stack; the origin is the capsule's shoulder (the top

@@ -1,4 +1,4 @@
-//! The build (D101, D102; `docs/design/ship-model.md` §4): catalog + craft
+//! The build (D101, D102; `docs/technical/ship-model.md` §4): catalog + craft
 //! file → every part and component generated and placed by its mounts →
 //! a [`CraftDef`] for the existing pipeline (union surface, cells by area,
 //! mass properties, volume nodes, the aero bake and thermal network, every

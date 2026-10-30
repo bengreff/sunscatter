@@ -1,7 +1,7 @@
 //! Ephemeris generation: integrate a system once with a fixed-step symplectic
 //! integrator, then fit each node's motion relative to its parent. Rails
 //! (elements + linear drift) are used where they measure within tolerance;
-//! otherwise a Chebyshev table. See `docs/design/motion-model.md` §1.
+//! otherwise a Chebyshev table. See `docs/technical/motion-model.md` §1.
 //!
 //! Generation is a pure function of its inputs (initial conditions, tree,
 //! config): the output bytes are identical on every platform.

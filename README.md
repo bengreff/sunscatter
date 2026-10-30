@@ -27,13 +27,13 @@ The full list is in the in-game Controls panel.
 ![Sunset after landing](docs/images/v0.2-visual/sunset_ultra.jpg)
 
 Build plans and their reviews (what works, measurements, what's next):
-- [the first prototype](docs/plans/v0.2-earth-moon-prototype.md)
-- [the visual pass and foundations](docs/plans/v0.2-visual-pass-and-foundations.md)
+- [the first prototype](docs/archive/plans/v0.2-earth-moon-prototype.md)
+- [the visual pass and foundations](docs/archive/plans/v0.2-visual-pass-and-foundations.md)
 
 ## Planning documents
 
 - [Vision](docs/vision.md): identity, pillars, non-goals and roadmap.
 - [Process](docs/process.md): documents, research strategy and engineering rules.
 - [Decision log](docs/decisions.md): what has been decided, and why.
-- [Lessons from v0.1](docs/lessons-from-v0.1.md): what to keep and what to change.
-- [Motion model](docs/design/motion-model.md): how bodies and ships move without spheres of influence, plus the analysis of numerical precision.
+- [Lessons from v0.1](docs/archive/research/lessons-from-v0.1.md): what to keep and what to change.
+- [Motion model](docs/technical/motion-model.md): how bodies and ships move without spheres of influence, plus the analysis of numerical precision.

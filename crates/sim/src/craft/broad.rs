@@ -1,5 +1,5 @@
 //! Broad phase for point-in-primitive tests (hot spot 5 of the scale
-//! baseline, `docs/plans/scale-baseline-2026-10-26.md`): the union surface
+//! baseline, `docs/archive/research/scale-baseline-2026-10-26.md`): the union surface
 //! ([`super::mesh::union_surface`]) and the interior grid
 //! ([`super::volume::VolumeGrid`]) ask whether points lie inside any
 //! primitive, which was a scan of every primitive per point (O(points ×

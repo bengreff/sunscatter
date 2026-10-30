@@ -164,7 +164,7 @@ fn save_and_load_mid_contact_continue_bit_for_bit() {
 /// live ticks leave out are ~1e-8 m/s²). Measured: 0.72 mm and 3.9e-5 m/s
 /// at 400 km, 0.28 mm and 2.2e-5 m/s at 2,000 km, a steady ~4e-7 m/s²
 /// between the live tick's force evaluation and the coast's (reported in
-/// `docs/features/proximity.md`); 1.00 mm at 400 km and 0.14 mm at 2,000 km
+/// `docs/technical/proximity.md`); 1.00 mm at 400 km and 0.14 mm at 2,000 km
 /// by 2026-10-26's code, 1.12 mm at 400 km with Earth's field to degree 30
 /// (D090): the live substeps' first-order integration of a lumpier field.
 #[test]

@@ -1,4 +1,4 @@
-//! Breakage triggers (D065, D066, D083; `docs/features/parts.md`):
+//! Breakage triggers (D065, D066, D083; `docs/technical/parts.md`):
 //! placeholder limits judged at the end of every live tick.
 //!
 //! * **Temperature**: a part with a skin cell above its material's limit or

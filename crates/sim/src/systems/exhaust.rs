@@ -1,4 +1,4 @@
-//! The exhaust seed (D109; features/exhaust.md): each engine's state at its
+//! The exhaust seed (D109; technical/exhaust.md): each engine's state at its
 //! nozzle exit, as a pure function of its data and its flow level, and the
 //! jet it makes in the local air. What the exhaust is drawn from; the
 //! trajectory physics never reads it.

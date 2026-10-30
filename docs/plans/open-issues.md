@@ -1,6 +1,6 @@
 # Open issues, 2026-09-27 (updated 2026-10-27 after the Falcon 9 night)
 
-Everything known to be open after the realism-1 build, for the next owner interview. Nothing here is being fixed yet (owner, 2026-09-27). Sources: the owner's play, `docs/reviews/2026-09-26-code-review.md`, `docs/design/aero-thermal.md` (limitations), and the agents' reports.
+Everything known to be open after the realism-1 build, for the next owner interview. Nothing here is being fixed yet (owner, 2026-09-27). Sources: the owner's play, `docs/archive/research/code-review-2026-09-26.md`, `docs/technical/aero-thermal.md` (limitations), and the agents' reports.
 
 ## Performance
 
@@ -25,7 +25,7 @@ Settled 2026-10-01 (owner): a full craft tearing its mains is kept (D079); nose-
 
 ## After the Falcon 9 night (2026-10-27, D088–D090, D100–D108)
 
-Each workstream's notes say more: `docs/features/{parts,falcon9,ship-systems,systems-screen,solar-system}.md`, `docs/plans/overnight-2026-10-27-falcon9.md`.
+Each workstream's notes say more: `docs/technical/{parts,ship-systems,systems-screen,solar-system}.md`, `docs/vehicles/falcon9.md`, `docs/archive/plans/overnight-2026-10-27-falcon9.md`.
 
 - **Frame rate:** the owner's slow view (185 km, Earth filling the screen, 3024×1964) is ~10.5 ms of GPU (was 18.1) against 8.3 ms for 120 Hz; the render scale should hold the refresh at ~0.9 (not yet measured unpinned on a quiet machine). Over land and close to the ground the terrain's main pass is 13 ms (ascent shots 46–79 fps). The terrain shader is register-bound (lighting + zones together); next levers (GFX2): drop eclipse occluders on the CPU when their shadow cannot reach (~0.9 ms), let the zones' pattern reuse the warp's lattice fetches, the warp's coarse octaves per vertex, the close-up ground pattern's noise from a texture (~2 ms close up). `tools/gpu_trace.py` measures GPU time per pass from a Metal System Trace.
 - **Flying the Falcon 9:** RCS translation (`Controls::translate`) has no keys (H/N/I–L are taken). Engines' heat stays D077's static shares (an off engine still heats its nozzle); the engines gimbal together; RCS rotation keeps per-axis authority (translation is allocated); SuperDraco and Draco not flown in tests; Dragon's internal-power switch at T−5 min (the umbilical drops at clamp release instead).
@@ -38,7 +38,7 @@ Each workstream's notes say more: `docs/features/{parts,falcon9,ship-systems,sys
 
 ## After the overnight run (2026-10-26, D081–D085)
 
-Each workstream's feature notes say more: `docs/features/{limbo,parts,proximity,scale-performance,solar-system}.md`, `docs/design/aero-thermal.md`, `docs/plans/scale-baseline-2026-10-26.md`.
+Each workstream's feature notes say more: `docs/technical/{limbo,parts,proximity,scale-performance,solar-system}.md`, `docs/technical/aero-thermal.md`, `docs/archive/research/scale-baseline-2026-10-26.md`.
 
 - **1,000,000× with 50 craft is not reached:** ~309,000× of real time on a quiet machine after the last thermal work (93d50b4; ~183,000× measured under load after COAST's DOP853 switch) (honestly shown as "limited: compute"); every frame stays under 16.7 ms. The bound is now the 300-part craft's coast thermal lattice (~18 ms per craft per 10⁶× frame; its budget units underestimate the work, 1–3.3 µs per unit), not integration (~0.75 ms). Options: a reduced-order coast thermal model for big craft (PERF rejected per-part aggregates: tens of kelvin of error), the fleet running continuously on worker threads instead of 8 ms per frame, interpolating body positions within a step (~15–20 %).
 - **The coast thermal skip never engages for limbo craft:** the thin-air input moves 1–4 % between lattice points (osculating-orbit averages jittered by J2's short-period terms) against a 1 % allowance; and where it engages, it can err up to 1.3 K on a held 300-part craft (error control to check). Smoothing the air input like the sunlight would let it engage (`scale-performance.md` §7).
@@ -62,7 +62,7 @@ Each workstream's feature notes say more: `docs/features/{limbo,parts,proximity,
 
 ## Physics and model gaps
 
-- Aero (D070 table in `docs/design/aero-thermal.md`): no base drag vs Mach, no plume effects, no body–fin interference, crossflow Cd constant in Mach, adiabatic smooth-wall friction, no supersonic area rule, radiative heating spread like convection, no ablation.
+- Aero (D070 table in `docs/technical/aero-thermal.md`): no base drag vs Mach, no plume effects, no body–fin interference, crossflow Cd constant in Mach, adiabatic smooth-wall friction, no supersonic area rule, radiative heating spread like convection, no ablation.
 - Aero constants checked against sources on 2026-09-30: Wilmoth bridge exact (NTRS 20040105522); Sutton–Graves k for Earth and Mars (TFAWS 2012); Tauber–Sutton Mars C, a, b (West & Brandis 2020, NTRS 20200002354); the equilibrium-air shock density ratio was 12–30 % low and is now NASA SP-3093's table (Cp,max moved ~1 %). Still unchecked: Tauber–Sutton's Earth constants and both f(V) tables (the 1991 paper is not on NTRS; they matter only above 9 km/s, lunar return). Mars has no atmosphere data.
 - No air above `top` (150 km): orbital decay above 150 km not modelled.
 - Coast skin temperatures are orbit averages (eclipse swing only in live flight); radiation to 2.725 K, no planet infrared; landed/crashed vessels keep their temperatures.

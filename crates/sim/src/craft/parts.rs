@@ -1,4 +1,4 @@
-//! The part layer (D032, D033, D065, D083; `docs/features/parts.md`): a
+//! The part layer (D032, D033, D065, D083; `docs/technical/parts.md`): a
 //! craft is a set of parts attached in a tree. **A foundation, not a part
 //! catalog**: craft creation is the owner's to guide (interview
 //! 2026-10-26), so every property here is a placeholder a real part

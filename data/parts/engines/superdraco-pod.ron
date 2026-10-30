@@ -1,4 +1,4 @@
-// Catalog entry (D101; sim::catalog). Numbers from docs/features/falcon9.md
+// Catalog entry (D101; sim::catalog). Numbers from docs/vehicles/falcon9.md
 // (DATA): P published, E estimate, D derived, U unknown (proposed value).
 (
     id: "superdraco-pod", name: "SuperDraco pod (two engines)", era: 2020, provisional: true,

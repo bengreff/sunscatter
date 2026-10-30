@@ -1,4 +1,4 @@
-//! Starlight pressure at a point (`docs/features/limbo.md` §1): for each
+//! Starlight pressure at a point (`docs/technical/limbo.md` §1): for each
 //! star, the radiation pressure P = L/(4πd²c) times the visible fraction of
 //! its disc, and the direction the light travels. The eclipse is
 //! [`crate::light::eclipse_factor`] (the one rule); occluders that cannot

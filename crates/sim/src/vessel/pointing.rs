@@ -1,5 +1,5 @@
 //! The attitude inside a coast segment as a pure function of time and
-//! state (`docs/features/limbo.md` §1), so forces that depend on the
+//! state (`docs/technical/limbo.md` §1), so forces that depend on the
 //! attitude (drag, radiation pressure, low thrust along the engine) can be
 //! integrated into a stored segment and any warp only samples it (rule 4).
 //!

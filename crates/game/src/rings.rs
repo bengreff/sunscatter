@@ -1,4 +1,4 @@
-//! Planetary rings (Saturn's; docs/features/solar-visuals.md#rings): a disc
+//! Planetary rings (Saturn's; docs/technical/solar-visuals.md#rings): a disc
 //! in the body's equatorial plane, drawn from the radial profile of normal
 //! optical depth in `visual.ron` (`RingsDef`). Each fragment is a slab of
 //! that optical depth: its coverage is 1 − exp(−τ/μ) for the view's μ, and

@@ -1,6 +1,6 @@
 # Process
 
-How v0.2 is planned, built and verified. This document exists because of [lessons-from-v0.1.md](lessons-from-v0.1.md).
+How v0.2 is planned, built and verified. This document exists because of [lessons-from-v0.1.md](archive/research/lessons-from-v0.1.md).
 
 ## Documents
 
@@ -77,7 +77,7 @@ Before designing a solution to a hard problem, **look at how others solved it.**
   - `/handoff` ends each session by deleting what is finished.
 - **Parallel agents** work in the main checkout on `main`: **no branches and no git worktrees** (owner, 2026-09-26). Give each agent files that do not overlap (a crate, a new module, a data directory) and run them one at a time when their builds would contend. The lead owns shared files (`main.rs`, plans, `decisions.md`). Agents commit and push directly, rebasing on `origin/main` first. Read-only agents (reviews, searches) can run in parallel freely.
 - **Visual checks are also assertions.** The demo checks what it can in code (for example: the camera is outside every body, nothing is hovered outside map view), and the screenshots are for judging the look.
-- **Windows.** CI builds and tests on Windows but has no GPU. At the end of a big session, run the demo on the owner's Windows PC over SSH (`backhouse`); if it isn't reachable, skip it. The exact procedure (update, build, demo, perf numbers) is in [windows.md](windows.md).
+- **Windows.** CI builds and tests on Windows but has no GPU. At the end of a big session, run the demo on the owner's Windows PC over SSH (`backhouse`); if it isn't reachable, skip it. The exact procedure (update, build, demo, perf numbers) is in [windows.md](technical/windows.md).
 
 ## Versioning
 

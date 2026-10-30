@@ -1,4 +1,4 @@
-//! Saturn's rings' radial profile (agent SKY; docs/features/solar-visuals.md#rings):
+//! Saturn's rings' radial profile (agent SKY; docs/technical/solar-visuals.md#rings):
 //! `asset-tool rings`. The normal optical depth from the Voyager 2 photopolarimeter's
 //! occultation of δ Scorpii (PDS Rings Node, VG_2801, `EASYDATA/KM010/PS1P01.TAB`: 10 km
 //! bins from 72,000 to 142,500 km; Esposito et al. 1983, JGR 88, 8643), stored as a

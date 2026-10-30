@@ -1,5 +1,5 @@
 //! Skin temperature per surface cell and interior volume nodes (D065
-//! revised, realism-1 §5b, `docs/design/aero-thermal.md`).
+//! revised, realism-1 §5b, `docs/technical/aero-thermal.md`).
 //!
 //! Each cell has a heat capacity (skin areal mass × area × specific heat),
 //! radiates εσA(T⁴ − T_env⁴), conducts to its neighbours (the cells'

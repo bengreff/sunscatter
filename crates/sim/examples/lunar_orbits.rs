@@ -7,7 +7,7 @@
 //! and its lowest altitude above the reference sphere per 5 days.
 //! `cargo run -p sim --release --example lunar_orbits -- PERI APO INC DAYS`
 //! (PFS-2: 91 130 169.28 60; PFS-1: 103 136 151.28 400; circular 100 km at
-//! each inclination: 100 100 INC 150; `docs/features/solar-system.md`).
+//! each inclination: 100 100 INC 150; `docs/technical/solar-system.md`).
 use sim::ephem::Ephemeris;
 use sim::kepler::Elements;
 use sim::sol;

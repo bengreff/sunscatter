@@ -1,14 +1,14 @@
 // Saturn's visuals (read by crates/game; physical data is in body.ron).
 // base_color: the mean of the colour map, sRGB (Lambert albedo 1.5 p from the geometric albedos in Sloan r', V, Sloan g':
 // Mallama et al. 2017, Icarus 282, 19); albedo: Bond albedo, NASA Planetary Fact Sheet (NSSDCA).
-// color_map: Hubble OPAL 2025 global maps, calibrated (`asset-tool giants`; docs/features/solar-visuals.md#giants).
+// color_map: Hubble OPAL 2025 global maps, calibrated (`asset-tool giants`; docs/technical/solar-visuals.md#giants).
 (
     base_color: (0.97, 0.88, 0.83),
     color_map: Some("color.jpg"),
     // Procedural cloud detail (D073: crisp at any distance, never a magnified photo): representative
     // values, not measurements: the first warp wavelength, its amplitude, the east-west stretch, the tone.
     clouds: Some((scale_m: 1500000.0, warp: 0.2, stretch: 6.0, contrast: 0.08)),
-    // Rings (agent SKY; docs/features/solar-visuals.md#rings): normal optical depth from the Voyager 2
+    // Rings (agent SKY; docs/technical/solar-visuals.md#rings): normal optical depth from the Voyager 2
     // photopolarimeter's occultation of delta Scorpii at 10 km (PDS Rings Node VG_2801; `asset-tool rings`).
     // Particle albedo by region (edges: NASA's Saturnian Rings Fact Sheet; values representative of
     // Cuzzi et al. 2009, in Saturn from Cassini-Huygens, ch. 15: A and B ring particles ~0.4-0.6 and red,

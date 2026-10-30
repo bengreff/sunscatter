@@ -2,7 +2,7 @@
 # Fails if code or docs cite a decision (Dnnn) that is not in
 # docs/decisions.md. Superseded decisions are deleted from the log, so a
 # stale citation means the text still describes a replaced rule. Lines that
-# say a decision was replaced or superseded are allowed; plans are dated
+# say a decision was replaced or superseded are allowed; plans and the archive are dated
 # records and are not checked.
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -19,5 +19,5 @@ while IFS= read -r hit; do
   done
 done < <(grep -rnE '\bD[0-9]{3}\b' crates docs README.md CLAUDE.md \
            --include='*.rs' --include='*.md' --include='*.ron' --include='*.wgsl' \
-         | grep -v '^docs/decisions.md:' | grep -v '^docs/plans/' || true)
+         | grep -v '^docs/decisions.md:' | grep -v '^docs/plans/' | grep -v '^docs/archive/' || true)
 exit $status

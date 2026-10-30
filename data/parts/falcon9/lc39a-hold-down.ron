@@ -1,4 +1,4 @@
-// Catalog entry (D101; sim::catalog). Numbers from docs/features/falcon9.md
+// Catalog entry (D101; sim::catalog). Numbers from docs/vehicles/falcon9.md
 // (DATA): P published, E estimate, D derived, U unknown (proposed value).
 (
     id: "lc39a-hold-down", name: "LC-39A launch mount and its hold-down clamps", era: 2017, provisional: true,

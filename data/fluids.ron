@@ -1,4 +1,4 @@
-// Fluids (D104, docs/design/ship-model.md §3.2; read by sim::fluids).
+// Fluids (D104, docs/technical/ship-model.md §3.2; read by sim::fluids).
 //
 // Liquids: saturated density (K, kg/m³) and vapour pressure (K, Pa) tables,
 // specific heat J/(kg·K), latent heat at the normal boiling point J/kg,

@@ -1,0 +1,64 @@
+# Overnight plan, 2026-10-26/27: the part system and a flyable Falcon 9
+
+From the owner's interview ([record](../interviews/interview-2026-10-26-parts.md)); decisions D100–D108; the design is [ship-model.md](../../technical/ship-model.md). The owner: "Start with just building the complete falcon 9 model within the part system foundation, controls and systems taken to the proper level of realism, allowing me to fly it. … I would like to see a falcon 9 at the proper level of simulation when I wake up." Up to 3 agents at a time (owner). Status words: *design / skeleton / playable / polished*.
+
+The same night, already running: **GFX** (one look, flare, lighting, the 27 fps), **NAV** (origin clock, orbit lines, zoom, picking), **GRAV** (gravity fields, D090). The workstreams below start as they finish.
+
+## Workstreams
+
+| Name | What | Files | Needs |
+|---|---|---|---|
+| **DATA** | The sourced data sheet [falcon9.md](../../vehicles/falcon9.md): every part and component of Falcon 9 Block 5 and Crew Dragon (dimensions, masses, materials, propellant loads and temperatures, tank pressures, COPVs, engines' published performance, throttle ranges, ignitions, start and shutdown transients, gimbal, cold-gas and Draco/SuperDraco thrusters, grid fins and legs, separation systems, avionics, batteries, sensors, parachutes, ECLSS), the materials and fluids tables' values, ratings and failure data (class-level rates with their low bounds), vibration qualification levels, propellant explosion yields, crew limits, the flight sequence (Crew missions' timeline). Each number cited and marked *published*, *estimate* or *derived*. | `docs/vehicles/falcon9.md`, `data/materials.ron`, `data/fluids.ron` | — (research only, no builds) |
+| **CORE** | The foundation in `sim`: `sim::materials`, `sim::fluids`, `sim::catalog` (generator framework, entries with published overrides and ratings), generators (tank with domes and common bulkhead, shell/interstage, thrust structure, engine, nozzle, fin, grid fin, leg, capsule as a surface of revolution, nosecone, trunk, heat shield, bottle, box components), craft file v2 (mounting points, patterns, components, joints, layer declarations, sequence, functions), the build into the existing pipeline, `ShipState`, mass properties from every tank's fill, each engine at its own mount and gimbal in the live tick, splits that partition the ship state by part, saves, the registry. The test craft keeps flying unchanged. Then the Falcon 9 Crew craft file and catalog entries from DATA. | `sim::craft` (file, parts, mass, mod, registry), new `sim::{materials, fluids, catalog}`, `data/parts/`, `data/craft/falcon9-crew/` | DATA for the real numbers (placeholders marked until then) |
+| **RUNTIME** | `sim::systems::{plumbing, propulsion, rcs, mechanisms, power, structure, vibration, failure, data, crew}`: the behaviour of §5–§7 of the design, `ShipCommand`, sequences and functions, clamps, grid-fin aero, legs, knowledge from sensors, debug mode's perfect information. | `sim::systems::*`, `sim::vessel::live` (wiring), `sim::aero` (grid fins) | CORE's types |
+| **GAME** | The flight with a Falcon 9: a new-flight choice of craft; the Falcon 9 on the pad at LC-39A; every part drawn with its own mesh and colour (pieces too); legs, fins and nosecone moving; a flame per running engine; the systems screen (layers, inspector, commands, stages, functions, pins) and the mini systems panel; Space for the next stage; readouts through knowledge (dashes, precision); switching to the booster after separation. | `game::systems_screen` (new), `game::scene`, `game::navball`, `game::interface`, `game::commands` | CORE's types, RUNTIME's commands and knowledge; after GFX and NAV (shared files) |
+
+## Order (at most 3 agents at once)
+
+1. First free slot: **CORE** (the critical path). Second: **DATA** (research only, light on the machine). Third: **GAME** once GFX and NAV are both done (it shares `scene`, `navball`, `interface` with them).
+2. When DATA finishes: **RUNTIME** (systems need CORE's types; it starts with plumbing and propulsion).
+3. The lead: reviews each push, runs the offscreen demos (one at a time), writes decisions and docs, keeps the test craft and every existing test green, and a final independent review agent if a slot is free.
+
+If the night runs short, cut in this order (owner's default): Dragon's insides (ECLSS, Draco plumbing) first, then the non-physical failures (vibration, statistical); the two Falcon stages keep full depth.
+
+## Acceptance for the morning (honest status in the table below)
+
+- The Falcon 9 Crew stands on the pad at LC-39A, fuelled at its loading temperatures, clamps holding, four crew aboard.
+- Space starts the nine Merlins (each with its own state, ignitions and transient); the clamps release when all run; the owner flies the ascent by hand (gimbal SAS, throttle in each engine's range).
+- MECO, stage separation (pneumatic pushers), the booster a controllable vessel the owner can switch to (grid fins, cold gas, legs, 3- and 1-engine burns); MVac ignition only with settled propellant; the second stage to orbit; Dragon separates.
+- The systems screen shows the craft by layer, with commands, stages, functions and pins; the mini panel works in flight; readouts come from the sensors.
+- Physical failures fire from the simulation (overload snap, overheating, overpressure, gas ingestion, cavitation); statistical ones only through fates; debug mode turns them all off and gives perfect information.
+- Every result the same bits at 1× and in one jump; the test craft and every existing test unchanged.
+
+## Working rules
+
+- No branches or worktrees. Commit only your own paths (`git commit -m … -- <paths>`), push after each commit; the pre-push hook (now enabled) runs CI's checks. Keep the crate compiling: write new modules completely before wiring them in.
+- Each agent builds in `CARGO_TARGET_DIR=target/agents/<name>`, `-j 4`, one cargo command at a time; delete the directory when finished (the disk is ~85 % full).
+- Agents never run the game or the demo; the lead runs offscreen demos, one at a time.
+- Decision numbers: D100–D108 are the parts decisions (lead); the evening's agents use D088–D099.
+
+## Status at the end of the night (2026-10-27, lead)
+
+At most three agents at once (owner's rule): the evening's GFX, NAV and GRAV, then CORE, DATA, GAME, RUNTIME, SYSTEMS2, GFX2 and an independent REVIEW. ~90 commits. Every visual and flight result checked by the lead in offscreen demos (one at a time); CI green except two runs fixed forward within minutes.
+
+| Workstream | Status | Notes | Headline |
+|---|---|---|---|
+| NAV | playable | D088, D089, D054 revised | The time shown is the launch site's clock (TT at the Kennedy pad); every clock had lost 1.34 ms/day (L_B). Orbit lines only when seen from outside; ORBIT/SURFACE drives the line with the auto-switch at the rails floor; the surface line through the air from the vessel's own force model (the owner's "kink": thin-air drag in dense air); double-click the heaviest body; trackpad ×1/5; zoom to the farthest body; the plot frame removed. |
+| GRAV | playable | D090, `solar-system.md` | Measured gravity fields truncated by significance (Earth GGM05C to 30, Moon GRGM1200A to 100, Mars, Venus, Mercury, Ceres, giants' zonals, moons' J2/C22). PFS-2 crashes after 35.9 days (real 35); frozen lunar orbits survive; GEO drifts to 75°E. A craft in low lunar orbit holds warp to ~4×10⁵× (budget call open). |
+| GFX → GFX2 | playable | D073 revised, D048 deleted, D072 revised | One look without graphics settings; a flare per star; Earthshine on ships (its tint fixed: the rocket was blue in flight); the profiler (`SUNSCATTER_PROFILE=1`), the per-part bench, `tools/gpu_trace.py`; the owner's slow view (185 km, Earth filling the screen, 3024×1964): GPU frame 18.1 → ~10.5 ms (26 → ~85–95 fps when not loaded), the render scale covering the rest to the refresh. Still short of 120 Hz at native resolution over land and close to the ground (next levers in `open-issues.md`). |
+| CORE | playable foundation | `parts.md`, D100–D103 | Materials, fluids, catalog and generators, craft files with mounting points, the build, ShipDef/ShipState, mass from every tank, per-engine thrust, separations without collisions, configurations, the launch mount. The Falcon 9 Crew: 33 parts, 70 components, 560.2 t at liftoff (sheet 560.2). |
+| DATA | done | `falcon9.md` | The sourced sheet (published/estimate/derived/unknown tags), materials and fluids checked, failure rates at the low Poisson bound of Block 5's own record. |
+| GAME | playable | `systems-screen.md`, D106–D108 | The Falcon 9 by default on the pad; parts drawn per material; Space runs the sequence; the systems screen (F8) by layer with inspector and stage/function editors; the mini panel; readouts only through sensors; commands as orders with light delay; event toasts. |
+| RUNTIME | playable | `ship-systems.md` | Orders at epochs; the pad's clamps (release at full thrust); engines' states, transients, steady map, settling before a start, gas ingestion and cavitation; plumbing (pressurisation, NPSP, settling, boil-off); gimbal rate and SAS for a big stack (the max-Q breakup's real cause); grid fins (lattice aero) and legs with crush cores; the knowledge API and the sheet's sensors. The booster lands on one engine in a sim test. |
+| SYSTEMS2 | playable | `ship-systems.md` | Structure (every joint, exact for the rigid body; snaps and buckles; never judges what it has no data for), failures (fates per save, time at temperature, vibration, bursts and blasts that cascade), power (umbilical, batteries, solar, shedding), crew (cabin air, acceleration limits). |
+| REVIEW | done | below | Independent review of the night's sim and game changes (three sub-reviewers, scenario tests). Blocker fixed (ae0d1f6: legs deployed on the pad). High: no boostback in vacuum (the cold-gas pods have no aft nozzle, data unknown: the booster's burns wait until drag settles it, ~40 km); rails warp allowed on the pad with engines lit; the clamp release needs 100 % throttle with no clear hint; Space while the MVac settles runs SECO. Medium: crew acceleration windows grow without bound (saves bloat); a dry tank's temperature goes non-physical; Dragon's provisional trunk fins burn on a flatter ascent; separating < 1 s after MECO lets the booster pass through. Fixes by SIMFIX/GAMEFIX: see their rows. |
+| SIMFIX | done | `ship-systems.md` | The review's sim items: crew acceleration windows bounded (14,886 → 0 on an ascent, d8c35cf); a tank run dry stays physical (53dc912); Dragon's trunk fins and nosecone on a coated composite rated to 1,000 K (U), so a flatter ascent keeps them (a53229c); Space while an engine of the last stage settles starts it instead of running SECO (32caba5). |
+| GAMEFIX | done | `ship-systems.md`, `architecture.md` | The review's game items: rails warp refused while a vessel is held live on the pad (9cdfd14); "CLAMPED · THROTTLE UP TO RELEASE" until the throttle is at 100 % (17c877b); "no stage left" (46b8172); a notice when leaving a craft with engines lit (46b0d56). |
+
+**The owner's slow view** (185 km, Earth filling the screen, 3024×1964, adaptive render scale ~0.9, ae0d1f6): 108 fps average (26 at the start of the night).
+
+**Flying notes from the review** (checked in sim): throttle to 100 % before Space (the clamps let go only at full thrust; the state line says so); don't warp while clamped with engines lit; the pitch kick is a 0.1–0.2 s tap of W at ~T+10 s, then SAS surface prograde (a 0.6 s pull flattens the ascent and breaks the stack at ~100 kPa, which is physics); keys 0/7/8/9/B are the booster's functions and act on the whole stack during ascent (0 is an early MECO); wait ~2 s after MECO before separating; let the MVac start by itself (if it waits to settle, Space again starts it); X does not stop an engine (zero throttle is its minimum); after SECO, Space separates Dragon (an MVac restart: F8 → the MVac → IGNITE); the booster: no boostback, land downrange: press 7 once at ~85 km (it starts by itself at ~40 km), cut with 0 at ~1,500 m/s, grid fins 9, legs B, landing burn 8, cut with 0 at touchdown (it cannot hover).
+
+**The Falcon 9 in the demo** (14b888b): clamps release at full thrust ~2 s after ignition; a pitch kick then SAS surface prograde; max-Q 33.4 kPa at 11.9 km, T+67 s; MECO at 74.8 km, 2,389 m/s, T+140 s; separation; the MVac lights; no structural event. How to fly it: `ship-systems.md` → "How the Falcon 9 is flown".
+
+**Incidents:** two red CI runs (46447f5 a case-only duplicate folder; 100e511 a commit built on a stale export that another agent's push carried), each fixed forward within minutes; the disk filled twice (agents' targets and the pre-push mirror); two agents died on a full context (GFX, RUNTIME), their work committed. Lessons in `HANDOFF.md` → Gotchas.

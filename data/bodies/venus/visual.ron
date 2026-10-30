@@ -7,7 +7,7 @@
     geometric_albedo: Some(0.689),
     roughness: 0.95,
     icon_color: (1.00, 0.98, 0.83),
-    // The surface (agent SKY; docs/features/solar-visuals.md#venus-and-titan-surfaces): zones from the Magellan
+    // The surface (agent SKY; docs/technical/solar-visuals.md#venus-and-titan-surfaces): zones from the Magellan
     // C3-MDIR radar mosaic (USGS, 2025 m), k-means centres of its grey levels. Radar brightness is roughness,
     // not colour, so the map does not tint (0) and the zones differ only slightly: Venera 13's colour images,
     // corrected for the orange light, show a dark surface without significant colour (Pieters et al. 1986,
@@ -31,7 +31,7 @@
         // Basalt (Venera 13/14: dark, platy).
         rock_color: (0.06, 0.06, 0.058),
     )),
-    // The sky (D052, Hillaire) at 680, 550, 440 nm; sources: docs/features/solar-visuals.md#venus (agent SKY).
+    // The sky (D052, Hillaire) at 680, 550, 440 nm; sources: docs/technical/solar-visuals.md#venus (agent SKY).
     // - Rayleigh: CO2 cross-sections 4.89, 11.6, 29.2 e-31 m2 (Sneep & Ubachs 2005) x the surface number
     //   density 9.07e26 m-3 (9.21 MPa, 735 K: body.ron); scale height 8.95 km, which puts VIRA's 3.69 kPa
     //   at 70 km (Seiff et al. 1985, Adv. Space Res. 5(11), 3): the CO2 above the clouds, which is all
@@ -61,7 +61,7 @@
         ground_albedo: (0.10, 0.07, 0.05),
         // Raymarched inside too: the haze broke the aerial-perspective table into coloured rings.
         raymarch_inside: true,
-        // The deck seen from above (docs/features/solar-visuals.md#venus): a Lambert sphere at the cloud top,
+        // The deck seen from above (docs/technical/solar-visuals.md#venus): a Lambert sphere at the cloud top,
         // 74 km (unit optical depth: Ignatiev et al. 2009, JGR 114, E00B43, from VMC/VIRTIS at low and
         // middle latitudes; the tent above puts tau = 1 there too). Albedo: the geometric albedos in
         // Johnson R, V, B, 0.708, 0.689, 0.658 (Mallama et al. 2017, Icarus 282, 19, table 7: the blue

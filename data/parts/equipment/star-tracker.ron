@@ -1,5 +1,5 @@
 // Catalog entry (D101; sim::catalog). Provisional: public numbers from memory,
-// to be replaced by docs/features/falcon9.md (DATA) as it lands.
+// to be replaced by docs/vehicles/falcon9.md (DATA) as it lands.
 (
     id: "star-tracker", name: "Star tracker", era: 2012, provisional: true,
     generator: Component(envelope: Box(0.15, 0.15, 0.2), power: 10.0,

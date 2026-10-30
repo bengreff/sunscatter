@@ -1,7 +1,7 @@
 //! The Falcon 9 Block 5 with Crew Dragon (`data/craft/falcon9-crew`) built
 //! from the catalog (`data/parts`): it builds without errors, its totals are
 //! those of the real vehicle within the stated tolerances (provisional data:
-//! docs/features/falcon9.md replaces them), its unmodelled masses are
+//! docs/vehicles/falcon9.md replaces them), its unmodelled masses are
 //! reported with their reasons, and it builds to the same bits twice.
 
 use super::{default_craft_dir, load_assembly};

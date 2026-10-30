@@ -1,5 +1,5 @@
 //! Coast integration cost and accuracy (release), the COAST workstream's
-//! measurements (`docs/features/scale-performance.md`): for a low orbit
+//! measurements (`docs/technical/scale-performance.md`): for a low orbit
 //! (bare and perturbed: thin air, light, held prograde), GEO, a lunar
 //! transfer and a heliocentric arc, the µs per step and the steps per day
 //! of the segment integrator.

@@ -1,5 +1,5 @@
 //! Aerodynamics on the craft's surface cells (D061, realism-1 §5a,
-//! `docs/design/aero-thermal.md`).
+//! `docs/technical/aero-thermal.md`).
 //!
 //! [`bake`] runs once per craft design; [`aero_forces`] runs per tick. Both
 //! are pure. The runtime blends three regimes:

@@ -74,7 +74,7 @@ pub struct CraftDesign {
     /// predictions (a vessel flown live uses the full aerodynamics).
     pub mean_drag_area: f64,
     /// Areas per direction for attitude-dependent drag and radiation
-    /// pressure on rails (`docs/features/limbo.md`).
+    /// pressure on rails (`docs/technical/limbo.md`).
     pub surfaces: crate::forces::SurfaceTable,
     /// The parts ([`super::parts`]) and each one's dry mass properties.
     pub parts: Vec<Part>,

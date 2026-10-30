@@ -9,7 +9,7 @@ Status values: **Decided** · **Direction** (settled in principle, details open)
 ## Project
 
 **D001: v0.1 is archived and v0.2 is written from scratch.** *Decided, 2026-09-25.*
-v0.1 now lives in `archive/v0.1/` and still builds and runs there, with its toolchain and lockfile pinned. v0.2 may port v0.1's algorithms and data, but not its code structure, and anything ported is re-tested. The reasons are in [lessons-from-v0.1.md](lessons-from-v0.1.md).
+v0.1 now lives in `archive/v0.1/` and still builds and runs there, with its toolchain and lockfile pinned. v0.2 may port v0.1's algorithms and data, but not its code structure, and anything ported is re-tested. The reasons are in [lessons-from-v0.1.md](archive/research/lessons-from-v0.1.md).
 
 **D002: The game is about mission design, flight and logistics at real scale, and it is 3D.** *Decided, 2026-09-25.*
 It is not only a space game. Designing missions, flying them, and running many of them at once efficiently are the core.
@@ -30,7 +30,7 @@ Ephemerides, the precision of the time type, and orbital drift models only need 
 ## Physics and motion
 
 **D008: Ship trajectories use N-body gravity. There are no sphere-of-influence (SOI) transitions.** *Decided, 2026-09-25.*
-Patched conics may appear only as tools for a first guess when planning; they never decide motion. Overlapping SOIs, barycenter special cases and "which body is this ship orbiting?" logic must not exist in the physics. The proposed model is in [design/motion-model.md](design/motion-model.md).
+Patched conics may appear only as tools for a first guess when planning; they never decide motion. Overlapping SOIs, barycenter special cases and "which body is this ship orbiting?" logic must not exist in the physics. The proposed model is in [technical/motion-model.md](technical/motion-model.md).
 
 **D009: Celestial bodies follow precomputed paths ("rails").** *Decided, 2026-09-25.*
 - Most bodies use orbital elements plus drift terms.
@@ -104,7 +104,7 @@ The game is about realistic progression across many simultaneous missions, not o
 - The body tree clusters distant subtrees into point masses.
 - **Gravity sources whose tidal acceleration (relative to the anchor) is below a threshold are not simulated in full:** they pull the vessel exactly as they pull the anchor, so they cancel. The set is re-checked every step and only grows within a segment.
 - Rails-or-table is decided by measuring how well a fit matches.
-- See [design/motion-model.md](design/motion-model.md).
+- See [technical/motion-model.md](technical/motion-model.md).
 
 **D024: A ship's precomputed trajectory is its actual path.** *Decided, 2026-09-25.*
 - Coast segments are computed once and stored.
@@ -122,7 +122,7 @@ It includes radiation pressure, drag in very thin upper atmosphere, rotation tha
 - They do not need to match real life that closely.
 - Simplified sets of perturbing bodies are allowed as long as the assumptions are applied consistently and recorded.
 
-**D027: The game starts in 2030, and the player leads an aerospace startup.** *Direction, 2026-09-25. The kind of organization was decided 2026-10-29 (owner; [interview-2026-10-29-next.md](plans/interview-2026-10-29-next.md)).*
+**D027: The game starts in 2030, and the player leads an aerospace startup.** *Direction, 2026-09-25. The kind of organization was decided 2026-10-29 (owner; [interview-2026-10-29-next.md](archive/interviews/interview-2026-10-29-next.md)).*
 - Every career starts as a startup, with little cash and investors to answer to. "Primarily you need to be able to launch iconic rockets." The startup gets them three ways:
   - it operates rockets bought from their makers, as Arianespace launched Russian-built Soyuz rockets from Kourou;
   - it builds them under license, as Japan built its N-I and H-I from Delta designs;
@@ -238,7 +238,7 @@ It lists tracked vessels (and later asteroids), lets you focus and switch to a v
 - Its icon, hover ring and name, and Ap/Pe markers are shown only while it is in map view. There is no global map mode and no map-view key.
 - Its orbit line is shown while it is in map view and its orbit is seen from outside: a radius of at most the focus distance, with hysteresis to 1.5 times. From inside, an orbit wraps around the camera and crosses the sky as a straight line (the owner, 2026-10-26: the planets' and dwarf planets' orbits seen from the pad, "too many appear too early"). The active vessel's own line is exempt: it starts under the camera.
 - On hover and on a double-click, the heaviest object under the cursor wins (a planet over its moons).
-- Details: [map-view-lighting-controls.md](features/map-view-lighting-controls.md).
+- Details: [map-view-lighting-controls.md](archive/plans/map-view-lighting-controls.md).
 
 **D055: Lighting is physical and per body, at a fixed exposure.** *Decided, 2026-09-26; exposure revised the same day.*
 - Stars have a luminosity in data. Each lit object receives flux L/(4πd²) from every nearby star at *its own* position, plus light reflected by nearby bodies (albedo, phase angle) and eclipses.
@@ -306,7 +306,7 @@ Contact points on the gear and hull touch the physical terrain with spring-dampe
 Streamable HTTP on localhost, off by default. Agent commands have the origin of the agent's control location (D067), so light delay applies to them exactly as to the player's.
 
 **D070: The aerodynamics model's required reach.** *Decided, 2026-09-26 (owner).*
-Simplified is fine, as long as it models, semi-accurately: lift; rocket flight at low and high altitude at all speeds (subsonic, transonic, supersonic, hypersonic, rarefied); and entry from interplanetary velocities (to ~16 km/s). No flow-field solver. The model's limitations are recorded in [design/aero-thermal.md](design/aero-thermal.md).
+Simplified is fine, as long as it models, semi-accurately: lift; rocket flight at low and high altitude at all speeds (subsonic, transonic, supersonic, hypersonic, rarefied); and entry from interplanetary velocities (to ~16 km/s). No flow-field solver. The model's limitations are recorded in [technical/aero-thermal.md](technical/aero-thermal.md).
 
 **D072: The 3D view renders at the window's full resolution whenever the frame fits.** *Decided, 2026-09-27 (owner); revised 2026-10-26 (owner: one look, no graphics settings, D073; the policy by measurement).*
 No render-scale setting: the 3D scene renders at the window's physical pixels (on Retina, every one) while the frame fits the display's refresh. Where the GPU cannot keep up, the main pass renders at a lower internal resolution, in steps down to half of it (a Retina display's logical resolution), upscaled before tonemapping with a sharp filter, and the full resolution comes back as soon as there is room (`game::render_scale`). The interface is always drawn at full resolution. The look is made cheap enough that this is rare (D073's frame-rate rule).
@@ -314,7 +314,7 @@ No render-scale setting: the 3D scene renders at the window's physical pixels (o
 **D073: Graphics are one look: simple, crisp and functional, with no graphics settings.** *Decided, 2026-09-28 (owner); revised 2026-10-25 and 2026-10-26 (owner). Replaces D048's five tiers.*
 - The owner's number-one rule: a 100% accurate spaceflight simulator. Cartoon looks are welcome as long as the physics is realistic.
 - Minimal means simple, never blurry: "sharp, crisp, clear surfaces, recognisably water or land or earth, just not necessarily needlessly complex" (2026-10-25).
-- Surfaces come from real data (satellite colour, elevation, the sea mask), sharpened by procedural algorithms: coastlines and zone edges stay crisp at every distance. Each zone (ocean, ice, forest, desert…) is drawn as one consistent procedural texture, not as a magnified photograph. Details: [crisp-surfaces.md](features/crisp-surfaces.md).
+- Surfaces come from real data (satellite colour, elevation, the sea mask), sharpened by procedural algorithms: coastlines and zone edges stay crisp at every distance. Each zone (ocean, ice, forest, desert…) is drawn as one consistent procedural texture, not as a magnified photograph. Details: [crisp-surfaces.md](technical/crisp-surfaces.md).
 - The sky is physical, from the atmosphere and the light: Bevy's scattering model (D052), raymarched from outside an atmosphere so the ground stays clear from orbit. Stars, every star's light, eclipses and planetshine (D055), shadows, a basic sun flare.
 - One look for everyone, no graphics settings (2026-10-26: "delete all graphics settings, there should just be one graphics setting … that is so well optimized it doesn't matter"), apart from D109's toggles for heavy, non-vital visuals (exhaust, reentry glow, clouds). The tiers and their code are deleted. All visuals are data-driven for any body. What each part of the look costs is measured (the benchmark turns parts off, never the player).
 - The look runs full screen at the display's frame rate on the reference Mac, at full resolution (D072).
@@ -330,7 +330,7 @@ Its shape makes it aerodynamically stable nose-first at every Mach number, on as
 A marker is placed wherever the predicted trajectory (through planned burns) reaches a local maximum or minimum of distance from the dominant body, kept only when it differs from its neighbouring extremum by a significant fraction of the altitude. Nothing comes from osculating elements, so an escape trajectory has no apoapsis. Every closed orbit shows an Ap and a Pe per revolution: where no extremum is significant (a near-circular orbit), its highest and lowest points, one of each per revolution, shown as plain Ap and Pe (owner, 2026-10-01: no label, because they hold still: no marker moved before the clock reached it in 36,000 frames per warp at 1x to 1000x, and every warp showed what 1x shows at the same time; test `near_circular_markers_hold_still_at_every_warp`). Altitudes are above the reference ellipsoid under the apsis, like the flight panel's.
 
 **D077: Engine heat leaves with the exhaust and by radiation from the nozzle; the interior warms only through the mount.** *Default taken 2026-09-30 (owner unavailable; reversible).*
-The chamber's wall heat returns to the flow (regenerative cooling) and is not a heat source. The radiatively cooled nozzle extension absorbs a share of the jet power sized so it runs near 1400 K (coated niobium), radiates it away, and conducts to the craft only through its mount (~1 W/K). Each skin material has its own temperature limit. Numbers and sources in [design/aero-thermal.md](design/aero-thermal.md). Replaces the earlier 2e-4 of the jet power into the mount's node, which drove the interior to 1100–1500 K on long burns.
+The chamber's wall heat returns to the flow (regenerative cooling) and is not a heat source. The radiatively cooled nozzle extension absorbs a share of the jet power sized so it runs near 1400 K (coated niobium), radiates it away, and conducts to the craft only through its mount (~1 W/K). Each skin material has its own temperature limit. Numbers and sources in [technical/aero-thermal.md](technical/aero-thermal.md). Replaces the earlier 2e-4 of the jet power into the mount's node, which drove the interior to 1100–1500 K on long burns.
 
 **D078: Attitude control is only what real actuators give: RCS couples and the engine's gimbal.** *Default taken 2026-09-30 (owner unavailable; reversible).*
 A craft declares its reaction-control thrusters (thrust, Isp, fore and aft ring stations, quad radius); SAS and the pilot get the pure couples they make (pitch and yaw `2·F·Δz`, roll `8·F·r`) plus the gimbal while the engine runs, and nothing else: no abstract torque, no reaction wheels (none big enough fly on craft this size), no special case on the ground. The thrusters burn the main propellant in live flight (their share of full command times their flow); with none left (outside debug mode) only the gimbal turns the craft. The test craft carries Apollo SM-class 445 N thrusters: 8.0 kN·m pitch and yaw, 3.7 kN·m roll (was 40/40/20 kN·m). On rails (coasts, planned burns) the torque limit holds but RCS propellant is not yet counted. Owner, 2026-10-01: SAS balancing the craft on two feet on a 20° lunar slope (3 kN·m of the 8 available) is kept: real actuators, real result; the pilot can turn SAS off.
@@ -346,7 +346,7 @@ A craft declares its reaction-control thrusters (thrust, Isp, fore and aft ring 
 - "Designated, elegant locations for menus; completely cut unnecessary information." Always on screen: time and warp, the navball cluster, and a menu bar. Nothing else unless the player opens it.
 - **Navball cluster:** the essentials only: speed with the orbit/surface/target switch, altitude, Ap and Pe, SAS and its hold modes, throttle, the flight state.
 - **Task menus**, each opened from the menu bar or its key, each in a fixed dock: **Orbital** (advanced orbital data, the target, later maneuvers), **Landing/Reentry** (impact, braking, entry and parachute; the impact marker is drawn only while it is open), **Utilities** (a brief status of propellant, thermal, power, life support, comms), **Staging**. New tasks add a menu (docking gets a Docking menu).
-- Menus are hierarchical: a short summary on top, sections that expand to everything there is to know. Details: [flight-menus.md](features/flight-menus.md).
+- Menus are hierarchical: a short summary on top, sections that expand to everything there is to know. Details: [flight-menus.md](technical/flight-menus.md).
 - The detailed ship-systems view (an abstracted schematic of the ship, no planets) is still a separate screen, built once ships have systems; Utilities is its brief summary.
 - GUI style: clean sci-fi, function first.
 
@@ -367,7 +367,7 @@ A piece that breaks off becomes a vessel with its own trajectory, aerodynamics a
 First every planet, dwarf planet and moon over 100 km radius, through the motion-model pipeline (rails or tables by measured residual). Each gets its physical data: GM, radii, rotation, J2, and an atmosphere where real (Venus, Mars, Titan). Moons over 5 km follow.
 
 **D085: Aerodynamics: full-body cells with boundary-layer turbulence, fast enough for breakups.** *Decided, 2026-10-26 (owner).*
-Close the D070 gaps listed in `docs/design/aero-thermal.md`. Model laminar–turbulent transition and its effect on friction and heating over the whole body. Stay fast enough for 1–2 large craft live, or many small pieces after a breakup.
+Close the D070 gaps listed in `docs/technical/aero-thermal.md`. Model laminar–turbulent transition and its effect on friction and heating over the whole body. Stay fast enough for 1–2 large craft live, or many small pieces after a breakup.
 
 **D086: Committed map data may grow to about 150 MB for the Solar System.** *Default taken 2026-10-26 (owner away; reversible). Revises D046's ~60 MB total.*
 - D046's rule stands: public-domain sources, downsampled, each file under ~50 MB, close to final. The total grows to ~150 MB so the planets and moons get real maps like Earth's (D073): heights where a global DEM exists, colour, zones, roughness.
@@ -390,12 +390,12 @@ Close the D070 gaps listed in `docs/design/aero-thermal.md`. Model laminar–tur
 - A body's field beyond its point mass is its published spherical-harmonic model (fully normalized C̄nm, S̄nm, with the model's reference radius and GM) in its own rotating frame, through its rotation model (`sim::gravity`, Pines' singularity-free recursion). A body without one keeps its J2 as the degree-2 zonal case of the same model. Every vessel force goes through it: coasts, limbo, live ticks, planned burns, the landing predictor, the bubble.
 - **Truncation, in the spirit of the cutoff:** a vessel includes a body's degrees up to where the bounds of all higher degrees together stay under a hundredth of the cutoff (10⁻¹⁴ m/s²) at the vessel. The field acts on the vessel only (the anchor's acceleration is its ephemeris'), so leaving a degree out errs by that degree at the vessel whatever the anchor: the rule depends on the vessel's distance from the body alone (rule 1). The degree only grows within a segment and is stored with it (chunked = single pass, rule 4). A far vessel pays for nothing.
 - **Steps resolve the field:** an integration step spans at most three half-wavelengths of the highest degree that can matter over a step, at the vessel's speed over the body's turning surface. Longer steps alias the high degrees, which error control does not see (degree 60 in LEO erred by 700 m a day at the coasts' tolerance, against its 8 m truncation error).
-- **Data** in `data/bodies/<body>/gravity.ron` (D051), generated by `ephem-tool gravity` from the public models and truncated where a day in the body's lowest common orbit converges to tens of metres at a cost that keeps D081 in reach: each doubling of the degree costs ~8× (evaluations go as N², steps as N). Sources, degrees, frames and the measurements in [solar-system.md](features/solar-system.md).
+- **Data** in `data/bodies/<body>/gravity.ron` (D051), generated by `ephem-tool gravity` from the public models and truncated where a day in the body's lowest common orbit converges to tens of metres at a cost that keeps D081 in reach: each doubling of the degree costs ~8× (evaluations go as N², steps as N). Sources, degrees, frames and the measurements in [solar-system.md](technical/solar-system.md).
 - The proper-time potential includes the field to the same degree (J2 is ~3e-13 of the rate in LEO).
 
 ## Ships: parts, systems, failures (2026-10-26 evening interview)
 
-The owner's interview: [interview-2026-10-26-parts.md](plans/interview-2026-10-26-parts.md). The design: [design/ship-model.md](design/ship-model.md). Numbers D091–D099 are left to the evening's other workstreams.
+The owner's interview: [interview-2026-10-26-parts.md](archive/interviews/interview-2026-10-26-parts.md). The design: [technical/ship-model.md](technical/ship-model.md). Numbers D091–D099 are left to the evening's other workstreams.
 
 **D100: Ships are parts, components and layers; the first vehicle is Falcon 9 Block 5 with Crew Dragon.** *Decided, 2026-10-26 (owner). Details D018, D033.*
 - A **part** is a physical object with a shape, a place and mounting points (a tank, an engine, a grid fin, the capsule). A **component** is equipment inside a part's volume, with mass, volume, power and heat but no outer shape (a helium bottle, a battery, a flight computer, a sensor, a valve, a seat). A **layer** is a network, not placed as a part: structure (joints), plumbing, electrical, data, thermal, mechanisms.
@@ -491,7 +491,7 @@ The player flies everything by hand for now (including a booster landing). Scrip
 - "It should be possible to run stages multiple times, activating the functions that can be activated and doing nothing otherwise": a stage already run can be run again; its commands that can act do (an engine with an ignition left starts), the rest do nothing. Opening the throttle again does not relight an engine: a restart is a stage run again (owner, 2026-10-29). Every stage already run has AGAIN on the staging bar: the active one, and below it the stages run before, one line each (the owner could not relight the Merlins once Liftoff was the active stage, 2026-10-29). The systems screen's stage editor locks the stages already run.
 - A pad abort (the clamps never let go) ends that launch: "Reset the ship fully, after all it needs to refuel. New launch." Once its engines are shut down, a fresh vessel of the same kind goes on the pad as loaded (full tanks, new engines, nothing staged), with a new launch save. The clock runs on: this is not a revert (owner, 2026-10-29).
 
-**D115: The ship model follows the real vehicle: its sensors only, published figures over derived ones, adaptive flight software, and guidance only where the real vehicle flies itself (D117).** *Decided, 2026-10-29 (owner; [interview-2026-10-29.md](plans/interview-2026-10-29.md)).*
+**D115: The ship model follows the real vehicle: its sensors only, published figures over derived ones, adaptive flight software, and guidance only where the real vehicle flies itself (D117).** *Decided, 2026-10-29 (owner; [interview-2026-10-29.md](archive/interviews/interview-2026-10-29.md)).*
 - Sensors: "ONLY add things the real vehicle has." What nothing real measures shows as a dash outside debug mode.
 - Published wins: where a derived value disagrees with a sourced one, the model's inputs change until it reproduces the source (recorded). Inconsistencies with the real Falcon 9 are bugs.
 - Readings carry real noise, drift and outages only where they matter; elsewhere a value shown to its sensor's significant figures stands for its uncertainty. "I really would not like flat out wrong measurements in most cases." Estimates where appropriate.
@@ -506,8 +506,8 @@ The player flies everything by hand for now (including a booster landing). Scrip
 - **Radiation:** the absorbed dose (Gy), integrated, against LD50/60 ≈ 4.5 Gy (E, untreated acute radiation syndrome). It lands when radiation enters the ship model (open question 1).
 - **Air:** the same rule for low O₂ partial pressure and high CO₂ (E: minutes at the red limits of the Crew menu, which are rough physiology).
 
-**D117: Foundations first, then Crew Dragon and the booster's return flown end to end; what flies itself in reality flies itself in the game.** *Decided, 2026-10-29 (owner; [interview-2026-10-29-next.md](plans/interview-2026-10-29-next.md)). Refines D115.*
-- Order: the fidelity review's foundations come before D115's fidelity work ([fidelity-review-2026-10-29.md](plans/fidelity-review-2026-10-29.md) §4). They are, in order: the vessel's state split and merged by construction, one mass truth, and flight software that reads only `Knowledge`.
+**D117: Foundations first, then Crew Dragon and the booster's return flown end to end; what flies itself in reality flies itself in the game.** *Decided, 2026-10-29 (owner; [interview-2026-10-29-next.md](archive/interviews/interview-2026-10-29-next.md)). Refines D115.*
+- Order: the fidelity review's foundations come before D115's fidelity work ([fidelity-review-2026-10-29.md](archive/research/fidelity-review-2026-10-29.md) §4). They are, in order: the vessel's state split and merged by construction, one mass truth, and flight software that reads only `Knowledge`.
 - Then two flights end to end, in parallel: Crew Dragon to the ISS and back, and the Falcon 9 booster's return (a landing zone first, the droneship later).
 - After separation the booster is flown by its own flight software (boostback, entry and landing burns), as the real one is, reading only what its sensors know. Later it becomes a ship-OS program the player can read and edit (pillar 4).
 - Dragon's rendezvous and docking have three levels the player picks. "2 can be activated if wanted, or you can switch on 1 and only have auto burn completion, or you can go fully 3":
@@ -515,7 +515,7 @@ The player flies everything by hand for now (including a booster landing). Scrip
   - the player plans the burns, the burns run themselves, and the player hand-flies the final approach;
   - fully manual.
 
-**D118: Things are built from a few thousand abstract components, materials and factories, the same way on Earth and in colonies.** *Direction, 2026-10-29 (owner; [interview-2026-10-29-next.md](plans/interview-2026-10-29-next.md)). A later roadmap goal: nothing is built now.*
+**D118: Things are built from a few thousand abstract components, materials and factories, the same way on Earth and in colonies.** *Direction, 2026-10-29 (owner; [interview-2026-10-29-next.md](archive/interviews/interview-2026-10-29-next.md)). A later roadmap goal: nothing is built now.*
 - "We define a few thousand basic components, new ones for various tech levels, and they are relatively abstracted (not a single bolt, but rather a certain type of turbopump, not a specific brand of solar cell but rather a standard solar cell)."
 - "Then we have entries for things like materials, time to construct, multi-purpose factories (for colonies), etc, and everything is built to work off a similar system on earth and on a colony except in a colony you need far more manufacturing from scratch." Building it yourself will eventually be the only way to build anything in a colony.
 - How it fits D101's generators (a part's physics) and D019's colonies is still to be worked out.
@@ -529,7 +529,7 @@ The player flies everything by hand for now (including a booster landing). Scrip
 - "Delta v should be vacuum by default. NO patchwork fixes." The bar's current-air figure stays a choice and is not the default. It is not patched stage by stage.
 - "Launch abort should only show when there is a valid abort procedure that would actually save the rocket or the crew." For the Falcon 9, that means while Crew Dragon, with its launch escape system (eight SuperDracos), is still attached to a stack it can escape from. Never on the booster after separation, on Dragon alone, or on a craft with no escape system (Cargo Dragon has no SuperDracos). The rule is derived from what the piece holds (crew, escape engines that can start, the joint to separate), not from the function's name.
 
-**D121: The ship model scales to a 5,000-part craft flown live and 50 craft of 300 parts at 10⁶×, through one kind of craft, one state and one advance law per subsystem.** *Decided, 2026-10-30 (owner; [interview-2026-10-30.md](plans/interview-2026-10-30.md)). Refines D081 and D119.*
+**D121: The ship model scales to a 5,000-part craft flown live and 50 craft of 300 parts at 10⁶×, through one kind of craft, one state and one advance law per subsystem.** *Decided, 2026-10-30 (owner; [interview-2026-10-30.md](archive/interviews/interview-2026-10-30.md)). Refines D081 and D119.*
 - **Scale:** a ~5,000-part craft flown live at 1× and 60 fps on the M2 Pro, and D081's fleet of 50 craft of ~300 parts at every warp up to 10⁶×. Live physics has no cap on the number of craft (owner: "No cap").
 - **One kind of craft.** The test craft and the made-up path (one placeholder part with a fuel number) are deleted: every craft is built from parts (D100), and benchmarks and tests use craft of parts. D074 goes with the test craft's code, and D064 keeps only debug mode.
 - **One state per vessel.** `ShipState` and `Runtime` merge into one, grouped by subsystem, split and merged by construction (F1). Ids are strings only at the edges (files, saves, the interface, MCP) and typed handles inside.
@@ -543,7 +543,7 @@ The player flies everything by hand for now (including a booster landing). Scrip
   - If not, it becomes a ballistic lump: its mass, its inertia, a drag area and heating from its bounding shape, and one heat node. A lump is deleted when it burns up or hits the ground; lumps in orbit stay.
   - Designs: the pieces the stage sequence can make get their designs when the craft is built. An unplanned controllable piece gets a design composed from its parts' bakes.
 
-**D122: One testing framework: unit tests, and mission tests flown headless through MCP by a development agent on the real flight software.** *Decided, 2026-10-30 (owner; [interview-2026-10-30.md](plans/interview-2026-10-30.md)).*
+**D122: One testing framework: unit tests, and mission tests flown headless through MCP by a development agent on the real flight software.** *Decided, 2026-10-30 (owner; [interview-2026-10-30.md](archive/interviews/interview-2026-10-30.md)).*
 - "We just need the headless mission test with screenshots for large integrations of new features, plus maybe specific cases if needed. The game can run 100% autonomously after all with an AI agent driving. Tests should be real flight software plus an AI agent making decisions, not a scripted demo. Clean, ONE testing framework. Ensure you have unit tests too."
 - **How a mission test runs:**
   - The game runs headless with its MCP server.
@@ -552,7 +552,7 @@ The player flies everything by hand for now (including a booster landing). Scrip
 - **CI** runs the unit tests and specific deterministic sim cases.
 - The scripted demo and the body tour are deleted, and the `SUNSCATTER_*` variables shrink to a few (the home dir, offscreen).
 
-**D123: The first flights: convex landing guidance, a calm sea, a placeholder station and fail-safe engines; visual work frozen.** *Decided, 2026-10-30 (owner; [interview-2026-10-30.md](plans/interview-2026-10-30.md)). Refines D117.*
+**D123: The first flights: convex landing guidance, a calm sea, a placeholder station and fail-safe engines; visual work frozen.** *Decided, 2026-10-30 (owner; [interview-2026-10-30.md](archive/interviews/interview-2026-10-30.md)). Refines D117.*
 - **The booster's landing burn** uses convex powered-descent guidance: lossless convexification (Açıkmeşe & Ploen, 2007), as SpaceX's (Blackmore, 2016). It is re-solved several times a second by a solver with a fixed number of iterations, so it stays deterministic. The boostback and entry burns are targeted by a predictor–corrector on the real trajectory propagator.
 - **Water:** a calm, flat sea first. Each contact point gets slamming pressure, added mass and buoyancy (E until checked against water-impact data). Waves come later.
 - **The docking target** is one rigid body, a placeholder. The ISS "will be deorbited soon anyways, it will likely not even be in the game."
@@ -561,7 +561,7 @@ The player flies everything by hand for now (including a booster landing). Scrip
 - **Aborts (D120):** an uncrewed Crew Dragon is offered the abort, since it saves the vehicle. The abort needs escape thrust enough to get away, not merely one engine that can start ("would actually save").
 - **Visuals are frozen** until both flights fly end to end; only bugs that mislead the player are fixed. "I don't know if we really need the last plume things."
 
-**D124: The docs are organised by system, finished work is archived, and there is no file-size cap.** *Decided, 2026-10-30 (owner; [interview-2026-10-30.md](plans/interview-2026-10-30.md)).*
+**D124: The docs are organised by system, finished work is archived, and there is no file-size cap.** *Decided, 2026-10-30 (owner; [interview-2026-10-30.md](archive/interviews/interview-2026-10-30.md)).*
 - The layout:
   - a reading guide in the README;
   - `docs/vision.md` and `docs/decisions.md`;

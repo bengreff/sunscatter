@@ -1,5 +1,5 @@
 //! What a craft of catalog parts is made of beyond its shape (D100, D104;
-//! `docs/design/ship-model.md` §2, §4): the static definition the build
+//! `docs/technical/ship-model.md` §2, §4): the static definition the build
 //! gives ([`super::build`]) and the systems read — every part's and
 //! component's identity and pose, tanks, bottles, engines, thruster blocks,
 //! valves, batteries, mechanisms, aero surfaces, sensors, computers, seats,

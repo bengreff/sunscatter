@@ -1,5 +1,5 @@
 //! What attitude-dependent forces on rails need of a craft's surface
-//! (`docs/features/limbo.md` §1): per direction in body axes, the projected
+//! (`docs/technical/limbo.md` §1): per direction in body axes, the projected
 //! area, the hypersonic continuum drag area and the two radiation-pressure
 //! moments of the exposed cells. Built once per design from the aero bake
 //! ([`crate::aero::AeroBake`]: the exposures self-shadow the craft), and

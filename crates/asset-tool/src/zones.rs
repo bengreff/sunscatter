@@ -1,4 +1,4 @@
-//! Surface zones (D073, `docs/features/crisp-surfaces.md`): each pixel of a
+//! Surface zones (D073, `docs/technical/crisp-surfaces.md`): each pixel of a
 //! body's committed maps is classified into one zone of the list in its
 //! `visual.ron` (`zones` block), so the renderer can draw every zone as one
 //! consistent procedural texture with crisp edges instead of a magnified

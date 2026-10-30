@@ -8,7 +8,7 @@
     roughness: 0.95,
     icon_color: (0.90, 0.63, 0.51),
     // The sky (D052, Hillaire): CO2 Rayleigh scattering and suspended dust, at 680, 550, 440 nm.
-    // Sources and the arithmetic: docs/features/solar-visuals.md#mars (agent SKY).
+    // Sources and the arithmetic: docs/technical/solar-visuals.md#mars (agent SKY).
     // - Rayleigh: CO2 cross-sections 4.89, 11.6, 29.2 e-31 m2 (Sneep & Ubachs 2005, JQSRT 92, 293:
     //   refractivity and King factor) x the surface number density 2.09e23 m-3 (699 Pa, 242 K: body.ron).
     //   Scale height 11.1 km (body.ron's p = 0.699 exp(-0.00009 h) kPa).

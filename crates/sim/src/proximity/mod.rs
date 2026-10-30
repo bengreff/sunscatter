@@ -10,7 +10,7 @@
 //!
 //! The lockstep stepping of a bubble's members (one tick lattice, a
 //! shared local frame, joint contact substeps) is in `sim::vessel::bubble`.
-//! Design and numbers: `docs/features/proximity.md`.
+//! Design and numbers: `docs/technical/proximity.md`.
 
 pub mod contact;
 pub mod hull;

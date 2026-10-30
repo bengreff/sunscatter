@@ -1,5 +1,5 @@
 //! The Solar System's solid surfaces (LANDS, 2026-10-26;
-//! `docs/features/solar-visuals.md`): every body that declares a heightmap
+//! `docs/technical/solar-visuals.md`): every body that declares a heightmap
 //! loads it with its procedural detail, known features sit at their
 //! measured heights, the rails floors follow D062's rule, and sampling is
 //! bit-identical across platforms (golden hashes per body).

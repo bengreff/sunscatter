@@ -1,4 +1,4 @@
-//! Breakups and debris in the game (D083, `docs/features/parts.md`): the
+//! Breakups and debris in the game (D083, `docs/technical/parts.md`): the
 //! wiring of `sim::vessel::split` and `sim::vessel::debris`; the rules are
 //! the sim's.
 //!

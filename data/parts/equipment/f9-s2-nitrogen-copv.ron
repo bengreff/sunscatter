@@ -1,5 +1,5 @@
 // Catalog entry (D101; sim::catalog). Provisional: public numbers from memory,
-// to be replaced by docs/features/falcon9.md (DATA) as it lands.
+// to be replaced by docs/vehicles/falcon9.md (DATA) as it lands.
 (
     id: "f9-s2-nitrogen-copv", name: "Falcon 9 second stage nitrogen COPV", era: 2015, provisional: true,
     generator: Component(

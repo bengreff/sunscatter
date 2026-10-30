@@ -213,7 +213,7 @@ fn saves_with_duplicate_or_unissued_vessel_ids_are_rejected() {
     assert!(matches!(unissued, Err(SaveError::Format(_))), "unissued id accepted");
 }
 
-/// The directed playtest's save (docs/plans/playtest-2026-10-01.md) loads,
+/// The directed playtest's save (docs/archive/plans/playtest-2026-10-01.md) loads,
 /// carries the current test craft, and its vessel coasts on.
 #[test]
 fn the_playtest_save_loads_with_the_current_test_craft() {

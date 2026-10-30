@@ -1,6 +1,6 @@
 //! Which gravity field each body gets (D090): the source, the truncation
 //! degree (the measured convergence of the game's lowest orbits:
-//! `docs/features/solar-system.md`, "Gravity fields") and the frame.
+//! `docs/technical/solar-system.md`, "Gravity fields") and the frame.
 
 use crate::gravity::iau;
 use sim::body::Rotation;
