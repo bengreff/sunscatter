@@ -12,6 +12,9 @@
 //! The look's benchmark runs at max-Q, the booster's plumes in view
 //! (`bench_max_q.md`; off with `SUNSCATTER_DEMO_NO_BENCH`).
 //! `SUNSCATTER_DEMO_STOP_AFTER=Pad` ends after the pad's shots;
+//! `SUNSCATTER_DEMO_STOP_AFTER=PadAbort` runs a pad abort instead (D114):
+//! the stage editor with the stages run locked (`parts_stages_locked`), then
+//! the fresh vessel on the pad and its toast (`parts_pad_abort`);
 //! `SUNSCATTER_DEMO_FAR=<factor>` moves the camera that much farther for the
 //! ignition, max-Q and upper-stage shots, so the plumes show clear of the
 //! interface (`SUNSCATTER_EXHAUST=1`, D109). Every stage goes through `GameCommand::NextStage`,
@@ -81,7 +84,24 @@ enum Phase {
     Upper(f64, bool),
     /// After the upper stage's shot (at this demo time): switched to the booster.
     Booster(f64, bool),
+    /// The pad abort's check ([`pad_abort`]).
+    Abort(Abort),
     Done,
+}
+
+/// The pad abort's steps (`SUNSCATTER_DEMO_STOP_AFTER=PadAbort`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Abort {
+    /// Ignited at 90 %: the clamps wait for full thrust.
+    Lit,
+    /// Liftoff run: the release armed.
+    Armed,
+    /// The stage editor's shot taken.
+    Editor,
+    /// The throttle closed on this vessel (the pad abort), at this demo time.
+    Closed(VesselId, f64),
+    /// The fresh vessel on the pad.
+    Fresh,
 }
 
 /// The script's progress.
@@ -234,6 +254,13 @@ pub fn run(
                 iface.menus.show_only(None);
                 return;
             }
+            if demo.stops_after("PadAbort") {
+                sim.controls_mut().throttle = 0.9;
+                cmds.write(GameCommand::NextStage);
+                script.phase = Phase::Abort(Abort::Lit);
+                (demo.timer, script.resume_at) = (0.0, 0.0);
+                return;
+            }
             if let Some(&(name, distance, pitch, yaw)) = PAD_VIEWS.get(script.view) {
                 (rig.distance, rig.pitch) = (distance, pitch);
                 rig.yaw += yaw;
@@ -348,8 +375,57 @@ pub fn run(
             script.phase = Phase::Done;
         }
         Phase::Booster(..) => {}
+        Phase::Abort(step) => pad_abort(step, &mut demo, &mut script, &mut sim, &mut systems, &mut cmds),
         Phase::Done => demo.next(Step::Done),
     }
+}
+
+/// The pad abort (D114): Liftoff armed with the throttle at 90 %, the stage
+/// editor showing Ignition and Liftoff locked, the throttle closed (the
+/// Merlins shut down, the clamps hold), and once they are off the fresh
+/// vessel `game::pad` puts on the pad, its toast in view.
+fn pad_abort(
+    step: Abort,
+    demo: &mut Demo,
+    script: &mut Script,
+    sim: &mut SimState,
+    systems: &mut SystemsScreen,
+    cmds: &mut MessageWriter<GameCommand>,
+) {
+    let t = demo.timer;
+    script.phase = Phase::Abort(match step {
+        Abort::Lit if t > 0.5 => {
+            cmds.write(GameCommand::NextStage);
+            Abort::Armed
+        }
+        Abort::Armed if t > 2.5 => {
+            systems.open_at(Some(Layer::Physical), None);
+            systems.tab = crate::systems_screen::Tab::Stages;
+            shoot(demo, script, "parts_stages_locked");
+            Abort::Editor
+        }
+        Abort::Editor => {
+            systems.open = false;
+            sim.controls_mut().throttle = 0.0;
+            Abort::Closed(sim.ship().id(), t)
+        }
+        Abort::Closed(id, _) if sim.ship().id() != id => {
+            info!("demo parts: pad abort: vessel {} replaced by {}", id.0, sim.ship().id().0);
+            script.resume_at = t + 1.5;
+            Abort::Fresh
+        }
+        Abort::Closed(_, at) if t - at > 30.0 => {
+            error!("demo parts: no fresh vessel 30 s after the pad abort");
+            script.phase = Phase::Done;
+            return;
+        }
+        Abort::Fresh => {
+            shoot(demo, script, "parts_pad_abort");
+            script.phase = Phase::Done;
+            return;
+        }
+        other => other,
+    });
 }
 
 /// The ascent's controls at `t` seconds after liftoff ([`KICK_AT`]): the
