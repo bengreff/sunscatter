@@ -15,6 +15,7 @@ Each agent has one brief (`brief-<name>.md`); these rules apply to all of them. 
 - Check `df -h .` before long builds; under 10 GB free, delete `target/agents/<name>/*/incremental`. Never point `CARGO_TARGET_DIR` at `target/debug`. Shots and logs go to your scratchpad. The lead deletes your target dir when your work has landed (disk hygiene: `docs/process.md`).
 - **Running the game is allowed** (owner, 2026-10-27: fewer than 10 windows in a burst is fine), headless preferred (`./run headless <port>`, D122: no window, works with the screen locked), **one game at a time on the machine**: take the lock with `mkdir target/demo.lock` (the old name, kept; if it fails, do other work and try later; a lock older than an hour with no `game` process running is stale and can be removed), `rmdir target/demo.lock` when done. Run nothing unless your own `mkdir` succeeded, and remove only the lock you made. Drive it through the MCP tools ([mcp.md](../technical/mcp.md)): `pause`, `step` and `run_until` keep runs short, and `shoot` with a `path` in your scratchpad writes the shots there. Look at them with the Read tool. Kill your own leftover game or cargo processes.
 - No sub-agents.
+- Keep every blocking call under ~5 minutes: the stream watchdog stops an agent whose call shows no output for 600 s. Run long builds and the whole test suite with `run_in_background` and wait for the notification, or run narrower targets (`--test <name>`). Split long MCP `run_until` spans.
 
 ## Context and finishing
 
