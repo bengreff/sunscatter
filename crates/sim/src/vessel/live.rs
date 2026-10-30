@@ -671,10 +671,10 @@ fn low_part(c: &Compensated) -> DVec3 {
     (c.sum - hi) + c.comp
 }
 
-/// Whether a landed pose has been checked since the vessel was built or
-/// loaded: bookkeeping, not state (every value compares equal; a check
-/// that passes changes nothing).
-#[derive(Clone, Copy, Debug, Default)]
+/// Whether a landed pose has been checked since the vessel was built:
+/// bookkeeping, not state (every value compares equal; a check that passes
+/// changes nothing).
+#[derive(Clone, Copy, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub(super) struct Checked(pub(super) bool);
 
 impl PartialEq for Checked {

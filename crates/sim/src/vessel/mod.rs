@@ -232,8 +232,10 @@ pub struct Vessel {
     #[serde(default)]
     rest_mode: Option<Controls>,
     /// Whether a landed pose has been checked to hold since the vessel was
-    /// built or loaded.
-    #[serde(skip)]
+    /// built; saved with it, so a save never changes what a landed vessel
+    /// does (a craft of parts' tanks boil off while it stands, and a pose
+    /// checked again after a load could wake it). Older saves check it.
+    #[serde(default)]
     checked: Checked,
     /// The ship clock: proper time minus coordinate time (D012).
     clock: ShipClock,
