@@ -207,6 +207,10 @@ Oceans get proper behavior when aerodynamics is implemented.
 **D044: The game runs an MCP server for AI agents.** *Decided, 2026-09-25.*
 - It exposes game state, planning tools and script deployment.
 - The player's own agent (Claude Code or another) connects through it, and acts as the tutorial and assistant (D041).
+- It is the only way an agent reaches the running game, for players and for development alike: D122's mission tests use the same tools (owner, 2026-10-30).
+- Every agent gets everything the player can see and do, including screenshots, camera placement, run-until, a new flight, and load and save. The look's benchmark and the profiler need a developer flag.
+- Game time runs while the agent thinks, as it does for the player. The agent has pause, step and run-until (to an epoch or an event) as tools, so tests stay deterministic.
+- An agent flies through decisions, plans and ship-OS programs (pillar 4), not stick and throttle: a tool call takes seconds, and light delay applies (D069).
 
 **D045: The engine is Bevy, with the version pinned per milestone.** *Decided, 2026-09-26.*
 The prototype showed no blocking issues and plenty of performance headroom: 11 vessels at 1,000,000x warp ran at ~265 fps on the reference Mac. This resolves D031's engine question.
