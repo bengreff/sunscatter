@@ -130,7 +130,7 @@ It includes radiation pressure, drag in very thin upper atmosphere, rotation tha
 - Buying components from contractors is a large part of the game, and generous: "like you can buy a full engine from another company." Each catalog entry (D101) names its maker, price and lead time.
 - Real companies keep their real names and products but are abstract. They are suppliers with catalogs, terms and published roadmaps (E), with no simulated management, stock or personalities, and for now they do not compete for contracts.
 - Money comes from contracts (governments' and commercial), from selling services and parts, and from investors. Science is a mechanic too, in simplified form. The sandbox stays alongside the career (vision).
-- Developing and manufacturing your own parts in the career comes later, through D118's components and factories, with D101 giving the parts their physics.
+- The career is designed after v0.3 (owner, 2026-10-30). Developing and manufacturing your own parts in the career comes later, through D118's components and factories, with D101 giving the parts their physics.
 
 **D028: Platforms and performance target.** *Decided, 2026-09-25.*
 - **macOS and Windows** are required. There is **no web build.**
@@ -162,7 +162,7 @@ It includes radiation pressure, drag in very thin upper atmosphere, rotation tha
 
 **D034: Control depends on the speed of light.** *Decided, 2026-09-25.*
 - The player can control any actual crew member.
-- Uncrewed ships are commanded with the real light delay to the nearest human.
+- Uncrewed ships are commanded with the real light delay from the nearest mission control (owner, 2026-10-30: "everything new comes from the nearest mission control (initially on earth, eventually on other planets)"): new commands and programs travel over the relay network. A crewed ship nearby does not command probes. A crewed ship (later, one with an onboard superintelligent AI) is controlled at once, "as if the player is right there on the ship".
 - A later technology (AGI or full autonomy, possibly brain uploads) allows direct control of probes.
 
 **D035: Every ship has a simple operating system and supports scripting.** *Decided, 2026-09-25.*
@@ -199,7 +199,9 @@ Oceans get proper behavior when aerodynamics is implemented.
 - Earth and the Moon near the start date: 10 m.
 - These measure accuracy against our reference integration. Determinism (D026) is exact regardless.
 
-**D043: Ship scripts are WASM modules.** *Decided, 2026-09-25.*
+**D043: The ship OS is one flight-computer layer per vessel, and every program on it is a WASM module.** *Decided, 2026-09-25; one layer and one format, 2026-10-30 (owner; [interview-2026-10-30.md](archive/interviews/interview-2026-10-30.md)).*
+- The layer F3 built (`sim::systems::flight`) is the ship OS. "Every computer on the ship is summed to one abstracted operating system": its compute budget is the sum of the computers' real processors (or their class, marked E), and a lost computer takes its share.
+- Every program is a WASM module with one API (`Knowledge` in, commands out, the budget): the vehicle's own flight software, which ships with the craft (readable, editable, shareable), and the player's programs alike. Native code is only the layer itself (sensors to `Knowledge`, commands to actuators).
 - Players can write scripts in any language that compiles to WASM.
 - Scripts run sandboxed and deterministically, with an execution budget per tick that models a ship computer's limited power.
 - Scripts are plain files on disk, driven by a command-line tool, so AI agents can work with them directly.
@@ -210,7 +212,7 @@ Oceans get proper behavior when aerodynamics is implemented.
 - It is the only way an agent reaches the running game, for players and for development alike: D122's mission tests use the same tools (owner, 2026-10-30).
 - Every agent gets everything the player can see and do, including screenshots, camera placement, run-until, a new flight, and load and save. The look's benchmark and the profiler need a developer flag.
 - Game time runs while the agent thinks, as it does for the player. The agent has pause, step and run-until (to an epoch or an event) as tools, so tests stay deterministic.
-- An agent flies through decisions, plans and ship-OS programs (pillar 4), not stick and throttle: a tool call takes seconds, and light delay applies (D069).
+- An agent flies mostly through decisions, plans and ship-OS programs (pillar 4), since a tool call takes seconds and light delay applies (D069). The player's manual controls are its too (D126).
 
 **D045: The engine is Bevy, with the version pinned per milestone.** *Decided, 2026-09-26.*
 The prototype showed no blocking issues and plenty of performance headroom: 11 vessels at 1,000,000x warp ran at ~265 fps on the reference Mac. This resolves D031's engine question.
@@ -499,7 +501,7 @@ The player flies everything by hand for now (including a booster landing). Scrip
 - Sensors: "ONLY add things the real vehicle has." What nothing real measures shows as a dash outside debug mode.
 - Published wins: where a derived value disagrees with a sourced one, the model's inputs change until it reproduces the source (recorded). Inconsistencies with the real Falcon 9 are bugs.
 - Readings carry real noise, drift and outages only where they matter; elsewhere a value shown to its sensor's significant figures stands for its uncertainty. "I really would not like flat out wrong measurements in most cases." Estimates where appropriate.
-- Built-in flight software is adaptive functions reacting to the vehicle's state (engine-out re-trim, launch-commit checks, propellant utilisation, the navigation filter), not guidance: the player flies, except where the real vehicle flies itself (D117: the booster's return, Dragon's autonomous docking).
+- Built-in flight software is adaptive functions reacting to the vehicle's state (engine-out re-trim, launch-commit checks, propellant utilisation, the navigation filter), not guidance: the player flies, except where the real vehicle flies itself (D117: the booster's return, Dragon's autonomous docking). All automation is a switch (D126).
 - Fidelity next: powered components heat their parts (an engine off heats nothing), Dragon's coolant loop and radiators; per-engine gimbals with the engine-out response and hard starts; O₂ / N₂ tanks through regulators and leaks, suits abstract.
 
 **D116: Crew limits are doses: integrated over time, lethal past a threshold drawn for each crew member, no injuries.** *Decided, 2026-10-29 (owner); the numbers are the lead's logical defaults.*
@@ -563,6 +565,7 @@ The player flies everything by hand for now (including a booster landing). Scrip
 - **Fail-safe engines:** an engine whose flight computers are all lost, or whose own controller is lost, shuts down (E until sourced).
 - **Debug mode** shows the truth, but a dead or unpowered computer is still dead.
 - **Aborts (D120):** an uncrewed Crew Dragon is offered the abort, since it saves the vehicle. The abort needs escape thrust enough to get away, not merely one engine that can start ("would actually save").
+- **Random failures (D105) are off** until both flights fly end to end cleanly, then on.
 - **Visuals are frozen** until both flights fly end to end; only bugs that mislead the player are fixed. "I don't know if we really need the last plume things."
 
 **D124: The docs are organised by system, finished work is archived, and there is no file-size cap.** *Decided, 2026-10-30 (owner; [interview-2026-10-30.md](archive/interviews/interview-2026-10-30.md)).*
@@ -576,6 +579,23 @@ The player flies everything by hand for now (including a booster landing). Scrip
   - `docs/archive/` for finished plans, briefs, interviews and logs;
   - `docs/plans/` for live work and the hand-off only.
 - "I never made this cap, you can remove it": the 700-line check goes from CI and the hooks.
+
+**D125: Physics is universal: no ship-specific models, and every part is fully described by its parameters.** *Decided, 2026-10-30 (owner; [interview-2026-10-30.md](archive/interviews/interview-2026-10-30.md)).*
+- "We CANNOT have ship specific physics." A behaviour is modelled once, for every craft that has the parameters for it, or it is not modelled.
+- "EVERY part must be FULLY described by a set of parameters." Ablation is one mechanism for every heat shield: 1-D, per cell, from the material's parameters (PICA-X is one material).
+- Supersonic retropropulsion is not modelled as such: thrust and the clean body's drag stay independent ("clean independence, as this is an edge case anyways").
+
+**D126: Automation is a switch; manual control is always possible.** *Decided, 2026-10-30 (owner; [interview-2026-10-30.md](archive/interviews/interview-2026-10-30.md)). Refines D115 and D117.*
+- Every automatic sequence can run three ways: by itself, when the player presses for it, or not at all. Examples are the parachutes' deploy on barometric altitude, a planned burn, and the booster's guidance. A manual "deploy" runs the same deploy function as the automatic sequence. The autopilot is a switch with a config menu.
+- **Planned burns** run closed-loop to their target state, with real engine starts, ullage settling and tail-off. They are flight-layer programs. Planned burns for craft of parts come right after ONEKIND.
+- **Warp to a point** ramps the warp up and down. It never jumps through time (D022).
+- **Manual control** is always available, with today's simplified aids (automatic engine vectoring), "even if it leads to catastrophic failure (part of the fun of driving your own spacecraft)."
+
+**D127: Vessels advance on parallel workers at one fixed live rate, bit-identical across machines.** *Decided, 2026-10-30 (owner; [interview-2026-10-30.md](archive/interviews/interview-2026-10-30.md)).*
+- Each vessel, and each coast, advances on its own worker, and the results are gathered in a fixed order. Craft in contact in the bubble advance together on one worker.
+- Every live craft ticks at one fixed rate. The costly parts step at their own rates inside it (D121).
+- Every simulation result is the same bits on every machine. CI flies the same cases on macOS and Windows and compares hashes.
+- Performance is measured by hand (the scale benchmarks); there is no gate in CI.
 
 ## Open questions
 

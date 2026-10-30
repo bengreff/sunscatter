@@ -47,3 +47,30 @@ Twenty-four questions from the lead, after F1–F3, D119 and D120 had landed. Pa
 ## Taken by the lead from the owner's words
 
 - **An abort needs escape thrust enough to get away:** "would actually save" (D120). An uncrewed Crew Dragon is offered it, since it saves the vehicle.
+
+## The second twenty (the same day, after DOCS, MISSION and ONEKIND started)
+
+Before these, the lead corrected an earlier example: Crew Dragon flies without a fairing, so a crew launch has no fairing halves. The decisions are D125–D127, plus D043, D034, D044, D115, D123 and D027 revised, and vision.md's v0.2.
+
+25. **The booster's guidance and the ship OS:** "Why are we writing the ship OS In WASM? I just don't remember. There should be a single flight-computer layer." The lead explained D043's reasons: any language, sandboxed, deterministic, metered. See 29.
+26. **The compute budget:** the real processors. "Also, every computer on the ship is summed to one abstracted operating system."
+27. **The vehicle's flight software:** shipped with the craft.
+28. **Uploads:** "This gets at a CRUCIAL razor: ships with a crewmember or (later) superintelligent AI system get to be instantly "controlled" by the player as if the player is right there on the ship. If the ship is autonomous scripts can run on it, but everything new comes from the nearest mission control (initially on earth, eventually on other planets)."
+29. **The programs' format on the one layer:** all WASM, one path.
+30. **Uncrewed ships are commanded from:** the nearest mission control.
+31. **Planned burns for craft of parts:** right after ONEKIND.
+32. **How a burn executes:** closed-loop to the target.
+33. **Supersonic retropropulsion:** "We CANNOT have ship specific physics. I would say 2, clean independence, as this is an edge case anyways."
+34. **Ablation:** "Once again, ablation must be a universal mechanism for all heat shields based on material etc. EVERY part must be FULLY described by a set of parameters. 1-D ablation."
+35. **The parachutes:** "Real logic. However, keep in mind that that is the AUTOMATIC option. It ALSO must be possible for a human to drive this spacecraft, so for example a human presses deploy as a manual override and the function for the deploying sequence runs. Autopilot should be a switch and a config menu, plus a button you can press to automatically perform an action such as a planned burn or timewarp to a given point (increasing and decreasing timewarp, never jumping through time). Manual control is always an option with simplified (obviously) controls as exist today (auto engine vectoring for example), even if it leads to catastrophic failure (part of the fun of driving your own spacecraft)."
+36. **Random failures in the first flights:** off until clean.
+37. **Threads:** per vessel.
+38. **The live tick rate:** one fixed rate.
+39. **Across machines:** bit-identical, tested.
+40. **A performance gate:** by hand.
+41. **Checkouts:** the shared tree, as today.
+42. **The agent cap:** 3 + the lead.
+43. **What completes v0.2:** the two flights plus the scale target.
+44. **The career's design:** after v0.3.
+
+Taken by the lead: MISSION's `rotate` tool stays, since the player's manual controls are the agent's too (D126). The developer flag is `SUNSCATTER_DEV`.

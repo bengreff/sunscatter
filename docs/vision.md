@@ -50,9 +50,8 @@ See [lessons-from-v0.1.md](archive/research/lessons-from-v0.1.md).
 
 ## Roadmap
 
-- **v0.2 (milestone 1):**
-  - One ship flying in the Earth–Moon system, on solid foundations.
-  - Graphics close to final: atmosphere and lighting, heavily optimized.
-  - Launch, fly, and land by parachute.
-  - Blocks with made-up thrust first, then predefined ships.
+- **v0.2 (milestone 1)** is complete when Crew Dragon flies to a station and back and the Falcon 9's booster lands, both end to end through mission tests (D122), and D121's scale target is met (owner, 2026-10-30):
+  - one ship flying in the Earth–Moon system, on solid foundations;
+  - graphics close to final, and then frozen (D123);
+  - launch, fly, and land by parachute.
 - **Beyond v0.2:** defined as we go, recorded in [decisions.md](decisions.md).
