@@ -29,4 +29,4 @@ How things go wrong: physical triggers from the simulation where it knows, stati
 
 - Owners: [owners.md, Failures](../owners.md#failures).
 - Decisions: D064, D065, D105, D123.
-- Technical: [ship-systems.md](../technical/ship-systems.md#failures-simsystemsfailure), [ship-model.md](../technical/ship-model.md) §6.
+- Technical: [failure-modes.md](../technical/failure-modes.md), [ship-model.md](../technical/ship-model.md) §6.

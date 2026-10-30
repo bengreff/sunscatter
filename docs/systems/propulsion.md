@@ -2,7 +2,7 @@
 
 How a craft makes thrust and feeds it: tanks and their pressures, the pressurant bottles, the lines to the engines, the engines' start, steady state and shutdown, the reaction-control thrusters, and the gimbal. It runs on the [ship model](ship.md)'s plumbing layer.
 
-**Status:** plumbing, the engine model, RCS and the gimbal are *playable* in `sim` for the Falcon 9 Crew, with table tests against their sources ([ship-systems.md](../technical/ship-systems.md)). The exhaust seed (each engine's exit state) is *skeleton*. D123's fail-safe shutdown when an engine's own controller is lost, and an abort that needs enough escape thrust, are next (FIXES3 in the [hand-off](../plans/HANDOFF.md)).
+**Status:** plumbing, the engine model, RCS and the gimbal are *playable* in `sim` for the Falcon 9 Crew, with table tests against their sources ([plumbing.md](../technical/plumbing.md), [engines.md](../technical/engines.md)). The exhaust seed (each engine's exit state) is *skeleton*. D123's fail-safe shutdown when an engine's own controller is lost, and an abort that needs enough escape thrust, are next (FIXES3 in the [hand-off](../plans/HANDOFF.md)).
 
 ## Laws
 
@@ -35,4 +35,4 @@ How a craft makes thrust and feeds it: tanks and their pressures, the pressurant
 
 - Owners: [owners.md, Propulsion](../owners.md#propulsion-plumbing-engines-rcs-estimates).
 - Decisions: D020, D064, D077, D078, D104–D106, D109, D111, D114, D119, D120, D123, D125, D126.
-- Technical: [ship-systems.md](../technical/ship-systems.md) (plumbing; propulsion and attitude control), [ship-model.md](../technical/ship-model.md) §5.2–§5.3, [exhaust.md](../technical/exhaust.md). Data: [falcon9.md](../vehicles/falcon9.md) §2–§3.
+- Technical: [plumbing.md](../technical/plumbing.md), [engines.md](../technical/engines.md) (engines, RCS and the gimbal), [ship-commands.md](../technical/ship-commands.md) (ignition, the pad and how the Falcon 9 is flown), [ship-model.md](../technical/ship-model.md) §5.2–§5.3, [exhaust.md](../technical/exhaust.md). Data: [falcon9.md](../vehicles/falcon9.md) §2–§3.

@@ -26,4 +26,4 @@ The people aboard: the cabin's air they breathe, the accelerations they can take
 
 - Owners: [owners.md, Crew](../owners.md#crew).
 - Decisions: D105, D111, D116, D120, D123.
-- Technical: [ship-systems.md](../technical/ship-systems.md#crew-and-life-support-simsystemscrew), [ship-model.md](../technical/ship-model.md) §5.8. Data: [falcon9.md](../vehicles/falcon9.md) §6.6.
+- Technical: [life-support.md](../technical/life-support.md), [ship-model.md](../technical/ship-model.md) §5.8. Data: [falcon9.md](../vehicles/falcon9.md) §6.6.
