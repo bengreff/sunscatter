@@ -45,14 +45,21 @@ Also remove the 700-line file cap. Follow [agent-rules.md](agent-rules.md). Your
 1. **The moves** (ad727c3): `docs/archive/{briefs,interviews,plans,research}/`; `docs/vehicles/falcon9.md`; `docs/technical/` (the design docs, the feature specs, `mcp.md`, `windows.md`); `architecture.md` → `owners.md`; `docs/VISION.md` tracked as `docs/vision.md`. Every link and code-comment path fixed (script: relink by resolved target; a checker confirms every relative link in `docs/`, `README.md`, `CLAUDE.md` resolves). `tools/check_decision_refs.sh` skips `docs/archive/` as it skips the plans. Feature plans that were built (realism-1, playtest-1, map-view-lighting-controls) went to `archive/plans/`.
 2. **The file cap** (87aa10f): the script, its CI step, the pre-push call, CLAUDE.md's mentions.
 3. **owners.md** (54be1f7): the rows verbatim, grouped by system; the `mcp` crate and the agent's row added; `technical/frame-order.md`, `technical/testing.md`.
+4. **docs/systems/** (8520a0a): a README index (status words as used, the written systems, the open ones: the career, economics and logistics, construction, colonies, advanced propulsion, interstellar, ship scripting, radiation) and ten docs: motion, world, ship, propulsion, structure, aero-thermal, avionics, crew, failures, game. Each: what it does, laws, what exists with its status word, not built, owners (its `owners.md` section), decisions, technical docs. Written from the technical docs, HANDOFF and decisions.md only.
+5. **The reading guide** (b1c64d9): README (the v0.2 row from what is built, the keys from `commands/keys.rs`, the guide for a person and for an agent, the layout); CLAUDE.md's Read first; process.md's document kinds (D124), D122's mission tests, no file cap, agents' commits and the demo lock as agent-rules says; agent-rules' "docs in the same round" and `/handoff`'s homes.
 
-### Left, in order
+### Left, in order (for the lead or a fresh agent)
 
-4. `docs/systems/` (a README index plus one doc per system), from the technical docs and the code.
-5. The README's reading guide; CLAUDE.md's Read first; process.md's document types.
+1. **ONEKIND's and MISSION's doc changes** when their States list them (none listed by 2026-10-30 afternoon). Expected: the technical docs' and systems docs' mentions of the test craft (aero-thermal.md's opening, parts.md, ship-systems.md, limbo.md, the systems docs' "being deleted"); MISSION's mission-test guide goes in `technical/testing.md` (its Mission tests row and the End to end row), and CLAUDE.md's Commands are MISSION's.
+2. **Split `technical/ship-systems.md`** by subsystem (commands and the pad, plumbing, propulsion, mechanisms, information, flight software, structure, failures, power, crew), one topic per file, and point the systems docs at the new files.
+3. **Extract the specs that live only in archived plans** into technical docs: the comm network, proper time and control locations (`archive/plans/realism-1.md` §4), the burn planner (§6), the map view, lighting, orbit lines and settings (`archive/plans/map-view-lighting-controls.md`), attitude holds and landing prediction (`archive/plans/playtest-1.md` B, C).
+4. Old status lines in technical docs that may be stale (crisp-surfaces.md "not yet seen on screen", solar-visuals.md "in progress", parts.md "skeleton", staging-bar.md "not yet seen"): check against the code and the shots and update.
+5. The README's two images are from before the one look (D073): replace them with shots from MISSION's tools.
 
 ### Open for the owner
 
+- The status words had no written definitions; `systems/README.md` gives the readings these docs use (design: written, not built; skeleton: built and tested, not doing the whole job; playable: does its job under tests; polished: unused).
+- `docs/archive/` is split into `briefs/`, `interviews/`, `plans/` and `research/` (D124 names only `archive/`).
 - `docs/plans/playtest-2026-10-01-orbit.ron` stays in `plans/` (`./run play` and `sim/tests/save_load.rs` read it); ONEKIND regenerates or drops it (it carries the test craft).
 - `plans/flight-ui-2026-10-27.md` (the workstream table agents update) and `plans/open-issues.md` (the backlog) stay in `plans/` as live work, under their old names, so the running agents' references hold.
 - The frozen GLOW and CLOUDS briefs were archived with the finished ones (D123: visuals frozen); a fresh brief starts from them when the freeze lifts.
