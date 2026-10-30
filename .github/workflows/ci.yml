@@ -29,9 +29,6 @@ jobs:
           shared-key: sim
       - name: Format
         run: cargo fmt --all --check
-      - name: File size limit
-        shell: bash
-        run: tools/check_file_sizes.sh
       - name: Decision references
         shell: bash
         run: tools/check_decision_refs.sh

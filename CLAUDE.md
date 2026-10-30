@@ -27,8 +27,8 @@ Real-scale 3D spaceflight, mission-design and logistics game in Rust. Being rebu
 - Body data lives in `data/bodies/<body>/` (`body.ron` for sim, `visual.ron` for game, maps baked by `cargo run -p asset-tool --release -- all`).
 - `cargo run -p sim --release --example bench_coast` — coast integration cost per step.
 - `cargo run -p ephem-tool --release -- sol` — regenerate the Solar System ephemeris (needs `data/external/de440s.bsp`; see the tool's docs). The golden tests fail if the shipped file and code disagree.
-- `cargo clippy -p sim -p ephem-tool -p asset-tool -p mcp --all-targets -- -D warnings`, `cargo fmt --all`, `tools/check_file_sizes.sh`.
-- CI: a fast `sim` job (no Bevy; fmt, file sizes, decision references, clippy, tests) and a separate `game` job, on macOS and Windows. `tools/check_decision_refs.sh` fails on citations of deleted (superseded) decisions.
+- `cargo clippy -p sim -p ephem-tool -p asset-tool -p mcp --all-targets -- -D warnings`, `cargo fmt --all`.
+- CI: a fast `sim` job (no Bevy; fmt, decision references, clippy, tests) and a separate `game` job, on macOS and Windows. `tools/check_decision_refs.sh` fails on citations of deleted (superseded) decisions.
 - Windows: at the end of a big session, try `ssh backhouse` (the owner's PC) and run the demo there (procedure: `docs/technical/windows.md`); if it doesn't connect, skip it.
 - Hooks (`.claude/settings.json`, scripts in `tools/hooks/`): the handoff is loaded at session start, `cargo check` of the owning crate runs after editing a `.rs` file, and `cargo test -p sim` runs on stop. Failures are fed back (exit 2).
 - Git pre-push hook (`tools/git-hooks/pre-push`; enable per checkout with `git config core.hooksPath tools/git-hooks`): runs CI's checks on the exact commit being pushed, in a private mirror, and refuses a push that would fail CI (a night of red pushes flooded the owner's inbox, 2026-10-26). Its pre-commit hook refuses a commit from a stale index, one that would revert HEAD's version of a file the work tree still has (after an agent's private-index commit; `git reset -q -- <file>`).

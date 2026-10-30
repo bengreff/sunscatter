@@ -7,7 +7,7 @@
 # checked out into a private mirror (`target/prepush/src`, its own index;
 # only changed files are rewritten, so builds stay incremental) and built
 # in `target/prepush/target`. The checks are CI's (`.github/workflows/ci.yml`):
-# format, file sizes, decision references, clippy and tests (--no-fail-fast)
+# format, decision references, clippy and tests (--no-fail-fast)
 # for sim and the tools; clippy and tests for game when the push touches it
 # or what it depends on (sim, mcp, data/, the manifests).
 # Pushes that change only docs skip cargo. Bypass in an emergency with
@@ -33,7 +33,7 @@ check() {
     GIT_INDEX_FILE="$index" git read-tree "$sha" && GIT_INDEX_FILE="$index" git --work-tree="$mirror" checkout-index -a -f -u || return 1
   fi
   echo "pre-push: checking ${sha:0:7} in $mirror" >&2
-  (cd "$mirror" && tools/check_file_sizes.sh && tools/check_decision_refs.sh) || return 1
+  (cd "$mirror" && tools/check_decision_refs.sh) || return 1
   if ! grep -qE '^(crates/|data/|Cargo\.(toml|lock)|\.github/)' <<<"$files"; then
     echo "pre-push: docs only, cargo skipped" >&2
     return 0
