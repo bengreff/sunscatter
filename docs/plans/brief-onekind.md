@@ -36,7 +36,43 @@ Three kinds of craft exist today: the **test craft** (a craft file `craft.ron` +
 - ce026b1 `craft::small` (D121): the build's fixture rocket and its test entries moved out of `build_tests`; `small-rocket` (ids `small-<name>` resolve in the registry, so saves and pieces reload) is the fixture plus Apollo parachutes (`t-chutes`, D079's numbers) and a radiatively cooled test nozzle (niobium C-103, D077's 2.2e-3); `Vessel::set_fill` (every tank to a fraction). `tests/craft_flight.rs` on it.
 - ce17b16 a real fix found on the way: the landed-pose check (`Checked`) is saved, so a save no longer wakes a landed craft of parts whose LOX boiled off while it stood (`proper_time::save_and_load_preserve_the_clock`).
 - e38f245 `tests/{landed_rest, proper_time, terrain}.rs` on the small rocket. A fall onto the plateau now breaks the craft up there (parts' loads) instead of crashing it whole; the test checks either.
+- fbd63c4 `tests/vessel_dynamics.rs` on the small rocket (masses set through `set_fill`, a breakup counts as a crash).
+- ccf8430 the small rocket carries an IMU and a GPS receiver on its computer's bus and data link: without them its flight software (F3) cannot hold an attitude.
+- 0107fa2 `tests/vessel_controls.rs` on the small rocket: the probe burns from before t0, and only the prograde hold travels with the delay.
+
+### How to move a test (for the next agent)
+
+- `&sim::craft::small::rocket()` replaces `test_craft()` (it is an `Arc<Craft>`). It is about 13.9 t loaded, 1 crew, four 100 kN engines (Isp 320/280 s, throttle 0.4–1), cold-gas thrusters, four legs and Apollo chutes.
+- Engines start only through the sequence: `assert_eq!(v.next_stage(&w).unwrap().0, "Ignition")`. A throttle below 0.4 shuts them down.
+- Propellant: `set_fill(&w, f)` sets every tank's liquid. For a target mass, fill to 1 and to 0 and interpolate (`vessel_dynamics::above_the_cape`). `propellant()` includes the ullage and bottle gas, and LOX boils off on coasts and on the pad, so compare within ~1 kg.
+- A hard impact breaks a craft of parts up (`v.breakup().is_some()`, the advance stops there) rather than `Phase::Crashed`; the impact speed is in `breakup().destroyed` (`vessel_dynamics::wrecked`).
+- Contact height: take it from a landed vessel (`terrain::standing`), not from `CraftParams::contact_height(16_000.0)` (the made-up mass law).
 
 ### Tests not kept, and why
 
 - `craft_flight::rcs_burns_propellant_at_its_flow_per_axis` (D078's couples drawing the main propellant: the made-up attitude model itself) and `powered_ticks_burn_propellant_at_the_engine_rate` (the scalar mass law): the parts path's versions are `vessel::ship_tests` (each tank drained by the mixture ratio) and `ship_systems_tests::the_first_stage_draws_its_engines_flow_and_nothing_else`.
+- `vessel_dynamics::a_drogue_fired_far_above_its_design_q_tears_and_the_mains_still_land_a_light_craft` is now `…_tears_and_so_do_the_mains_behind_it`. With its drogue torn, the slender rocket reaches the mains' height near 190 m/s and they tear too. The finned test craft's broadside drag used to slow it enough for the mains alone. A mains-alone landing would need a draggier small craft.
+
+### Left, in order
+
+1. **Move the remaining tests.** Nothing blocks them now: DOCS has committed, and the demo and tour are deleted.
+   - sim integration tests: `contact` (13 tests: `set_propellant(d.propellant)`, the hull's top from `surface.positions`), `scenario_launch` (pad to orbit in debug mode, then the chute), `aerothermal` (14 tests: the finned craft's entry burn-up, the nozzle node, its cells), `limbo`, `limbo_physics`, `limbo_regime`, `frame_live_stop`, `parts`, `save_load` (it reads `docs/plans/playtest-2026-10-01-orbit.ron`, a test-craft save).
+   - sim unit tests: `aero/{tests,lift_tests}`, `chute/tests`, `craft/{broad,cells_tests,design,engine,mass,mod,parts,registry,volume}`, `forces/surface`, `landing/tests`, `proximity/{contact_tests,hull_tests}`, `thermal/{tests,heating_tests}`, `vessel/{bubble_tests,tests}`.
+   - examples: `bench_{aero,bubble,fleet,integrator,limbo,thermal}`, `long_run`.
+   - game: `debris`, `fleet_tests`, `menus/{data,hottest,landing,rcs_data,rcs}`, `stage_bar/rows_tests`, `landing`, `navball`, `saves`, `staging`, `state`, `state_tests`, `trajectory/*_tests`; `GameCommand::SpawnTestShips` (MISSION's brief).
+   - **Blocked on planned burns for craft of parts (PLANNER, D126):** `planned_burns` (11 tests), `hold_modes`' maneuver-hold tests, the game's planner and `trajectory/predict_tests`, and `landing::model` (`craft.mass.at`, `craft.engine`). Default below.
+2. **The stress generator on the parts path:** an `AssemblyFile` built in code from catalog generators (tank, engine, thrust structure, revolution, solar), resolved as `stress-<n>` like `small-<name>`. Keep `bench_scale` and `bench_coast`. `stress_tests`, `split_tests`, `mass_tests` and `bubble_tests` use the stress craft.
+3. **Delete the made-up path** (the inventory above). Also in `build.rs`, the craft-of-parts build falls back to `test_craft()`'s skin and chute: it needs a default skin and "no chutes". Then: the test craft's data, its new-flight entry (`state.rs`), `SUNSCATTER_CRAFT=test-craft`, and the playtest save (regenerated from a Falcon 9 flight, or dropped if MISSION's tools replace it).
+4. **Decisions:** delete D074; trim D064 to debug mode (D123); update D060, D078, D079 (the test craft's chutes), D100 ("the test craft stays as the debug craft") and D104; update every citation in the same commit.
+
+### Doc changes needed (for DOCS or the lead)
+
+- `docs/owners.md`: a row for `sim::craft::small` (the small craft of parts for tests and benchmarks; ids `small-<name>` in the registry).
+- The parts and vessel technical docs: craft built in code (`craft::small`), and `Vessel::set_fill`. A landed vessel's pose check is saved with it (ce17b16).
+- My row in `flight-ui-2026-10-27.md`: there is none, so I left that plan alone.
+
+### Open for the owner (defaults taken)
+
+- **Planned burns between ONEKIND and PLANNER.** The only craft that can plan a burn is the test craft. Default: its planned-burn tests are deleted with it, and PLANNER writes closed-loop ones on craft of parts (D126 replaces the open-loop burn law anyway). Until then, the game offers no planned burns. The other choice is to keep the test craft until PLANNER lands.
+- A hard impact breaks a craft of parts up at its parts' loads (D103) instead of destroying it whole. Tests accept either.
+- The small rocket's test engine has a radiatively cooled niobium nozzle with D077's 2.2e-3 heat share, so the nozzle-cooling test keeps its meaning. The real Merlin 1D's is regenerative (0).
