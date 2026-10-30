@@ -91,8 +91,8 @@ U/E data in `falcon9.md`, Dragon's CO₂ removal, the Moon's field degree, the 1
 
 - **Agents follow [agent-rules.md](agent-rules.md).** Their private-index commits leave the shared index stale. The lead runs `git reset -q` before every commit while agents run; b48bc21 reverted an agent's fix this way, and the new pre-commit hook now refuses such a commit. An agent can stall at the stream watchdog (PLUME-ALTITUDE did); `SendMessage` resumes it.
 - **The machine:** builds by two agents plus the lead at once are slow; plan an hour as ~40 minutes of work. `target/agents/plume` (25 GB, game and sim) is the one warm copy for the next agent.
-- **Demos:** fewer than 10 windows in a burst, one at a time under `target/demo.lock`. The booster's plumes sit behind the navball cluster: use `SUNSCATTER_DEMO_UI_SCALE=0.2 SUNSCATTER_DEMO_FAR=0.6` and crop with `sips`.
-- The egui proportional font lacks ▲ ▼ ▸ →: use ⏶ ⏷ or test the glyph in a demo shot. egui areas default to 400 px tall: set the max height before a scroll area.
+- **The game:** fewer than 10 windows in a burst, one game at a time under `target/demo.lock` (the scripted demo is gone; the lock kept its name). Mission tests run `./run headless <port>` and drive it through MCP ([mcp.md](../technical/mcp.md)). The booster's plumes sit behind the navball cluster: `shoot` with `ui_scale: 0.2`, `set_camera` farther out, and crop with `sips`.
+- The egui proportional font lacks ▲ ▼ ▸ →: use ⏶ ⏷ or test the glyph in a shot. egui areas default to 400 px tall: set the max height before a scroll area.
 - **The disk:** follow `docs/process.md`'s disk hygiene (keep ≥ 30 GB free; the SessionStart hook prints it).
 - `cargo test` stops at the first failing binary unless `--no-fail-fast`. The stop hook tests the shared tree, so an agent's unfinished work shows there.
-- Saves are not compatible across versions (D063). The playtest save (version 14) embeds `CraftParams` and the ephemeris id; regenerate it from the demo's Orbit step (`orbit_save.ron`) when they change. `./run play`, then Cmd+L.
+- Saves are not compatible across versions (D063). The playtest save (version 14) embeds `CraftParams` and the ephemeris id, and carries the test craft. The demo step that wrote it is deleted: ONEKIND regenerates it from a Falcon 9 flight (`save_game` in a headless run) or drops it. `./run play`, then Cmd+L.

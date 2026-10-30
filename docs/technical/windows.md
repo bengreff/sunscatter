@@ -17,27 +17,37 @@ ssh backhouse 'powershell -NoProfile -Command "Get-Content C:\Users\Ben\game_bui
 
 A clean release build takes about 6 minutes.
 
-## Demo for screenshots (plain SSH)
+## The headless game for screenshots (plain SSH)
 
-Plain SSH (session 0) renders fine offscreen (Vulkan on the RTX). Note `&&` with no space before it, so the values carry no trailing space:
+The scripted demo is gone (D122): a run on backhouse is the headless game driven through MCP, as on the Mac ([mcp.md](mcp.md)). **Not yet run on backhouse** (written 2026-10-30 from the Mac's procedure): check it the first time and fix this section.
+
+Plain SSH (session 0) renders fine offscreen (Vulkan on the RTX). `run.cmd` has no headless mode, so set what `./run headless` sets. Note `&&` with no space before it, so the values carry no trailing space. Start it with `run_in_background`:
 
 ```
-ssh backhouse "rmdir /s /q C:\Users\Ben\sunscatter_demo 2>nul & set SUNSCATTER_DEMO=C:\Users\Ben\sunscatter_demo&& set SUNSCATTER_DEMO_OFFSCREEN=1&& set SUNSCATTER_DEMO_NO_BENCH=1&& set SUNSCATTER_HOME=C:\Users\Ben\sunscatter_demo\home&& cd /d C:\Users\Ben\sunscatter && target\release\game.exe > C:\Users\Ben\sunscatter_demo.log 2>&1"
-scp "backhouse:sunscatter_demo/03_pad_medium.png" <local dir>/   # one file per scp call
-ssh backhouse "type C:\Users\Ben\sunscatter_demo.log" | sed 's/\x1b\[[0-9;]*m//g' | grep "demo perf"
+ssh backhouse "rmdir /s /q C:\Users\Ben\sunscatter_headless 2>nul & set SUNSCATTER_HOME=C:\Users\Ben\sunscatter_headless&& set SUNSCATTER_OFFSCREEN=1&& set SUNSCATTER_DEV=1&& set SUNSCATTER_AGENT=7777:dev&& cd /d C:\Users\Ben\sunscatter && target\release\game.exe > C:\Users\Ben\sunscatter_headless.log 2>&1"
 ```
 
-## Demo for performance numbers (interactive session)
+The server listens on backhouse's 127.0.0.1 only, so call it there with Windows' `curl.exe`. JSON does not survive cmd.exe's quoting: copy each call as a file, then post it (single quotes locally, so cmd.exe gets the double quotes):
 
-Frame times over plain SSH are 3–4x worse (session 0). For perf or benchmark numbers run in the logged-in console session with a scheduled task (check `ssh backhouse "query user"` shows `ben / console / Active`). `C:\Users\Ben\run_demo.cmd` (CRLF line endings) sets the same variables, runs `target\release\game.exe >> C:\Users\Ben\sunscatter_demo.log 2>&1`, and appends `EXIT %ERRORLEVEL%`.
+```
+scp shoot.json backhouse:call.json     # {"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"shoot","arguments":{"path":"C:\\Users\\Ben\\sunscatter_headless\\pad.png"}}}
+ssh backhouse 'curl.exe -s http://127.0.0.1:7777/mcp -H "Authorization: Bearer dev" -H "Content-Type: application/json" -d @call.json'
+scp "backhouse:sunscatter_headless/pad.png" <local dir>/   # one file per scp call
+```
+
+End the game with `taskkill /im game.exe /f` over SSH.
+
+## Performance numbers (interactive session)
+
+Frame times over plain SSH are 3–4x worse (session 0). For perf or benchmark numbers run in the logged-in console session with a scheduled task (check `ssh backhouse "query user"` shows `ben / console / Active`), and read them with the `profile` and `bench` tools. `C:\Users\Ben\run_demo.cmd` (CRLF line endings) still sets the deleted demo's variables: change it to the four above, keeping `target\release\game.exe >> C:\Users\Ben\sunscatter_demo.log 2>&1` and the appended `EXIT %ERRORLEVEL%`. The 11-vessel numbers below need a tool that spawns vessels, which does not exist yet ([brief-mission.md](../plans/brief-mission.md)).
 
 ```
 ssh backhouse "schtasks /create /tn SunscatterDemo /tr C:\Users\Ben\run_demo.cmd /sc once /st 00:00 /ru ben /it /f && schtasks /run /tn SunscatterDemo"
-# poll the log until it contains EXIT, then:
+# drive it through MCP as above; when done, end the game, then:
 ssh backhouse "schtasks /delete /tn SunscatterDemo /f"
 ```
 
-## Results, 2026-10-26 (commit e6476d3, end of the overnight run)
+## Results, 2026-10-26 (commit e6476d3, end of the overnight run; from the deleted demo)
 
 Plain SSH (session 0, frame times 3–4× worse than the console), offscreen, no bench: `cargo test -p sim --no-fail-fast` all 25 binaries pass (the bit-exact goldens agree with macOS); the full demo ran through (67 shots, no errors, the impact-marker check ran). Perf, 11 vessels: 1× 160 fps (worst 16.4 ms), 1,000× 163 fps (988× reached), 1,000,000× 52 fps (worst 63 ms, 934,875× reached, compute-limited 7/207 frames). The same run on the reference Mac: 204 / 212 / 119 fps, 961,921× reached at 10⁶×.
 

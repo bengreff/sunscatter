@@ -54,12 +54,12 @@ Before designing a solution to a hard problem, **look at how others solved it.**
   - **Property tests:** conservation laws, round trips (orbital elements ↔ state vectors, save ↔ load).
   - **Golden tests:** against DE440 and real mission profiles.
   - **Invariance tests:** the choice of anchor, and chunked versus single-pass computation.
-  - **Determinism tests:** macOS against Windows.
+  - **Determinism tests:** the same cases on macOS and Windows, compared by hash (D127).
   - **Executable scenarios**, such as a trans-lunar injection to the Moon.
   - **Mission tests** (D122): one testing framework. Large integrations are checked by a development agent flying the game headless through MCP on the real flight software, with screenshots ([technical/testing.md](technical/testing.md)).
 - **One owner for each piece of math**, enforced by module visibility.
 - **Frames and units are types.** Mixing frames is a compile error.
-- **Performance budgets** live in the technical docs and are checked by benchmarks in CI, against the reference machine (D028).
+- **Performance budgets** live in the technical docs and are measured by hand with the benchmarks, against the reference machine (D028). CI has no performance gate (D127).
 - **The simulation crate has no engine dependencies.** There is no file-length cap (D124).
 - **`Cargo.lock` is tracked.** Stale data is deleted, not labelled as stale.
 
@@ -80,12 +80,12 @@ Before designing a solution to a hard problem, **look at how others solved it.**
   - Three build dirs are kept: `target/debug` (~23 GB, the hooks and tests), `target/prepush` (~23 GB, the pre-push mirror) and `target/release` (~3 GB, `./run`). `data/external/` (~9 GB, gitignored) is the raw source data for re-baking maps and the ephemeris, so it is kept too. Everything else under `target/` is temporary.
   - An agent's `target/agents/<name>` (10–22 GB) is deleted once its work has landed. The exception is a dir handed straight to the next agent (rename it). Keep at most one warm copy.
   - Never set `CARGO_TARGET_DIR=target/debug`: cargo nests a second, duplicate `target/debug/debug` (10 GB, found 2026-10-29). For the main tree, leave it unset.
-  - Demo shots, logs and profiles go to the session's scratchpad, never into the repo or `target/`.
+  - Shots, logs and profiles go to the session's scratchpad, never into the repo or `target/`.
   - Keep at least 30 GB free before launching an agent or a long build (`df -h .`; the SessionStart hook prints it). When space is short, delete the finished agents' dirs and the `*/incremental` caches first. Ask the owner before deleting anything outside the repo.
   - `/handoff` ends each session by deleting what is finished.
 - **Parallel agents** work in the main checkout on `main`: **no branches and no git worktrees** (owner, 2026-09-26). Give each agent files that do not overlap (a crate, a new module, a data directory) and run them one at a time when their builds would contend. The lead owns shared files (`main.rs`, plans, `decisions.md`). Agents commit their own paths through a private index and push at once ([agent-rules.md](plans/agent-rules.md)). Read-only agents (reviews, searches) can run in parallel freely.
-- **Visual checks are also assertions.** The demo (until D122's mission tests replace it) checks what it can in code (for example: the camera is outside every body, nothing is hovered outside map view), and the screenshots are for judging the look.
-- **Windows.** CI builds and tests on Windows but has no GPU. At the end of a big session, run the demo on the owner's Windows PC over SSH (`backhouse`); if it isn't reachable, skip it. The exact procedure (update, build, demo, perf numbers) is in [windows.md](technical/windows.md).
+- **Visual checks are also assertions.** What can be checked in code is (for example: a headless game exits 3 on a shader that fails to compile; the camera is outside every body and nothing is hovered outside map view, as rules with table tests), and the mission tests' screenshots are for judging the look (D122).
+- **Windows.** CI builds and tests on Windows but has no GPU. At the end of a big session, run the tests and the headless game on the owner's Windows PC over SSH (`backhouse`); if it isn't reachable, skip it. The exact procedure (update, build, the headless game and its shots, perf numbers) is in [windows.md](technical/windows.md).
 
 ## Versioning
 
