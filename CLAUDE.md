@@ -3,13 +3,14 @@
 Real-scale 3D spaceflight, mission-design and logistics game in Rust. Being rebuilt from scratch; v0.1 (2D) is archived in `archive/v0.1/` — do not edit it.
 
 ## Read first
-- `docs/plans/HANDOFF.md` — **start here in a fresh session** (auto-loaded by a SessionStart hook): reading order, current state, next steps. `/handoff` updates it before a `/clear`.
+The reading guide is in `README.md`; the docs are organised by system (D124).
+- `docs/plans/HANDOFF.md` — **start here in a fresh session** (auto-loaded by a SessionStart hook): current state, next steps, gotchas. `/handoff` updates it before a `/clear`.
 - `docs/vision.md` — pillars and non-goals. `docs/decisions.md` — what is decided (check before proposing).
-- `docs/technical/motion-model.md` — how bodies and ships move (no SOIs, frame tree, precision, determinism).
-- `docs/plans/` — the current build plan; check items off as you go.
+- `docs/owners.md` — **who owns what**, by system (search it before writing a new function about bodies, orbits, visibility, lighting or time).
+- `docs/systems/` — one general doc per system: its laws, what is built (status words), owners, decisions. Read the one you work on.
+- `docs/technical/` — specific details, one topic per file: `motion-model.md` (no SOIs, frame tree, precision, determinism), `ship-model.md`, the frame order, testing, the spec of what you are building. `docs/vehicles/` — research dossiers (`falcon9.md`).
+- `docs/plans/` — live work only: the hand-off, `agent-rules.md`, running briefs, the workstream plan; check items off as you go. Finished work goes to `docs/archive/`.
 - `docs/process.md` — doc types, research strategy (KSP mods, Principia, …), engineering rules.
-- `docs/owners.md` — **who owns what** (search it before writing a new function about bodies, orbits, visibility, lighting or time), frame order, where tests live.
-- `docs/technical/` — the detailed spec for the part you are building, if one exists.
 
 ## Layout
 - `crates/sim` — simulation core. **No engine dependencies.** f64, frame-typed, deterministic.
