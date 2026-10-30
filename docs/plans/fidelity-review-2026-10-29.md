@@ -86,7 +86,7 @@ Rank for D100's first goal (a whole Crew mission): **A** breaks or falsifies the
 | 24 | Power brown-out | Undervoltage makes computers drop out, controllers safe the engines, and heaters stop. | Shedding exists. A shed computer only blocks starts: running engines, gimbal, SAS and heaters carry on. | Failures do not propagate (D105). | B |
 | 25 | Sensor failure and what the craft then knows | Losing the IMUs means no attitude solution, and SAS cannot hold. | Knowledge shows a dash, but SAS, the holds, the estimates and the pad's release check read the truth. | D106/D115 hold only for the display, not for control. | B |
 | 26 | Coast heat with eclipses | The skin swings with every sunset and sunrise. | Orbit-averaged skin temperatures on rails (open issue); components produce no heat. | Battery and propellant temperatures. | C |
-| 27 | Radiation, single-event upsets | Dose to the crew and electronics. | None (open question 2). | Later (D116 has the rule ready). | C |
+| 27 | Radiation, single-event upsets | Dose to the crew and electronics. | None (open question 1). | Later (D116 has the rule ready). | C |
 
 ### Entry and splashdown
 

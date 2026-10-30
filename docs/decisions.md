@@ -122,9 +122,15 @@ It includes radiation pressure, drag in very thin upper atmosphere, rotation tha
 - They do not need to match real life that closely.
 - Simplified sets of perturbing bodies are allowed as long as the assumptions are applied consistently and recorded.
 
-**D027: The game starts in 2030, and the player leads an organization.** *Direction, 2026-09-25.*
-- Which kind of organization is still open: a NASA-like agency, a SpaceX-like company, or an international body.
-- Funding and science are both mechanics, in simplified form.
+**D027: The game starts in 2030, and the player leads an aerospace startup.** *Direction, 2026-09-25. The kind of organization was decided 2026-10-29 (owner; [interview-2026-10-29-next.md](plans/interview-2026-10-29-next.md)).*
+- Every career starts as a startup, with little cash and investors to answer to. "Primarily you need to be able to launch iconic rockets." The startup gets them three ways:
+  - it operates rockets bought from their makers, as Arianespace launched Russian-built Soyuz rockets from Kourou;
+  - it builds them under license, as Japan built its N-I and H-I from Delta designs;
+  - it buys launches, which the provider flies with its own flight software (D117).
+- Buying components from contractors is a large part of the game, and generous: "like you can buy a full engine from another company." Each catalog entry (D101) names its maker, price and lead time.
+- Real companies keep their real names and products but are abstract. They are suppliers with catalogs, terms and published roadmaps (E), with no simulated management, stock or personalities, and for now they do not compete for contracts.
+- Money comes from contracts (governments' and commercial), from selling services and parts, and from investors. Science is a mechanic too, in simplified form. The sandbox stays alongside the career (vision).
+- Developing and manufacturing your own parts in the career comes later, through D118's components and factories, with D101 giving the parts their physics.
 
 **D028: Platforms and performance target.** *Decided, 2026-09-25.*
 - **macOS and Windows** are required. There is **no web build.**
@@ -482,13 +488,14 @@ The player flies everything by hand for now (including a booster landing). Scrip
 **D114: One revert, from a launch save; a closed throttle shuts engines down; stages run again.** *Decided, 2026-10-28 (owner).*
 - "Reverting flight to launch/to the pad should be ONE function, and it should RESET EVERYTHING to the last time the current active vessel was launched from the pad." When a vessel is placed on the pad the game writes a launch save to disk; every piece that splits from it keeps the link. Revert loads that file directly: the whole game as it was, fuelled, throttle closed. A save records its active vessel and the screen showing.
 - "Throttling down to 0% should automatically shut off any engine currently running": closing the throttle (from open to 0) shuts every starting or running engine down (its tail-off). An engine lit with the throttle already closed runs at its minimum until the throttle is opened and closed again.
-- "It should be possible to run stages multiple times, activating the functions that can be activated and doing nothing otherwise": a stage already run can be run again; its commands that can act do (an engine with an ignition left starts), the rest do nothing. Opening the throttle again does not relight an engine: a restart is a stage run again (owner, 2026-10-29). Every stage already run has AGAIN on the staging bar: the active one, and below it the stages run before, one line each (the owner could not relight the Merlins once Liftoff was the active stage, 2026-10-29).
+- "It should be possible to run stages multiple times, activating the functions that can be activated and doing nothing otherwise": a stage already run can be run again; its commands that can act do (an engine with an ignition left starts), the rest do nothing. Opening the throttle again does not relight an engine: a restart is a stage run again (owner, 2026-10-29). Every stage already run has AGAIN on the staging bar: the active one, and below it the stages run before, one line each (the owner could not relight the Merlins once Liftoff was the active stage, 2026-10-29). The systems screen's stage editor locks the stages already run.
+- A pad abort (the clamps never let go) ends that launch: "Reset the ship fully, after all it needs to refuel. New launch." Once its engines are shut down, a fresh vessel of the same kind goes on the pad as loaded (full tanks, new engines, nothing staged), with a new launch save. The clock runs on: this is not a revert (owner, 2026-10-29).
 
-**D115: The ship model follows the real vehicle: its sensors only, published figures over derived ones, adaptive flight software but no autopilot.** *Decided, 2026-10-29 (owner; [interview-2026-10-29.md](plans/interview-2026-10-29.md)).*
+**D115: The ship model follows the real vehicle: its sensors only, published figures over derived ones, adaptive flight software, and guidance only where the real vehicle flies itself (D117).** *Decided, 2026-10-29 (owner; [interview-2026-10-29.md](plans/interview-2026-10-29.md)).*
 - Sensors: "ONLY add things the real vehicle has." What nothing real measures shows as a dash outside debug mode.
 - Published wins: where a derived value disagrees with a sourced one, the model's inputs change until it reproduces the source (recorded). Inconsistencies with the real Falcon 9 are bugs.
 - Readings carry real noise, drift and outages only where they matter; elsewhere a value shown to its sensor's significant figures stands for its uncertainty. "I really would not like flat out wrong measurements in most cases." Estimates where appropriate.
-- Built-in flight software is adaptive functions reacting to the vehicle's state (engine-out re-trim, launch-commit checks, propellant utilisation, the navigation filter), not guidance: the player flies.
+- Built-in flight software is adaptive functions reacting to the vehicle's state (engine-out re-trim, launch-commit checks, propellant utilisation, the navigation filter), not guidance: the player flies, except where the real vehicle flies itself (D117: the booster's return, Dragon's autonomous docking).
 - Fidelity next: powered components heat their parts (an engine off heats nothing), Dragon's coolant loop and radiators; per-engine gimbals with the engine-out response and hard starts; O₂ / N₂ tanks through regulators and leaks, suits abstract.
 
 **D116: Crew limits are doses: integrated over time, lethal past a threshold drawn for each crew member, no injuries.** *Decided, 2026-10-29 (owner); the numbers are the lead's logical defaults.*
@@ -496,14 +503,27 @@ The player flies everything by hand for now (including a booster landing). Scrip
 - **One rule for every hazard:** each crew member carries a dose per hazard. It grows by `dt / T(x)`, where `T(x)` is how long level `x` can be survived, and it does not shrink. They die when it passes their threshold. Below that they are well: no injuries and no impairment, only the alarms and the menus' readings as it rises.
 - **Thresholds are statistical.** Each crew member draws one per hazard when the craft is placed on the pad: lognormal around 1, σ 0.3 (E), seeded like failures (D105), so a flight replays the same. No instant deaths: every `T` is finite, so even a spike takes time to kill.
 - **Acceleration:** `T(g)` by axis is NASA-STD-3001 Vol. 2's limit duration for that level, times 3 (E: the standard is the no-injury limit, and the lethal one is rougher). Sideways is still judged against the more tolerant axis.
-- **Radiation:** the absorbed dose (Gy), integrated, against LD50/60 ≈ 4.5 Gy (E, untreated acute radiation syndrome). It lands when radiation enters the ship model (open question 2).
+- **Radiation:** the absorbed dose (Gy), integrated, against LD50/60 ≈ 4.5 Gy (E, untreated acute radiation syndrome). It lands when radiation enters the ship model (open question 1).
 - **Air:** the same rule for low O₂ partial pressure and high CO₂ (E: minutes at the red limits of the Crew menu, which are rough physiology).
+
+**D117: Foundations first, then Crew Dragon and the booster's return flown end to end; what flies itself in reality flies itself in the game.** *Decided, 2026-10-29 (owner; [interview-2026-10-29-next.md](plans/interview-2026-10-29-next.md)). Refines D115.*
+- Order: the fidelity review's foundations come before D115's fidelity work ([fidelity-review-2026-10-29.md](plans/fidelity-review-2026-10-29.md) §4). They are, in order: the vessel's state split and merged by construction, one mass truth, and flight software that reads only `Knowledge`.
+- Then two flights end to end, in parallel: Crew Dragon to the ISS and back, and the Falcon 9 booster's return (a landing zone first, the droneship later).
+- After separation the booster is flown by its own flight software (boostback, entry and landing burns), as the real one is, reading only what its sensors know. Later it becomes a ship-OS program the player can read and edit (pillar 4).
+- Dragon's rendezvous and docking have three levels the player picks. "2 can be activated if wanted, or you can switch on 1 and only have auto burn completion, or you can go fully 3":
+  - autonomous, as the real Dragon (the crew can take over);
+  - the player plans the burns, the burns run themselves, and the player hand-flies the final approach;
+  - fully manual.
+
+**D118: Things are built from a few thousand abstract components, materials and factories, the same way on Earth and in colonies.** *Direction, 2026-10-29 (owner; [interview-2026-10-29-next.md](plans/interview-2026-10-29-next.md)). A later roadmap goal: nothing is built now.*
+- "We define a few thousand basic components, new ones for various tech levels, and they are relatively abstracted (not a single bolt, but rather a certain type of turbopump, not a specific brand of solar cell but rather a standard solar cell)."
+- "Then we have entries for things like materials, time to construct, multi-purpose factories (for colonies), etc, and everything is built to work off a similar system on earth and on a colony except in a colony you need far more manufacturing from scratch." Building it yourself will eventually be the only way to build anything in a colony.
+- How it fits D101's generators (a part's physics) and D019's colonies is still to be worked out.
 
 ## Open questions
 
-1. What kind of organization the player leads (D027).
-2. Radiation in the ship model (dose, single-event upsets), and how the career's knowledge of a design's reliability grows (D105).
-3. The crew model beyond its limits (D116): skills, tasks, who flies.
-4. The colony design (D019).
-5. Which model the player's AI agent uses and what it costs the player (D044).
-6. Motion-model tunables: the cutoff threshold, opening angle, anchor hysteresis, and choice of coast integrator.
+1. Radiation in the ship model (dose, single-event upsets), and how the career's knowledge of a design's reliability grows (D105).
+2. The crew model beyond its limits (D116): skills, tasks, who flies.
+3. The colony design (D019, D118).
+4. Which model the player's AI agent uses and what it costs the player (D044).
+5. Motion-model tunables: the cutoff threshold, opening angle, anchor hysteresis, and choice of coast integrator.

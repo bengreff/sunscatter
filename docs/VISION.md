@@ -1,6 +1,6 @@
 # Vision: Sunscatter v0.2+
 
-> A challenging, vast, scientifically honest game about designing missions, flying them and running logistics. You lead a spaceflight organization starting in 2030, and expand from Earth into the nearest 100 light-years over 1,000 years.
+> A challenging, vast, scientifically honest game about designing missions, flying them and running logistics. You found an aerospace startup in 2030 (D027) and expand it from Earth into the nearest 100 light-years over 1,000 years.
 
 This is not a casual game. The target is several steps beyond KSP in realism. It is complex enough that a player's own AI agent, connected to the game, acts as the tutorial and assistant.
 

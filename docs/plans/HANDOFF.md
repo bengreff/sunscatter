@@ -2,16 +2,12 @@
 
 A SessionStart hook loads this file automatically after `/clear` or at startup. It is kept current by `/handoff`.
 
-*Updated 2026-10-29 (evening): the fix list done, the SEQUENCE and PLUME-ALTITUDE agents landed, the FIDELITY review written. Nothing running.*
+*Updated 2026-10-29 (late): the owner's answers recorded (D117, D118, D027). FOUNDATION (F1) and QUICKFIX are being launched.*
 
 ## Your first job
 
-1. Get the owner's answers. These were asked at the end of the session; the answers may be in the first message:
-   - Should the fidelity review's three foundations ([fidelity-review-2026-10-29.md](fidelity-review-2026-10-29.md) §4) come before D115's fidelity work? The lead recommends yes.
-   - Plume: soot 0.5 % for the main nozzle (Ross's 2 % includes the gas generator's exhaust, which the Merlin vents through its own pipe)? The exit temperature from the agent's CEA-method runs until CRUCIBLE gives each engine's figure?
-   - SEQUENCE's defaults ([fixes-2026-10-28.md](fixes-2026-10-28.md), Open for the owner): after a pad abort Liftoff is next again; an edit to a stage already run is refused.
-   - The parachute's q / DESIGN q flicker on the pad: is it still seen? It has not been reproduced since f57da59.
-2. Then work through "What is next" in the order the answers give.
+1. The owner answered the open questions on 2026-10-29 ([interview-2026-10-29-next.md](interview-2026-10-29-next.md)). The decisions are D117 (the order and who flies what), D118 (the later roadmap for building) and D027 (the player is an aerospace startup), and D114 gains the pad abort.
+2. Check on the two agents (FOUNDATION and QUICKFIX; briefs in this folder), then work through "What is next".
 
 ## State
 
@@ -25,19 +21,31 @@ A SessionStart hook loads this file automatically after `/clear` or at startup. 
 
 ## What is next
 
-1. The owner's answers (above).
-2. Quick fixes:
-   - Launch abort also shuts the Merlins down.
-   - Dragon's tank loading against the SuperDraco's chamber pressure (D115: published wins).
-   - Lock the stages already run in the stage editor.
-   - `docs/features/parts.md`'s "Not done" list is out of date.
-3. If approved, the foundations (review §4):
-   - split and merge vessel state by construction (fields are still copied whole: crew, buses, gimbal direction, pressure flag);
-   - one mass truth (each tank's liquid position feeds the mass model);
-   - the flight software reads what the sensors know.
-4. The interview's queue: planned burns for craft of parts (`PlanError::PartsUnsupported`); the booster after MECO (no vacuum relight; separation inside 1 s of MECO); Falcon 9 inconsistencies (the legs' 173 kg against ~500 kg published; the U/E rows of `falcon9.md`).
-5. D115's fidelity: sensors, adaptive functions, powered components' heat (revises D077: update it and its citations in the same commit), per-engine gimbals, O₂ / N₂ tanks, noise only where needed.
-6. The plume's rest; D116's doses; GLOW, CLOUDS; the Crew mission (docking first).
+1. **QUICKFIX** ([brief-quickfix.md](brief-quickfix.md)):
+   - Launch abort shuts the Merlins down;
+   - Dragon's tanks at the real regulated pressure;
+   - the pad abort puts a fresh vessel on the pad (D114);
+   - the stage editor locks the stages already run;
+   - `parts.md`'s "Not done" list.
+2. **The foundations, in order** (D117; the review's §4):
+   - F1: the vessel's state split and merged by construction (FOUNDATION, [brief-foundation.md](brief-foundation.md));
+   - F2: one mass truth, given to a fresh agent after F1;
+   - F3: the flight software reads `Knowledge`.
+3. **Then two flights end to end, in parallel** (D117):
+   - **Crew Dragon to the ISS and back:** the capsule–trunk joint and the entry; the abort tests; water and splashdown with D116's doses; docking at three autonomy levels.
+   - **The booster's return:** the vacuum relight and separation after MECO; the booster flown by its own flight software through the boostback, entry and landing burns; retropropulsion; a landing zone first.
+4. The interview's older queue:
+   - planned burns for craft of parts (`PlanError::PartsUnsupported`), needed for Dragon's phasing burns;
+   - the Falcon 9 inconsistencies (the legs' mass, `falcon9.md`'s U/E rows).
+5. D115's fidelity, after the foundations:
+   - sensors;
+   - adaptive functions;
+   - powered components' heat (this revises D077: update it and its citations in the same commit);
+   - per-engine gimbals;
+   - O₂ / N₂ tanks;
+   - noise only where needed.
+6. The plume's rest (the MECO cloud, the shock cells), GLOW, CLOUDS.
+7. Later roadmap, nothing built now: the career as a startup (D027), with D118's components and factories.
 
 ## Open for the owner (older)
 
