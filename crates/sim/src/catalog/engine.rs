@@ -18,8 +18,9 @@ use crate::vessel::G0;
 use glam::DVec3;
 use serde::{Deserialize, Serialize};
 
-/// What a published number may override on an engine.
-pub const OVERRIDABLE: &[&str] = &["thrust_vac", "thrust_sl", "isp_vac", "isp_sl"];
+/// What a published number may override (or give: the chamber pressure)
+/// on an engine.
+pub const OVERRIDABLE: &[&str] = &["thrust_vac", "thrust_sl", "isp_vac", "isp_sl", "chamber_pressure"];
 
 /// Unverified performance (sandbox engines, D101): published numbers win.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -171,6 +172,7 @@ impl EngineParams {
             nozzle_heat_fraction: self.nozzle_heat_fraction,
             exit_area: math::PI * self.exit_diameter * self.exit_diameter / 4.0,
             throat_area: math::PI * self.throat_diameter * self.throat_diameter / 4.0,
+            chamber_pressure: published.get("chamber_pressure").map_or(0.0, |s| s.0),
             pos: DVec3::ZERO,
             dir: DVec3::Z,
         })

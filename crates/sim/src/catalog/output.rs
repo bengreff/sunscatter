@@ -158,6 +158,10 @@ pub struct EngineData {
     /// (`systems::exhaust`).
     #[serde(default)]
     pub throat_area: f64,
+    /// Chamber pressure at full thrust (Pa, published; 0: not given). A
+    /// pressure-fed engine's tanks must exceed it (`craft::build::fed`).
+    #[serde(default)]
+    pub chamber_pressure: f64,
     /// Gimbal point and thrust direction (the force on the craft), part frame.
     pub pos: DVec3,
     pub dir: DVec3,

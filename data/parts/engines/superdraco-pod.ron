@@ -26,5 +26,6 @@
         "thrust_sl": (71.0e3, "P: SpaceX 2014, 16,000 lbf, falcon9.md §2.3"),
         "thrust_vac": (73.0e3, "E: sea-level thrust over the 235 s / 241 s Isp ratio; falcon9.md §2.3"),
         "isp_vac": (241.0, "E: 235 s at sea level (unsourced), vacuum estimate; falcon9.md §2.3"),
+        "chamber_pressure": (6.9e6, "P: 1,000 psi (NSF and AvWeek, 2014); falcon9.md §2.3"),
     },
 )

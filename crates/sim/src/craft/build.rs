@@ -96,6 +96,7 @@ pub fn build(file: &AssemblyFile, catalog: &Catalog, ctx: &Ctx) -> Result<Assemb
     }
     let mut report = report(&parts, &components, &ship, &primitives);
     report.contradictions.extend(checked);
+    report.contradictions.extend(underfed(&ship));
     let def = assemble(file, &parts, &components, primitives, ship);
     Ok(Assembly { def, report })
 }
@@ -602,4 +603,64 @@ pub fn ship_aggregate(spec: &mut CraftFile, ship: &ShipDef, crew: u32) {
     let capacity: f64 = ship.regions().iter().map(|r| r.1).sum();
     spec.propellant = PropellantFile { mass: ship.loaded().min(capacity), capacity };
     spec.crew = crew;
+}
+
+/// A pressure-fed engine's injector pressure drop as a share of its
+/// chamber pressure (E: 15–25 % keeps the combustion from coupling with the
+/// feed system, chugging; Sutton & Biblarz, *Rocket Propulsion Elements*,
+/// on injectors; 20 % picked).
+pub const INJECTOR_DROP: f64 = 0.2;
+
+/// Whether a pressure-fed engine whose chamber runs at `chamber` (Pa) is
+/// fed by tanks at `feed` (Pa): only a feed above the chamber plus the
+/// injector's drop pushes the propellant in. A chamber pressure not given
+/// (0) is not checked.
+pub fn fed(feed: f64, chamber: f64) -> bool {
+    chamber <= 0.0 || feed > chamber * (1.0 + INJECTOR_DROP)
+}
+
+/// The craft check of every pressure-fed engine ([`fed`]) against the
+/// lowest loading pressure of the tanks feeding it: one line for each
+/// engine fed below its chamber.
+pub fn underfed(ship: &ShipDef) -> Vec<String> {
+    let mut out = Vec::new();
+    for e in ship.engines.iter().filter(|e| e.data.cycle == crate::catalog::Cycle::PressureFed) {
+        let tanks = e.feeds.iter().flatten().filter_map(|&t| ship.tanks.get(t as usize));
+        let Some(t) = tanks.min_by(|a, b| a.load.pressure.total_cmp(&b.load.pressure)) else { continue };
+        let (feed, chamber) = (t.load.pressure, e.data.chamber_pressure);
+        if !fed(feed, chamber) {
+            out.push(format!(
+                "{}: fed at {:.2} MPa from {}, below its chamber's {:.2} MPa plus the injector's {:.0} %",
+                e.id,
+                feed / 1e6,
+                t.id,
+                chamber / 1e6,
+                100.0 * INJECTOR_DROP
+            ));
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A pressure-fed engine is fed only above its chamber pressure plus
+    /// the injector's drop; a chamber not given passes.
+    #[test]
+    fn a_pressure_fed_engine_needs_its_feed_above_its_chamber() {
+        // (feed MPa, chamber MPa, fed)
+        let cases = [
+            (16.5, 6.9, true),  // Dragon at 2,400 psi, the SuperDraco at 1,000 psi
+            (1.7, 6.9, false),  // the tanks as first loaded
+            (6.9, 6.9, false),  // no drop left for the injector
+            (8.28, 6.9, false), // exactly the drop
+            (8.3, 6.9, true),
+            (0.1, 0.0, true), // no chamber pressure given
+        ];
+        for (feed, chamber, want) in cases {
+            assert_eq!(fed(feed * 1e6, chamber * 1e6), want, "{feed} MPa into {chamber} MPa");
+        }
+    }
 }

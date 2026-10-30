@@ -3,5 +3,5 @@
 (
     id: "dragon-tank-nto", name: "Dragon NTO tank (carbon-overwrapped titanium sphere)", era: 2019, provisional: true,
     generator: Component(envelope: Sphere(0.526),
-        equipment: Tank(fluid: "NTO", pressure: 1.7e6, safety_factor: 1.5, material: "ti-6al-4v", min_gauge: 0.0015, ullage: 0.10)),
+        equipment: Tank(fluid: "NTO", pressure: 1.65e7, safety_factor: 1.5, material: "ti-6al-4v", min_gauge: 0.0015, ullage: 0.10)),
 )

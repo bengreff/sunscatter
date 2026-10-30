@@ -55,6 +55,11 @@ fn the_falcon_9_builds_with_its_totals() {
     assert_eq!(ship.thrusters.iter().map(|t| t.nozzles.len()).sum::<usize>(), 8 + 8 + 16, "nitrogen pods, Dracos");
     assert_eq!(ship.sequence.len(), 7);
     assert_eq!(a.def.parts[0].crew, 4);
+    // Dragon's tanks push the propellant into the SuperDracos' chambers
+    // (6.9 MPa, P) through their injectors (D115: published wins).
+    assert!(ship.engines.iter().filter(|e| e.id.contains("superdraco")).all(|e| e.data.chamber_pressure == 6.9e6));
+    let underfed = crate::craft::build::underfed(&ship);
+    assert!(underfed.is_empty() && !r.contradictions.iter().any(|c| c.contains("fed at")), "{underfed:?}");
 }
 
 /// The legs deployed (the booster's landing configuration): four feet,

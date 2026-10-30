@@ -1,8 +1,9 @@
 // Catalog entry (D101; sim::catalog). falcon9.md §5.2: pressure transducers on
-// every tank (P: present), ~0.1 % of full scale (E: class). A 3.4 MPa
-// transducer on a pressure-fed propellant tank (Dragon's at 1.7 MPa): 3.4 kPa.
+// every tank (P: present), ~0.1 % of full scale (E: class). A 5,000 psi
+// (34.5 MPa) transducer on a pressure-fed propellant tank (Dragon's at
+// 16.5 MPa, falcon9.md §3.2): 34.5 kPa.
 (
-    id: "high-pressure-transducer", name: "Tank pressure transducer (3.4 MPa)", era: 2010, provisional: true,
+    id: "high-pressure-transducer", name: "Tank pressure transducer (34.5 MPa)", era: 2010, provisional: true,
     generator: Component(envelope: Cylinder(0.02, 0.08), power: 1.0,
-        equipment: Sensor(quantity: "pressure", accuracy: 3.4e3, rate_hz: 100.0, mass: 0.3)),
+        equipment: Sensor(quantity: "pressure", accuracy: 3.45e4, rate_hz: 100.0, mass: 0.3)),
 )
