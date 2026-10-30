@@ -2,7 +2,7 @@
 //! (t TDB) against the GPS and ISS numbers, a site's clock against TT, and
 //! determinism (chunked = single pass, save/load).
 
-use sim::craft::test_craft;
+use sim::craft::small;
 use sim::ephem::Ephemeris;
 use sim::kepler::Elements;
 use sim::relativity::tdb_minus_tt;
@@ -29,11 +29,11 @@ fn gps(w: &World) -> (Vessel, f64) {
     let (r, v) =
         Elements { a, e: 0.0, i: 55f64.to_radians(), raan: 0.3, argp: 0.0, mean_anomaly: 0.0 }.to_state(earth.gm);
     let period = std::f64::consts::TAU * (a * a * a / earth.gm).sqrt();
-    (Vessel::coasting(w, VesselId(1), t0(), earth.node, r, v, test_craft()), period)
+    (Vessel::coasting(w, VesselId(1), t0(), earth.node, r, v, &small::rocket()), period)
 }
 
 fn equator(w: &World) -> Vessel {
-    Vessel::landed_at(w, VesselId(2), "Earth", 0.0, 0.0, t0(), test_craft())
+    Vessel::landed_at(w, VesselId(2), "Earth", 0.0, 0.0, t0(), &small::rocket())
 }
 
 #[test]
@@ -100,7 +100,7 @@ fn an_iss_clock_loses_25_microseconds_a_day_against_the_site() {
     let (r, v) = el.to_state(earth.gm);
     let period = std::f64::consts::TAU * (a * a * a / earth.gm).sqrt();
     let mut site = SiteClock::reading_tt(earth.node, fixed, t0());
-    let mut iss = Vessel::coasting(&w, VesselId(3), t0(), earth.node, r, v, test_craft());
+    let mut iss = Vessel::coasting(&w, VesselId(3), t0(), earth.node, r, v, &small::rocket());
     iss.set_clock_offset(&w, site.offset_at(&w, t0()));
     // 16 orbits, about a day: the orbital periodic terms come back.
     let end = t0().add_seconds(16.0 * period);
@@ -146,9 +146,10 @@ fn live_ticks_carry_the_clock() {
     let w = world();
     let full = Controls { throttle: 1.0, sas: true, ..Controls::default() };
     let mut pad = equator(&w);
-    pad.set_debug(&w, true);
     let (mut sat, _) = gps(&w);
     for ship in [&mut pad, &mut sat] {
+        ship.set_debug(&w, true);
+        assert_eq!(ship.next_stage(&w).unwrap().0, "Ignition");
         let mut single = ship.clone();
         let before = ship.proper_time_offset();
         let start = ship.time;
