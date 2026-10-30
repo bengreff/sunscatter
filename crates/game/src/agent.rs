@@ -121,7 +121,8 @@ fn flight_tools() -> Vec<Tool> {
         ),
         t(
             "switch_vessel",
-            "Go aboard a vessel: it becomes the active vessel and your control location.",
+            "Fly a vessel: it becomes the active vessel, and your control location is aboard it if it is crewed, \
+             mission control if it is not (as for the player).",
             schema(json!({"id": id}), &["id"]),
         ),
         t(
@@ -335,8 +336,14 @@ fn run(
         }
         "switch_vessel" => {
             let id = vessel_id(args)?;
-            sim.index_of(id).ok_or("no such vessel")?;
-            (json!({"aboard": id.0}), vec![Effect::Command(GameCommand::Switch(id)), Effect::Station(false)])
+            let i = sim.index_of(id).ok_or("no such vessel")?;
+            // Aboard a crewed vessel; a probe is flown from mission control.
+            let crewed = sim.fleet[i].crew() > 0;
+            let at = comms.name_of(comms::location_rule(false, id, crewed, comms.mission_control));
+            (
+                json!({"active_vessel": id.0, "location": at}),
+                vec![Effect::Command(GameCommand::Switch(id)), Effect::Station(false)],
+            )
         }
         "go_to_mission_control" => (json!({"location": "mission control"}), vec![Effect::Station(true)]),
         "set_plan" => set_plan(args, sim, comms)?,
@@ -786,6 +793,17 @@ mod tests {
         assert!(matches!(r, ToolResult::Err(e) if e.contains("no signal")));
         let (r, _) = answer("set_controls", &json!({"id": 999}), &sim, &comms, &Default::default());
         assert!(matches!(r, ToolResult::Err(e) if e.contains("no such vessel")));
+    }
+
+    #[test]
+    fn a_probe_is_flown_from_mission_control() {
+        let (sim, comms) = setup();
+        let probe = sim.fleet[2].id();
+        assert_eq!(sim.fleet[2].crew(), 0);
+        let (r, e) = answer("switch_vessel", &json!({"id": probe.0}), &sim, &comms, &Default::default());
+        assert_eq!(e, vec![Effect::Command(GameCommand::Switch(probe)), Effect::Station(false)]);
+        let site = comms.name_of(Location::Site(comms.mission_control));
+        assert!(matches!(r, ToolResult::Ok(v) if v["location"] == site.as_str() && v["active_vessel"] == probe.0));
     }
 
     #[test]

@@ -114,7 +114,12 @@ impl Comms {
 
     /// The name of the location.
     pub fn location_name(&self) -> String {
-        match self.location {
+        self.name_of(self.location)
+    }
+
+    /// A control location's name: the site's, or "aboard Vessel n".
+    pub fn name_of(&self, location: Location) -> String {
+        match location {
             Location::Site(i) => self.data.sites[i].name.clone(),
             Location::Vessel(id) => format!("aboard Vessel {}", id.0),
         }
