@@ -343,17 +343,13 @@ impl ShipState {
 
     /// Gas in the bottles (kg).
     pub fn gas(&self, def: &ShipDef) -> f64 {
-        (self.bottles.iter().zip(&def.bottles))
-            .map(|(s, b)| s.moles * molar_mass(&b.gas))
-            .sum()
+        (self.bottles.iter().zip(&def.bottles)).map(|(s, b)| s.moles * molar_mass(&b.gas)).sum()
     }
 
     /// The pressurant in the tanks' ullages (kg): the gas the bottles let
     /// in stays aboard until it is vented (`sim::systems::plumbing`).
     pub fn ullage_gas(&self, def: &ShipDef) -> f64 {
-        (self.tanks.iter().zip(&def.tanks))
-            .map(|(s, t)| s.ullage_moles * molar_mass(&t.load.pressurant))
-            .sum()
+        (self.tanks.iter().zip(&def.tanks)).map(|(s, t)| s.ullage_moles * molar_mass(&t.load.pressurant)).sum()
     }
 
     /// Everything the vessel carries that it can spend (kg): its propellant,

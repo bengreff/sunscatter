@@ -223,7 +223,8 @@ impl Trajectory {
         // flown live, and the coast after it restarts from the ship).
         let limbo = limbo.map(|mut l| {
             let state = (last.anchor, last.s.r, last.s.v);
-            let prev_law = prev.limbo().and_then(|p| p.law.as_deref()).filter(|_| matches!(prev.kind, SegmentKind::Coast));
+            let prev_law =
+                prev.limbo().and_then(|p| p.law.as_deref()).filter(|_| matches!(prev.kind, SegmentKind::Coast));
             l.law = prev_law.and_then(|law| {
                 let heat = l.law_heat(world, t, state)?;
                 Some(Box::new(law.continued(l.ship_def()?, end.t, &heat)))

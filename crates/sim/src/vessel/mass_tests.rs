@@ -193,7 +193,8 @@ fn the_segments_mass_is_the_ships_at_every_lattice_point() {
     let mut v = Vessel::coasting(&w, VesselId(1), t0(), earth.node, r, vel, &craft);
     let s = v.ship.as_mut().unwrap();
     s.tanks[lox].liquid *= 0.3;
-    s.tanks[lox].liquid_k = plumbing::liquid_of(&def.tanks[lox]).unwrap().saturation_temperature(def.tanks[lox].pressure);
+    s.tanks[lox].liquid_k =
+        plumbing::liquid_of(&def.tanks[lox]).unwrap().saturation_temperature(def.tanks[lox].pressure);
     s.tanks[lox].ullage_moles = 0.0;
     v.start_coast(&w);
     let m0 = v.mass();

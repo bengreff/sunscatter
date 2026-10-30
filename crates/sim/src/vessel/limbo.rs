@@ -242,7 +242,13 @@ impl Limbo {
 
     /// The law of a craft of parts' `ship` from `t` on (local time 0 there)
     /// at `state`, held by this pointing; `None` without a ship.
-    pub fn law_from(&self, world: &World, t: Epoch, state: (NodeId, DVec3, DVec3), ship: &ShipState) -> Option<CoastLaw> {
+    pub fn law_from(
+        &self,
+        world: &World,
+        t: Epoch,
+        state: (NodeId, DVec3, DVec3),
+        ship: &ShipState,
+    ) -> Option<CoastLaw> {
         let heat = self.law_heat(world, t, state)?;
         Some(CoastLaw::start(self.ship_def()?, ship, &heat))
     }
