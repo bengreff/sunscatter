@@ -2,15 +2,15 @@
 
 A SessionStart hook loads this file automatically after `/clear` or at startup. It is kept current by `/handoff`.
 
-*Updated 2026-10-30 (night). Three agents are running: ONEKIND-2, MISSION-2 and DOCS-2.*
+*Updated 2026-10-30 (night). Two agents are running: ONEKIND-2 and MISSION-2. DOCS-2 has finished.*
 
 ## Your first job
 
 1. Take the three agents' reports as they arrive. Each reports through a message with its commits, what is left and its questions. Their briefs hold their State.
    - **ONEKIND-2** ([brief-onekind.md](brief-onekind.md)) moves the ~55 remaining test files off the test craft onto `craft::small` or the Falcon 9, and rebuilds `craft::stress` on parts. It does **not** delete the made-up path. The lead decided that comes only after PLANNER, so the game never loses planned burns.
    - **MISSION-2** ([brief-mission.md](brief-mission.md)) flies the Falcon 9 through stage separation in a headless game via MCP, then writes the mission-test guide in `docs/technical/testing.md`.
-   - **DOCS-2** ([brief-docs.md](brief-docs.md)) brings `docs/systems/` up to D121–D127 and applies MISSION's listed doc changes.
-2. When a slot frees (cap: 3 agents plus the lead), launch **PLANNER**: next steps, item 1.
+   - **DOCS-2: done** (67bf95d, 5a930dc, ae6bf93, a068d59). The system docs match today's decisions, decided against built; `technical/ship-systems.md` is split into ten files; comms.md and proper-time.md were extracted. Its Left is in [brief-docs.md](brief-docs.md): the other archived specs, stale status lines, the README's images.
+2. A slot is free (cap: 3 agents plus the lead): launch **PLANNER** (next steps, item 1).
 
 ## State
 
@@ -41,7 +41,9 @@ A SessionStart hook loads this file automatically after `/clear` or at startup. 
      - `estimate::ready` against `program::can_start`;
      - an abort needs enough escape thrust;
      - fail-safe shutdown for a lost controller (D123);
-     - SAS and the holds on coasts through the flight layer.
+     - SAS and the holds on coasts through the flight layer;
+     - D034's routing: a crewed vessel must not command probes (it still does);
+     - D123's switch to turn random failures off (none exists; every vessel draws its fates).
    - **ADVANCE:** one advance law per subsystem.
    - **PERF:** aero once per tick; thermal at its own rate; analytic coast heat; a spatial index for the geometry scans; per-vessel threads with bit-identical cross-machine tests (D127).
    - **DEBRIS:** the controllability check; ballistic lumps; designs precomputed at build.
