@@ -260,7 +260,7 @@ fn live_ticks_converge_in_a_few_sweeps() {
 fn with_nodes() -> (&'static ThermalNetwork, Vec<f64>) {
     let d = test_craft().design();
     let mut cap = vec![0.0; d.nodes()];
-    d.node_capacity(test_craft().spec.propellant.capacity, &mut cap);
+    d.node_capacity(&crate::craft::design::Aboard::Fill(test_craft().spec.propellant.capacity), &mut cap);
     (&d.network, cap)
 }
 

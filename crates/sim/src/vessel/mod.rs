@@ -30,7 +30,9 @@
 //!
 //! The vessel carries its propellant (burned by the engine in powered ticks
 //! and in planned burns) and the **debug mode** flag (D064): infinite
-//! propellant, no overheating, infinite impact tolerance, all together.
+//! propellant, no overheating, infinite impact tolerance, all together. A
+//! craft of catalog parts holds its propellant only in its ship state's
+//! tanks and bottles (F2): every total is derived from them.
 
 mod aerothermal;
 mod anchor;
@@ -49,6 +51,8 @@ mod hold;
 mod id;
 mod live;
 use live::{attitude_mode, Checked};
+mod mass;
+pub(crate) use mass::ship_props;
 pub mod limbo;
 pub mod pointing;
 mod segment;
@@ -81,7 +85,7 @@ pub use segment::{coast_tolerance, CoastStart, EndKind, Sample, Segment, Segment
 pub use split::{Breakup, SplitPlan};
 pub use trajectory::Trajectory;
 
-use crate::craft::{CraftParams, MassProps};
+use crate::craft::CraftParams;
 use crate::forces::{ambient_pressure, DragModel};
 use crate::frame::{BodyFixed, NodeId, Vec3};
 use crate::time::Epoch;
@@ -198,7 +202,9 @@ pub struct Vessel {
     /// People aboard (0: an uncrewed probe, controlled from elsewhere with
     /// light delay, D034, D067).
     crew: u32,
-    /// Propellant at `time` (kg).
+    /// A made-up craft's propellant at `time` (kg). A craft of parts holds
+    /// its own only in its ship state (`ship`): this stays 0 and
+    /// [`Vessel::propellant`] sums the tanks and bottles.
     propellant: f64,
     /// Debug mode (D064): infinite propellant, no overheating, infinite
     /// impact tolerance.
@@ -250,7 +256,7 @@ pub struct Vessel {
     #[serde(default, skip_serializing_if = "crate::proximity::BubbleState::is_idle")]
     bubble: crate::proximity::BubbleState,
     /// A craft of catalog parts: its tanks, engines and systems
-    /// ([`crate::craft::state`]); `propellant` is their consumables' total.
+    /// ([`crate::craft::state`]): the only truth of its propellant.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     ship: Option<crate::craft::state::ShipState>,
     /// The other pieces of the split this vessel came from, while they
@@ -339,27 +345,6 @@ impl Vessel {
         (t, self.craft.design().volume.nodes[i].centre)
     }
 
-    /// Mass at the vessel's time (kg): dry plus propellant.
-    pub fn mass(&self) -> f64 {
-        self.craft.mass.dry_mass + self.propellant
-    }
-
-    /// Propellant at the vessel's time (kg).
-    pub fn propellant(&self) -> f64 {
-        self.propellant
-    }
-
-    /// Mass, centre of mass (body axes) and inertia at the vessel's time.
-    pub fn mass_props(&self) -> MassProps {
-        match self.ship_parts() {
-            Some((def, state)) => {
-                let (slugs, points) = state.contents(def);
-                self.craft.mass.with_contents(&slugs, &points)
-            }
-            None => self.craft.mass.at(self.propellant),
-        }
-    }
-
     /// Height of the centre of mass above the ground when standing (m).
     pub fn contact_height(&self) -> f64 {
         self.mass_props().com.z - self.craft.bottom_z
@@ -396,16 +381,6 @@ impl Vessel {
         self.control.base = None;
         self.control.hold = (att.omega == DVec3::ZERO).then_some(att.q);
         self.repoint = matches!(self.phase, Phase::Coasting { .. });
-    }
-
-    /// Sets the propellant (clamped to [0, capacity]). A coast is restarted
-    /// from now with the new mass.
-    pub fn set_propellant(&mut self, world: &World, kg: f64) {
-        self.propellant = kg.clamp(0.0, self.craft.mass.capacity);
-        self.sync_ship_to_propellant();
-        if matches!(self.phase, Phase::Coasting { .. }) {
-            self.start_coast(world);
-        }
     }
 
     /// Whether the engine runs with these controls (a throttle, and
@@ -652,6 +627,8 @@ impl Vessel {
     }
 }
 
+#[cfg(test)]
+mod mass_tests;
 #[cfg(test)]
 mod sequence_tests;
 #[cfg(test)]

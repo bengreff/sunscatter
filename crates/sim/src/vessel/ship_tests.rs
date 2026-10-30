@@ -330,7 +330,6 @@ fn the_falcon_9_stages_separate_without_touching() {
             t.liquid *= 0.07;
         }
     }
-    v.propellant = ship.consumables(&def);
     v.launch = Some(VesselId(1));
     v.command(&w, &ShipCommand::Separate("stage separation".into())).unwrap();
     let plan = v.plan_breakup().unwrap();

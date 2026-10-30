@@ -157,7 +157,9 @@ fn the_test_rocket_draws_part_by_part() {
     let f = at(&v, 1.0);
     assert!(f.iter().all(|x| (0.0..=1.0).contains(x)) && f[1] == 0.0 && f[3] == 0.0, "{f:?}");
     assert_eq!(at(&v, 0.0), [0.0; 4]);
-    v.set_propellant(&sim.world, 0.0);
+    for tank in 0..def.tanks.len() {
+        assert!(v.set_tank(&sim.world, tank, 0.0));
+    }
     assert_eq!(at(&v, 1.0), [0.0; 4], "no propellant");
 }
 

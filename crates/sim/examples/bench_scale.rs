@@ -222,7 +222,7 @@ fn pieces(d: &CraftDesign, propellant: f64, n: usize) -> [f64; 4] {
     let sun = DVec3::new(1361.0, 0.0, 0.0);
     let heating = per(&mut || cell_heat_flow(&d.bake, &d.cells, Some(&air), sun, &mut scratch, &mut heat));
     let mut cap = vec![0.0; m];
-    d.node_capacity(propellant, &mut cap);
+    d.node_capacity(&sim::craft::design::Aboard::Fill(propellant), &mut cap);
     let mut state = ThermalState::uniform(c, m, 290.0);
     let node_heat = vec![0.0; m];
     let step = per(&mut || {
@@ -260,7 +260,7 @@ fn coast(w: &World, craft: &Craft, runs: usize) -> Coast {
     let (mut heat, mut scratch) = (vec![0.0; c], vec![0.0; c]);
     cell_heat_flow(&d.bake, &d.cells, None, DVec3::new(1361.0, 0.0, 0.0), &mut scratch, &mut heat);
     let mut cap = vec![0.0; m];
-    d.node_capacity(craft.spec.propellant.capacity, &mut cap);
+    d.node_capacity(&sim::craft::design::Aboard::Fill(craft.spec.propellant.capacity), &mut cap);
     let node_heat = vec![0.0; m];
     let mut state = ThermalState::uniform(c, m, 290.0);
     let mut solve = || {

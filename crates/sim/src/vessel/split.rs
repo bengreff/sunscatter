@@ -288,7 +288,7 @@ impl Vessel {
             attitude,      // the body axes and ω, in every piece
             chute,         // with the parts that carry the parachutes
             crew: _,       // by seats, the vessel's piece first (`crew`)
-            propellant: _, // the piece's tanks (else the craft's fill)
+            propellant: _, // the piece's tanks (a made-up craft: the craft's fill)
             debug,
             plan,
             tick_accel: _, // a new live start
@@ -316,8 +316,8 @@ impl Vessel {
             // A craft of parts: each item goes with its part (`craft::partition`).
             (Some(state), Some(def), Some(whole)) => {
                 let parts: Vec<u32> = design.parts.iter().map(|p| p.id).collect();
-                let mine = state.partition(&parts, whole, def, own);
-                (mine.consumables(def), Some(mine))
+                // Its propellant is its tanks' and bottles' (F2).
+                (0.0, Some(state.partition(&parts, whole, def, own)))
             }
             _ => {
                 debug_assert!(ship.is_none(), "a piece of a craft of parts is a craft of parts");

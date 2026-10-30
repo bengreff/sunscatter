@@ -276,7 +276,9 @@ impl Vessel {
     /// flies live ticks with contact (m): its farthest contact point plus
     /// [`contact::NEAR`]. Coasts end here.
     pub fn live_height(&self) -> f64 {
-        self.craft.contact_reach(self.propellant) + contact::NEAR
+        let com = self.mass_props().com;
+        let reach = self.craft.contacts.iter().map(|c| (c.pos - com).length()).fold(0.0, f64::max);
+        reach + contact::NEAR
     }
 
     /// Becomes live (ticks) from `(anchor, r, v)` at the vessel's time.
@@ -548,7 +550,7 @@ impl Vessel {
         let TickEnd { r: r1, lo, v: v1, touching, delta } = end;
         self.chute = chute_now;
         self.hold_effectors(ship.as_ref(), &cmd, &fins_held);
-        let (engine_heat, propellant, effects) = match &ship {
+        let (engine_heat, aboard, effects) = match &ship {
             Some(tick) => {
                 let aero_loads = aero.as_ref().map(|a| a.loads(att0));
                 let (omega0, ground) = (before.0.omega, contact_body);
@@ -568,20 +570,20 @@ impl Vessel {
                     ground,
                     thrust_dir: cmd.thrust_dir,
                 };
-                let (left, effects) = self.ship_after_tick(world, tick, cmd.rcs, &m, controls.throttle);
-                (tick.heat, left, effects)
+                let effects = self.ship_after_tick(world, tick, cmd.rcs, &m, controls.throttle);
+                (tick.heat, self.aboard(), effects)
             }
             None => {
                 let engine = self.craft.engine;
                 let mdot = out.mdot + cmd.rcs.dot(self.craft.rcs_flow);
                 let mdot = mdot + self.systems.consumables.boil_off;
                 let left = if self.debug { self.propellant } else { (self.propellant - mdot * dt).max(0.0) };
-                (engine.heat(out.thrust, out.mdot), left, Vec::new())
+                self.propellant = left;
+                (engine.heat(out.thrust, out.mdot), crate::craft::design::Aboard::Fill(left), Vec::new())
             }
         };
         let heat_tick = aero.as_ref().zip(air.as_ref());
-        aerothermal::live_step(design, &mut self.thermal, heat_tick, att0, sun_body, engine_heat, propellant, dt);
-        self.propellant = propellant;
+        aerothermal::live_step(design, &mut self.thermal, heat_tick, att0, sun_body, engine_heat, &aboard, dt);
         self.time = until;
         self.clock.add(self.time, delta);
         self.phase = Phase::Powered { anchor, r: r1, v: v1 };

@@ -45,7 +45,7 @@ fn main() {
     let d = c.design();
     let net = &d.network;
     let mut cap = vec![0.0; d.nodes()];
-    d.node_capacity(c.spec.propellant.capacity, &mut cap);
+    d.node_capacity(&sim::craft::design::Aboard::Fill(c.spec.propellant.capacity), &mut cap);
     let node_heat = vec![0.0; d.nodes()];
     println!("interior: {} volume nodes", d.nodes());
     let mut state = ThermalState::uniform(c.cells.cells.len(), d.nodes(), 290.0);

@@ -142,7 +142,7 @@ fn lattice(w: &World, craft: &sim::craft::Craft, runs: usize) -> [f64; 4] {
 fn run(name: &str, design: std::sync::Arc<CraftDesign>, propellant: f64, runs: usize) {
     let m = design.nodes();
     let mut capacity = vec![0.0; m];
-    design.node_capacity(propellant, &mut capacity);
+    design.node_capacity(&sim::craft::design::Aboard::Fill(propellant), &mut capacity);
     let case = Case { design, capacity, node_heat: vec![0.0; m] };
     let (n, unknowns) = (case.design.cells.len(), case.design.cells.len() + m);
     let sun = DVec3::new(1361.0, 0.0, 0.0);

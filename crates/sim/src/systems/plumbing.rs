@@ -33,6 +33,7 @@
 
 use super::runtime::TankRun;
 use crate::catalog::Cycle;
+use crate::craft::mass::Slug;
 use crate::craft::ship::{ShipDef, TankDef};
 use crate::craft::state::{EngineStatus, ShipState, TankState};
 use crate::fluids::{fluids, Liquid, R_GAS};
@@ -207,6 +208,74 @@ pub fn settle(run: &mut TankRun, t: &TankDef, g: &Geometry, a: f64, dt: f64) {
 /// Whether a tank's outlet is covered by its liquid (see the module).
 pub fn covered(run: &TankRun, g: &Geometry, liquid: f64) -> bool {
     liquid > 0.0 && run.drift <= cover(g)
+}
+
+/// Where a tank's liquid sits (F2; the mass model, the thermal nodes): the
+/// slug of its height, `run.drift` from the outlet along the tank (within
+/// the walls).
+pub fn slug(t: &TankDef, s: &TankState, run: &TankRun) -> Slug {
+    let g = geometry(t, s);
+    let drift = run.drift.clamp(0.0, (g.length - g.height).max(0.0));
+    Slug { mass: s.liquid, base: t.region.base + g.axis * drift, axis: g.axis, height: g.height, radius: g.radius }
+}
+
+/// Where a tank's ullage gas sits: the centroid of the tank's length the
+/// slug leaves free, below and above it (the far dome when there is none).
+pub fn ullage_centre(t: &TankDef, slug: &Slug) -> DVec3 {
+    let length = t.volume / (math::PI * t.region.radius * t.region.radius);
+    let below = (slug.base - t.region.base).dot(slug.axis).max(0.0);
+    let above = (length - below - slug.height).max(0.0);
+    if below + above <= 0.0 {
+        return t.region.base + slug.axis * length;
+    }
+    let along = (below * below * 0.5 + above * (length - 0.5 * above)) / (below + above);
+    t.region.base + slug.axis * along
+}
+
+/// What every tank and bottle holds for the thermal nodes (F2), in the
+/// volume grid's order (`ShipDef::regions`: tanks, then bottles): each
+/// liquid where it sits ([`slug`]) at its specific heat, each bottle's gas
+/// filling it at its cᵥ (cₚ/γ). The ullages' gas (kilograms) is left out.
+pub fn held(def: &ShipDef, state: &ShipState) -> Vec<crate::craft::design::Held> {
+    use crate::craft::design::Held;
+    let f = fluids();
+    let run = |i: usize| state.runtime.tanks.get(i).cloned().unwrap_or_default();
+    let liquids = (def.tanks.iter().zip(&state.tanks).enumerate()).map(|(i, (t, s))| {
+        let slug = slug(t, s, &run(i));
+        let from = (slug.base - t.region.base).dot(slug.axis);
+        let specific_heat = liquid_of(t).map_or(0.0, |l| l.specific_heat);
+        let at = slug.base + slug.axis * (0.5 * slug.height);
+        Held { mass: s.liquid, specific_heat, from, to: from + slug.height, at }
+    });
+    let regions = def.regions();
+    let gases = (def.bottles.iter().zip(&state.bottles).zip(&regions[def.tanks.len()..])).map(|((b, s), r)| {
+        let gas = f.gas(&b.gas).ok();
+        Held {
+            mass: s.moles * gas.map_or(0.0, |g| g.molar_mass),
+            specific_heat: gas.map_or(0.0, |g| g.cp / g.gamma),
+            from: 0.0,
+            to: r.0.axis.length(),
+            at: b.pos,
+        }
+    });
+    liquids.chain(gases).collect()
+}
+
+/// Every tank's liquid where it sits ([`slug`]) and the gas as point
+/// masses (each bottle's at its place, each ullage's at [`ullage_centre`]):
+/// what `MassModel::with_slugs` takes.
+pub fn contents(def: &ShipDef, state: &ShipState) -> (Vec<Slug>, Vec<(DVec3, f64)>) {
+    let f = fluids();
+    let run = |i: usize| state.runtime.tanks.get(i).cloned().unwrap_or_default();
+    let slugs: Vec<Slug> =
+        (def.tanks.iter().zip(&state.tanks).enumerate()).map(|(i, (t, s))| slug(t, s, &run(i))).collect();
+    let bottles = (state.bottles.iter().zip(&def.bottles))
+        .map(|(s, b)| (b.pos, s.moles * f.gas(&b.gas).map_or(0.0, |g| g.molar_mass)));
+    let ullages = (def.tanks.iter().zip(&state.tanks).zip(&slugs)).map(|((t, s), slug)| {
+        (ullage_centre(t, slug), s.ullage_moles * f.gas(&t.load.pressurant).map_or(0.0, |g| g.molar_mass))
+    });
+    let points = bottles.chain(ullages).collect();
+    (slugs, points)
 }
 
 /// A tank's conditions for the engines it feeds.

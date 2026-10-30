@@ -24,6 +24,7 @@ use super::limbo::Limbo;
 use super::pointing::{self, Pointing, Rule};
 use super::segment::{EndKind, SegmentEnd, SegmentKind};
 use super::{Controls, Phase, Trajectory, Vessel, LIVE_STOP, TICK};
+use crate::craft::design::Aboard;
 use crate::craft::CraftParams;
 use crate::time::Epoch;
 use crate::world::World;
@@ -296,10 +297,19 @@ impl Vessel {
         // Attitude and temperatures before pruning: control ticks read the
         // inertia, and the thermal lattice the position, at epochs after the
         // vessel's time, which the trajectory still holds.
+        // A craft of parts' mass is its ship state's at every lattice point
+        // (it vents there, F2; its segment integrates its perturbations
+        // with the mass it started with); a made-up craft's is the
+        // segment's mass law.
         let (model, dry) = (self.craft.mass, self.craft.mass.dry_mass);
+        let ship_def = self.craft.design().ship.clone();
+        let parts = |ship: Option<&crate::craft::state::ShipState>| {
+            ship.zip(ship_def.as_deref()).map(|(s, d)| super::ship_props(&model, d, s))
+        };
         let mass_now = dry + self.propellant;
-        let inertia_at = |e: Epoch| model.at(trajectory.mass_at(e).unwrap_or(mass_now) - dry).inertia;
-        let inertia_now = model.at(self.propellant).inertia;
+        let segment_inertia = |e: Epoch| model.at(trajectory.mass_at(e).unwrap_or(mass_now) - dry).inertia;
+        let held = parts(self.ship.as_ref()).map(|p| p.inertia);
+        let inertia_now = held.unwrap_or_else(|| model.at(self.propellant).inertia);
         let fly = Rails { world, trajectory, plan: &self.plan, craft: &self.craft, controls, inertia_now };
         let stop_settled;
         (reach, stop_settled) = fly.regime_stops(self.time, reach);
@@ -307,8 +317,7 @@ impl Vessel {
         let engine = self.craft.engine;
         let heat = |law: &BurnLaw| engine.heat(law.thrust, engine.mdot_max() * law.thrust / engine.thrust_vac);
         self.thermal.record_burns(&trajectory.segments, reach, heat);
-        let propellant_at = |e: Epoch| (trajectory.mass_at(e).unwrap_or(mass_now) - dry).max(0.0);
-        let ship_def = self.craft.design().ship.clone();
+        let segment_propellant = |e: Epoch| (trajectory.mass_at(e).unwrap_or(mass_now) - dry).max(0.0);
         let mut t = self.time;
         let mut stopped = false;
         let mut settled = None;
@@ -328,6 +337,11 @@ impl Vessel {
                 stopped = true;
                 break;
             }
+            // What a craft of parts holds now (its lattice steps so far).
+            let now = parts(self.ship.as_ref());
+            let propellant_at = |e: Epoch| now.map_or_else(|| segment_propellant(e), |p| p.mass - dry);
+            let inertia_at = |e: Epoch| now.map_or_else(|| segment_inertia(e), |p| p.inertia);
+            let inertia_now = now.map_or(inertia_now, |p| p.inertia);
             let fly = Rails { world, trajectory, plan: &self.plan, craft: &self.craft, controls, inertia_now };
             if e_systems.is_some() {
                 settled = fly.attitude(&mut self.attitude, &mut self.control, (t, e), &inertia_at, stop_settled);
@@ -358,7 +372,11 @@ impl Vessel {
             let mut suns = super::coast_heat::coast_suns(world, e, state, known, &self.attitude);
             suns.air = super::coast_heat::coast_air(world, e, state, known, &self.attitude, design.bake.length);
             let units = solve_units(&design, suns.suns.len() + suns.air.len());
-            let solved = aerothermal::coast_step(&design, &mut self.thermal, &suns, propellant_at(e), e, false);
+            let aboard = match (self.ship.as_ref(), ship_def.as_deref()) {
+                (Some(s), Some(d)) => Aboard::Tanks(crate::systems::plumbing::held(d, s)),
+                _ => Aboard::Fill(propellant_at(e)),
+            };
+            let solved = aerothermal::coast_step(&design, &mut self.thermal, &suns, &aboard, e, false);
             budget.charge(if solved { units } else { POINT_UNITS });
         }
         if let Some(s) = settled {
@@ -366,6 +384,9 @@ impl Vessel {
         } else if stopped {
             reach = t;
         } else {
+            let now = parts(self.ship.as_ref());
+            let inertia_at = |e: Epoch| now.map_or_else(|| segment_inertia(e), |p| p.inertia);
+            let inertia_now = now.map_or(inertia_now, |p| p.inertia);
             let fly = Rails { world, trajectory, plan: &self.plan, craft: &self.craft, controls, inertia_now };
             if let Some(s) = fly.attitude(&mut self.attitude, &mut self.control, (t, reach), &inertia_at, stop_settled)
             {
@@ -373,38 +394,17 @@ impl Vessel {
                 settled = Some(s);
             }
         }
-        // Keep the samples back to where the next frame's control resumes:
-        // a followed hold's base (up to a follow step behind), else at most
-        // a tick behind (a lattice point can fall just past the frame's end).
-        // Holds aim from the state there.
-        let follows = self.control.settled.is_some() || self.control.waiting;
-        let tick_back = reach.add_seconds(-TICK);
-        let base = self.control.base.map(|b| b.epoch).and_then(|e| {
-            if follows {
-                (reach.seconds_since(e) < 2.0 * FOLLOW_STEP).then_some(e)
-            } else {
-                Some(if e > tick_back { e } else { tick_back })
-            }
-        });
-        let seg_start = trajectory.segment_at(reach).map(|s| s.t0);
-        let keep = match (base, seg_start) {
-            (Some(b), Some(s)) if b < reach => {
-                if b > s {
-                    b
-                } else {
-                    s
-                }
-            }
-            _ => reach,
-        };
+        let keep = kept_from(&self.control, reach, trajectory);
         trajectory.prune_before(keep);
-        self.propellant = (trajectory.mass_at(reach).expect("the vessel's time is in its trajectory") - dry).max(0.0);
+        if self.ship.is_none() {
+            self.propellant =
+                (trajectory.mass_at(reach).expect("the vessel's time is in its trajectory") - dry).max(0.0);
+        }
         let delta = trajectory.proper_time_at(reach).expect("the vessel's time is in its trajectory");
         self.clock = ShipClock::at(reach, delta);
         let last = trajectory.last();
         let near_surface = matches!(last.end, Some(SegmentEnd { kind: EndKind::Surface { .. }, .. })) && at_end;
         self.time = reach;
-        self.contents_after_coast();
         if !stopped && settled.is_none() && (entry.is_some() || near_surface) {
             // In an atmosphere or close to a surface: flown in live ticks.
             self.thermal_to_now(world);
@@ -426,7 +426,35 @@ impl Vessel {
         let design = self.craft.design().clone();
         let sun = self.attitude.q.inverse() * sun;
         let sun = super::coast_heat::CoastSun::one(sun);
-        aerothermal::coast_step(&design, &mut self.thermal, &sun, self.propellant, self.time, true);
+        let aboard = self.aboard();
+        aerothermal::coast_step(&design, &mut self.thermal, &sun, &aboard, self.time, true);
+    }
+}
+
+/// Where a coast keeps its samples from, after reaching `reach`: back to
+/// where the next frame's control resumes, a followed hold's base (up to a
+/// follow step behind), else at most a tick behind (a lattice point can
+/// fall just past the frame's end). Holds aim from the state there.
+fn kept_from(control: &AttitudeControl, reach: Epoch, trajectory: &Trajectory) -> Epoch {
+    let follows = control.settled.is_some() || control.waiting;
+    let tick_back = reach.add_seconds(-TICK);
+    let base = control.base.map(|b| b.epoch).and_then(|e| {
+        if follows {
+            (reach.seconds_since(e) < 2.0 * FOLLOW_STEP).then_some(e)
+        } else {
+            Some(if e > tick_back { e } else { tick_back })
+        }
+    });
+    let seg_start = trajectory.segment_at(reach).map(|s| s.t0);
+    match (base, seg_start) {
+        (Some(b), Some(s)) if b < reach => {
+            if b > s {
+                b
+            } else {
+                s
+            }
+        }
+        _ => reach,
     }
 }
 

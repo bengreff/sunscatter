@@ -87,13 +87,13 @@ fn every_vessel_field_has_its_rule_at_a_split() {
         // A new live start, then a coast: nothing of the vessel's ticks.
         assert!(p.tick_accel.is_none() && p.rest_ticks == 0 && p.rest_mode.is_none() && !p.repoint);
         assert!(p.breakup.is_none() && matches!(p.phase, Phase::Coasting { .. }));
-        // The ship state with its parts, the propellant its consumables,
-        // the temperatures on the piece's own cells.
-        assert_eq!(p.propellant, p.ship().unwrap().consumables(&p.ship_def().unwrap()));
+        // The ship state with its parts, the propellant only its
+        // consumables (F2), the temperatures on the piece's own cells.
+        assert_eq!((p.propellant, p.propellant()), (0.0, p.ship().unwrap().consumables(&p.ship_def().unwrap())));
         let design = p.craft.design();
         assert_eq!((p.thermal.state.skin.len(), p.thermal.state.nodes.len()), (design.cells.len(), design.nodes()));
     }
-    assert!((v.propellant + b.propellant - before.propellant).abs() < 1e-9 * before.propellant);
+    assert!((v.propellant() + b.propellant() - before.propellant()).abs() < 1e-9 * before.propellant());
     // The crew with the seats, the parachutes with their parts.
     assert_eq!((v.crew(), b.crew()), (before.crew(), 0));
     assert_eq!((v.chute, b.chute), (before.chute, split::LOST_CHUTE));

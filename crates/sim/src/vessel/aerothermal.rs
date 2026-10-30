@@ -42,6 +42,7 @@ use super::burn::BurnLaw;
 use super::coast_heat::CoastSun;
 use super::segment::{Segment, SegmentKind};
 use crate::aero::{self, Flow};
+use crate::craft::design::Aboard;
 use crate::craft::CraftDesign;
 use crate::ephem::Snapshot;
 use crate::frame::{NodeId, Vec3};
@@ -167,21 +168,22 @@ pub fn shock_layer(design: &CraftDesign, flow: &Flow, air: &Air) -> Option<Shock
 }
 
 /// The nodes' heat capacities (J/K) of a coast solve, kept for its design
-/// and propellant load: a coast without burns reuses them instead of
-/// summing the tanks' volume grid at every solve (the same bits). A cache:
-/// not saved, and equal to any other (it is derived from the design and
-/// the propellant, which are compared), like [`crate::craft::DesignSlot`].
+/// and what is aboard: a coast without burns or venting reuses them
+/// instead of summing the tanks' volume grid at every solve (the same
+/// bits). A cache: not saved, and equal to any other (it is derived from
+/// the design and what is aboard, which are compared), like
+/// [`crate::craft::DesignSlot`].
 #[derive(Clone, Default)]
-struct Capacities(Option<(Arc<CraftDesign>, u64, Vec<f64>)>);
+struct Capacities(Option<(Arc<CraftDesign>, Aboard, Vec<f64>)>);
 
 impl Capacities {
-    /// The capacities of `design`'s nodes with `propellant` kg aboard.
-    fn get(&mut self, design: &Arc<CraftDesign>, propellant: f64) -> &[f64] {
-        let kept = matches!(&self.0, Some((d, p, _)) if Arc::ptr_eq(d, design) && *p == propellant.to_bits());
+    /// The capacities of `design`'s nodes with `aboard` in its tanks.
+    fn get(&mut self, design: &Arc<CraftDesign>, aboard: &Aboard) -> &[f64] {
+        let kept = matches!(&self.0, Some((d, a, _)) if Arc::ptr_eq(d, design) && a == aboard);
         if !kept {
             let mut out = vec![0.0; design.nodes()];
-            design.node_capacity(propellant, &mut out);
-            self.0 = Some((design.clone(), propellant.to_bits(), out));
+            design.node_capacity(aboard, &mut out);
+            self.0 = Some((design.clone(), aboard.clone(), out));
         }
         self.0.as_ref().map_or(&[], |c| &c.2[..])
     }
@@ -551,20 +553,20 @@ impl Buffers {
 }
 
 /// The engine's wall heat `engine_heat` (W) into the nozzle's cells (D077),
-/// no heat released in the nodes, and the nodes' capacities with
-/// `propellant` kg aboard.
-fn engine_and_nodes(design: &CraftDesign, engine_heat: f64, propellant: f64, b: &mut Buffers) {
+/// no heat released in the nodes, and the nodes' capacities with `aboard`
+/// in the tanks.
+fn engine_and_nodes(design: &CraftDesign, engine_heat: f64, aboard: &Aboard, b: &mut Buffers) {
     for &(i, share) in &design.nozzle_cells {
         b.heat[i as usize] += engine_heat * share;
     }
     b.node_heat.fill(0.0);
-    design.node_capacity(propellant, &mut b.node_capacity);
+    design.node_capacity(aboard, &mut b.node_capacity);
 }
 
 /// One live tick of heating: `state` advanced by `dt` with the flow and
 /// stagnation flux of `air` (if any), the sunlight `sun_body` (W/m², body
 /// axes) and the engine's wall heat `engine_heat` (W, into the nozzle), with
-/// `propellant` kg aboard. The flow is taken at attitude `q`.
+/// `aboard` in the tanks. The flow is taken at attitude `q`.
 #[allow(clippy::too_many_arguments)]
 pub fn live_step(
     design: &CraftDesign,
@@ -573,7 +575,7 @@ pub fn live_step(
     q: DQuat,
     sun_body: DVec3,
     engine_heat: f64,
-    propellant: f64,
+    aboard: &Aboard,
     dt: f64,
 ) {
     let mut b = Buffers::new(design);
@@ -601,15 +603,15 @@ pub fn live_step(
         }
         None => thermal::cell_heat_flow(bake, cells, None, sun_body, &mut b.scratch, &mut b.heat),
     }
-    engine_and_nodes(design, engine_heat, propellant, &mut b);
+    engine_and_nodes(design, engine_heat, aboard, &mut b);
     design.network.step(&mut th.state, &b.heat, &b.node_heat, &b.node_capacity, SINK_K, dt, DEFAULT_SWEEPS);
     th.restart(th.epoch.add_seconds(dt));
     th.step = lattice_step(design, &th.state);
 }
 
 /// The coast step at `epoch` (a lattice point; or, with `last`, the end of
-/// the coast) with the sunlight `sun_body` (W/m², body axes) and
-/// `propellant` kg aboard: solves from the state's epoch (spanning skipped
+/// the coast) with the sunlight `sun_body` (W/m², body axes) and `aboard`
+/// in the tanks: solves from the state's epoch (spanning skipped
 /// lattice points; the planned burns' engine heat over that span goes into
 /// the nozzle), or skips the point. A point is skipped while the
 /// sunlight is the same as at the last solve (within [`SUN_SAME`]), no
@@ -624,7 +626,7 @@ pub fn coast_step(
     design: &Arc<CraftDesign>,
     th: &mut VesselThermal,
     sun: &CoastSun,
-    propellant: f64,
+    aboard: &Aboard,
     epoch: Epoch,
     last: bool,
 ) -> bool {
@@ -656,7 +658,7 @@ pub fn coast_step(
         b.heat[i as usize] += burn / dt * share;
     }
     let before = th.state.clone();
-    let (heat, node_heat, capacity) = (&b.heat, &b.node_heat, th.capacities.get(design, propellant));
+    let (heat, node_heat, capacity) = (&b.heat, &b.node_heat, th.capacities.get(design, aboard));
     design.network.step_to(&mut th.state, heat, node_heat, capacity, SINK_K, dt, DEFAULT_SWEEPS, COAST_CONVERGED);
     let change = |now: &[f64], was: &[f64]| now.iter().zip(was).map(|(a, b)| (a - b).abs()).fold(0.0, f64::max);
     let change = change(&th.state.skin, &before.skin).max(change(&th.state.nodes, &before.nodes));

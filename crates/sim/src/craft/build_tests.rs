@@ -204,9 +204,11 @@ fn the_build_refuses_with_named_errors() {
     assert!(built(CRAFT).is_ok());
 }
 
-/// The vessel's mass properties with each tank at its own fill (D104 §5.1)
-/// against a hand sum: the dry parts, each tank's liquid a solid cylinder
-/// from its base, the bottle's gas at its centre.
+/// The vessel's mass properties with each tank at its own fill (D104 §5.1,
+/// F2) against a hand sum: the dry parts, each tank's liquid a solid
+/// cylinder settled on its base (its height from its density at its
+/// temperature), the bottle's gas at its centre, each ullage's gas at the
+/// middle of the length the liquid leaves.
 #[test]
 fn mass_properties_of_a_draining_multi_tank_craft() {
     let a = built(CRAFT).unwrap();
@@ -219,12 +221,15 @@ fn mass_properties_of_a_draining_multi_tank_craft() {
     for (ox, fuel) in [(1.0, 1.0), (0.5, 0.9), (0.1, 0.0), (0.0, 0.0)] {
         state.tanks[1].liquid = ship.tanks[1].capacity * ox;
         state.tanks[0].liquid = ship.tanks[0].capacity * fuel;
-        let (slugs, points) = state.contents(&ship);
-        let props = craft.mass.with_contents(&slugs, &points);
+        let (slugs, points) = crate::systems::plumbing::contents(&ship, &state);
+        let props = craft.mass.with_slugs(&slugs, &points);
         let mut bodies = vec![dry];
+        let area = |t: &crate::craft::ship::TankDef| std::f64::consts::PI * t.region.radius * t.region.radius;
+        let density =
+            |t: &crate::craft::ship::TankDef, k: f64| crate::fluids::fluids().liquid(&t.fluid).unwrap().density(k);
         for (t, s) in ship.tanks.iter().zip(&state.tanks) {
             if s.liquid > 0.0 {
-                let h = t.region.axis.length() * s.liquid / t.capacity;
+                let h = s.liquid / (density(t, s.liquid_k) * area(t));
                 let d = t.region.axis.normalize();
                 bodies.push(MassProps {
                     mass: s.liquid,
@@ -235,10 +240,12 @@ fn mass_properties_of_a_draining_multi_tank_craft() {
         }
         let gas = state.gas(&ship);
         bodies.push(MassProps { mass: gas, com: ship.bottles[0].pos, inertia: DMat3::ZERO });
-        // Each ullage's pressurant at the top of its tank's liquid region.
+        // Each ullage's pressurant over its liquid, up to the far dome.
         for (t, s) in ship.tanks.iter().zip(&state.tanks) {
             let mass = s.ullage_moles * crate::fluids::fluids().gas(&t.load.pressurant).unwrap().molar_mass;
-            bodies.push(MassProps { mass, com: t.region.base + t.region.axis, inertia: DMat3::ZERO });
+            let (h, length) = (s.liquid / (density(t, s.liquid_k) * area(t)), t.volume / area(t));
+            let com = t.region.base + t.region.axis.normalize() * (0.5 * (h + length));
+            bodies.push(MassProps { mass, com, inertia: DMat3::ZERO });
         }
         let mass: f64 = bodies.iter().map(|b| b.mass).sum();
         let com = bodies.iter().map(|b| b.com * b.mass).sum::<DVec3>() / mass;

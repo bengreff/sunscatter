@@ -17,12 +17,10 @@
 //! transients are the systems').
 
 use super::command::{matches, ShipCommand, Stage};
-use super::file::Tank;
 use super::ship::ShipDef;
 use crate::catalog::Igniter;
 use crate::fluids::{self, fluids};
 use crate::systems::command::edit_sequence;
-use glam::DVec3;
 use serde::{Deserialize, Serialize};
 
 /// Room temperature for what is not loaded cold (K).
@@ -207,10 +205,6 @@ pub struct ShipState {
     pub runtime: crate::systems::Runtime,
 }
 
-/// Each tank's region, capacity and liquid (kg), each bottle's place and
-/// gas (kg).
-pub type Contents = (Vec<(Tank, f64, f64)>, Vec<(DVec3, f64)>);
-
 /// How a part failed destroyed (D105 §6.4; `sim::systems::failure`).
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub enum PartFailure {
@@ -362,46 +356,11 @@ impl ShipState {
             .sum()
     }
 
-    /// Everything the vessel carries that it can spend (kg): what its
-    /// `propellant` is (the liquids, the bottles' gas and the ullages').
+    /// Everything the vessel carries that it can spend (kg): its propellant,
+    /// the only total there is (F2: the liquids, the bottles' gas and the
+    /// ullages').
     pub fn consumables(&self, def: &ShipDef) -> f64 {
         self.liquid() + self.gas(def) + self.ullage_gas(def)
-    }
-
-    /// Each tank's region, capacity and liquid, and each bottle's gas at its
-    /// place: what `MassModel::with_contents` takes.
-    pub fn contents(&self, def: &ShipDef) -> Contents {
-        let slugs = self.tanks.iter().zip(&def.tanks).map(|(s, t)| (t.region, t.capacity, s.liquid)).collect();
-        let bottles = (self.bottles.iter().zip(&def.bottles))
-            .map(|(s, b)| (b.pos, s.moles * fluids().gas(&b.gas).map_or(0.0, |g| g.molar_mass)));
-        // An ullage's gas at the top of its tank's liquid region.
-        let ullages = (self.tanks.iter().zip(&def.tanks)).map(|(s, t)| {
-            (
-                t.region.base + t.region.axis,
-                s.ullage_moles * fluids().gas(&t.load.pressurant).map_or(0.0, |g| g.molar_mass),
-            )
-        });
-        (slugs, bottles.chain(ullages).collect())
-    }
-
-    /// Scales every tank's liquid and bottle's gas so the consumables total
-    /// `kg` (a coast's continuous mass laws and `set_propellant` give one
-    /// total; the tanks keep their shares).
-    pub fn scale_to(&mut self, def: &ShipDef, kg: f64) {
-        let now = self.consumables(def);
-        let f = if now > 0.0 { (kg / now).max(0.0) } else { 0.0 };
-        if f == 1.0 {
-            return;
-        }
-        for t in &mut self.tanks {
-            t.liquid *= f;
-        }
-        for b in &mut self.bottles {
-            b.moles *= f;
-        }
-        for t in &mut self.tanks {
-            t.ullage_moles *= f;
-        }
     }
 
     /// Applies a command's plain effect (see the module): the state changes

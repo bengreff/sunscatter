@@ -1,13 +1,13 @@
 //! A vessel of a craft of catalog parts (D100, D104; ship-model.md §5.1,
-//! §5.3): its ship state, the mass properties from every tank's own fill,
+//! §5.3): its ship state, the mass properties from every tank's own slug,
 //! each engine at its own mount from its own state and level
 //! (`systems::propulsion`, the one engine model), the RCS's authority from
 //! its thrusters' geometry about the centre of mass, commands and the stage
 //! sequence (applied at a tick: [`super::ship_tick`]), and a separation at a
 //! joint (a breakup the game applies as any other).
 //!
-//! The vessel's `propellant` is the ship state's consumables (liquid and
-//! gas): coasts, predictions and saves see the same mass. The readouts'
+//! The ship state is the only truth of its propellant (F2, [`super::mass`]):
+//! coasts, predictions and saves read its tanks and bottles. The readouts'
 //! engine (`CraftParams::engine`) is the selected main engines'.
 
 use super::attitude::{Actuators, Gimbal};
@@ -90,7 +90,8 @@ impl Vessel {
         // cycles from here (D105 §6.3).
         let seed = state.runtime.seed;
         crate::systems::failure::draw_fates(&def, &mut state, seed, self.time);
-        self.propellant = state.consumables(&def);
+        // Its tanks and bottles hold its propellant (F2).
+        self.propellant = 0.0;
         self.ship = Some(state);
         self.sync_engine();
         if !self.craft.design().parts.iter().any(|p| p.chute) {
@@ -109,15 +110,6 @@ impl Vessel {
         let pick = if selected.is_empty() { all } else { selected };
         let files: Vec<_> = pick.iter().map(|&i| file_of(&def.engines[i].data)).collect();
         self.craft.engine = Engine::from_file(&combine_engines(&files));
-    }
-
-    /// The tanks and bottles at `self.propellant` in total (after a set
-    /// propellant).
-    pub(super) fn sync_ship_to_propellant(&mut self) {
-        let Some(def) = self.ship_def() else { return };
-        if let Some(state) = self.ship.as_mut() {
-            state.scale_to(&def, self.propellant);
-        }
     }
 
     /// The engines' output now at ambient pressure `p` over a tick (a craft

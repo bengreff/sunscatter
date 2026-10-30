@@ -193,7 +193,6 @@ impl Vessel {
             let (throttle, com) = (controls.throttle, props.com);
             let env = sys::TickEnv { at, dt: TICK, p, throttle, accel, omega, alpha, com, sun, air_k, debug, bodies };
             effects.extend(sys::tick(&def, state, &env, &out.draws, &[]));
-            self.propellant = state.consumables(&def);
             self.advance_grounded(world, at.add_seconds(TICK));
             self.after_command(world, &effects);
             if effects.contains(&Effect::ReleaseClamps) {
@@ -217,20 +216,9 @@ impl Vessel {
         }
     }
 
-    /// After a coast: a craft of parts' contents are its ship state's (it
-    /// vents on the lattice; the segment carries the mass it started with),
-    /// any other craft's tanks follow the segment's mass.
-    pub(super) fn contents_after_coast(&mut self) {
-        match (self.ship_def(), self.ship.as_ref()) {
-            (Some(def), Some(ship)) => self.propellant = ship.consumables(&def),
-            _ => self.sync_ship_to_propellant(),
-        }
-    }
-
     /// After a live tick of a craft of parts (`m` its motion, the vessel's
     /// time still its start): the systems' step with what the tick drew.
-    /// Returns the consumables left (kg) and the effects to act on at the
-    /// tick's end.
+    /// Returns the effects to act on at the tick's end.
     pub(super) fn ship_after_tick(
         &mut self,
         world: &World,
@@ -238,7 +226,7 @@ impl Vessel {
         rcs: DVec3,
         m: &TickMotion,
         throttle: f64,
-    ) -> (f64, Vec<Effect>) {
+    ) -> Vec<Effect> {
         let at = self.time;
         let mid = at.add_seconds(0.5 * m.dt);
         let g = gravity(world, mid, m.anchor, (m.r0 + m.r1) * 0.5, (m.v0 + m.v1) * 0.5);
@@ -257,7 +245,7 @@ impl Vessel {
             g.push(self.fin_pushes(&tick.fins, tick.fin_flow));
             g
         });
-        let (Some(def), Some(state)) = (self.ship_def(), self.ship.as_mut()) else { return (self.propellant, vec![]) };
+        let (Some(def), Some(state)) = (self.ship_def(), self.ship.as_mut()) else { return vec![] };
         let mut per_block = vec![0.0; def.thrusters.len()];
         for &(i, share) in &tick.blocks {
             per_block[i] = rcs_kg * share;
@@ -268,8 +256,7 @@ impl Vessel {
         let bodies = loads.as_ref().map(|g| g.bodies());
         let (sun, air_k) = (m.sun, m.air_k);
         let env = sys::TickEnv { at, dt: m.dt, p, throttle, accel, omega, alpha, com, sun, air_k, debug, bodies };
-        let effects = sys::tick(&def, state, &env, &tick.draws, &per_block);
-        (state.consumables(&def), effects)
+        sys::tick(&def, state, &env, &tick.draws, &per_block)
     }
 }
 
@@ -277,15 +264,16 @@ impl Vessel {
 /// lattice`: boil-off and venting, its liquids warming, settled or
 /// floating), at `(anchor, r, v)` with attitude `q`: standing on `grounded`
 /// the ground holds its liquids down (proper acceleration ω×(ω×r) − g);
-/// coasting they float. Returns the consumables left (kg), if a ship.
+/// coasting they float. Its tanks and bottles are its propellant: what
+/// they vent leaves the vessel (F2).
 pub(super) fn ship_lattice(
     ship: Option<&mut crate::craft::state::ShipState>,
     def: Option<&crate::craft::ship::ShipDef>,
     world: &World,
     (e, (anchor, r, v), q): (Epoch, (NodeId, DVec3, DVec3), glam::DQuat),
     grounded: Option<NodeId>,
-) -> Option<f64> {
-    let (state, def) = (ship?, def?);
+) {
+    let (Some(state), Some(def)) = (ship, def) else { return };
     let snap = world.snapshot(e);
     let sun = q.inverse() * crate::light::sunlight(world, &snap, anchor, r);
     let air_k = super::aerothermal::air_at(world, &snap, anchor, r, v).map(|a| a.temperature);
@@ -298,5 +286,4 @@ pub(super) fn ship_lattice(
         None => DVec3::ZERO,
     };
     sys::lattice(def, state, e, &crate::systems::plumbing::Surroundings { sun, air_k }, accel);
-    Some(state.consumables(def))
 }

@@ -245,6 +245,39 @@ impl VolumeGrid {
     }
 }
 
+impl VolumeGrid {
+    /// How many tanks the grid's samples are sorted into.
+    pub fn tanks(&self) -> usize {
+        self.tank_height.len()
+    }
+
+    /// Adds `amount` (any quantity: kg, J/K) in tank `k` between the heights
+    /// `from` and `to` along it (a slug where it sits, F2), shared out over
+    /// the tank's samples by the part of each one's span inside the band;
+    /// a band beside every sample goes to the node of the one nearest it.
+    /// Returns whether the tank has samples of its own (a bottle inside
+    /// another tank has none: its samples are that tank's).
+    pub fn band(&self, k: usize, amount: f64, (from, to): (f64, f64), out: &mut [f64]) -> bool {
+        let Some(list) = self.by_tank.get(k).filter(|l| !l.is_empty()) else { return false };
+        let step = self.size / SAMPLES as f64;
+        let below = |x: f64, h: f64| ((x - h) / step + 0.5).clamp(0.0, 1.0);
+        let weight = |h: f64| below(to, h) - below(from, h);
+        let total: f64 = list.iter().flat_map(|(_, h)| h.iter().copied()).map(weight).sum();
+        if total <= 0.0 {
+            let mid = 0.5 * (from + to);
+            let near = (list.iter())
+                .map(|(i, h)| (h.iter().map(|x| (x - mid).abs()).fold(f64::MAX, f64::min), *i))
+                .fold((f64::MAX, 0), |b, x| if x.0 < b.0 { x } else { b });
+            out[near.1 as usize] += amount;
+            return true;
+        }
+        for (i, h) in list {
+            out[*i as usize] += amount * h.iter().copied().map(weight).sum::<f64>() / total;
+        }
+        true
+    }
+}
+
 /// The heights of a node's samples in tank `tank` (`None`: every tank).
 fn heights(n: &VolumeNode, tank: Option<u32>) -> impl Iterator<Item = f64> + '_ {
     n.tank.iter().zip(&n.tank_of).filter(move |(_, &k)| tank.is_none_or(|t| t == k)).map(|(&h, _)| h)
@@ -285,6 +318,28 @@ mod tests {
         for &(a, b, area) in &g.links {
             assert!(a < b && area > 0.0 && area <= 1.0);
         }
+    }
+
+    /// A slug where it sits (F2): all of it in the nodes whose samples meet
+    /// its band along the tank (a sample either side), wherever the band.
+    #[test]
+    fn a_band_goes_where_it_sits() {
+        let g = grid();
+        let mut out = vec![0.0; g.nodes.len()];
+        for (from, to) in [(0.0, 0.5), (1.5, 2.5), (4.0, 4.7), (9.0, 9.5)] {
+            out.fill(0.0);
+            assert!(g.band(0, 1000.0, (from, to), &mut out));
+            let total: f64 = out.iter().sum();
+            assert!((total - 1000.0).abs() < 1e-9, "{from}..{to}: {total}");
+            let step = g.size / SAMPLES as f64;
+            for (n, m) in g.nodes.iter().zip(&out) {
+                if *m > 0.0 && to < 4.7 {
+                    let near = n.tank.iter().any(|&h| h > from - step && h < to + step);
+                    assert!(near, "{from}..{to}: node at {} holds {m}", n.centre);
+                }
+            }
+        }
+        assert!(!g.band(1, 1000.0, (0.0, 1.0), &mut out), "no such tank");
     }
 
     #[test]

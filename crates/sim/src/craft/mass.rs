@@ -3,9 +3,11 @@
 //!
 //! The dry mass is spread over the surface as a thin shell, in proportion
 //! to each surface's skin areal mass (scaled so the total is `dry_mass`:
-//! the shell stands in for structure and equipment too). The propellant is
-//! a solid cylinder filling the tank from its base (it settles against the
-//! thrust), so its centre of mass and inertia change with the fill level.
+//! the shell stands in for structure and equipment too). A made-up craft's
+//! propellant is a solid cylinder filling the tank from its base (it
+//! settles against the thrust), so its centre of mass and inertia change
+//! with the fill level. A craft of parts' liquids are each a cylinder where
+//! the plumbing has its slug ([`Slug`], [`MassModel::with_slugs`]).
 //! Everything is in body axes; inertia tensors are about the centre of mass.
 
 use super::file::{Primitive, Skin, Tank};
@@ -50,6 +52,20 @@ pub struct MassModel {
 pub struct TankMoments {
     pub first: [DVec3; 2],
     pub second: [DMat3; 3],
+}
+
+/// A tank's liquid as one solid cylinder: `mass` (kg) from `base` along the
+/// unit `axis` for `height`, of `radius` (m, body axes). Where it sits is
+/// the plumbing's (`systems::plumbing::slug`: settled on the outlet, or
+/// moved along the tank by the settling acceleration); a slosh pendulum
+/// (Abramson, NASA SP-106) would move a share of it across the axis.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Slug {
+    pub mass: f64,
+    pub base: DVec3,
+    pub axis: DVec3,
+    pub height: f64,
+    pub radius: f64,
 }
 
 impl TankMoments {
@@ -216,18 +232,14 @@ impl MassModel {
     }
 
     /// Mass properties with each tank's own contents (a craft of catalog
-    /// parts): the dry craft, each tank's liquid a solid cylinder of its
-    /// region filling from the base (`mass` of `capacity` kg; the region's
-    /// length is the liquid's height at capacity) and the point masses
-    /// (bottles' gas).
-    pub fn with_contents(&self, slugs: &[(Tank, f64, f64)], points: &[(DVec3, f64)]) -> MassProps {
+    /// parts): the dry craft, each tank's liquid where it sits (a solid
+    /// cylinder, [`Slug`]: `systems::plumbing::contents`) and the point
+    /// masses (the gas).
+    pub fn with_slugs(&self, slugs: &[Slug], points: &[(DVec3, f64)]) -> MassProps {
         let mut items = vec![MassProps { mass: self.dry_mass, com: self.dry_com, inertia: self.dry_inertia }];
-        for &(t, capacity, mass) in slugs {
-            if mass > 0.0 && capacity > 0.0 {
-                let (d, h) = (t.axis.normalize(), t.axis.length() * (mass / capacity).min(1.0));
-                let com = t.base + d * (0.5 * h);
-                items.push(MassProps { mass, com, inertia: solid_cylinder(mass, t.radius, h, d) });
-            }
+        for s in slugs.iter().filter(|s| s.mass > 0.0) {
+            let com = s.base + s.axis * (0.5 * s.height);
+            items.push(MassProps { mass: s.mass, com, inertia: solid_cylinder(s.mass, s.radius, s.height, s.axis) });
         }
         for &(at, mass) in points {
             if mass > 0.0 {
