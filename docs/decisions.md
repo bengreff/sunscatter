@@ -352,7 +352,7 @@ A craft declares its reaction-control thrusters (thrust, Isp, fore and aft ring 
 
 **D081: Scale: 50 craft of ~300 parts to 1,000,000×; live physics for a few, "limbo" for many.** *Decided, 2026-10-26 (owner).*
 - The target: 50 craft of ~300 parts each in one game, at every warp up to 1,000,000×.
-- **Live physics** (fixed ticks, contact, full aero) is needed for 1–3 craft at a time, at low warp.
+- **Live physics** (fixed ticks, contact, full aero) for every craft that needs it, at low warp: no cap on the number (D121, which also sets the scale target: a ~5,000-part craft live as well as this fleet).
 - **Limbo:** 10 or more craft at once on rails under continuous forces: low thrust, upper-atmosphere drag, radiation pressure. Their internal systems (thermal, propellant, power, consumables) evolve on fixed time lattices. Nothing a limbo craft does may change with the warp rate: chunked equals single pass (rule 4), tested.
 - Craft creation stays with the owner. A synthetic stress-craft generator, with placeholder part properties, exists only for benchmarks and tests.
 - Live craft cap the warp: rails warp is refused while any craft is in live physics, with the reason shown.
@@ -528,6 +528,50 @@ The player flies everything by hand for now (including a booster landing). Scrip
 **D120: The staging bar's Δv is in vacuum by default; an abort is offered only when it would save the crew or the vehicle.** *Decided, 2026-10-30 (owner).*
 - "Delta v should be vacuum by default. NO patchwork fixes." The bar's current-air figure stays a choice and is not the default. It is not patched stage by stage.
 - "Launch abort should only show when there is a valid abort procedure that would actually save the rocket or the crew." For the Falcon 9, that means while Crew Dragon, with its launch escape system (eight SuperDracos), is still attached to a stack it can escape from. Never on the booster after separation, on Dragon alone, or on a craft with no escape system (Cargo Dragon has no SuperDracos). The rule is derived from what the piece holds (crew, escape engines that can start, the joint to separate), not from the function's name.
+
+**D121: The ship model scales to a 5,000-part craft flown live and 50 craft of 300 parts at 10⁶×, through one kind of craft, one state and one advance law per subsystem.** *Decided, 2026-10-30 (owner; [interview-2026-10-30.md](plans/interview-2026-10-30.md)). Refines D081 and D119.*
+- **Scale:** a ~5,000-part craft flown live at 1× and 60 fps on the M2 Pro, and D081's fleet of 50 craft of ~300 parts at every warp up to 10⁶×. Live physics has no cap on the number of craft (owner: "No cap").
+- **One kind of craft.** The test craft and the made-up path (one placeholder part with a fuel number) are deleted: every craft is built from parts (D100), and benchmarks and tests use craft of parts. D074 goes with the test craft's code, and D064 keeps only debug mode.
+- **One state per vessel.** `ShipState` and `Runtime` merge into one, grouped by subsystem, split and merged by construction (F1). Ids are strings only at the edges (files, saves, the interface, MCP) and typed handles inside.
+- **One advance law per subsystem.** Each subsystem advances over any interval, exact or coarse-grained, chunked = single pass. Live ticks, the systems lattice and coasts only choose the interval (this closes the review's F6).
+- **Live costs:**
+  - The aero cells are evaluated once per tick, and their forces are held through the integrator's stages and the contact substeps.
+  - The thermal network steps at its own rate, set by its fastest time constant, with the ticks' heat accumulated between steps.
+  - On a coast, each node relaxes analytically toward its orbit-averaged equilibrium (D119), with breaks at eclipse entry and exit.
+- **Separations.** At every separation each new piece is checked: "is this thing controlable (radio/crew/onboard computer, power)".
+  - If it is, it becomes a full craft, simulated while inactive.
+  - If not, it becomes a ballistic lump: its mass, its inertia, a drag area and heating from its bounding shape, and one heat node. A lump is deleted when it burns up or hits the ground; lumps in orbit stay.
+  - Designs: the pieces the stage sequence can make get their designs when the craft is built. An unplanned controllable piece gets a design composed from its parts' bakes.
+
+**D122: One testing framework: unit tests, and mission tests flown headless through MCP by a development agent on the real flight software.** *Decided, 2026-10-30 (owner; [interview-2026-10-30.md](plans/interview-2026-10-30.md)).*
+- "We just need the headless mission test with screenshots for large integrations of new features, plus maybe specific cases if needed. The game can run 100% autonomously after all with an AI agent driving. Tests should be real flight software plus an AI agent making decisions, not a scripted demo. Clean, ONE testing framework. Ensure you have unit tests too."
+- **How a mission test runs:**
+  - The game runs headless with its MCP server.
+  - Screenshots, the look's benchmark and the performance numbers are MCP tools.
+  - A development agent flies the mission through MCP, deciding as a player would, and checks the results and the shots.
+- **CI** runs the unit tests and specific deterministic sim cases.
+- The scripted demo and the body tour are deleted, and the `SUNSCATTER_*` variables shrink to a few (the home dir, offscreen).
+
+**D123: The first flights: convex landing guidance, a calm sea, a placeholder station and fail-safe engines; visual work frozen.** *Decided, 2026-10-30 (owner; [interview-2026-10-30.md](plans/interview-2026-10-30.md)). Refines D117.*
+- **The booster's landing burn** uses convex powered-descent guidance: lossless convexification (Açıkmeşe & Ploen, 2007), as SpaceX's (Blackmore, 2016). It is re-solved several times a second by a solver with a fixed number of iterations, so it stays deterministic. The boostback and entry burns are targeted by a predictor–corrector on the real trajectory propagator.
+- **Water:** a calm, flat sea first. Each contact point gets slamming pressure, added mass and buoyancy (E until checked against water-impact data). Waves come later.
+- **The docking target** is one rigid body, a placeholder. The ISS "will be deorbited soon anyways, it will likely not even be in the game."
+- **Fail-safe engines:** an engine whose flight computers are all lost, or whose own controller is lost, shuts down (E until sourced).
+- **Debug mode** shows the truth, but a dead or unpowered computer is still dead.
+- **Aborts (D120):** an uncrewed Crew Dragon is offered the abort, since it saves the vehicle. The abort needs escape thrust enough to get away, not merely one engine that can start ("would actually save").
+- **Visuals are frozen** until both flights fly end to end; only bugs that mislead the player are fixed. "I don't know if we really need the last plume things."
+
+**D124: The docs are organised by system, finished work is archived, and there is no file-size cap.** *Decided, 2026-10-30 (owner; [interview-2026-10-30.md](plans/interview-2026-10-30.md)).*
+- The layout:
+  - a reading guide in the README;
+  - `docs/vision.md` and `docs/decisions.md`;
+  - an owners table, and `process.md`;
+  - `docs/systems/`, one general doc per main system, open to later ones ("colonies, economics, construction, fusion, various interstellar techs, etc, just leave that open");
+  - `docs/technical/` for specific details;
+  - `docs/vehicles/` for research dossiers such as the Falcon 9's;
+  - `docs/archive/` for finished plans, briefs, interviews and logs;
+  - `docs/plans/` for live work and the hand-off only.
+- "I never made this cap, you can remove it": the 700-line check goes from CI and the hooks.
 
 ## Open questions
 

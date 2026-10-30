@@ -2,15 +2,18 @@
 
 A SessionStart hook loads this file automatically after `/clear` or at startup. It is kept current by `/handoff`.
 
-*Updated 2026-10-30: F1 and F2 landed; the owner answered (D119 coasts, D120 Δv in vacuum and the real abort); FLIGHTSW, COAST and FIXES2 running.*
+*Updated 2026-10-30 (day): F1–F3, D119 and D120 landed; the simplification interview recorded (D121–D124); ONEKIND, MISSION and DOCS running.*
 
 ## Your first job
 
-1. Check on the three agents: FLIGHTSW (F3, [brief-flightsw.md](brief-flightsw.md)), COAST (D119, [brief-coast.md](brief-coast.md)) and FIXES2 (D120, [brief-fixes2.md](brief-fixes2.md)). Agents wrap up at ~300k context (owner, 2026-10-30).
-2. Then work through "What is next".
+1. Check on the three agents: ONEKIND (D121: delete the test craft, [brief-onekind.md](brief-onekind.md)), MISSION (D122: MCP mission tests replace the demo, [brief-mission.md](brief-mission.md)) and DOCS (D124: docs by system, [brief-docs.md](brief-docs.md)). Agents wrap up at ~300k context.
+2. Then launch the next wave from "What is next".
 
 ## State
 
+- **F3, the flight software: done** ([brief-flightsw.md](brief-flightsw.md); 994fad7, ccf251d). One layer, `sim::systems::flight`, whose only inputs are `Knowledge` and the computers' health. SAS, the holds, the launch commit, the estimates and the landing gate go through it, and the navball shows SAS NO REF / NO NAV / NO CPU. Left: SAS and the holds on coasts, the chutes' deploy altitude and the ullage burn (adaptive functions), the MCP tools (MISSION).
+- **COAST (D119): done** ([brief-coast.md](brief-coast.md); dbe3f3b, 861157e). `sim::systems::coast_law`: on a coast the tanks follow closed-form phases, and the segment's mass equals the ship's at every lattice point.
+- **FIXES2 (D120): done** ([brief-fixes2.md](brief-fixes2.md); f806401, 537e456 + 02dfb33, 57950ca). Δv in vacuum by default; an abort offered from what the piece holds (`program::offered`); Dragon's tanks no longer vent (MEOP 19.0 MPa, U).
 - **QUICKFIX ([brief-quickfix.md](brief-quickfix.md)): done.** Launch abort shuts the Merlins and the MVac down (9886435). Dragon's tanks are at the published 2,400 psi, with a feed check (7424645). A pad abort puts a fresh vessel on the pad (e48a0fc). The stage editor locks the stages already run (3a4f502). parts.md is current (cd74409). The demo has `SUNSCATTER_DEMO_STOP_AFTER=PadAbort`. Both checked on screen.
 - **F1, split and merge by construction: done** ([brief-foundation.md](brief-foundation.md)): `craft::partition` (4ed2658), `Vessel::piece` (2d9de38), and every piece keeps the whole program with a per-piece view, `craft::program` (e4718a0, 7a0f7f6). Seen on screen after the separation (the lead's demo, 2026-10-30). The upper stack's bar shows Dragon separation, SECO, Second stage ignition (6,600 m/s at 79.5 km) and Liftoff. The booster's shows "no stage left", Stage separation active, and MECO, Liftoff and Ignition with AGAIN. The booster's action bar still offers "Launch abort": D120 (FIXES2). Left for docking: a list of cabins joined by hatches (the brief's Left 2).
 - **F2, one mass truth: done** ([brief-mass.md](brief-mass.md), 751d0da). A craft of parts' propellant is its ship state's, each liquid sits where its slug is, and the thermal nodes take each tank's contents. A coast keeps its starting mass for drag and radiation pressure (open below). The booster's flip (the centre of mass moving as the LOX is thrown up) is not in the demo, so it has not been seen on screen.
@@ -24,42 +27,50 @@ A SessionStart hook loads this file automatically after `/clear` or at startup. 
 
 ## What is next
 
-1. **F3, the last foundation** (D117; the review's §4.4): the flight software reads `Knowledge`. SAS, the holds, the pad's health check, the estimates and the landing prediction stop reading the truth.
-2. **COAST** (D119): a coast's slow changes solved analytically where possible, with one law for the trajectory and the ship state. **FIXES2** (D120): Δv in vacuum by default; "Launch abort" only where a real abort exists; Dragon's tanks venting at relief.
-3. Queued: Dragon's helium bottles are too small for 16.5 MPa through an abort burn (with recommendation 5); a vacuum nozzle at sea level has no flow separation, so the MVac's thrust goes negative under the current-air readout.
-4. **Then two flights end to end, in parallel** (D117):
-   - **Crew Dragon to the ISS and back:** the capsule–trunk joint and the entry; the abort tests; water and splashdown with D116's doses; docking at three autonomy levels.
-   - **The booster's return:** the vacuum relight and separation after MECO; the booster flown by its own flight software through the boostback, entry and landing burns; retropropulsion; a landing zone first.
-5. The interview's older queue:
-   - planned burns for craft of parts (`PlanError::PartsUnsupported`), needed for Dragon's phasing burns;
-   - the Falcon 9 inconsistencies (the legs' mass, `falcon9.md`'s U/E rows).
-6. D115's fidelity, after the foundations:
-   - sensors;
-   - adaptive functions;
-   - powered components' heat (this revises D077: update it and its citations in the same commit);
+1. **Running:** ONEKIND, MISSION, DOCS (above).
+2. **Next wave, after ONEKIND** (each touches the whole of `sim`, so one at a time or split by subsystem):
+   - **STATE** (D121): merge `ShipState` and `Runtime` into one state grouped by subsystem; typed handles inside, strings only at the edges (the 46 linear id searches); the engine rule in one place (review F8).
+   - **FIXES3:**
+     - the function runner through `program::offered`;
+     - the load's vapour in `ShipState::initial`;
+     - `estimate`'s `ready` against `program::can_start`;
+     - an abort needs enough escape thrust (D123);
+     - fail-safe shutdown when an engine's controller is lost (D123);
+     - SAS and the holds on coasts through the flight layer.
+   - **ADVANCE** (D121): one advance law per subsystem over any interval; the modes only choose the interval (closes F6).
+   - **PERF** (D121):
+     - live aero once per tick;
+     - the live thermal network at its own rate;
+     - analytic node relaxation on coasts;
+     - geometry scans with a spatial index;
+     - against the scale target: 5,000 parts live, 50 × 300 at 10⁶×.
+   - **DEBRIS** (D121): the controllability check at separation; ballistic lumps; the planned pieces' designs at craft build; composed designs for unplanned pieces.
+3. **Then the two flights end to end, in parallel** (D117, D123):
+   - **Crew Dragon:** the capsule–trunk joint and the entry; a calm sea with water impact; D116's doses; docking with a rigid placeholder station, at three autonomy levels.
+   - **The booster:** the vacuum relight; boostback and entry by a predictor–corrector; the landing burn by convex guidance; a landing zone first.
+   - Each is checked by a MISSION-style test flown through MCP.
+4. **Queued:**
+   - Dragon's helium bottles (recommendation 5, with thrust following feed pressure);
+   - flow separation in vacuum nozzles at sea level;
+   - planned burns for craft of parts;
+   - the Falcon 9 inconsistencies (the legs' mass, falcon9.md's U/E rows).
+5. D115's fidelity after the flights:
+   - sensors' noise only where needed;
+   - the adaptive functions;
+   - powered components' heat (revise D077 with it);
    - per-engine gimbals;
-   - O₂ / N₂ tanks;
-   - noise only where needed.
-7. The plume's rest (the MECO cloud, the shock cells), GLOW, CLOUDS.
-8. Later roadmap, nothing built now: the career as a startup (D027), with D118's components and factories.
+   - O₂ / N₂ tanks.
+6. **Frozen** (D123): visuals (the plume's rest, GLOW, CLOUDS).
+7. **Later roadmap:** the career as a startup (D027) and D118's components and factories.
 
 ## Open for the owner, new (defaults in place)
 
-- **QUICKFIX** ([brief-quickfix.md](brief-quickfix.md)):
-  - after a launch abort on the pad, the stack without its capsule stays (no second crew);
-  - a pad abort of a vessel not being flown waits until it is active;
-  - thrust termination uses the normal tail-off;
-  - the helium bottles get resized with recommendation 5.
-- **ROUNDTRIP** ([brief-foundation.md](brief-foundation.md)):
-  - CURRENT AIR: answered, D120 (vacuum by default, no per-stage rules);
-  - a vacuum nozzle at sea level: queued (a flow-separation model);
-  - Liftoff stays on both pieces' bars;
-  - edits are per piece, and docking joins the two copies by name;
-  - stage numbers count within each piece's view.
-- **MASS** ([brief-mass.md](brief-mass.md)):
-  - a coast's mass for its perturbations: answered, D119 (COAST);
-  - in roll, the liquid turns with its tank until the slosh model;
-  - the ullage gas is left out of the thermal capacities.
+- Dragon's 19.0 MPa MEOP and relief (U, proposed: 115 % of the feed; FIXES2).
+- On a coast, the tanks get orbit-averaged sunlight and their conditions are refreshed hourly (COAST). A direct write to a coasting vessel's tanks must go through a restart.
+- Tanks between the live boundary and 150 km use the pad's air film against ~700 K thermosphere air (an existing problem, COAST).
+- In roll, the liquid turns with its tank until the slosh model (MASS).
+- The staging defaults: Liftoff on both pieces' bars, edits per piece, stage numbers per view (ROUNDTRIP).
+- After a launch abort on the pad, the stack without its capsule stays; a pad abort of an inactive vessel waits until it is active (QUICKFIX).
 
 ## Open for the owner (older)
 
