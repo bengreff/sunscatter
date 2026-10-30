@@ -32,7 +32,7 @@ A SessionStart hook loads this file automatically after `/clear` or at startup. 
 
 ## What is next
 
-1. **Running:** ONEKIND, MISSION, DOCS (above).
+1. **Running:** ONEKIND, MISSION-2, DOCS-2 (above).
 2. **PLANNER, right after ONEKIND** (D126). Planned burns for craft of parts (`PlanError::PartsUnsupported`), run closed-loop to their target state as a flight-layer program: real starts, ullage settling, tail-off. Once the test craft goes, nothing else can plan a burn.
 3. **Next wave, after ONEKIND** (each touches the whole of `sim`, so one at a time or split by subsystem):
    - **STATE** (D121): merge `ShipState` and `Runtime` into one state grouped by subsystem; typed handles inside, strings only at the edges (the 46 linear id searches); the engine rule in one place (review F8).
