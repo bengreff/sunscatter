@@ -67,7 +67,7 @@ Respect D115: only the real vehicle's sensors, and readings to their sensor's si
 
 ### Left, in order
 
-1. SAS and the holds in coasts and on rails through the layer (a small hunk in `vessel/coast.rs` after COAST commits).
+1. SAS and the holds in coasts and on rails through the layer: a small hunk in `vessel/coast.rs`, now free (COAST committed it: dbe3f3b, 861157e). Gate the coast's controls through `Sas::acting` at the systems lattice's epochs, not at frame starts, so 60 fps and one jump agree; test it with every IMU lost on a coast.
 2. The parachutes' deploy on the computer's barometric altitude; the engine start's ullage as a timed burn (adaptive functions, D115).
 3. The MCP agent's tools through `Knowledge`.
 
