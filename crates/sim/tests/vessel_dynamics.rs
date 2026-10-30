@@ -155,9 +155,9 @@ fn time_warp_does_not_change_the_state() {
     let w = world();
     let (earth, mu) = earth(&w);
     let (r, v) = leo(mu);
-    let params = sim::craft::test_craft();
-    let mut slow = Vessel::coasting(&w, VesselId(1), t0(), earth, r, v, params);
-    let mut fast = Vessel::coasting(&w, VesselId(1), t0(), earth, r, v, params);
+    let craft = sim::craft::small::rocket();
+    let mut slow = Vessel::coasting(&w, VesselId(1), t0(), earth, r, v, &craft);
+    let mut fast = Vessel::coasting(&w, VesselId(1), t0(), earth, r, v, &craft);
     let controls = Controls::default();
     let end = t0().add_seconds(20_000.0);
     let mut t = t0();
@@ -181,7 +181,7 @@ fn nan_initial_state_ends_the_segment_instead_of_hanging() {
     assert_eq!(seg.end, Some(SegmentEnd { t: 0.0, kind: EndKind::Failed }));
     // A vessel in that state stops at its time; advancing returns.
     let mut vessel =
-        Vessel::coasting(&w, VesselId(1), t0(), earth, DVec3::new(f64::NAN, r.y, r.z), v, sim::craft::test_craft());
+        Vessel::coasting(&w, VesselId(1), t0(), earth, DVec3::new(f64::NAN, r.y, r.z), v, &sim::craft::small::rocket());
     assert_eq!(vessel.advance(&w, t0().add_seconds(60.0), &Controls::default(), usize::MAX), t0());
 }
 
@@ -198,9 +198,10 @@ impl MinEpoch for Epoch {
     }
 }
 
-/// A vessel `height` m above Cape Canaveral falling at `down` m/s
-/// relative to the ground.
-fn above_the_cape(w: &World, height: f64, down: f64, propellant: Option<f64>) -> Vessel {
+/// A small rocket `height` m above Cape Canaveral falling at `down` m/s
+/// relative to the ground, its tanks filled alike to make `mass` (kg; at
+/// its loading if `None`).
+fn above_the_cape(w: &World, height: f64, down: f64, mass: Option<f64>) -> Vessel {
     let (earth, _) = earth(w);
     let e = sim::body::earth();
     let t = t0();
@@ -208,13 +209,25 @@ fn above_the_cape(w: &World, height: f64, down: f64, propellant: Option<f64>) ->
     let fixed = e.surface_point(28.6 * deg, -80.6 * deg, height);
     let r = e.rotation.to_inertial(fixed, t).raw();
     let v = e.rotation.omega(t).raw().cross(r) - r.normalize() * down;
-    let mut vessel = Vessel::coasting(w, VesselId(1), t, earth, r, v, sim::craft::test_craft());
-    if let Some(p) = propellant {
-        vessel.set_propellant(w, p);
+    let mut vessel = Vessel::coasting(w, VesselId(1), t, earth, r, v, &sim::craft::small::rocket());
+    if let Some(m) = mass {
+        vessel.set_fill(w, 1.0);
+        let full = vessel.mass();
+        vessel.set_fill(w, 0.0);
+        let empty = vessel.mass();
+        vessel.set_fill(w, (m - empty) / (full - empty));
+        assert!((vessel.mass() - m).abs() < 1.0, "{} kg", vessel.mass());
     }
     // In the atmosphere it is flown live from the start.
     assert!(matches!(vessel.phase, Phase::Powered { .. }), "{:?}", vessel.phase);
     vessel
+}
+
+/// Whether the vessel was destroyed: crashed whole, or broken up by its
+/// parts' loads (D103), waiting for its split.
+fn wrecked(vessel: &Vessel) -> bool {
+    matches!(vessel.phase, Phase::Crashed { .. })
+        || vessel.breakup().is_some_and(|b| !b.destroyed.is_empty() || !b.torn.is_empty())
 }
 
 /// Speed relative to the ground (m/s).
@@ -242,7 +255,7 @@ fn chute_load(w: &World, vessel: &Vessel) -> f64 {
 fn a_full_craft_tears_its_mains_and_crashes_but_lands_in_debug_mode() {
     let w = world();
     let controls = Controls { chute: true, sas: true, ..Default::default() };
-    // At its full 20 t the drogues hold, but the mains, sized for 5 t,
+    // At its full ~13 t the drogues hold, but the mains, sized for 5 t,
     // break as they open towards full (D079); the craft hits at its
     // drogue-less hull speed.
     let mut vessel = above_the_cape(&w, 8_000.0, 0.0, None);
@@ -255,15 +268,20 @@ fn a_full_craft_tears_its_mains_and_crashes_but_lands_in_debug_mode() {
         vessel.advance(&w, clock, &controls, usize::MAX);
         main_failed |= vessel.chute.main == CanopyState::Failed;
         assert_ne!(vessel.chute.drogue, CanopyState::Failed);
-        if !matches!(vessel.phase, Phase::Powered { .. }) {
+        if !matches!(vessel.phase, Phase::Powered { .. }) || wrecked(&vessel) {
             break;
         }
     }
     assert!(main_failed);
-    match vessel.phase {
-        Phase::Crashed { cause: Destruction::Impact { speed, .. }, .. } => assert!(speed > 30.0, "{speed} m/s"),
+    assert!(wrecked(&vessel), "expected a crash, got {:?}", vessel.phase);
+    let speed = match (&vessel.phase, vessel.breakup()) {
+        (Phase::Crashed { cause: Destruction::Impact { speed, .. }, .. }, _) => *speed,
+        (_, Some(b)) => (b.destroyed.iter())
+            .find_map(|(_, d)| if let Destruction::Impact { speed, .. } = d { Some(*speed) } else { None })
+            .expect("an impact"),
         other => panic!("expected a crash, got {other:?}"),
-    }
+    };
+    assert!(speed > 30.0, "{speed} m/s");
     // Debug mode: unbreakable canopies and infinite impact tolerance; it
     // reaches the ground at its terminal speed under the full main,
     // √(2mg / ρ·CdA) ≈ 14 m/s.
@@ -286,10 +304,10 @@ fn a_full_craft_tears_its_mains_and_crashes_but_lands_in_debug_mode() {
 #[test]
 fn a_nominal_descent_opens_drogues_then_reefed_mains_within_their_design_loads() {
     let w = world();
-    // A 5 t craft (dry plus a 1 t reserve) at 7.3 km (Apollo's 24,000 ft,
+    // A 5 t craft at 7.3 km (Apollo's 24,000 ft,
     // TN D-7437) falling at 110 m/s (q ≈ 3.4 kPa, inside Apollo's 2.5 to
     // 5.5 kPa drogue qualification range), the command given at once.
-    let mut vessel = above_the_cape(&w, 7_300.0, 110.0, Some(1_000.0));
+    let mut vessel = above_the_cape(&w, 7_300.0, 110.0, Some(5_000.0));
     let controls = Controls { chute: true, sas: true, ..Default::default() };
     let weight = vessel.mass() * 9.80;
     let (mut drogue_peak, mut main_peak, mut drogue_q, mut main_q) = (0.0f64, 0.0f64, None, None);
@@ -336,11 +354,8 @@ fn a_nominal_descent_opens_drogues_then_reefed_mains_within_their_design_loads()
     // the weight (they decelerate the craft) and Apollo's design limit
     // loads (2 × 17,200 lb drogues, 4 × 23,800 lb mains; TN D-7437). In g
     // the light craft feels more than Apollo's 2.9 g main design (37,500 lb
-    // on 13,000 lb): four mains on 5 t against three on 5.9 t. Hanging
-    // tail-down under the drogue its fins are upstream: since they lift
-    // with the body's interference (D085, Pitts–Nielsen–Kaattari) it swings
-    // to ~120° and its own broadside drag shares the deceleration, so the
-    // drogue peaks near 1.0 g (1.4 g before); the main opened slower.
+    // on 13,000 lb): four mains on 5 t against three on 5.9 t (the small
+    // rocket: drogue ~1.6 g, mains ~4.2 g).
     assert!(drogue_q.unwrap() < d.deploy_max_q && main_q.unwrap() < m.deploy_max_q);
     assert!(main_q.unwrap() < drogue_q.unwrap(), "the drogue decelerated it");
     assert!(drogue_peak < 2.0 * 76.5e3 && drogue_peak > 0.8 * weight, "{drogue_peak}");
@@ -348,25 +363,31 @@ fn a_nominal_descent_opens_drogues_then_reefed_mains_within_their_design_loads()
     assert!(drogue_peak < d.max_load && main_peak < m.max_load);
 }
 
+/// Overload is physical at both canopies (D079): a drogue fired far above
+/// its design q tears, and the small rocket's slender hull then brings it
+/// to the mains' height well above their design q, so they tear as well
+/// and it hits the ground (the finned test craft's broadside drag once
+/// slowed it enough for the mains alone).
 #[test]
-fn a_drogue_fired_far_above_its_design_q_tears_and_the_mains_still_land_a_light_craft() {
+fn a_drogue_fired_far_above_its_design_q_tears_and_so_do_the_mains_behind_it() {
     let w = world();
     // 350 m/s at 10 km (q ≈ 25 kPa, 4.6 × the drogue's 5.5 kPa).
-    let mut vessel = above_the_cape(&w, 10_000.0, 350.0, Some(1_000.0));
+    let mut vessel = above_the_cape(&w, 10_000.0, 350.0, Some(5_000.0));
     let controls = Controls { chute: true, sas: true, ..Default::default() };
     vessel.advance(&w, vessel.time.add_seconds(1.0), &controls, usize::MAX);
     assert_eq!(vessel.chute.drogue, CanopyState::Failed);
     vessel.advance(&w, vessel.time.add_seconds(1_800.0), &controls, usize::MAX);
-    assert!(matches!(vessel.phase, Phase::Landed { .. }), "{:?}", vessel.phase);
+    assert_eq!(vessel.chute.main, CanopyState::Failed);
+    assert!(wrecked(&vessel), "{:?}", vessel.phase);
 }
 
 #[test]
 fn a_light_craft_lands_intact_under_its_parachute() {
     let w = world();
     let controls = Controls { chute: true, sas: true, ..Default::default() };
-    // Dry 4 t plus a 1 t reserve: the landing mass the chute is sized
-    // for (~7 m/s at sea level, under the gear's 8 m/s).
-    let mut vessel = above_the_cape(&w, 3_000.0, 0.0, Some(1_000.0));
+    // 5 t: the landing mass the chute is sized for (~7 m/s at sea level,
+    // under the gear's 8 m/s).
+    let mut vessel = above_the_cape(&w, 3_000.0, 0.0, Some(5_000.0));
     let terminal =
         (2.0 * vessel.mass() * 9.80 / (1.225 * (vessel.craft.cd_area + vessel.craft.chute.main.cd_area))).sqrt();
     assert!(terminal > 6.0 && terminal < 7.5, "{terminal} m/s");
@@ -384,9 +405,9 @@ fn falling_without_parachute_crashes() {
     let fixed = e.surface_point(0.0, 10.0 * deg, 3_000.0);
     let r = e.rotation.to_inertial(fixed, t).raw();
     let v = e.rotation.omega(t).raw().cross(r);
-    let mut vessel = Vessel::coasting(&w, VesselId(1), t, earth, r, v, sim::craft::test_craft());
+    let mut vessel = Vessel::coasting(&w, VesselId(1), t, earth, r, v, &sim::craft::small::rocket());
     vessel.advance(&w, t.add_seconds(600.0), &Controls::default(), usize::MAX);
-    assert!(matches!(vessel.phase, Phase::Crashed { .. }), "{:?}", vessel.phase);
+    assert!(wrecked(&vessel), "{:?}", vessel.phase);
 }
 
 /// Cross-platform determinism of vessel coasts: CI runs this on macOS
@@ -431,8 +452,9 @@ const COAST_GOLDEN: u64 = 0xb9c40c9ce55ddc57;
 #[test]
 fn powered_vessel_shown_at_the_clock_is_continuous() {
     let w = world();
-    let mut ship = Vessel::landed_at(&w, VesselId(1), "Earth", 28.5, -80.6, t0(), sim::craft::test_craft());
+    let mut ship = Vessel::landed_at(&w, VesselId(1), "Earth", 28.5, -80.6, t0(), &sim::craft::small::rocket());
     let full = Controls { throttle: 1.0, sas: true, ..Controls::default() };
+    assert_eq!(ship.next_stage(&w).unwrap().0, "Ignition");
     let mut clock = t0();
     // 20 s of climb, advanced by uneven frames as the game does.
     for k in 0..1500 {
@@ -461,7 +483,7 @@ fn powered_vessel_shown_at_the_clock_is_continuous() {
 #[test]
 fn landed_vessel_state_at_follows_the_rotation() {
     let w = world();
-    let ship = Vessel::landed_at(&w, VesselId(1), "Earth", 0.0, 0.0, t0(), sim::craft::test_craft());
+    let ship = Vessel::landed_at(&w, VesselId(1), "Earth", 0.0, 0.0, t0(), &sim::craft::small::rocket());
     let (_, r0, v0) = ship.state(&w);
     let (_, r1, _) = ship.state_at(&w, t0().add_seconds(0.01));
     assert!(((r1 - r0) - v0 * 0.01).length() < 1e-4);
