@@ -299,8 +299,10 @@ fn groups(
     }
 }
 
-/// The stage and function editors; the `sequence` stages already run are
-/// shown locked ([`edit::allowed`]).
+/// The stage and function editors, on the craft's view of its program
+/// (`sim::craft::program`: after a split, what acts on this piece; edits by
+/// the program's indices); the `sequence` stages already run are shown
+/// locked ([`edit::allowed`]).
 fn editors(
     ui: &mut egui::Ui,
     screen: &mut SystemsScreen,
@@ -326,11 +328,14 @@ fn editors(
     let catalogue = edit::catalogue(def);
     let mut edits: Vec<Edit> = Vec::new();
     let mut run: Option<Vec<sim::craft::command::ShipCommand>> = None;
+    let view = sim::craft::program::view(def, list);
+    let shown: Vec<usize> = view.iter().map(|v| v.index).collect();
     egui::ScrollArea::vertical().id_salt("systems_editor").max_height((ui.available_height() - 30.0).max(40.0)).show(
         ui,
         |ui| {
-            for (i, s) in list.iter().enumerate() {
-                entry(ui, i, s, functions, locked, &catalogue, &mut edits, &mut run);
+            for v in &view {
+                let at = Entry { shown: &shown, actions: &v.actions, function: functions, locked };
+                entry(ui, v.index, &list[v.index], &at, &catalogue, &mut edits, &mut run);
             }
         },
     );
@@ -368,39 +373,46 @@ fn editors(
     screen.drafts = Some(drafts);
 }
 
-/// One stage or function: its name, order, keys and pin, commands. The
-/// first `locked` entries (stages already run) are shown but disabled.
-#[allow(clippy::too_many_arguments)]
+/// Where an entry sits in the editor's view: the view's entries (their
+/// indices in the program), the entry's commands shown, whether it is a
+/// function, and how many stages are locked (run).
+struct Entry<'a> {
+    shown: &'a [usize],
+    actions: &'a [usize],
+    function: bool,
+    locked: usize,
+}
+
+/// One stage or function (`i`: its index in the program): its name,
+/// order, keys and pin, its commands in the view. The first `locked`
+/// entries (stages already run) are shown but disabled.
 fn entry(
     ui: &mut egui::Ui,
     i: usize,
     s: &Stage,
-    function: bool,
-    locked: usize,
+    at: &Entry,
     catalogue: &[sim::craft::command::ShipCommand],
     edits: &mut Vec<Edit>,
     run: &mut Option<Vec<sim::craft::command::ShipCommand>>,
 ) {
-    let done = i < locked;
+    let done = i < at.locked;
     ui.horizontal(|ui| {
         if done {
             let tag = egui::RichText::new("RUN").monospace().color(theme::MUTED);
             ui.label(tag).on_hover_text("Already run: locked. AGAIN on the staging bar runs it again.");
         }
-        ui.add_enabled_ui(!done, |ui| entry_row(ui, i, s, function, locked, catalogue, edits, run));
+        ui.add_enabled_ui(!done, |ui| entry_row(ui, i, s, at, catalogue, edits, run));
     });
-    ui.add_enabled_ui(!done, |ui| entry_commands(ui, i, s, edits));
+    ui.add_enabled_ui(!done, |ui| entry_commands(ui, i, s, at.actions, edits));
     ui.add_space(4.0);
 }
 
 /// An entry's name, order, pin and command picker.
-#[allow(clippy::too_many_arguments)]
 fn entry_row(
     ui: &mut egui::Ui,
     i: usize,
     s: &Stage,
-    function: bool,
-    locked: usize,
+    at: &Entry,
     catalogue: &[sim::craft::command::ShipCommand],
     edits: &mut Vec<Edit>,
     run: &mut Option<Vec<sim::craft::command::ShipCommand>>,
@@ -409,25 +421,26 @@ fn entry_row(
     if ui.add(egui::TextEdit::singleline(&mut name).desired_width(170.0)).changed() {
         edits.push(Edit::Rename(i, name));
     }
-    if ui.add_enabled(edit::allowed(&Edit::Up(i), locked), egui::Button::new("up").small()).clicked() {
-        edits.push(Edit::Up(i));
-    }
-    if ui.small_button("down").clicked() {
-        edits.push(Edit::Down(i));
+    let (up, down) = edit::moves(at.shown, i);
+    for (e, word) in [(up, "up"), (down, "down")] {
+        let ok = e.as_ref().is_some_and(|e| edit::allowed(e, at.locked));
+        if ui.add_enabled(ok, egui::Button::new(word).small()).clicked() {
+            edits.extend(e);
+        }
     }
     if ui.small_button("remove").clicked() {
         edits.push(Edit::Remove(i));
     }
-    if function {
+    if at.function {
         let mut pinned = s.pinned;
         if ui.checkbox(&mut pinned, "pinned").changed() {
             edits.push(Edit::Pin(i, pinned));
         }
         if ui.button("run").clicked() {
-            *run = Some(s.actions.clone());
+            *run = Some(at.actions.iter().map(|&j| s.actions[j].clone()).collect());
         }
     }
-    egui::ComboBox::from_id_salt(("add", function, i)).selected_text("+ command").width(150.0).show_ui(ui, |ui| {
+    egui::ComboBox::from_id_salt(("add", at.function, i)).selected_text("+ command").width(150.0).show_ui(ui, |ui| {
         for c in catalogue {
             if ui.selectable_label(false, label(c)).clicked() {
                 edits.push(Edit::AddAction(i, c.clone()));
@@ -436,15 +449,16 @@ fn entry_row(
     });
 }
 
-/// An entry's commands, each with its order and remove buttons.
-fn entry_commands(ui: &mut egui::Ui, i: usize, s: &Stage, edits: &mut Vec<Edit>) {
+/// An entry's commands in the view (`shown`: their indices in the
+/// entry), each with its order and remove buttons.
+fn entry_commands(ui: &mut egui::Ui, i: usize, s: &Stage, shown: &[usize], edits: &mut Vec<Edit>) {
     ui.horizontal_wrapped(|ui| {
         ui.add_space(14.0);
-        for (j, c) in s.actions.iter().enumerate() {
-            ui.label(egui::RichText::new(label(c)).monospace().color(theme::MUTED));
+        for (k, &j) in shown.iter().enumerate() {
+            ui.label(egui::RichText::new(label(&s.actions[j])).monospace().color(theme::MUTED));
             // (The default font has no arrow glyphs: plain words.)
-            if j > 0 && ui.small_button("<").on_hover_text("earlier").clicked() {
-                edits.push(Edit::ActionUp(i, j));
+            if k > 0 && ui.small_button("<").on_hover_text("earlier").clicked() {
+                edits.push(Edit::SwapActions(i, shown[k - 1], j));
             }
             if ui.small_button("x").on_hover_text("remove").clicked() {
                 edits.push(Edit::RemoveAction(i, j));

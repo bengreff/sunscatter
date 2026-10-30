@@ -83,6 +83,55 @@ fn the_stages_run_before_follow_the_active_one() {
     }
 }
 
+/// After the stage separation each piece's bar shows its own view of the
+/// program (`sim::craft::program`), numbered in it, by the stages' indices
+/// in the program: the booster its stages run (the separation active, its
+/// cold-gas thrusters' command only), the upper stack its own still to run.
+#[test]
+fn after_the_stage_separation_each_piece_shows_its_own_stages() {
+    let (def, mut state, hull) = falcon9();
+    state.clamped = false;
+    for _ in 0..4 {
+        state.next_stage(&def).unwrap();
+    }
+    let ids = |f: &dyn Fn(&str) -> bool| def.parts.iter().filter(|p| f(&p.id)).map(|p| p.part).collect::<Vec<_>>();
+    let upper = |id: &str| id.starts_with("s2.") || id.starts_with("dragon.");
+    // (piece, its parts, the rows: number, program index, name, place, commands)
+    type Want<'a> = &'a [(u32, usize, &'a str, Place, usize)];
+    let table: [(&str, Vec<u32>, Want); 2] = [
+        (
+            "booster",
+            ids(&|id| !upper(id)),
+            &[
+                (0, 3, "Stage separation", Place::Active, 1),
+                (1, 2, "MECO", Place::Done, 0),
+                (2, 1, "Liftoff", Place::Done, 0),
+                (3, 0, "Ignition", Place::Done, 0),
+            ],
+        ),
+        (
+            "upper",
+            ids(&upper),
+            &[
+                (0, 6, "Dragon separation", Place::Later, 3),
+                (1, 5, "SECO", Place::Later, 1),
+                (2, 4, "Second stage ignition", Place::Next, 2),
+                (3, 1, "Liftoff", Place::Active, 1),
+            ],
+        ),
+    ];
+    for (name, parts, want) in table {
+        let piece = def.subset(&parts);
+        let s = state.partition(&parts, &def, &piece, name == "upper");
+        let hull: Vec<Hull> = hull.iter().filter(|h| parts.contains(&h.part)).copied().collect();
+        let rows = bar(&piece, &s, &hull, &Knowledge::perfect());
+        let got: Vec<_> = (rows.iter())
+            .map(|r| (r.number.unwrap(), r.stage.unwrap(), r.name.as_str(), r.place, r.items.len()))
+            .collect();
+        assert_eq!(got, want, "{name}");
+    }
+}
+
 #[test]
 fn what_is_not_measured_is_a_dash() {
     let (def, state, hull) = falcon9();

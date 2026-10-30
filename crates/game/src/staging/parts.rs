@@ -1,31 +1,36 @@
 //! The stage stack of a craft of catalog parts (D107): the vessel's own
 //! stage list (`ShipState::stages`, the craft file's at load, edited in
-//! the systems screen), numbered as KSP does (the first stage the highest
-//! number), each stage's commands with the state of what they act on now.
+//! the systems screen) in its view (`sim::craft::program`: after a split,
+//! the stages and commands acting on this piece), numbered as KSP does
+//! (the first stage the highest number), each stage's commands with the
+//! state of what they act on now.
 //! Space runs the next stage (`Vessel::next_stage`); nothing is locked on
 //! the ground, since a craft of parts launches by its sequence.
 
 use super::{Part, PartTone, Stage, StageState};
 use sim::craft::command::{matches, ShipCommand};
+use sim::craft::program;
 use sim::craft::ship::ShipDef;
 use sim::craft::state::{EngineStatus, ShipState};
 
 /// The stack, stage 0 (the last of the sequence) first. `chute_armed`: the
 /// parachute command was given.
 pub fn stack(def: &ShipDef, state: &ShipState, chute_armed: bool) -> Vec<Stage> {
-    let n = state.stages.len();
-    let next = state.sequence as usize;
-    let mut out: Vec<Stage> = (state.stages.iter().enumerate())
-        .map(|(j, s)| Stage {
-            number: (n - 1 - j) as u32,
-            state: match j.cmp(&next) {
-                std::cmp::Ordering::Less => StageState::Active,
-                std::cmp::Ordering::Equal => StageState::Next,
-                std::cmp::Ordering::Greater => StageState::Later,
+    let shown = program::view(def, &state.stages);
+    let next = program::next(def, &state.stages, state.sequence);
+    let n = shown.len();
+    let mut out: Vec<Stage> = (shown.iter().enumerate())
+        .map(|(k, v)| Stage {
+            number: (n - 1 - k) as u32,
+            state: match v.index {
+                j if j < state.sequence as usize => StageState::Active,
+                j if Some(j) == next => StageState::Next,
+                _ => StageState::Later,
             },
-            name: Some(s.name.clone()),
-            parts: (s.actions.iter())
-                .map(|c| {
+            name: Some(state.stages[v.index].name.clone()),
+            parts: (v.actions.iter())
+                .map(|&a| {
+                    let c = &state.stages[v.index].actions[a];
                     let (state, tone) = status(def, state, c, chute_armed);
                     Part { name: label(c), state, tone }
                 })
@@ -211,11 +216,11 @@ mod tests {
             (vec![OrderKind::Stage], false),
         ];
         for (kinds, want) in table {
-            assert_eq!(super::super::arms_chutes(&state, &kinds), want, "{kinds:?}");
+            assert_eq!(super::super::arms_chutes(def, &state, &kinds), want, "{kinds:?}");
         }
         // The next stage arms them once the sequence reaches it.
         state.sequence = 1;
-        assert!(super::super::arms_chutes(&state, &[OrderKind::Stage]));
+        assert!(super::super::arms_chutes(def, &state, &[OrderKind::Stage]));
     }
 
     #[test]

@@ -12,6 +12,7 @@ use crate::state::SimState;
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 use sim::craft::command::Stage;
+use sim::craft::ship::ShipDef;
 
 /// The bar's egui area (the docks keep clear of it).
 pub const AREA: &str = "action_bar";
@@ -24,11 +25,13 @@ pub struct Entry {
     pub name: String,
 }
 
-/// The bar's entries: the pinned functions in order.
-pub fn entries(functions: &[Stage]) -> Vec<Entry> {
-    (functions.iter().enumerate())
-        .filter(|(_, f)| f.pinned)
-        .map(|(index, f)| Entry { index, name: f.name.clone() })
+/// The bar's entries: the pinned functions in order, of those in the
+/// craft's view (`sim::craft::program`: after a split, those acting on
+/// this piece).
+pub fn entries(def: &ShipDef, functions: &[Stage]) -> Vec<Entry> {
+    (sim::craft::program::view(def, functions).into_iter())
+        .filter(|v| functions[v.index].pinned)
+        .map(|v| Entry { index: v.index, name: functions[v.index].name.clone() })
         .collect()
 }
 
@@ -58,12 +61,12 @@ pub fn draw(
     mut systems: ResMut<crate::systems_screen::SystemsScreen>,
     mut cmds: MessageWriter<GameCommand>,
 ) -> Result {
-    let Some(state) = sim.ship().ship() else { return Ok(()) };
+    let (Some(def), Some(state)) = (sim.ship().ship_def(), sim.ship().ship()) else { return Ok(()) };
     if station.open || systems.open {
         return Ok(());
     }
     let ctx = contexts.ctx_mut()?;
-    let entries = entries(&state.functions);
+    let entries = entries(&def, &state.functions);
     let mut clicked: Option<usize> = None;
     let corner = [-layout::MARGIN, layout::MARGIN];
     egui::Area::new(AREA.into()).anchor(egui::Align2::RIGHT_TOP, corner).movable(false).show(ctx, |ui| {
@@ -105,11 +108,15 @@ mod tests {
             actions: vec![ShipCommand::ArmChutes],
             pinned,
         };
-        let functions = [f("Legs", Some("L"), true), f("Hidden", Some("K"), false), f("Abort", None, true)];
-        let shown = entries(&functions);
+        let rocket = crate::test_rocket::rocket();
+        let def = rocket.ship.as_deref().unwrap();
+        let mut functions = vec![f("Legs", Some("L"), true), f("Hidden", Some("K"), false), f("Abort", None, true)];
+        // Another piece's function (nothing here it acts on): not shown.
+        functions.push(Stage { actions: vec![ShipCommand::Deploy("nothing#*".into())], ..f("Other", None, true) });
+        let shown = entries(def, &functions);
         let got: Vec<(usize, &str)> = shown.iter().map(|e| (e.index, e.name.as_str())).collect();
         assert_eq!(got, [(0, "Legs"), (2, "Abort")]);
-        assert!(entries(&[f("x", Some("Z"), false)]).is_empty());
+        assert!(entries(def, &[f("x", Some("Z"), false)]).is_empty());
     }
 
     /// The test rocket's pinned function is sent to the vessel by name; the
@@ -118,13 +125,16 @@ mod tests {
     fn a_pinned_function_runs_on_the_active_vessel_and_abort_is_one() {
         let rocket = crate::test_rocket::rocket();
         let sim = SimState::with_craft(&rocket);
-        let e = entries(&sim.ship().ship().unwrap().functions);
+        let e = entries(&sim.ship().ship_def().unwrap(), &sim.ship().ship().unwrap().functions);
         assert_eq!(e.len(), 1, "Legs is pinned, Pair is not");
         let c = run(&sim, e[0].index).unwrap();
         assert_eq!(c, GameCommand::Function { vessel: sim.ship().id(), name: "Legs".into() });
         assert!(run(&sim, 99).is_none());
         let f9 = SimState::with_craft(&crate::state::craft_or_test("falcon9-crew"));
-        let names: Vec<String> = entries(&f9.ship().ship().unwrap().functions).into_iter().map(|e| e.name).collect();
+        let names: Vec<String> = (entries(&f9.ship().ship_def().unwrap(), &f9.ship().ship().unwrap().functions))
+            .into_iter()
+            .map(|e| e.name)
+            .collect();
         assert!(names.iter().any(|n| n == "Launch abort"), "{names:?}");
     }
 }

@@ -391,9 +391,12 @@ fn place(
         return;
     };
     let at = sim.clock.add_seconds(delay);
-    let arms = sim.fleet[i].ship().is_some_and(|state| crate::staging::arms_chutes(state, &kinds));
+    let def = sim.fleet[i].ship_def();
+    let arms = (def.as_deref().zip(sim.fleet[i].ship()))
+        .is_some_and(|(def, state)| crate::staging::arms_chutes(def, state, &kinds));
     for kind in kinds {
-        let none_left = sim.fleet[i].ship().is_some_and(crate::staging::no_stage_left);
+        let none_left = (def.as_deref().zip(sim.fleet[i].ship()))
+            .is_some_and(|(def, state)| crate::staging::no_stage_left(def, state));
         if matches!(kind, OrderKind::Stage) && none_left {
             let message = crate::staging::Refusal::NoStageLeft.message();
             toasts.push_linked(now, message, false, to(id));

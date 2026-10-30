@@ -183,27 +183,36 @@ pub fn activate_next(s: &StageInputs, grounded: bool, controls: &mut Controls) -
     Ok(a)
 }
 
-/// Whether orders arm the parachutes (a craft of parts): a command that
-/// does, the next stage of the vessel's sequence (or one run again) or a
-/// saved function with one. Arming them is the pilot's parachute command (D079).
-pub fn arms_chutes(state: &sim::craft::state::ShipState, kinds: &[sim::systems::OrderKind]) -> bool {
+/// Whether orders arm the parachutes (a craft of parts, `def`): a command
+/// that does, the next stage of the vessel's sequence in its view (or one
+/// run again) or a saved function with one (`sim::craft::program`). Arming
+/// them is the pilot's parachute command (D079).
+pub fn arms_chutes(
+    def: &sim::craft::ship::ShipDef,
+    state: &sim::craft::state::ShipState,
+    kinds: &[sim::systems::OrderKind],
+) -> bool {
     use sim::craft::command::ShipCommand::ArmChutes;
+    use sim::craft::program;
     use sim::systems::OrderKind;
-    let has = |list: &[sim::craft::command::ShipCommand]| list.contains(&ArmChutes);
+    let has = |k: usize| state.stages.get(k).is_some_and(|s| s.actions.contains(&ArmChutes));
     kinds.iter().any(|k| match k {
         OrderKind::Command(c) => *c == ArmChutes,
-        OrderKind::Stage => state.stages.get(state.sequence as usize).is_some_and(|s| has(&s.actions)),
-        OrderKind::Again(k) => state.stages.get(*k as usize).is_some_and(|s| has(&s.actions)),
-        OrderKind::Function(name) => state.functions.iter().any(|f| f.name == *name && has(&f.actions)),
+        OrderKind::Stage => program::next(def, &state.stages, state.sequence).is_some_and(has),
+        OrderKind::Again(k) => program::has_run(def, &state.stages, state.sequence, *k) && has(*k as usize),
+        OrderKind::Function(name) => {
+            program::function(def, &state.functions, name).is_some_and(|f| f.actions.contains(&ArmChutes))
+        }
     })
 }
 
-/// Whether Space finds no stage left in a craft of parts' sequence: every
-/// stage run, or already ordered (an order waits for its tick, or for the
-/// signal's light delay, in `Runtime::orders`).
-pub fn no_stage_left(state: &sim::craft::state::ShipState) -> bool {
+/// Whether Space finds no stage left in a craft of parts' sequence (`def`'s
+/// view, `sim::craft::program`): every stage run, or already ordered (an
+/// order waits for its tick, or for the signal's light delay, in
+/// `Runtime::orders`).
+pub fn no_stage_left(def: &sim::craft::ship::ShipDef, state: &sim::craft::state::ShipState) -> bool {
     let ordered = state.runtime.orders.iter().filter(|o| matches!(o.kind, sim::systems::OrderKind::Stage)).count();
-    state.sequence as usize + ordered >= state.stages.len()
+    sim::craft::program::pending(def, &state.stages, state.sequence).len() <= ordered
 }
 
 /// Whether a vessel counts as on the ground for staging.
@@ -282,6 +291,7 @@ mod tests {
         let craft = crate::test_rocket::rocket();
         let sim = crate::state::SimState::with_craft(&craft);
         let mut state = sim.ship().ship().unwrap().clone();
+        let def = sim.ship().ship_def().unwrap();
         let n = state.stages.len();
         assert!(n >= 1);
         // (run, ordered, none left)
@@ -293,7 +303,7 @@ mod tests {
                 state.runtime.order(sim.clock, OrderKind::Stage);
             }
             state.runtime.order(sim.clock, OrderKind::Function("x".into()));
-            assert_eq!(no_stage_left(&state), want, "{run} {ordered}");
+            assert_eq!(no_stage_left(&def, &state), want, "{run} {ordered}");
         }
     }
 

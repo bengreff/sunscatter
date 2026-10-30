@@ -1,5 +1,6 @@
-//! The staging bar's rows (D111) as pure data with table tests (rule 8):
-//! the stages still to run, the last at the top and the next at the
+//! The staging bar's rows (D111) as pure data with table tests (rule 8),
+//! from the craft's view of its program (`sim::craft::program`: after a
+//! split, what acts on this piece): the stages still to run, the last at the top and the next at the
 //! bottom, then the active stage (the last one run, or what burns now when
 //! none has), then the stages run before it, the latest first, each with
 //! only its name (all can be run again, D114). Each row shows, where it applies, one bar per propellant
@@ -13,6 +14,7 @@
 use super::icons::{icons, Icon, Look};
 use crate::format;
 use sim::craft::command::SequenceEdit;
+use sim::craft::program;
 use sim::craft::ship::ShipDef;
 use sim::craft::state::ShipState;
 use sim::systems::estimate::{Burn, Estimates};
@@ -33,7 +35,7 @@ pub enum Place {
 /// One of a stage's commands and the icons of what it acts on.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Item {
-    /// Its index in the stage's commands.
+    /// Its index in the stage's commands (the program's).
     pub action: usize,
     pub label: String,
     pub icons: Vec<Icon>,
@@ -69,7 +71,8 @@ pub struct Figures {
 /// One row of the bar.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Row {
-    /// Its index in the sequence (`None`: what burns now before any stage).
+    /// Its index in the sequence, the program's (`None`: what burns now
+    /// before any stage).
     pub stage: Option<usize>,
     /// KSP's number: the first stage the highest, the last 0.
     pub number: Option<u32>,
@@ -82,34 +85,39 @@ pub struct Row {
 /// The bar's rows, top to bottom (see the module). `chute`: the parts
 /// carrying the parachutes and how they look.
 pub fn rows(def: &ShipDef, state: &ShipState, est: &Estimates, chute: (&[u32], Look)) -> Vec<Row> {
-    let n = state.stages.len();
-    let next = state.sequence as usize;
-    let items = |j: usize| -> Vec<Item> {
-        (state.stages[j].actions.iter().enumerate())
-            .map(|(action, c)| Item {
-                action,
-                label: crate::staging::parts::label(c),
-                icons: icons(def, state, c, chute),
+    // The craft's view (`sim::craft::program`): after a split, the stages
+    // and commands acting on this piece, by their indices in the program.
+    let shown = program::view(def, &state.stages);
+    let n = shown.len();
+    let number = |k: usize| Some((n - 1 - k) as u32);
+    let items = |k: usize| -> Vec<Item> {
+        let stage = &state.stages[shown[k].index];
+        (shown[k].actions.iter())
+            .map(|&action| {
+                let c = &stage.actions[action];
+                Item { action, label: crate::staging::parts::label(c), icons: icons(def, state, c, chute) }
             })
             .collect()
     };
-    let row = |j: usize, place: Place, burn: Option<&Burn>, active: bool| Row {
-        stage: Some(j),
-        number: Some((n - 1 - j) as u32),
-        name: state.stages[j].name.clone(),
+    let row = |k: usize, place: Place, burn: Option<&Burn>, active: bool| Row {
+        stage: Some(shown[k].index),
+        number: number(k),
+        name: state.stages[shown[k].index].name.clone(),
         place,
-        items: items(j),
+        items: items(k),
         figures: burn.map(|b| figures(b, active)),
     };
+    // The first still to run, in the view.
+    let next = shown.iter().position(|v| v.index >= state.sequence as usize).unwrap_or(n);
     let mut out: Vec<Row> = (next..n)
         .rev()
-        .map(|j| {
-            let burn = est.stages.iter().find(|(k, _)| *k == j).and_then(|(_, b)| b.as_ref());
-            row(j, if j == next { Place::Next } else { Place::Later }, burn, false)
+        .map(|k| {
+            let burn = est.stages.iter().find(|(j, _)| *j == shown[k].index).and_then(|(_, b)| b.as_ref());
+            row(k, if k == next { Place::Next } else { Place::Later }, burn, false)
         })
         .collect();
-    match (next.checked_sub(1).filter(|&j| j < n), &est.now) {
-        (Some(j), now) => out.push(row(j, Place::Active, now.as_ref(), true)),
+    match (next.checked_sub(1), &est.now) {
+        (Some(k), now) => out.push(row(k, Place::Active, now.as_ref(), true)),
         (None, Some(now)) => out.push(Row {
             stage: None,
             number: None,
@@ -120,10 +128,10 @@ pub fn rows(def: &ShipDef, state: &ShipState, est: &Estimates, chute: (&[u32], L
         }),
         (None, None) => {}
     }
-    out.extend((0..next.saturating_sub(1).min(n)).rev().map(|j| Row {
-        stage: Some(j),
-        number: Some((n - 1 - j) as u32),
-        name: state.stages[j].name.clone(),
+    out.extend((0..next.saturating_sub(1)).rev().map(|k| Row {
+        stage: Some(shown[k].index),
+        number: number(k),
+        name: state.stages[shown[k].index].name.clone(),
         place: Place::Done,
         items: Vec::new(),
         figures: None,
