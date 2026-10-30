@@ -272,7 +272,8 @@ mod tests {
         let plain = Stage { abort: false, ..abort.clone() };
         type Change<'a> = &'a dyn Fn(&ShipDef, &mut ShipState);
         // (case, piece, its state, the function, offered)
-        let table: [(&str, &ShipDef, Change, &Stage, Result<(), NoEscape>); 13] = [
+        type Row<'a> = (&'a str, &'a ShipDef, Change<'a>, &'a Stage, Result<(), NoEscape>);
+        let table: [Row; 13] = [
             ("the stack on the pad", &whole, &asis, &abort, Ok(())),
             ("the stack in ascent", &flying, &asis, &abort, Ok(())),
             ("the upper stack after the stage separation", &upper, &asis, &abort, Ok(())),
