@@ -222,7 +222,9 @@
         (name: "Landing legs", key: "L", pinned: true, actions: [Deploy("s1.leg#*")]),
         (name: "Parachutes", key: "C", actions: [ArmChutes]),
         (name: "Nosecone", key: "N", actions: [Deploy("dragon.nose")]),
-        (name: "Launch abort", key: "A", pinned: true, actions: [Separate("dragon separation"), Select("superdraco"), Ignite("superdraco")]),
+        // Thrust termination first (the AFSS shuts the Merlins down, stage
+        // 2's pyrovalve the MVac; falcon9.md §5.1), then Dragon leaves.
+        (name: "Launch abort", key: "A", pinned: true, actions: [Shutdown("s1"), Shutdown("s2"), Separate("dragon separation"), Select("superdraco"), Ignite("superdraco")]),
     ],
     checks: [
         (name: "Falcon 9 first stage dry mass (Block 5, legs and grid fins)", parts: ["s1."],

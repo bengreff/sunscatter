@@ -103,9 +103,17 @@ fn a_launch_abort_on_the_pad_leaves_liftoff_next() {
     assert!(!s.runtime.release_armed);
     assert_eq!(s.stages[s.sequence as usize].name, "Liftoff", "Liftoff is next again");
     assert!(s.runtime.events.iter().any(|e| e.text.starts_with("Clamps: release disarmed")), "{:?}", s.runtime.events);
+    assert!(merlins(stack).iter().all(|s| !lit(*s)), "thrust terminated: {:?}", merlins(stack));
     for p in free {
         assert!(!p.ship().unwrap().clamped, "{:?}: nothing holds it", p.craft.id);
+        let def = p.ship_def().unwrap();
+        let dracos = (def.engines.iter().zip(&p.ship().unwrap().engines)).filter(|(d, _)| d.id.contains("superdraco"));
+        assert!(dracos.map(|(_, e)| e.status).all(lit), "{:?}: the SuperDracos burn", p.craft.id);
     }
+}
+
+fn lit(s: EngineStatus) -> bool {
+    matches!(s, EngineStatus::Starting | EngineStatus::Running)
 }
 
 /// Editing the stages in flight (the systems screen sends the whole list,

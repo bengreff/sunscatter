@@ -475,4 +475,44 @@ mod tests {
         assert!(!name.ends_with("start now"), "{name}");
         assert_eq!(state.sequence as usize, ignition + 2);
     }
+
+    /// The Falcon 9's "Launch abort" terminates the stack's thrust (the
+    /// AFSS and stage 2's pyrovalve, falcon9.md §5.1) as Dragon separates
+    /// and lights its SuperDracos: on the pad with the Merlins at full
+    /// thrust, in flight on the booster, and in flight on the second stage.
+    #[test]
+    fn a_launch_abort_shuts_the_stack_down() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/craft/falcon9-crew");
+        let def = crate::craft::load_definition(&path).unwrap().ship.unwrap();
+        let at = Epoch::new(1_000_000_000, 0.0);
+        let stack = |i: usize| def.engines[i].id.starts_with("s1.") || def.engines[i].id.starts_with("s2.");
+        let lit = |s: EngineStatus| matches!(s, EngineStatus::Starting | EngineStatus::Running);
+        // (case, clamped, the engines running before)
+        let cases: [(&str, bool, &str); 3] = [
+            ("on the pad", true, "s1.merlin"),
+            ("booster burning", false, "s1.merlin"),
+            ("second stage", false, "s2.mvac"),
+        ];
+        for (case, clamped, running) in cases {
+            let mut state = ShipState::initial(&def);
+            state.clamped = clamped;
+            state.runtime.refit(&def);
+            for (i, d) in def.engines.iter().enumerate() {
+                if d.id.starts_with(running) {
+                    state.engines[i].status = EngineStatus::Running;
+                    state.runtime.engines[i].level = 1.0;
+                }
+            }
+            let effects = function(&def, &mut state, "Launch abort", at).expect("the function");
+            assert!(!effects.is_empty(), "{case}: Dragon separates");
+            for (i, d) in def.engines.iter().enumerate() {
+                let s = state.engines[i].status;
+                if stack(i) {
+                    assert!(!lit(s), "{case}: {} is {s:?}", d.id);
+                } else if d.id.starts_with("dragon.superdraco") {
+                    assert!(lit(s), "{case}: {} is {s:?}", d.id);
+                }
+            }
+        }
+    }
 }
