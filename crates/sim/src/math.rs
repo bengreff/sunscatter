@@ -42,9 +42,18 @@ pub fn atan2(y: f64, x: f64) -> f64 {
 pub fn exp(x: f64) -> f64 {
     libm::exp(x)
 }
+/// eˣ − 1, exact near 0.
+#[inline]
+pub fn expm1(x: f64) -> f64 {
+    libm::expm1(x)
+}
 #[inline]
 pub fn ln(x: f64) -> f64 {
     libm::log(x)
+}
+#[inline]
+pub fn atan(x: f64) -> f64 {
+    libm::atan(x)
 }
 #[inline]
 pub fn log10(x: f64) -> f64 {

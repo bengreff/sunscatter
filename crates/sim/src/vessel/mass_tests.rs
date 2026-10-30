@@ -131,6 +131,8 @@ fn a_days_boil_off_takes_from_each_tank_what_it_vents() {
     let l = plumbing::liquid_of(&def.tanks[lox]).unwrap();
     s.tanks[lox].liquid_k = l.saturation_temperature(def.tanks[lox].pressure);
     s.tanks[lox].ullage_moles = 0.0;
+    // The coast's law of the tanks goes on from them (D119).
+    v.start_coast(&w);
     let start = v.ship().unwrap().clone();
     let m0 = v.mass();
     let day = t0().add_seconds(86_400.0);
@@ -169,6 +171,45 @@ fn a_days_boil_off_takes_from_each_tank_what_it_vents() {
     }
     let all: f64 = vented.iter().sum();
     assert!((m0 - v.mass() - all).abs() < 1e-9 * m0, "the vessel loses what its tanks vent");
+}
+
+/// One law for the trajectory and the ship state (D119): through a day's
+/// coast of the second stage with Dragon in a 400 km orbit, its LOX boiling
+/// at its relief, the mass the segment's drag and radiation pressure divide
+/// by is the dry mass plus the ship's consumables at every systems lattice
+/// point, to the bit (both are the coast's law of the tanks there,
+/// `systems::coast_law`), and the boil-off runs all day. Flown lattice
+/// point by lattice point, it is the vessel one jump gives.
+#[test]
+fn the_segments_mass_is_the_ships_at_every_lattice_point() {
+    let w = world();
+    let earth = w.find("Earth").unwrap();
+    let (r, vel) =
+        crate::kepler::Elements { a: 6_778_137.0, e: 0.0005, i: 0.9, raan: 1.0, argp: 0.5, mean_anomaly: 0.0 }
+            .to_state(earth.gm);
+    let craft = craft_of(&CraftId("falcon9-crew#0-11".into()));
+    let def = craft.ship.clone().unwrap();
+    let lox = def.tanks.iter().position(|t| t.id == "s2.tank:lox").unwrap();
+    let mut v = Vessel::coasting(&w, VesselId(1), t0(), earth.node, r, vel, &craft);
+    let s = v.ship.as_mut().unwrap();
+    s.tanks[lox].liquid *= 0.3;
+    s.tanks[lox].liquid_k = plumbing::liquid_of(&def.tanks[lox]).unwrap().saturation_temperature(def.tanks[lox].pressure);
+    s.tanks[lox].ullage_moles = 0.0;
+    v.start_coast(&w);
+    let m0 = v.mass();
+    let mut one = v.clone();
+    one.advance(&w, t0().add_seconds(86_400.0), &Controls::default(), usize::MAX);
+    for k in 1..=1_440 {
+        let e = t0().add_seconds(60.0 * f64::from(k));
+        v.advance(&w, e, &Controls::default(), usize::MAX);
+        assert_eq!(v.time, e);
+        let segment = v.trajectory().unwrap().mass_at(e).unwrap();
+        assert_eq!(segment.to_bits(), v.mass().to_bits(), "lattice point {k}: {segment} vs {} kg", v.mass());
+    }
+    let vented = v.ship().unwrap().runtime.tanks[lox].vented;
+    println!("the LOX vented {vented:.1} kg in a day, the vessel lost {:.1} kg", m0 - v.mass());
+    assert!(vented > 300.0, "the boil-off runs through the coast");
+    assert_eq!(v, one, "point by point and one jump");
 }
 
 /// The thermal nodes' heat capacities from the tanks' own contents (F2):

@@ -14,7 +14,10 @@
 //! * **Low thrust**: a planned burn below [`LOW_THRUST`] flown as a
 //!   perturbed segment, thrust along the engine axis at the pointing's
 //!   attitude (D075); its mass flow is the segment's.
-//! * **Boil-off**: a constant propellant mass flow down to the dry mass.
+//! * **Boil-off**: a craft of parts' tanks by their law through the coast
+//!   ([`crate::systems::coast_law`], D119), the one its ship state reads
+//!   at the lattice points; a made-up craft's, a constant propellant mass
+//!   flow down to the dry mass.
 //!
 //! The **live boundary** ([`LiveBoundary`]) says where the coast model's
 //! assumptions stop holding and the vessel must fly live ticks.
@@ -22,11 +25,16 @@
 use super::pointing::Pointing;
 use crate::aero;
 use crate::body::atmosphere::Atmosphere;
+use crate::craft::ship::ShipDef;
+use crate::craft::state::ShipState;
 use crate::craft::{CraftId, DesignSlot};
 use crate::ephem::Snapshot;
 use crate::forces::radiation::starlight;
 use crate::forces::{Optics, SurfaceTable};
 use crate::frame::NodeId;
+use crate::systems::coast_law::CoastLaw;
+use crate::systems::plumbing::{self, HeatLaw};
+use crate::time::Epoch;
 use crate::world::World;
 use glam::DVec3;
 
@@ -128,6 +136,10 @@ pub struct Limbo {
     #[serde(default)]
     pub chute_area: f64,
     pub boundary: LiveBoundary,
+    /// A craft of parts' tanks and bottles through a coast (D119): its
+    /// mass is the dry mass and their law's consumables.
+    #[serde(default)]
+    pub law: Option<Box<CoastLaw>>,
 }
 
 /// The air of one body at a vessel, read from the model up to its top.
@@ -210,7 +222,42 @@ impl Limbo {
             dry_mass,
             chute_area: 0.0,
             boundary: LiveBoundary::DEFAULT,
+            law: None,
         }
+    }
+
+    /// The craft's ship (a craft of parts), if it has one.
+    pub fn ship_def(&self) -> Option<&ShipDef> {
+        self.design.get(&self.craft).ship.as_deref()
+    }
+
+    /// Each tank's heat for a span of the law starting at `t` at `(r, v)`
+    /// relative to `anchor`, held by this pointing
+    /// ([`super::coast_heat::law_conditions`]); `None` without a ship.
+    pub fn law_heat(&self, world: &World, t: Epoch, state: (NodeId, DVec3, DVec3)) -> Option<Vec<HeatLaw>> {
+        let def = self.ship_def()?;
+        let (suns, air_k) = super::coast_heat::law_conditions(world, t, state, &self.pointing);
+        Some((0..def.tanks.len()).map(|i| plumbing::heat_law(def, i, &suns, air_k)).collect())
+    }
+
+    /// The law of a craft of parts' `ship` from `t` on (local time 0 there)
+    /// at `state`, held by this pointing; `None` without a ship.
+    pub fn law_from(&self, world: &World, t: Epoch, state: (NodeId, DVec3, DVec3), ship: &ShipState) -> Option<CoastLaw> {
+        let heat = self.law_heat(world, t, state)?;
+        Some(CoastLaw::start(self.ship_def()?, ship, &heat))
+    }
+
+    /// Starts the law's next span at local time `t` (epoch `epoch`, the
+    /// vessel at `state`) if one is due. Returns whether it did.
+    pub fn next_span(&mut self, world: &World, (t, epoch): (f64, Epoch), state: (NodeId, DVec3, DVec3)) -> bool {
+        if !self.law.as_ref().is_some_and(|l| l.due(t)) {
+            return false;
+        }
+        let Some(heat) = self.law_heat(world, epoch, state) else { return false };
+        let design = self.design.get(&self.craft).clone();
+        let (Some(def), Some(law)) = (design.ship.as_deref(), self.law.as_mut()) else { return false };
+        law.add_span(def, t, &heat);
+        true
     }
 
     /// The design's surface table.
@@ -218,15 +265,28 @@ impl Limbo {
         &self.design.get(&self.craft).surfaces
     }
 
-    /// The same model with another pointing (and thrust).
+    /// The same model with another pointing (and thrust), its law as it is
+    /// (a burn's has none: [`Self::without_law`]).
     pub fn with(&self, pointing: Pointing, thrust: Option<LowThrust>) -> Self {
         Limbo { pointing, thrust, ..self.clone() }
     }
 
+    /// The same model without a law of the tanks (a burn, or a coast after
+    /// a predicted burn: its mass is its segment's own law).
+    pub fn without_law(mut self) -> Self {
+        self.law = None;
+        self
+    }
+
     /// Mass at local time `t` of a segment starting at `mass0` whose own
-    /// mass flow (a burn's) is `flow`: boil-off on top, never below the
-    /// dry mass.
+    /// mass flow (a burn's) is `flow`: a craft of parts' law of its tanks
+    /// (a coast's), else boil-off on top, never below the dry mass.
     pub fn mass(&self, mass0: f64, flow: f64, t: f64) -> f64 {
+        if let Some(law) = self.law.as_deref() {
+            if let Some(def) = self.ship_def() {
+                return self.dry_mass + law.total(def, t);
+            }
+        }
         if self.boil_off > 0.0 {
             (mass0 - (flow + self.boil_off) * t).max(self.dry_mass.min(mass0))
         } else {

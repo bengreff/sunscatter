@@ -302,6 +302,8 @@ impl Vessel {
     /// [`Self::order_at`].
     pub fn command(&mut self, world: &World, cmd: &ShipCommand) -> Result<Vec<Effect>, String> {
         let def = self.ship_def().ok_or("not a craft of parts")?;
+        // Its tanks where the coast's law has them now (D119).
+        self.law_to_now();
         let at = self.time;
         let state = self.ship.as_mut().ok_or("no ship state")?;
         let effects = command::apply(&def, state, cmd, command::Context { at, sequence: false })?;

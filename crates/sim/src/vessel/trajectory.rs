@@ -218,6 +218,18 @@ impl Trajectory {
             (EndKind::Horizon, Some(p)) if matches!(prev.kind, SegmentKind::Coast) => l.with(p.pointing.clone(), None),
             _ => l.with(Pointing::Mean, None),
         });
+        // A craft of parts' law of its tanks goes on from where a coast left
+        // it (D119); after a predicted burn there is none (the burn is
+        // flown live, and the coast after it restarts from the ship).
+        let limbo = limbo.map(|mut l| {
+            let state = (last.anchor, last.s.r, last.s.v);
+            let prev_law = prev.limbo().and_then(|p| p.law.as_deref()).filter(|_| matches!(prev.kind, SegmentKind::Coast));
+            l.law = prev_law.and_then(|law| {
+                let heat = l.law_heat(world, t, state)?;
+                Some(Box::new(law.continued(l.ship_def()?, end.t, &heat)))
+            });
+            l
+        });
         Some(make_segment(world, plan, t, start, prev.mass_at(end.t), index, self.flying(), from, limbo.as_ref()))
     }
 
@@ -428,7 +440,7 @@ fn make_segment(
                 let axis = c.engine.mount_dir;
                 let snap = world.snapshot(t);
                 let p = pointing::on_law(&law.direction, &att, axis, world, &snap, (start.anchor, start.r, start.v));
-                let limbo = Some(Box::new(l.with(p, Some(LowThrust { thrust: law.thrust, axis }))));
+                let limbo = Some(Box::new(l.with(p, Some(LowThrust { thrust: law.thrust, axis })).without_law()));
                 return Segment::start(world, t, start, mass, kind, EndKind::BurnEnd, i, None, limbo);
             }
             let start = CoastStart { horizon, ..start };
@@ -436,7 +448,7 @@ fn make_segment(
             // A flown (chemical) burn of minutes takes no boil-off: its thrust
             // is the engine's mass flow alone (`flown::Flight::tick`).
             let limbo = limbo.map(|l| {
-                let mut flown = l.with(Pointing::Mean, None);
+                let mut flown = l.with(Pointing::Mean, None).without_law();
                 flown.boil_off = 0.0;
                 Box::new(flown)
             });

@@ -312,6 +312,7 @@ impl Vessel {
     pub fn set_clock_offset(&mut self, world: &World, offset: f64) {
         self.clock = ShipClock::at(self.time, offset);
         if matches!(self.phase, Phase::Coasting { .. }) {
+            self.law_to_now();
             self.start_coast(world);
         }
     }
@@ -364,7 +365,10 @@ impl Vessel {
         }
         self.debug = on;
         match self.phase {
-            Phase::Coasting { .. } => self.start_coast(world),
+            Phase::Coasting { .. } => {
+                self.law_to_now();
+                self.start_coast(world);
+            }
             Phase::Landed { .. } => self.wake(world),
             _ => {}
         }
@@ -575,8 +579,16 @@ impl Vessel {
         };
         let seed = (self.attitude, self.control);
         let (plan, limits, craft) = (&self.plan, self.burn_limits(), BurnCraft::of(&self.craft));
-        let model = Some(self.limbo_model(p));
-        let trajectory = Trajectory::perturbed(world, self.time, start, self.mass(), plan, limits, craft, seed, model);
+        // A craft of parts' tanks go by their law from now (D119); its total
+        // is the segment's mass.
+        let mut model = self.limbo_model(p);
+        let law = self.ship.as_ref().and_then(|s| model.law_from(world, self.time, (anchor, r, v), s));
+        let mass = match (&law, model.ship_def()) {
+            (Some(law), Some(def)) => self.craft.mass.dry_mass + law.total(def, 0.0),
+            _ => self.mass(),
+        };
+        model.law = law.map(Box::new);
+        let trajectory = Trajectory::perturbed(world, self.time, start, mass, plan, limits, craft, seed, Some(model));
         self.phase = Phase::Coasting { trajectory: Box::new(trajectory) };
         self.repoint = false;
     }

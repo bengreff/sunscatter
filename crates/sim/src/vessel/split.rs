@@ -196,6 +196,8 @@ impl Vessel {
         ids: &mut VesselIds,
     ) -> Vec<Vessel> {
         assert_eq!(plan.pieces.len(), crafts.len(), "one craft per piece");
+        // Each piece's tanks from where the coast's law has them now (D119).
+        self.law_to_now();
         let pending = self.breakup.take();
         // One piece of another craft: the same parts, mechanisms moved.
         let reconfigure = plan.pieces.len() == 1 && crafts[0].id != self.craft.id;

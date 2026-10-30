@@ -184,6 +184,31 @@ pub fn coast_suns(
     CoastSun::one(att.q.inverse() * coast_sunlight(world, t, anchor, r, v))
 }
 
+/// What a span of a coast's law of its tanks holds (D119,
+/// `crate::systems::coast_law`) at `t` for a vessel at `(r, v)` relative to
+/// `anchor` held by `pointing`: the sunlight samples in body axes as the
+/// coast thermal lattice takes them ([`coast_suns`]) where the pointing
+/// knows the attitude, else the coast sunlight from every direction alike
+/// (the segment does not know the attitude: its drag takes the orientation
+/// average too); and the air's temperature, if in an atmosphere.
+pub fn law_conditions(
+    world: &World,
+    t: Epoch,
+    (anchor, r, v): (NodeId, DVec3, DVec3),
+    pointing: &super::pointing::Pointing,
+) -> (Vec<DVec3>, Option<f64>) {
+    let snap = world.snapshot(t);
+    let air_k = super::aerothermal::air_at(world, &snap, anchor, r, v).map(|a| a.temperature);
+    let suns = match pointing.attitude(world, &snap, anchor, r, v) {
+        Some(att) => coast_suns(world, t, (anchor, r, v), Some(pointing), &att).suns,
+        None => {
+            let flux = coast_sunlight(world, t, anchor, r, v).length();
+            icosahedron().into_iter().map(|d| d * flux).collect()
+        }
+    };
+    (suns, air_k)
+}
+
 /// The orbit-averaged samples of [`coast_suns`] for a frame-held pointing,
 /// if the orbit qualifies.
 fn orbit_suns(

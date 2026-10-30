@@ -344,7 +344,7 @@ impl ShipState {
     /// Gas in the bottles (kg).
     pub fn gas(&self, def: &ShipDef) -> f64 {
         (self.bottles.iter().zip(&def.bottles))
-            .map(|(s, b)| s.moles * fluids().gas(&b.gas).map_or(0.0, |g| g.molar_mass))
+            .map(|(s, b)| s.moles * molar_mass(&b.gas))
             .sum()
     }
 
@@ -352,7 +352,7 @@ impl ShipState {
     /// in stays aboard until it is vented (`sim::systems::plumbing`).
     pub fn ullage_gas(&self, def: &ShipDef) -> f64 {
         (self.tanks.iter().zip(&def.tanks))
-            .map(|(s, t)| s.ullage_moles * fluids().gas(&t.load.pressurant).map_or(0.0, |g| g.molar_mass))
+            .map(|(s, t)| s.ullage_moles * molar_mass(&t.load.pressurant))
             .sum()
     }
 
@@ -360,7 +360,8 @@ impl ShipState {
     /// the only total there is (F2: the liquids, the bottles' gas and the
     /// ullages').
     pub fn consumables(&self, def: &ShipDef) -> f64 {
-        self.liquid() + self.gas(def) + self.ullage_gas(def)
+        let tanks = self.tanks.iter().map(|t| (t.liquid, t.ullage_moles));
+        consumables_of(def, tanks, self.bottles.iter().map(|b| b.moles))
     }
 
     /// Applies a command's plain effect (see the module): the state changes
@@ -506,4 +507,43 @@ impl ShipState {
         }
         Some((stage.name.clone(), effects))
     }
+}
+
+/// A craft of parts' consumables (kg): its tanks' liquids and ullage gas,
+/// `(kg, mol)` in `def`'s order, and its bottles' gas (mol), each gas at
+/// its molar mass ([`consumables_sum`]).
+pub fn consumables_of(
+    def: &ShipDef,
+    tanks: impl IntoIterator<Item = (f64, f64)>,
+    bottles: impl IntoIterator<Item = f64>,
+) -> f64 {
+    let tanks = tanks.into_iter().zip(&def.tanks).map(|((kg, mol), t)| (kg, mol, molar_mass(&t.load.pressurant)));
+    consumables_sum(tanks, bottles.into_iter().zip(&def.bottles).map(|(mol, b)| (mol, molar_mass(&b.gas))))
+}
+
+/// A gas's molar mass (kg/mol; 0 for a gas the table does not know: it
+/// weighs nothing in the consumables).
+pub fn molar_mass(gas: &str) -> f64 {
+    fluids().gas(gas).map_or(0.0, |g| g.molar_mass)
+}
+
+/// The one sum of the consumables (kg): the tanks' liquids, then the
+/// bottles' gas, then the ullages', from `(kg, mol, kg/mol)` per tank and
+/// `(mol, kg/mol)` per bottle. The ship state ([`ShipState::consumables`])
+/// and a coast's law of it (`systems::coast_law`) both take it, so they
+/// agree to the bit.
+pub fn consumables_sum(
+    tanks: impl IntoIterator<Item = (f64, f64, f64)>,
+    bottles: impl IntoIterator<Item = (f64, f64)>,
+) -> f64 {
+    let (mut liquid, mut ullage) = (0.0, 0.0);
+    for (kg, mol, molar) in tanks {
+        liquid += kg;
+        ullage += mol * molar;
+    }
+    let mut gas = 0.0;
+    for (mol, molar) in bottles {
+        gas += mol * molar;
+    }
+    liquid + gas + ullage
 }

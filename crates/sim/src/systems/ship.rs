@@ -163,3 +163,30 @@ pub fn lattice(def: &ShipDef, state: &mut ShipState, at: Epoch, env: &plumbing::
     super::crew::step(def, state, None, env.air_k.unwrap_or(293.15), dt, at);
     vented
 }
+
+/// The ship's slow systems on a coast's lattice (D119): its tanks and
+/// bottles are their law's at its local time `t` (`super::coast_law`, the
+/// one the coast's segment takes its mass from), its liquids float, and
+/// power and the crew step from where they last stepped to `at`.
+pub fn coast_lattice(
+    def: &ShipDef,
+    state: &mut ShipState,
+    at: Epoch,
+    env: &plumbing::Surroundings,
+    (law, t): (&super::coast_law::CoastLaw, f64),
+) {
+    state.runtime.refit(def);
+    let dt = state.runtime.stepped.map_or(0.0, |s| at.seconds_since(s));
+    if state.runtime.stepped.is_none() || dt > 0.0 {
+        state.runtime.stepped = Some(at);
+    }
+    law.apply(def, state, t);
+    // The regulator holds the ullages at span starts (the law's top-up).
+    state.runtime.pressure_regulated = true;
+    if dt <= 0.0 {
+        return;
+    }
+    plumbing::float(def, state, dt);
+    super::power::step_ship(def, state, env.sun, dt, at);
+    super::crew::step(def, state, None, env.air_k.unwrap_or(293.15), dt, at);
+}

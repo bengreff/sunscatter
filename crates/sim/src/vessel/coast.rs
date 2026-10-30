@@ -219,6 +219,7 @@ impl Vessel {
         budget: &mut Budget,
     ) -> Coasted {
         if self.engine_running(controls) || self.ship_wants_ticks(controls) {
+            self.law_to_now();
             self.thermal_to_now(world);
             let (anchor, r, v) = self.state(world);
             self.phase = Phase::Powered { anchor, r, v };
@@ -249,6 +250,7 @@ impl Vessel {
         let Some(state) = trajectory.eval(self.time) else { return false };
         let Some(current) = seg.limbo().map(|l| &l.pointing) else {
             // A coast from before perturbed coasts (an older save): restart it.
+            self.law_to_now();
             self.start_coast_pointing(world, state, Pointing::Mean);
             return true;
         };
@@ -271,6 +273,7 @@ impl Vessel {
             self.attitude = a;
             self.control = p.control(key_of(&aim), self.time, a, inertia_now);
         }
+        self.law_to_now();
         self.start_coast_pointing(world, state, p);
         true
     }
@@ -352,7 +355,8 @@ impl Vessel {
                 let (anchor, r, v) = trajectory.eval(e).expect("the lattice epoch is in the trajectory");
                 self.systems.step(&Vessel::systems_env(world, e, (anchor, r), self.attitude.q, propellant_at(e)));
                 let at = (e, (anchor, r, v), self.attitude.q);
-                super::ship_tick::ship_lattice(self.ship.as_mut(), ship_def.as_deref(), world, at, None);
+                let law = law_at(trajectory, e);
+                super::ship_tick::ship_lattice(self.ship.as_mut(), ship_def.as_deref(), world, at, None, law);
                 budget.charge(SYSTEMS_UNITS);
                 continue;
             }
@@ -407,6 +411,7 @@ impl Vessel {
         self.time = reach;
         if !stopped && settled.is_none() && (entry.is_some() || near_surface) {
             // In an atmosphere or close to a surface: flown in live ticks.
+            self.law_to_now();
             self.thermal_to_now(world);
             let state = self.state(world);
             self.go_live(state);
@@ -456,6 +461,13 @@ fn kept_from(control: &AttitudeControl, reach: Epoch, trajectory: &Trajectory) -
         }
         _ => reach,
     }
+}
+
+/// The law of a craft of parts' tanks at `e` (D119): the coast segment's
+/// there and its local time.
+fn law_at(trajectory: &Trajectory, e: Epoch) -> Option<(&crate::systems::coast_law::CoastLaw, f64)> {
+    let s = trajectory.segment_at(e)?;
+    Some((s.limbo()?.law.as_deref()?, e.seconds_since(s.t0)))
 }
 
 /// The key of a direction hold's aim.

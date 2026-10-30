@@ -115,7 +115,9 @@ fn a_separation_partitions_the_ship_and_conserves_momentum() {
     v.next_stage(&w).unwrap();
     let plan = v.plan_breakup().expect("a pending separation");
     assert_eq!(plan.pieces, vec![vec![0], (1..11).collect::<Vec<u32>>()]);
-    let before = v.clone();
+    // The split takes the tanks where the coast's law has them now (D119).
+    let mut before = v.clone();
+    before.law_to_now();
     let state = before.ship().unwrap().clone();
     let props = before.mass_props();
     let (_, r0, v0) = before.state(&w);

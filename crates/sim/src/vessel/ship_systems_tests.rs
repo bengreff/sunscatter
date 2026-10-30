@@ -241,6 +241,8 @@ fn a_restart_after_a_coast_settles_first_and_ingests_gas_when_forced() {
             let g = crate::systems::plumbing::geometry(t, st);
             st.ullage_moles = crate::fluids::moles(t.load.pressure, g.ullage, st.ullage_k);
         }
+        // The coast's law of the tanks goes on from them (D119).
+        v.start_coast(&w);
         v
     };
     let ignite = ShipCommand::Ignite("s2".into());
@@ -510,6 +512,8 @@ fn a_day_on_rails_warms_and_boils_off_the_same_in_any_frames() {
             let l = crate::systems::plumbing::liquid_of(&def.tanks[lox]).unwrap();
             s.tanks[lox].liquid_k = l.saturation_temperature(def.tanks[lox].pressure);
             s.tanks[lox].ullage_moles = 0.0;
+            // The coast's law of the tanks goes on from them (D119).
+            v.start_coast(&w);
         }
         let (k0, m0) = (v.ship().unwrap().tanks[lox].liquid_k, v.mass());
         let mut frames = v.clone();

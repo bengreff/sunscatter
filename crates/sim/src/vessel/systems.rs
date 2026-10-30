@@ -48,7 +48,7 @@ impl Vessel {
             // A craft of parts' slow systems (its liquids warm on the pad).
             let v = rot.omega(e).raw().cross(r);
             let at = (e, (body, r, v), q);
-            super::ship_tick::ship_lattice(self.ship.as_mut(), def.as_deref(), world, at, Some(body));
+            super::ship_tick::ship_lattice(self.ship.as_mut(), def.as_deref(), world, at, Some(body), None);
         }
     }
 }
@@ -60,7 +60,22 @@ impl Vessel {
     pub fn set_boil_off(&mut self, world: &World, rate: f64) {
         self.systems.consumables.boil_off = rate.max(0.0);
         if matches!(self.phase, Phase::Coasting { .. }) {
+            self.law_to_now();
             self.start_coast(world);
         }
+    }
+}
+
+impl Vessel {
+    /// Brings a craft of parts' tanks and bottles to its coast's law at the
+    /// vessel's time (D119, `systems::coast_law`), between lattice points:
+    /// before a command acts on them, and before the coast is left or
+    /// restarted, so a new law (or the live ticks) goes on from there.
+    pub(super) fn law_to_now(&mut self) {
+        let Phase::Coasting { trajectory } = &self.phase else { return };
+        let Some(seg) = trajectory.segment_at(self.time) else { return };
+        let Some((l, law)) = seg.limbo().and_then(|l| Some((l, l.law.as_deref()?))) else { return };
+        let (Some(def), Some(ship)) = (l.ship_def(), self.ship.as_mut()) else { return };
+        law.apply(def, ship, self.time.seconds_since(seg.t0));
     }
 }

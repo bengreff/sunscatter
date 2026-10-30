@@ -159,7 +159,7 @@ pub fn pressure(t: &TankDef, s: &TankState) -> f64 {
 /// the liquid's vapour pressure, at most what all of the liquid gives as
 /// gas there (a residual cannot fill a dry tank with saturated vapour: a
 /// few grams of LOX at its 4 bar boiling point would vent all the helium).
-fn vapour(t: &TankDef, s: &TankState, ullage: f64) -> f64 {
+pub(crate) fn vapour(t: &TankDef, s: &TankState, ullage: f64) -> f64 {
     let all = |l: &Liquid| s.liquid / l.molar_mass * R_GAS * s.liquid_k / ullage;
     liquid_of(t).map_or(0.0, |l| l.vapour_pressure(s.liquid_k).min(all(l)))
 }
@@ -422,13 +422,11 @@ fn pressurise(def: &ShipDef, state: &mut ShipState, i: usize, dt: f64) -> f64 {
     let_in
 }
 
-/// Vents tank `i` down to its relief pressure (its MEOP); a liquid at
+/// Vents tank `t` down to its relief pressure (its MEOP); a liquid at
 /// saturation there boils what heats it. Returns the mass vented (kg).
-fn relieve(def: &ShipDef, state: &mut ShipState, i: usize) -> f64 {
-    let t = &def.tanks[i];
+fn relieve(t: &TankDef, s: &mut TankState) -> f64 {
     let Some(liquid) = liquid_of(t) else { return 0.0 };
     let molar = fluids().gas(&t.load.pressurant).map_or(0.004, |g| g.molar_mass);
-    let s = &mut state.tanks[i];
     let mut vented = 0.0;
     // Saturated at the relief pressure: the excess heat boils off.
     let saturation = liquid.saturation_temperature(t.pressure);
@@ -464,24 +462,37 @@ pub struct Surroundings {
     pub air_k: Option<f64>,
 }
 
-/// Heat into tank `i`'s liquid (W): the air's film on its wetted wall and
-/// the sunlight its wetted wall absorbs, less its radiation in vacuum; none
-/// for a tank inside a component (held by its heaters).
-pub fn heat_in(def: &ShipDef, state: &ShipState, i: usize, env: &Surroundings) -> f64 {
-    let t = &def.tanks[i];
-    let s = &state.tanks[i];
+/// Whether tank `t` sits inside a component, whose heaters hold it (no
+/// heat from outside reaches its liquid).
+fn heated_inside(def: &ShipDef, t: &TankDef) -> bool {
     let owner = t.id.split(':').next().unwrap_or("");
-    if s.liquid <= 0.0 || def.components.iter().any(|c| c.id == owner) {
-        return 0.0;
-    }
-    let g = geometry(t, s);
-    let wetted = 2.0 * math::PI * g.radius * g.height + math::PI * g.radius * g.radius;
+    def.components.iter().any(|c| c.id == owner)
+}
+
+/// Solar absorptivity and emissivity of tank `t`'s wall: its part's finish,
+/// else its material (0.3 and 0.1 when neither is known).
+fn optics(def: &ShipDef, t: &TankDef) -> (f64, f64) {
     let part = def.parts.iter().find(|p| p.part == t.part);
     let mats = crate::materials::materials();
     let finish = part.and_then(|p| p.finish.as_deref()).and_then(|f| mats.finish(f).ok());
     let bare = part.and_then(|p| mats.get(&p.material).ok());
     let alpha = finish.map(|f| f.absorptivity).or(bare.map(|m| m.absorptivity)).unwrap_or(0.3);
     let epsilon = finish.map(|f| f.emissivity).or(bare.map(|m| m.emissivity)).unwrap_or(0.1);
+    (alpha, epsilon)
+}
+
+/// Heat into tank `i`'s liquid (W): the air's film on its wetted wall and
+/// the sunlight its wetted wall absorbs, less its radiation in vacuum; none
+/// for a tank inside a component (held by its heaters).
+pub fn heat_in(def: &ShipDef, state: &ShipState, i: usize, env: &Surroundings) -> f64 {
+    let t = &def.tanks[i];
+    let s = &state.tanks[i];
+    if s.liquid <= 0.0 || heated_inside(def, t) {
+        return 0.0;
+    }
+    let g = geometry(t, s);
+    let wetted = 2.0 * math::PI * g.radius * g.height + math::PI * g.radius * g.radius;
+    let (alpha, epsilon) = optics(def, t);
     let flux = env.sun.length();
     let sunlit = if flux > 0.0 {
         let c = (env.sun / flux).dot(g.axis).abs().min(1.0);
@@ -514,7 +525,7 @@ pub fn slow(def: &ShipDef, state: &mut ShipState, env: &Surroundings, dt: f64) -
             keep_physical(&def.tanks[i], s);
             s.ullage_k += (s.liquid_k - s.ullage_k) * (1.0 - math::exp(-dt / TAU_ULLAGE));
         }
-        let out = relieve(def, state, i);
+        let out = relieve(&def.tanks[i], &mut state.tanks[i]);
         keep_physical(&def.tanks[i], &mut state.tanks[i]);
         state.runtime.tanks[i].vented += out;
         vented += out;
@@ -569,6 +580,10 @@ pub fn accels(def: &ShipDef, state: &ShipState, com: DVec3, accel: DVec3, omega:
         .map(|(t, s)| settling_accel(&geometry(t, s), com, accel, omega, alpha))
         .collect()
 }
+
+#[path = "plumbing_coast.rs"]
+mod coast;
+pub use coast::{equilibrate, float, heat_law, HeatLaw};
 
 #[cfg(test)]
 #[path = "plumbing_tests.rs"]

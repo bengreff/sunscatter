@@ -132,6 +132,7 @@ impl Vessel {
             return;
         }
         let Some(def) = self.ship_def() else { return };
+        self.law_to_now();
         let state = self.ship.as_mut().expect("checked");
         let mut effects = Vec::new();
         for order in state.runtime.due(at) {
@@ -265,13 +266,15 @@ impl Vessel {
 /// floating), at `(anchor, r, v)` with attitude `q`: standing on `grounded`
 /// the ground holds its liquids down (proper acceleration ω×(ω×r) − g);
 /// coasting they float. Its tanks and bottles are its propellant: what
-/// they vent leaves the vessel (F2).
+/// they vent leaves the vessel (F2). On a coast with a law of its tanks
+/// (`law`: it and the local time of `e`, D119), they are the law's there.
 pub(super) fn ship_lattice(
     ship: Option<&mut crate::craft::state::ShipState>,
     def: Option<&crate::craft::ship::ShipDef>,
     world: &World,
     (e, (anchor, r, v), q): (Epoch, (NodeId, DVec3, DVec3), glam::DQuat),
     grounded: Option<NodeId>,
+    law: Option<(&crate::systems::coast_law::CoastLaw, f64)>,
 ) {
     let (Some(state), Some(def)) = (ship, def) else { return };
     let snap = world.snapshot(e);
@@ -285,5 +288,11 @@ pub(super) fn ship_lattice(
         }
         None => DVec3::ZERO,
     };
-    sys::lattice(def, state, e, &crate::systems::plumbing::Surroundings { sun, air_k }, accel);
+    let env = crate::systems::plumbing::Surroundings { sun, air_k };
+    match law {
+        Some(law) => sys::coast_lattice(def, state, e, &env, law),
+        None => {
+            sys::lattice(def, state, e, &env, accel);
+        }
+    }
 }

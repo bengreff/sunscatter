@@ -20,6 +20,7 @@
 //! Placeholders until parts carry systems (D060): [`Power`] (a solar
 //! panel, a battery, constant loads) and [`Consumables`] (boil-off).
 
+pub mod coast_law;
 pub mod command;
 pub mod crew;
 pub mod data;

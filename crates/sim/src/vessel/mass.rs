@@ -66,6 +66,7 @@ impl Vessel {
     /// from now with the new mass. Returns whether there is such a tank.
     pub fn set_tank(&mut self, world: &World, tank: usize, kg: f64) -> bool {
         let Some(def) = self.ship_def() else { return false };
+        self.law_to_now();
         let (Some(t), Some(state)) = (def.tanks.get(tank), self.ship.as_mut()) else { return false };
         state.tanks[tank].liquid = kg.clamp(0.0, t.capacity);
         if matches!(self.phase, Phase::Coasting { .. }) {

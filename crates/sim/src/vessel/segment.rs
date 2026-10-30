@@ -419,10 +419,18 @@ impl Segment {
     /// a segment. Both are decided from the stored state only, so chunked
     /// integration still equals a single pass.
     fn after_step(&mut self, world: &World, snaps: &SnapshotCache) {
+        // A coast's law of its tanks starts its next span here, at a stored
+        // sample (D119): its mass may move (relief), so the acceleration is
+        // taken again.
+        let spanned = matches!(self.kind, SegmentKind::Coast) && {
+            let (t, epoch) = (self.state.t, self.t0.add_seconds(self.state.t));
+            let state = (self.anchor, self.state.r.value(), self.state.v.value());
+            self.limbo.as_deref_mut().is_some_and(|l| l.next_span(world, (t, epoch), state))
+        };
         let reanchored = snaps.with(self.t0.add_seconds(self.state.t), |snap| {
             let reanchored = self.maybe_reanchor(world, snap);
             let grew = self.active.grow(world, snap, self.anchor, self.state.r.value());
-            if reanchored || grew {
+            if reanchored || grew || spanned {
                 let (r, v) = (self.state.r.value(), self.state.v.value());
                 let f = Forces {
                     world,
@@ -481,6 +489,9 @@ impl Segment {
         }
         if let Some(f) = self.flight.as_deref_mut() {
             f.prune_before(t);
+        }
+        if let Some(law) = self.limbo.as_deref_mut().and_then(|l| l.law.as_deref_mut()) {
+            law.prune_before(t);
         }
     }
 
