@@ -39,6 +39,10 @@ Three kinds of craft exist today: the **test craft** (a craft file `craft.ron` +
 - fbd63c4 `tests/vessel_dynamics.rs` on the small rocket (masses set through `set_fill`, a breakup counts as a crash).
 - ccf8430 the small rocket carries an IMU and a GPS receiver on its computer's bus and data link: without them its flight software (F3) cannot hold an attitude.
 - 0107fa2 `tests/vessel_controls.rs` on the small rocket: the probe burns from before t0, and only the prograde hold travels with the delay.
+- (ONEKIND-2) 09d44b8 a vessel of a configuration (`small-rocket@7-10`) starts with those mechanisms deployed (`init_ship`), so its first tick does not reconfigure it back; the small rocket's legs are 2.5 m (its feet 3.13 m out and below the bells); `craft::small::legs_out()`.
+- 8a29ad3 `tests/frame_live_stop.rs`, `tests/scenario_launch.rs` (debug mode, engines relit for each burn) and `parts`' roughness check on the small rocket.
+- e57e934 the small rocket gets four thruster blocks (torque about every axis: 1.9, 1.9 and 1.1 kN·m; the fixture's two gave none about Y), feet springs for its mass (3e5 N/m, 1.8e4 N·s/m, 0.35 m stroke: ~11 cm of sink on Earth) and a nozzle heat share sized by D077's rule for its own nozzle (1.7e-4: ~1400 K, not 2650 K); `CraftParams::bottom_z` is the lowest contact point (a deployed foot's tilted pad rim is lower than its base, so a craft on legs spawned in the air). Its bells cool over 90 s on the coast lattice (`craft_flight`), not 30 s.
+- 3d79bff `tests/contact.rs` (13 tests, on `legs_out`) and `tests/aerothermal.rs` (13 of 14; the planned-burn one waits) on the small rocket.
 
 ### How to move a test (for the next agent)
 
@@ -47,8 +51,16 @@ Three kinds of craft exist today: the **test craft** (a craft file `craft.ron` +
 - Propellant: `set_fill(&w, f)` sets every tank's liquid. For a target mass, fill to 1 and to 0 and interpolate (`vessel_dynamics::above_the_cape`). `propellant()` includes the ullage and bottle gas, and LOX boils off on coasts and on the pad, so compare within ~1 kg.
 - A hard impact breaks a craft of parts up (`v.breakup().is_some()`, the advance stops there) rather than `Phase::Crashed`; the impact speed is in `breakup().destroyed` (`vessel_dynamics::wrecked`).
 - Contact height: take it from a landed vessel (`terrain::standing`), not from `CraftParams::contact_height(16_000.0)` (the made-up mass law).
+- Standing on feet: `small::legs_out()` (the stowed rocket stands on its bells and has no feet). Feet 3.13 m out on X and Y, tip angle 29° empty and ~32° full with two feet downhill.
+- Destroyed: `contact::still()` (landed, crashed or a breakup pending) and `contact::impact()` (the impact from `phase` or `breakup().destroyed`); `aerothermal::wrecked()`.
+- An exact mass that does not boil off on a coast: fill only the RP-1 tank (`set_tank` with the index of `tank:fuel` in `ship_def().tanks`), the LOX at 0.
 
 ### Tests not kept, and why
+
+- `contact::a_steep_slope_tips_it_over_and_it_comes_to_rest_lying_down`: it still falls over, never frozen mid-fall, but may slide on down the 35° slope lying on its round hull. Its tip angle (29–32°) is above the hull's sliding angle (atan 0.5 = 26.6°), so no slope both tips it and holds it lying. The finned test craft could not roll.
+- `contact::twelve_metres_per_second_on_the_hull_destroys_the_craft`: the whole wreck's bounce and rest are gone. A craft of parts breaks up at the impact, and its pieces are the game's split.
+- `aerothermal::an_entry_…`: the destroyed cell is the one most over its limit, not the hottest cell (the niobium nozzle runs hotter, within its own limit).
+- `frame_live_stop`: the Moon fall ends at rest or lying within its reach of the surface. A round hull on its side has no support polygon to rest on.
 
 - `craft_flight::rcs_burns_propellant_at_its_flow_per_axis` (D078's couples drawing the main propellant: the made-up attitude model itself) and `powered_ticks_burn_propellant_at_the_engine_rate` (the scalar mass law): the parts path's versions are `vessel::ship_tests` (each tank drained by the mixture ratio) and `ship_systems_tests::the_first_stage_draws_its_engines_flow_and_nothing_else`.
 - `vessel_dynamics::a_drogue_fired_far_above_its_design_q_tears_and_the_mains_still_land_a_light_craft` is now `…_tears_and_so_do_the_mains_behind_it`. With its drogue torn, the slender rocket reaches the mains' height near 190 m/s and they tear too. The finned test craft's broadside drag used to slow it enough for the mains alone. A mains-alone landing would need a draggier small craft.
@@ -56,12 +68,12 @@ Three kinds of craft exist today: the **test craft** (a craft file `craft.ron` +
 ### Left, in order
 
 1. **Move the remaining tests.** Nothing blocks them now: DOCS has committed, and the demo and tour are deleted.
-   - sim integration tests: `contact` (13 tests: `set_propellant(d.propellant)`, the hull's top from `surface.positions`), `scenario_launch` (pad to orbit in debug mode, then the chute), `aerothermal` (14 tests: the finned craft's entry burn-up, the nozzle node, its cells), `limbo`, `limbo_physics`, `limbo_regime`, `frame_live_stop`, `parts`, `save_load` (it reads `docs/plans/playtest-2026-10-01-orbit.ron`, a test-craft save).
+   - sim integration tests: `limbo` (3 tests; its two ion-burn tests are planned burns and wait), `limbo_physics` (drag decay: set the ISS-like mass with RP-1 only; the plate; the anchor; thin air. `boil_off_ends_a_low_thrust_burn…` and `a_flown_burn_takes_no_boil_off` are the made-up boil-off (`set_boil_off`) and planned burns: delete with the path, the parts' boil-off is the tanks' own, D119), `limbo_regime`, `save_load` (it reads `docs/plans/playtest-2026-10-01-orbit.ron`, a test-craft save).
    - sim unit tests: `aero/{tests,lift_tests}`, `chute/tests`, `craft/{broad,cells_tests,design,engine,mass,mod,parts,registry,volume}`, `forces/surface`, `landing/tests`, `proximity/{contact_tests,hull_tests}`, `thermal/{tests,heating_tests}`, `vessel/{bubble_tests,tests}`.
    - examples: `bench_{aero,bubble,fleet,integrator,limbo,thermal}`, `long_run`.
    - game: `debris`, `fleet_tests`, `menus/{data,hottest,landing,rcs_data,rcs}`, `stage_bar/rows_tests`, `landing`, `navball`, `saves`, `staging`, `state`, `state_tests`, `trajectory/*_tests`; `GameCommand::SpawnTestShips` (MISSION's brief).
    - **Blocked on planned burns for craft of parts (PLANNER, D126):** `planned_burns` (11 tests), `hold_modes`' maneuver-hold tests, the game's planner and `trajectory/predict_tests`, and `landing::model` (`craft.mass.at`, `craft.engine`). Default below.
-2. **The stress generator on the parts path:** an `AssemblyFile` built in code from catalog generators (tank, engine, thrust structure, revolution, solar), resolved as `stress-<n>` like `small-<name>`. Keep `bench_scale` and `bench_coast`. `stress_tests`, `split_tests`, `mass_tests` and `bubble_tests` use the stress craft.
+2. **The stress generator on the parts path** (not started by ONEKIND-2: no new numbers yet): an `AssemblyFile` built in code from catalog generators (tank, engine, thrust structure, revolution, solar), resolved as `stress-<n>` like `small-<name>`, its entries in `craft::small`'s catalog or one of its own. Keep `bench_scale` and `bench_coast`, and record their numbers at 300, 1,000 and 5,000 parts here. `stress_tests`, `split_tests`, `mass_tests`, `bubble_tests` and `tests/parts.rs` use the stress craft.
 3. **Delete the made-up path** (the inventory above). Also in `build.rs`, the craft-of-parts build falls back to `test_craft()`'s skin and chute: it needs a default skin and "no chutes". Then: the test craft's data, its new-flight entry (`state.rs`), `SUNSCATTER_CRAFT=test-craft`, and the playtest save (regenerated from a Falcon 9 flight, or dropped if MISSION's tools replace it).
 4. **Decisions:** delete D074; trim D064 to debug mode (D123); update D060, D078, D079 (the test craft's chutes), D100 ("the test craft stays as the debug craft") and D104; update every citation in the same commit.
 
@@ -70,9 +82,11 @@ Three kinds of craft exist today: the **test craft** (a craft file `craft.ron` +
 - `docs/owners.md`: a row for `sim::craft::small` (the small craft of parts for tests and benchmarks; ids `small-<name>` in the registry).
 - The parts and vessel technical docs: craft built in code (`craft::small`), and `Vessel::set_fill`. A landed vessel's pose check is saved with it (ce17b16).
 - My row in `flight-ui-2026-10-27.md`: there is none, so I left that plan alone.
+- (ONEKIND-2) `docs/owners.md`'s `craft::small` row: also `legs_out()` (the rocket on its feet). The parts technical doc: a vessel of a configuration starts with those mechanisms deployed; `CraftParams::bottom_z` is the lowest contact point.
 
 ### Open for the owner (defaults taken)
 
 - **Planned burns between ONEKIND and PLANNER.** The only craft that can plan a burn is the test craft. Default: its planned-burn tests are deleted with it, and PLANNER writes closed-loop ones on craft of parts (D126 replaces the open-loop burn law anyway). Until then, the game offers no planned burns. The other choice is to keep the test craft until PLANNER lands.
 - A hard impact breaks a craft of parts up at its parts' loads (D103) instead of destroying it whole. Tests accept either.
-- The small rocket's test engine has a radiatively cooled niobium nozzle with D077's 2.2e-3 heat share, so the nozzle-cooling test keeps its meaning. The real Merlin 1D's is regenerative (0).
+- The small rocket's test engine has a radiatively cooled niobium nozzle, so the nozzle-cooling test keeps its meaning. The real Merlin 1D's is regenerative (0). ONEKIND-2 sized its heat share by D077's rule (near 1400 K on its own nozzle): 1.7e-4, not the test craft's 2.2e-3, which ran it at 2650 K, past C-103's melting point.
+- (ONEKIND-2) The small rocket's other test numbers (E): four 400 N cold-gas blocks, feet springs 3e5 N/m and 1.8e4 N·s/m with a 0.35 m stroke, 2.5 m legs. They are test parts, not a design the game offers.
