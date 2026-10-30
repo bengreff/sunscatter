@@ -437,3 +437,24 @@ fn the_throttle_shuts_the_merlins_down_and_again_relights_them() {
     assert_eq!(merlins(&v), [EngineStatus::Running; 9]);
     assert!(v.clamped(), "Liftoff has not run");
 }
+
+/// A vessel of a configuration starts as the configuration has it: the
+/// small rocket with its legs out (`craft::small::legs_out`) starts with
+/// their mechanisms deployed, so its first ticks reconfigure nothing, and
+/// it stands on its four feet below its engines' bells.
+#[test]
+fn a_vessel_of_a_configuration_starts_with_its_mechanisms_deployed() {
+    use crate::craft::ContactKind;
+    let w = world();
+    let craft = crate::craft::small::legs_out();
+    let mut v = Vessel::landed_at(&w, VesselId(1), "Moon", 0.0, 20.0, t0(), &craft);
+    assert_eq!(v.deployed_parts(), craft.id.deployed());
+    assert_eq!(craft.id.deployed().len(), 4);
+    v.advance(&w, t0().add_seconds(5.0), &Controls::default(), usize::MAX);
+    assert!(v.plan_breakup().is_none(), "nothing reconfigured");
+    assert!(matches!(v.phase, Phase::Landed { .. }), "{:?}", v.phase);
+    let c = &v.craft.contacts;
+    let feet = c.iter().filter(|k| k.kind == ContactKind::Foot).map(|k| k.pos.z).fold(f64::MIN, f64::max);
+    let hull = c.iter().filter(|k| k.kind == ContactKind::Hull).map(|k| k.pos.z).fold(f64::MAX, f64::min);
+    assert!(feet < hull - 0.1, "feet at {feet} m, the lowest hull point at {hull} m");
+}

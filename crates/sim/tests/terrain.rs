@@ -118,13 +118,14 @@ fn falling_onto_a_mountain_is_detected_at_its_height() {
     // A hull or foot point hit the plateau: the craft broke up there (its
     // parts' loads, D103) or crashed whole, its centre of mass within the
     // craft's reach of the plateau (the fall is flown live with its
-    // aerodynamics and may hit tilted), not near the ellipsoid 3 km below.
+    // aerodynamics and may hit tilted, or lying down with its hull pressed
+    // in), not near the ellipsoid 3 km below.
     assert!(ship.breakup().is_some() || matches!(ship.phase, Phase::Crashed { .. }), "{:?}", ship.phase);
     let (_, r, _) = ship.state(&w);
     let h = e.altitude(e.rotation.to_fixed(sim::frame::Vec3::from_raw(r), ship.time)) - 3_000.0;
     let com = ship.mass_props().com;
     let reach = ship.craft.contacts.iter().map(|c| (c.pos - com).length()).fold(0.0, f64::max);
-    assert!(h > 0.0 && h < reach, "{h} m");
+    assert!(h.abs() < reach, "{h} m");
 }
 
 /// Real data (skipped when the heightmaps are not present).

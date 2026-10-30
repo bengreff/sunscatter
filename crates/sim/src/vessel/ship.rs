@@ -81,13 +81,20 @@ impl Vessel {
     }
 
     /// Starts the ship state of a craft of catalog parts: tanks at their
-    /// loading, the readouts' engine the selected one; without parachutes
-    /// there are none to open. The failure fates are drawn from its launch
-    /// (its creation epoch).
+    /// loading, the readouts' engine the selected one, the mechanisms of a
+    /// configuration's deployed parts deployed (legs out: `craft::configure`);
+    /// without parachutes there are none to open. The failure fates are
+    /// drawn from its launch (its creation epoch).
     pub(super) fn init_ship(&mut self) {
         let Some(def) = self.ship_def() else { return };
         let mut state = ShipState::initial(&def);
         state.runtime.launch = Some(self.time);
+        let deployed = self.craft.id.deployed();
+        for (d, m) in def.mechanisms.iter().zip(&mut state.mechanisms) {
+            if deployed.contains(&d.part) {
+                (m.angle, m.target) = (d.item.deployed_deg, d.item.deployed_deg);
+            }
+        }
         // The fates are drawn at the launch, counting the parts' starts and
         // cycles from here (D105 §6.3).
         let seed = state.runtime.seed;

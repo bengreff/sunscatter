@@ -13,7 +13,8 @@
 //! * [`rocket`] (`small-rocket`): the same with parachutes in the capsule
 //!   ([`CHUTES`]: two Apollo drogues and four Apollo mains, D079), an IMU
 //!   and a GPS receiver (the flight software's attitude and orbit, F3): the
-//!   stand-in of the deleted test craft (D121).
+//!   stand-in of the deleted test craft (D121). [`legs_out`]: with its
+//!   legs deployed.
 //!
 //! The ids resolve in [`super::registry`], so a vessel of a small craft
 //! (and every piece of one) reloads from a save.
@@ -48,7 +49,7 @@ pub const ENTRIES: &[&str] = &[
             nozzle_length: 0.6, powerhead_length: 0.4, powerhead_radius: 0.15, nozzle_material: "niobium-c103",
             nozzle_thickness: 0.001, nozzle_heat_fraction: 2.2e-3, thrust_to_weight: 100.0))"#,
     r#"(id: "t-leg", name: "Test leg", era: 2020,
-        generator: Leg(length: 2.0, depth: 0.15, width: 0.2, wall: Solid(material: "al-7075", thickness: 0.003),
+        generator: Leg(length: 2.5, depth: 0.15, width: 0.2, wall: Solid(material: "al-7075", thickness: 0.003),
             foot_radius: 0.25, foot_mass: 10.0, deployed_deg: 120.0, deploy_rate_dps: 30.0, actuator: Pneumatic,
             stroke: 0.3))"#,
     r#"(id: "t-bottle", name: "Test bottle", era: 2020,
@@ -189,6 +190,15 @@ pub fn id(name: &str) -> CraftId {
 /// process.
 pub fn rocket() -> Arc<Craft> {
     craft_of(&id("rocket"))
+}
+
+/// The small rocket with its four legs out (`small-rocket@7-10`, a
+/// configuration: `super::configure`): a vessel of it starts with its legs
+/// deployed and stands on its feet, below its engines' bells.
+pub fn legs_out() -> Arc<Craft> {
+    let base = rocket();
+    let legs: Vec<u32> = (base.parts.iter()).filter(|p| p.name.starts_with("leg#")).map(|p| p.id).collect();
+    craft_of(&base.id.with_deployed(&legs))
 }
 
 #[cfg(test)]

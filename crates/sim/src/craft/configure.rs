@@ -118,10 +118,10 @@ mod tests {
             open.cells.contacts.iter().filter(|c| c.kind == ContactKind::Foot).map(|c| c.pos).collect();
         assert_eq!(feet.len(), 4);
         assert!(stowed.cells.contacts.iter().all(|c| c.kind != ContactKind::Foot));
-        // Leg 1 on the +X mount at z −4.75: the foot 2 m along the leg turned
-        // 120° from +Z, 0.075 m out from the hinge.
+        // Leg 1 on the +X mount at z −4.75: the foot 2.5 m along the leg
+        // turned 120° from +Z, 0.075 m out from the hinge.
         let hinge = DVec3::new(1.0, 0.0, -4.75);
-        let foot = place::hinge(hinge, DVec3::Y, 120.0).point(hinge + DVec3::new(0.075, 0.0, 2.0));
+        let foot = place::hinge(hinge, DVec3::Y, 120.0).point(hinge + DVec3::new(0.075, 0.0, 2.5));
         assert!(feet.iter().any(|f| (*f - foot).length() < 1e-9), "{feet:?} vs {foot}");
         assert!(out
             .ship
