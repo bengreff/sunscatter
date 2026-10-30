@@ -21,11 +21,14 @@ pub mod file;
 mod layers;
 pub mod mass;
 pub mod mesh;
+pub mod partition;
 pub mod parts;
 pub mod place;
 pub mod registry;
 pub mod ship;
 pub mod state;
+#[cfg(test)]
+mod state_tests;
 pub mod stress;
 pub mod volume;
 

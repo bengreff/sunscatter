@@ -7,7 +7,8 @@
 //!
 //! Every list is aligned with its [`ShipDef`] list and every entry names
 //! its part (`Part::id`), so a split partitions the state exactly as the
-//! definition ([`ShipState::partition`], [`ShipDef::subset`]).
+//! definition, and a docking merges it, each field by its own rule
+//! (`craft::partition`: [`ShipState::partition`], [`ShipState::merge`]).
 //!
 //! What the systems do with it is `sim::systems` (RUNTIME). Here: the state
 //! at load (tanks filled at their loading temperatures, bottles at their
@@ -178,6 +179,10 @@ pub struct ShipState {
     pub batteries: Vec<BatteryState>,
     pub mechanisms: Vec<MechanismState>,
     pub joints: Vec<JointState>,
+    /// Joints a split cut, kept by their child's piece until a merge joins
+    /// their parts again (`craft::partition`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub severed: Vec<JointState>,
     pub parts: Vec<PartState>,
     /// One per component.
     pub power: Vec<Switch>,
@@ -308,6 +313,7 @@ impl ShipState {
                 .map(|m| MechanismState { part: m.part, angle: m.item.stowed_deg, target: m.item.stowed_deg })
                 .collect(),
             joints: def.joints.iter().map(|j| JointState { parent: j.parent, child: j.child, intact: true }).collect(),
+            severed: Vec::new(),
             parts: (def.parts.iter())
                 .map(|p| PartState {
                     part: p.part,
@@ -333,50 +339,6 @@ impl ShipState {
             stages: def.sequence.clone(),
             functions: def.functions.clone(),
             runtime: crate::systems::Runtime::initial(def),
-        }
-    }
-
-    /// The state of the piece holding the parts `kept` (`Part::id`s, its
-    /// definition `piece`, the whole ship's `whole`): every entry of those parts, in order; joints
-    /// within the piece; the cabin if its part is kept; held by the clamps
-    /// if it was and keeps their joint (a capsule leaving the pad is not).
-    /// Its stages and functions keep the commands that name something
-    /// the piece has (and those that name nothing: the clamps, the chutes),
-    /// stages and functions left empty go, and the sequence's position
-    /// counts the stages kept before it.
-    pub fn partition(&self, kept: &[u32], whole: &ShipDef, piece: &ShipDef) -> ShipState {
-        let mine = |list: &[Stage]| -> Vec<Option<Stage>> {
-            (list.iter())
-                .map(|s| {
-                    let actions: Vec<ShipCommand> =
-                        s.actions.iter().filter(|a| piece.check(a).is_ok()).cloned().collect();
-                    (!actions.is_empty()).then(|| Stage { actions, ..s.clone() })
-                })
-                .collect()
-        };
-        let stages = mine(&self.stages);
-        let sequence = stages.iter().take(self.sequence as usize).flatten().count() as u32;
-        fn by<T: Clone>(items: &[T], part: impl Fn(&T) -> u32, kept: &[u32]) -> Vec<T> {
-            items.iter().filter(|x| kept.contains(&part(x))).cloned().collect()
-        }
-        ShipState {
-            tanks: by(&self.tanks, |x| x.part, kept),
-            bottles: by(&self.bottles, |x| x.part, kept),
-            engines: by(&self.engines, |x| x.part, kept),
-            thrusters: by(&self.thrusters, |x| x.part, kept),
-            valves: by(&self.valves, |x| x.part, kept),
-            batteries: by(&self.batteries, |x| x.part, kept),
-            mechanisms: by(&self.mechanisms, |x| x.part, kept),
-            joints: by(&self.joints, |j| if kept.contains(&j.parent) { j.child } else { u32::MAX }, kept),
-            parts: by(&self.parts, |x| x.part, kept),
-            power: by(&self.power, |x| x.part, kept),
-            cabin: self.cabin.clone().filter(|c| kept.contains(&c.part)),
-            fates: by(&self.fates, |x| x.part, kept),
-            clamped: self.clamped && piece.joints.iter().any(|j| j.kind == super::assembly::JointKind::HoldDown),
-            sequence,
-            stages: stages.into_iter().flatten().collect(),
-            functions: mine(&self.functions).into_iter().flatten().collect(),
-            runtime: self.runtime.partition(kept, whole),
         }
     }
 

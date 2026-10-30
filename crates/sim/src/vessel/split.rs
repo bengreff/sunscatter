@@ -234,11 +234,7 @@ impl Vessel {
                 // A craft of parts: each tank and bottle goes with its part.
                 (Some(state), Some(def), Some(whole)) => {
                     let ids: Vec<u32> = design.parts.iter().map(|p| p.id).collect();
-                    let mut mine = state.partition(&ids, whole, def);
-                    // Orders were sent to the vessel, which keeps the first piece.
-                    if k > 0 {
-                        mine.runtime.orders.clear();
-                    }
+                    let mine = state.partition(&ids, whole, def, k == 0);
                     piece.propellant = mine.consumables(def);
                     piece.ship = Some(mine);
                     piece.sync_engine();
