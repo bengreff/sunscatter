@@ -41,3 +41,44 @@ D122: unit tests, plus mission tests flown headless through MCP by a development
 **The variables:** demo only: `SUNSCATTER_DEMO`, `_DEMO_OFFSCREEN`, `_DEMO_STOP_AFTER`, `_DEMO_ONLY`, `_DEMO_NO_BENCH`, `_DEMO_NO_CAPTURE`, `_DEMO_ZOOM` (zoom sweep 50 m → 20,000 km), `_DEMO_SIZE`, `_DEMO_UI_SCALE`, `_DEMO_FAR`, `_PLUNGE_OVER`, `_EXHAUST`, `_BENCH_ONLY`, `_TOUR`, `_TOUR_VIEWS`, `_TOUR_DATE`. Kept: `SUNSCATTER_HOME`, `SUNSCATTER_PROFILE`, `SUNSCATTER_AGENT=<port>:<token>` (turns the MCP server on), `SUNSCATTER_RENDER_SCALE`, `SUNSCATTER_DUMP_MSL` (a shader test's), `SUNSCATTER_CRAFT` (ONEKIND's: the test-craft value goes), `SUNSCATTER_TIER` (only in `run`'s comment: stale). `tools/gpu_trace.py` launches the plunge demo.
 
 **The MCP server** (`crates/mcp`, `game::agent`, D044, D069): Streamable HTTP on 127.0.0.1 with a bearer token, JSON replies, a call waits ≤ 10 s for the game's frame; the HTTP thread serves one request at a time. Tools: `get_state`, `list_bodies`, `get_vessel`, `get_trajectory`, `set_warp`, `switch_vessel`, `go_to_mission_control`, `set_plan`, `get_landing_prediction`, `closest_approaches`, `set_controls` (throttle, SAS, hold), `stage`. They read the true state (FLIGHTSW's inventory), light-delayed by `comms`. Missing for a mission test: shots, camera, bench, profile, run-until, new flight, load/save, the pilot's rotation input and speed reference, tank and engine readings.
+
+### Landed (2026-10-30)
+
+- **b239026** MCP: each request on its own thread; a call waits up to 15 min (the long tools bound their own wait).
+- **77c7941** The headless game and the session tools; the demo and the tour deleted:
+  - `./run headless [port]` (default 7777, token `dev`): `SUNSCATTER_OFFSCREEN=1` (`game::offscreen`), `SUNSCATTER_AGENT=<port>:dev`, `SUNSCATTER_DEV=1`, a fresh home dir unless `SUNSCATTER_HOME` is given. Headless games neither load nor save settings; a shader error exits 3.
+  - `game::agent::session`: `shoot`, `set_camera`, `pause`, `step`, `run_until`, `new_flight`, `save_game`, `load_game`, `set_debug`; `bench` and `profile` only with `SUNSCATTER_DEV=1` (D044). `state::advance` ends a frame at `StopAt`, so a step stops at its epoch exactly.
+  - `set_controls` takes `speed_reference` and `rotate` (the pilot's keys, held aboard the active vessel: `agent::HeldRotation`, added in `keys::read_controls`).
+  - Knowledge (item 3, done): `get_vessel` shows position, velocity, altitude (now above the ellipsoid), orbit and attitude (heading/pitch/roll and the body axes in east-north-up) only where a working sensor measures them, at its precision. It adds `stages` (the next stage, tank levels, engines, the feeding share). `get_landing_prediction` and `get_trajectory` need navigation.
+  - Checked on screen: headless start, `get_state`, `pause`, `get_vessel` on the pad (Falcon 9: GNSS and IMU known, Dragon's tanks unmeasured), `set_camera`, `shoot` with Orbital open (settled, 1600×900; the pad shot looked right).
+
+### Left, in order
+
+1. **Fly the mission (item 4)** with `./run headless 7781` (take `target/demo.lock`) and a curl helper, e.g. `mcp.sh <tool> '<json>'` posting `tools/call` with `Authorization: Bearer dev`. The procedure to try:
+   - `pause`; `set_controls {throttle: 1}`; `stage` (Ignition); `step {seconds: 0.5}`; `stage` (Liftoff); shots.
+   - `step {seconds: 10}`, SAS stability.
+   - The pitch kick: `get_vessel`'s `attitude.axes_enu` gives the body axes. Rotating about local north tips the nose east, so `rotate = [n·x, n·y, n·z] × 0.04` with `n = (0,1,0)` in ENU, with `sas: false`. Then `step {seconds: 2.5}`, then `rotate [0,0,0]`, `sas: true, hold: prograde, speed_reference: surface`.
+   - `run_until {max_q: true, warp: 2}` and a shot; `run_until {feeding_below: 0.08, seconds: 146}` (MECO) and `stage`; `step 2`; `stage` (separation); `run_until {separation: true}`; `step 3`; `stage` (second-stage ignition); shots of the upper stage, then `switch_vessel` to the booster and a shot.
+   - Check each `reached`. If the run never reaches orbit, say how far it got.
+
+   Untested yet: `step`/`run_until` (the clamp at `StopAt`), `bench`, `profile`, `new_flight`, saves, the named screens. Then write the procedure as a short guide (`docs/process.md`'s testing section, or where DOCS puts it).
+2. **Perf with 11 vessels:** no tool spawns vessels. `GameCommand::SpawnTestShips` spawns test craft, which ONEKIND is deleting. Add a debug `spawn_ships` tool once ONEKIND settles what it spawns, then measure with `profile` at warps 0, 6 and 9.
+3. **What the demo had that no tool does yet:**
+   - the body tour's limb and ground views: the camera looks at the focus, so `set_camera` cannot look at the horizon from low down. Moving `tour::pose` into a camera override would do it;
+   - the eclipse and transit searches;
+   - the plunge view (a vessel placed 185 km up, falling);
+   - the zoom sweep;
+   - the playtest save from the orbit step (ONEKIND regenerates or drops it);
+   - the map-view (D054) and impact-marker (D080) checks, which ran only in the demo: check that their rules' table tests cover them.
+4. Doc changes for DOCS (not mine to edit):
+   - `docs/process.md` and HANDOFF's Gotchas still describe the demo (`SUNSCATTER_DEMO_*`, `demo.lock` wording, the plume crop);
+   - `agent-rules.md` line 16 names `SUNSCATTER_DEMO_OFFSCREEN`, `_STOP_AFTER`, `_ONLY`, `_NO_BENCH`: now `./run headless` and the tools;
+   - `docs/technical/mcp.md` (if that is where `mcp.md` went) needs the session tools, the developer flag and Knowledge;
+   - the owners table needs rows for `game::offscreen` and `game::agent::session`, and the demo's and tour's rows removed;
+   - `docs/technical/windows.md` ran the demo on backhouse.
+
+### Open for the owner
+
+- **The developer flag** is a new variable, `SUNSCATTER_DEV=1`. The profiler's tables still need `SUNSCATTER_PROFILE=1` as well, because the profiler is set up at startup.
+- **The pitch kick is stick input:** the agent holds the pilot's rotation keys between a pause and a step. D044 says agents fly by decisions. The decision-level way would be a commanded-attitude hold (a sim `HoldMode`, the pointing laws), which is not built. Should agents lose `rotate` once that hold exists?
+- **`step` and `run_until` stop time at the end** (unless `keep_running`); time otherwise runs while the agent thinks (D044).
