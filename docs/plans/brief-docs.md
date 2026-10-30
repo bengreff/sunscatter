@@ -39,3 +39,20 @@ Also remove the 700-line file cap. Follow [agent-rules.md](agent-rules.md). Your
 ## State
 
 (Update as you land: commits with hashes, what moved where, what is left in order.)
+
+### Landed
+
+1. **The moves** (ad727c3): `docs/archive/{briefs,interviews,plans,research}/`; `docs/vehicles/falcon9.md`; `docs/technical/` (the design docs, the feature specs, `mcp.md`, `windows.md`); `architecture.md` → `owners.md`; `docs/VISION.md` tracked as `docs/vision.md`. Every link and code-comment path fixed (script: relink by resolved target; a checker confirms every relative link in `docs/`, `README.md`, `CLAUDE.md` resolves). `tools/check_decision_refs.sh` skips `docs/archive/` as it skips the plans. Feature plans that were built (realism-1, playtest-1, map-view-lighting-controls) went to `archive/plans/`.
+2. **The file cap** (87aa10f): the script, its CI step, the pre-push call, CLAUDE.md's mentions.
+3. **owners.md** (54be1f7): the rows verbatim, grouped by system; the `mcp` crate and the agent's row added; `technical/frame-order.md`, `technical/testing.md`.
+
+### Left, in order
+
+4. `docs/systems/` (a README index plus one doc per system), from the technical docs and the code.
+5. The README's reading guide; CLAUDE.md's Read first; process.md's document types.
+
+### Open for the owner
+
+- `docs/plans/playtest-2026-10-01-orbit.ron` stays in `plans/` (`./run play` and `sim/tests/save_load.rs` read it); ONEKIND regenerates or drops it (it carries the test craft).
+- `plans/flight-ui-2026-10-27.md` (the workstream table agents update) and `plans/open-issues.md` (the backlog) stay in `plans/` as live work, under their old names, so the running agents' references hold.
+- The frozen GLOW and CLOUDS briefs were archived with the finished ones (D123: visuals frozen); a fresh brief starts from them when the freeze lifts.
