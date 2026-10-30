@@ -1,8 +1,12 @@
 //! Aerodynamics and heating of a flying vessel (realism-1 §5, D061, D064,
 //! D065): entries from low Earth orbit, sunlight in orbit, drag decay, and
-//! determinism (chunked == single pass, save/load, warp independence).
+//! determinism (chunked == single pass, save/load, warp independence). The
+//! craft is the small rocket of parts (`craft::small`, D121); one test of a
+//! planned burn still flies the test craft until planned burns run on craft
+//! of parts (D126).
 
 use glam::DVec3;
+use sim::craft::{small, Craft};
 use sim::ephem::Ephemeris;
 use sim::frame::NodeId;
 use sim::kepler::Elements;
@@ -24,6 +28,17 @@ fn t0() -> Epoch {
 }
 
 const RE: f64 = 6_378_137.0;
+
+/// The craft the tests fly.
+fn craft() -> Arc<Craft> {
+    small::rocket()
+}
+
+/// Whether a part of the craft was destroyed (a breakup waiting for its
+/// split, D103) or the vessel crashed whole.
+fn wrecked(v: &Vessel) -> bool {
+    v.destruction().is_some() || v.breakup().is_some_and(|b| !b.destroyed.is_empty())
+}
 
 /// An orbit from `apo` down to `peri` (heights, m), starting at apoapsis.
 fn orbit(w: &World, apo: f64, peri: f64) -> (NodeId, DVec3, DVec3) {
@@ -54,7 +69,7 @@ impl Peak {
     }
 
     fn describe(&self) -> String {
-        let craft = sim::craft::test_craft();
+        let craft = craft();
         let c = &craft.cells.cells[self.cell];
         let part = &craft.geometry.primitives[c.primitive as usize].name;
         format!(
@@ -65,11 +80,11 @@ impl Peak {
 }
 
 /// Flies an entry from a 200 × 40 km orbit in 1 s frames until the vessel
-/// is destroyed or lands.
+/// is destroyed (a part of it: the breakup stops it there) or lands.
 fn entry(debug: bool) -> (Vessel, Peak, f64) {
     let w = world();
     let (earth, r, v) = orbit(&w, 200_000.0, 40_000.0);
-    let mut ship = Vessel::coasting(&w, VesselId(1), t0(), earth, r, v, sim::craft::test_craft());
+    let mut ship = Vessel::coasting(&w, VesselId(1), t0(), earth, r, v, &craft());
     ship.set_debug(&w, debug);
     assert!(matches!(ship.phase, Phase::Coasting { .. }));
     let mut peak = Peak::default();
@@ -77,16 +92,12 @@ fn entry(debug: bool) -> (Vessel, Peak, f64) {
     let mut live = 0.0;
     for _ in 0..20_000 {
         t = t.add_seconds(1.0);
-        let intact = ship.destruction().is_none();
         ship.advance(&w, t, &Controls::default(), usize::MAX);
-        // The peak of the intact craft: a wreck flies on and heats further.
-        if intact {
-            peak.record(&ship);
-        }
+        peak.record(&ship);
         if matches!(ship.phase, Phase::Powered { .. }) {
             live += 1.0;
         }
-        if matches!(ship.phase, Phase::Crashed { .. } | Phase::Landed { .. }) {
+        if wrecked(&ship) || matches!(ship.phase, Phase::Crashed { .. } | Phase::Landed { .. }) {
             break;
         }
     }
@@ -94,16 +105,27 @@ fn entry(debug: bool) -> (Vessel, Peak, f64) {
 }
 
 #[test]
-fn an_entry_from_low_orbit_burns_up_the_test_craft() {
-    // No heat shield (D064): the realistic outcome is destruction (D065).
+fn an_entry_from_low_orbit_burns_up_a_craft_without_a_heat_shield() {
+    // No heat shield (D064): the realistic outcome is destruction (D065):
+    // the first part over its skin's limit is destroyed at the hottest cell.
     let (ship, peak, live) = entry(false);
-    println!("no debug: {}, {live:.0} s live, {:?}", peak.describe(), ship.phase);
-    let Phase::Crashed { cause: Destruction::Overheat { at: Overheat::Cell(cell), temperature }, .. } = ship.phase
-    else {
-        panic!("expected to burn up: {:?}", ship.phase)
-    };
-    assert!(temperature > ship.craft.thermal.skin_max_k, "{temperature}");
-    assert_eq!(cell as usize, peak.cell);
+    println!("no debug: {}, {live:.0} s live, {:?}", peak.describe(), ship.breakup());
+    let b = ship.breakup().expect("expected to burn up");
+    let (part, temperature, cell) = (b.destroyed.iter())
+        .find_map(|&(p, d)| match d {
+            Destruction::Overheat { at: Overheat::Cell(cell), temperature } => Some((p, temperature, cell)),
+            _ => None,
+        })
+        .expect("a part overheated");
+    let design = ship.craft.design();
+    assert!(temperature > design.skin_max[cell as usize], "{temperature}");
+    assert_eq!(design.cell_part[cell as usize], part);
+    // The cells most over their limits are the destroyed ones (the nozzle,
+    // niobium, may be hotter and still within its own).
+    let skin = &ship.thermal().state.skin;
+    let worst =
+        (0..skin.len()).fold(0, |b, i| if skin[i] / design.skin_max[i] > skin[b] / design.skin_max[b] { i } else { b });
+    assert!(b.destroyed.iter().any(|d| d.0 == design.cell_part[worst]), "{worst} {:?}", b.destroyed);
 }
 
 #[test]
@@ -134,7 +156,7 @@ fn a_craft_at_rest_in_sunlight_settles() {
     let w = world();
     let t = t0();
     let (earth, r, v) = sunlit(&w, t);
-    let mut ship = Vessel::coasting(&w, VesselId(1), t, earth, r, v, sim::craft::test_craft());
+    let mut ship = Vessel::coasting(&w, VesselId(1), t, earth, r, v, &craft());
     // Side on to the Sun (the nose perpendicular to the light), not rotating.
     let sun_dir = w.snapshot(t).relative_r(w.find("Sun").unwrap().node, earth).normalize();
     let side = sim::vessel::quat_z_to(sun_dir.cross(DVec3::Z).normalize());
@@ -171,7 +193,7 @@ fn coast_temperatures_do_not_depend_on_the_frame_rate() {
     // one jump, three hours.
     let w = world();
     let (earth, r, v) = orbit(&w, 420_000.0, 400_000.0);
-    let mut a = Vessel::coasting(&w, VesselId(1), t0(), earth, r, v, sim::craft::test_craft());
+    let mut a = Vessel::coasting(&w, VesselId(1), t0(), earth, r, v, &craft());
     let q = sim::vessel::quat_z_to(DVec3::new(0.3, 0.5, 0.8).normalize());
     a.set_attitude(Attitude { q, omega: DVec3::new(0.01, -0.02, 0.005) });
     let mut b = a.clone();
@@ -195,7 +217,7 @@ fn descending(w: &World) -> Vessel {
     let r = DVec3::new(RE + 100_000.0, 0.0, 0.0);
     let g = 1.5f64.to_radians();
     let v = DVec3::new(-g.sin(), g.cos(), 0.0) * 7_600.0;
-    let mut ship = Vessel::coasting(w, VesselId(1), t0(), earth.node, r, v, sim::craft::test_craft());
+    let mut ship = Vessel::coasting(w, VesselId(1), t0(), earth.node, r, v, &craft());
     ship.set_debug(w, true);
     assert!(matches!(ship.phase, Phase::Powered { .. }), "live in the atmosphere");
     ship
@@ -246,7 +268,7 @@ fn drag_in_the_upper_atmosphere_decays_an_orbit() {
     let r0 = RE + 130_000.0;
     let (r, v) = (DVec3::new(r0, 0.0, 0.0), DVec3::new(0.0, (earth.gm / r0).sqrt(), 0.0));
     let energy = |r: DVec3, v: DVec3| 0.5 * v.length_squared() - earth.gm / r.length();
-    let mut ship = Vessel::coasting(&w, VesselId(1), t0(), earth.node, r, v, sim::craft::test_craft());
+    let mut ship = Vessel::coasting(&w, VesselId(1), t0(), earth.node, r, v, &craft());
     assert!(matches!(ship.phase, Phase::Powered { .. }));
     let dt = 300.0;
     ship.advance(&w, t0().add_seconds(dt), &Controls { sas: true, ..Default::default() }, usize::MAX);
@@ -315,21 +337,26 @@ fn a_long_burn_heats_the_nozzle_to_radiative_equilibrium_and_barely_the_interior
     let t = t0();
     let (earth, r, _) = sunlit(&w, t);
     let (r, v) = (r * 14.0, DVec3::ZERO);
-    let mut idle = Vessel::coasting(&w, VesselId(1), t, earth, r, v, sim::craft::test_craft());
+    let mut idle = Vessel::coasting(&w, VesselId(1), t, earth, r, v, &craft());
     // Debug mode keeps the propellant (and so the nodes' capacities) equal.
     idle.set_debug(&w, true);
     let mut burn = idle.clone();
-    let design = sim::craft::test_craft().design().clone();
+    assert_eq!(burn.next_stage(&w).unwrap().0, "Ignition");
+    let design = craft().design().clone();
     let nodes = &design.volume.nodes;
-    let (aft, nose) = (
-        design.engine_node as usize,
-        (0..nodes.len()).fold(0, |b, i| if nodes[i].centre.z > nodes[b].centre.z { i } else { b }),
-    );
-    let cells = &sim::craft::test_craft().cells.cells;
+    // Each engine's nozzle is joined to its own mount's node (D077).
+    let mut mounts: Vec<usize> =
+        design.nozzle_cells.iter().map(|&(i, _)| design.network.cell_node[i as usize] as usize).collect();
+    mounts.sort_unstable();
+    mounts.dedup();
+    let engines = craft().ship.as_ref().unwrap().engines.len();
+    assert_eq!(mounts.len(), engines);
+    let nose = (0..nodes.len()).fold(0, |b, i| if nodes[i].centre.z > nodes[b].centre.z { i } else { b });
+    let cells = &craft().cells.cells;
     let area: f64 = design.nozzle_cells.iter().map(|&(i, _)| cells[i as usize].area).sum();
     let n = design.nozzle_cells.len();
-    let g: f64 = design.nozzle_cells.iter().map(|&(i, _)| design.network.to_node[i as usize]).sum();
-    println!("nozzle: {n} cells, {area:.2} m², {g:.2} W/K to the mount");
+    let g = design.nozzle_cells.iter().map(|&(i, _)| design.network.to_node[i as usize]).sum::<f64>() / engines as f64;
+    println!("nozzles: {n} cells, {area:.2} m², {g:.2} W/K each to its mount");
     // Joined at the throat only: about a watt per kelvin (D077).
     assert!(g > 0.5 && g < 2.0, "{g}");
     let full = Controls { throttle: 1.0, sas: true, ..Default::default() };
@@ -340,10 +367,11 @@ fn a_long_burn_heats_the_nozzle_to_radiative_equilibrium_and_barely_the_interior
     idle.advance(&w, t.add_seconds(300.0), &coast, usize::MAX);
     let (nozzle, rise) = (nozzle_max(&burn), node_rise(&burn, &idle));
     let hottest = (0..rise.len()).fold(0, |b, i| if rise[i] > rise[b] { i } else { b });
+    let aft = mounts[0];
     println!(
-        "after 300 s: nozzle {nozzle:.0} K ({:+.1} K in the last minute), mount node +{:.2} K, nose +{:.5} K",
+        "after 300 s: nozzle {nozzle:.0} K ({:+.1} K in the last minute), mount nodes +{:.2?} K, nose +{:.5} K",
         nozzle - before,
-        rise[aft],
+        mounts.iter().map(|&m| rise[m]).collect::<Vec<_>>(),
         rise[nose]
     );
     // A radiatively cooled niobium extension runs near 1300–1500 K in
@@ -351,9 +379,9 @@ fn a_long_burn_heats_the_nozzle_to_radiative_equilibrium_and_barely_the_interior
     assert!((1300.0..1500.0).contains(&nozzle), "{nozzle}");
     assert!((nozzle - before).abs() < 10.0, "not yet in equilibrium: {before} → {nozzle}");
     assert!(nozzle < design.skin_max[design.nozzle_cells[0].0 as usize]);
-    // Through the ~1 W/K mount only: the interior barely warms.
-    assert_eq!(hottest, aft);
-    assert!(rise[aft] > 0.1 && rise[aft] < 10.0, "{}", rise[aft]);
+    // Through the ~1 W/K mounts only: the interior barely warms.
+    assert!(mounts.contains(&hottest), "{hottest} not in {mounts:?}");
+    assert!(mounts.iter().all(|&m| rise[m] > 0.1 && rise[m] < 10.0), "{rise:?}");
     // The nose differs only through the attitude's small differences in
     // sunlight (the burning craft's gimbal).
     assert!(rise[nose].abs() < 0.1, "{}", rise[nose]);
@@ -363,7 +391,9 @@ fn a_long_burn_heats_the_nozzle_to_radiative_equilibrium_and_barely_the_interior
     idle.advance(&w, later, &coast, usize::MAX);
     let soaked = node_rise(&burn, &idle);
     println!("an hour later: nozzle {:.0} K, mount node +{:.2} K", nozzle_max(&burn), soaked[aft]);
-    assert!(nozzle_max(&burn) - nozzle_max(&idle) < 20.0);
+    // (The small nozzles sit near their mounts' temperature once cold: the
+    // throat's ~1 W/K outweighs their radiation below ~500 K.)
+    assert!(nozzle_max(&burn) < 400.0, "{} vs idle {}", nozzle_max(&burn), nozzle_max(&idle));
     assert!(soaked.iter().all(|&x| x < 10.0), "{soaked:?}");
 }
 
@@ -372,7 +402,8 @@ fn a_burning_vessel_in_frames_equals_one_jump() {
     let w = world();
     let t = t0();
     let (earth, r, v) = sunlit(&w, t);
-    let mut a = Vessel::coasting(&w, VesselId(1), t, earth, r, v, sim::craft::test_craft());
+    let mut a = Vessel::coasting(&w, VesselId(1), t, earth, r, v, &craft());
+    assert_eq!(a.next_stage(&w).unwrap().0, "Ignition");
     let mut b = a.clone();
     let full = Controls { throttle: 1.0, sas: true, ..Default::default() };
     let end = t.add_seconds(20.0);
@@ -438,7 +469,7 @@ fn a_budgeted_coast_equals_an_unbudgeted_one() {
     // a small work budget (the game holds its clock back) against one call.
     let w = world();
     let (earth, r, v) = orbit(&w, 420_000.0, 400_000.0);
-    let mut a = Vessel::coasting(&w, VesselId(1), t0(), earth, r, v, sim::craft::test_craft());
+    let mut a = Vessel::coasting(&w, VesselId(1), t0(), earth, r, v, &craft());
     let mut b = a.clone();
     let controls = Controls { sas: true, ..Default::default() };
     let end = t0().add_seconds(2.0 * 86_400.0);
@@ -460,7 +491,7 @@ fn holding_attitude_in_low_orbit_frames_equal_one_jump() {
     // while the attitude holds) against one jump.
     let w = world();
     let (earth, r, v) = orbit(&w, 420_000.0, 400_000.0);
-    let mut a = Vessel::coasting(&w, VesselId(1), t0(), earth, r, v, sim::craft::test_craft());
+    let mut a = Vessel::coasting(&w, VesselId(1), t0(), earth, r, v, &craft());
     let mut b = a.clone();
     let controls = Controls { sas: true, ..Default::default() };
     let end = t0().add_seconds(86_400.0);
