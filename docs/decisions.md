@@ -520,6 +520,15 @@ The player flies everything by hand for now (including a booster landing). Scrip
 - "Then we have entries for things like materials, time to construct, multi-purpose factories (for colonies), etc, and everything is built to work off a similar system on earth and on a colony except in a colony you need far more manufacturing from scratch." Building it yourself will eventually be the only way to build anything in a colony.
 - How it fits D101's generators (a part's physics) and D019's colonies is still to be worked out.
 
+**D119: On a coast, internal systems run coarse-grained models, solved analytically where possible, and the trajectory reads the same law.** *Decided, 2026-10-30 (owner). Refines D081.*
+- "On coasts, just do a coarse grained model for things like that. You should still be simulating boil off on coast. Solve analytically when you can."
+- Boil-off, venting and similar slow changes keep running through a coast. Where a closed form exists (a tank's heat leak, its pressure rising to relief, then venting at the heat leak over the latent heat), it is evaluated at any time, not stepped. Elsewhere a coarse-grained law stands in for it.
+- The coast segment's mass for its perturbations (drag, radiation pressure) and the ship state come from the same law, so there is one mass truth (F2). It stays deterministic, warp-invariant and chunked = single pass (rule 4).
+
+**D120: The staging bar's Δv is in vacuum by default; an abort is offered only when it would save the crew or the vehicle.** *Decided, 2026-10-30 (owner).*
+- "Delta v should be vacuum by default. NO patchwork fixes." The bar's current-air figure stays a choice and is not the default. It is not patched stage by stage.
+- "Launch abort should only show when there is a valid abort procedure that would actually save the rocket or the crew." For the Falcon 9, that means while Crew Dragon, with its launch escape system (eight SuperDracos), is still attached to a stack it can escape from. Never on the booster after separation, on Dragon alone, or on a craft with no escape system (Cargo Dragon has no SuperDracos). The rule is derived from what the piece holds (crew, escape engines that can start, the joint to separate), not from the function's name.
+
 ## Open questions
 
 1. Radiation in the ship model (dose, single-event upsets), and how the career's knowledge of a design's reliability grows (D105).

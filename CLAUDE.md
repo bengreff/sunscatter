@@ -46,7 +46,7 @@ Real-scale 3D spaceflight, mission-design and logistics game in Rust. Being rebu
 
 ## Usage budget (owner's rule, 2026-10-27)
 Two overnight swarms (26-27 Oct) used about half of a week's limit in two days: about 35 agents, many running at 500k-975k context, re-reading about 6 billion tokens to write about 2 million. Every call re-reads the whole context, so cost scales with context size times the number of calls.
-1. **Cap context.** The lead session (the orchestrator) hands off at about 400k tokens (`/handoff` then `/clear`; owner, 2026-10-29). Agents hand off or start fresh at about 150-200k: write the agent's brief to a file and launch a fresh one. Never run an agent past 300k.
+1. **Cap context.** The lead session (the orchestrator) hands off at about 400k tokens (`/handoff` then `/clear`; owner, 2026-10-29). Agents wrap up at about 300k (owner, 2026-10-30): they commit, write their state into their brief, and a fresh agent continues from it.
 2. **Cap agents.** One lead plus at most 3 parallel agents, non-branching (no sub-agents of agents). Reviewers count toward the 3. Prefer one strong agent per workstream over many small ones; swarms leave patchwork.
 3. **Cap a night.** An unattended run spends at most 20% of the weekly limit. Check `/usage` before launching and stop launching new agents at the cap.
 4. **Agents read files, not transcripts.** Give each agent a short brief that points at docs and files, not a pasted history. Large logs go through `head`/`grep`, never whole into context.
