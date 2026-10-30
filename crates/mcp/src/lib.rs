@@ -5,7 +5,10 @@
 //! The server runs on its own thread and knows nothing about the game: the
 //! game registers tools (name, description, JSON schema) at start and
 //! answers each call through [`Server::poll`], once per frame, on its own
-//! thread. A call waits for the game's answer up to [`CALL_TIMEOUT`].
+//! thread. Each request is served on a thread of its own, so a call the
+//! game answers over many frames (a screenshot once the view has settled,
+//! the clock run until an event) holds up no other; a call waits for the
+//! game's answer up to [`CALL_TIMEOUT`].
 //!
 //! Security: it binds to 127.0.0.1 only, rejects requests whose `Origin`
 //! is not local (DNS rebinding), and requires `Authorization: Bearer <token>`
@@ -21,8 +24,10 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
-/// How long a tool call waits for the game (it answers once per frame).
-pub const CALL_TIMEOUT: Duration = Duration::from_secs(10);
+/// How long a tool call waits for the game: most are answered in the next
+/// frame; the long ones (D122's testing tools) bound their own wait below
+/// this.
+pub const CALL_TIMEOUT: Duration = Duration::from_secs(900);
 
 /// A tool call waiting for the game's answer.
 pub struct Call {
@@ -54,9 +59,16 @@ impl Server {
         let http = std::sync::Arc::new(http);
         let (tx, calls) = mpsc::channel::<Call>();
         let server = http.clone();
+        let (tools, token) = (std::sync::Arc::new(tools), std::sync::Arc::new(token));
         let thread = std::thread::Builder::new().name("mcp".into()).spawn(move || {
             for request in server.incoming_requests() {
-                serve(request, token.as_deref(), &tools, &tx);
+                let (tools, token, tx) = (tools.clone(), token.clone(), tx.clone());
+                let spawned = std::thread::Builder::new()
+                    .name("mcp-call".into())
+                    .spawn(move || serve(request, token.as_deref(), &tools, &tx));
+                if let Err(e) = spawned {
+                    eprintln!("mcp: no thread for a request: {e}");
+                }
             }
         })?;
         Ok(Server { calls, port, http, thread: Some(thread) })
@@ -211,6 +223,45 @@ mod tests {
         let (status, _) = post(port, r#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#, Some("secret"));
         assert_eq!(status, 202);
         stop_tx.send(()).unwrap();
+        game.join().unwrap();
+    }
+
+    #[test]
+    fn a_call_answered_later_holds_up_no_other() {
+        let tool =
+            |name: &str| Tool { name: name.into(), description: "d".into(), input_schema: json!({"type": "object"}) };
+        let server = Server::start(0, None, vec![tool("slow"), tool("fast")]).unwrap();
+        let port = server.port();
+        // The "game": keeps `slow` until `fast` has been answered.
+        let game = std::thread::spawn(move || {
+            let (mut slow, mut fast_done, mut slow_done) = (None, false, false);
+            while !(fast_done && slow_done) {
+                for c in server.poll() {
+                    if c.tool == "slow" {
+                        slow = Some(c);
+                    } else {
+                        c.reply(ToolResult::Ok(json!("fast")));
+                        fast_done = true;
+                    }
+                }
+                if fast_done {
+                    if let Some(c) = slow.take() {
+                        c.reply(ToolResult::Ok(json!("slow")));
+                        slow_done = true;
+                    }
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        });
+        let call =
+            |name: &str| format!(r#"{{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{{"name":"{name}"}}}}"#);
+        let slow = std::thread::spawn({
+            let body = call("slow");
+            move || post(port, &body, None).1
+        });
+        std::thread::sleep(Duration::from_millis(50));
+        assert!(post(port, &call("fast"), None).1.contains("\"fast\""));
+        assert!(slow.join().unwrap().contains("\"slow\""));
         game.join().unwrap();
     }
 }
