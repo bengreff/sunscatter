@@ -26,4 +26,32 @@ Not in scope: F3 (flight software reading `Knowledge`) and slosh dynamics.
 
 ## State
 
-(Update as you land: commits with hashes, the inventory, what is left in order.)
+### Inventory (before F2)
+
+- **The scalar `Vessel::propellant`.** Written by: the creation (`initial_propellant`), `init_ship` (= the ship's consumables), `set_propellant` (clamped, then `scale_to` over every tank and bottle), the live tick (a made-up craft burns it; a craft of parts = its consumables), the pad's held ticks and the landed lattice (= consumables), the coast's end (= the segment's mass − dry, then = consumables for a craft of parts: `contents_after_coast`), a split's pieces (a craft of parts: its piece's consumables; else the craft's fill), five tests. Read by: `mass()`, `propellant()` (the game's staging bar, planner Δv, data menus' TWR and Δv, MCP's TWR, landing predictions), a made-up craft's mass properties, engine and RCS gating, `live_height` (the uniform-fill model's centre of mass, for every craft), the coast's start mass, the coast's inertia (the uniform-fill model at the segment's mass, for every craft), the coast's and the live tick's thermal capacities, the placeholder systems' `Env`, a split's fill.
+- **The tanks' contents** (`ShipState::tanks`, `bottles`, the ullages). Written by the systems' tick and lattice (`systems::ship`: the engines' draw, the plumbing's pressurisation, boil-off and venting), the commands, and `scale_to`. Read by `consumables`, `contents` → `MassModel::with_contents` (each liquid a cylinder from its tank's base, rigid with the tank; each ullage's gas at the top of the region at capacity), the plumbing, the estimates, the RCS's authority, the structure's loads.
+- **The thermal nodes' capacities:** `CraftDesign::node_capacity(propellant)`, one fill for every tank and bottle, at the craft file's one specific heat (the Falcon 9's 1,700 J/(kg·K), its helium too).
+
+### Decisions (most consistent with D081, D104, rules 4 and 5)
+
+- A craft of parts' propellant is its ship state's: `Vessel::propellant()` sums the tanks and bottles; the scalar stays 0 for it (a made-up craft's only truth, its segments' mass law). `set_propellant` is the made-up craft's (a debug assertion on a craft of parts); `set_tank` sets one tank. `scale_to` is gone.
+- A craft of parts' coast segment integrates its perturbations (drag, radiation pressure) with the mass it started with; the ship state vents on the systems lattice and is the mass at every lattice point (the coast's inertia, the thermal capacities, the systems). Exact and warp-invariant as before; the segment's perturbing accelerations err by the vented share (a day of saturated LOX: 1.45 t of 123 t).
+- The liquid's slug is the plumbing's (`plumbing::slug`: its height from its density, `drift` from the outlet); the ullage's gas fills the length it leaves. The mass model takes slugs (`MassModel::with_slugs`, `Slug`); a slosh pendulum later moves a share of one across the axis.
+- The thermal nodes take each tank's liquid where its slug sits, at the fluid table's specific heat, and each bottle's gas at its cᵥ (`Aboard::Tanks`, `plumbing::held`, `VolumeGrid::band`); a bottle inside another tank (the Falcon 9's helium in its LOX) goes to its nearest node. The made-up craft keeps its one fill (`Aboard::Fill`, bit for bit as before).
+
+### Landed
+
+- **751d0da** F2's code: `vessel::mass` (the vessel's mass, propellant, mass properties, `aboard`, `set_propellant` for the made-up craft, `set_tank`), `plumbing::{slug, ullage_centre, contents, held}`, `MassModel::with_slugs` (`with_contents`, `ShipState::contents`, `scale_to` and `sync_ship_to_propellant` gone), `design::{Aboard, Held}`, `VolumeGrid::band`; the coast's lattice reads the ship state; tests in `vessel/mass_tests.rs` (the flip: 7.473859 m against the hand 7.4739 m; the day's boil-off; the nodes), `craft/volume.rs` (`a_band_goes_where_it_sits`), the build test's hand sum on slugs. The chunked = single-pass and warp tests unchanged and passing.
+- Docs (this commit): `architecture.md` rows, `ship-model.md` §5.1, the review's F2 and recommendation 2.
+
+### Left, in order
+
+1. Nothing of the brief. Later, with slosh: the pendulum (Abramson, SP-106) moving a share of the slug across the axis, and the liquids' spin in roll (both below).
+2. On screen (lead): the booster's flip after separation draws the craft shifting against its centre of mass as the LOX is thrown up (`SUNSCATTER_DEMO_STOP_AFTER` past separation); nothing else should look different.
+
+### Open for the owner
+
+- A coast keeps its starting mass for its perturbations while the ship state vents (above). Exact alternative, not built: restart the coast at the lattice epoch where the ship's mass has drifted from the segment's by more than a set share (deterministic, so warp-invariant).
+- In roll the liquids still turn with their tanks: a liquid spins up only through its boundary layers (Ekman), so its own moment about the tank's axis should leave the roll inertia. It needs the liquid's angular momentum as state: with the slosh pendulum.
+- The ullages' gas (kilograms) is left out of the nodes' heat capacities.
+- Seen in the boil-off test: Dragon's NTO and MMH tanks vent 11 g and 0.5 g a day in orbit at their relief (held warm by their heaters). Their loading pressure against their MEOP may want a look (plumbing data, not F2).
