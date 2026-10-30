@@ -51,7 +51,7 @@ Not in scope: F3 (flight software reading `Knowledge`) and slosh dynamics.
 
 ### Open for the owner
 
-- A coast keeps its starting mass for its perturbations while the ship state vents (above). Exact alternative, not built: restart the coast at the lattice epoch where the ship's mass has drifted from the segment's by more than a set share (deterministic, so warp-invariant).
+- ~~A coast keeps its starting mass for its perturbations while the ship state vents (above).~~ **Resolved by D119** (COAST, dbe3f3b + 861157e): the tanks follow one law of time through a coast (`systems::coast_law`), which the segment's mass and the ship state both read, bit for bit at every lattice point ([brief-coast.md](brief-coast.md)).
 - In roll the liquids still turn with their tanks: a liquid spins up only through its boundary layers (Ekman), so its own moment about the tank's axis should leave the roll inertia. It needs the liquid's angular momentum as state: with the slosh pendulum.
 - The ullages' gas (kilograms) is left out of the nodes' heat capacities.
 - Seen in the boil-off test: Dragon's NTO and MMH tanks vent 11 g and 0.5 g a day in orbit at their relief (held warm by their heaters). Their loading pressure against their MEOP may want a look (plumbing data, not F2).
