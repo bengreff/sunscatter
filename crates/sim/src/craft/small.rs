@@ -11,7 +11,8 @@
 //!   sequence Ignition, Separation. The build's own fixture
 //!   (`build_tests`).
 //! * [`rocket`] (`small-rocket`): the same with parachutes in the capsule
-//!   ([`CHUTES`]: two Apollo drogues and four Apollo mains, D079), an IMU
+//!   ([`CHUTES`]: two Apollo drogues and four Apollo mains, D079), four
+//!   thruster blocks instead of two (torque about every axis), an IMU
 //!   and a GPS receiver (the flight software's attitude and orbit, F3): the
 //!   stand-in of the deleted test craft (D121). [`legs_out`]: with its
 //!   legs deployed.
@@ -19,7 +20,7 @@
 //! The ids resolve in [`super::registry`], so a vessel of a small craft
 //! (and every piece of one) reloads from a save.
 
-use super::assembly::{AssemblyFile, ComponentPlace};
+use super::assembly::{AssemblyFile, ComponentPlace, Pattern};
 use super::parts::CraftDef;
 use super::{craft_of, Craft, CraftId};
 use crate::catalog::{ron_options, Catalog, Ctx, Entry};
@@ -47,7 +48,7 @@ pub const ENTRIES: &[&str] = &[
             performance: (thrust_vac: 100.0e3, isp_vac: 320.0, isp_sl: 280.0), throttle_min: 0.4, gimbal_deg: 5.0,
             ignitions: 3, igniter: TeaTeb, start_time: 1.0, throat_diameter: 0.1, exit_diameter: 0.4,
             nozzle_length: 0.6, powerhead_length: 0.4, powerhead_radius: 0.15, nozzle_material: "niobium-c103",
-            nozzle_thickness: 0.001, nozzle_heat_fraction: 2.2e-3, thrust_to_weight: 100.0))"#,
+            nozzle_thickness: 0.001, nozzle_heat_fraction: 1.7e-4, thrust_to_weight: 100.0))"#,
     r#"(id: "t-leg", name: "Test leg", era: 2020,
         generator: Leg(length: 2.5, depth: 0.15, width: 0.2, wall: Solid(material: "al-7075", thickness: 0.003),
             foot_radius: 0.25, foot_mass: 10.0, deployed_deg: 120.0, deploy_rate_dps: 30.0, actuator: Pneumatic,
@@ -159,6 +160,16 @@ pub fn file(name: &str) -> Option<AssemblyFile> {
                 roll_deg: 0.0,
             };
             f.components.push(place("chutes", CHUTES, DVec3::new(0.0, 0.0, 1.1)));
+            // Four thruster blocks round the capsule, not two: torque about
+            // every axis (the fixture's two turn it about X and Z only).
+            let rcs = f.components.iter_mut().find(|c| c.id == "rcs").expect("the fixture's thrusters");
+            rcs.pattern = Some(Pattern::Radial { count: 4, start_deg: 0.0 });
+            // Its feet sized for it (D066): 13.6 t on four feet sink ~11 cm
+            // on Earth (~2 cm on the Moon), damped at ζ ≈ 0.28 per foot
+            // full: a touchdown bounces visibly.
+            f.contact.foot.stiffness = 3.0e5;
+            f.contact.foot.damping = 1.8e4;
+            f.contact.foot.stroke = 0.35;
             // What the flight software needs to hold an attitude and know
             // its orbit (F3): an IMU and a GPS receiver on the computer's
             // bus and data link.

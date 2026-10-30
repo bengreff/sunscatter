@@ -169,7 +169,10 @@ impl Craft {
             impact_max_speed: self.spec.impact.max_speed,
             contact: self.spec.contact,
             contacts: self.cells.contacts.clone(),
-            bottom_z: s.positions.iter().map(|p| p.z).fold(f64::MAX, f64::min),
+            bottom_z: match self.cells.contacts.is_empty() {
+                true => s.positions.iter().map(|p| p.z).fold(f64::MAX, f64::min),
+                false => self.cells.contacts.iter().map(|c| c.pos.z).fold(f64::MAX, f64::min),
+            },
             initial_propellant: self.spec.propellant.mass,
             design: DesignSlot::filled(design),
         }
@@ -203,7 +206,9 @@ pub struct CraftParams {
     pub contact: ContactFile,
     /// The points that touch the ground (body axes): feet, then hull points.
     pub contacts: Vec<ContactPoint>,
-    /// Lowest point of the craft along body Z (m): the bottom of the feet.
+    /// Lowest point of the craft along body Z (m): its lowest contact point
+    /// (the bottom of the feet; a deployed foot's pad is tilted, its rim
+    /// lower than its base), else the surface's.
     pub bottom_z: f64,
     /// Propellant loaded at the start (kg).
     pub initial_propellant: f64,
