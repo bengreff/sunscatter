@@ -85,6 +85,8 @@ The numbers above illustrate the format; [falcon9.md](../features/falcon9.md) ho
 
 Catalog + craft file → generate every part and component → place them by their mounts → the existing pipeline: union surface, cells by area, mass properties, interior volume nodes, the aero bake, the thermal network (`CraftDesign`), with every cell and node tagged by part (exists) → the layer graphs (plumbing, electrical, data, mechanisms, joints) → validation (unconnected ports, an engine without a feed, an over-full part volume, a part a generator could not reach) → a `CraftDef` with its `ShipState` at the start (tanks loaded at their loading temperatures). Built once per craft id and process (the registry, exists); pieces after a split are `base#ids` (exists).
 
+At a split the ship state goes item by item with its owner (`craft::partition`, F1 of the [fidelity review](../plans/fidelity-review-2026-10-29.md)): an item of a part with its part, a joint with its two parts (one the split cuts kept with its child's piece until a docking joins them again), the cabin and its crew with their part, and each field of the vessel as a whole by a rule named for it (the clamps with the piece holding the hold-down joint, the pilot's orders with the vessel's piece, the event log copied to each). The vessel's own fields go the same way (`Vessel::piece`). Both are exhaustive destructurings with no copy of the whole, so a new field does not compile until it has its rule. The inverse, `ShipState::merge` and `Runtime::merge` (a docking), gives the state back bit for bit, except the sequence: a piece keeps only the stages and functions that name its own parts.
+
 ## 5. Runtime
 
 ### 5.0 Tick order (live, 20 ms; contact substeps as now)
@@ -131,7 +133,7 @@ The existing network (D065), now per part and material: each part's cells take i
 
 ### 5.8 Crew and life support
 
-Dragon's cabin as a lumped volume: pressure, O₂, N₂, CO₂ and water vapour partial pressures, temperature (its node); tanks of O₂ and N₂; CO₂ removal; consumption per crew member (NASA BVAD); crew limits on acceleration by axis and duration and on landing loads (NASA-STD-3001). Radiation dose later. On the overnight list this is cut first if time runs short (owner's default).
+Dragon's cabin as a lumped volume: pressure, O₂, N₂, CO₂ and water vapour partial pressures, temperature (its node); tanks of O₂ and N₂; CO₂ removal; consumption per crew member (NASA BVAD); crew limits on acceleration by axis and duration and on landing loads (NASA-STD-3001). Radiation dose later. On the overnight list this is cut first if time runs short (owner's default). One cabin per ship state for now (a merge refuses two); a docking needs a list of cabins, pressurised volumes joined by hatches, each with its own air and crew (docking's first step, [brief-foundation.md](../plans/brief-foundation.md)).
 
 ### 5.9 Vibration
 

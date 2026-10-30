@@ -107,7 +107,7 @@ Rank for D100's first goal (a whole Crew mission): **A** breaks or falsifies the
 | 35 | Cold-gas blowdown | Thrust and Isp fall with bottle pressure and temperature. | Full thrust to the last mole. | Flip time, settling time. | C |
 | 36 | Propellant residuals and utilisation | The mixture ratio is trimmed to burn both propellants out together. | Fixed ratio; the first propellant to run out flames the engine out. | Landing margin. | C |
 | 37 | An engine that is off | It heats nothing (D115). | It heats its nozzle by the static shares (D077); the revision is queued. | Heat on entry and long coasts. | C |
-| 38 | Splits carry systems state | Each piece keeps its own. | The crew's exposure history, the buses' records, the realised gimbal direction and `pressure_regulated` are copied to every piece (`systems/runtime.rs::partition`, `..self.clone()`). The grid-fin deflections were too, and misaligned, until f41f229 fixed that one field by hand today. | See §3, gap F1. | B |
+| 38 | Splits carry systems state | Each piece keeps its own. | The crew's exposure history, the buses' records, the realised gimbal direction and `pressure_regulated` are copied to every piece (`systems/runtime.rs::partition`, `..self.clone()`). The grid-fin deflections were too, and misaligned, until f41f229 fixed that one field by hand today. | See §3, gap F1 (done: 4ed2658, 2d9de38). | B |
 
 ## 3. Foundation gaps (in the order to fix)
 
@@ -116,6 +116,7 @@ Rank for D100's first goal (a whole Crew mission): **A** breaks or falsifies the
   - `refit` silently rebuilds the lists as loaded when their lengths disagree, so state can be lost without a sign.
   - Each new field makes this worse. Docking needs the inverse (a merge), and there is none.
   - Fix: every item of state keyed by its owner's id, and a partition and merge that every field must implement (no default copy), so the compiler and a coverage test catch a missing one.
+  - **Done** (FOUNDATION, 4ed2658, 2d9de38): `ShipState`, `Runtime` and `Vessel` split field by field (exhaustive destructuring, no default copy); cut joints kept with their child's piece; a merge, bit for bit after a split; `refit` mismatches are a debug assertion and an alarm. Index alignment with `ShipDef` kept (reason in [brief-foundation.md](brief-foundation.md)). Left: the sequence's round trip, and a list of cabins before docking (both in the brief).
 - **F2. One mass truth.**
   - The mass is held twice: in `Vessel::propellant`, a scalar (also the coast segment's starting mass, scaled back over every tank uniformly by `scale_to`), and in the ship state's tanks.
   - The thermal nodes' capacities come from the scalar.
