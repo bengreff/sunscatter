@@ -52,33 +52,24 @@ D122: unit tests, plus mission tests flown headless through MCP by a development
   - Knowledge (item 3, done): `get_vessel` shows position, velocity, altitude (now above the ellipsoid), orbit and attitude (heading/pitch/roll and the body axes in east-north-up) only where a working sensor measures them, at its precision. It adds `stages` (the next stage, tank levels, engines, the feeding share). `get_landing_prediction` and `get_trajectory` need navigation.
   - Checked on screen: headless start, `get_state`, `pause`, `get_vessel` on the pad (Falcon 9: GNSS and IMU known, Dragon's tanks unmeasured), `set_camera`, `shoot` with Orbital open (settled, 1600×900; the pad shot looked right).
 
+### Landed by MISSION-2 (2026-10-30)
+
+- **The mission flown** through MCP, headless, on the real flight software, deciding as a player: the Falcon 9 from the pad through the pitch kick, the gravity turn, max-Q (T+66 s, 34.6 kPa at 12.1 km), MECO at 8 % (T+138 s, 65 km, 2.17 km/s), separation, the second stage's ignition and a hand-steered insertion to 189 × 600 km at 28.7°, SECO. Replayed from a save to the metre (determinism). Every session tool run in the game: `step`, `run_until` (`max_q`, `feeding_below`, `separation`), `save_game`/`load_game`, `new_flight`, the named screens (systems with a layer and a part, tracking, pause, settings at 1200×800), `bench` and `profile` with the developer flag. Shots (scratchpad, not kept): pad, ignition, liftoff, max-Q with Orbital, the upper stage burning with the booster behind, the booster, orbit with Orbital, the four screens, Earth from 25,000 km.
+- Fixes found on the way: **1d33b69** a headless game exited mid-flight when the lid closed (the display went, the hidden window with it; now `ExitCondition::DontExit`); **293d22d** `switch_vessel` answered "aboard" even for an uncrewed vessel, flown from mission control; **1df446b** `load_game` resumed stopped time, so a replay was not exact; **3a64fef** `bench` with `only` dropped the whole look and gave each part's cost as minus the frame time (`bench::selected`, a table test); **563b356** mcp.md.
+- **The guide**: `docs/technical/testing.md`'s Mission tests (start, short calls, the tools, the worked example, what to check) and `tools/mcp.sh`, in the commit after this State.
+- Seen, not bugs: the booster, uncontrolled after separation (its return is D123's work), breaks up on the way down and its pieces are deleted as debris (D083). The tracking station's Earth is a dot under the vessel's marker from 2.5 million km. The render scale oscillates 0.8–1.0 every half second in a headless game (`render_scale::adapt`), harmless for shots. The second stage's tanks read slightly over capacity on the pad (densified propellant against the nominal density?): for the vehicle's dossier owner to check.
+- Flying notes for the next test: orbit prograde from SECO-1 climbs too steeply (apoapsis 190 km at 3 km/s); insertion needs pitch steering, and with `rotate` as the only steering it takes a loop of 1 s pulses (the guide's step 9). A closed-loop planned burn for craft of parts (D126, after ONEKIND) or a commanded-pitch hold would make this a decision. The booster's fate in a test waits on its return guidance.
+
 ### Left, in order
 
-1. **Fly the mission (item 4)** with `./run headless 7781` (take `target/demo.lock`) and a curl helper, e.g. `mcp.sh <tool> '<json>'` posting `tools/call` with `Authorization: Bearer dev`. The procedure to try:
-   - `pause`; `set_controls {throttle: 1}`; `stage` (Ignition); `step {seconds: 0.5}`; `stage` (Liftoff); shots.
-   - `step {seconds: 10}`, SAS stability.
-   - The pitch kick: `get_vessel`'s `attitude.axes_enu` gives the body axes. Rotating about local north tips the nose east, so `rotate = [n·x, n·y, n·z] × 0.04` with `n = (0,1,0)` in ENU, with `sas: false`. Then `step {seconds: 2.5}`, then `rotate [0,0,0]`, `sas: true, hold: prograde, speed_reference: surface`.
-   - `run_until {max_q: true, warp: 2}` and a shot; `run_until {feeding_below: 0.08, seconds: 146}` (MECO) and `stage`; `step 2`; `stage` (separation); `run_until {separation: true}`; `step 3`; `stage` (second-stage ignition); shots of the upper stage, then `switch_vessel` to the booster and a shot.
-   - Check each `reached`. If the run never reaches orbit, say how far it got.
-
-   Untested yet: `step`/`run_until` (the clamp at `StopAt`), `bench`, `profile`, `new_flight`, saves, the named screens. Then write the procedure as a short guide (`docs/process.md`'s testing section, or where DOCS puts it).
-2. **Perf with 11 vessels:** no tool spawns vessels. `GameCommand::SpawnTestShips` spawns test craft, which ONEKIND is deleting. Add a debug `spawn_ships` tool once ONEKIND settles what it spawns, then measure with `profile` at warps 0, 6 and 9.
-3. **What the demo had that no tool does yet:**
-   - the body tour's limb and ground views: the camera looks at the focus, so `set_camera` cannot look at the horizon from low down. Moving `tour::pose` into a camera override would do it;
-   - the eclipse and transit searches;
-   - the plunge view (a vessel placed 185 km up, falling);
-   - the zoom sweep;
-   - the playtest save from the orbit step (ONEKIND regenerates or drops it);
-   - the map-view (D054) and impact-marker (D080) checks, which ran only in the demo: check that their rules' table tests cover them.
-4. Doc changes for DOCS (not mine to edit):
-   - `docs/process.md` and HANDOFF's Gotchas still describe the demo (`SUNSCATTER_DEMO_*`, `demo.lock` wording, the plume crop);
-   - `agent-rules.md` line 16 names `SUNSCATTER_DEMO_OFFSCREEN`, `_STOP_AFTER`, `_ONLY`, `_NO_BENCH`: now `./run headless` and the tools;
-   - `docs/technical/mcp.md` (if that is where `mcp.md` went) needs the session tools, the developer flag and Knowledge;
-   - the owners table needs rows for `game::offscreen` and `game::agent::session`, and the demo's and tour's rows removed;
-   - `docs/technical/windows.md` ran the demo on backhouse.
+1. **Perf with 11 vessels** (D127: measured by hand): no tool spawns vessels. `GameCommand::SpawnTestShips` spawns test craft, which ONEKIND is deleting (its State: the small rocket `craft::small` has landed, the test craft not yet deleted). Once ONEKIND settles what `spawn_test_ships` becomes, add a developer `spawn_ships {count}` tool (a thin wire to it), then `profile` at warps 0, 6 and 9 with the Falcon 9 in orbit (the `orbit` save of a mission test).
+2. **The tour's and the demo's other views: not needed as tools now.** A mission test sees the limb and the ground near its vessel with `set_camera` on the ship. The body tour's views anywhere on a body, the eclipse and transit searches and the zoom sweep checked the look, which is frozen until both flights fly (D123); they come back as camera tools when visual work resumes. The plunge view (a vessel placed 185 km up, falling) needs a vessel placed at a state: it goes with item 1's spawn tool if the owner's slow-view case is measured again; a deorbit flown in a mission test gives the same view. The map-view (D054) and impact-marker (D080) checks are covered by their rules' table tests (`map_view.rs`, `landing.rs`).
+3. **The playtest save** (`./run play`, `docs/plans/playtest-2026-10-01-orbit.ron`): ONEKIND regenerates it from a Falcon 9 flight or drops it; a mission test's `orbit` save (`save_game` after SECO) is the way to make one.
+4. Doc changes for DOCS or the lead: `tools/gpu_trace.py` still launches the plunge demo (it needs `./run headless` and a `profile` call, or deleting); `docs/process.md`'s testing section can point at `docs/technical/testing.md`'s Mission tests.
 
 ### Open for the owner
 
-- **The developer flag** is a new variable, `SUNSCATTER_DEV=1`. The profiler's tables still need `SUNSCATTER_PROFILE=1` as well, because the profiler is set up at startup.
-- **The pitch kick is stick input:** the agent holds the pilot's rotation keys between a pause and a step. D044 says agents fly by decisions. The decision-level way would be a commanded-attitude hold (a sim `HoldMode`, the pointing laws), which is not built. Should agents lose `rotate` once that hold exists?
 - **`step` and `run_until` stop time at the end** (unless `keep_running`); time otherwise runs while the agent thinks (D044).
+- **Answered by the owner (2026-10-30):** `SUNSCATTER_DEV` stays the developer flag (the profiler's tables still need `SUNSCATTER_PROFILE=1`, set up at startup), and `rotate` stays (the player's manual controls are the agent's too, D126).
+- **Insertion is hand-steered with `rotate`** (D126 allows it). Should a mission test fly the insertion as a decision instead, once planned burns for craft of parts land (D126), rather than a loop of pulses? Default: yes, the guide's step 9 becomes a planned burn when it exists.
+- **A call can block up to 15 minutes** (the MCP server's backstop) while the stream watchdog stops an agent after 10. The guide tells agents to bound each call (`seconds` and `timeout_s` ≤ 240); the server's limit stays, for the player's agent.
