@@ -40,7 +40,8 @@ pub enum GameCommand {
     /// Replace the game with a (checked, non-empty) save: load or revert.
     Restore(Box<SaveGame>),
     /// Put the active vessel back on the pad (a new craft of its kind):
-    /// the revert of a vessel without a launch save (D114).
+    /// the revert of a vessel without a launch save, and the fresh vessel
+    /// after a pad abort (D114, `pad`).
     Reset,
     /// A new flight: the active vessel replaced by a new craft `.0` (a
     /// directory under `data/craft`) on the pad.

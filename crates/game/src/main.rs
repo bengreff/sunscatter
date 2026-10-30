@@ -27,6 +27,7 @@ mod look;
 mod map;
 mod map_view;
 mod navball;
+mod pad;
 mod persist;
 mod planner;
 mod profile;
@@ -132,7 +133,9 @@ fn main() {
         )
         .add_systems(
             Update,
-            (state::advance, debris::update, state::update_prediction, landing::update).chain().in_set(Stage::Simulate),
+            (state::advance, debris::update, pad::update, state::update_prediction, landing::update)
+                .chain()
+                .in_set(Stage::Simulate),
         )
         .add_systems(
             Update,
