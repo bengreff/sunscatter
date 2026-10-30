@@ -11,7 +11,8 @@
 //!   sequence Ignition, Separation. The build's own fixture
 //!   (`build_tests`).
 //! * [`rocket`] (`small-rocket`): the same with parachutes in the capsule
-//!   ([`CHUTES`]: two Apollo drogues and four Apollo mains, D079): the
+//!   ([`CHUTES`]: two Apollo drogues and four Apollo mains, D079), an IMU
+//!   and a GPS receiver (the flight software's attitude and orbit, F3): the
 //!   stand-in of the deleted test craft (D121).
 //!
 //! The ids resolve in [`super::registry`], so a vessel of a small craft
@@ -74,6 +75,12 @@ pub const ENTRIES: &[&str] = &[
                    reefing: [(cd_fraction: 0.0679, until: 6.0), (cd_fraction: 0.2571, until: 10.0)],
                    deploy_max_q: 3.27e3, max_load: 588.6e3),
             main_height: 3350.0))))"#,
+    r#"(id: "t-imu", name: "Test IMU", era: 2020,
+        generator: Component(envelope: Box(0.2, 0.2, 0.15), power: 30.0,
+            equipment: Sensor(quantity: "inertial", accuracy: 1.0e-4, rate_hz: 400.0, mass: 5.0)))"#,
+    r#"(id: "t-gps", name: "Test GPS receiver", era: 2020,
+        generator: Component(envelope: Box(0.15, 0.15, 0.08), power: 10.0,
+            equipment: Sensor(quantity: "position", accuracy: 3.0, rate_hz: 10.0, mass: 2.0)))"#,
 ];
 
 /// The small rocket without parachutes (the build's fixture).
@@ -140,16 +147,26 @@ pub fn file(name: &str) -> Option<AssemblyFile> {
     match name {
         "rocket" => {
             let mut f = parse(ROCKET);
-            f.components.push(ComponentPlace {
-                id: "chutes".into(),
-                entry: CHUTES.into(),
+            let place = |id: &str, entry: &str, pos: DVec3| ComponentPlace {
+                id: id.into(),
+                entry: entry.into(),
                 set: Default::default(),
                 pattern: None,
                 host: "capsule".into(),
-                pos: DVec3::new(0.0, 0.0, 1.1),
+                pos,
                 axis: DVec3::Z,
                 roll_deg: 0.0,
-            });
+            };
+            f.components.push(place("chutes", CHUTES, DVec3::new(0.0, 0.0, 1.1)));
+            // What the flight software needs to hold an attitude and know
+            // its orbit (F3): an IMU and a GPS receiver on the computer's
+            // bus and data link.
+            f.components.push(place("imu", "t-imu", DVec3::new(0.3, 0.0, 0.6)));
+            f.components.push(place("gps", "t-gps", DVec3::new(-0.3, 0.0, 0.6)));
+            for s in ["imu", "gps"] {
+                f.electrical[0].members.push(s.into());
+                f.data[0].to.push(s.into());
+            }
             Some(f)
         }
         _ => None,
