@@ -22,14 +22,20 @@
 //!   momentum are conserved, since the pieces' mass properties sum to the
 //!   craft's (each part's dry mass is its own shell; every tank is at the
 //!   same fill).
-//! * **State carried**: propellant by tank (each piece's tanks at the
-//!   craft's fill), skin and interior temperatures (each new cell or node
-//!   takes the temperature of the nearest one of its part), the ship clock,
-//!   systems (power and boil-off shared by the parts' placeholders), debug
-//!   mode, the limbo placeholders; the parachutes go with the part that
-//!   carries them, the crew with the seats (the vessel's piece first). The
-//!   vessel keeps its flight plan and its attitude control; a new piece
-//!   starts with neither.
+//! * **State carried** ([`Vessel::piece`], every field of the vessel by
+//!   name, no copy of the whole): the ship state item by item with its
+//!   parts (`craft::partition`), else propellant at the craft's fill; skin
+//!   and interior temperatures (each new cell or node takes the temperature
+//!   of the nearest one of its part); systems (power and boil-off shared by
+//!   the parts' placeholders, the ledgers with the vessel's piece); the
+//!   parachutes with the part that carries them; the crew with the seats
+//!   (the vessel's piece first). Copied to every piece: the time, attitude,
+//!   ship clock, debug mode, limbo placeholders, bubble state, launch and a
+//!   wreck's destruction. The vessel keeps its id, flight plan, attitude
+//!   control (its lattice restarts) and helm; a new piece gets a new id, no
+//!   plan or control, and [`Controls::for_piece`](super::Controls::for_piece).
+//!   Every piece starts live with no tick acceleration, rest or repoint,
+//!   and the split's pieces are clear of each other.
 //! * **Phase**: live stays live, a coast restarts as coasts from the split
 //!   epoch, a landed or crashed vessel is woken into live ticks.
 
@@ -38,6 +44,7 @@ use crate::chute::{CanopyState, ChuteState};
 use crate::craft::assembly::JointKind;
 use crate::craft::parts::components;
 use crate::craft::{registry, Craft, CraftDesign, CraftId};
+use crate::frame::NodeId;
 use crate::thermal::ThermalState;
 use crate::time::Epoch;
 use crate::world::World;
@@ -179,7 +186,8 @@ impl Vessel {
     /// Splits the vessel by `plan` with the pieces' `crafts` (in the plan's
     /// order, [`SplitPlan::crafts`]): the vessel becomes the first piece and
     /// the others are returned as new vessels, with ids from `ids`. Clears a
-    /// pending breakup.
+    /// pending breakup. Each piece's fields follow [`Self::piece`]'s rules;
+    /// its motion is set here.
     pub fn split(
         &mut self,
         world: &World,
@@ -202,9 +210,6 @@ impl Vessel {
             self.thermal_to_now(world);
         }
         let (anchor, r, v) = self.state(world);
-        // Every piece gets its own phase below: drop the stored trajectory
-        // first, so the pieces' copies are light.
-        self.phase = Phase::Powered { anchor, r, v };
         let old = self.craft.design().clone();
         let props = self.mass_props();
         let capacity = self.craft.mass.capacity;
@@ -216,7 +221,7 @@ impl Vessel {
             let text = "Clamps: release disarmed by the separation; clamps held".to_string();
             crate::systems::propulsion::disarm(state, self.time, text, true);
         }
-        let total = Shares::of(&old.parts);
+        let cut = Cut { old: &old, at: (anchor, r, v), fill, total: Shares::of(&old.parts) };
         let mut crew = self.crew;
         let mut pieces: Vec<Vessel> = Vec::new();
         for (k, craft) in crafts.iter().enumerate() {
@@ -226,55 +231,21 @@ impl Vessel {
             if k > 0 && ground {
                 continue;
             }
-            let design = craft.design().clone();
-            let mut piece = self.clone();
-            piece.craft = craft.params();
-            let capacity = piece.craft.mass.capacity;
-            match (&self.ship, &craft.ship, old.ship.as_deref()) {
-                // A craft of parts: each tank and bottle goes with its part.
-                (Some(state), Some(def), Some(whole)) => {
-                    let ids: Vec<u32> = design.parts.iter().map(|p| p.id).collect();
-                    let mine = state.partition(&ids, whole, def, k == 0);
-                    piece.propellant = mine.consumables(def);
-                    piece.ship = Some(mine);
-                    piece.sync_engine();
-                }
-                _ => piece.propellant = (fill * capacity).min(capacity),
-            }
+            let seats: u32 = craft.design().parts.iter().map(|p| p.crew).sum();
+            let aboard = crew.min(seats);
+            crew -= aboard;
+            let id = (k > 0).then(|| ids.allocate());
+            let mut piece = self.piece(&cut, craft, id, aboard);
             // A reconfiguration moves parts about the centre of mass, which
             // stays; the angular momentum stays with the new inertia.
             let offset = if reconfigure { DVec3::ZERO } else { q * (piece.mass_props().com - props.com) };
-            let state = (anchor, r + offset, v + omega.cross(offset));
             if reconfigure {
                 let rot = glam::DMat3::from_quat(q);
                 let world = |i: glam::DMat3| rot * i * rot.transpose();
                 let spin = world(props.inertia) * omega;
                 piece.attitude.omega = world(piece.mass_props().inertia).inverse() * spin;
             }
-            piece.phase = Phase::Powered { anchor: state.0, r: state.1, v: state.2 };
-            piece.tick_accel = None;
-            piece.rest_ticks = 0;
-            piece.rest_mode = None;
-            piece.repoint = false;
-            let mut th = VesselThermal::uniform(design.cells.len(), design.nodes(), 0.0, self.thermal.epoch);
-            th.state = carry_temperatures(&old, &self.thermal.state, &design);
-            piece.thermal = th;
-            let mine = Shares::of(&design.parts);
-            piece.systems = total.share(&mine, &self.systems, k == 0);
-            if !design.parts.iter().any(|p| p.chute) {
-                piece.chute = LOST_CHUTE;
-            }
-            let seats: u32 = design.parts.iter().map(|p| p.crew).sum();
-            piece.crew = crew.min(seats);
-            crew -= piece.crew;
-            if k > 0 {
-                piece.id = ids.allocate();
-                piece.plan = Default::default();
-                piece.control = AttitudeControl::default();
-                piece.start_helm_as_piece();
-            } else {
-                piece.control.base = None;
-            }
+            piece.phase = Phase::Powered { anchor, r: r + offset, v: v + omega.cross(offset) };
             if let Some(cause) = plan.destroyed[k] {
                 piece.destroy(cause);
             }
@@ -300,6 +271,110 @@ impl Vessel {
         *self = pieces.pop().expect("the vessel's piece");
         rest
     }
+
+    /// The piece of this vessel made of `craft`'s parts, before its motion
+    /// ([`Self::split`] sets the phase at its centre of mass, and a
+    /// reconfiguration's spin): every field by its own rule, named one by
+    /// one, so a new field has no rule until it is given one (the
+    /// destructuring and the literal are exhaustive; no copy of the whole).
+    /// `id`: a new piece's id (`None`: the piece that stays the vessel);
+    /// `crew`: the people its seats take.
+    fn piece(&self, cut: &Cut, craft: &Arc<Craft>, id: Option<VesselId>, crew: u32) -> Vessel {
+        let Vessel {
+            id: vessel_id,
+            craft: _,      // the piece's own
+            phase: _,      // set by the split (live at the piece's centre of mass)
+            time,          // the split's epoch, in every piece
+            attitude,      // the body axes and ω, in every piece
+            chute,         // with the parts that carry the parachutes
+            crew: _,       // by seats, the vessel's piece first (`crew`)
+            propellant: _, // the piece's tanks (else the craft's fill)
+            debug,
+            plan,
+            tick_accel: _, // a new live start
+            control,
+            rest_ticks: _,
+            destroyed, // a wreck's pieces are wrecks (and the plan's, by its cause)
+            rest_mode: _,
+            checked, // bookkeeping: a piece flies live, its landing is its own
+            clock,
+            thermal,
+            limbo,
+            repoint: _, // a coast restarts from the split anyway
+            systems,
+            breakup: _, // this split applies it
+            bubble,
+            ship,
+            clear_of,
+            helm,
+            launch,
+        } = self;
+        let own = id.is_none();
+        let design = craft.design();
+        let params = craft.params();
+        let (propellant, ship) = match (ship, &craft.ship, cut.old.ship.as_deref()) {
+            // A craft of parts: each item goes with its part (`craft::partition`).
+            (Some(state), Some(def), Some(whole)) => {
+                let parts: Vec<u32> = design.parts.iter().map(|p| p.id).collect();
+                let mine = state.partition(&parts, whole, def, own);
+                (mine.consumables(def), Some(mine))
+            }
+            _ => {
+                debug_assert!(ship.is_none(), "a piece of a craft of parts is a craft of parts");
+                let capacity = params.mass.capacity;
+                ((cut.fill * capacity).min(capacity), None)
+            }
+        };
+        let mut th = VesselThermal::uniform(design.cells.len(), design.nodes(), 0.0, thermal.epoch);
+        th.state = carry_temperatures(cut.old, &thermal.state, design);
+        let mut piece = Vessel {
+            id: id.unwrap_or(*vessel_id),
+            craft: params,
+            phase: Phase::Powered { anchor: cut.at.0, r: cut.at.1, v: cut.at.2 },
+            time: *time,
+            attitude: *attitude,
+            chute: if design.parts.iter().any(|p| p.chute) { *chute } else { LOST_CHUTE },
+            crew,
+            propellant,
+            debug: *debug,
+            // The vessel keeps its flight plan and attitude control (its
+            // coast's lattice restarts); a new piece starts with neither.
+            plan: if own { plan.clone() } else { Default::default() },
+            tick_accel: None,
+            control: if own { AttitudeControl { base: None, ..*control } } else { Default::default() },
+            rest_ticks: 0,
+            destroyed: *destroyed,
+            rest_mode: None,
+            checked: *checked,
+            clock: *clock,
+            thermal: th,
+            limbo: *limbo,
+            repoint: false,
+            systems: cut.total.share(&Shares::of(&design.parts), systems, own),
+            breakup: None,
+            bubble: *bubble,
+            ship,
+            // A split's pieces are set clear of each other by the split; a
+            // reconfiguration keeps the vessel's.
+            clear_of: clear_of.clone(),
+            helm: if own { helm.clone() } else { helm.for_piece() },
+            launch: *launch,
+        };
+        piece.sync_engine();
+        piece
+    }
+}
+
+/// What every piece of one split starts from ([`Vessel::piece`]).
+struct Cut<'a> {
+    /// The craft split.
+    old: &'a CraftDesign,
+    /// Its state (anchor, position, velocity) at the split.
+    at: (NodeId, DVec3, DVec3),
+    /// Its tanks' fill (a craft not of parts).
+    fill: f64,
+    /// Its parts' power and tank placeholders.
+    total: Shares,
 }
 
 /// Each separation system that fired (the joints of the `separated` parts,

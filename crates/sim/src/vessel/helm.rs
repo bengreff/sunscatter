@@ -73,6 +73,14 @@ impl Helm {
         Helm { set, received: set, queue: VecDeque::new() }
     }
 
+    /// The helm a piece of a split starts with (every piece but the one
+    /// that keeps the vessel's id): the controls of [`Controls::for_piece`],
+    /// received at once (nothing in flight: settings sent were for the
+    /// vessel).
+    pub(super) fn for_piece(&self) -> Self {
+        Helm::new(self.set.for_piece())
+    }
+
     /// What the vessel acts on at `now`: `crewed`, its controls as set;
     /// otherwise those that have reached it, the setting at `now` sent with
     /// one-way `delay` (s; `None`: no signal, nothing sent).
@@ -132,12 +140,6 @@ impl Vessel {
     pub fn acting_controls(&mut self, now: Epoch, delay: Option<f64>) -> Controls {
         let crewed = self.crew() > 0;
         self.helm.acting(now, crewed, delay)
-    }
-
-    /// Starts a piece of a split with the controls of [`Controls::for_piece`]
-    /// (nothing in flight: settings sent were for the vessel).
-    pub(super) fn start_helm_as_piece(&mut self) {
-        self.helm = Helm::new(self.helm.set.for_piece());
     }
 }
 
