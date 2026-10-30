@@ -173,7 +173,7 @@ The result is **roughly 10–30 force terms per step**, whatever the population 
 ## 6. Relativity
 
 - Motion is integrated in proper-velocity form, **u = γv**, in the current inertial frame. Thrust is a proper acceleration. Gravity is Newtonian (weak-field).
-- Each ship carries its own **proper time**, stored as δ = τ − t (§3), integrated at `dδ/dt = −U/c² − v²/(2c²)` (U = Σ GM/r over every source, v barycentric) as an extra component of the vessel's state outside error control (`sim::relativity`, `sim::vessel::clock`). **Global coordinate time** is the bubble frame's time. Clocks in different system frames are treated as identical; the difference is about 10⁻⁸. This simplification is documented, not hidden.
+- Each ship carries its own **proper time**, stored as δ = τ − t (§3), integrated at `dδ/dt = (L_B − (U + v²/2)/c²) / (1 − L_B)` (U = Σ GM/r over every source, v barycentric, L_B TDB's rate against TCB; [proper-time.md](proper-time.md)) as an extra component of the vessel's state outside error control (`sim::relativity`, `sim::vessel::clock`). **Global coordinate time** is the bubble frame's time. Clocks in different system frames are treated as identical; the difference is about 10⁻⁸. This simplification is documented, not hidden.
 - Compact objects, if the population statistics place any within 100 ly, use a pseudo-Newtonian potential (Paczyński–Wiita) plus gravitational time dilation.
 - Communication delay (D034) uses light-travel time computed along the same frame tree.
 

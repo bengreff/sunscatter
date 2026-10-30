@@ -46,4 +46,4 @@ What a craft knows, what its own computers decide, how it is powered, and how it
 
 - Owners: [owners.md, Avionics](../owners.md#avionics-data-flight-software-controls-power-comms).
 - Decisions: D034, D035, D043, D064, D067, D068, D104, D106, D108, D112, D115, D117, D123, D125, D126.
-- Technical: [knowledge.md](../technical/knowledge.md), [flight-software.md](../technical/flight-software.md), [power.md](../technical/power.md), [ship-commands.md](../technical/ship-commands.md) (commands, the pad, light-delayed orders), [ship-model.md](../technical/ship-model.md) §5.5, §7, §8. The comm network's spec is in the archived [realism-1](../archive/plans/realism-1.md) §4.
+- Technical: [knowledge.md](../technical/knowledge.md), [flight-software.md](../technical/flight-software.md), [power.md](../technical/power.md), [ship-commands.md](../technical/ship-commands.md) (commands, the pad, light-delayed orders), [ship-model.md](../technical/ship-model.md) §5.5, §7, §8. [comms.md](../technical/comms.md) (control locations, the relay network, light delay, D034's routing).
