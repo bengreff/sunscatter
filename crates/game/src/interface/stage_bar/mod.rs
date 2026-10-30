@@ -179,7 +179,7 @@ mod tests {
 
     #[test]
     fn estimates_are_taken_again_when_anything_they_read_changes() {
-        let stages = vec![Stage { name: "a".into(), key: None, actions: vec![], pinned: false }];
+        let stages = vec![Stage { name: "a".into(), key: None, actions: vec![], pinned: false, abort: false }];
         let c = Cached {
             vessel: VesselId(1),
             at: 10.0,

@@ -310,7 +310,8 @@ mod tests {
     /// releases the clamps; without one, it stays.
     #[test]
     fn a_release_undone_is_next_again() {
-        let stage = |actions: Vec<ShipCommand>| Stage { name: String::new(), key: None, actions, pinned: false };
+        let stage =
+            |actions: Vec<ShipCommand>| Stage { name: String::new(), key: None, actions, pinned: false, abort: false };
         let ignite = || ShipCommand::Ignite("s1".into());
         let stages = vec![
             stage(vec![ignite()]),
@@ -400,7 +401,7 @@ mod tests {
         let def = crate::craft::load_definition(&path).unwrap().ship.unwrap();
         let at = Epoch::new(1_000_000_000, 0.0);
         let mut state = ShipState::initial(&def);
-        let fins = Stage { name: "Grid fins".into(), key: None, actions: vec![], pinned: false };
+        let fins = Stage { name: "Grid fins".into(), key: None, actions: vec![], pinned: false, abort: false };
         state.stages.push(Stage { actions: vec![ShipCommand::Deploy("s1.gridfin#*".into())], ..fins });
         state.clamped = false;
         for _ in 0..4 {
@@ -439,6 +440,7 @@ mod tests {
                 .map(|k| if k % 2 == 0 { ShipCommand::ArmChutes } else { ShipCommand::ReleaseClamps })
                 .collect(),
             pinned: false,
+            abort: false,
         };
         let names = |s: &[Stage]| s.iter().map(|s| format!("{}{}", s.name, s.actions.len())).collect::<Vec<_>>();
         // (edit, sequence, stages after, or refused)

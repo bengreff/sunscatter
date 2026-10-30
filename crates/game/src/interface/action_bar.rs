@@ -3,16 +3,18 @@
 //! mini-tab to the top right corner, same width as staging"), the way into
 //! the systems screen (Tab) and the active craft's functions pinned in the
 //! systems screen, each run by a click (no craft-specific keys: abort is one
-//! of them), wrapping onto more lines. Nothing for a craft without a ship
-//! definition (the test craft). The staging bar stops below it.
+//! of them, shown only while it would save the crew, D120:
+//! `sim::craft::program::offered`), wrapping onto more lines. Nothing for a
+//! craft without a ship definition (the test craft). The staging bar stops
+//! below it.
 
 use super::{layout, theme};
 use crate::commands::GameCommand;
 use crate::state::SimState;
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
-use sim::craft::command::Stage;
 use sim::craft::ship::ShipDef;
+use sim::craft::state::ShipState;
 
 /// The bar's egui area (the docks keep clear of it).
 pub const AREA: &str = "action_bar";
@@ -27,10 +29,12 @@ pub struct Entry {
 
 /// The bar's entries: the pinned functions in order, of those in the
 /// craft's view (`sim::craft::program`: after a split, those acting on
-/// this piece).
-pub fn entries(def: &ShipDef, functions: &[Stage]) -> Vec<Entry> {
+/// this piece) that it offers (an abort only while it would save the crew).
+pub fn entries(def: &ShipDef, state: &ShipState) -> Vec<Entry> {
+    let functions = &state.functions;
     (sim::craft::program::view(def, functions).into_iter())
         .filter(|v| functions[v.index].pinned)
+        .filter(|v| sim::craft::program::offered(def, state, &functions[v.index]).is_ok())
         .map(|v| Entry { index: v.index, name: functions[v.index].name.clone() })
         .collect()
 }
@@ -66,7 +70,7 @@ pub fn draw(
         return Ok(());
     }
     let ctx = contexts.ctx_mut()?;
-    let entries = entries(&def, &state.functions);
+    let entries = entries(&def, state);
     let mut clicked: Option<usize> = None;
     let corner = [-layout::MARGIN, layout::MARGIN];
     egui::Area::new(AREA.into()).anchor(egui::Align2::RIGHT_TOP, corner).movable(false).show(ctx, |ui| {
@@ -98,7 +102,7 @@ pub fn draw(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sim::craft::command::ShipCommand;
+    use sim::craft::command::{ShipCommand, Stage};
 
     #[test]
     fn only_pinned_functions_show_and_keys_are_ignored() {
@@ -107,34 +111,59 @@ mod tests {
             key: key.map(str::to_string),
             actions: vec![ShipCommand::ArmChutes],
             pinned,
+            abort: false,
         };
         let rocket = crate::test_rocket::rocket();
         let def = rocket.ship.as_deref().unwrap();
-        let mut functions = vec![f("Legs", Some("L"), true), f("Hidden", Some("K"), false), f("Abort", None, true)];
+        let mut state = ShipState::initial(def);
+        // A function named "Abort" is a function like any other; one marked
+        // as an abort that would save no one here is not shown.
+        state.functions = vec![f("Legs", Some("L"), true), f("Hidden", Some("K"), false), f("Abort", None, true)];
         // Another piece's function (nothing here it acts on): not shown.
-        functions.push(Stage { actions: vec![ShipCommand::Deploy("nothing#*".into())], ..f("Other", None, true) });
-        let shown = entries(def, &functions);
+        state
+            .functions
+            .push(Stage { actions: vec![ShipCommand::Deploy("nothing#*".into())], ..f("Other", None, true) });
+        state.functions.push(Stage { abort: true, ..f("Escape", None, true) });
+        let shown = entries(def, &state);
         let got: Vec<(usize, &str)> = shown.iter().map(|e| (e.index, e.name.as_str())).collect();
         assert_eq!(got, [(0, "Legs"), (2, "Abort")]);
-        assert!(entries(def, &[f("x", Some("Z"), false)]).is_empty());
+        state.functions = vec![f("x", Some("Z"), false)];
+        assert!(entries(def, &state).is_empty());
     }
 
     /// The test rocket's pinned function is sent to the vessel by name; the
-    /// Falcon 9 Crew's launch abort is on the bar.
+    /// Falcon 9 Crew's launch abort is on the bar while it would save the
+    /// crew (D120): on the stack and the upper stack, not on the booster
+    /// after the stage separation, nor once Dragon's separation has fired.
     #[test]
     fn a_pinned_function_runs_on_the_active_vessel_and_abort_is_one() {
         let rocket = crate::test_rocket::rocket();
         let sim = SimState::with_craft(&rocket);
-        let e = entries(&sim.ship().ship_def().unwrap(), &sim.ship().ship().unwrap().functions);
+        let e = entries(&sim.ship().ship_def().unwrap(), sim.ship().ship().unwrap());
         assert_eq!(e.len(), 1, "Legs is pinned, Pair is not");
         let c = run(&sim, e[0].index).unwrap();
         assert_eq!(c, GameCommand::Function { vessel: sim.ship().id(), name: "Legs".into() });
         assert!(run(&sim, 99).is_none());
         let f9 = SimState::with_craft(&crate::state::craft_or_test("falcon9-crew"));
-        let names: Vec<String> = (entries(&f9.ship().ship_def().unwrap(), &f9.ship().ship().unwrap().functions))
-            .into_iter()
-            .map(|e| e.name)
-            .collect();
-        assert!(names.iter().any(|n| n == "Launch abort"), "{names:?}");
+        let def = f9.ship().ship_def().unwrap();
+        let piece = |keep: &dyn Fn(&str) -> bool| {
+            def.subset(&def.parts.iter().filter(|p| keep(&p.id)).map(|p| p.part).collect::<Vec<_>>())
+        };
+        let upper = |id: &str| id.starts_with("s2.") || id.starts_with("dragon.");
+        let mut fired = f9.ship().ship().unwrap().clone();
+        let j = def.joints.iter().position(|j| j.name == "dragon separation").unwrap();
+        fired.joints[j].intact = false;
+        // (case, piece, its state or the initial one, the abort on the bar)
+        let table: [(&str, ShipDef, Option<ShipState>, bool); 4] = [
+            ("the stack on the pad", (*def).clone(), None, true),
+            ("Dragon's separation fired", (*def).clone(), Some(fired), false),
+            ("the upper stack", piece(&upper), None, true),
+            ("the booster", piece(&|id| !upper(id)), None, false),
+        ];
+        for (case, d, state, want) in table {
+            let state = state.unwrap_or_else(|| ShipState::initial(&d));
+            let names: Vec<String> = entries(&d, &state).into_iter().map(|e| e.name).collect();
+            assert_eq!(names.iter().any(|n| n == "Launch abort"), want, "{case}: {names:?}");
+        }
     }
 }

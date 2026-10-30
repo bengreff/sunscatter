@@ -72,7 +72,8 @@ fn a_craft_of_parts_lifts_off_on_its_engines() {
     assert_eq!(each, vec![100.0e3; 4]);
     // The sequence and functions are the vessel's: edited, checked.
     use crate::craft::command::{ShipCommand, Stage};
-    let stage = |action: ShipCommand| Stage { name: "x".into(), key: None, actions: vec![action], pinned: true };
+    let stage =
+        |action: ShipCommand| Stage { name: "x".into(), key: None, actions: vec![action], pinned: true, abort: false };
     let bad = v.set_functions(vec![stage(ShipCommand::Separate("no such joint".into()))]).unwrap_err();
     assert!(bad[0].contains("names no joint"), "{bad:?}");
     v.set_functions(vec![stage(ShipCommand::Deploy("leg#*".into()))]).unwrap();

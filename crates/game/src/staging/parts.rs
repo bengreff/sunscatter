@@ -205,6 +205,7 @@ mod tests {
             key: None,
             actions: vec![ShipCommand::ArmChutes],
             pinned: false,
+            abort: false,
         });
         state.stages[1].actions.push(ShipCommand::ArmChutes);
         // (orders, arms)

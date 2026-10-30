@@ -129,7 +129,7 @@ fn editing_the_stages_keeps_those_already_run() {
     v.next_stage(&w).unwrap();
     v.next_stage(&w).unwrap();
     let all = v.ship().unwrap().stages.clone();
-    let named = |name: &str| Stage { name: name.into(), key: None, actions: Vec::new(), pinned: false };
+    let named = |name: &str| Stage { name: name.into(), key: None, actions: Vec::new(), pinned: false, abort: false };
     type Edit = fn(&mut Vec<Stage>, Stage);
     let edits: [(&str, Edit); 6] = [
         ("delete a stage run", |s, _| drop(s.remove(0))),

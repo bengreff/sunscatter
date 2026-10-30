@@ -68,6 +68,10 @@ pub struct Stage {
     /// Shown on the mini systems panel in flight (D107).
     #[serde(default)]
     pub pinned: bool,
+    /// An escape: offered only while it would save the crew
+    /// (`systems::abort`, D120), whatever its name.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub abort: bool,
 }
 
 impl ShipCommand {
@@ -139,6 +143,7 @@ mod tests {
             name: "Ignition".into(),
             key: Some("1".into()),
             pinned: true,
+            abort: true,
             actions: vec![
                 ShipCommand::Ignite("s1.merlin#*".into()),
                 ShipCommand::Throttle("s1".into(), 0.6),

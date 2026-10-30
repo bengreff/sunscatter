@@ -118,7 +118,7 @@ pub fn moves(shown: &[usize], i: usize) -> (Option<Edit>, Option<Edit>) {
 pub fn apply(list: &mut Vec<Stage>, edit: Edit) {
     let n = list.len();
     match edit {
-        Edit::Add(name) => list.push(Stage { name, key: None, actions: Vec::new(), pinned: false }),
+        Edit::Add(name) => list.push(Stage { name, key: None, actions: Vec::new(), pinned: false, abort: false }),
         Edit::Remove(i) if i < n => {
             list.remove(i);
         }
@@ -210,7 +210,7 @@ mod tests {
         for (i, up, down) in table {
             assert_eq!(moves(&shown, i), (up, down), "{i}");
         }
-        let stage = |name: &str| Stage { name: name.into(), key: None, actions: vec![], pinned: false };
+        let stage = |name: &str| Stage { name: name.into(), key: None, actions: vec![], pinned: false, abort: false };
         let mut list: Vec<Stage> = ["A", "x", "B", "y", "C", "D"].into_iter().map(stage).collect();
         apply(&mut list, moves(&shown, 4).0.unwrap());
         let names: Vec<&str> = list.iter().map(|s| s.name.as_str()).collect();
@@ -224,6 +224,7 @@ mod tests {
             key: None,
             actions: vec![ShipCommand::ArmChutes; n],
             pinned: false,
+            abort: false,
         };
         let names = |l: &[Stage]| l.iter().map(|s| s.name.clone()).collect::<Vec<_>>();
         // (edit, names after, actions of the first after)

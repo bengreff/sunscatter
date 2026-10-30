@@ -201,8 +201,13 @@ mod tests {
 
     #[test]
     fn drafts_follow_the_vessel_unless_edited() {
-        let s =
-            |name: &str| Stage { name: name.into(), key: None, actions: vec![ShipCommand::ArmChutes], pinned: false };
+        let s = |name: &str| Stage {
+            name: name.into(),
+            key: None,
+            actions: vec![ShipCommand::ArmChutes],
+            pinned: false,
+            abort: false,
+        };
         let v = VesselId(4);
         let d = Drafts::sync(None, v, "c", &[s("A")], &[s("F")]);
         assert_eq!((d.stages[0].name.as_str(), d.functions[0].name.as_str(), d.dirty), ("A", "F", [false; 2]));

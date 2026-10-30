@@ -12,12 +12,31 @@
 //! no command at all (one just added) is in every view. D114 holds in each
 //! piece: its commands that can act do, the rest do nothing.
 //!
+//! **An abort** (a function marked `abort`, D120: "Launch abort should only
+//! show when there is a valid abort procedure that would actually save the
+//! rocket or the crew") is offered only while what the piece holds makes
+//! its procedure an escape, whatever its name ([`offered`]):
+//!
+//! * a crew cabin (seats) in the piece;
+//! * a joint it separates, intact, holding the cabin to a stack still in
+//!   the piece;
+//! * an engine it lights on the cabin's side of that joint that can start
+//!   ([`can_start`]: not failed, an ignition left, its controller working
+//!   with power, propellant in its feeds).
+//!
+//! So the Falcon 9 offers its launch abort on the pad and in ascent; the
+//! booster after the stage separation (no cabin), Dragon after its own
+//! (nothing to leave) and a capsule without escape engines (Cargo Dragon
+//! has no SuperDracos) do not.
+//!
 //! Read by `systems::command` (Space, AGAIN, functions, the sequence's
 //! edits), `systems::estimate`, `Vessel::set_stages` and the game's staging
 //! bar, action bar and systems screen.
 
 use super::command::{ShipCommand, Stage};
 use super::ship::ShipDef;
+use super::state::{EngineStatus, ShipState};
+use crate::systems::{command, propulsion};
 
 /// Whether the piece `def` takes command `c`: it names something the piece
 /// has, or nothing at all (the clamps, the parachutes).
@@ -82,6 +101,107 @@ pub fn function<'a>(def: &ShipDef, functions: &'a [Stage], name: &str) -> Option
     functions.iter().find(|f| f.name == name && shows(def, f))
 }
 
+/// Why an abort would save no one in this piece (the furthest its
+/// procedure gets, in this order).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum NoEscape {
+    /// No crew cabin aboard.
+    NoCabin,
+    /// Nothing it separates holds the cabin to a stack still attached.
+    NothingToLeave,
+    /// No engine it lights rides with the cabin.
+    NoEngines,
+    /// Its engines there cannot start (failed, no ignition, no controller
+    /// or power, no propellant).
+    CannotStart,
+}
+
+impl NoEscape {
+    /// A few words for the player.
+    pub fn describe(self) -> &'static str {
+        match self {
+            NoEscape::NoCabin => "no crew cabin aboard",
+            NoEscape::NothingToLeave => "nothing to escape from: the cabin is not attached to a stack",
+            NoEscape::NoEngines => "no escape engines ride with the cabin",
+            NoEscape::CannotStart => "the escape engines cannot start (ignitions, propellant, power)",
+        }
+    }
+}
+
+/// Whether engine `i` can start now: not failed, an ignition left (or the
+/// ground's), its controller reachable with power, propellant in its feeds.
+pub fn can_start(def: &ShipDef, state: &ShipState, i: usize) -> bool {
+    let (d, e) = (&def.engines[i], &state.engines[i]);
+    e.status != EngineStatus::Failed
+        && command::can_ignite(d.data.igniter, e.ignitions, state.clamped)
+        && command::reachable(def, state, &d.owner)
+        && propulsion::fed(def, state, i)
+}
+
+/// Whether the piece (`def`, `state`) offers function `f`: any function
+/// not marked as an abort; an abort only when its procedure is an escape
+/// here (see the module), else why not.
+pub fn offered(def: &ShipDef, state: &ShipState, f: &Stage) -> Result<(), NoEscape> {
+    if !f.abort {
+        return Ok(());
+    }
+    let cabin: Vec<u32> = def.seats.iter().filter(|s| s.item > 0).map(|s| s.part).collect();
+    if cabin.is_empty() {
+        return Err(NoEscape::NoCabin);
+    }
+    let lit: Vec<usize> = (f.actions.iter())
+        .filter_map(|c| match c {
+            ShipCommand::Ignite(s) => Some(def.engines_of(s)),
+            _ => None,
+        })
+        .flatten()
+        .collect();
+    let mut why = NoEscape::NothingToLeave;
+    for c in &f.actions {
+        let ShipCommand::Separate(name) = c else { continue };
+        let Some(j) = def.joints.iter().position(|j| j.name == *name) else { continue };
+        if !state.joints[j].intact {
+            continue;
+        }
+        let (parent, child) = (def.joints[j].parent, def.joints[j].child);
+        let ours = [side(def, state, j, parent), side(def, state, j, child)]
+            .into_iter()
+            .find(|side| cabin.iter().any(|p| side.contains(p)));
+        let Some(ours) = ours else { continue };
+        let engines: Vec<usize> = lit.iter().copied().filter(|&i| ours.contains(&def.engines[i].part)).collect();
+        if engines.iter().any(|&i| can_start(def, state, i)) {
+            return Ok(());
+        }
+        why = why.max(if engines.is_empty() { NoEscape::NoEngines } else { NoEscape::CannotStart });
+    }
+    Err(why)
+}
+
+/// The parts joined to part `from` without crossing joint `cut` (by intact
+/// joints of the piece).
+fn side(def: &ShipDef, state: &ShipState, cut: usize, from: u32) -> Vec<u32> {
+    let mut seen = vec![from];
+    let mut k = 0;
+    while k < seen.len() {
+        let p = seen[k];
+        for (i, j) in def.joints.iter().enumerate() {
+            if i == cut || !state.joints[i].intact {
+                continue;
+            }
+            let other = match (j.parent == p, j.child == p) {
+                (true, _) => j.child,
+                (_, true) => j.parent,
+                _ => continue,
+            };
+            if !seen.contains(&other) {
+                seen.push(other);
+            }
+        }
+        k += 1;
+    }
+    seen
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -103,6 +223,76 @@ mod tests {
             ("upper", of(&|id| id.starts_with("s2.") || id.starts_with("dragon."))),
             ("dragon", of(&|id| id.starts_with("dragon."))),
         ]
+    }
+
+    /// D120: the launch abort is offered where it would save the crew, from
+    /// what each piece holds: on the pad and in ascent, never on the
+    /// booster after the stage separation, on Dragon after its own, on a
+    /// capsule without escape engines, or with the escape engines unable
+    /// to start.
+    #[test]
+    fn an_abort_is_offered_only_where_it_would_save_the_crew() {
+        use NoEscape::*;
+        let def = falcon9();
+        let abort = def.functions.iter().find(|f| f.abort).expect("the Falcon 9's abort").clone();
+        let [whole, booster, upper, dragon] = pieces(&def).map(|(_, d)| d);
+        let flying = def.subset(&def.parts.iter().filter(|p| !p.ground).map(|p| p.part).collect::<Vec<_>>());
+        // Cargo Dragon: no SuperDracos.
+        let mut cargo = def.clone();
+        cargo.engines.retain(|e| !e.owner.starts_with("dragon.superdraco"));
+        let superdracos = |d: &ShipDef| -> Vec<usize> {
+            (0..d.engines.len()).filter(|&i| d.engines[i].owner.starts_with("dragon.superdraco")).collect()
+        };
+        let failed = |d: &ShipDef, s: &mut ShipState| {
+            superdracos(d).into_iter().for_each(|i| s.engines[i].status = EngineStatus::Failed)
+        };
+        let dry = |d: &ShipDef, s: &mut ShipState| {
+            let capsule = d.part_named("dragon.capsule").unwrap();
+            (s.tanks.iter_mut()).filter(|t| t.part == capsule).for_each(|t| t.liquid = 0.0);
+        };
+        let unpowered = |d: &ShipDef, s: &mut ShipState| {
+            for i in superdracos(d) {
+                let (part, owner) = (d.engines[i].part, d.engines[i].owner.clone());
+                s.runtime.unpowered.push(crate::systems::runtime::Lost { part, owner, why: "bus dead".into() });
+            }
+        };
+        let separated = |d: &ShipDef, s: &mut ShipState| {
+            let j = d.joints.iter().position(|j| j.name == "dragon separation").unwrap();
+            s.joints[j].intact = false;
+        };
+        let asis = |_: &ShipDef, _: &mut ShipState| {};
+        let no_separation = Stage {
+            actions: abort.actions.iter().filter(|c| !matches!(c, ShipCommand::Separate(_))).cloned().collect(),
+            ..abort.clone()
+        };
+        let lights_the_booster = Stage {
+            actions: [ShipCommand::Separate("dragon separation".into()), ShipCommand::Ignite("s1".into())].into(),
+            ..abort.clone()
+        };
+        let plain = Stage { abort: false, ..abort.clone() };
+        type Change<'a> = &'a dyn Fn(&ShipDef, &mut ShipState);
+        // (case, piece, its state, the function, offered)
+        let table: [(&str, &ShipDef, Change, &Stage, Result<(), NoEscape>); 13] = [
+            ("the stack on the pad", &whole, &asis, &abort, Ok(())),
+            ("the stack in ascent", &flying, &asis, &abort, Ok(())),
+            ("the upper stack after the stage separation", &upper, &asis, &abort, Ok(())),
+            ("the booster after the stage separation", &booster, &asis, &abort, Err(NoCabin)),
+            ("Dragon after its separation", &dragon, &asis, &abort, Err(NothingToLeave)),
+            ("Cargo Dragon (no SuperDracos)", &cargo, &asis, &abort, Err(NoEngines)),
+            ("the SuperDracos failed", &flying, &failed, &abort, Err(CannotStart)),
+            ("Dragon's tanks dry", &upper, &dry, &abort, Err(CannotStart)),
+            ("the SuperDracos without power", &whole, &unpowered, &abort, Err(CannotStart)),
+            ("Dragon's separation fired, the split not yet made", &upper, &separated, &abort, Err(NothingToLeave)),
+            ("a procedure that separates nothing", &whole, &asis, &no_separation, Err(NothingToLeave)),
+            ("a procedure lighting what stays behind", &whole, &asis, &lights_the_booster, Err(NoEngines)),
+            ("a function not marked as an abort", &booster, &asis, &plain, Ok(())),
+        ];
+        for (case, piece, change, f, want) in table {
+            let mut state = ShipState::initial(piece);
+            state.runtime.refit(piece);
+            change(piece, &mut state);
+            assert_eq!(offered(piece, &state, f), want, "{case}");
+        }
     }
 
     /// Each piece's view of the Falcon 9's sequence: the stages with a
@@ -131,7 +321,7 @@ mod tests {
         let booster = &pieces(&def)[1].1;
         assert_eq!(mine(booster, &stages[3]).actions, [ShipCommand::Rcs("s1.coldgas#*".into(), true)]);
         // A stage without commands is everyone's.
-        let empty = Stage { name: "New".into(), key: None, actions: vec![], pinned: false };
+        let empty = Stage { name: "New".into(), key: None, actions: vec![], pinned: false, abort: false };
         assert!(pieces(&def).iter().all(|(_, d)| shows(d, &empty)));
     }
 
@@ -144,7 +334,7 @@ mod tests {
         let booster = &pieces(&def)[1].1;
         let mut stages = def.sequence.clone();
         let flip = ShipCommand::Deploy("s1.gridfin#*".into());
-        stages.push(Stage { name: "Grid fins".into(), key: None, actions: vec![flip], pinned: false });
+        stages.push(Stage { name: "Grid fins".into(), key: None, actions: vec![flip], pinned: false, abort: false });
         // (sequence, next, active, pending)
         type Row<'a> = (u32, Option<usize>, Option<usize>, &'a [usize]);
         let table: [Row; 6] = [
@@ -166,7 +356,8 @@ mod tests {
         for (sequence, k, want) in runs {
             assert_eq!(has_run(booster, &stages, sequence, k), want, "{sequence} {k}");
         }
-        // Functions: the booster's own and the abort (its Merlins' shutdown).
+        // Functions: the booster's own and the abort (its Merlins' shutdown),
+        // which it does not offer ([`offered`]: no cabin).
         let named = |n: &str| function(booster, &def.functions, n).is_some();
         assert!(named("Landing legs") && named("Launch abort") && named("Parachutes"));
         assert!(!named("Nosecone") && !named("No such"));

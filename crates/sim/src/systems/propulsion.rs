@@ -176,6 +176,12 @@ fn first(list: &[u32], state: &ShipState, infinite: bool) -> Option<usize> {
     list.iter().map(|&t| t as usize).find(|&t| infinite || state.tanks[t].liquid > 0.0)
 }
 
+/// Whether engine `i` has propellant to burn: a tank holding liquid in
+/// each of its feed lists (what [`output`] draws on).
+pub fn fed(def: &ShipDef, state: &ShipState, i: usize) -> bool {
+    def.engines[i].feeds.iter().all(|list| first(list, state, false).is_some())
+}
+
 /// The engines' output over a tick of `dt` at their levels now and ambient
 /// pressure `p` (`infinite`: debug mode, no draw limits): thrust and flow
 /// summed, the thrust-weighted mount and direction, each tank's draw, each

@@ -143,8 +143,13 @@ fn a_feed_list_drains_tank_after_tank() {
     let feeds = [vec![tank("s1.tank:lox"), tank("s2.tank:lox")], vec![tank("s1.tank:rp1"), tank("s2.tank:rp1")]];
     def.engines[mvac].feeds = feeds.clone();
     state.clamped = false;
-    state.stages =
-        vec![Stage { name: "MVac".into(), key: None, actions: vec![ShipCommand::Ignite("s2".into())], pinned: false }];
+    state.stages = vec![Stage {
+        name: "MVac".into(),
+        key: None,
+        actions: vec![ShipCommand::Ignite("s2".into())],
+        pinned: false,
+        abort: false,
+    }];
     let k = Knowledge::perfect();
     let e = estimate(&def, &state, &inputs(&hull, &k, 0.0));
     let b = e.stages[0].1.as_ref().unwrap();
@@ -168,8 +173,13 @@ fn a_setting_without_flow_never_burns_out() {
     let mvac = def.engines.iter().position(|e| e.id == "s2.mvac").unwrap();
     def.engines[mvac].data.throttle_min = 0.0;
     state.clamped = false;
-    state.stages =
-        vec![Stage { name: "MVac".into(), key: None, actions: vec![ShipCommand::Ignite("s2".into())], pinned: false }];
+    state.stages = vec![Stage {
+        name: "MVac".into(),
+        key: None,
+        actions: vec![ShipCommand::Ignite("s2".into())],
+        pinned: false,
+        abort: false,
+    }];
     let k = Knowledge::perfect();
     let idle = Inputs { throttle: 0.0, ..inputs(&hull, &k, 0.0) };
     let e = estimate(&def, &state, &idle);

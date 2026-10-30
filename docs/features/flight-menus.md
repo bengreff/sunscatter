@@ -26,7 +26,7 @@
 
 - Speed and its ORBIT / SURFACE / TARGET switch above the ball; ALT (with its datum switch, `navball::altitude`), Ap and Pe on the left; SAS, the hold modes (click only), the RCS button and the throttle bar on the right.
 - **G row** (`navball::g_meter`): the load now, its direction (▲ ▼ ◀ ▶), and on hover the g-limit and what sets it (a joint, or the crew along an axis; `sim::systems::g_limit`), given from 0.01 g (coasting, couples and thin air load the joints and a limit scaled from them means nothing); amber from 80 % of the limit, red at it.
-- **Action bar** (`interface::action_bar`) at the top right, the staging bar's width (owner, 2026-10-28): SYSTEMS, then the craft's saved functions (click only), wrapping, the Falcon 9's launch abort pinned.
+- **Action bar** (`interface::action_bar`) at the top right, the staging bar's width (owner, 2026-10-28): SYSTEMS, then the craft's saved functions (click only), wrapping, the Falcon 9's launch abort pinned. A function the craft file marks as an abort (`abort: true`) shows only while it would save the crew (D120, `sim::craft::program::offered`), whatever its name: a crew cabin in the piece, an intact joint it separates holding the cabin to a stack, and an engine it lights on the cabin's side that can start (not failed, an ignition, its controller with power, propellant). So the stack and the upper stack show it; the booster after the stage separation, Dragon after its own and a capsule without escape engines (Cargo Dragon) do not. The systems screen lists it (tagged ABORT) with its run button off where it would save no one, saying why.
 
 ## Menus
 

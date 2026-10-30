@@ -78,7 +78,7 @@ pub fn draw(
             let x = Selected { def, state, facts: &view.facts, known: &known, vessel: vessel.id() };
             selected(ui, &mut screen, &x, &mut out);
         });
-        region(ui, regions.bottom, |ui| editors(ui, &mut screen, def, state.sequence as usize, vessel.id(), &mut out));
+        region(ui, regions.bottom, |ui| editors(ui, &mut screen, def, state, vessel.id(), &mut out));
     });
     if ship.is_some() {
         screen.settle_layer(&view.facts);
@@ -301,16 +301,18 @@ fn groups(
 
 /// The stage and function editors, on the craft's view of its program
 /// (`sim::craft::program`: after a split, what acts on this piece; edits by
-/// the program's indices); the `sequence` stages already run are shown
-/// locked ([`edit::allowed`]).
+/// the program's indices); the stages already run are shown locked
+/// ([`edit::allowed`]); a function runs only where the piece offers it (an
+/// abort only while it would save the crew, `program::offered`).
 fn editors(
     ui: &mut egui::Ui,
     screen: &mut SystemsScreen,
     def: &sim::craft::ship::ShipDef,
-    sequence: usize,
+    state: &sim::craft::state::ShipState,
     vessel: sim::vessel::VesselId,
     out: &mut Vec<GameCommand>,
 ) {
+    let sequence = state.sequence as usize;
     let Some(mut drafts) = screen.drafts.take() else { return };
     ui.horizontal(|ui| {
         for (tab, name) in
@@ -334,7 +336,8 @@ fn editors(
         ui,
         |ui| {
             for v in &view {
-                let at = Entry { shown: &shown, actions: &v.actions, function: functions, locked };
+                let offered = sim::craft::program::offered(def, state, &list[v.index]);
+                let at = Entry { shown: &shown, actions: &v.actions, function: functions, locked, offered };
                 entry(ui, v.index, &list[v.index], &at, &catalogue, &mut edits, &mut run);
             }
         },
@@ -375,12 +378,14 @@ fn editors(
 
 /// Where an entry sits in the editor's view: the view's entries (their
 /// indices in the program), the entry's commands shown, whether it is a
-/// function, and how many stages are locked (run).
+/// function, how many stages are locked (run), and whether the piece
+/// offers it.
 struct Entry<'a> {
     shown: &'a [usize],
     actions: &'a [usize],
     function: bool,
     locked: usize,
+    offered: Result<(), sim::craft::program::NoEscape>,
 }
 
 /// One stage or function (`i`: its index in the program): its name,
@@ -436,7 +441,16 @@ fn entry_row(
         if ui.checkbox(&mut pinned, "pinned").changed() {
             edits.push(Edit::Pin(i, pinned));
         }
-        if ui.button("run").clicked() {
+        if s.abort {
+            let tag = egui::RichText::new("ABORT").monospace().color(theme::WARN);
+            ui.label(tag).on_hover_text("An escape: offered only while it would save the crew");
+        }
+        let button = ui.add_enabled(at.offered.is_ok(), egui::Button::new("run"));
+        let button = match at.offered {
+            Err(why) => button.on_disabled_hover_text(format!("It would save no one here: {}", why.describe())),
+            Ok(()) => button,
+        };
+        if button.clicked() {
             *run = Some(at.actions.iter().map(|&j| s.actions[j].clone()).collect());
         }
     }
