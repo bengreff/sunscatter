@@ -16,4 +16,21 @@ Each item: a failing test first where it is a rule, then the fix, then one commi
 
 ## State
 
-(Update as you land: commits with hashes, what is left.)
+**Done** (2026-10-29/30), all five items, each with its tests:
+
+1. 9886435: "Launch abort" shuts every Merlin and the MVac down (`Shutdown("s1")`, `Shutdown("s2")`) before Dragon separates and lights its SuperDracos; `systems::command` test on the pad, booster and second stage, and the vessel-level pad test checks the pieces.
+2. 7424645: Dragon's tanks at **16.5 MPa** (2,400 psi, E: SpaceX's 15 July 2019 call, as reported by Teslarati [S29] in falcon9.md §3.2; the only published figure). The craft check `craft::build::underfed` / `fed` (table test): every pressure-fed engine's feed above its chamber plus a 20 % injector drop (E, Sutton & Biblarz), reported as a build contradiction; the Falcon 9 test asserts none. Engines carry a published `chamber_pressure` (the SuperDraco's 6.9 MPa). The tank walls (titanium, sized at the new MEOP) add 333 kg, carried by the capsule's unmodelled gap (2,356 → 2,023 kg; Dragon's total unchanged); the tank transducer moved to a 5,000 psi class.
+3. e48a0fc: `game::pad`: once the engines of the active, whole vessel are off after a "Pad abort", `GameCommand::Reset` puts a fresh vessel of its kind on the pad (new launch save, toast); the clock runs on. Rule `replace_after_abort` with a table test, and the Falcon 9's pad abort in a game test.
+4. 3a4f502: the stage editor shows the stages already run locked, tagged RUN (`systems_screen::edit::allowed`, table test); the save's refusal stays.
+5. cd74409: parts.md's two "Not done" lists checked against the code, the Falcon 9's status *playable*.
+
+Also 9aca5bc: `SUNSCATTER_DEMO_STOP_AFTER=PadAbort` (with `SUNSCATTER_CRAFT=falcon9-crew`) shows items 3 and 4 on screen: `parts_stages_locked` (Ignition and Liftoff locked, MECO's "up" off) and `parts_pad_abort` (the fresh vessel clamped, Ignition next, full tanks, the toast; a second launch save written). Seen at 1600×900.
+
+**Open for the owner** (logical defaults taken):
+- A pad abort replaces only the **whole** vessel: after a launch abort on the pad the stack (its capsule gone) stays on the pad, since that launch flies on with the crew in the capsule and a fresh Falcon 9 would bring a second crew. Revert or New flight clears it.
+- It fires only for the **active** vessel (a new flight replaces the active vessel and writes its launch save); a vessel switched away from during its tail-off waits until it is active again.
+- The launch abort's thrust termination is a commanded shutdown with the normal tail-off, not an instant cut.
+- Dragon's tanks are loaded at 16.5 MPa from the pad; the real system pressurises to it ~100 ms before the SuperDracos light. The two helium bottles (0.1 m³ at 31 MPa, U) give ~3 kg above 16.5 MPa, against ~26 kg to hold it through a 5 s abort burn: the tanks' pressure sags late in the burn. Resize them (U: ~1.6 m³ at 41 MPa to empty the tanks) when thrust follows feed pressure (the review's recommendation 5).
+- The Dracos (thrusters) are not in the feed check: their chamber pressure is U (falcon9.md proposes 1.0 MPa).
+
+**Seen in passing, not mine:** the staging bar on the pad shows "Second stage ignition … Δv 0.0 m/s" with full tanks and a 9 m 32 s burnout (`parts_pad_abort`).
