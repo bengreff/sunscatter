@@ -638,6 +638,8 @@ mod ship_systems_tests;
 #[cfg(test)]
 mod ship_tests;
 #[cfg(test)]
+mod software_tests;
+#[cfg(test)]
 mod split_tests;
 #[cfg(test)]
 mod tests;

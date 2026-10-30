@@ -454,8 +454,9 @@ impl Vessel {
         });
         let (out, act, ship) = self.actuators(controls, (p, fin_flow), dt, &props);
         let before = (self.attitude, self.control);
-        let aim = self.aim(world, &snap, (anchor, r, v), controls);
-        let mut cmd = attitude::command(&self.attitude, &props.inertia, &mut self.control, controls, &act, &aim, dt);
+        // The flight software's view and what it lets SAS fly (F3).
+        let (acting, aim, sensed) = self.steer(world, &snap, (anchor, r, v), controls);
+        let mut cmd = attitude::command(&sensed, &props.inertia, &mut self.control, &acting, &act, &aim, dt);
         let (lift, fins_held) = self.ship_effectors(ship.as_ref(), &mut cmd, lift, &props, dt);
         let compensate = self.bubble.member;
         Some(TickStart {

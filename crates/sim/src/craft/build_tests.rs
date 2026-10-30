@@ -43,6 +43,9 @@ pub(crate) const ENTRIES: &[&str] = &[
     r#"(id: "t-computer", name: "Test computer", era: 2020, published: { "dry_mass": (12.0, "test") },
         generator: Component(envelope: Box(0.3, 0.2, 0.1), power: 50.0, control: true,
             equipment: Computer(channels: 3, mass: 10.0)))"#,
+    r#"(id: "t-battery", name: "Test battery", era: 2020,
+        generator: Component(envelope: Box(0.3, 0.2, 0.2), equipment: Battery(capacity_wh: 1000.0, voltage: 28.0,
+            specific_energy: 120.0, internal_resistance: 0.02, max_power: 1000.0)))"#,
     r#"(id: "t-seat", name: "Test seat", era: 2020,
         generator: Component(envelope: Box(0.5, 0.5, 0.5), equipment: Seat(crew: 1, mass: 30.0)))"#,
 ];
@@ -60,6 +63,8 @@ pub(crate) const CRAFT: &str = r#"(
         (id: "bottle", entry: "t-bottle", in: "tank", pos: (0.0, 0.0, 3.0)),
         (id: "rcs", entry: "t-rcs", pattern: Radial(count: 2, start_deg: 0.0), in: "capsule", pos: (0.7, 0.0, 0.3)),
         (id: "computer", entry: "t-computer", in: "capsule", pos: (0.0, 0.0, 0.6)),
+        // Its bus's battery (F3: an unpowered computer commands nothing).
+        (id: "battery", entry: "t-battery", in: "capsule", pos: (0.0, 0.4, 0.6)),
         (id: "seat", entry: "t-seat", in: "capsule", pos: (0.0, 0.0, 0.3)),
     ],
     joints: [(name: "separation", between: ("capsule", "tank"),
@@ -69,7 +74,7 @@ pub(crate) const CRAFT: &str = r#"(
         (from: "tank:fuel.outlet", to: "engine#*:fuel_in", diameter: 0.05, length: 1.0),
         (from: "bottle:out", to: "rcs#*:in", diameter: 0.01, length: 3.0),
     ],
-    electrical: [(name: "bus", voltage: 28.0, members: ["computer", "rcs#*"])],
+    electrical: [(name: "bus", voltage: 28.0, members: ["battery", "computer", "rcs#*"])],
     data: [(from: "computer", to: ["engine#*", "rcs#*"])],
     loading: [
         (tank: "tank:ox", temperature_k: 90.0, pressure: 3.0e5, pressurant: "helium"),

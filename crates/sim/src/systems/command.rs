@@ -37,11 +37,9 @@ pub fn can_ignite(igniter: Igniter, ignitions: u32, ground: bool) -> bool {
 
 /// Whether an engine (or other actuator) `owner` can be commanded: its own
 /// function in (not lost, with power), and if computers are linked to it,
-/// one of them working.
+/// one of them working (`systems::flight::commanded`).
 pub fn reachable(def: &ShipDef, state: &ShipState, owner: &str) -> bool {
-    let mut links = def.links.iter().filter(|l| l.to.iter().any(|(id, _)| id == owner)).peekable();
-    let linked = links.peek().is_some();
-    !state.runtime.out(owner) && (!linked || links.any(|l| !state.runtime.out(&l.from.0)))
+    !state.runtime.out(owner) && super::flight::commanded(def, state, owner)
 }
 
 /// Applies `command` (see the module); the effects the vessel acts on are

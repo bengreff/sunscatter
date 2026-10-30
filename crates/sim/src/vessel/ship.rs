@@ -10,16 +10,18 @@
 //! coasts, predictions and saves read its tanks and bottles. The readouts'
 //! engine (`CraftParams::engine`) is the selected main engines'.
 
-use super::attitude::{Actuators, Gimbal};
+use super::attitude::{Actuators, Attitude, Gimbal};
+use super::hold::Aim;
 use super::split::{Breakup, LOST_CHUTE};
-use super::{Vessel, TICK};
+use super::{Controls, Vessel, TICK};
 use crate::craft::command::{ShipCommand, Stage};
 use crate::craft::engine::{file_of, ShipThrust};
 use crate::craft::parts::combine_engines;
 use crate::craft::ship::ShipDef;
 use crate::craft::state::{Effect, ShipState};
 use crate::craft::{Engine, EngineOutput, MassProps};
-use crate::systems::{command, propulsion, OrderKind};
+use crate::frame::NodeId;
+use crate::systems::{command, flight, propulsion, OrderKind};
 use crate::world::World;
 use glam::DVec3;
 use std::sync::Arc;
@@ -156,6 +158,37 @@ impl Vessel {
             Some((def, state)) => crate::systems::data::knowledge(def, state, self.debug),
             None => crate::systems::Knowledge::perfect(),
         }
+    }
+
+    /// The computers' health (`systems::flight::health`; all working for a
+    /// craft without the part system).
+    pub fn flight_health(&self) -> flight::Health {
+        self.ship_parts().map_or_else(flight::Health::ideal, |(def, state)| flight::health(def, state))
+    }
+
+    /// What SAS can do now with `controls` (`systems::flight::sas`): the
+    /// navball says it.
+    pub fn sas_status(&self, controls: &Controls) -> flight::Sas {
+        flight::sas(&self.knowledge(), &self.flight_health(), controls)
+    }
+
+    /// What the attitude controller flies in a live tick at `state`
+    /// (anchor-relative) with the pilot's `controls` (F3): the controls the
+    /// flight software lets through ([`flight::Sas::acting`]), what SAS aims
+    /// at from the navigation solution (the attitude held without one), and
+    /// the attitude as the sensors give it.
+    pub(super) fn steer(
+        &self,
+        world: &World,
+        snap: &crate::ephem::Snapshot,
+        state: (NodeId, DVec3, DVec3),
+        controls: &Controls,
+    ) -> (Controls, Aim, Attitude) {
+        let k = self.knowledge();
+        let acting = flight::sas(&k, &self.flight_health(), controls).acting(controls);
+        let view = flight::sense(k, (self.attitude, state), None);
+        let aim = view.nav.map_or(Aim::Stability, |nav| self.aim(world, snap, nav, &acting));
+        (acting, aim, view.attitude.unwrap_or(self.attitude))
     }
 
     /// The ship's event log (failures, aborts, stages; newest last).

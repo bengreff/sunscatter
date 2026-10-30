@@ -27,6 +27,7 @@ pub mod estimate;
 pub mod exhaust;
 pub mod failure;
 pub mod fins;
+pub mod flight;
 pub mod g_limit;
 pub mod mechanisms;
 pub mod plumbing;

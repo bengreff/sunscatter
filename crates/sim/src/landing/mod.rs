@@ -84,7 +84,8 @@ impl LandingStart {
     /// A flying vessel's prediction start with `throttle` and its chutes
     /// (armed by `chute_command`). A coast with planned burns starts after the
     /// last one, once its trajectory is computed that far (the plan is
-    /// flown). `None` for landed and crashed vessels.
+    /// flown). `None` for landed and crashed vessels, and for one whose
+    /// flight software has no navigation solution (`flight::can_predict`).
     pub fn of_vessel(
         world: &World,
         vessel: &Vessel,
@@ -92,6 +93,12 @@ impl LandingStart {
         chute_command: bool,
         attitude: AssumedAttitude,
     ) -> Option<Self> {
+        // What the flight software knows (F3): a navigation solution, and the
+        // attitude when it assumes the current one held.
+        let inertial = matches!(attitude, AssumedAttitude::Inertial(_));
+        if !crate::systems::flight::can_predict(&vessel.knowledge(), inertial) {
+            return None;
+        }
         let mut chute = if vessel.destruction().is_none() { vessel.chute } else { Default::default() };
         chute.armed |= chute_command;
         let (t, (anchor, r, v), propellant, throttle) = match &vessel.phase {

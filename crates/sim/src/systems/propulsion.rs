@@ -24,12 +24,17 @@
 //!   covered; commanded again it starts at once, and ingests gas if it is
 //!   still floating.
 //! * **The pad's rule** (falcon9.md §1.2, §4.2): an armed release lets the
-//!   clamps go at the first tick every engine it waits for runs at its
-//!   rated thrust; an engine that fails or stops first aborts the launch
+//!   clamps go at the first tick every engine it waits for reports its
+//!   rated thrust (the flight software's launch commit, `flight::commit`,
+//!   on the engine controllers' readouts); an engine that fails or stops
+//!   first, or whose readout no computer receives, aborts the launch
 //!   (every engine shut down, the clamps kept); armed with none lit, it is
 //!   disarmed. A release disarmed without letting go did not happen: its
 //!   stage is next again ([`disarm`]).
+//! * **Safing** (`flight::safing`): a lit engine whose flight computers are
+//!   all lost or unpowered is shut down by its own controller (E).
 
+use super::flight;
 use super::plumbing::Feed;
 use crate::catalog::EngineData;
 use crate::craft::command::ShipCommand;
@@ -314,6 +319,7 @@ pub fn stop(def: &ShipDef, state: &mut ShipState, i: usize, why: Stop, at: Epoch
 pub fn step(def: &ShipDef, state: &mut ShipState, env: &Env, feeds: &[Feed]) -> Vec<Effect> {
     state.runtime.refit(def);
     close_throttle(def, state, env);
+    safe(def, state, env.at);
     settle_or_start(def, state, env);
     for i in 0..def.engines.len() {
         if !env.debug && inlet_trouble(def, state, i, env, feeds) {
@@ -321,7 +327,23 @@ pub fn step(def: &ShipDef, state: &mut ShipState, env: &Env, feeds: &[Feed]) -> 
         }
         step_engine(def, state, i, env);
     }
-    release(def, state, env.at)
+    release(def, state, env.at, env.debug)
+}
+
+/// The engine controllers' safing (`flight::safing`): a lit engine whose
+/// every flight computer is lost or unpowered is shut down by its own
+/// controller.
+fn safe(def: &ShipDef, state: &mut ShipState, at: Epoch) {
+    let lit: Vec<bool> = (state.engines.iter().zip(&state.runtime.engines))
+        .map(|(e, r)| matches!(e.status, EngineStatus::Starting | EngineStatus::Running) || r.settling.is_some())
+        .collect();
+    if !lit.contains(&true) {
+        return;
+    }
+    for i in flight::safing(&flight::health(def, state), &lit) {
+        shut_down(state, i, "safed by its controller: no flight computer");
+        state.runtime.event(at, format!("{}: safed by its controller: no flight computer", def.engines[i].id), true);
+    }
 }
 
 /// Starts engine `i`'s shutdown (its tail-off) for `why`, and drops a
@@ -446,8 +468,10 @@ pub fn disarm(state: &mut ShipState, at: Epoch, text: String, alarm: bool) {
     state.runtime.event(at, text, alarm);
 }
 
-/// The pad's armed release (see the module).
-fn release(def: &ShipDef, state: &mut ShipState, at: Epoch) -> Vec<Effect> {
+/// The pad's armed release (see the module): it waits on the flight
+/// software's launch commit (`flight::commit`), which reads the engine
+/// controllers' readouts.
+fn release(def: &ShipDef, state: &mut ShipState, at: Epoch, debug: bool) -> Vec<Effect> {
     if !state.runtime.release_armed || !state.clamped {
         state.runtime.release_armed = false;
         return Vec::new();
@@ -464,26 +488,18 @@ fn release(def: &ShipDef, state: &mut ShipState, at: Epoch) -> Vec<Effect> {
         }
     }
     let waits: Vec<usize> = state.runtime.release_engines.iter().map(|&i| i as usize).collect();
-    let bad =
-        waits.iter().find(|&&i| !matches!(state.engines[i].status, EngineStatus::Starting | EngineStatus::Running));
-    if let Some(&i) = bad {
-        let why = state.runtime.engines[i].reason.clone().unwrap_or_else(|| "stopped".into());
-        for j in lit(state) {
-            let (e, run) = (&mut state.engines[j as usize], &mut state.runtime.engines[j as usize]);
-            e.status = EngineStatus::ShuttingDown;
-            e.timer = 0.0;
-            run.cutoff = run.level;
-            run.reason = Some("pad abort".into());
+    // The flight software's launch commit, on the controllers' readouts.
+    let k = super::data::knowledge(def, state, debug);
+    match flight::commit(def, &flight::engine_readings(def, state, &k), &waits) {
+        flight::Commit::Wait => return Vec::new(),
+        flight::Commit::Abort { engine: i, why } => {
+            for j in lit(state) {
+                shut_down(state, j as usize, "pad abort");
+            }
+            disarm(state, at, format!("Pad abort: {} {why}; clamps held", def.engines[i].id), true);
+            return Vec::new();
         }
-        disarm(state, at, format!("Pad abort: {} {why}; clamps held", def.engines[i].id), true);
-        return Vec::new();
-    }
-    let rated = |i: usize| {
-        state.engines[i].status == EngineStatus::Running
-            && state.runtime.engines[i].level >= def.engines[i].data.throttle_max * (1.0 - 1e-9)
-    };
-    if !waits.iter().all(|&i| rated(i)) {
-        return Vec::new();
+        flight::Commit::Release => {}
     }
     state.runtime.release_armed = false;
     state.runtime.release_engines.clear();

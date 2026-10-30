@@ -24,9 +24,10 @@
 //! `strain` (the joints at its part). A sensor
 //! counts while it is switched on, its part intact, and linked to a
 //! working computer (D106: "the actual mechanisms behind how your ship gets
-//! the data"). Each engine's own controller reads its thrust (falcon9.md
-//! §5.2: chamber pressure and the rest), to 1 %; each battery's management
-//! electronics its charge, to 1 %.
+//! the data"; `systems::flight::works`, `read_by_computer`). Each engine's
+//! own controller reads its thrust (falcon9.md §5.2: chamber pressure and
+//! the rest), to 1 %, while it works and a computer reads it; each
+//! battery's management electronics its charge, to 1 %.
 
 use crate::craft::ship::ShipDef;
 use crate::craft::state::ShipState;
@@ -184,21 +185,11 @@ pub fn knowledge(def: &ShipDef, state: &ShipState, debug: bool) -> Knowledge {
     if debug {
         return Knowledge::perfect();
     }
+    use super::flight::{read_by_computer, works};
     let mut k = Knowledge::default();
     let intact = |part: u32| state.parts.iter().find(|p| p.part == part).is_none_or(|p| p.integrity > 0.0);
-    // Switched on, its part intact, its function neither lost (a failure)
-    // nor without power.
-    let on = |id: &str, part: u32| {
-        let i = def.components.iter().position(|c| c.id == id);
-        let lost = state.runtime.out(id);
-        intact(part) && !lost && i.is_none_or(|i| state.power.get(i).is_none_or(|s| s.on))
-    };
-    // Computers that work, and what they are linked to.
-    let linked = |id: &str| {
-        def.links.iter().any(|l| on(&l.from.0, l.from.1) && l.to.iter().any(|(to, _)| to == id)) || def.links.is_empty()
-    };
     for s in &def.sensors {
-        if !(on(&s.id, s.part) && linked(&s.id)) {
+        if !(works(def, state, &s.id, s.part) && read_by_computer(def, state, &s.id)) {
             continue;
         }
         let (q, acc) = (s.item.quantity.as_str(), s.item.accuracy);
@@ -233,8 +224,13 @@ pub fn knowledge(def: &ShipDef, state: &ShipState, debug: bool) -> Knowledge {
             _ => {}
         }
     }
-    // Each engine's own controller (falcon9.md §5.2), while its part is intact.
-    for (i, e) in def.engines.iter().enumerate().filter(|(_, e)| intact(e.part)) {
+    // Each engine's own controller (falcon9.md §5.2), while it works and a
+    // computer reads it (F3: a lost controller or a dead stage computer
+    // leaves its engine's thrust unknown).
+    let reported = |e: &crate::craft::ship::EngineDef| {
+        works(def, state, &e.owner, e.part) && read_by_computer(def, state, &e.owner)
+    };
+    for (i, e) in def.engines.iter().enumerate().filter(|(_, e)| reported(e)) {
         k.learn(Quantity::EngineThrust(i as u32), 0.01 * e.data.thrust_vac);
     }
     // Each battery's management electronics report its charge, to 1 %.
