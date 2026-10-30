@@ -24,6 +24,7 @@ pub mod mesh;
 pub mod partition;
 pub mod parts;
 pub mod place;
+pub mod program;
 pub mod registry;
 pub mod ship;
 pub mod state;

@@ -530,16 +530,17 @@ impl ShipState {
                 }
                 Ok(Vec::new())
             }
-            ShipCommand::Sequence(e) => edit_sequence(&mut self.stages, self.sequence, e).map(|()| Vec::new()),
+            ShipCommand::Sequence(e) => edit_sequence(def, &mut self.stages, self.sequence, e).map(|()| Vec::new()),
         }
     }
 
-    /// Runs the next stage of the sequence (the state's own): each of its
-    /// commands' plain effect (a command naming what this craft lacks is
-    /// skipped). `None` when the sequence is done.
+    /// Runs the next stage of the sequence in this craft's view
+    /// (`craft::program`): each of its commands' plain effect. `None` when
+    /// it has none left.
     pub fn next_stage(&mut self, def: &ShipDef) -> Option<(String, Vec<Effect>)> {
-        let stage = self.stages.get(self.sequence as usize)?.clone();
-        self.sequence += 1;
+        let k = super::program::next(def, &self.stages, self.sequence)?;
+        let stage = super::program::mine(def, &self.stages[k]);
+        self.sequence = k as u32 + 1;
         let mut effects = Vec::new();
         for a in &stage.actions {
             effects.extend(self.apply(def, a).unwrap_or_default());

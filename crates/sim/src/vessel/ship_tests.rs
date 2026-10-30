@@ -247,10 +247,17 @@ fn the_falcon_9_stands_on_the_pad_and_lifts_off() {
     let momentum = (v.state(&w).2 - v0) * v.mass() + (booster.state(&w).2 - v0) * booster.mass();
     let com = (v.state(&w).1 - r0) * v.mass() + (booster.state(&w).1 - r0) * booster.mass();
     assert!(momentum.length() < 1e-6 * mass && com.length() < 1e-6 * mass);
-    let names = |x: &Vessel| x.ship().unwrap().functions.iter().map(|f| f.name.clone()).collect::<Vec<_>>();
+    // The functions in each piece's view (`craft::program`).
+    let names = |x: &Vessel| {
+        let (def, fs) = (x.ship_def().unwrap(), &x.ship().unwrap().functions);
+        crate::craft::program::view(&def, fs).iter().map(|f| fs[f.index].name.clone()).collect::<Vec<_>>()
+    };
     assert!(names(booster).contains(&"Landing legs".to_string()) && !names(booster).contains(&"Nosecone".to_string()));
     assert!(names(&v).contains(&"Nosecone".to_string()) && !names(&v).contains(&"Grid fins".to_string()));
     assert_eq!(booster.ship().unwrap().engines.len(), 9);
+    // Space on the booster: none of its stages is left (the rest are the
+    // upper stack's, `craft::program`).
+    assert!(booster.clone().next_stage(&w).is_none());
     assert!(booster.controllable(), "the booster can be flown");
     assert_eq!(v.craft.engine.thrust_vac, 981.0e3, "the readouts' engine: the MVac");
     assert_eq!(v.next_stage(&w).unwrap().0, "Second stage ignition");

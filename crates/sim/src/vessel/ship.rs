@@ -171,15 +171,17 @@ impl Vessel {
         self.ship.as_ref().map_or(&[], |s| &s.runtime.events)
     }
 
-    /// Replaces the stage sequence (the systems screen, D107): every
-    /// command must name something this craft has, and the stages already
-    /// run must stay as they were, first and in order (D111: only stages
-    /// still to run change), else nothing changes and the errors are
-    /// returned. The sequence's position stays: it counts exactly the
-    /// stages run.
+    /// Replaces the stage sequence, the whole program's (the systems
+    /// screen, D107; edited through the craft's view, `craft::program`):
+    /// every command must name something this craft has or be one the
+    /// program already carries (another piece's, which does nothing here),
+    /// and the stages already run must stay as they were, first and in
+    /// order (D111: only stages still to run change), else nothing changes
+    /// and the errors are returned. The sequence's position stays: it
+    /// counts exactly the stages run.
     pub fn set_stages(&mut self, stages: Vec<Stage>) -> Result<(), Vec<String>> {
         let def = self.ship_def().ok_or_else(|| vec!["not a craft of parts".to_string()])?;
-        check_stages(&def, &stages)?;
+        check_stages(&def, &stages, self.ship.as_ref().map_or(&[], |s| &s.stages))?;
         let state = self.ship.as_mut().ok_or_else(|| vec!["no ship state".to_string()])?;
         let run = &state.stages[..(state.sequence as usize).min(state.stages.len())];
         if !stages.starts_with(run) {
@@ -194,7 +196,7 @@ impl Vessel {
     /// [`Self::set_stages`].
     pub fn set_functions(&mut self, functions: Vec<Stage>) -> Result<(), Vec<String>> {
         let def = self.ship_def().ok_or_else(|| vec!["not a craft of parts".to_string()])?;
-        check_stages(&def, &functions)?;
+        check_stages(&def, &functions, self.ship.as_ref().map_or(&[], |s| &s.functions))?;
         self.ship.as_mut().ok_or_else(|| vec!["no ship state".to_string()])?.functions = functions;
         Ok(())
     }
@@ -399,9 +401,16 @@ fn limits(def: &ShipDef, state: &ShipState, t: &ShipThrust, dt: f64, q: f64) -> 
 }
 
 /// Every command of `stages` checked against the craft; the errors by stage.
-fn check_stages(def: &ShipDef, stages: &[Stage]) -> Result<(), Vec<String>> {
+/// Every command of `stages` names something `def` has, or is one the
+/// list `carried` already has (another piece's: the program is the whole
+/// vessel's, `craft::program`); else each error.
+fn check_stages(def: &ShipDef, stages: &[Stage], carried: &[Stage]) -> Result<(), Vec<String>> {
+    let had = |a: &ShipCommand| carried.iter().any(|s| s.actions.contains(a));
     let errors: Vec<String> = (stages.iter())
-        .flat_map(|s| s.actions.iter().filter_map(move |a| def.check(a).err().map(|e| format!("{:?}: {e}", s.name))))
+        .flat_map(|s| {
+            (s.actions.iter())
+                .filter_map(move |a| def.check(a).err().filter(|_| !had(a)).map(|e| format!("{:?}: {e}", s.name)))
+        })
         .collect();
     if errors.is_empty() {
         Ok(())

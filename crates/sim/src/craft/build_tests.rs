@@ -308,17 +308,21 @@ fn ship_definitions_and_states_partition_by_part() {
     let piece = a.def.subset(&[0]);
     assert_eq!(piece.ship.as_deref(), Some(&du));
     assert_eq!(piece.parts.len(), 1);
-    // Each piece keeps the commands that name what it has: the capsule
-    // none, the tank both stages less the separation (its joint is gone),
-    // and the sequence's position counts the stages kept before it.
+    // Each piece keeps the whole program and sees the commands that name
+    // what it has (`craft::program`): the capsule none, the tank both
+    // stages less the separation (its joint is gone).
     let mut flown = state.clone();
     flown.next_stage(&ship).unwrap();
     flown.next_stage(&ship).unwrap();
     let (fu, fl) = (flown.partition(&upper, &ship, &du, true), flown.partition(&lower, &ship, &dl, false));
-    assert!(fu.stages.is_empty() && fu.functions.is_empty() && fu.sequence == 0);
-    let names: Vec<(&str, usize)> = fl.stages.iter().map(|s| (s.name.as_str(), s.actions.len())).collect();
-    assert_eq!(names, [("Ignition", 1), ("Separation", 1)]);
-    assert_eq!((fl.sequence, fl.functions.len()), (2, 1));
+    for p in [&fu, &fl] {
+        assert!((&p.stages, &p.functions, p.sequence) == (&flown.stages, &flown.functions, 2));
+    }
+    use super::program::{view, Shown};
+    assert!(view(&du, &fu.stages).is_empty() && view(&du, &fu.functions).is_empty());
+    let shown = |index: usize, actions: Vec<usize>| Shown { index, actions };
+    assert_eq!(view(&dl, &fl.stages), [shown(0, vec![0]), shown(1, vec![0])]);
+    assert_eq!(view(&dl, &fl.functions), [shown(0, vec![0])]);
 }
 
 /// Built twice, the same bits (definition and craft); the commands of the

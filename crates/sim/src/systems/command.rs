@@ -15,6 +15,7 @@
 use super::runtime::OrderKind;
 use crate::catalog::Igniter;
 use crate::craft::command::{matches, SequenceEdit, ShipCommand, Stage};
+use crate::craft::program;
 use crate::craft::ship::ShipDef;
 use crate::craft::state::{Effect, EngineStatus, ShipState};
 use crate::time::Epoch;
@@ -152,18 +153,16 @@ pub fn apply(def: &ShipDef, state: &mut ShipState, command: &ShipCommand, cx: Co
     }
 }
 
-/// Edits the stage sequence (D111: the staging bar in flight): moves a
-/// stage, moves one of a stage's commands to the end of another, or deletes
-/// a stage. Only stages still to run (from `sequence` on) change; anything
-/// else is refused and nothing changes. A stage left without commands
-/// stays (it can be deleted).
-pub fn edit_sequence(stages: &mut Vec<Stage>, sequence: u32, edit: &SequenceEdit) -> Result<(), String> {
-    let pending = |k: u32| {
-        if (k as usize) < stages.len() && k >= sequence {
-            Ok(k as usize)
-        } else {
-            Err(format!("{edit:?}: stage {k} is not one still to run ({sequence}..{})", stages.len()))
-        }
+/// Edits the stage sequence (D111: the staging bar in flight), by indices
+/// into the program: moves a stage, moves one of a stage's commands to the
+/// end of another, or deletes a stage. Only stages still to run (from
+/// `sequence` on) in the piece's view (`def`: `craft::program`) change, and
+/// only commands it takes move; anything else is refused and nothing
+/// changes. A stage left without commands stays (it can be deleted).
+pub fn edit_sequence(def: &ShipDef, stages: &mut Vec<Stage>, sequence: u32, edit: &SequenceEdit) -> Result<(), String> {
+    let pending = |k: u32| match stages.get(k as usize) {
+        Some(s) if k >= sequence && program::shows(def, s) => Ok(k as usize),
+        _ => Err(format!("{edit:?}: stage {k} is not one still to run here ({sequence}..{})", stages.len())),
     };
     match *edit {
         SequenceEdit::Move { from, to } => {
@@ -173,7 +172,8 @@ pub fn edit_sequence(stages: &mut Vec<Stage>, sequence: u32, edit: &SequenceEdit
         }
         SequenceEdit::MoveAction { from, action, to } => {
             let (from, to) = (pending(from)?, pending(to)?);
-            if action as usize >= stages[from].actions.len() || from == to {
+            let taken = stages[from].actions.get(action as usize).is_some_and(|c| program::takes(def, c));
+            if !taken || from == to {
                 return Err(format!("{edit:?}: no such command to move"));
             }
             let command = stages[from].actions.remove(action as usize);
@@ -204,14 +204,15 @@ fn settling(def: &ShipDef, state: &ShipState, s: &str) -> bool {
     def.engines_of(s).into_iter().any(|i| waits(i) && state.engines[i].status == EngineStatus::Off)
 }
 
-/// Runs the next stage of the ship's own sequence: its commands (one naming
-/// what the craft lacks is skipped); `None` when the sequence is done.
-/// While an ignition of the last stage waits for its propellant to settle,
-/// the order starts it now instead (its hint says so) and the sequence
-/// stays: running on, the next stage's shutdown would cancel the start
-/// (review H4: Space while the second stage settled ran SECO).
+/// Runs the next stage of the ship's own sequence in its view
+/// (`craft::program`: a stage of other pieces only is skipped): its
+/// commands the craft takes; `None` when it has none left. While an
+/// ignition of its active stage waits for its propellant to settle, the
+/// order starts it now instead (its hint says so) and the sequence stays:
+/// running on, the next stage's shutdown would cancel the start (review
+/// H4: Space while the second stage settled ran SECO).
 pub fn next_stage(def: &ShipDef, state: &mut ShipState, at: Epoch) -> Option<(String, Vec<Effect>)> {
-    let last = state.sequence.checked_sub(1).and_then(|k| state.stages.get(k as usize));
+    let last = program::active(def, &state.stages, state.sequence).map(|k| &state.stages[k]);
     let waiting: Vec<ShipCommand> = last
         .map(|st| st.actions.iter().filter(|a| matches!(a, ShipCommand::Ignite(s) if settling(def, state, s))))
         .into_iter()
@@ -224,28 +225,31 @@ pub fn next_stage(def: &ShipDef, state: &mut ShipState, at: Epoch) -> Option<(St
         let effects = waiting.iter().flat_map(|a| apply(def, state, a, cx).unwrap_or_default()).collect();
         return Some((name, effects));
     }
-    let stage = state.stages.get(state.sequence as usize)?.clone();
-    state.sequence += 1;
+    let k = program::next(def, &state.stages, state.sequence)?;
+    let stage = program::mine(def, &state.stages[k]);
+    state.sequence = k as u32 + 1;
     let cx = Context { at, sequence: true };
     Some((stage.name.clone(), run(def, state, &stage, cx)))
 }
 
-/// Runs stage `k` of the sequence again (D114), one already run: each of
-/// its commands that can act does (an engine with an ignition left starts),
-/// the rest do nothing (a joint already parted, clamps let go, a mechanism
-/// where it is); the sequence stays. `None` for a stage not yet run.
+/// Runs stage `k` of the program again (D114), one already run in the
+/// craft's view: each of its commands that can act does (an engine with an
+/// ignition left starts), the rest do nothing (a joint already parted,
+/// clamps let go, a mechanism where it is); the sequence stays. `None` for
+/// a stage not yet run or not in the view.
 pub fn again(def: &ShipDef, state: &mut ShipState, k: u32, at: Epoch) -> Option<(String, Vec<Effect>)> {
-    if k >= state.sequence {
+    if !program::has_run(def, &state.stages, state.sequence, k) {
         return None;
     }
-    let stage = state.stages.get(k as usize)?.clone();
+    let stage = program::mine(def, &state.stages[k as usize]);
     let cx = Context { at, sequence: true };
     Some((stage.name.clone(), run(def, state, &stage, cx)))
 }
 
-/// Runs a saved function by name; `None` if there is none.
+/// Runs a saved function by name, its commands the craft takes; `None` if
+/// its view has none of that name.
 pub fn function(def: &ShipDef, state: &mut ShipState, name: &str, at: Epoch) -> Option<Vec<Effect>> {
-    let stage = state.functions.iter().find(|f| f.name == name)?.clone();
+    let stage = program::mine(def, program::function(def, &state.functions, name)?);
     Some(run(def, state, &stage, Context { at, sequence: false }))
 }
 
@@ -280,7 +284,7 @@ pub fn carry_out(def: &ShipDef, state: &mut ShipState, kind: &OrderKind, at: Epo
                 e
             }
             None => {
-                state.runtime.event(at, format!("Stage {} has not run yet", k + 1), true);
+                state.runtime.event(at, format!("Stage {} has not run yet on this vessel", k + 1), true);
                 Vec::new()
             }
         },
@@ -386,16 +390,54 @@ mod tests {
         assert_eq!(lit.iter().filter(|&&i| state.engines[i].status == EngineStatus::Starting).count(), 3);
     }
 
+    /// After the stage separation each piece keeps the whole program and
+    /// runs its own stages (`craft::program`): Space on the booster skips
+    /// the upper stack's to its own next one, on the upper stack it runs
+    /// the second stage's ignition; AGAIN refuses another piece's stage.
+    #[test]
+    fn each_piece_runs_its_own_stages_after_a_split() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/craft/falcon9-crew");
+        let def = crate::craft::load_definition(&path).unwrap().ship.unwrap();
+        let at = Epoch::new(1_000_000_000, 0.0);
+        let mut state = ShipState::initial(&def);
+        let fins = Stage { name: "Grid fins".into(), key: None, actions: vec![], pinned: false };
+        state.stages.push(Stage { actions: vec![ShipCommand::Deploy("s1.gridfin#*".into())], ..fins });
+        state.clamped = false;
+        for _ in 0..4 {
+            next_stage(&def, &mut state, at).unwrap();
+        }
+        let ids = |f: &dyn Fn(&str) -> bool| def.parts.iter().filter(|p| f(&p.id)).map(|p| p.part).collect::<Vec<_>>();
+        let upper = |id: &str| id.starts_with("s2.") || id.starts_with("dragon.");
+        let (a, b) = (ids(&upper), ids(&|id| !upper(id)));
+        let (da, db) = (def.subset(&a), def.subset(&b));
+        let (mut pa, mut pb) = (state.partition(&a, &def, &da, true), state.partition(&b, &def, &db, false));
+        assert_eq!(next_stage(&db, &mut pb, at).unwrap().0, "Grid fins");
+        assert_eq!(pb.sequence, 8);
+        let fin = db.mechanisms.iter().position(|m| m.id.starts_with("s1.gridfin")).unwrap();
+        assert_eq!(pb.mechanisms[fin].target, db.mechanisms[fin].item.deployed_deg);
+        assert!(next_stage(&db, &mut pb, at).is_none(), "none left");
+        assert!(again(&db, &mut pb, 4, at).is_none(), "the upper stack's");
+        assert_eq!(again(&db, &mut pb, 3, at).unwrap().0, "Stage separation");
+        assert_eq!(next_stage(&da, &mut pa, at).unwrap().0, "Second stage ignition");
+        assert_eq!(pa.sequence, 5);
+    }
+
     /// The sequence is edited in flight (D111) through the ship's commands:
-    /// stages still to run move, swap commands and go; the stages run and
-    /// out-of-range indices are refused whole.
+    /// stages still to run move, swap commands and go; the stages run,
+    /// out-of-range indices and what is not in the craft's view are refused
+    /// whole.
     #[test]
     fn the_sequence_is_edited_where_it_has_not_run() {
         use SequenceEdit::{Delete, Move, MoveAction};
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/craft/falcon9-crew");
+        let def = crate::craft::load_definition(&path).unwrap().ship.unwrap();
+        // Commands every craft takes (they name nothing).
         let stage = |name: &str, n: usize| Stage {
             name: name.into(),
             key: None,
-            actions: (0..n).map(|k| ShipCommand::Ignite(format!("{name}{k}"))).collect(),
+            actions: (0..n)
+                .map(|k| if k % 2 == 0 { ShipCommand::ArmChutes } else { ShipCommand::ReleaseClamps })
+                .collect(),
             pinned: false,
         };
         let names = |s: &[Stage]| s.iter().map(|s| format!("{}{}", s.name, s.actions.len())).collect::<Vec<_>>();
@@ -414,7 +456,7 @@ mod tests {
         for (edit, sequence, want) in cases {
             let mut stages = vec![stage("a", 1), stage("b", 2), stage("c", 0), stage("d", 1)];
             let before = stages.clone();
-            let got = edit_sequence(&mut stages, sequence, &edit);
+            let got = edit_sequence(&def, &mut stages, sequence, &edit);
             match want {
                 Some(w) => {
                     got.unwrap();
@@ -427,9 +469,26 @@ mod tests {
                 }
             }
         }
+        // In the booster's view after the stage separation, the upper
+        // stack's stages and commands stay as they are.
+        let parts: Vec<u32> = (def.parts.iter())
+            .filter(|p| !p.id.starts_with("s2.") && !p.id.starts_with("dragon."))
+            .map(|p| p.part)
+            .collect();
+        let booster = def.subset(&parts);
+        let mut stages = def.sequence.clone();
+        let refused =
+            [Move { from: 4, to: 3 }, Move { from: 2, to: 5 }, Delete(6), MoveAction { from: 3, action: 0, to: 2 }];
+        for edit in refused {
+            assert!(edit_sequence(&booster, &mut stages, 2, &edit).is_err(), "{edit:?}");
+        }
+        edit_sequence(&booster, &mut stages, 2, &MoveAction { from: 3, action: 1, to: 2 }).unwrap();
+        assert_eq!(
+            stages[2].actions,
+            [ShipCommand::Shutdown("s1".into()), ShipCommand::Rcs("s1.coldgas#*".into(), true)]
+        );
+        assert_eq!(stages[3].actions, [ShipCommand::Separate("stage separation".into())], "the cut joint's stays");
         // As a ship command: the moved command keeps its place in order.
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/craft/falcon9-crew");
-        let def = crate::craft::load_definition(&path).unwrap().ship.unwrap();
         let mut state = ShipState::initial(&def);
         let cx = Context { at: Epoch::new(1_000_000_000, 0.0), sequence: false };
         let n = state.stages.len();

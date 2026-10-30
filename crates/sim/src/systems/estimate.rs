@@ -1,5 +1,6 @@
 //! Stage estimates (D111; the staging bar): for the burn going on now and
-//! for each stage of the vessel's sequence still to run, which tanks its
+//! for each stage of the vessel's sequence still to run in its view
+//! (`craft::program`: the stages of other pieces are left out), which tanks its
 //! engines draw on, what each propellant holds of those tanks' capacity,
 //! how long until the first propellant runs out (burnout), the Δv, and the
 //! thrust, thrust-to-weight ratio, mass at the start and at burnout and
@@ -111,8 +112,9 @@ pub struct Estimates {
     /// The burn going on now (engines starting, running or waiting for
     /// their propellant to settle), if any.
     pub now: Option<Burn>,
-    /// Each stage still to run (its index into `ShipState::stages`) and its
-    /// burn, if engines burn after its commands.
+    /// Each stage still to run in the craft's view (its index into
+    /// `ShipState::stages`, the program) and its burn, if engines burn
+    /// after its commands.
     pub stages: Vec<(usize, Option<Burn>)>,
 }
 
@@ -242,9 +244,10 @@ fn walk(def: &ShipDef, state: &ShipState, inp: &Inputs, levels: &[f64]) -> Walke
         }
     }
     let now = w.burn();
-    let stages = (state.sequence as usize..state.stages.len())
+    // The stages still to run in the craft's view (`craft::program`).
+    let stages = (crate::craft::program::pending(def, &state.stages, state.sequence).into_iter())
         .map(|j| {
-            for c in &state.stages[j].actions {
+            for c in &crate::craft::program::mine(def, &state.stages[j]).actions {
                 w.command(c);
             }
             (j, w.burn())

@@ -1,7 +1,8 @@
 //! The ship state's split and merge (`craft::partition`, F1 of the
 //! fidelity review): a state with every field set, split at the Falcon 9's
-//! stage separation and at Dragon's, puts each item in exactly one piece,
-//! and merging the pieces gives it back bit for bit.
+//! stage separation and at Dragon's, puts each item in exactly one piece
+//! (the program, the vessel's as a whole, a copy in each), and merging the
+//! pieces gives it back bit for bit.
 
 use super::ship::ShipDef;
 use super::state::{Fate, JointState, ShipState};
@@ -272,6 +273,10 @@ fn a_split_puts_each_item_in_exactly_one_piece() {
         assert!(!pa.clamped && !pa.runtime.release_armed && pb.clamped && pb.runtime.release_armed, "{name}");
         assert_eq!((pa.runtime.throttle_was, pb.runtime.throttle_was), (0.75, 0.0));
         assert!(pb.runtime.orders.is_empty());
+        // The program is the vessel's as a whole: a copy in each piece.
+        for p in [&pa, &pb] {
+            assert!((&p.stages, &p.functions, p.sequence) == (&s.stages, &s.functions, s.sequence), "{name}");
+        }
         // The cut joints wait with their child's piece.
         let cut = (def.joints.iter()).filter(|j| a.contains(&j.parent) != a.contains(&j.child)).count();
         assert_eq!(pa.severed.len() + pb.severed.len(), 1 + cut, "{name}");
@@ -285,21 +290,9 @@ fn merging_the_pieces_of_a_split_gives_the_state_back_bit_for_bit() {
     for (name, a, b) in splits(&def) {
         let (da, db) = (def.subset(&a), def.subset(&b));
         let (pa, pb) = (s.partition(&a, &def, &da, true), s.partition(&b, &def, &db, false));
-        let mut back = ShipState::merge(&pa, &da, &pb, &db, &def).unwrap();
-        // The sequence is the one field a merge cannot undo: the partition
-        // keeps each piece's own commands (a crossing joint's separation
-        // names neither), so the pieces' programs are joined instead.
-        assert_eq!(
-            back.stages,
-            pa.stages.iter().chain(&pb.stages).fold(Vec::new(), |mut v: Vec<super::command::Stage>, x| {
-                if !v.iter().any(|y| y.name == x.name) {
-                    v.push(x.clone());
-                }
-                v
-            })
-        );
-        assert_eq!(back.sequence, pa.sequence);
-        (back.stages, back.functions, back.sequence) = (s.stages.clone(), s.functions.clone(), s.sequence);
+        // Every field, the program too (each piece keeps it whole and
+        // reads it through its view, `craft::program`).
+        let back = ShipState::merge(&pa, &da, &pb, &db, &def).unwrap();
         assert!(back == s, "{name}: the merge differs from the state split");
         // Bit for bit (PartialEq on f64 would pass -0.0 for 0.0).
         assert_eq!(ron::to_string(&back).unwrap(), ron::to_string(&s).unwrap(), "{name}");

@@ -16,10 +16,12 @@
 //!   its parts again.
 //! * **The cabin** goes with its part; the crew's exposure with it
 //!   (`Runtime::partition`).
-//! * **The vessel's own** (one copy each, by name): the clamps to the piece
-//!   keeping a hold-down joint; the sequence and functions filtered to what
-//!   each piece has (`ShipState::partition`'s rule, which a merge cannot
-//!   undo: see `merge`).
+//! * **The vessel's own** (by name): the clamps to the piece keeping a
+//!   hold-down joint; the program (the stages, the functions and the
+//!   sequence's position) whole to every piece, a copy each: it is the
+//!   vessel's as a whole, and each piece reads it through its view
+//!   (`craft::program`: what each stage does in that piece), so a merge
+//!   gives it back.
 
 use super::assembly::JointKind;
 use super::command::Stage;
@@ -71,11 +73,9 @@ fn holds(def: &ShipDef) -> bool {
 impl ShipState {
     /// The state of the piece holding the parts `kept` (`Part::id`s, its
     /// definition `piece`, the whole ship's `whole`; `own`: the piece the
-    /// vessel keeps): see the module for each field's rule. Its stages and
-    /// functions keep the commands that name something the piece has (and
-    /// those that name nothing: the clamps, the chutes), stages and
-    /// functions left empty go, and the sequence's position counts the
-    /// stages kept before it.
+    /// vessel keeps): see the module for each field's rule. The program
+    /// (stages, functions, the sequence's position) is copied whole: the
+    /// piece's view of it (`craft::program`) shows what it does there.
     pub fn partition(&self, kept: &[u32], whole: &ShipDef, piece: &ShipDef, own: bool) -> ShipState {
         let ShipState {
             tanks,
@@ -97,15 +97,6 @@ impl ShipState {
             functions,
             runtime,
         } = self;
-        let mine = |list: &[Stage]| -> Vec<Option<Stage>> {
-            (list.iter())
-                .map(|s| {
-                    let actions: Vec<_> = s.actions.iter().filter(|a| piece.check(a).is_ok()).cloned().collect();
-                    (!actions.is_empty()).then(|| Stage { actions, ..s.clone() })
-                })
-                .collect()
-        };
-        let stages = mine(stages);
         let within = |j: &JointState| kept.contains(&j.parent) && kept.contains(&j.child);
         let cut = |j: &JointState| !kept.contains(&j.parent) && kept.contains(&j.child);
         ShipState {
@@ -126,9 +117,10 @@ impl ShipState {
             cabin: cabin.clone().filter(|c| kept.contains(&c.part)),
             fates: by(fates, |x| x.part, kept),
             clamped: *clamped && holds(piece),
-            sequence: stages.iter().take(*sequence as usize).flatten().count() as u32,
-            stages: stages.into_iter().flatten().collect(),
-            functions: mine(functions).into_iter().flatten().collect(),
+            // The vessel's as a whole: a copy in every piece.
+            sequence: *sequence,
+            stages: stages.clone(),
+            functions: functions.clone(),
             runtime: runtime.partition(kept, whole, piece, own),
         }
     }
@@ -137,11 +129,11 @@ impl ShipState {
     /// whole (`whole`, whose parts are those of `a_def` and `b_def`, with
     /// unique ids) from the pieces' states, `a` the vessel that keeps its
     /// identity. A joint of the whole neither piece has starts as loaded
-    /// (intact, unloaded: a new docking joint). The stages: `a`'s, then
-    /// `b`'s whose names `a` lacks, and the functions likewise; the
-    /// sequence's position is `a`'s (a partition filtered them by piece,
-    /// so a merge after a split gives each piece's own program, not the
-    /// whole's as it was). Two cabins are refused (one cabin per state).
+    /// (intact, unloaded: a new docking joint). The program: the stages
+    /// are `a`'s, then `b`'s whose names `a` lacks, the functions likewise,
+    /// and the sequence's position is `a`'s; the pieces of a split keep the
+    /// same program (each a copy of the whole's), so their merge gives it
+    /// back. Two cabins are refused (one cabin per state).
     pub fn merge(
         a: &ShipState,
         a_def: &ShipDef,
