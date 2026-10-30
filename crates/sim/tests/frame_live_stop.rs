@@ -22,14 +22,15 @@ fn t0() -> Epoch {
     sol::sol_epoch().add_seconds(86_400.0)
 }
 
-/// The test craft 30 km above the Moon's surface, falling at 500 m/s with
-/// 300 m/s across: it reaches the ground about a minute later.
+/// The small rocket of parts (D121) 30 km above the Moon's surface,
+/// falling at 500 m/s with 300 m/s across: it reaches the ground about a
+/// minute later.
 fn falling_onto_the_moon(w: &World) -> Vessel {
     let moon = w.find("Moon").unwrap();
     let rm = moon.physical.as_ref().unwrap().radius_eq;
     let r = DVec3::new(rm + 30_000.0, 0.0, 0.0);
     let v = DVec3::new(-500.0, 300.0, 0.0);
-    let mut s = Vessel::coasting(w, VesselId(1), t0(), moon.node, r, v, sim::craft::test_craft());
+    let mut s = Vessel::coasting(w, VesselId(1), t0(), moon.node, r, v, &sim::craft::small::rocket());
     s.set_debug(w, true);
     s
 }
@@ -64,7 +65,16 @@ fn a_coast_onto_a_surface_stops_where_it_goes_live_in_a_rails_frame() {
     }
     let mut jump = start.clone();
     jump.advance(&w, end, &controls, usize::MAX);
-    assert!(matches!(jump.phase, Phase::Landed { .. } | Phase::Crashed { .. }), "on the ground: {:?}", jump.phase);
+    // On the ground: at rest, or (a slender hull lying on its side has no
+    // support polygon to rest on, `contact::holds`) lying within its reach
+    // of the surface.
+    let moon = w.find("Moon").unwrap().physical.as_ref().unwrap();
+    let (_, r, _) = jump.state(&w);
+    let h = moon.altitude_above_surface(moon.rotation.to_fixed(sim::frame::Vec3::from_raw(r), jump.time));
+    let com = jump.mass_props().com;
+    let reach = jump.craft.contacts.iter().map(|c| (c.pos - com).length()).fold(0.0, f64::max);
+    let down = matches!(jump.phase, Phase::Landed { .. } | Phase::Crashed { .. }) || h < reach;
+    assert!(down, "on the ground: {h} m up, {:?}", jump.phase);
     assert_eq!(framed.time, jump.time);
     assert_eq!(framed.phase, jump.phase);
     assert_eq!(framed.state(&w), jump.state(&w));
@@ -75,15 +85,17 @@ fn an_engine_starting_in_a_long_frame_stops_there_and_a_short_one_flies_on() {
     let w = world();
     let earth = w.find("Earth").unwrap();
     let r = 6_378_137.0 + 400e3;
-    let s = Vessel::coasting(
+    let mut s = Vessel::coasting(
         &w,
         VesselId(2),
         t0(),
         earth.node,
         DVec3::new(r, 0.0, 0.0),
         DVec3::new(0.0, (earth.gm / r).sqrt(), 0.0),
-        sim::craft::test_craft(),
+        &sim::craft::small::rocket(),
     );
+    // Its engines start through the sequence (D100).
+    assert_eq!(s.next_stage(&w).unwrap().0, "Ignition");
     let burn = Controls { throttle: 1.0, sas: true, ..Controls::default() };
     // A long frame (the throttle would cap the warp; a frame already asked
     // for stops where the engine starts).

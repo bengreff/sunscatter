@@ -484,7 +484,7 @@ fn a_crafts_roughness_reaches_the_flow() {
     register(&id, def);
     let rough = craft_of(&id);
     assert_eq!(rough.design().roughness, 0.74e-3);
-    assert_eq!(sim::craft::test_craft().design().roughness, 0.0);
+    assert_eq!(sim::craft::small::rocket().design().roughness, 0.0);
     let earth = w.find("Earth").unwrap();
     let r = DVec3::X * (earth.physical.as_ref().unwrap().radius_eq + 10e3);
     let v = DVec3::Y * 300.0;

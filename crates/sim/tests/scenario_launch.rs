@@ -1,13 +1,14 @@
-//! Executable scenario: launch the test craft from Cape Canaveral into a
-//! low Earth orbit with a scripted gravity turn, coast a full orbit, then
-//! de-orbit and land under parachute.
+//! Executable scenario: launch the small rocket of parts (`craft::small`,
+//! D121) from Cape Canaveral into a low Earth orbit with a scripted gravity
+//! turn, coast a full orbit, then de-orbit and land under parachute.
 //!
-//! Flown in **debug mode** (D064): the test craft is a lander (Δv ≈ 5 km/s,
-//! liftoff thrust-to-weight 1.3) and cannot reach orbit on its own
-//! propellant, and at its full mass the parachute lands it faster than its
-//! impact limit. Debug mode gives infinite propellant and impact tolerance.
+//! Flown in **debug mode** (D064): the small rocket is a single stage far
+//! short of orbital Δv, and at its full mass its Apollo mains (sized for
+//! 5 t) would tear. Debug mode gives infinite propellant, and its parts and
+//! canopies take any load.
 
 use glam::DVec3;
+use sim::craft::command::ShipCommand;
 use sim::ephem::Ephemeris;
 use sim::kepler::Elements;
 use sim::sol;
@@ -64,8 +65,13 @@ fn pad_to_orbit_then_parachute_landing() {
     let w = world();
     let earth = w.find("Earth").unwrap();
     let start = sol::sol_epoch().add_seconds(86_400.0);
-    let mut ship = Vessel::landed_at(&w, VesselId(1), "Earth", 28.6082, -80.6041, start, sim::craft::test_craft());
+    let rocket = sim::craft::small::rocket();
+    let mut ship = Vessel::landed_at(&w, VesselId(1), "Earth", 28.6082, -80.6041, start, &rocket);
     ship.set_debug(&w, true);
+    // Its engines start through the sequence; closing the throttle shuts
+    // them down, and each burn after the first relights them.
+    assert_eq!(ship.next_stage(&w).unwrap().0, "Ignition");
+    let relight = |ship: &mut Vessel, w: &World| ship.command(w, &ShipCommand::Ignite("main".into())).unwrap();
     let mut f = Flight { w: &w, ship, t: start, mu: earth.gm, re: sim::body::earth().radius_eq };
     let mut controls = Controls { throttle: 1.0, sas: true, ..Default::default() };
 
@@ -77,7 +83,7 @@ fn pad_to_orbit_then_parachute_landing() {
             break;
         }
         let up = r.normalize();
-        // A slow turn: liftoff thrust-to-weight is only 1.3.
+        // A slow turn, as for a lander's thrust-to-weight.
         let pitch = (1.4 * ((r.length() - f.re) / 200_000.0).clamp(0.0, 1.0).sqrt()).min(1.35);
         f.point(up * pitch.cos() + horizontal(r, v) * pitch.sin());
         f.step(0.1, &controls);
@@ -95,6 +101,7 @@ fn pad_to_orbit_then_parachute_landing() {
     }
     // Circularize: horizontal burn holding vertical speed near zero, thrust
     // tapered as horizontal speed approaches circular speed.
+    relight(&mut f.ship, &w);
     for i in 0.. {
         assert!(i < 20_000, "circularization did not converge");
         let (r, v, el) = f.orbit();
@@ -120,6 +127,7 @@ fn pad_to_orbit_then_parachute_landing() {
 
     // De-orbit retrograde until periapsis is 30 km.
     controls.throttle = 1.0;
+    relight(&mut f.ship, &w);
     for i in 0.. {
         assert!(i < 10_000, "de-orbit burn did not converge");
         let (_, v, el) = f.orbit();
