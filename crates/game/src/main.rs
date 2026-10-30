@@ -49,7 +49,7 @@ mod tracking;
 mod trajectory;
 
 use bevy::prelude::*;
-use bevy::window::PresentMode;
+use bevy::window::{ExitCondition, PresentMode};
 use bevy_egui::{EguiPlugin, EguiPrimaryContextPass};
 
 #[derive(SystemSet, Debug, Clone, PartialEq, Eq, Hash)]
@@ -73,6 +73,11 @@ fn default_plugins(measuring: bool, offscreen: bool) -> bevy::app::PluginGroupBu
                 visible: !offscreen,
                 ..default()
             }),
+            // A headless game lives without its hidden window: closing the
+            // Mac's lid removed the monitor, the window went with it and the
+            // game exited mid-flight (2026-10-30). It ends when killed.
+            exit_condition: if offscreen { ExitCondition::DontExit } else { ExitCondition::OnAllClosed },
+            close_when_requested: !offscreen,
             ..default()
         })
         .set(TaskPoolPlugin { task_pool_options: fleet::task_pools() })
