@@ -26,7 +26,7 @@ The agent is at a **control location** like you (D067): mission control when the
 | `get_vessel` | A vessel as seen from the location, as far as its sensors measure: position, velocity, altitude above the ellipsoid, orbit, attitude (heading, pitch, roll and the body axes in east-north-up), signal; for a craft of parts, `stages` (the next stage, tank levels, engines, the feeding tanks' share) |
 | `get_trajectory` | A vessel's predicted path from now, sampled (needs a navigation solution) |
 | `set_warp` | Time warp level; resumes stopped time |
-| `switch_vessel` | Go aboard a vessel (it becomes active) |
+| `switch_vessel` | Fly a vessel: it becomes active, and the control location moves aboard it if it is crewed (mission control if not) |
 | `go_to_mission_control` | Open the tracking station (mission control) |
 | `set_controls` | Throttle, SAS, the hold and the speed reference of any vessel (`id`, default the active one; D112), after the light delay from anywhere but aboard; `rotate`, the pilot's rotation keys held aboard the active vessel |
 | `stage` | A craft of parts' next stage (`id`, default the active one), sent like any command |
@@ -44,9 +44,9 @@ The agent is at a **control location** like you (D067): mission control when the
 | `step` | Run `seconds` of game time and stop exactly there, at a warp level; answers when the clock has stopped |
 | `run_until` | Run until the first of: an epoch, `seconds`, the vessel's altitude above or below a value, its apoapsis or periapsis above one, its feeding tanks' share below one, max-Q, a separation, a status. Answers with what stopped it (`reached`) and the vessel's state. A condition on something no working sensor measures is refused |
 | `new_flight` | A new craft on the pad (`craft`: a directory under `data/craft`) |
-| `save_game`, `load_game` | Save or load by name (loading resets warp to 1×) |
+| `save_game`, `load_game` | Save or load by name (loading resets warp to 1×; stopped time stays stopped, so a test replays from a save exactly) |
 | `set_debug` | Debug mode (D064) for every vessel; a dead computer is still dead (D123) |
-| `bench` | Developer flag only: the look's benchmark from the current view (each part's cost) |
+| `bench` | Developer flag only: the look's benchmark from the current view (each part's cost); `only` measures the whole look and the parts it names |
 | `profile` | Developer flag only: frame statistics over a real-time window (fps, worst and 95th-percentile frame, the warp achieved), with the profiler's report when started with `SUNSCATTER_PROFILE=1` |
 
 `step` and `run_until` stop time at the end (unless `keep_running`), and every command sent while time is stopped applies at that clock, so a mission test is deterministic.
@@ -56,7 +56,7 @@ The agent is at a **control location** like you (D067): mission control when the
 - `crates/mcp`: the transport (JSON-RPC 2.0 over HTTP POST, plain JSON responses; `initialize`, `ping`, `tools/list`, `tools/call`). It knows nothing about the game.
 - `crates/mcp` serves each request on its own thread; a call waits up to 15 minutes for the game (the long tools bound their own wait).
 - `game::agent`: the flying tools, answered once per frame in the input stage; actions become `GameCommand`s (`game::commands`), exactly as the keyboard's. `game::agent::session`: the session tools, answered after the simulation each frame, the long ones over several frames (a shot once the view has settled, a run once the clock stops).
-- `SUNSCATTER_AGENT=<port>:<token>` turns the server on at start. `SUNSCATTER_DEV=1` is the developer flag (`bench`, `profile`). `SUNSCATTER_OFFSCREEN=1` renders into an image with no window (`game::offscreen`; shots work with the screen locked).
+- `SUNSCATTER_AGENT=<port>:<token>` turns the server on at start. `SUNSCATTER_DEV=1` is the developer flag (`bench`, `profile`). `SUNSCATTER_OFFSCREEN=1` renders into an image with no window (`game::offscreen`; shots work with the screen locked, and the game keeps running when the display goes, e.g. the lid closed).
 - **The headless game for a mission test** (D122): `./run headless [port]` sets all three (port 7777 by default, token `dev`) and a fresh home dir for shots and saves (`SUNSCATTER_HOME` to keep one). Headless games neither load nor save settings, and a shader that fails to compile exits with code 3. One game at a time on the machine (the lock in [agent-rules.md](../plans/agent-rules.md)). How to fly a mission test is in [testing.md](testing.md).
 - Test a running game by hand:
 
