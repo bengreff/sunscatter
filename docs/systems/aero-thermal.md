@@ -12,6 +12,8 @@ The air's forces on a craft, the heat it takes and loses, and where that heat go
 - **Heat is a network** (D065): skin cells and interior nodes, an implicit step; a part over its limits is destroyed cleanly (see [failures](failures.md)). Engine heat leaves with the exhaust and by radiation from the nozzle (D077).
 - **Coasts** (D119): heat inputs are orbit-averaged; D121 adds analytic relaxation of each node toward its orbit-averaged equilibrium, with breaks at eclipse entry and exit. Rails warp is refused below a per-body altitude (D062).
 - **Visuals come from the physics** (D109): the glow, when built, comes from the shock layer, and the model is improved where it cannot show it.
+- **Universal** (D125): ablation is one mechanism for every heat shield, 1-D and per cell, from the material's parameters (PICA-X is one material). Supersonic retropropulsion is not modelled as such: thrust and the clean body's drag stay independent.
+- **At their own rates inside the tick** (D121, D127): the aero cells are evaluated once per tick, their forces held through the integrator's stages and the contact substeps; the thermal network steps at the rate its fastest time constant sets, with the ticks' heat accumulated between steps.
 
 ## What exists
 
@@ -23,6 +25,7 @@ The air's forces on a craft, the heat it takes and loses, and where that heat go
 
 ## Not built
 
+- **Ablation** (D125): the materials carry an ablator's data (`materials::Ablation`: virgin and char density, pyrolysis temperature, effective heat, char conductivity), but no cell chars or recedes yet. It comes with Crew Dragon's entry (D117).
 - The reentry glow (*design*, frozen, D123).
 - Coolant loops and radiators (Dragon's trunk), heat pipes; powered components' heat (D115's queue, with a revision of D077).
 - Shock–shock interactions, buffet, flow separation and plume interactions (not required by D070).
@@ -31,5 +34,5 @@ The air's forces on a craft, the heat it takes and loses, and where that heat go
 ## Owners and decisions
 
 - Owners: [owners.md, Aero and thermal](../owners.md#aero-and-thermal).
-- Decisions: D061, D062, D065, D070, D077, D079, D085, D109, D119, D121, D123.
+- Decisions: D061, D062, D065, D070, D077, D079, D085, D109, D119, D121, D123, D125, D127.
 - Technical: [aero-thermal.md](../technical/aero-thermal.md) (the model, the bake, the live tick, coasts, limits, tests), [reentry.md](../technical/reentry.md), [scale-performance.md](../technical/scale-performance.md) (the thermal solve and the coast thermal lattice).

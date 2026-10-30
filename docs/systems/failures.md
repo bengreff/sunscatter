@@ -2,7 +2,7 @@
 
 How things go wrong: physical triggers from the simulation where it knows, statistical modes only where the inside of a part is not simulated, and never a failure when the simulator is unsure (D105). Every mode has its outcome: a split, a destroyed part, an explosion, a benign shutdown, a stuck valve.
 
-**Status:** *playable* in `sim` (`sim::systems::failure`) for the Falcon 9 Crew: fates, time at temperature, vibration, bursts and blasts, each mode's outcome. Debug mode turns all of it off (D064). The fidelity review found failures are mostly flags that drive little else (the coupling gap; [the review](../archive/research/fidelity-review-2026-10-29.md)).
+**Status:** *playable* in `sim` (`sim::systems::failure`) for the Falcon 9 Crew: fates, time at temperature, vibration, bursts and blasts, each mode's outcome. Debug mode turns all of it off (D064). D123 turns random failures off until both first flights fly end to end cleanly; that switch is not built, and the game still seeds every vessel's fates. The fidelity review found failures are mostly flags that drive little else (the coupling gap; [the review](../archive/research/fidelity-review-2026-10-29.md)).
 
 ## Laws
 
@@ -21,6 +21,7 @@ How things go wrong: physical triggers from the simulation where it knows, stati
 
 ## Not built
 
+- D123's switch: random (statistical) failures off until both flights are clean, then on. The physical triggers stay on.
 - Hard starts, pyroshock, fragments; components' own vibration; hazards on the rails lattice.
 - Radiation's single-event upsets; how the career learns a design's reliability (D105, open question 1).
 

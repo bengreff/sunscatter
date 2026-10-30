@@ -12,6 +12,8 @@ What holds a craft together, what breaks it apart, and what it touches. Every jo
 - **Contact is rigid-body contact** (D066): contact points against the physical surface, gear and hull spring-dampers; a point closing faster than its limit destroys its part.
 - **Debris** (D083): a piece is a full vessel until it is dead, uncontrollable and 10 km from every controllable craft. D121 replaces this at separation with a check: a controllable piece becomes a full craft, simulated while inactive; any other becomes a ballistic lump (mass, inertia, drag area, heating, one heat node), deleted when it burns up or hits the ground.
 - **The g-load limit** (D111): the proper acceleration the craft may reach is the lower of its structure's and its crew's.
+- **Craft in contact advance together** on one worker (D127); bubbles share no craft, so threads change nothing.
+- **Universal** (D125): joints, contact and (when built) water impact are one mechanism each, from the parts' parameters.
 
 ## What exists
 
@@ -19,7 +21,7 @@ What holds a craft together, what breaks it apart, and what it touches. Every jo
 - **Mechanisms and grid fins** (`sim::systems::{mechanisms, fins}`, `sim::aero::lattice`): legs, grid fins and Dragon's nosecone at their actuators' rates; the lattice-fin aero model with the transonic dip. *Playable.*
 - **Splits, breakage and debris** (`sim::vessel::{split, breakage, debris}`): planned separations, decouplers and breakups by temperature, impact or load. *Playable.* [parts.md](../technical/parts.md)
 - **Ground contact** (`sim::contact`, D066): legs with crush cores, hull points, slopes that hold or tip, bounces, slides, rest across save and load. *Playable.*
-- **Craft-to-craft contact** (D082, `sim::proximity`): exact signed distances to each craft's hull, equal and opposite forces, impacts that break parts; no merging. *Playable* in the sim. [proximity.md](../technical/proximity.md)
+- **Craft-to-craft contact** (D082, `sim::proximity`): exact signed distances to each craft's hull, equal and opposite forces, impacts that break parts; no merging. Each bubble steps on its own thread (D127). *Playable* in the sim. [proximity.md](../technical/proximity.md)
 
 ## Not built
 
@@ -27,10 +29,11 @@ What holds a craft together, what breaks it apart, and what it touches. Every jo
 - **Water** (D123): a calm sea with slamming pressure, added mass and buoyancy at each contact point (E until checked against water-impact data). Oceans are solid today (D037).
 - **The capsule–trunk joint** (the fidelity review's gap), single-use crush cores, legs' self-levelling, a leg's strut capacity.
 - **Debris lumps** and the controllability check at separation (D121).
+- **Capacity data for every joint** (D125): a joint with none (an engine mount, a point attachment, a part on a mechanism) never breaks today, though its load is shown.
 - **Construction** of structures in space or on the ground (D118): not written.
 
 ## Owners and decisions
 
 - Owners: [owners.md, Structure](../owners.md#structure-joints-loads-mechanisms-separation-contact).
-- Decisions: D032, D037, D064, D066, D082, D083, D103, D111, D112, D117, D121, D123.
+- Decisions: D032, D037, D064, D066, D082, D083, D103, D111, D112, D117, D121, D123, D125, D127.
 - Technical: [ship-systems.md](../technical/ship-systems.md) (structure; mechanisms and grid fins), [parts.md](../technical/parts.md) (splits, breakage, debris), [proximity.md](../technical/proximity.md), [ship-model.md](../technical/ship-model.md) §5.4, §5.6.

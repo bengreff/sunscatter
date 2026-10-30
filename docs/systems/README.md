@@ -19,6 +19,17 @@ Status words (rule 7, [process.md](../process.md)): *design*, *skeleton*, *playa
 | [Failures](failures.md) | Physical triggers, statistical fates, outcomes, ratings |
 | [The game](game.md) | Rendering, the flight interface, the systems screen, camera and map, saves, the MCP server and the agent's tools |
 
+## Across every system
+
+These decisions bind every system; each doc says how far it has got.
+
+- **One kind of craft, one state, one advance law per subsystem** (D121): every craft is built from parts, each vessel has one state, and each subsystem advances over any interval, chunked = single pass. See [the ship](ship.md) and [motion](motion.md).
+- **Physics is universal** (D125): no ship-specific models, and every part is fully described by its parameters.
+- **Automation is a switch** (D126): every automatic sequence runs by itself, on a press, or not at all, and manual control is always possible. See [avionics](avionics.md).
+- **Parallel, at one live rate, bit-identical across machines** (D127). See [motion](motion.md).
+- **One flight-computer layer per vessel, every program WASM** (D043), and **commands from the nearest mission control** (D034). See [avionics](avionics.md).
+- **One testing framework** (D122): unit tests and mission tests flown headless through MCP. See [the game](game.md) and [testing.md](../technical/testing.md).
+
 ## Open (not written yet)
 
 Left open on purpose (D124: "colonies, economics, construction, fusion, various interstellar techs, etc, just leave that open"). Each gets its doc when its design starts; until then its decisions are the record.
