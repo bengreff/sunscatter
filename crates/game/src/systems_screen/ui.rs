@@ -78,7 +78,7 @@ pub fn draw(
             let x = Selected { def, state, facts: &view.facts, known: &known, vessel: vessel.id() };
             selected(ui, &mut screen, &x, &mut out);
         });
-        region(ui, regions.bottom, |ui| editors(ui, &mut screen, def, vessel.id(), &mut out));
+        region(ui, regions.bottom, |ui| editors(ui, &mut screen, def, state.sequence as usize, vessel.id(), &mut out));
     });
     if ship.is_some() {
         screen.settle_layer(&view.facts);
@@ -299,10 +299,13 @@ fn groups(
     }
 }
 
+/// The stage and function editors; the `sequence` stages already run are
+/// shown locked ([`edit::allowed`]).
 fn editors(
     ui: &mut egui::Ui,
     screen: &mut SystemsScreen,
     def: &sim::craft::ship::ShipDef,
+    sequence: usize,
     vessel: sim::vessel::VesselId,
     out: &mut Vec<GameCommand>,
 ) {
@@ -319,6 +322,7 @@ fn editors(
     let functions = screen.tab == Tab::Functions;
     let k = usize::from(functions);
     let list = if functions { &mut drafts.functions } else { &mut drafts.stages };
+    let locked = if functions { 0 } else { sequence };
     let catalogue = edit::catalogue(def);
     let mut edits: Vec<Edit> = Vec::new();
     let mut run: Option<Vec<sim::craft::command::ShipCommand>> = None;
@@ -326,7 +330,7 @@ fn editors(
         ui,
         |ui| {
             for (i, s) in list.iter().enumerate() {
-                entry(ui, i, s, functions, &catalogue, &mut edits, &mut run);
+                entry(ui, i, s, functions, locked, &catalogue, &mut edits, &mut run);
             }
         },
     );
@@ -353,7 +357,7 @@ fn editors(
     });
     let list = if functions { &mut drafts.functions } else { &mut drafts.stages };
     if !edits.is_empty() {
-        for e in edits {
+        for e in edits.into_iter().filter(|e| edit::allowed(e, locked)) {
             edit::apply(list, e);
         }
         drafts.dirty[k] = true;
@@ -364,48 +368,76 @@ fn editors(
     screen.drafts = Some(drafts);
 }
 
-/// One stage or function: its name, order, keys and pin, commands.
+/// One stage or function: its name, order, keys and pin, commands. The
+/// first `locked` entries (stages already run) are shown but disabled.
 #[allow(clippy::too_many_arguments)]
 fn entry(
     ui: &mut egui::Ui,
     i: usize,
     s: &Stage,
     function: bool,
+    locked: usize,
     catalogue: &[sim::craft::command::ShipCommand],
     edits: &mut Vec<Edit>,
     run: &mut Option<Vec<sim::craft::command::ShipCommand>>,
 ) {
+    let done = i < locked;
     ui.horizontal(|ui| {
-        let mut name = s.name.clone();
-        if ui.add(egui::TextEdit::singleline(&mut name).desired_width(170.0)).changed() {
-            edits.push(Edit::Rename(i, name));
+        if done {
+            let tag = egui::RichText::new("RUN").monospace().color(theme::MUTED);
+            ui.label(tag).on_hover_text("Already run: locked. AGAIN on the staging bar runs it again.");
         }
-        if ui.small_button("up").clicked() {
-            edits.push(Edit::Up(i));
-        }
-        if ui.small_button("down").clicked() {
-            edits.push(Edit::Down(i));
-        }
-        if ui.small_button("remove").clicked() {
-            edits.push(Edit::Remove(i));
-        }
-        if function {
-            let mut pinned = s.pinned;
-            if ui.checkbox(&mut pinned, "pinned").changed() {
-                edits.push(Edit::Pin(i, pinned));
-            }
-            if ui.button("run").clicked() {
-                *run = Some(s.actions.clone());
-            }
-        }
-        egui::ComboBox::from_id_salt(("add", function, i)).selected_text("+ command").width(150.0).show_ui(ui, |ui| {
-            for c in catalogue {
-                if ui.selectable_label(false, label(c)).clicked() {
-                    edits.push(Edit::AddAction(i, c.clone()));
-                }
-            }
-        });
+        ui.add_enabled_ui(!done, |ui| entry_row(ui, i, s, function, locked, catalogue, edits, run));
     });
+    ui.add_enabled_ui(!done, |ui| entry_commands(ui, i, s, edits));
+    ui.add_space(4.0);
+}
+
+/// An entry's name, order, pin and command picker.
+#[allow(clippy::too_many_arguments)]
+fn entry_row(
+    ui: &mut egui::Ui,
+    i: usize,
+    s: &Stage,
+    function: bool,
+    locked: usize,
+    catalogue: &[sim::craft::command::ShipCommand],
+    edits: &mut Vec<Edit>,
+    run: &mut Option<Vec<sim::craft::command::ShipCommand>>,
+) {
+    let mut name = s.name.clone();
+    if ui.add(egui::TextEdit::singleline(&mut name).desired_width(170.0)).changed() {
+        edits.push(Edit::Rename(i, name));
+    }
+    if ui.add_enabled(edit::allowed(&Edit::Up(i), locked), egui::Button::new("up").small()).clicked() {
+        edits.push(Edit::Up(i));
+    }
+    if ui.small_button("down").clicked() {
+        edits.push(Edit::Down(i));
+    }
+    if ui.small_button("remove").clicked() {
+        edits.push(Edit::Remove(i));
+    }
+    if function {
+        let mut pinned = s.pinned;
+        if ui.checkbox(&mut pinned, "pinned").changed() {
+            edits.push(Edit::Pin(i, pinned));
+        }
+        if ui.button("run").clicked() {
+            *run = Some(s.actions.clone());
+        }
+    }
+    egui::ComboBox::from_id_salt(("add", function, i)).selected_text("+ command").width(150.0).show_ui(ui, |ui| {
+        for c in catalogue {
+            if ui.selectable_label(false, label(c)).clicked() {
+                edits.push(Edit::AddAction(i, c.clone()));
+            }
+        }
+    });
+}
+
+/// An entry's commands, each with its order and remove buttons.
+fn entry_commands(ui: &mut egui::Ui, i: usize, s: &Stage, edits: &mut Vec<Edit>) {
     ui.horizontal_wrapped(|ui| {
         ui.add_space(14.0);
         for (j, c) in s.actions.iter().enumerate() {
@@ -419,7 +451,6 @@ fn entry(
             }
         }
     });
-    ui.add_space(4.0);
 }
 
 #[cfg(test)]

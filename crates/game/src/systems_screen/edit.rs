@@ -84,6 +84,26 @@ pub enum Edit {
     Pin(usize, bool),
 }
 
+/// Whether `edit` leaves the first `run` entries as they are: the stage
+/// editor locks the stages already run (D114, D111; the sequence's index
+/// counts exactly them), shown but not edited; the functions lock none
+/// (`run` 0). The sim's refusal on save stays as the backstop
+/// (`Vessel::set_stages`).
+pub fn allowed(edit: &Edit, run: usize) -> bool {
+    match edit {
+        Edit::Add(_) => true,
+        // Swaps the entry with the one before it.
+        Edit::Up(i) => *i > run,
+        Edit::Remove(i)
+        | Edit::Down(i)
+        | Edit::Rename(i, _)
+        | Edit::AddAction(i, _)
+        | Edit::RemoveAction(i, _)
+        | Edit::ActionUp(i, _)
+        | Edit::Pin(i, _) => *i >= run,
+    }
+}
+
 /// Applies `edit` to `list`; an edit naming what is not there does nothing.
 pub fn apply(list: &mut Vec<Stage>, edit: Edit) {
     let n = list.len();
@@ -136,6 +156,36 @@ mod tests {
         }
         let unique: std::collections::BTreeSet<String> = labels.iter().cloned().collect();
         assert_eq!(unique.len(), labels.len());
+    }
+
+    /// With two stages run, their rows take no edit (the first still to
+    /// run cannot move above them); the rest, and every function, do.
+    #[test]
+    fn the_stages_already_run_are_locked() {
+        let c = ShipCommand::ArmChutes;
+        // (edit, allowed with 2 run)
+        let table = [
+            (Edit::Add("New".into()), true),
+            (Edit::Remove(1), false),
+            (Edit::Remove(2), true),
+            (Edit::Up(2), false),
+            (Edit::Up(3), true),
+            (Edit::Down(1), false),
+            (Edit::Down(2), true),
+            (Edit::Rename(0, "Z".into()), false),
+            (Edit::Rename(2, "Z".into()), true),
+            (Edit::AddAction(1, c.clone()), false),
+            (Edit::AddAction(2, c), true),
+            (Edit::RemoveAction(0, 0), false),
+            (Edit::ActionUp(1, 1), false),
+            (Edit::ActionUp(3, 1), true),
+            (Edit::Pin(1, true), false),
+        ];
+        for (edit, want) in table {
+            assert_eq!(allowed(&edit, 2), want, "{edit:?}");
+            assert!(allowed(&edit, 0) || matches!(edit, Edit::Up(0)), "nothing run: {edit:?}");
+        }
+        assert!(!allowed(&Edit::Up(0), 0), "the first entry has none before it");
     }
 
     #[test]
