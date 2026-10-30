@@ -2,7 +2,7 @@
 
 Who owns what: one module per rule (rule 5, rule 8). **Before adding a function that computes something about bodies, orbits, visibility, lighting or time, search this table: if a row covers it, extend that module instead of writing a second version** (lesson: v0.1's two Kepler solvers). Keep it current: a new owner gets its row in the commit that adds it.
 
-The rows are grouped by system. The frame order is in [technical/frame-order.md](technical/frame-order.md), and where each kind of test lives in [technical/testing.md](technical/testing.md).
+The rows are grouped by system, as [systems/](systems/README.md) is. The frame order is in [technical/frame-order.md](technical/frame-order.md), and where each kind of test lives in [technical/testing.md](technical/testing.md).
 
 ## Crates
 
