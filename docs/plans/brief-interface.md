@@ -53,6 +53,39 @@ Small commits, each passing fmt, clippy and the game's tests you touched (`cargo
 
 ## State
 
+**INTERFACE-3 (2026-10-31), wrapped up at its context cap.** Continued INTERFACE-2's "Left" (below), then walked the screens again in orbit (findings 21–26 in [interface-map.md](../technical/interface-map.md)) and took two items from PLANNER-4.
+
+**Landed:**
+- 12d7faa: Settings, Saves and the help start below the PAUSED banner (it lay over Settings' title; `layout::page_place_in`, `help_place_in`); every scroll area shows a thin bar while its list is cut (`theme::scroll`: the Orbital's TARGET picker under Landing gave no sign it was there). Findings 21, 22.
+- a3a4336: MCP `set_target` (the picker's own choices, `navball::target_choices`; `get_state` reads it), `edit_stages` (the bar's rules, now pure: `stage_bar::rows::{editable, runs_again, check}`) with the bar's rows and figures in `get_vessel`'s `stages.sequence` (`stage_bar::{estimates_of, rows_of}`, `air`), `notifications` (numbered, `Toasts::since`). `command` lists and runs only the functions the piece offers (`program::view`, `offered`; it listed the booster's grid fins in orbit). `shoot {screen: saves}`; the RCS menu with RCS off is refused. Findings 10 (closed), 23, 24.
+- 8936e94: lists that shrank to their rows put their bar mid-panel (notifications, Settings' bodies, tracking list, stage editor): full width now; a menu heading too wide wraps. Finding 26.
+- 50a08d5: the part card's temperature was the skin's mean against the interior's rating (capsule: 344 K / 1650 K against the screen's 397 K / 2000 K skin): it shows the systems screen's skin and interior rows, one owner (`systems_screen::rules::part_temperatures`, `vessel_temperatures`, a single pass); `rules::nearest_limits` (the measured parts ranked, the rest counted). Finding 25.
+- 4d4153e: Landing ▸ Thermal by that rule (`menus::hottest`): only measured parts ranked, NOT MEASURED n parts; the INTERIOR row (truth) gone. Finding 13. (`hottest.rs` still returns nothing for a craft without parts, ONEKIND's test craft.)
+- b246f9d: the navball draws the controls flown (`maneuver::Program::flown`, `Vessel::flown_controls`): during a programmed burn its buttons showed the pilot's STAB and 0 % (PLANNER-4's item 1).
+
+**Live MCP on the Falcon 9 in orbit** (orbit save, a3a4336): `command {}` (all items, the functions now only Parachutes and Nosecone on Dragon alone; `Grid fins` refused "acts on nothing aboard"); `get_vessel` gives the bar's rows (0 Dragon separation next, 1 SECO active, 2 and 3 done); `stage` then `set_target {vessel: 11}` (the second stage, shown in Orbital as TARGET · Vessel 11, 13 m, 0.4 m/s); `notifications {after: 9}` gave "Dragon separation" and the new vessel.
+
+**Shots for the lead** (scratchpad `/private/tmp/claude-501/-Users-ben-sunscatter/7c5f130a-69ba-45d3-9965-ca858b31253e/scratchpad/interface3/shots/`):
+- INTERFACE-2's fixes at HEAD: `h_help.png` (16), `h_tracking.png` (14, TIME STOPPED), `h_cards.png` (15, the capsule's long label), `h_mvac_struct.png` (11, the MVac's joint dashes).
+- 21: `h_settings_orbits.png` (PAUSED over the title) → `f_settings.png`, `f_saves.png`.
+- 22: `h_menus_ol.png` (Orbital cut at TRUE ANOMALY, no sign) → `f_menus_ol.png` (bars).
+- 13 before: `h_menus_ol.png` (Landing ▸ Thermal all dashes) against `f_sys_thermal.png` (the summary's measured s2.tank and capsule); 25 before: `h_cards.png` against `z_capsule.png`.
+- MCP's target in the Orbital menu: `z_target.png`.
+- Not yet shot: 8936e94, 50a08d5, 4d4153e and b246f9d on screen (tested only).
+
+**Left, in order:**
+1. PLANNER-4's item 2: `get_vessel`'s apsides lag while thrusting (they come from the live prediction, refreshed every 0.25 s of real time, so a `step` at speed reads seconds old: 343.9 km against 360.0 mid-burn). Proposed: under thrust, give the prediction's age and the two-body apsides of the state now (from centre, as the Orbital menu's ORBIT NOW), or compute the prediction on the call. `agent.rs` is ONEKIND-7's until its step (b) lands.
+2. Shots of the four commits above: the Landing menu in orbit (measured S2.TANK and DRAGON.CAPSULE, NOT MEASURED 10), the capsule's card (skin, interior), the bars at the panels' edges, the navball during a planned burn (MNV lit, the throttle at the program's).
+3. Small: the systems screen's electrical summary names buses in capitals (S2.BUS, from the Power menu's rows) where every other layer uses the ids (s2.tank). One shot of a single menu (`menus: ["orbital"]`) showed no menu at all and the next identical one did; not reproduced.
+4. `owners.md` rows (held by another agent): `navball::target_choices`; `stage_bar::rows::{editable, runs_again, check}` and `stage_bar::{estimates_of, rows_of}`; `toasts::Toasts::since`; `systems_screen::rules::{nearest_by_part, nearer, nearest_limits, part_temperatures, vessel_temperatures}` (and `menus::hottest` on them); `maneuver::Program::flown`, `Vessel::flown_controls`; `layout::{page_place_in, help_place_in, shown_rect}`, `theme::scroll`; MCP `set_target`, `edit_stages`, `notifications`.
+
+**Open for the owner (INTERFACE-3):**
+- A scroll bar shows (thin) whenever a list is cut, not only on hover: an access cue under D123's interface exception, the look otherwise unchanged.
+- The part card shows a part's skin and interior against their own limits (as the systems screen), no longer "(rated … K)"; the rating stays in the systems screen's RATINGS.
+- Landing ▸ Thermal ranks only measured parts and says how many are not measured; its INTERIOR row went (each part's row includes its interior).
+- `edit_stages` names stages by the program's index (`stage` in `get_vessel`), not the bar's countdown number, which changes as stages run.
+- `command` refuses a function that acts on nothing aboard the piece, as the action bar hides it.
+
 **INTERFACE-2 (2026-10-31), wrapped up at its context cap.** Continued INTERFACE-1's "Left" (below).
 
 **Landed:**
