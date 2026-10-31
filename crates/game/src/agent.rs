@@ -117,7 +117,10 @@ fn flight_tools() -> Vec<Tool> {
             "get_vessel",
             "A vessel as seen from your location (light-delayed): position and velocity relative to the body it is \
              about (inertial axes, m and m/s), altitude, orbit (the next apsides and any impact along the predicted \
-             trajectory; inclination, eccentricity and period osculating), signal, and its stages: tanks, engines, \
+             trajectory; inclination, eccentricity and period osculating; while the active vessel flies live, \
+             `prediction_age_s`, how old the predicted path is (it is recomputed a few times a second of real time, \
+             so just after a `step` under thrust it lags), and always `now_two_body`, the apsides from the body's \
+             centre if only its gravity acted from now, the Orbital menu's ORBIT NOW), signal, and its stages: tanks, engines, \
              and `sequence`, the staging bar's rows top to bottom (each stage's `stage` number for edit_stages, KSP \
              number, name, place, commands, and the figures it shows: Δv, burnout, propellant, the active stage's \
              thrust, TWR, mass, Isp; in vacuum, or the current air with `air: \"current\"`, D120). Dashes (null \
@@ -692,8 +695,14 @@ fn get_vessel(
         })
         .collect();
     let impact = aps.impact.filter(|m| m.t.seconds_since(sim.clock) > 0.0);
+    let live = i == sim.active && matches!(v.phase, Phase::Powered { .. });
+    let age = prediction_age(sim.clock, live, prediction.segments.first().map(|s| s.t0));
     let orbit = orbit.map(|o| {
+        let (peri, apo) = two_body_apsides(o.elements.a, o.elements.e);
         json!({"periapsis_altitude_m": pe.map(|a| a.altitude), "apoapsis_altitude_m": ap.map(|a| a.altitude),
+               "prediction_age_s": age,
+               "now_two_body": {"periapsis_from_centre_m": peri, "apoapsis_from_centre_m": apo,
+                                "semi_major_axis_m": o.elements.a},
                "apsides": upcoming,
                "impact": impact.map(|m| json!({"body": name(m.body), "in_s": m.t.seconds_since(sim.clock)})),
                "inclination_deg": o.elements.i.to_degrees(), "eccentricity": o.elements.e,
@@ -719,6 +728,25 @@ fn get_vessel(
         "stages": stages_json(sim, i, &known, air)?, "signal": signal_json(Some(signal)),
     });
     Ok((out, Vec::new()))
+}
+
+/// How old the predicted path is (s) while the active vessel flies live
+/// (`live`): it starts from the state when it was computed (`start`), a
+/// few times a second of real time, so a reading just after a `step` under
+/// thrust lags the clock. None while the stored trajectory gives the path.
+fn prediction_age(clock: sim::time::Epoch, live: bool, start: Option<sim::time::Epoch>) -> Option<f64> {
+    start.filter(|_| live).map(|t0| clock.seconds_since(t0).max(0.0))
+}
+
+/// The two-body apsides from the centre (m) of an orbit of semi-major axis
+/// `a` and eccentricity `e`: the periapsis, and the apoapsis if it is
+/// bound.
+fn two_body_apsides(a: f64, e: f64) -> (f64, Option<f64>) {
+    if e < 1.0 {
+        (a * (1.0 - e), Some(a * (1.0 + e)))
+    } else {
+        (a * (1.0 - e), None)
+    }
 }
 
 /// A value as the vessel knows it: shown to its precision, or null.
@@ -1065,6 +1093,32 @@ mod tests {
         let mut sim = SimState::new();
         sim.spawn_test_ships(3);
         (sim, Comms::load())
+    }
+
+    #[test]
+    fn under_thrust_the_vessel_says_how_old_its_predicted_apsides_are() {
+        let t = |s: f64| sim::sol::sol_epoch().add_seconds(s);
+        // (flies live, the predicted path's start, the clock, age)
+        let cases = [
+            (true, Some(t(100.0)), t(103.5), Some(3.5)), // a `step` under thrust just ended
+            (true, Some(t(103.5)), t(103.5), Some(0.0)), // caught up
+            (false, Some(t(100.0)), t(103.5), None),     // coasting: the stored trajectory
+            (true, None, t(103.5), None),                // no prediction yet
+        ];
+        for (live, start, clock, want) in cases {
+            assert_eq!(prediction_age(clock, live, start), want, "{live} {start:?}");
+        }
+        // The two-body apsides from the centre: bound, circular, escaping.
+        // (a, e, periapsis, apoapsis)
+        let orbits = [(7.0e6, 0.1, 6.3e6, Some(7.7e6)), (7.0e6, 0.0, 7.0e6, Some(7.0e6)), (-2.0e7, 1.5, 1.0e7, None)];
+        for (a, e, peri, apo) in orbits {
+            let (p, q) = two_body_apsides(a, e);
+            assert!((p - peri).abs() < 1e-6, "{a} {e}: {p}");
+            assert_eq!(q.is_some(), apo.is_some(), "{a} {e}");
+            if let (Some(q), Some(apo)) = (q, apo) {
+                assert!((q - apo).abs() < 1e-6, "{a} {e}: {q}");
+            }
+        }
     }
 
     #[test]
