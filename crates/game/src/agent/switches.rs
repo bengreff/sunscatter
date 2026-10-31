@@ -137,9 +137,10 @@ fn value_json(v: &programs::Value) -> (Value, &'static str) {
 }
 
 /// The programs as the agent reads them (`read {programs: true}`): each
-/// one's switch, what it does and is doing, its press or why not, and the
-/// tool that works each control.
-pub fn programs_json(rows: &[Row]) -> Value {
+/// one's switch, what it does and is doing, its press or why not, its
+/// settings, and the tool that works each control; the craft's warp stops
+/// (its notifications, `set_notify`) as the tab heads them.
+pub fn programs_json(rows: &[Row], stops: &programs::WarpStops) -> Value {
     let list: Vec<Value> = rows
         .iter()
         .map(|r| {
@@ -170,7 +171,9 @@ pub fn programs_json(rows: &[Row]) -> Value {
                    "settings": settings})
         })
         .collect();
-    json!({"programs": list})
+    let notify = json!({"on": stops.on, "does": stops.does, "now": stops.now,
+        "tone": super::read::tone_name(stops.tone), "by": format!("set_notify {{on: {}}}", !stops.on)});
+    json!({"programs": list, "notify": notify})
 }
 
 #[cfg(test)]

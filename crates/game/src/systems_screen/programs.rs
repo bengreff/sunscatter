@@ -24,7 +24,7 @@ use crate::interface::menus::Tone;
 use sim::chute::{CanopyState, ChuteSpec, ChuteState};
 use sim::systems::maneuver::Step;
 use sim::systems::ship_os::program::{self, Builtin, Installed, Schedule, Setting, Slot};
-use sim::systems::ship_os::{chutes, power_guard, Software, Switch};
+use sim::systems::ship_os::{chutes, power_guard, warp_stop, Software, Switch};
 use sim::time::Epoch;
 use sim::vessel::{Vessel, VesselId};
 
@@ -221,6 +221,11 @@ pub struct Inputs {
     pub chutes: Option<Chutes>,
     /// The components a load manager may switch (`power_guard::switchable`).
     pub switchable: Vec<String>,
+    /// Whether a risk to the craft stops time warp (its notifications,
+    /// D128), and the risks its last check read (`Watch::seen`, as a stop
+    /// names them).
+    pub notify: bool,
+    pub risks: Vec<String>,
     pub now: Epoch,
 }
 
@@ -242,6 +247,8 @@ impl Inputs {
             burn,
             chutes,
             switchable: v.ship_def().map_or_else(Vec::new, |d| power_guard::switchable(&d)),
+            notify: v.notify(),
+            risks: v.ship_def().map_or_else(Vec::new, |d| software.watch.seen.iter().map(|r| r.text(&d)).collect()),
             now,
         })
     }
@@ -254,8 +261,82 @@ pub fn rows(x: &Inputs) -> Vec<Row> {
     burns.settings = burn_settings(&x.software.maneuver_settings);
     let mut out = vec![burns];
     out.extend(x.chutes.as_ref().map(parachutes));
+    out.extend(x.software.warp_stop.map(|p| warp_program(&p, x.computing)));
     out.extend(x.software.programs.iter().map(|p| installed(p, x.now, x.computing, &x.switchable)));
     out
+}
+
+/// The craft's warp stops (D128: "Notifications can be switched off per
+/// craft"): whether a risk to it stops time warp, which line decides, and
+/// the risks it reads now. Its notifications are the craft's own setting,
+/// applied at once (`GameCommand::SetNotify`, MCP's `set_notify`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct WarpStops {
+    pub on: bool,
+    pub does: String,
+    pub now: String,
+    pub tone: Tone,
+}
+
+/// The kinds of risk a line stops on, in words.
+fn kinds(l: &warp_stop::Line) -> String {
+    let named = [
+        (l.crew, "the crew"),
+        (l.vessel, "a part destroyed"),
+        (l.control, "no flight computer"),
+        (l.power, "an essential load shed"),
+    ];
+    let on: Vec<&str> = named.iter().filter(|k| k.0).map(|k| k.1).collect();
+    if on.is_empty() {
+        "nothing".into()
+    } else {
+        on.join(", ")
+    }
+}
+
+/// The craft's warp stops as the tab heads its programs with them.
+pub fn warp_stops(x: &Inputs) -> WarpStops {
+    let program = x.software.warp_stop.filter(|p| p.slot.may_run() && x.computing);
+    let does = match (x.notify, program) {
+        (false, _) => "OFF: nothing on this craft stops time warp; its events are still logged".to_string(),
+        (true, Some(p)) => {
+            format!("a new risk ({}) stops time warp at its epoch: the warp-stop program's line", kinds(&p.line))
+        }
+        (true, None) => "a new risk to the crew or the vessel (the cabin's air or life support, a part destroyed, no \
+                         flight computer, an essential load shed) stops time warp at its epoch: the built-in line"
+            .into(),
+    };
+    let (now, tone) = if x.risks.is_empty() {
+        ("no risk read now".to_string(), Tone::Normal)
+    } else {
+        (format!("at risk now (seen: only a new risk stops warp): {}", x.risks.join("; ")), Tone::Warn)
+    };
+    WarpStops { on: x.notify, does, now, tone }
+}
+
+/// The command that sets the craft's notifications (the tab's and MCP's).
+pub fn set_notify(vessel: VesselId, on: bool) -> GameCommand {
+    GameCommand::SetNotify { vessel, on }
+}
+
+/// An installed warp-stop program (`Software::warp_stop`): it decides in
+/// place of the built-in line while it runs on a working computer.
+fn warp_program(p: &warp_stop::Program, computing: bool) -> Row {
+    let (now, tone) = match (computing, p.slot.may_run()) {
+        (false, _) => ("no working flight computer: the built-in line decides".to_string(), Tone::Alert),
+        (true, true) => (format!("deciding: stops on {}", kinds(&p.line)), Tone::Good),
+        (true, false) => ("not running: the built-in line decides".into(), Tone::Dim),
+    };
+    Row {
+        name: "warp_stop".into(),
+        title: "Warp-stop program".into(),
+        does: format!("replaces the built-in line while it runs: a new risk ({}) stops time warp", kinds(&p.line)),
+        switch: p.slot.switch,
+        now,
+        tone,
+        press: Err("it decides at each check of the risks".into()),
+        settings: Vec::new(),
+    }
 }
 
 /// The planned burns' program (`maneuver`).

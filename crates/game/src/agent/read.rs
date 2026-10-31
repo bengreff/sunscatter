@@ -79,7 +79,8 @@ pub fn read(args: &Value, sim: &SimState, seen: &Seen) -> Result<Value, String> 
         }
         let x = crate::systems_screen::programs::Inputs::of(sim.ship(), sim.clock)
             .ok_or("the active vessel is not a craft of parts (it has no ship computer)")?;
-        return Ok(super::switches::programs_json(&crate::systems_screen::programs::rows(&x)));
+        use crate::systems_screen::programs::{rows, warp_stops};
+        return Ok(super::switches::programs_json(&rows(&x), &warp_stops(&x)));
     }
     match (s("menu"), s("card"), s("layer").is_some() || s("item").is_some(), navball) {
         (Some(name), None, false, false) => {

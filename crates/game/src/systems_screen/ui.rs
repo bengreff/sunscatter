@@ -407,6 +407,9 @@ fn programs(
     use super::programs::{press, set_switch, SWITCHES};
     let scroll = egui::ScrollArea::vertical().id_salt("systems_programs").auto_shrink([false, true]);
     scroll.max_height(ui.available_height().max(40.0)).show(ui, |ui| {
+        if let Some(x) = x {
+            warp_stops(ui, x, vessel, out);
+        }
         for r in rows {
             ui.horizontal_wrapped(|ui| {
                 ui.label(egui::RichText::new(&r.title).color(theme::ACCENT));
@@ -432,6 +435,28 @@ fn programs(
             ui.add_space(4.0);
         }
     });
+}
+
+/// The craft's warp stops (D128): its notifications ON or OFF (applied at
+/// once, `programs::set_notify`), what stops warp and what it reads now.
+fn warp_stops(
+    ui: &mut egui::Ui,
+    x: &super::programs::Inputs,
+    vessel: sim::vessel::VesselId,
+    out: &mut Vec<GameCommand>,
+) {
+    let w = super::programs::warp_stops(x);
+    ui.horizontal_wrapped(|ui| {
+        ui.label(egui::RichText::new("Warp stops").color(theme::ACCENT));
+        for (on, text) in [(true, "ON"), (false, "OFF")] {
+            if ui.selectable_label(w.on == on, text).clicked() && w.on != on {
+                out.push(super::programs::set_notify(vessel, on));
+            }
+        }
+        ui.label(egui::RichText::new(&w.now).color(crate::interface::menus::render::tone_colour(w.tone)));
+    });
+    ui.label(egui::RichText::new(&w.does).small().color(theme::DIM));
+    ui.add_space(4.0);
 }
 
 /// A program's config menu (D126): each setting's field, sent once its

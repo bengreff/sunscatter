@@ -287,3 +287,58 @@ fn one_rule_for_the_settings() {
     let bad = settings_of(&x, "power", &[c(LOADS, list(&["dragon.nowhere"]))]).unwrap_err();
     assert!(bad.starts_with("Load manager: dragon.nowhere is not a component that draws power"), "{bad}");
 }
+
+/// The craft's warp stops by its notifications, the program installed and
+/// its computer, and the risks read; an installed warp-stop program's row.
+#[test]
+fn the_warp_stops_by_notify_program_and_computer() {
+    let sim = crate::state::SimState::with_craft(&crate::state::craft_or_fallback("falcon9-crew"));
+    let x0 = Inputs::of(sim.ship(), sim.clock).expect("a craft of parts");
+    assert!(x0.notify && x0.risks.is_empty(), "on by default, nothing seen on the pad");
+    let line = warp_stop::Line { crew: true, vessel: false, control: false, power: true };
+    let program = |switch| warp_stop::Program { slot: Slot { switch, pressed: false }, line };
+    let with = |notify, p: Option<warp_stop::Program>, computing, risks: &[&str]| {
+        let mut x = x0.clone();
+        x.notify = notify;
+        x.software.warp_stop = p;
+        x.computing = computing;
+        x.risks = risks.iter().map(|s| s.to_string()).collect();
+        warp_stops(&x)
+    };
+    let built_in = |w: &WarpStops| w.does.ends_with("the built-in line");
+    // (notify, program, computing, the built-in line decides)
+    let cases = [
+        (true, None, true, true),
+        (true, Some(program(Switch::Auto)), true, false),
+        (true, Some(program(Switch::Off)), true, true),
+        (true, Some(program(Switch::Auto)), false, true), // its computer lost: the fail-safe is the parts'
+    ];
+    for (notify, p, computing, decides) in cases {
+        let w = with(notify, p, computing, &[]);
+        assert_eq!(built_in(&w), decides, "{p:?} {computing}: {}", w.does);
+        assert_eq!((w.now.as_str(), w.tone), ("no risk read now", Tone::Normal));
+    }
+    let w = with(true, Some(program(Switch::Auto)), true, &[]);
+    assert!(w.does.contains("(the crew, an essential load shed)"), "{}", w.does);
+    let off = with(false, None, true, &["crew at risk: cabin CO₂ over its limit"]);
+    assert!(!off.on && off.does.starts_with("OFF: nothing on this craft stops time warp"), "{}", off.does);
+    assert_eq!(off.now, "at risk now (seen: only a new risk stops warp): crew at risk: cabin CO₂ over its limit");
+    assert_eq!(off.tone, Tone::Warn);
+    assert_eq!(set_notify(VesselId(3), false), GameCommand::SetNotify { vessel: VesselId(3), on: false });
+
+    // An installed program: its row, its switch by the one rule, no press.
+    let mut x = x0;
+    x.software.warp_stop = Some(program(Switch::Auto));
+    let rows = rows(&x);
+    let r = find(&rows, "warp_stop").expect("its row");
+    assert_eq!(
+        (r.title.as_str(), r.now.as_str(), r.tone),
+        ("Warp-stop program", "deciding: stops on the crew, an essential load shed", Tone::Good)
+    );
+    assert!(r.press.is_err());
+    let v = VesselId(1);
+    assert_eq!(
+        set_switch(&rows, v, "warp_stop", Switch::Off),
+        Ok(GameCommand::SetSwitch { vessel: v, program: "warp_stop".into(), switch: Switch::Off })
+    );
+}

@@ -75,7 +75,15 @@ fn the_programs_read_as_the_tab_lists_them() {
             settings: Vec::new(),
         },
     ];
-    let v = programs_json(&rows);
+    let stops = programs::WarpStops {
+        on: true,
+        does: "the built-in line".into(),
+        now: "no risk read now".into(),
+        tone: crate::interface::menus::Tone::Normal,
+    };
+    let v = programs_json(&rows, &stops);
+    assert_eq!(v["notify"]["on"], true);
+    assert_eq!(v["notify"]["by"], "set_notify {on: false}", "the call that turns them off");
     let chutes = &v["programs"][0];
     assert_eq!((chutes["program"].as_str(), chutes["switch"].as_str()), (Some("chutes"), Some("press")));
     assert_eq!(chutes["tone"], Value::Null, "a normal tone is left out");
@@ -98,7 +106,8 @@ fn the_programs_read_as_the_tab_lists_them() {
     let (sim, _) = aboard();
     let got = super::super::read::read(&json!({"programs": true}), &sim, &Default::default()).unwrap();
     let x = crate::systems_screen::programs::Inputs::of(sim.ship(), sim.clock).unwrap();
-    assert_eq!(got, programs_json(&crate::systems_screen::programs::rows(&x)));
+    let (rows, stops) = (crate::systems_screen::programs::rows(&x), crate::systems_screen::programs::warp_stops(&x));
+    assert_eq!(got, programs_json(&rows, &stops));
     let e = super::super::read::read(&json!({"programs": true, "navball": true}), &sim, &Default::default());
     assert!(e.unwrap_err().contains("alone"));
 }
