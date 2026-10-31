@@ -185,3 +185,30 @@ fn electrical_is_the_power_menus() {
     assert_eq!(group(&g, "WITHOUT POWER").rows[0].level, Level::Over);
     assert_eq!(group(&electrical(None), "BUSES").value(""), Some("no electrical system"));
 }
+
+/// What is lost reads by its owner's id (a part's, a component's: the
+/// typed handles resolved at the edge, `ShipDef::owner_id`), as the Power
+/// menu's unpowered list does.
+#[test]
+fn the_lost_read_by_their_owners_ids() {
+    let craft = rocket();
+    let def = craft.ship.as_deref().unwrap();
+    let mut state = ShipState::initial(def);
+    let tank = def.part_named("tank").unwrap();
+    let computer = &def.components[0];
+    let lost = |owner, part| sim::craft::state::Lost { part, owner, why: "burst".into() };
+    state.lost.push(lost(def.owner_named("tank").unwrap(), tank));
+    state.lost.push(lost(def.owner_named(&computer.id).unwrap(), computer.part));
+    state.unpowered.push(lost(def.owner_named(&computer.id).unwrap(), computer.part));
+    let all = Knowledge::perfect();
+    let facts = facts_of(def, &state, &all);
+    let known = Known::from(all);
+    let aboard = Aboard { mass: Reading { value: 0.0, precision: 0.0 }, dry: 0.0 };
+    let x =
+        Inputs { def, state: &state, facts: &facts, known: &known, aboard, com: 0.0, power: None, accel: DVec3::ZERO };
+    let s = summary(Layer::Health, &x);
+    let labels: Vec<&str> = group(&s, "LOST").rows.iter().map(|r| r.label.as_str()).collect();
+    assert_eq!(labels, ["tank", computer.id.as_str()]);
+    let unpowered: Vec<String> = state.unpowered.iter().map(|l| def.owner_id(l.owner).to_string()).collect();
+    assert_eq!(unpowered, std::slice::from_ref(&computer.id));
+}
