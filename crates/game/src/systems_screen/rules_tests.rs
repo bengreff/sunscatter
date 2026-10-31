@@ -35,6 +35,12 @@ fn facts_gather_each_parts_joint_tanks_and_systems() {
     assert_eq!((capsule.computers, capsule.load, capsule.bus, capsule.linked), (1, 50.0, true, true));
     assert!(named(&f, "engine#1").plumbing && named(&f, "engine#1").linked);
     assert_eq!(named(&f, "leg#2").joint.as_ref().unwrap().class, JointClass::Bolted);
+    // A leg hangs by its hinge (a mechanism): the craft gives its joint no
+    // capacity, so neither it nor a load ratio shows, even with every sensor
+    // (D106: a dash, not 0). The separation ring has both.
+    let leg = named(&f, "leg#2").joint.as_ref().unwrap();
+    assert_eq!((leg.allowable, leg.ratio), (None, None));
+    assert!(joint.allowable.is_some_and(|a| a > 0.0) && joint.ratio.is_some());
     assert!(f.iter().all(|p| p.integrity == 1.0 && p.damage == 0.0 && p.skin.is_none()));
     // Separated, switched off, damaged.
     state.apply(def, &ShipCommand::Separate("separation".into())).unwrap();
@@ -68,23 +74,24 @@ fn temperatures_go_to_their_parts_nearest_their_limits() {
     assert!(blind.iter().all(|p| p.skin.is_none() && p.interior.is_none()));
     assert!(blind.iter().flat_map(|p| &p.tanks).all(|t| t.1.is_none()));
     let tank = blind.iter().find(|p| !p.tanks.is_empty()).unwrap();
-    let shade = colour(Layer::Plumbing, tank, false);
+    let shade = colour(Layer::Plumbing, tank);
     assert_eq!(
         shade,
         fluid_colour(&tank.tanks.iter().max_by(|a, b| a.2.total_cmp(&b.2)).unwrap().0).map(|c| c * UNKNOWN_FILL)
     );
     assert_eq!((f[0].interior, f[1].interior, f[1].skin), (None, Some((350.0, 400.0)), None));
     // Its thermal colour is near the red end.
-    let c = colour(Layer::Thermal, &f[0], false);
+    let c = colour(Layer::Thermal, &f[0]);
     assert!(c[0] > 0.8 && c[2] < 0.2, "{c:?}");
-    assert_eq!(colour(Layer::Thermal, &f[2], false), GHOST, "no temperature known");
+    assert_eq!(colour(Layer::Thermal, &f[2]), GHOST, "no temperature known");
 }
 
 #[test]
 fn layer_colours_table() {
     let base = PartFacts { material: [0.8, 0.8, 0.8], integrity: 1.0, ..Default::default() };
-    let joint =
-        |class, intact| Some(JointFact { name: "j".into(), class, intact, allowable: 1.0, radius: 1.0, ratio: None });
+    let joint = |class, intact| {
+        Some(JointFact { name: "j".into(), class, intact, allowable: Some(1.0), radius: 1.0, ratio: None })
+    };
     let loaded = |ratio| Some(JointFact { ratio: Some(ratio), ..joint(JointClass::Bolted, true).unwrap() });
     let lox_half = PartFacts { tanks: vec![("LOX".into(), Some(50.0), 100.0)], ..base.clone() };
     let lox_full = PartFacts { tanks: vec![("LOX".into(), Some(100.0), 100.0)], ..base.clone() };
@@ -112,13 +119,10 @@ fn layer_colours_table() {
         (Layer::Health, PartFacts { damage: 0.5, ..base.clone() }, [0.9, 0.8, 0.1]),
     ];
     for (layer, f, want) in table {
-        let got = colour(layer, &f, false);
+        let got = colour(layer, &f);
         let close = got.iter().zip(want).all(|(a, b)| (a - b).abs() < 1e-5);
         assert!(close, "{layer:?} {f:?}: {got:?} vs {want:?}");
     }
-    // The selection is tinted towards the accent in every layer.
-    let s = colour(Layer::Physical, &base, true);
-    assert!(s[0] > s[2] && s != [0.8, 0.8, 0.8]);
     assert!(Layer::ALL.iter().all(|l| !l.name().is_empty() && !l.note().is_empty()));
 }
 

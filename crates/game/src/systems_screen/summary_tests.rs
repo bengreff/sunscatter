@@ -27,10 +27,13 @@ fn each_layer_summarises_the_craft() {
     assert_eq!(group(&s, "STRUCTURE").value("mass"), Some("12.35 t"));
     assert_eq!(group(&s, "STRUCTURE").value("dry mass"), Some("4000 kg"));
     assert_eq!(group(&s, "STRUCTURE").value("centre of mass"), Some("2.5 m above the base"));
-    // Unloaded on the pad's state: every joint at 0 %, linked to its part.
+    // Unloaded on the pad's state: every rated joint at 0 %, linked to its
+    // part; the legs counted, with no load shown (no capacity, D106).
     let joints = group(&s, "JOINTS");
     assert_eq!(joints.value("separation"), Some("0 % / 100 %"));
-    assert!(joints.rows.iter().all(|r| r.open.is_some() && r.level == Level::Normal));
+    let (counted, loads): (Vec<_>, Vec<_>) = joints.rows.iter().partition(|r| r.label == "no capacity");
+    assert_eq!(counted.len(), 1);
+    assert!(loads.iter().all(|r| r.open.is_some() && r.level == Level::Normal && r.value.ends_with("/ 100 %")));
     let p = summary(Layer::Plumbing, &x);
     let tanks = group(&p, "TANKS");
     assert_eq!(tanks.rows.len(), def.tanks.len());
@@ -52,8 +55,14 @@ fn each_layer_summarises_the_craft() {
     let s = summary(Layer::Structural, &x);
     assert_eq!(group(&s, "STRUCTURE").value("mass"), Some(DASH));
     let joints = group(&s, "JOINTS");
-    assert_eq!(joints.rows.len(), 1);
-    assert_eq!(joints.value("not measured"), Some(format!("{} joints (no strain gauge)", def.joints.len()).as_str()));
+    // The joints the craft gives a capacity are not measured; the rest (the
+    // legs, hung by their hinges) have nothing to measure against.
+    let rated = def.joints.iter().filter(|j| sim::systems::structure::rated(def, j)).count();
+    assert!(rated > 0 && rated < def.joints.len());
+    assert_eq!(joints.rows.len(), 2);
+    assert_eq!(joints.value("not measured"), Some(format!("{rated} joints (no strain gauge)").as_str()));
+    let unrated = format!("{} joints (no allowable given, or hung by a hinge)", def.joints.len() - rated);
+    assert_eq!(joints.value("no capacity"), Some(unrated.as_str()));
     let measured = group(&summary(Layer::Data, &x), "WHAT THE CRAFT MEASURES").value("tank levels").map(String::from);
     assert_eq!(measured, Some(format!("0 of {}", def.tanks.len())));
 }

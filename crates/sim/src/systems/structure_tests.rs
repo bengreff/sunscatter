@@ -405,6 +405,24 @@ fn pressure_raises_the_buckling_load() {
     }
 }
 
+/// Which of the Falcon 9's joints the craft gives a capacity: the stack's
+/// rings do; the MVac's bolted mount and the heat shield's (no allowable
+/// on either side) and a leg (hung by its hinge) do not.
+#[test]
+fn rated_joints_table() {
+    let craft = falcon9();
+    let def = craft.ship.as_ref().unwrap();
+    let table = [
+        ("s2.skirt|s2.mvac", false),
+        ("dragon.capsule|dragon.shield", false),
+        ("s1.octaweb|s1.leg#1", false),
+        ("dragon.shield|dragon.trunk", true),
+    ];
+    for (name, want) in table {
+        assert_eq!(rated(def, &def.joints[joint(def, name)]), want, "{name}");
+    }
+}
+
 /// What the systems' steps of SYSTEMS2 cost per live tick on the Falcon 9
 /// (ship-model.md §10's budget: the whole systems step under 0.5 ms).
 #[test]

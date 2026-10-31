@@ -317,7 +317,7 @@ pub fn update(
     let thermal_layer = screen.layer == rules::Layer::Thermal;
     for (k, pv) in view.parts.iter().enumerate() {
         let ghost = isolated.is_some_and(|i| i != k);
-        let [r, g, b] = view.facts.get(k).map_or(rules::GHOST, |f| rules::colour(screen.layer, f, false));
+        let [r, g, b] = view.facts.get(k).map_or(rules::GHOST, |f| rules::colour(screen.layer, f));
         let want = Color::linear_rgb(r, g, b);
         if materials.get(&pv.material).is_some_and(|m| m.base_color != want) {
             if let Some(mut m) = materials.get_mut(&pv.material) {

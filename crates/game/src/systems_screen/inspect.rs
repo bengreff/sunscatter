@@ -108,7 +108,10 @@ pub fn term(label: &str) -> Option<&'static str> {
             "The heaviest line load on the joint's ring at the last tick over what it takes at its temperature; \
              100 % is its ultimate (it fails). Measured by a strain gauge."
         }
-        "allowable line load" => "The line load (force per metre of ring) the joint takes at room temperature.",
+        "allowable line load" => {
+            "The line load (force per metre of ring) the joint takes at room temperature. A dash: the craft \
+             gives none (a mount with no wall data, a part hung by a hinge), so its load is not checked."
+        }
         "axial capacity" => "The allowable line load times the ring's circumference: the pull or push it takes.",
         "ullage pressure" | "pressure" => {
             "The gas over the liquid (or in the bottle) against its burst pressure: amber from 80 %. The relief \
@@ -121,6 +124,10 @@ pub fn term(label: &str) -> Option<&'static str> {
         "skin" | "interior" => "The hottest skin cell or interior node of the part against its limit.",
         "integrity" => "100 % sound; it fails at 0 %.",
         "thermal damage" => "Wear from time above its rated temperature; it fails at 1.",
+        "peak interior" => {
+            "The hottest its interior nodes have been, against its rated temperature (its skin cells are judged \
+             against their materials' limits, THERMAL)."
+        }
         "vibration damage" => "Wear from vibration past its qualification (Miner's rule); it fails at 1.",
         "run time" | "starts" | "cycles" => "Its use so far against its rated life.",
         "g-limit" => {
@@ -246,9 +253,12 @@ fn part_groups(def: &ShipDef, state: &ShipState, id: u32, f: Option<&PartFacts>,
         // RUNTIME's load at the last live tick, where a strain gauge measures it.
         let load = j.ratio.map_or_else(|| crate::format::DASH.to_string(), |r| format!("{:.0} % / 100 %", r * 100.0));
         g.limit("joint load", load, j.ratio, 1.0);
-        g.row("allowable line load", format!("{:.0} kN/m", j.allowable / 1e3));
+        // A dash where the craft gives the joint no capacity (D106).
+        let dash = || crate::format::DASH.to_string();
+        g.row("allowable line load", j.allowable.map_or_else(dash, |a| format!("{:.0} kN/m", a / 1e3)));
         if j.radius > 0.0 {
-            g.row("axial capacity", kilonewtons(j.allowable * 2.0 * std::f64::consts::PI * j.radius));
+            let axial = j.allowable.map(|a| a * 2.0 * std::f64::consts::PI * j.radius);
+            g.row("axial capacity", axial.map_or_else(dash, kilonewtons));
         }
     }
     out.push(g);
@@ -307,7 +317,7 @@ fn part_groups(def: &ShipDef, state: &ShipState, id: u32, f: Option<&PartFacts>,
 }
 
 /// A part's wear: integrity, damage (fails at 1), its use against its
-/// rated life, its peak temperature against its rating.
+/// rated life, its interior's peak temperature against its rating.
 fn condition(s: &sim::craft::state::PartState, r: &Ratings) -> Group {
     let mut g = Group::new("CONDITION");
     g.limit("integrity", format!("{:.0} %", s.integrity * 100.0), Some(1.0 - s.integrity), 1.0)
@@ -334,9 +344,9 @@ fn condition(s: &sim::craft::state::PartState, r: &Ratings) -> Group {
     if h.peak_k > 0.0 {
         match r.rated_k {
             Some(rated) => {
-                g.limit("peak temperature", format!("{} / {}", kelvin(h.peak_k), kelvin(rated)), Some(h.peak_k), rated)
+                g.limit("peak interior", format!("{} / {}", kelvin(h.peak_k), kelvin(rated)), Some(h.peak_k), rated)
             }
-            None => g.row("peak temperature", kelvin(h.peak_k)),
+            None => g.row("peak interior", kelvin(h.peak_k)),
         };
     }
     g

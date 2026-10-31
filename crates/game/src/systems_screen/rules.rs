@@ -118,12 +118,13 @@ pub struct JointFact {
     pub name: String,
     pub class: JointClass,
     pub intact: bool,
-    /// Line load it carries (N/m) and its ring's radius (m).
-    pub allowable: f64,
+    /// Line load it carries (N/m), where the craft gives one
+    /// (`sim::systems::structure::rated`), and its ring's radius (m).
+    pub allowable: Option<f64>,
     pub radius: f64,
     /// Its load at the last live tick over its allowable at temperature (1:
     /// the ultimate load; RUNTIME's structure), where the craft measures it
-    /// (a strain gauge, D106).
+    /// (a strain gauge, D106) and gives it a capacity.
     pub ratio: Option<f64>,
 }
 
@@ -192,20 +193,23 @@ pub fn facts(
         .map(|(k, p)| {
             let id = p.id;
             let info = def.parts.iter().find(|i| i.part == id);
-            let joint = (def.joints.iter().enumerate()).find(|(_, j)| j.child == id).map(|(i, j)| JointFact {
-                name: j.name.clone(),
-                class: match j.kind {
-                    JointKind::Integral => JointClass::Integral,
-                    JointKind::Bolted => JointClass::Bolted,
-                    JointKind::Separation { .. } => JointClass::Separation,
-                    JointKind::HoldDown => JointClass::HoldDown,
-                },
-                intact: state.joints.get(i).is_none_or(|s| s.intact),
-                allowable: j.allowable,
-                radius: j.radius,
-                ratio: (state.runtime.joints.get(i))
-                    .filter(|_| known.knows(Quantity::JointLoad(i as u32)))
-                    .map(|r| r.ratio),
+            let joint = (def.joints.iter().enumerate()).find(|(_, j)| j.child == id).map(|(i, j)| {
+                let rated = sim::systems::structure::rated(def, j);
+                JointFact {
+                    name: j.name.clone(),
+                    class: match j.kind {
+                        JointKind::Integral => JointClass::Integral,
+                        JointKind::Bolted => JointClass::Bolted,
+                        JointKind::Separation { .. } => JointClass::Separation,
+                        JointKind::HoldDown => JointClass::HoldDown,
+                    },
+                    intact: state.joints.get(i).is_none_or(|s| s.intact),
+                    allowable: rated.then_some(j.allowable),
+                    radius: j.radius,
+                    ratio: (state.runtime.joints.get(i))
+                        .filter(|_| rated && known.knows(Quantity::JointLoad(i as u32)))
+                        .map(|r| r.ratio),
+                }
             });
             let tanks = (def.tanks.iter().zip(&state.tanks).enumerate())
                 .filter(|(_, (d, _))| d.part == id)
@@ -256,8 +260,6 @@ pub const UNKNOWN_FILL: f32 = 0.35;
 
 /// A part that does not matter in a layer (linear).
 pub const GHOST: [f32; 3] = [0.06, 0.065, 0.075];
-/// The selection's tint.
-pub const SELECTED: [f32; 3] = [1.0, 0.55, 0.08];
 
 fn mix(a: [f32; 3], b: [f32; 3], t: f32) -> [f32; 3] {
     [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]
@@ -303,9 +305,10 @@ pub fn health_colour(integrity: f64, damage: f64) -> [f32; 3] {
     ramp(&[[0.12, 0.75, 0.25], [0.9, 0.8, 0.1], [0.9, 0.08, 0.04]], x)
 }
 
-/// A part's colour in `layer` (linear), the selection tinted.
-pub fn colour(layer: Layer, f: &PartFacts, selected: bool) -> [f32; 3] {
-    let c = match layer {
+/// A part's colour in `layer` (linear). A selection is not tinted: it is
+/// isolated, the other parts ghosted (`view`).
+pub fn colour(layer: Layer, f: &PartFacts) -> [f32; 3] {
+    match layer {
         Layer::Physical => f.material,
         Layer::Structural => match f.joint.as_ref().map(|j| (j.class, j.intact)) {
             _ if f.ground => crate::scene::parts::GROUND,
@@ -350,11 +353,6 @@ pub fn colour(layer: Layer, f: &PartFacts, selected: bool) -> [f32; 3] {
         },
         Layer::Health if f.ground => GHOST,
         Layer::Health => health_colour(f.integrity, f.damage),
-    };
-    if selected {
-        mix(c, SELECTED, 0.55)
-    } else {
-        c
     }
 }
 

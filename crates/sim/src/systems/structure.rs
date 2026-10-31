@@ -195,6 +195,15 @@ impl Capacity {
     }
 }
 
+/// Whether the craft gives a joint a capacity to check its load against:
+/// a ring with an allowable line load, not a part hung by a mechanism's
+/// hinge and actuator (a leg's A-frame and strut, a grid fin's hinge). The
+/// one owner of the rule: the load's ratio is zero without it, and the
+/// interface shows a dash (D106).
+pub fn rated(def: &ShipDef, d: &JointDef) -> bool {
+    d.allowable > 0.0 && !def.mechanisms.iter().any(|m| m.part == d.child)
+}
+
 /// The section's load over its capacity (1 is the ultimate load); zero
 /// when the capacity is not known.
 pub fn ratio(s: &Section, c: &Capacity) -> f64 {
@@ -605,16 +614,14 @@ pub fn step(def: &ShipDef, state: &mut ShipState, b: &Bodies, m: &Motion, at: Ep
         let moment = moment_about(force, about_origin, d.pos);
         let terms = gauge_terms(def, state, d, motion.accel, b.ambient);
         let factor = joint_factor(def, d, |id| index(id).and_then(|k| b.kelvin.get(k).copied()));
-        // A part on a mechanism hangs by its hinge and actuator (a leg's
-        // A-frame and strut, a grid fin's hinge), not a ring: no data.
-        let hinged = def.mechanisms.iter().any(|m| m.part == d.child);
+        let rated = rated(def, d);
         // The section and its ratio with the load as it stands scaled by k
         // (the liquids' heads with it): k = 1 now.
         let scaled = |k: f64| {
             let gauge = gauge_at(&terms, k);
             let sec = section(force * k, moment * k, d.normal, d.radius, gauge);
             let buckling = if d.buckling > 0.0 { pressurised_buckling(d.buckling, d.radius, gauge) } else { 0.0 };
-            let cap = if hinged { Capacity::default() } else { Capacity::of(d.allowable, buckling, factor) };
+            let cap = if rated { Capacity::of(d.allowable, buckling, factor) } else { Capacity::default() };
             (sec, ratio(&sec, &cap))
         };
         let (sec, r) = scaled(1.0);

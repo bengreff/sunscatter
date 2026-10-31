@@ -103,8 +103,9 @@ fn structure(x: &Inputs) -> Vec<Group> {
     }
     let mut joints = Group::new("JOINTS NEAREST THEIR ULTIMATE");
     let intact = |i: usize| state.joints.get(i).is_none_or(|s| s.intact);
+    let rated = |i: usize| sim::systems::structure::rated(def, &def.joints[i]);
     let mut loads: Vec<(usize, f64)> = (0..def.joints.len())
-        .filter(|&i| intact(i) && k.knows(Quantity::JointLoad(i as u32)))
+        .filter(|&i| intact(i) && rated(i) && k.knows(Quantity::JointLoad(i as u32)))
         .filter_map(|i| Some((i, state.runtime.joints.get(i)?.ratio)))
         .collect();
     loads.sort_by(|a, b| b.1.total_cmp(&a.1));
@@ -112,9 +113,13 @@ fn structure(x: &Inputs) -> Vec<Group> {
         let j = &def.joints[i];
         joints.limit(&j.name, format!("{:.0} % / 100 %", r * 100.0), Some(r), 1.0).opens(Selection::Part(j.child));
     }
-    let blind = (0..def.joints.len()).filter(|&i| intact(i)).count() - loads.len();
+    let unrated = (0..def.joints.len()).filter(|&i| intact(i) && !rated(i)).count();
+    let blind = (0..def.joints.len()).filter(|&i| intact(i) && rated(i)).count() - loads.len();
     if blind > 0 {
         joints.row("not measured", format!("{blind} joints (no strain gauge)"));
+    }
+    if unrated > 0 {
+        joints.row("no capacity", format!("{unrated} joints (no allowable given, or hung by a hinge)"));
     }
     vec![g, joints]
 }
