@@ -12,6 +12,7 @@
 //! a developer's alike (D044, D122): the session's tools ([`session`]: shots,
 //! the camera, time, flights, saves) are every agent's.
 
+pub mod program;
 pub mod read;
 pub mod session;
 
@@ -271,6 +272,7 @@ fn interface_tools(id: &Value) -> Vec<Tool> {
              after number `after` (default 0: all still kept, the last 200). `count` is the newest's number.",
             schema(json!({"after": {"type": "integer", "minimum": 0}}), &[]),
         ),
+        program::tool(id),
     ]
 }
 
@@ -563,6 +565,7 @@ fn run(
         }
         "command" => command(args, sim, comms)?,
         "edit_stages" => edit_stages(args, sim, comms)?,
+        "edit_program" => program::edit_program(args, sim, comms)?,
         "set_target" => {
             let t = target_arg(args, sim)?;
             (json!({"target": target_json(sim, t)}), vec![Effect::Target(t)])
