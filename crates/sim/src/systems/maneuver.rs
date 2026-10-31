@@ -128,6 +128,10 @@ pub struct Program {
     pub lit_seen: bool,
     /// |v_go| at the cutoff (m/s), for the log.
     pub left: Option<f64>,
+    /// The throttle it commanded at its last tick (what a burn ended by a
+    /// separation hands the pilot, [`handover`]).
+    #[serde(default)]
+    pub throttle: Option<f64>,
 }
 
 /// What the program commands this tick: what a player would set.
@@ -268,6 +272,25 @@ pub fn conflicts(baseline: &Controls, now: &Controls, c: &Commands) -> bool {
     throttle || rotate || sas || hold || translate
 }
 
+/// The pilot's controls when a burn is handed over (D126: taken over, or
+/// ended by a separation): the pilot's `now`, except in what the program
+/// commanded (`c`, its last tick's) and the pilot left as it was at the
+/// wake (`baseline`). There the burn goes on as it was: the throttle at
+/// the program's, and SAS on holding the attitude where it is (the
+/// stability hold: the burn's attitude, or where a rotation input leaves
+/// it), until the pilot changes them.
+pub fn handover(baseline: &Controls, now: &Controls, c: &Commands) -> Controls {
+    let mut out = *now;
+    if let Some(t) = c.throttle.filter(|_| now.throttle == baseline.throttle) {
+        out.throttle = t;
+    }
+    if c.hold.is_some() && now.sas == baseline.sas && now.hold == baseline.hold {
+        out.sas = true;
+        out.hold = HoldMode::Stability;
+    }
+    out
+}
+
 /// The schedule of a node of Δv `dv` (m/s) for a burn of thrust `thrust`
 /// (N) and flow `mdot` (kg/s) from mass `m0`, engines starting in
 /// `start` (s), and a turn taking `turn` (s): ignition so half the Δv is
@@ -319,6 +342,13 @@ fn quiet(view: &View, i: u32) -> bool {
 /// what it commands. At the wake the caller latches the target and the
 /// pilot's baseline ([`Program::wake_up`]).
 pub fn step(x: &Inputs, p: &mut Program) -> Commands {
+    let c = commands(x, p);
+    p.throttle = c.throttle;
+    c
+}
+
+/// [`step`]'s commands.
+fn commands(x: &Inputs, p: &mut Program) -> Commands {
     if !p.step.flying() {
         return Commands::default();
     }
@@ -422,6 +452,7 @@ impl Program {
             ignited: None,
             lit_seen: false,
             left: None,
+            throttle: None,
         }
     }
 

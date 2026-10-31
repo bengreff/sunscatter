@@ -162,14 +162,20 @@ impl Vessel {
     }
 
     /// After a split, the kept piece's program for the next node not yet
-    /// flown (`old`: the whole's; a burn in flight ends with the split, as
-    /// its engines' indices were the whole's).
+    /// flown (`old`: the whole's). A burn in flight ends with the split, as
+    /// its engines' indices were the whole's: the pilot is told, and has
+    /// the burn as it was flying (`maneuver::handover`).
     pub(super) fn reschedule(&mut self, old: Option<&Program>) {
         let next = old.map_or(0, |p| if p.step == Step::Wait { p.node } else { p.node + 1 });
         if let Some(p) = old.filter(|p| p.step.flying()) {
             let (at, text) = (self.time, format!("burn {}: ended by the separation", p.node + 1));
             if let Some(state) = self.ship.as_mut() {
                 state.runtime.event(at, text, true);
+            }
+            if let Some(base) = p.pilot {
+                let last = maneuver::Commands { hold: p.dir, throttle: p.throttle, ..Default::default() };
+                let now = *self.received_controls();
+                self.helm.hand_over(&now, maneuver::handover(&base, &now, &last));
             }
         }
         self.program = self.schedule_node(next);
@@ -214,8 +220,10 @@ impl Vessel {
     /// The controls a live tick flies with the pilot's `controls`: a flying
     /// program's step runs (its ignitions applied now) and its commands lie
     /// over them, unless the pilot's input conflicts with it (D126): then
-    /// the burn is the pilot's from this tick on.
+    /// the burn is the pilot's from this tick on, handed over as it was
+    /// flying (`maneuver::handover`).
     pub(super) fn tick_controls(&mut self, world: &World, controls: &super::Controls) -> super::Controls {
+        let controls = &self.helm.current(controls);
         if !self.program_flying() {
             return *controls;
         }
@@ -255,11 +263,13 @@ impl Vessel {
         };
         let before = p.step;
         let cmds = maneuver::step(&x, &mut p);
-        if p.pilot.is_some_and(|base| maneuver::conflicts(&base, controls, &cmds)) {
+        if let Some(base) = p.pilot.filter(|base| maneuver::conflicts(base, controls, &cmds)) {
             p.step = Step::Manual;
             self.program = Some(p);
             self.program_log();
-            return *controls;
+            let handed = maneuver::handover(&base, controls, &cmds);
+            self.helm.hand_over(controls, handed);
+            return handed;
         }
         let ignite = cmds.ignite.clone();
         let ended = p.step != before && !p.step.flying();

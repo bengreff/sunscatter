@@ -240,3 +240,46 @@ fn a_separation_mid_burn_ends_the_burn_and_keeps_the_later_nodes() {
     assert_eq!(pieces.len(), 1);
     assert!(pieces[0].nodes().is_empty() && pieces[0].program().is_none());
 }
+
+#[test]
+fn a_rotation_nudge_mid_burn_hands_the_burn_over_as_it_was_flying() {
+    use sim::vessel::HoldMode;
+    let w = world();
+    let earth = w.find("Earth").unwrap();
+    let mut s = leo(&w);
+    let node = Node { t: t0().add_seconds(900.0), dv: DVec3::new(150.0, 0.0, 0.0), reference: earth.node };
+    let later = Node { t: t0().add_seconds(4_000.0), dv: DVec3::new(5.0, 0.0, 0.0), reference: earth.node };
+    s.set_nodes(vec![node, later]).unwrap();
+    // The pilot's controls: SAS on, prograde, the throttle closed.
+    let pilot = Controls { sas: true, hold: HoldMode::Prograde, ..Controls::default() };
+    let burning = |s: &Vessel| s.ship().unwrap().runtime.engines.iter().any(|e| e.level > 0.5);
+    let mut lit = None;
+    while lit.is_none_or(|t: sim::time::Epoch| s.time.seconds_since(t) < 1.0) {
+        let t = s.time.add_seconds(0.25);
+        s.advance(&w, t, &pilot, usize::MAX);
+        if lit.is_none() && s.program().is_some_and(|p| p.lit_seen) {
+            lit = Some(s.time);
+        }
+    }
+    assert_eq!(s.program().unwrap().step, Step::Burn);
+    // One frame of a rotation key, mid-burn: against the hold, so the burn
+    // is the pilot's (D126). It goes on as it was flying: the throttle at
+    // the program's, SAS on holding where the nudge leaves it.
+    let nudge = Controls { rotate: DVec3::X * 0.1, ..pilot };
+    let t = s.time.add_seconds(0.1);
+    s.advance(&w, t, &nudge, usize::MAX);
+    let events: Vec<_> = s.ship_events().iter().map(|e| e.text.clone()).collect();
+    assert!(events.contains(&"burn 1: taken over by the pilot".to_string()), "{events:?}");
+    let handed = *s.controls();
+    assert_eq!((handed.throttle, handed.sas, handed.hold), (1.0, true, HoldMode::Stability), "{handed:?}");
+    // The rest of the frame's step read the handed controls, not the stale
+    // ones from before (a closed throttle would have cut the engine).
+    assert!(burning(&s), "the engine burns on");
+    // The next frame passes the pilot's controls as they now are.
+    let t = s.time.add_seconds(1.0);
+    s.advance(&w, t, &handed, usize::MAX);
+    assert!(burning(&s), "the engine burns on under the pilot");
+    // The later node keeps its program.
+    let p = s.program().unwrap();
+    assert_eq!((p.node, p.step), (1, Step::Wait));
+}

@@ -146,6 +146,32 @@ fn takeover_table() {
 }
 
 #[test]
+fn handover_table() {
+    use HoldMode::*;
+    let base = Controls { sas: true, hold: Prograde, ..Controls::default() };
+    let burning = Commands { hold: Some(DVec3::X), throttle: Some(0.8), ..Commands::default() };
+    let on = |throttle: f64| Controls { throttle, sas: true, hold: Stability, ..base };
+    // (the pilot now, the program's last commands) → the pilot's controls.
+    let cases = [
+        // A rotation nudge: the burn goes on at the program's throttle,
+        // holding where the nudge leaves it.
+        (Controls { rotate: DVec3::X, ..base }, &burning, Controls { rotate: DVec3::X, ..on(0.8) }),
+        // The pilot's own throttle is kept; the hold is handed over.
+        (Controls { throttle: 0.3, ..base }, &burning, on(0.3)),
+        // The pilot's SAS off or own hold is kept; the throttle handed over.
+        (Controls { sas: false, ..base }, &burning, Controls { sas: false, throttle: 0.8, ..base }),
+        (Controls { hold: Retrograde, ..base }, &burning, Controls { hold: Retrograde, throttle: 0.8, ..base }),
+        // What it did not command is the pilot's.
+        (Controls { chute: true, ..base }, &burning, Controls { chute: true, ..on(0.8) }),
+        // Nothing commanded: nothing handed over.
+        (base, &Commands::default(), base),
+    ];
+    for (i, (now, c, want)) in cases.iter().enumerate() {
+        assert_eq!(handover(&base, now, c), *want, "case {i}: {now:?}");
+    }
+}
+
+#[test]
 fn schedule_table() {
     // (Δv, thrust, flow, mass, start, turn) → seconds from ignition to the
     // node, and from the wake to ignition.

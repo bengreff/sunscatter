@@ -59,6 +59,11 @@ pub struct Helm {
     /// times, in the order sent.
     #[serde(default, skip_serializing_if = "VecDeque::is_empty")]
     queue: VecDeque<(Epoch, Controls)>,
+    /// After a planned burn was handed to the pilot ([`Helm::hand_over`]):
+    /// the controls the step was flying with, which read as the handed
+    /// ones until the caller passes others.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    taken: Option<Controls>,
 }
 
 impl Default for Helm {
@@ -70,7 +75,34 @@ impl Default for Helm {
 impl Helm {
     /// Controls `set`, already received.
     pub fn new(set: Controls) -> Self {
-        Helm { set, received: set, queue: VecDeque::new() }
+        Helm { set, received: set, queue: VecDeque::new(), taken: None }
+    }
+
+    /// Hands the pilot the controls `handed` (a planned burn taken over
+    /// or ended by a separation, D126; `maneuver::handover`): set and
+    /// received at once, as the program flew them. The caller's controls
+    /// for the rest of the step (`taken`, from before) then read as these
+    /// ([`Helm::current`]); its next ones carry them.
+    pub(super) fn hand_over(&mut self, taken: &Controls, handed: Controls) {
+        self.set = handed;
+        self.received = handed;
+        self.taken = Some(*taken);
+    }
+
+    /// The controls a tick flies with the caller's `controls`: after a
+    /// hand-over, the handed ones (with the caller's momentary inputs)
+    /// while the caller still passes those from before it.
+    pub(super) fn current(&mut self, controls: &Controls) -> Controls {
+        match self.taken {
+            Some(t) if t.released() == controls.released() => {
+                Controls { rotate: controls.rotate, translate: controls.translate, ..self.received.released() }
+            }
+            Some(_) => {
+                self.taken = None;
+                *controls
+            }
+            None => *controls,
+        }
     }
 
     /// The helm a piece of a split starts with (every piece but the one
