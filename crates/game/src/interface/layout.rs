@@ -32,6 +32,11 @@ pub const PAGE_CHROME: f32 = 96.0;
 /// The egui areas of the fixed panels (the docks keep clear of them).
 pub const TIME_AREA: &str = "hud_time";
 pub const BAR_AREA: &str = "menu_bar";
+/// The pause menu's PAUSED banner, under the menu bar (the windows the
+/// pause menu opens start below it).
+pub const PAUSED_AREA: &str = "paused_banner";
+/// The help window's title bar and frame above and below its scrolling list.
+pub const HELP_CHROME: f32 = 48.0;
 
 /// Interface preferences (the settings screen's Interface tab).
 #[derive(Resource, Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -106,7 +111,9 @@ pub struct DockPlace {
 }
 
 /// The top of the dock: below the time panel and the menu bar, whichever
-/// reaches lowest (rects as last drawn; `None` if not drawn).
+/// reaches lowest (rects as last drawn; `None` if not drawn). A window the
+/// pause menu opens starts the same way below the menu bar and the PAUSED
+/// banner (it lay over Settings' title, interface-map.md finding 21).
 pub fn dock_top(time: Option<Rect>, bar: Option<Rect>) -> f32 {
     let bottom = [time, bar].into_iter().flatten().fold(MARGIN, |b, r| b.max(r.max.y));
     bottom + GAP
@@ -140,10 +147,26 @@ pub fn page_place(screen: Rect, top: f32, cluster: Option<Rect>) -> DockPlace {
     DockPlace { x: screen.center().x, top, max_height: (bottom - top).max(MIN_PAGE_HEIGHT) }
 }
 
-/// [`page_place`] from the panels as last drawn.
+/// [`page_place`] from the panels drawn last frame: below the menu bar and
+/// the PAUSED banner.
 pub fn page_place_in(ctx: &bevy_egui::egui::Context) -> DockPlace {
-    let rect = |id: &str| ctx.memory(|m| m.area_rect(bevy_egui::egui::Id::new(id)));
-    page_place(ctx.content_rect(), dock_top(None, rect(BAR_AREA)), rect(crate::navball::AREA))
+    let top = dock_top(shown_rect(ctx, PAUSED_AREA), shown_rect(ctx, BAR_AREA));
+    page_place(ctx.content_rect(), top, shown_rect(ctx, crate::navball::AREA))
+}
+
+/// Where the help goes: from the pages' top (below the menu bar and the
+/// PAUSED banner) to the bottom margin, over the navball cluster (its
+/// window is solid).
+pub fn help_place_in(ctx: &bevy_egui::egui::Context) -> DockPlace {
+    page_place(ctx.content_rect(), page_place_in(ctx).top, None)
+}
+
+/// Where the egui area `id` (of the middle order: the HUD's panels) was
+/// drawn last frame, if it was.
+pub fn shown_rect(ctx: &bevy_egui::egui::Context, id: &str) -> Option<Rect> {
+    use bevy_egui::egui::{Id, LayerId, Order};
+    let id = Id::new(id);
+    ctx.memory(|m| m.areas().visible_last_frame(&LayerId::new(Order::Middle, id)).then(|| m.area_rect(id)).flatten())
 }
 
 /// Whether a mark at `r` falls behind any of the HUD's panels (`hud`, as
@@ -185,8 +208,10 @@ mod tests {
     fn the_dock_starts_below_the_top_panels() {
         let time = Some(rect(10.0, 10.0, 260.0, 76.0));
         let bar = Some(rect(400.0, 10.0, 880.0, 42.0));
-        // (time, bar, top)
-        let table = [(time, bar, 84.0), (None, bar, 50.0), (None, None, MARGIN + GAP)];
+        // The PAUSED banner under the bar: a page starts below it.
+        let banner = Some(rect(740.0, 48.0, 820.0, 72.0));
+        // (time or banner, bar, top)
+        let table = [(time, bar, 84.0), (None, bar, 50.0), (None, None, MARGIN + GAP), (banner, bar, 80.0)];
         for (t, b, want) in table {
             assert_eq!(dock_top(t, b), want, "{t:?} {b:?}");
         }

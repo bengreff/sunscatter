@@ -57,6 +57,14 @@ pub mod theme {
             .inner_margin(Margin::same(8))
     }
 
+    /// Scroll bars: a thin handle shown whenever a list is cut, not only
+    /// while hovered (egui's default, `floating`), so a menu cut to its
+    /// share of the dock shows that it goes on (the Orbital menu's TARGET
+    /// under the Landing menu, interface-map.md finding 22).
+    pub fn scroll() -> bevy_egui::egui::style::ScrollStyle {
+        bevy_egui::egui::style::ScrollStyle::thin()
+    }
+
     /// The menu bar's frame: the panel's, slimmer.
     pub fn bar_frame() -> Frame {
         panel_frame().inner_margin(Margin::symmetric(6, 4))
@@ -84,6 +92,7 @@ pub fn apply_style(
         v.selection.bg_fill = egui::Color32::from_rgb(150, 95, 20);
         v.override_text_color = Some(theme::TEXT);
         ctx.set_visuals(v);
+        ctx.all_styles_mut(|s| s.spacing.scroll = theme::scroll());
     }
     let zoom = offscreen.ui_scale.unwrap_or(iface.ui_scale) * offscreen.native_scale();
     if (ctx.zoom_factor() - zoom).abs() > 1e-3 {
@@ -148,6 +157,15 @@ mod tests {
 
     fn button(pos: Pos2, pressed: bool) -> Event {
         Event::PointerButton { pos, button: PointerButton::Primary, pressed, modifiers: Default::default() }
+    }
+
+    /// A cut list shows its scroll bar without a hover: the handle and its
+    /// track are drawn while dormant.
+    #[test]
+    fn a_cut_list_shows_that_it_scrolls() {
+        let s = theme::scroll();
+        assert!(s.dormant_handle_opacity > 0.5 && s.dormant_background_opacity > 0.5, "{s:?}");
+        assert!(s.floating_allocated_width > 0.0, "the bar keeps its own room beside the rows");
     }
 
     #[test]

@@ -253,7 +253,7 @@ pub fn draw(
     let ctx = contexts.ctx_mut()?;
     // Under the menu bar, not over it.
     let below = ctx.memory(|m| m.area_rect(egui::Id::new(super::layout::BAR_AREA))).map_or(12.0, |r| r.max.y + 6.0);
-    egui::Area::new("paused_banner".into()).anchor(egui::Align2::CENTER_TOP, [0.0, below]).show(ctx, |ui| {
+    egui::Area::new(super::layout::PAUSED_AREA.into()).anchor(egui::Align2::CENTER_TOP, [0.0, below]).show(ctx, |ui| {
         ui.label(egui::RichText::new("PAUSED").monospace().size(20.0).color(theme::ACCENT));
     });
     let (settings, saves, help) = (&mut windows.0, &mut windows.1, &mut windows.2);

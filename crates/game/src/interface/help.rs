@@ -108,14 +108,16 @@ pub fn draw(mut contexts: EguiContexts, mut help: ResMut<Help>) -> Result {
         return Ok(());
     }
     let ctx = contexts.ctx_mut()?;
-    let height = ctx.content_rect().height() * 0.8;
+    // Below the menu bar and the PAUSED banner, as the pause menu's pages.
+    let place = super::layout::help_place_in(ctx);
+    let height = place.max_height - super::layout::HELP_CHROME;
     let mut open = true;
     egui::Window::new(format!("Keys and every way in ({})", keys::label(Action::Help)))
         .open(&mut open)
         .collapsible(false)
         .resizable(false)
         .default_width(760.0)
-        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+        .anchor(egui::Align2::CENTER_TOP, [0.0, place.top])
         .frame(theme::panel_frame().fill(theme::SOLID))
         .show(ctx, |ui| {
             ui.set_max_height(height);
