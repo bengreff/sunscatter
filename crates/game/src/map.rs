@@ -301,6 +301,9 @@ fn draw_apsides(
     lines: &Lines,
     active_frame: Option<trajectory::LineFrame>,
 ) {
+    // The icons drawn (vessels' diamonds, bodies' dots): no label covers one.
+    let icons: Vec<Vec2> =
+        (map.objects.iter().zip(&map.vis)).filter(|(_, v)| v.icon).filter_map(|(o, _)| o.screen).collect();
     for line in &lines.vessels {
         let (Some(i), Some(list)) = (sim.index_of(line.id), aps.get(line.id)) else { continue };
         let plotter = Plotter::new(sim, rig, trajectory::frame_of(sim, i, active_frame));
@@ -335,7 +338,10 @@ fn draw_apsides(
                 (true, None) => format!("{name}\nin {}", format::duration(t.seconds_since(sim.clock))),
             };
             let font = egui::FontId::monospace(if line.active { 12.0 } else { 10.0 });
-            painter.text(egui::pos2(s.x + 8.0, s.y - 8.0), egui::Align2::LEFT_BOTTOM, label, font, color);
+            let galley = painter.layout_no_wrap(label, font, color);
+            let size = Vec2::new(galley.size().x, galley.size().y);
+            let at = map_view::label_at(s, size, &icons);
+            painter.galley(egui::pos2(at.x, at.y), galley, color);
         }
     }
 }

@@ -30,6 +30,11 @@ pub const PICK_MIN_PX: f64 = 16.0;
 pub const ICON_MERGE_PX: f32 = 6.0;
 /// The cursor hovers an icon within this distance (px) of its centre.
 pub const ICON_HIT_PX: f32 = 8.0;
+/// An apsis marker's label starts this far (px) from its dot, each way.
+pub const LABEL_GAP_PX: f32 = 8.0;
+/// The room (px) kept around an icon's centre that no label may cover: the
+/// active vessel's diamond (6 px) with a margin.
+pub const LABEL_CLEAR_PX: f32 = 8.0;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ObjectId {
@@ -72,6 +77,29 @@ pub struct Visibility {
     pub icon: bool,
     /// Its orbit line is drawn: in map view and seen from outside.
     pub line: bool,
+}
+
+/// Where an apsis marker's label of `size` (px) goes, its top-left corner:
+/// up and to the right of the marker's dot at `marker`, else the first of
+/// up-left, down-right and down-left whose box keeps clear of every icon in
+/// `icons` (screen centres; [`LABEL_CLEAR_PX`] around each). With every
+/// corner covered it stays up and to the right. The periapsis label lay over
+/// the craft just past its periapsis (interface-map finding 43).
+pub fn label_at(marker: Vec2, size: Vec2, icons: &[Vec2]) -> Vec2 {
+    let corner = |sx: f32, sy: f32| {
+        let x = if sx > 0.0 { marker.x + LABEL_GAP_PX } else { marker.x - LABEL_GAP_PX - size.x };
+        let y = if sy > 0.0 { marker.y + LABEL_GAP_PX } else { marker.y - LABEL_GAP_PX - size.y };
+        Vec2::new(x, y)
+    };
+    let clear = |min: Vec2| {
+        let max = min + size;
+        icons.iter().all(|c| {
+            let r = LABEL_CLEAR_PX;
+            c.x + r <= min.x || c.x - r >= max.x || c.y + r <= min.y || c.y - r >= max.y
+        })
+    };
+    let options = [corner(1.0, -1.0), corner(-1.0, -1.0), corner(1.0, 1.0), corner(-1.0, 1.0)];
+    options.into_iter().find(|&c| clear(c)).unwrap_or(options[0])
 }
 
 /// Pixels per metre at the camera's distance to its focus: the one scale
@@ -222,6 +250,33 @@ mod tests {
 
     fn fresh(objects: &[Object], focus_distance: f64) -> Vec<Visibility> {
         classify(objects, scale(H, FOV, focus_distance), focus_distance, |_| Visibility::default())
+    }
+
+    /// An apsis label goes up-right of its dot, else the first corner clear
+    /// of every icon: the craft just past periapsis (up-right, 10 px) sends
+    /// it up-left; icons on every side leave it up-right.
+    #[test]
+    fn apsis_labels_keep_clear_of_icons() {
+        let m = Vec2::new(400.0, 300.0);
+        let size = Vec2::new(70.0, 28.0);
+        let (ur, ul) = (Vec2::new(408.0, 264.0), Vec2::new(322.0, 264.0));
+        let (dr, dl) = (Vec2::new(408.0, 308.0), Vec2::new(322.0, 308.0));
+        let table: [(&[Vec2], Vec2); 7] = [
+            (&[], ur),
+            // On the dot itself: its diamond is clear of every corner.
+            (&[m], ur),
+            // The finding's case: the craft up and to the right.
+            (&[Vec2::new(410.0, 290.0)], ul),
+            (&[Vec2::new(440.0, 280.0)], ul),
+            (&[Vec2::new(440.0, 280.0), Vec2::new(360.0, 280.0)], dr),
+            (&[Vec2::new(440.0, 280.0), Vec2::new(360.0, 280.0), Vec2::new(440.0, 320.0)], dl),
+            (&[Vec2::new(440.0, 280.0), Vec2::new(360.0, 280.0), Vec2::new(440.0, 320.0), Vec2::new(360.0, 320.0)], ur),
+        ];
+        for (icons, want) in table {
+            assert_eq!(label_at(m, size, icons), want, "{icons:?}");
+        }
+        // Far icons do not move it.
+        assert_eq!(label_at(m, size, &[Vec2::new(600.0, 100.0)]), ur);
     }
 
     #[test]
