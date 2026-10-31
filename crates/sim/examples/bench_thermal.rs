@@ -231,11 +231,11 @@ fn main() {
                 show_lattice(&w, c, runs);
             }
         } else {
-            let s = stress::stress_craft(p);
-            let cap = s.craft.spec.propellant.capacity;
-            run(&format!("stress {p}"), s.craft.design().clone(), cap, runs);
+            let s = stress::craft(p);
+            let cap = s.spec.propellant.capacity;
+            run(&format!("stress {p}"), s.design().clone(), cap, runs);
             if with_lattice {
-                show_lattice(&w, &s.craft, runs);
+                show_lattice(&w, &s, runs);
             }
         }
     }

@@ -5,7 +5,7 @@
 //! An id is resolved, in order, as
 //! * a definition registered at run time ([`register`]: a craft made in the
 //!   game, later);
-//! * `stress-<n>`: the synthetic stress craft of n parts ([`super::stress`]);
+//! * `stress-<n>`: the stress craft of n catalog parts ([`super::stress`]);
 //! * `small-<name>`: a small craft of parts built in code ([`super::small`]);
 //! * a directory under `data/craft` ([`super::default_craft_dir`]), one
 //!   part for the whole ship;
@@ -74,8 +74,8 @@ pub fn definition(id: &CraftId) -> Result<CraftDef, String> {
     let base = id.base();
     let whole = if let Some(def) = registered().lock().expect("craft registry").get(base) {
         def.clone()
-    } else if let Some(n) = base.strip_prefix("stress-").and_then(|n| n.parse::<usize>().ok()).filter(|&n| n > 0) {
-        super::stress::layout(n).def()
+    } else if let Some(def) = super::stress::definition(base) {
+        def?
     } else if let Some(def) = super::small::definition(base) {
         def?
     } else if base == super::TEST_CRAFT {
@@ -172,7 +172,8 @@ mod tests {
         let test = definition(&CraftId(super::super::TEST_CRAFT.into())).unwrap();
         assert_eq!(test.parts.len(), 1);
         let whole = definition(&CraftId("stress-12".into())).unwrap();
-        assert_eq!(whole, super::super::stress::layout(12).def());
+        assert_eq!(whole.parts.len(), 12);
+        assert_eq!(Some(Ok(whole.clone())), super::super::stress::definition("stress-12"));
         let piece = definition(&CraftId::piece("stress-12", &[1, 4, 5, 6])).unwrap();
         assert_eq!(piece.parts.iter().map(|p| p.id).collect::<Vec<_>>(), vec![1, 4, 5, 6]);
         assert_eq!(piece, whole.subset(&[1, 4, 5, 6]));
@@ -187,7 +188,9 @@ mod tests {
     /// reloads).
     #[test]
     fn a_stress_craft_and_its_pieces_rebuild_from_their_ids() {
-        let built = super::super::stress::stress_craft(12).craft;
+        let id = super::super::stress::id(12);
+        let def = definition(&id).unwrap();
+        let built = Craft::from_def(id.clone(), def.clone(), &Resolution::default(), &cell_options(&id, &def));
         let again = craft_of(&built.id);
         assert_eq!(again.as_ref(), &built);
         assert_eq!(**again.design(), **built.design());

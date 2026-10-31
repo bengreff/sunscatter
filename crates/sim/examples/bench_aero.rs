@@ -17,11 +17,11 @@ fn main() {
         let mut sizes = vec![50, 300];
         sizes.extend(args.iter().skip(1).filter_map(|a| a.parse::<usize>().ok()));
         per_cell("test craft", &test_craft().surface, &test_craft().cells);
-        let one = sim::craft::stress::stress_craft(1);
-        per_cell("stress craft, 1 part", &one.craft.surface, &one.craft.cells);
+        let one = sim::craft::stress::craft(1);
+        per_cell("stress craft, 1 part", &one.surface, &one.cells);
         for n in sizes {
-            let s = sim::craft::stress::stress_craft(n);
-            per_cell(&format!("stress craft, {n} parts"), &s.craft.surface, &s.craft.cells);
+            let s = sim::craft::stress::craft(n);
+            per_cell(&format!("stress craft, {n} parts"), &s.surface, &s.cells);
         }
         return;
     }
@@ -157,8 +157,8 @@ fn vessel_ticks() {
     // Ascent through the turning air at 12 km, M 1.2 (turbulent): the test
     // craft and a 300-part stress craft (`… bench_aero ticks`).
     if std::env::args().any(|a| a == "ticks") {
-        let stress = sim::craft::stress::stress_craft(300);
-        for (name, craft) in [("test craft", test_craft()), ("stress craft, 300 parts", &stress.craft)] {
+        let stress = sim::craft::stress::craft(300);
+        for (name, craft) in [("test craft", test_craft()), ("stress craft, 300 parts", &*stress)] {
             let r = DVec3::new(re + 12_000.0, 0.0, 0.0);
             let v =
                 sim::body::earth().rotation.omega(t0).raw().cross(r) + DVec3::new(0.3, 1.0, 0.0).normalize() * 354.0;

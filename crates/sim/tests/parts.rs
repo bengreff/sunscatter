@@ -30,8 +30,18 @@ fn orbit(w: &World, a: f64, phase: f64) -> (sim::frame::NodeId, DVec3, DVec3) {
     (earth.node, r, v)
 }
 
+/// The placeholder stress layout of `n` parts, registered as
+/// `placeholder-<n>`: these tests were written on its parts and numbers,
+/// and move to `stress-<n>` (catalog parts) with the made-up path's
+/// deletion (D121).
+fn placeholder(n: usize) -> CraftId {
+    let id = CraftId(format!("placeholder-{n}"));
+    sim::craft::registry::register(&id, stress::layout(n).def());
+    id
+}
+
 fn craft(n: usize) -> Arc<Craft> {
-    craft_of(&stress::id(n))
+    craft_of(&placeholder(n))
 }
 
 /// The parts of a craft whose names start with `prefix`.
@@ -105,8 +115,8 @@ fn a_split_in_a_coast_conserves_momentum_and_restarts_coasts() {
         let fill = v.propellant() / v.craft.mass.capacity;
         assert!((fill - 0.6).abs() < 1e-12, "fill {fill}");
     }
-    assert_eq!(b.craft.id, CraftId::piece("stress-40", &plan.pieces[1]));
-    assert_eq!(b.craft.id.0, "stress-40#12-16,32,36", "the booster and the small parts on it");
+    assert_eq!(b.craft.id, CraftId::piece("placeholder-40", &plan.pieces[1]));
+    assert_eq!(b.craft.id.0, "placeholder-40#12-16,32,36", "the booster and the small parts on it");
     // The booster has an engine but no control part; the core keeps the pod.
     assert!(b.craft.engine.thrust_vac > 0.0 && !b.controllable() && a.controllable());
     assert_eq!((a.crew(), b.crew()), (3, 0));
@@ -325,7 +335,7 @@ fn a_light_piece_dropped_on_the_pad_loses_energy_and_rests() {
     let part = (0..c.parts.len())
         .min_by(|&a, &b| (c.parts[a].dry_mass - 250.0).abs().total_cmp(&(c.parts[b].dry_mass - 250.0).abs()));
     let part = &c.parts[part.unwrap()];
-    let piece = sim::craft::craft_of(&CraftId::piece(stress::id(40).base(), &[part.id]));
+    let piece = sim::craft::craft_of(&CraftId::piece(placeholder(40).base(), &[part.id]));
     let pad = Vessel::landed_at(&w, VesselId(1), "Earth", 28.6082, -80.66, t0(), &piece);
     let (anchor, r, v) = pad.state(&w);
     assert_eq!(anchor, earth.node);

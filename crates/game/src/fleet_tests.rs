@@ -209,7 +209,7 @@ fn fleet_frames() {
     let threads = std::env::var("FLEET_THREADS").ok().and_then(|s| s.parse().ok()).unwrap_or(7);
     ComputeTaskPool::get_or_init(|| bevy::tasks::TaskPoolBuilder::new().num_threads(threads).build());
     let w = world();
-    let big = sim::craft::stress::stress_craft(300).craft;
+    let big = (*sim::craft::stress::craft(300)).clone();
     let _ = big.design();
     let small = sim::craft::test_craft();
     let earth = w.find("Earth").expect("Earth").clone();

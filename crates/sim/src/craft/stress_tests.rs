@@ -185,3 +185,63 @@ fn stress_craft_build_and_bake_through_the_pipeline() {
         }
     }
 }
+
+/// Parts a plan spends: the capsule, the core's tanks, its thrust
+/// structure and engines, its legs, and every booster.
+fn spent(p: &super::PartsPlan) -> usize {
+    1 + p.core_tanks
+        + 5 * usize::from(p.engines)
+        + 4 * usize::from(p.legs)
+        + p.boosters.iter().map(|t| 6 + t).sum::<usize>()
+}
+
+#[test]
+fn the_plan_of_catalog_parts_spends_exactly_n() {
+    use super::parts_plan as plan;
+    // (n, core tanks, rings, tanks of the first and last booster)
+    let table = [
+        (1, 0, 0, None),
+        (6, 5, 0, None),
+        (7, 1, 0, None),
+        (10, 4, 0, None),
+        (12, 2, 0, None),
+        (40, 2, 1, Some((1, 1))),
+        (300, 2, 4, Some((2, 1))),
+        (1_000, 3, 7, Some((3, 2))),
+        (5_000, 10, 12, Some((10, 9))),
+    ];
+    for (n, core, rings, first_last) in table {
+        let p = plan(n);
+        assert_eq!(spent(&p), n, "{n}: {p:?}");
+        assert_eq!((p.core_tanks, p.rings, p.boosters.len()), (core, rings, 2 * rings * (rings + 1)), "{n}");
+        assert_eq!(p.boosters.first().zip(p.boosters.last()).map(|(a, b)| (*a, *b)), first_last, "{n}");
+    }
+    for n in 1..=700 {
+        assert_eq!(spent(&plan(n)), n, "{n}");
+    }
+    assert_eq!(super::file(137), super::file(137));
+}
+
+#[test]
+fn a_stress_craft_of_catalog_parts_builds_with_its_stacks_and_sequence() {
+    let c = super::craft(40);
+    let ship = c.ship.clone().expect("a craft of parts");
+    assert_eq!((c.parts.len(), c.spec.crew), (40, 1));
+    // The core's four engines and the four boosters' sixteen, each fed.
+    assert_eq!(ship.engines.len(), 20);
+    let names: Vec<&str> = ship.sequence.iter().map(|s| s.name.as_str()).collect();
+    assert_eq!(names, ["Ignition", "Boosters", "Separation"]);
+    // Quarter-turn symmetric: the boosters' noses at 2.3 m, 90° apart.
+    let noses: Vec<DVec3> =
+        (c.parts.iter().zip(&c.part_mass)).filter(|(p, _)| p.name.ends_with(".nose")).map(|(_, m)| m.com).collect();
+    assert_eq!(noses.len(), 4);
+    for w in noses.windows(2) {
+        assert!(
+            (w[0].truncate().length() - w[1].truncate().length()).abs() < 1e-9 && (w[0].z - w[1].z).abs() < 1e-9,
+            "{noses:?}"
+        );
+    }
+    // Its pieces resolve from their ids (a booster alone).
+    let nose = c.parts.iter().find(|p| p.name == "b1.nose").unwrap().id;
+    assert_eq!(crate::craft::craft_of(&CraftId::piece("stress-40", &[nose])).parts.len(), 1);
+}

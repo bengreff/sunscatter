@@ -11,7 +11,7 @@
 use glam::DVec3;
 use sim::aero::{aero_forces, bake, BakeOptions, Flow};
 use sim::craft::design::{mean_drag_area, CraftDesign};
-use sim::craft::stress::{self, layout, StressCraft};
+use sim::craft::stress;
 use sim::craft::volume::VolumeGrid;
 use sim::craft::{cells, mesh, test_craft, CellOptions, Craft, Resolution};
 use sim::ephem::Ephemeris;
@@ -162,17 +162,21 @@ fn live_case(w: &World, craft: &Craft, case: usize, secs: f64) -> (Vessel, Contr
             let air = rotation.omega(t0()).raw().cross(DVec3::X * (RE + 12e3));
             (at(12e3, air + DVec3::new(100.0, 340.0, 0.0)), sas, secs)
         }
-        // Vacuum: 400 km, engine at full thrust.
+        // Vacuum: 400 km, tanks full, every engine started (Ignition) at
+        // full thrust.
         2 => {
             let v = DVec3::Y * (earth.gm / (RE + 400e3)).sqrt();
             let mut s = at(400e3, v);
-            s.set_propellant(w, s.craft.mass.capacity);
+            s.set_fill(w, 1.0);
+            if craft.ship.as_ref().is_some_and(|d| !d.sequence.is_empty()) {
+                s.next_stage(w);
+            }
             (s, Controls { throttle: 1.0, ..sas }, secs)
         }
-        // Pad: engine at minimum throttle, held down (contact substeps).
+        // Pad: standing on it, engines off (contact substeps).
         _ => {
             let s = Vessel::landed_at(w, VesselId(1), "Earth", PAD.0, PAD.1, t0(), craft);
-            (s, Controls { throttle: 0.1, ..sas }, secs)
+            (s, sas, secs)
         }
     };
     out.0.set_debug(w, true);
@@ -318,19 +322,27 @@ struct Row {
     coast: Coast,
 }
 
+/// The stress craft of `n` catalog parts built afresh (not the registry's
+/// cache): its assembly through the catalog, then its surface, cells and
+/// mass model.
+fn fresh(n: usize) -> Craft {
+    let id = stress::id(n);
+    let def = stress::definition(id.base()).unwrap().unwrap();
+    Craft::from_def(id, def, &Resolution::default(), &stress::cell_options(n))
+}
+
 fn craft_row(w: &World, n: usize, runs: usize) -> Row {
     let res = Resolution::default();
-    let opts = stress::cell_options(n);
-    let l = layout(n);
-    let union = median(runs, || timed(|| mesh::union_surface(&l.geometry.primitives, &res)).1);
-    let mut built: Option<StressCraft> = None;
+    // The build: the assembly through the catalog, then the craft's surface,
+    // cells and mass model.
+    let mut built: Option<Craft> = None;
     let build = median(runs, || {
-        let (s, ms) = timed(|| layout(n).build(&res, &opts));
-        built = Some(s);
+        let (c, ms) = timed(|| fresh(n));
+        built = Some(c);
         ms
     });
-    let s = built.unwrap();
-    let c = &s.craft;
+    let c = &built.unwrap();
+    let union = median(runs, || timed(|| mesh::union_surface(&c.geometry.primitives, &res)).1);
     let defaults = cells::build_cells(&c.surface, &c.geometry.primitives, &c.geometry.skin, &CellOptions::default());
     let default_tubes = tubes(&c.surface, &defaults);
     let (lo, hi) = c
@@ -561,8 +573,8 @@ fn frame_loop(
 }
 
 fn fleets(w: &World, sizes: &[usize]) {
-    let (big, ms) = timed(|| stress::stress_craft(300));
-    let (_, bake_ms) = timed(|| big.craft.design().clone());
+    let (big, ms) = timed(|| fresh(300));
+    let (_, bake_ms) = timed(|| big.design().clone());
     println!(
         "\n300-part craft for the fleets: built in {ms:.0} ms, design in {bake_ms:.0} ms (shared by every vessel)"
     );
@@ -570,7 +582,7 @@ fn fleets(w: &World, sizes: &[usize]) {
     println!("|---|---|---|---|---|---|---|---|---|---|---|");
     // Fresh from launch (uniform 290 K), then settled for 30 days first.
     for (size, settled) in sizes.iter().flat_map(|&n| [(n, false), (n, true)]) {
-        let (mut ships, controls) = fleet(w, size, &big.craft, settled);
+        let (mut ships, controls) = fleet(w, size, &big, settled);
         let ((), settle_ms) = timed(|| {
             for (v, c) in ships.iter_mut().zip(&controls).filter(|_| settled) {
                 v.advance(w, t0().add_seconds(30.0 * 86_400.0), c, usize::MAX);
@@ -601,11 +613,11 @@ fn fleets(w: &World, sizes: &[usize]) {
 fn profile(w: &World, what: &str, n: usize) {
     let clock = Instant::now();
     let mut runs = 0;
-    let s = stress::stress_craft(if what == "fleet" { 300 } else { n });
-    let c = Some(&s.craft);
+    let s = fresh(if what == "fleet" { 300 } else { n });
+    let c = Some(&s);
     while clock.elapsed().as_secs_f64() < 30.0 {
         match (what, c) {
-            ("build", _) => drop(stress::stress_craft(n)),
+            ("build", _) => drop(fresh(n)),
             ("bake", Some(c)) => drop(bake(&c.surface, &c.cells, &BakeOptions::default())),
             ("design", Some(c)) => drop(CraftDesign::new(c)),
             ("live", Some(c)) => drop(live_tick(w, c, 0, 2.0)),

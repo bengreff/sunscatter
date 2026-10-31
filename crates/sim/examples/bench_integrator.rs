@@ -239,7 +239,7 @@ fn fleet_craft(w: &World) {
     let t0 = sol::sol_epoch().add_seconds(86_400.0);
     let el = Elements { a: RE + 300_000.0, e: 0.001, i: 0.3, raan: 0.4, argp: 0.0, mean_anomaly: 0.7 };
     let (r, v) = el.to_state(earth.gm);
-    let big = sim::craft::stress::stress_craft(300).craft;
+    let big = (*sim::craft::stress::craft(300)).clone();
     let frame = 1e6 / 60.0;
     for (name, craft) in [("test craft", sim::craft::test_craft()), ("300-part craft", &big)] {
         let mut s = Vessel::coasting(w, VesselId(1), t0, earth.node, r, v, craft);
