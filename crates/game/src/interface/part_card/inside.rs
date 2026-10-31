@@ -91,12 +91,9 @@ pub fn sections(live: &Live, inside: &Inside) -> Vec<Section> {
     }
     if !inside.batteries.is_empty() {
         let b = &inside.batteries;
-        let cap: f64 = b.iter().map(|&j| def.batteries[j].item.capacity).sum::<f64>().max(1.0);
+        let cap: f64 = b.iter().map(|&j| def.batteries[j].item.capacity).sum();
         let charge = total(live, b.iter().map(|&j| (Quantity::BatteryCharge(j as u32), state.batteries[j].charge)));
-        let lines = vec![
-            line("charge", value(live, charge, |r| format!("{:.0} %", r.shown() / cap * 100.0))),
-            shown("capacity", format!("{:.0} Wh", cap / 3600.0)),
-        ];
+        let lines = vec![line("charge", value(live, charge, |r| format::charge(Some(r), cap)))];
         out.push(Section { heading: format!("BATTERIES · {}", n(b)), lines });
     }
     if !inside.thrusters.is_empty() {

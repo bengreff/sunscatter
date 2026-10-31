@@ -105,6 +105,36 @@ pub fn amount(kg: Option<Reading>, capacity: f64) -> String {
     format!("{held}/{:.*} {unit}", max, capacity / scale)
 }
 
+/// The share of `capacity` (the reading's unit) a reading holds, in % to
+/// its precision, at most one decimal (a tank's or a battery's share of
+/// full).
+pub fn share(r: Reading, capacity: f64) -> String {
+    let k = 100.0 / capacity;
+    format!("{:.*} %", decimals(r.precision * k, 1.0, 1), r.shown() * k)
+}
+
+/// One watt-hour (J).
+const WH: f64 = 3600.0;
+
+/// A battery's charge of its capacity (J): `amount`'s rule in Wh (kWh from
+/// 10 kWh), the charge rounded to its reading's precision in that unit,
+/// with its share of full; a dash when no sensor measures it (one rule:
+/// the Power menu and the systems screen's Electrical summary, the part
+/// card's battery and batteries, the systems screen's battery).
+pub fn charge(j: Option<Reading>, capacity: f64) -> String {
+    let (scale, unit, max) = if capacity < 1.0e4 * WH { (WH, "Wh", 0) } else { (1e3 * WH, "kWh", 1) };
+    let full = format!("{:.*} {unit}", max, capacity / scale);
+    let Some(r) = j else { return format!("{DASH}/{full}") };
+    // In the shown unit, so the rounding is to the precision's decade there.
+    let r = Reading { value: r.value / scale, precision: r.precision / scale };
+    let held = format!("{:.*}/{full}", decimals(r.precision, 1.0, max), r.shown());
+    if capacity > 0.0 {
+        format!("{held} ({})", share(r, capacity / scale))
+    } else {
+        held
+    }
+}
+
 /// A mass as it is known (D106: an estimate's reading, a dash when unknown).
 pub fn mass(r: Option<Reading>) -> String {
     read(r, mass_unit)
@@ -291,6 +321,43 @@ mod tests {
         ];
         for (reading, want) in table {
             assert_eq!(ratio(reading), want, "{reading:?}");
+        }
+    }
+
+    /// A battery's charge (finding 47): the held rounded to the sensor's
+    /// 1 % in Wh, the share to its precision; exact in debug mode; a dash
+    /// unmeasured, the capacity still given.
+    #[test]
+    fn charges_read_to_their_precision() {
+        let wh = |x: f64| x * 3600.0;
+        let r = |value: f64, precision: f64| Some(Reading { value: wh(value), precision: wh(precision) });
+        // (charge, capacity in Wh, text)
+        let table = [
+            (r(1888.9, 25.0), 2500.0, "1890/2500 Wh (76 %)"),
+            (r(1888.9, 0.0), 2500.0, "1889/2500 Wh (75.6 %)"),
+            (r(2500.0, 25.0), 2500.0, "2500/2500 Wh (100 %)"),
+            (r(0.0, 25.0), 2500.0, "0/2500 Wh (0 %)"),
+            (None, 2500.0, "—/2500 Wh"),
+            (r(12_345.0, 250.0), 25_000.0, "12.3/25.0 kWh (49 %)"),
+            (None, 25_000.0, "—/25.0 kWh"),
+        ];
+        for (reading, capacity, want) in table {
+            assert_eq!(charge(reading, wh(capacity)), want, "{reading:?}");
+        }
+    }
+
+    /// A share of full, to its precision (one decimal at most).
+    #[test]
+    fn shares_read_to_their_precision() {
+        let r = |value: f64, precision: f64| Reading { value, precision };
+        let table = [
+            (r(150_000.0, 1_400.0), 287_412.0, "52.2 %"),
+            (r(150_000.0, 0.0), 287_412.0, "52.2 %"),
+            (r(75.0, 1.0), 100.0, "75 %"),
+            (r(75.04, 0.0), 100.0, "75.0 %"),
+        ];
+        for (reading, capacity, want) in table {
+            assert_eq!(share(reading, capacity), want, "{reading:?}");
         }
     }
 

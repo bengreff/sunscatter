@@ -6,7 +6,7 @@
 
 use super::{Section, Tone};
 use crate::format::DASH;
-use sim::systems::Quantity;
+use sim::systems::{Quantity, Reading};
 use sim::vessel::Vessel;
 
 /// A battery under this share of its charge is amber, empty red.
@@ -27,11 +27,10 @@ pub struct PowerData {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Battery {
     pub id: String,
-    /// J now and full.
-    pub charge: f64,
+    /// J now as measured (D106: `None` unmeasured).
+    pub charge: Option<Reading>,
+    /// J full.
     pub capacity: f64,
-    /// Measured (D106).
-    pub known: bool,
 }
 
 /// The electrical system of `v` (`None`: a craft with neither buses nor
@@ -45,9 +44,8 @@ pub fn gather(v: &Vessel) -> Option<PowerData> {
     let batteries = (def.batteries.iter().zip(&state.batteries).enumerate())
         .map(|(j, (d, s))| Battery {
             id: d.id.clone(),
-            charge: s.charge,
+            charge: knowledge.read(Quantity::BatteryCharge(j as u32), s.charge),
             capacity: d.item.capacity,
-            known: knowledge.knows(Quantity::BatteryCharge(j as u32)),
         })
         .collect();
     Some(PowerData {
@@ -100,19 +98,17 @@ fn named(p: Option<&PowerData>, name: fn(&str) -> String) -> Vec<Section> {
     }
     let mut cells = Section::new("batteries", format!("BATTERIES · {}", p.batteries.len()));
     for b in &p.batteries {
-        let share = if b.capacity > 0.0 { b.charge / b.capacity } else { 0.0 };
-        let (text, tone) = if !b.known {
-            (format!("{DASH} / {:.0} Wh", b.capacity / 3600.0), Tone::Normal)
-        } else {
-            let text = format!("{:.0} / {:.0} Wh ({:.0} %)", b.charge / 3600.0, b.capacity / 3600.0, share * 100.0);
-            let tone = match share {
+        // The charge by the one rule (`format::charge`: the card's and the
+        // systems screen's), toned by the share it reads.
+        let tone = match b.charge {
+            None => Tone::Normal,
+            Some(r) => match if b.capacity > 0.0 { r.shown() / b.capacity } else { 0.0 } {
                 x if x <= 0.0 => Tone::Alert,
                 x if x < BATTERY_LOW => Tone::Warn,
                 _ => Tone::Normal,
-            };
-            (text, tone)
+            },
         };
-        cells.toned(name(&b.id), text, tone);
+        cells.toned(name(&b.id), crate::format::charge(b.charge, b.capacity), tone);
     }
     let mut off = Section::new("unpowered", format!("WITHOUT POWER · {}", p.unpowered.len()));
     for (owner, why) in &p.unpowered {
@@ -164,12 +160,14 @@ mod tests {
     /// Batteries by share of charge, a dash unmeasured; the unpowered in red.
     #[test]
     fn batteries_and_the_unpowered() {
-        let cell = |charge: f64, known| Battery { id: "b".into(), charge, capacity: 3600.0 * 100.0, known };
+        // The battery's sensor: 1 % of its 100 Wh.
+        let read = |wh: f64| Some(Reading { value: 3600.0 * wh, precision: 3600.0 });
+        let cell = |charge| Battery { id: "b".into(), charge, capacity: 3600.0 * 100.0 };
         let table = [
-            (cell(3600.0 * 50.0, true), "50 / 100 Wh (50 %)", Tone::Normal),
-            (cell(3600.0 * 10.0, true), "10 / 100 Wh (10 %)", Tone::Warn),
-            (cell(0.0, true), "0 / 100 Wh (0 %)", Tone::Alert),
-            (cell(0.0, false), "— / 100 Wh", Tone::Normal),
+            (cell(read(50.0)), "50/100 Wh (50 %)", Tone::Normal),
+            (cell(read(10.0)), "10/100 Wh (10 %)", Tone::Warn),
+            (cell(read(0.0)), "0/100 Wh (0 %)", Tone::Alert),
+            (cell(None), "—/100 Wh", Tone::Normal),
         ];
         for (b, value, tone) in table {
             let p = PowerData {
@@ -194,7 +192,7 @@ mod tests {
         let sim = crate::state::SimState::with_craft(&crate::state::craft_or_fallback("falcon9-crew"));
         let p = gather(sim.ship()).expect("electrical");
         assert!(!p.batteries.is_empty(), "{p:?}");
-        assert!(p.batteries.iter().all(|b| b.capacity > 0.0 && b.charge > 0.0), "{p:?}");
+        assert!(p.batteries.iter().all(|b| b.capacity > 0.0 && b.charge.is_some_and(|r| r.value > 0.0)), "{p:?}");
         assert!(p.unpowered.is_empty(), "{:?}", p.unpowered);
     }
 }

@@ -213,14 +213,10 @@ fn stores(live: &Live, part: u32, inside: &Inside, out: &mut Vec<Section>) {
         out.push(Section { heading: format!("BOTTLE {} · {}", b.id, b.gas), lines });
     }
     for (j, b) in def.batteries.iter().enumerate().filter(|(j, b)| b.part == part && !inside.batteries.contains(j)) {
-        let cap = b.item.capacity.max(1.0);
+        let cap = b.item.capacity;
         let charge = state.batteries[j].charge;
-        let v = live.value(Quantity::BatteryCharge(j as u32), charge, |r| format!("{:.0} %", r.shown() / cap * 100.0));
-        let wh = format!("{:.0} Wh", cap / 3600.0);
-        out.push(Section {
-            heading: format!("BATTERY {}", b.id),
-            lines: vec![line("charge", v), shown("capacity", wh)],
-        });
+        let v = live.value(Quantity::BatteryCharge(j as u32), charge, |r| format::charge(Some(r), cap));
+        out.push(Section { heading: format!("BATTERY {}", b.id), lines: vec![line("charge", v)] });
     }
     for (j, t) in def.thrusters.iter().enumerate().filter(|(j, t)| t.part == part && !inside.thrusters.contains(j)) {
         let lost = state.out(t.owner);

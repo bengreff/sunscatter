@@ -55,6 +55,28 @@ fn a_tank_card_shows_what_the_craft_measures() {
     assert_eq!(value(&dragon, "TANKS", fluid), &Value::Unknown("a level sensor in the tank: none fitted".into()));
 }
 
+/// A battery's charge by the one rule (finding 47, `format::charge`): the
+/// card's batteries read what their sensors give, to their 1 %, as the
+/// Power menu and the systems screen do.
+#[test]
+fn a_batterys_charge_reads_by_the_one_rule() {
+    let (def, mut state) = falcon9();
+    let s2: Vec<usize> = (0..def.batteries.len()).filter(|&j| def.batteries[j].id.starts_with("s2.battery")).collect();
+    assert_eq!(s2.len(), 2, "two of 2 kWh in the second stage's tank");
+    for &j in &s2 {
+        state.batteries[j].charge = 0.7 * def.batteries[j].item.capacity;
+    }
+    let k = data::knowledge(&def, &state, false);
+    let live = Live { def: &def, state: &state, knowledge: &k, thrusts: &[], temps: &[], chute: None };
+    let card = card(&live, def.batteries[s2[0]].part).unwrap();
+    let r = |j: usize| k.read(Quantity::BatteryCharge(j as u32), state.batteries[j].charge).unwrap();
+    let sum = sim::systems::Reading { value: r(s2[0]).value + r(s2[1]).value, precision: r(s2[0]).precision };
+    let want = format::charge(Some(sum), 4000.0 * 3600.0);
+    assert_eq!(want, "2800/4000 Wh (70.0 %)", "to the sensors' 20 Wh, half a per cent of the two");
+    assert_eq!(value(&card, "BATTERIES", "charge"), &Value::Shown(want));
+    assert_eq!(format::charge(Some(r(s2[0])), 7.2e6), "1400/2000 Wh (70 %)", "one of them, to 1 %");
+}
+
 /// The capsule's card is the part and its totals (owner, 2026-10-29: "those
 /// components should not be listed"): one section per kind of what its
 /// components carry, none per component, and none of their commands.
@@ -80,7 +102,11 @@ fn the_capsules_card_sums_what_it_carries() {
         assert!(headings.iter().all(|h| !h.starts_with(one)), "{one} listed: {headings:?}");
     }
     assert_eq!(value(&card, "ENGINES", "state"), &Value::Shown("8 off".into()));
-    assert!(matches!(value(&card, "BATTERIES", "charge"), Value::Shown(t) if t.ends_with('%')), "{card:?}");
+    assert_eq!(
+        value(&card, "BATTERIES", "charge"),
+        &Value::Shown("10.0/10.0 kWh (100.0 %)".into()),
+        "four of 2.5 kWh, exact"
+    );
     assert!(card.sections.last().unwrap().heading.starts_with("PART"));
     assert!(card.commands.iter().all(|c| !matches!(c.command, ShipCommand::Rcs(..) | ShipCommand::Ignite(..))));
     // A part's own items keep their sections (the booster's tank's two).

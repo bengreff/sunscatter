@@ -161,7 +161,11 @@ fn the_hottest_and_the_worn_lead() {
 #[test]
 fn electrical_is_the_power_menus() {
     use crate::interface::menus::power::{sections, Battery, PowerData};
-    let cell = |charge: f64| Battery { id: "s2.battery#1".into(), charge, capacity: 3600.0e3, known: true };
+    let cell = |charge: f64| Battery {
+        id: "s2.battery#1".into(),
+        charge: Some(sim::systems::Reading { value: charge, precision: 36.0e3 }),
+        capacity: 3600.0e3,
+    };
     let p = PowerData {
         buses: vec![sim::systems::power::BusRun {
             name: "dragon".into(),

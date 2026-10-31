@@ -360,11 +360,7 @@ fn tank_group(def: &ShipDef, state: &ShipState, i: usize, k: &Known) -> Group {
     // card's and the staging bar's rule), and its share of full.
     let read = k.knowledge.read(q(Quantity::TankLevel), s.liquid);
     let level = match read.filter(|_| t.capacity > 0.0) {
-        Some(r) => {
-            let share = 100.0 / t.capacity;
-            let pct = format!("{:.*}", crate::format::decimals(r.precision * share, 1.0, 1), r.shown() * share);
-            format!("{} ({pct} %)", crate::format::amount(read, t.capacity))
-        }
+        Some(r) => format!("{} ({})", crate::format::amount(read, t.capacity), crate::format::share(r, t.capacity)),
         None => crate::format::amount(read, t.capacity),
     };
     let warm = k.knows(q(Quantity::TankTemperature));
@@ -450,9 +446,9 @@ fn stores(def: &ShipDef, state: &ShipState, id: &str, k: &Known, out: &mut Vec<G
     }
     for (j, b) in def.batteries.iter().enumerate().filter(|(_, b)| b.id == id) {
         let s = &state.batteries[j];
-        let charge = k.or_dash(k.knows(Quantity::BatteryCharge(j as u32)), || format!("{:.0}", s.charge / 3600.0));
+        let charge = k.knowledge.read(Quantity::BatteryCharge(j as u32), s.charge);
         let mut g = Group::new(format!("BATTERY {}", b.id));
-        g.row("charge", format!("{charge} / {:.0} Wh", b.item.capacity / 3600.0))
+        g.row("charge", crate::format::charge(charge, b.item.capacity))
             .row("voltage", format!("{:.0} V", b.item.voltage))
             .row("temperature", k.or_dash(k.knowledge.perfect, || kelvin(s.k)));
         // The bus it feeds, as `systems::power` runs it.
