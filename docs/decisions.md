@@ -200,7 +200,7 @@ Oceans get proper behavior when aerodynamics is implemented.
 - These measure accuracy against our reference integration. Determinism (D026) is exact regardless.
 
 **D043: The ship OS is one flight-computer layer per vessel, and every program on it is a WASM module.** *Decided, 2026-09-25; one layer and one format, 2026-10-30 (owner; [interview-2026-10-30.md](archive/interviews/interview-2026-10-30.md)).*
-- The layer F3 built (`sim::systems::flight`) is the ship OS. "Every computer on the ship is summed to one abstracted operating system": its compute budget is the sum of the computers' real processors (or their class, marked E), and a lost computer takes its share.
+- The layer F3 built (`sim::systems::ship_os`, once `systems::flight`) is the ship OS. "Every computer on the ship is summed to one abstracted operating system": its compute budget is the sum of the computers' real processors (or their class, marked E), and a lost computer takes its share.
 - Every program is a WASM module with one API (`Knowledge` in, commands out, the budget): the vehicle's own flight software, which ships with the craft (readable, editable, shareable), and the player's programs alike. Native code is only the layer itself (sensors to `Knowledge`, commands to actuators).
 - Players can write scripts in any language that compiles to WASM.
 - Scripts run sandboxed and deterministically, with an execution budget per tick that models a ship computer's limited power.

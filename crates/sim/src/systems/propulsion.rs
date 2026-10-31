@@ -23,21 +23,16 @@
 //!   pods), or drag settles it, and starts once its tanks' outlets are
 //!   covered; commanded again it starts at once, and ingests gas if it is
 //!   still floating.
-//! * **The pad's rule** (falcon9.md §1.2, §4.2): an armed release lets the
-//!   clamps go at the first tick every engine it waits for reports its
-//!   rated thrust (the flight software's launch commit, `flight::commit`,
-//!   on the engine controllers' readouts); an engine that fails or stops
-//!   first, or whose readout no computer receives, aborts the launch
-//!   (every engine shut down, the clamps kept); armed with none lit, it is
-//!   disarmed. A release disarmed without letting go did not happen: its
-//!   stage is next again ([`disarm`]).
-//! * **Safing** (`flight::safing`): a lit engine whose flight computers are
-//!   all lost or unpowered is shut down by its own controller (E).
+//! * **The fail-safe** (D123, E): a lit engine whose linked flight
+//!   computers are all lost or unpowered, or whose own controller is lost,
+//!   is shut down by its controller (its tail-off), reading only its own
+//!   links (`systems::links`). The engine controllers are layer 1 (D128):
+//!   nothing here calls the ship computer (`systems::ship_os`), which reads
+//!   their readouts (the pad's launch commit, `ship_os::commit`).
 
-use super::flight;
+use super::links;
 use super::plumbing::Feed;
 use crate::catalog::EngineData;
-use crate::craft::command::ShipCommand;
 use crate::craft::engine::{ShipThrust, P_SEA_LEVEL};
 use crate::craft::ship::{EngineDef, ShipDef};
 use crate::craft::state::{Effect, EngineStatus, ShipState};
@@ -96,20 +91,6 @@ pub fn lit(state: &ShipState) -> Vec<u32> {
         .filter(|(_, e)| matches!(e.status, EngineStatus::Starting | EngineStatus::Running))
         .map(|(i, _)| i as u32)
         .collect()
-}
-
-/// The armed release waits for the engines lit now (and for no other).
-pub(crate) fn await_lit(state: &mut ShipState) {
-    for e in &mut state.engines {
-        e.awaited = matches!(e.status, EngineStatus::Starting | EngineStatus::Running);
-    }
-}
-
-/// The release waits for no engine (it is disarmed or let go).
-fn await_none(state: &mut ShipState) {
-    for e in &mut state.engines {
-        e.awaited = false;
-    }
 }
 
 /// Whether any engine is doing something (settling its propellant to
@@ -330,11 +311,12 @@ pub fn stop(def: &ShipDef, state: &mut ShipState, i: usize, why: Stop, at: Epoch
 
 /// Advances every engine over a tick (`env`) with its tanks' conditions
 /// (`feeds`, `plumbing::feeds`): the transients, depletion, gas ingestion
-/// and cavitation, the run time; then the pad's armed release. Returns the
-/// effects the vessel acts on (the clamps' release).
+/// and cavitation, the run time (the pad's armed release is the ship
+/// computer's, `ship_os::commit::step`, after it). Returns the effects the
+/// vessel acts on (none yet).
 pub fn step(def: &ShipDef, state: &mut ShipState, env: &Env, feeds: &[Feed]) -> Vec<Effect> {
     close_throttle(def, state, env);
-    safe(def, state, env.at);
+    fail_safe(def, state, env.at);
     settle_or_start(def, state, env);
     for i in 0..def.engines.len() {
         if !env.debug && inlet_trouble(def, state, i, env, feeds) {
@@ -342,22 +324,36 @@ pub fn step(def: &ShipDef, state: &mut ShipState, env: &Env, feeds: &[Feed]) -> 
         }
         step_engine(def, state, i, env);
     }
-    release(def, state, env.at, env.debug)
+    Vec::new()
 }
 
-/// The engine controllers' safing (`flight::safing`): a lit engine whose
-/// every flight computer is lost or unpowered is shut down by its own
-/// controller.
-fn safe(def: &ShipDef, state: &mut ShipState, at: Epoch) {
-    let lit: Vec<bool> = (state.engines.iter())
-        .map(|e| matches!(e.status, EngineStatus::Starting | EngineStatus::Running) || e.settling.is_some())
-        .collect();
-    if !lit.contains(&true) {
-        return;
+/// Why engine `i`'s controller safes it now (D123, E: the class default;
+/// falcon9.md has no source for the Merlin's, and the Shuttle's SSME held
+/// its last command instead): lit (`lit`: starting, running or waiting for
+/// its propellant to settle) with its own controller lost, or with every
+/// flight computer linked to it lost or unpowered. `None`: it runs on.
+pub fn safes(controller: links::Controller, lit: bool) -> Option<&'static str> {
+    match (lit, controller.works, controller.commanded) {
+        (false, ..) => None,
+        (true, false, _) => Some("safed: its controller lost"),
+        (true, true, false) => Some("safed by its controller: no flight computer"),
+        (true, true, true) => None,
     }
-    for i in flight::safing(&flight::health(def, state), &lit) {
-        shut_down(state, i, "safed by its controller: no flight computer");
-        state.event(at, format!("{}: safed by its controller: no flight computer", def.engines[i].id), true);
+}
+
+/// The engine controllers' fail-safe ([`safes`]), each reading its own
+/// links.
+fn fail_safe(def: &ShipDef, state: &mut ShipState, at: Epoch) {
+    for i in 0..def.engines.len() {
+        let e = &state.engines[i];
+        let lit = matches!(e.status, EngineStatus::Starting | EngineStatus::Running) || e.settling.is_some();
+        if !lit {
+            continue;
+        }
+        if let Some(why) = safes(links::controller(def, state, i), lit) {
+            shut_down(state, i, why);
+            state.event(at, format!("{}: {why}", def.engines[i].id), true);
+        }
     }
 }
 
@@ -470,59 +466,6 @@ fn step_engine(def: &ShipDef, state: &mut ShipState, i: usize, env: &Env) {
     }
 }
 
-/// Disarms the pad's armed release without letting go, with the event
-/// `text`: the release's stage is next again
-/// (`command::release_undone`). Nothing if it is not armed.
-pub fn disarm(state: &mut ShipState, at: Epoch, text: String, alarm: bool) {
-    if !state.release_armed {
-        return;
-    }
-    state.release_armed = false;
-    await_none(state);
-    state.sequence = super::command::release_undone(&state.stages, state.sequence);
-    state.event(at, text, alarm);
-}
-
-/// The pad's armed release (see the module): it waits on the flight
-/// software's launch commit (`flight::commit`), which reads the engine
-/// controllers' readouts.
-fn release(def: &ShipDef, state: &mut ShipState, at: Epoch, debug: bool) -> Vec<Effect> {
-    if !state.release_armed || !state.clamped {
-        state.release_armed = false;
-        await_none(state);
-        return Vec::new();
-    }
-    if !state.engines.iter().any(|e| e.awaited) {
-        await_lit(state);
-        if !state.engines.iter().any(|e| e.awaited) {
-            // None lit (one waiting for its propellant to settle is about
-            // to): armed, it would hold the vessel in live ticks for ever.
-            if !state.engines.iter().any(|r| r.settling.is_some()) {
-                disarm(state, at, "Clamps: release disarmed: no engine lit; clamps held".into(), true);
-            }
-            return Vec::new();
-        }
-    }
-    let waits: Vec<usize> = (state.engines.iter().enumerate()).filter(|(_, e)| e.awaited).map(|(i, _)| i).collect();
-    // The flight software's launch commit, on the controllers' readouts.
-    let k = super::data::knowledge(def, state, debug);
-    match flight::commit(def, &flight::engine_readings(def, state, &k), &waits) {
-        flight::Commit::Wait => return Vec::new(),
-        flight::Commit::Abort { engine: i, why } => {
-            for j in lit(state) {
-                shut_down(state, j as usize, "pad abort");
-            }
-            disarm(state, at, format!("Pad abort: {} {why}; clamps held", def.engines[i].id), true);
-            return Vec::new();
-        }
-        flight::Commit::Release => {}
-    }
-    state.release_armed = false;
-    await_none(state);
-    state.event(at, "Liftoff: the clamps released at full thrust", false);
-    state.apply(def, &ShipCommand::ReleaseClamps).unwrap_or_default()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -557,5 +500,25 @@ mod tests {
         assert_eq!((setting(&d, 0.0, 1.0), setting(&d, 0.7, 1.0), setting(&d, 2.0, 1.0)), (0.4, 0.7, 1.0));
         assert!((tail_off(&d) - 2.1e5 / 914e3).abs() < 1e-12);
         assert_eq!((ramp(-1.0), ramp(0.5), ramp(2.0)), (0.0, 0.5, 1.0));
+    }
+
+    /// The controllers' fail-safe (D123): a lit engine is safed when its
+    /// own controller is lost or no linked computer works; a dark engine,
+    /// or a lit one commanded by a working controller, is not.
+    #[test]
+    fn the_fail_safe_table() {
+        let c = |works, commanded| links::Controller { works, commanded };
+        // (controller, lit, why)
+        let cases = [
+            (c(true, true), true, None),
+            (c(true, false), true, Some("safed by its controller: no flight computer")),
+            (c(false, true), true, Some("safed: its controller lost")),
+            (c(false, false), true, Some("safed: its controller lost")),
+            (c(true, false), false, None),
+            (c(false, false), false, None),
+        ];
+        for (i, (controller, lit, want)) in cases.into_iter().enumerate() {
+            assert_eq!(safes(controller, lit), want, "row {i}");
+        }
     }
 }

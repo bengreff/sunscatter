@@ -16,7 +16,7 @@ As built in `sim::landing` (`mod.rs`: the starts, the impact, the braking soluti
 
 **The assumed attitude** (`AssumedAttitude`), chosen by the game from the controls (`landing::assumed_attitude`, a table test): SAS off, nose into the relative wind (`SurfacePrograde`: a stable craft left to itself); a surface retrograde or prograde hold, that direction; any other hold, the current attitude held inertially (exact for stability, a fair guess for the rest). Straight up at rest.
 
-**What the software knows:** a prediction needs the flight software's navigation solution, and for an inertial attitude its attitude knowledge (`flight::can_predict`, F3). Landed and crashed vessels have none.
+**What the software knows:** a prediction needs the flight software's navigation solution, and for an inertial attitude its attitude knowledge (`ship_os::can_predict`, F3). Landed and crashed vessels have none.
 
 ## Where it ends
 

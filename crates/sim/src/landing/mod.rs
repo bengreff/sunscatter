@@ -91,7 +91,7 @@ pub struct LandingStart {
 impl LandingStart {
     /// A flying vessel's prediction start with `throttle` and its chutes
     /// (armed by `chute_command`), from the vessel's time. `None` for landed and crashed vessels, and for one whose
-    /// flight software has no navigation solution (`flight::can_predict`).
+    /// flight software has no navigation solution (`ship_os::can_predict`).
     pub fn of_vessel(
         world: &World,
         vessel: &Vessel,
@@ -102,7 +102,7 @@ impl LandingStart {
         // What the flight software knows (F3): a navigation solution, and the
         // attitude when it assumes the current one held.
         let inertial = matches!(attitude, AssumedAttitude::Inertial(_));
-        if !crate::systems::flight::can_predict(&vessel.knowledge(), inertial) {
+        if !crate::systems::ship_os::can_predict(&vessel.knowledge(), inertial) {
             return None;
         }
         let mut chute = if vessel.destruction().is_none() { vessel.chute } else { Default::default() };

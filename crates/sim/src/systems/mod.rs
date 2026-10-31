@@ -26,8 +26,8 @@ pub mod estimate;
 pub mod exhaust;
 pub mod failure;
 pub mod fins;
-pub mod flight;
 pub mod g_limit;
+pub mod links;
 pub mod maneuver;
 pub mod mechanisms;
 pub mod plumbing;
@@ -35,6 +35,7 @@ pub mod power;
 pub mod propulsion;
 pub mod rcs;
 pub mod ship;
+pub mod ship_os;
 pub mod structure;
 
 pub use crate::craft::state::{Event, Order, OrderKind};

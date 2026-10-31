@@ -218,7 +218,7 @@ impl Vessel {
         // happen (its stage is next again in every piece).
         if let Some(state) = self.ship.as_mut().filter(|s| s.clamped) {
             let text = "Clamps: release disarmed by the separation; clamps held".to_string();
-            crate::systems::propulsion::disarm(state, self.time, text, true);
+            crate::systems::ship_os::commit::disarm(state, self.time, text, true);
         }
         let cut = Cut { old: &old, at: (anchor, r, v) };
         let mut crew = self.crew;

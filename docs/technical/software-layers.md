@@ -1,6 +1,6 @@
 # Ship software layers (D128): the inventory and the design
 
-**Status: design** (AUDIT, 2026-10-30, at 14c2a4d). Nothing here is built. LAYERS builds it ([brief-layers.md](../plans/brief-layers.md)). This doc classifies every piece of logic in the code that decides something, says where it lives today and where it should, and defines the bare minimum, the warp-stop line, notifications per craft, and the module layout with its two APIs. The system: [avionics](../systems/avionics.md); the flight software as built: [flight-software.md](flight-software.md).
+**Status: being built** (designed by AUDIT, 2026-10-30, at 14c2a4d; LAYERS builds it, [brief-layers.md](../plans/brief-layers.md)): §7's moves say item by item what is *built*; the rest is *design*. This doc classifies every piece of logic in the code that decides something, says where it lives today and where it should, and defines the bare minimum, the warp-stop line, notifications per craft, and the module layout with its two APIs. The system: [avionics](../systems/avionics.md); the flight software as built: [flight-software.md](flight-software.md).
 
 D128:
 - **Layer 1** is each part's own logic, "synonymous with how the part actually works": an engine controller's start sequence and fail-safe shutdown, a valve's relief.
@@ -14,7 +14,7 @@ A piece of logic is **layer 1** when it belongs to one part and reads only that 
 
 It is **layer 2** when it coordinates parts, or reads the craft through its sensors to choose commands: what a player could do at the controls or in the systems screen. It reads `Knowledge`, never the truth (D106), and its outputs are the commands a player issues (D043).
 
-Neither: the physics (what happens), the native boundary (sensors to `Knowledge`, commands to actuators: `systems::data`, `flight::sense`, `flight::health`, `systems::command::apply`, `ShipState::apply`), and the interface's readers (estimates, the g-limit, the abort's offer).
+Neither: the physics (what happens), the native boundary (sensors to `Knowledge`, commands to actuators: `systems::data`, `systems::links`, `ship_os::sense`, `ship_os::health`, `systems::command::apply`, `ShipState::apply`), and the interface's readers (estimates, the g-limit, the abort's offer).
 
 ## 2. Inventory
 
@@ -26,7 +26,7 @@ Neither: the physics (what happens), the native boundary (sensors to `Knowledge`
 | Shutdown and tail-off | *shutting down* with the published impulse, then *off* | `propulsion::stop` | stays | |
 | Throttle within range | a running engine cannot go below its minimum | `propulsion` | stays | |
 | Flame-out when dry | an engine whose feed runs dry stops (not a failure) | `propulsion` | stays (physics) | |
-| **The fail-safe shutdown** (D123) | a lit engine whose linked computers are all lost or unpowered shuts down; D123 adds its own controller lost | `systems::flight::safing`, called from `propulsion` (`propulsion.rs:343`) | the engine controller's own rule in `propulsion`, reading its own links | today in the ship-OS module: the clearest layer-1 rule living in layer 2's file |
+| **The fail-safe shutdown** (D123) | a lit engine whose linked computers are all lost or unpowered shuts down; D123 adds its own controller lost | was `systems::flight::safing`, called from `propulsion` | **built:** `propulsion::safes` (a table test), each controller reading its own links (`systems::links::controller`), D123's lost controller included | |
 | Benign shutdown on a failure | the controller stops an engine whose mode is benign | `failure::outcome` → `propulsion::stop` | stays | |
 | **The wait for settled propellant** | an engine commanded on floating propellant waits up to `SETTLE_LIMIT`, then starts; commanded again it starts at once | `propulsion::settle_or_start` | see the next row | PLANNER's `systems::maneuver` calls the settling wait layer 1 |
 | **The push that settles it** | the thrusters along the thrust fire during the wait (the S2's nitrogen pods) | `propulsion::ullage` → `systems::rcs` | **layer 2**: the stage computer's ullage function | an engine commanding another part's thrusters is the "mingling" D128 forbids. The real sequence's timed ullage burn is the flight computer's (flight-software.md: "an adaptive function"). Open point 1 |
@@ -48,7 +48,7 @@ Neither: the physics (what happens), the native boundary (sensors to `Knowledge`
 | Torque and force allocation | which thrusters fire, the gimbals' automatic vectoring (D126's "simplified aids"), the grid fins' share | `systems::rcs` (allocation), `fins::allocate`, `vessel::attitude` | part of `ship_os::sas` | coordinates parts. With layer 1 alone a pilot fires thrusters one by one (D128's "nearly impossible") |
 | The pilot's RCS modes (D111) | what the translation and rotation keys fire | `rcs::pilot` | the pilot's input handling in layer 2 | |
 | Throttle to zero shuts down (D114) | closing the throttle stops the lit engines | `propulsion` (the level's rule) | layer 2's input handling | an engine controller holds its minimum; the lever's meaning is the ship's |
-| **The launch commit** | the clamps let go when every engine reports rated thrust; an engine failing first aborts the launch | `flight::commit`, called from `propulsion` (`propulsion.rs:493`) | a program: `ship_os::commit` | propulsion keeps only the engines' readouts |
+| **The launch commit** | the clamps let go when every engine reports rated thrust; an engine failing first aborts the launch | was `flight::commit`, called from `propulsion` | **built:** `ship_os::commit` (the rule and the armed release, `commit::step`, run after the engines step) | propulsion keeps only the engines' readouts |
 | **The stage sequence and functions** | Space runs the next stage; AGAIN; saved functions; the sequence's position | `systems::command` (`next_stage`, `again`, `function`, `run`), `craft::program` | `ship_os::sequence` | the edits are the systems screen's (`edit_sequence`) |
 | Interlocks | the legs refused while the clamps hold; a stage with nothing left refused | `systems::command`, `game::staging` | `ship_os::sequence` | |
 | **Aborts** (D120) | the procedure's commands; the automatic decision on a thrust-to-weight margin | the procedure: a function (`program::offered` for the offer); the decision: not built | `ship_os::abort` | the offer stays an interface rule |
@@ -156,7 +156,7 @@ sim::systems::
 
 ## 7. The moves for LAYERS, in order
 
-1. `systems::flight` → `systems::ship_os::{mod, sas, commit}`; `safing` → `propulsion`'s engine controller.
+1. *Built.* `systems::flight` → `systems::ship_os::{mod, sas, commit}`; `safing` → `propulsion`'s engine controller (D123's lost controller with it); the data links both layers read → `systems::links`.
 2. The ullage push out of `propulsion` into `ship_os::ullage`, with the engine's own start rule left in `propulsion` (open point 1).
 3. The sequence, functions and interlocks out of `systems::command` into `ship_os::sequence`; `command::apply` stays the native boundary.
 4. The chutes' arming and main height into `ship_os::chutes`, from the barometric altitude in `Knowledge`.

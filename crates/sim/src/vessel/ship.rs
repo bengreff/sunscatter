@@ -20,7 +20,7 @@ use crate::craft::ship::ShipDef;
 use crate::craft::state::{Effect, ShipState};
 use crate::craft::{EngineOutput, MassProps};
 use crate::frame::NodeId;
-use crate::systems::{command, flight, propulsion, OrderKind};
+use crate::systems::{command, propulsion, ship_os, OrderKind};
 use crate::world::World;
 use glam::DVec3;
 use std::sync::Arc;
@@ -150,21 +150,21 @@ impl Vessel {
         }
     }
 
-    /// The computers' health (`systems::flight::health`; all working for a
+    /// The computers' health (`systems::ship_os::health`; all working for a
     /// craft without the part system).
-    pub fn flight_health(&self) -> flight::Health {
-        self.ship_parts().map_or_else(flight::Health::ideal, |(def, state)| flight::health(def, state))
+    pub fn flight_health(&self) -> ship_os::Health {
+        self.ship_parts().map_or_else(ship_os::Health::ideal, |(def, state)| ship_os::health(def, state))
     }
 
-    /// What SAS can do now with `controls` (`systems::flight::sas`): the
+    /// What SAS can do now with `controls` (`systems::ship_os::sas`): the
     /// navball says it.
-    pub fn sas_status(&self, controls: &Controls) -> flight::Sas {
-        flight::sas(&self.knowledge(), &self.flight_health(), controls)
+    pub fn sas_status(&self, controls: &Controls) -> ship_os::Sas {
+        ship_os::sas(&self.knowledge(), &self.flight_health(), controls)
     }
 
     /// What the attitude controller flies in a live tick at `state`
     /// (anchor-relative) with the pilot's `controls` (F3): the controls the
-    /// flight software lets through ([`flight::Sas::acting`]), what SAS aims
+    /// flight software lets through ([`ship_os::Sas::acting`]), what SAS aims
     /// at from the navigation solution (the attitude held without one), and
     /// the attitude as the sensors give it.
     pub(super) fn steer(
@@ -175,8 +175,8 @@ impl Vessel {
         controls: &Controls,
     ) -> (Controls, Aim, Attitude) {
         let k = self.knowledge();
-        let acting = flight::sas(&k, &self.flight_health(), controls).acting(controls);
-        let view = flight::sense(k, (self.attitude, state), None);
+        let acting = ship_os::sas(&k, &self.flight_health(), controls).acting(controls);
+        let view = ship_os::sense(k, (self.attitude, state), None);
         let aim = view.nav.map_or(Aim::Stability, |nav| self.aim(world, snap, nav, &acting));
         (acting, aim, view.attitude.unwrap_or(self.attitude))
     }

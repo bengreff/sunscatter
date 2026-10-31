@@ -10,7 +10,7 @@
 //! the two-body model spans only the settling and the burn (J2 moves a LEO
 //! state ~1 cm/s per second from its conic).
 //!
-//! **Inputs** are only what the flight software sees ([`super::flight::View`]:
+//! **Inputs** are only what the flight software sees ([`super::ship_os::View`]:
 //! the attitude, the navigation solution, the engine controllers' readouts,
 //! the feeds' settled flags where a level sensor reads them), the node, the
 //! stage estimate of its engines (`estimate::lit`, the staging bar's walk)
@@ -34,7 +34,7 @@
 //!
 //! Numbers marked (E) are estimates awaiting the owner.
 
-use super::flight::View;
+use super::ship_os::View;
 use crate::craft::state::EngineStatus;
 use crate::frame::NodeId;
 use crate::time::Epoch;

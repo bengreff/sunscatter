@@ -6,7 +6,7 @@ What a craft knows, what its own computers decide, how it is powered, and how it
 - The information model (`Knowledge`) is *playable*; the interface and the agent's tools read it.
 - Power is *playable*.
 - The comm network (sites, link budgets, line of sight, light time, relays) and light-delayed control are *playable*. D034's revision is not built: today a command to another vessel leaves from wherever the player is, so from a crewed vessel a probe is commanded with the delay between the two, not from mission control.
-- The flight software is a *skeleton*. D043's one flight-computer layer per vessel exists (`sim::systems::flight`): SAS, the holds, the launch commit and the engine controllers' safing go through it. Its functions are native Rust, with no compute budget, no guidance and no adaptive functions yet. D043's WASM programs and ship scripting are *design*.
+- The flight software is a *skeleton*. D043's one flight-computer layer per vessel exists (`sim::systems::ship_os`, D128's layer 2): SAS, the holds and the launch commit go through it; the engines' fail-safe is their controllers' own (layer 1, `systems::propulsion`). Its functions are native Rust, with no compute budget, no guidance and no adaptive functions yet. D043's WASM programs and ship scripting are *design*.
 - D126's automation switch is *design*.
 
 ## Laws
@@ -25,7 +25,7 @@ What a craft knows, what its own computers decide, how it is powered, and how it
 ## What exists
 
 - **Knowledge** (`sim::systems::data`): position, velocity, attitude, rates, acceleration; tank levels, pressures and temperatures; bottle pressures; engine thrust; battery charge; joint loads; part temperatures; the cabin's air. From IMUs, star trackers, GNSS, level sensors, pressure transducers and thermocouples. *Playable.*
-- **The flight software** (`sim::systems::flight`, D043's layer): SAS and the holds need an attitude reference and a working computer, a direction hold a navigation solution too; the pad's launch commit; the engine controllers' safing when every linked computer is lost. Each is a native function of what the sensors know, the computers' health and the craft's definition, the shape a WASM program will take. *Skeleton.*
+- **The ship computer** (`sim::systems::ship_os`, D043's layer, D128's layer 2): SAS and the holds need an attitude reference and a working computer, a direction hold a navigation solution too; the pad's launch commit and the armed release. The engine controllers' fail-safe (D123: every linked computer lost, or its own controller lost) is layer 1, in `systems::propulsion`. Each is a native function of what the sensors know, the computers' health and the craft's definition, the shape a WASM program will take. *Skeleton.*
 - **Power** (`sim::systems::power`): each bus's loads against the pad's umbilical, solar cells and batteries (I²R losses), shedding the least essential load. *Playable.*
 - **Comms** (D068, `sim::comms`, `game::comms`): ground sites, link budgets, line of sight against the bodies' ellipsoids, light time, relay paths; delayed telemetry and commands. *Playable.* The control location (D067, `game::comms::location_rule`): aboard a crewed active vessel the player commands it at once; flying an uncrewed vessel, or at the tracking station, the player is at mission control (one site, on Earth, in `data/comms.ron`). An uncrewed vessel's helm carries the light delay itself (`game::commands::controls_route`).
 - **Controls** (D112, `sim::vessel::helm`): manual control with SAS and the gimbal's automatic vectoring, always available (D126). *Playable.*
@@ -41,7 +41,7 @@ What a craft knows, what its own computers decide, how it is powered, and how it
 - **The ship OS** (D043, D035; pillar 4 of the [vision](../vision.md)): the WASM runtime and its one API, the compute budget summed from the computers, the vehicle's flight software as WASM modules, the player's scripts and their command-line tool.
 - **D034's routing:** commands to a vessel leave only from the nearest mission control, and programs upload over the relay network; with one mission control there is no choice of the nearest yet.
 - **D126's switch:** each automatic sequence by itself, on a press or off; the autopilot's config menu; taking over elsewhere than planned burns. Planned burns are built as a layer-2 program (*playable*, [planner.md](../technical/planner.md)): taken over only where the player's input conflicts with it, and handed over as it was flying.
-- **D128's three layers:** today `sim::systems::flight` mixes the parts' own logic (layer 1: engine controllers, valves, regulators, the fail-safe shutdown) with the ship computer's (layer 2: SAS, the holds, the launch commit, functions, aborts). LAYERS splits them, with the bare minimum defined by layer 1 alone (enough to coast for months) and the warp-stop line on it.
+- **D128's three layers:** LAYERS is splitting them ([software-layers.md](../technical/software-layers.md) §7; the rename to `ship_os` and the fail-safe into the engine controllers are built), with the bare minimum defined by layer 1 alone (enough to coast for months) and the warp-stop line on it.
 - **Antennas from the parts** (D125): every vessel carries the same antenna constant (`game::comms::VESSEL_ANTENNA`, the test craft's).
 
 ## Owners and decisions

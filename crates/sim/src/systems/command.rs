@@ -40,9 +40,9 @@ pub fn can_ignite(igniter: Igniter, ignitions: u32, ground: bool) -> bool {
 
 /// Whether an engine (or other actuator) `owner` can be commanded: its own
 /// function in (not lost, with power), and if computers are linked to it,
-/// one of them working (`systems::flight::commanded`).
+/// one of them working (`systems::links::commanded`).
 pub fn reachable(def: &ShipDef, state: &ShipState, owner: Owner) -> bool {
-    !state.out(owner) && super::flight::commanded(def, state, owner)
+    !state.out(owner) && super::links::commanded(def, state, owner)
 }
 
 /// Applies `command` (see the module); the effects the vessel acts on are
@@ -167,7 +167,7 @@ pub fn apply(def: &ShipDef, state: &mut ShipState, command: &ShipCommand, cx: Co
         ShipCommand::ReleaseClamps if !state.clamped => Ok(Vec::new()),
         ShipCommand::ReleaseClamps if cx.sequence => {
             state.release_armed = true;
-            super::propulsion::await_lit(state);
+            super::ship_os::commit::await_lit(state);
             state.event(cx.at, "Clamps armed: release at full thrust", false);
             Ok(Vec::new())
         }

@@ -9,7 +9,7 @@
 use crate::trajectory::LineFrame;
 use glam::{DQuat, DVec3};
 use sim::frame::NodeId;
-use sim::systems::flight::Sas;
+use sim::systems::ship_os::Sas;
 
 /// A vessel below the rails floor counts as low until it is this fraction
 /// of the floor above it (a band, so the mode cannot chatter there).
@@ -270,7 +270,7 @@ pub fn speed_reference(mode: Mode) -> sim::vessel::SpeedReference {
 /// body for prograde and retrograde (stated, D075).
 /// The SAS button's label and hover: ON or OFF, or what the flight
 /// software says when it cannot do what is asked (F3,
-/// `sim::systems::flight::Sas`: "no attitude reference", with the hold in
+/// `sim::systems::ship_os::Sas`: "no attitude reference", with the hold in
 /// the hover).
 pub fn sas_button(controls: &sim::vessel::Controls, body: &str, status: Sas) -> (&'static str, String) {
     let label = match status {

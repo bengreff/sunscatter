@@ -1,4 +1,4 @@
-//! The flight software in flight (F3, `systems::flight`): the Falcon 9
+//! The flight software in flight (F3, `systems::ship_os`): the Falcon 9
 //! Crew's SAS without its IMUs, its first stage's computer unpowered, a
 //! lost engine controller on the pad, debug mode, and the landing
 //! prediction without navigation.
@@ -9,7 +9,7 @@ use crate::craft::state::Lost;
 use crate::craft::{craft_of, CraftId};
 use crate::ephem::Ephemeris;
 use crate::sol;
-use crate::systems::flight::Sas;
+use crate::systems::ship_os::Sas;
 use std::sync::Arc;
 
 fn world() -> World {
@@ -141,9 +141,11 @@ fn a_stage_computer_unpowered_safes_its_engines() {
     assert!(v.flight_health().computing());
 }
 
-/// A Merlin's controller lost during the start: its thrust reading never
-/// reaches the computer, and the launch commit aborts (the clamps held);
-/// in debug mode (the truth view) the release goes ahead.
+/// A Merlin's controller lost during the start: its fail-safe shuts the
+/// engine down (D123), its thrust reading never reaches the computer, and
+/// the launch commit aborts (the clamps held). In debug mode (the truth
+/// view) the lost controller safes its engine too (D123: a dead part is
+/// still dead), and the commit aborts on the readout it sees.
 #[test]
 fn a_lost_controller_on_the_pad_aborts_the_launch() {
     let w = world();
@@ -159,13 +161,11 @@ fn a_lost_controller_on_the_pad_aborts_the_launch() {
         let lost = Lost { part: e5.part, owner: e5.owner, why: "controller lost".into() };
         v.ship.as_mut().unwrap().lost.push(lost);
         v.advance(&w, t0().add_seconds(3.0), &full(), usize::MAX);
-        let abort = v.ship_events().iter().find(|e| e.text.starts_with("Pad abort"));
-        if debug {
-            assert!(abort.is_none() && !v.clamped(), "debug: released");
-        } else {
-            let abort = abort.expect("a pad abort");
-            assert!(abort.alarm && abort.text.contains("s1.merlin.5 no thrust reading"), "{}", abort.text);
-            assert!(v.clamped() && !v.ship().unwrap().release_armed);
-        }
+        let events = v.ship_events();
+        assert!(events.iter().any(|e| e.alarm && e.text == "s1.merlin.5: safed: its controller lost"), "{events:?}");
+        let abort = events.iter().find(|e| e.text.starts_with("Pad abort")).expect("a pad abort");
+        let why = if debug { "s1.merlin.5 safed: its controller lost" } else { "s1.merlin.5 no thrust reading" };
+        assert!(abort.alarm && abort.text.contains(why), "debug {debug}: {}", abort.text);
+        assert!(v.clamped() && !v.ship().unwrap().release_armed);
     }
 }

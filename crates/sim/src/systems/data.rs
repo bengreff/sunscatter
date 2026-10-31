@@ -24,7 +24,7 @@
 //! `strain` (the joints at its part). A sensor
 //! counts while it is switched on, its part intact, and linked to a
 //! working computer (D106: "the actual mechanisms behind how your ship gets
-//! the data"; `systems::flight::works`, `read_by_computer`). Each engine's
+//! the data"; `systems::links::works`, `read_by_computer`). Each engine's
 //! own controller reads its thrust (falcon9.md §5.2: chamber pressure and
 //! the rest), to 1 %, while it works and a computer reads it; each
 //! battery's management electronics its charge, to 1 %.
@@ -203,7 +203,7 @@ pub fn knowledge(def: &ShipDef, state: &ShipState, debug: bool) -> Knowledge {
     if debug {
         return Knowledge::perfect();
     }
-    use super::flight::{read_by_computer, works};
+    use super::links::{read_by_computer, works};
     let mut k = Knowledge::default();
     let intact = |part: u32| def.part_index(part).map(|i| &state.parts[i]).is_none_or(|p| p.integrity > 0.0);
     for s in &def.sensors {

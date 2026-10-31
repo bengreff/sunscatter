@@ -182,7 +182,7 @@ The interface never shows something wrong: a quantity the ship cannot measure sh
 - **Knowledge**: `sim` derives what the vessel knows now (each quantity's value and precision, or nothing) from its working sensors; the flight view, the systems screen, the MCP server and later scripts read only that. Uncrewed craft's knowledge reaches mission control through the comm network with its delay and occlusion (exists for telemetry).
 - **Precision** sets the digits shown (no velocity to 50 decimals in orbit). The errors themselves are simplified: values are shown at their precision, not drawn with noise.
 - **Debug mode** gives perfect information instantly.
-- **The flight software reads only this** (F3, `sim::systems::flight`): SAS and the holds, the pad's launch commit, the engine controllers' safing, the estimates and the landing prediction take what the sensors know and the computers' health, never the true state; D115's adaptive functions and D117's guidance plug in as its functions.
+- **The flight software reads only this** (F3, `sim::systems::ship_os`): SAS and the holds, the pad's launch commit, the engine controllers' safing, the estimates and the landing prediction take what the sensors know and the computers' health, never the true state; D115's adaptive functions and D117's guidance plug in as its functions.
 
 ## 8. Controls and the systems screen (D107, D108)
 

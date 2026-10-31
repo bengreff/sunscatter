@@ -1,5 +1,5 @@
 use super::*;
-use crate::systems::flight::EngineReading;
+use crate::systems::ship_os::EngineReading;
 use crate::systems::Knowledge;
 use glam::DQuat;
 

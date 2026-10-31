@@ -1,10 +1,12 @@
-//! The flight software's functions as table tests (F3), and its inputs on
-//! the Falcon 9 Crew.
+//! The ship computer's functions as table tests (F3, D128's layer 2), and
+//! its inputs on the Falcon 9 Crew.
 
 use super::*;
 use crate::craft::state::Lost;
 use crate::craft::state::ShipState;
 use crate::systems::data::{knowledge, provides};
+use crate::vessel::{Controls, HoldMode};
+use glam::DVec3;
 
 fn knows(quantities: &[&str]) -> Knowledge {
     let mut k = Knowledge::default();
@@ -121,19 +123,6 @@ fn the_launch_commit_table() {
     for (i, (readouts, want)) in table.into_iter().enumerate() {
         assert_eq!(commit(&def, &readouts, &merlins), want, "row {i}");
     }
-}
-
-/// The controllers' safing: a lit engine whose controller works but has no
-/// working computer is shut down; a lost controller or a dark engine is not.
-#[test]
-fn the_controllers_safe_their_engines_without_a_computer() {
-    let c = |works, commanded| Controller { works, commanded };
-    let health = Health {
-        controllers: vec![c(true, true), c(true, false), c(true, false), c(false, false)],
-        ..Health::default()
-    };
-    assert_eq!(safing(&health, &[true, true, false, true]), vec![1]);
-    assert_eq!(safing(&health, &[false; 4]), Vec::<usize>::new());
 }
 
 #[test]

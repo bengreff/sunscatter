@@ -9,7 +9,7 @@
 use super::{PlanError, Vessel};
 use crate::craft::command::ShipCommand;
 use crate::systems::maneuver::{self, Node, Program, Step};
-use crate::systems::{command, estimate, flight};
+use crate::systems::{command, estimate, ship_os};
 use crate::time::Epoch;
 use crate::world::World;
 use glam::DVec3;
@@ -208,7 +208,7 @@ impl Vessel {
 
     /// The navigation solution relative to `node`'s reference body, and the
     /// body's μ: what the program steers on.
-    fn node_frame(&self, world: &World, view: &flight::View, node: &Node) -> (Option<(DVec3, DVec3)>, f64) {
+    fn node_frame(&self, world: &World, view: &ship_os::View, node: &Node) -> (Option<(DVec3, DVec3)>, f64) {
         let mu = world.source(node.reference).map_or(0.0, |s| s.gm);
         let rel = view.nav.map(|(anchor, r, v)| {
             let k = world.eph.relative(anchor, node.reference, self.time);
@@ -223,7 +223,7 @@ impl Vessel {
         let Some(p) = self.program.as_ref().filter(|p| p.step == Step::Wait && p.wake <= self.time) else { return };
         let Some(node) = self.nodes.get(p.node).copied() else { return };
         let Some((def, state)) = self.ship_parts() else { return };
-        let view = flight::sense(self.knowledge(), (self.attitude, self.state(world)), Some((def, state)));
+        let view = ship_os::sense(self.knowledge(), (self.attitude, self.state(world)), Some((def, state)));
         let (rel, mu) = self.node_frame(world, &view, &node);
         let to_node = node.t.seconds_since(self.time);
         let mut p = self.program.take().expect("checked");
@@ -251,8 +251,8 @@ impl Vessel {
         };
         let state = self.ship.as_ref().expect("a craft of parts");
         let k = self.knowledge();
-        let settled = flight::feeds_read(&def, state, &k, &p.engines);
-        let view = flight::sense(k, (self.attitude, self.state(world)), Some((&def, state)));
+        let settled = ship_os::feeds_read(&def, state, &k, &p.engines);
+        let view = ship_os::sense(k, (self.attitude, self.state(world)), Some((&def, state)));
         let (rel, mu) = self.node_frame(world, &view, &node);
         let axis = p.engines.iter().map(|&i| def.engines[i as usize].data.dir.normalize()).sum::<DVec3>().normalize();
         let can_settle = crate::systems::rcs::can_push(&def, state, axis);
