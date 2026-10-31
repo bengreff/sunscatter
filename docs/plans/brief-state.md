@@ -58,3 +58,19 @@ Not state (derived each tick, never saved): the feeds (`plumbing::Feed`), the th
 | 1,000 | 90.4 ms | 75.2 ms | 62.4 ms | 73.7 ms | 84.3 ms | 3.2 ms | 39.9, 31.3 ms | 27.7 ms | 37.3 s |
 
 Read the ratios, not the last digit (other agents were building). The handles' gain shows in the live ticks and the lattice (the systems run in both).
+
+**Landed** (each passed fmt, clippy, the whole sim suite, and the game's check and its touched modules' tests):
+- 4360a3d **step 0**, ONEKIND-7's sim leftovers: `Part::{tank, rcs}` (`PartTank`, `RcsFile`), `CraftFile::{propellant, attitude_control}`, `GeometryFile::tank`, `CraftDef::tanks`' ship-less branch, `ship_aggregate`, `MassModel::new`, `VolumeGrid::{new, propellant}`, `CraftDesign::tank_capacity` and `node_capacity`'s fill, the design's one-part branches, the breakage's one-part and ship-less rules (`check_overheat`), `cell_options`' id. Docs: parts.md, proximity.md.
+- 4bf532a the plan above.
+- 7ee1753 **2a** tanks: `TankRun` into `TankState` (drift, drift speed, the ledgers).
+- 2948566 **2b** engines: `EngineRun` into `EngineState` (level, cutoff, reason, settling).
+- 2f16f26 **2c** joints: `JointRun` into `JointState` (force, moment, ratio, to_ultimate), one `severed` list; `Runtime::{initial, fits, refit}` gone (`ShipState::fits` checks every list); script `scratchpad/state/step2c.py`.
+
+**Left, in order** (scratchpad `/private/tmp/claude-501/-Users-ben-sunscatter/7c5f130a-69ba-45d3-9965-ca858b31253e/scratchpad/state/`):
+1. **2d**, the rest of `Runtime` into `ShipState`, grouped as the plan says, and `systems/runtime.rs` deleted: `step2d.py` is written against the tree after 2c and untested. It moves the fields, the types (`Order`, `OrderKind`, `Event`, `Lost`, `EVENTS_KEPT`), the methods (`out`, `event`, `order`, `next_order`, `due`), `renumber` and the partition and merge rules into `craft::state` and `craft::partition`, and renames `.runtime.` everywhere. By hand after it: the three `let r = &mut state.runtime;` / `let run = &state.runtime;` bindings (`systems/ship.rs:61`, `game/src/interface/menus/{power, crew}.rs`), the coverage test's `Runtime` half (`state_tests.rs`: fold its field list into `ShipState`'s), and `systems/mod.rs`' re-export. Run it with `python3 step2d.py` from the repo root, then `cargo check`.
+2. Step 3 (handles), 4 (F8), 5 (saves, the playtest save), 6 (docs) as the plan says. The docs naming `Runtime` (owners.md:64, 112, 119; systems/ship.md:29; ship-model.md §5; power.md:5; life-support.md:5; systems-screen.md:21, 51; crew.md:21) wait for 2d.
+3. The cost after: rerun `bench_scale craft parts=300,1000 runs=1` after step 3 and add the row to `docs/technical/scale-performance.md`.
+
+**Open for the owner (STATE-1):**
+- A craft of one part now takes the parts' path everywhere: its interior is judged by its time at temperature (`systems::failure`), not at once at its service limit, and when its one part is destroyed it flies on as a wreck by the split (it was destroyed whole). The only difference is the interior rule, which now matches every other craft.
+- The crew count of a built craft is the file's (`file.crew`), as before; a piece's is its parts' seats.
