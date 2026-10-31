@@ -2,18 +2,18 @@
 
 A SessionStart hook loads this file automatically after `/clear` or at startup. It is kept current by `/handoff`.
 
-*Updated 2026-10-30 (night). Running: PLANNER-3, INTERFACE, ONEKIND-4 (all three slots). The owner asked for next steps 1–3 done; answers in [interview-2026-10-30-roadmap.md](../archive/interviews/interview-2026-10-30-roadmap.md) (D120, D126 revised; D128, D129 new; D063, D121 extended).*
+*Updated 2026-10-30 (night). Running: PLANNER-4, ONEKIND-5, INTERFACE-2 (all three slots). The owner asked for next steps 1–3 done; answers in [interview-2026-10-30-roadmap.md](../archive/interviews/interview-2026-10-30-roadmap.md) (D120, D126 revised; D128, D129 new; D063, D121 extended).*
 
 ## Your first job
 
 The owner, 2026-10-31: "Work all night on this please", with at least one agent on the interface (INTERFACE). The lead's context may go as high as needed tonight. The cap stays at 3 agents plus the lead.
 
 1. **Running:**
-   - **PLANNER-3** ([brief-planner.md](brief-planner.md), "For PLANNER-3"): the game's planner on nodes, then `predict_tests`, `landing::model`, the second stage's slew cap, MCP `set_plan` and the Falcon 9 mission test.
-   - **INTERFACE** ([brief-interface.md](brief-interface.md)): the map of the interface and its cleanup; the systems screen's thermal mesh and part isolation (D123's freeze lifted for the interface).
-   - **ONEKIND-4** ([brief-onekind.md](brief-onekind.md), its section): the rest of the tests, then the made-up path's deletion once PLANNER-3 says so.
+   - **PLANNER-4** ([brief-planner.md](brief-planner.md), PLANNER-3's Left): the turn-rate cap from the gas left and the second stage's test, a split mid-burn, the Maneuver menu's nodes, the Falcon 9 mission test, the takeover hand-over, docs.
+   - **ONEKIND-5** ([brief-onekind.md](brief-onekind.md), ONEKIND-4's Left): the game tests' patch, the MCP spawn tool, `tests/parts.rs`, then **the deletion of the made-up path and the test craft** (unblocked: PLANNER-3, fa2bfb0), the decisions, the playtest save.
+   - **INTERFACE-2** ([brief-interface.md](brief-interface.md), INTERFACE-1's Left): orbit shots of the thermal mesh, an MCP `command` tool, small fixes, then more of the owner's cleanup. INTERFACE-1 landed the map, Esc one level everywhere, the generated help, the thermal mesh and part isolation (723ceec, 85bb56e; the lead looked at the shots).
 2. **Next:** once PLANNER and ONEKIND have landed, the wave one agent at a time: STATE, LAYERS, FIXES3, ADVANCE (from `brief-advance.md`), PERF (first: the coast's tank law at 5,000 parts), DEBRIS. Successor agents continue from a brief's State when one wraps up at ~300k.
-3. **Done tonight:** RESEARCH (26f4639, 4dd65f9); AUDIT (14c2a4d, 17ec7aa, 08a34c8); PLANNER-1 (bce4379, c7c2de4, 0a382b6); PLANNER-2 (bb43d53, 8de24aa, 835f839); ONEKIND-3 (1721504, be83b64; the stress craft's numbers in `scale-performance.md`). ONEKIND-2, MISSION-2 and DOCS-2 before them (`brief-mission.md`, `brief-docs.md` and `brief-audit.md` to archive when convenient; DOCS-2's Left is still open).
+3. **Done tonight:** PLANNER-3 (8b5e8e9: the game's planner, MCP `set_plan` and the landing prediction on nodes); ONEKIND-4 (716e2fd, 4ee9212: sim unit tests and examples on the small rocket); INTERFACE-1 (def10d2, 1183eb1, 723ceec, 85bb56e, f7aff55); RESEARCH (26f4639, 4dd65f9); AUDIT (14c2a4d, 17ec7aa, 08a34c8); PLANNER-1 (bce4379, c7c2de4, 0a382b6); PLANNER-2 (bb43d53, 8de24aa, 835f839); ONEKIND-3 (1721504, be83b64; the stress craft's numbers in `scale-performance.md`). ONEKIND-2, MISSION-2 and DOCS-2 before them (`brief-mission.md`, `brief-docs.md` and `brief-audit.md` to archive when convenient; DOCS-2's Left is still open).
 
 ## State
 
@@ -55,6 +55,8 @@ The owner, 2026-10-31: "Work all night on this please", with at least one agent 
    - **Crew Dragon:** the trunk joint, entry with 1-D ablation by material, the chutes' real logic as the automatic option, a calm sea, D116's doses, a rigid placeholder station.
    - **The booster:** relight, boostback and entry by predictor–corrector, convex landing guidance written as WASM-ready flight-layer code (D043), a landing zone first.
 5. **Small items:**
+   - in `bench_limbo` the small rocket held prograde at 900 km loses 6.6 t of its 12.2 t of propellant in 30 days (ONEKIND-4): plausible for bare tanks in sunlight (~2 %/day), but check the coast tank law (D119) against a hand calculation;
+   - INTERFACE-1's ascent fell back after a surface-prograde hold flattened the stack (pitch 9° at 19.9 km), and MCP `run_until {max_q}` never fired: pilot error or a regression since MISSION-2's flight; PLANNER-4 and INTERFACE-2 fly the guide and will say;
    - the 11-vessel performance check needs a spawn tool once the test craft is gone (ONEKIND-3 has it);
    - the render scale flips between 0.8 and 1.0 every half second in a headless game;
    - stage 2's RP-1 reads 29.70 t against a 29.66 t capacity on the pad (densified load against nominal density?);
