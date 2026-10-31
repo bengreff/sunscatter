@@ -12,12 +12,11 @@
 //! What a system may and may not do: a system that changes what the
 //! trajectory integrates (mass, thrust) must give the segment a continuous
 //! law it can integrate exactly (a craft of parts' tanks on a coast:
-//! [`coast_law`]), never step it; anything else (power, life support, comms, crew later)
-//! steps here. A real system is one more field and one more call in
-//! [`Systems::step`], reading [`Env`].
-//!
-//! A placeholder until parts carry it (D060): [`Power`] (a solar panel, a
-//! battery, constant loads).
+//! [`coast_law`]), never step it; anything else (power, life support, the
+//! liquids' boil-off, comms later) steps on the lattice. Their state is the
+//! ship state's ([`crate::craft::state`]); [`Systems`] is the lattice's
+//! clock, and the vessel steps the ship's slow systems at each of its
+//! points ([`ship::lattice`], live ticks step them every tick instead).
 
 pub mod coast_law;
 pub mod command;
@@ -40,38 +39,25 @@ pub mod structure;
 
 pub use crate::craft::state::{Event, Order, OrderKind};
 pub use data::{Knowledge, Quantity, Reading};
-pub use power::{Power, PowerSpec};
 
 use crate::time::Epoch;
-use glam::{DQuat, DVec3};
 
 /// The systems lattice spacing (s): resolves a low orbit's eclipse
 /// (≈ 35 min) to a minute.
 pub const STEP: f64 = 60.0;
 
-/// What the systems read at a lattice point.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Env {
-    /// Sunlight at the vessel (W/m², inertial, along the light; eclipses
-    /// included, `sim::light`'s rule).
-    pub sun: DVec3,
-    /// Attitude (body → inertial).
-    pub attitude: DQuat,
-}
-
-/// A vessel's systems and where their lattice stands.
+/// Where a vessel's systems lattice stands.
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Systems {
     /// The last lattice point stepped; `None` until the vessel first
     /// advances (the lattice then starts at its time).
     pub epoch: Option<Epoch>,
-    pub power: Power,
 }
 
 impl Systems {
     /// Systems whose lattice starts at `epoch`.
     pub fn starting(epoch: Epoch) -> Self {
-        Systems { epoch: Some(epoch), ..Systems::default() }
+        Systems { epoch: Some(epoch) }
     }
 
     /// The next lattice point (`None` before the lattice has started).
@@ -84,20 +70,19 @@ impl Systems {
         self.epoch.get_or_insert(epoch);
     }
 
-    /// Steps every system to the next lattice point with the environment
-    /// there.
-    pub fn step(&mut self, env: &Env) {
-        let Some(next) = self.next() else { return };
-        self.power.step(env, STEP);
-        self.epoch = Some(next);
+    /// Moves to the next lattice point (its systems stepped there).
+    pub fn step(&mut self) {
+        if let Some(next) = self.next() {
+            self.epoch = Some(next);
+        }
     }
 
-    /// Steps every lattice point up to `until`, the environment at each
-    /// from `env_at`. Returns the number of steps.
-    pub fn advance(&mut self, until: Epoch, mut env_at: impl FnMut(Epoch) -> Env) -> usize {
+    /// Moves over every lattice point up to `until` (a live tick's: the
+    /// ticks stepped the systems). Returns the number of points.
+    pub fn advance(&mut self, until: Epoch) -> usize {
         let mut n = 0;
-        while let Some(e) = self.next().filter(|e| e.seconds_since(until) <= 0.0) {
-            self.step(&env_at(e));
+        while self.next().is_some_and(|e| e.seconds_since(until) <= 0.0) {
+            self.step();
             n += 1;
         }
         n
@@ -108,28 +93,23 @@ impl Systems {
 mod tests {
     use super::*;
 
-    fn env(sun: f64) -> Env {
-        Env { sun: DVec3::new(-sun, 0.0, 0.0), attitude: DQuat::IDENTITY }
-    }
-
     #[test]
     fn any_chunking_of_the_lattice_gives_the_same_bits() {
         let t0 = Epoch::new(1_000_000_000, 0.25);
-        // Sunlight that switches on and off (an eclipse every 50 min).
-        let env_at = |e: Epoch| env(if (e.seconds_since(t0) / 3_000.0) as i64 % 2 == 0 { 1_361.0 } else { 0.0 });
         let mut one = Systems::starting(t0);
         let mut chunked = one.clone();
-        one.advance(t0.add_seconds(86_400.0), env_at);
+        assert_eq!(one.advance(t0.add_seconds(86_400.0)), 1_440);
         let mut t = t0;
         for k in 0..2_000 {
             t = t.add_seconds(if k % 3 == 0 { 7.3 } else { 61.9 });
             if t.seconds_since(t0) > 86_400.0 {
                 t = t0.add_seconds(86_400.0);
             }
-            chunked.advance(t, env_at);
+            chunked.advance(t);
         }
-        chunked.advance(t0.add_seconds(86_400.0), env_at);
+        chunked.advance(t0.add_seconds(86_400.0));
         assert_eq!(one, chunked);
         assert_eq!(one.epoch, Some(t0.add_seconds(86_400.0)));
+        assert_eq!(Systems::default().advance(t0), 0, "not started");
     }
 }

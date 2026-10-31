@@ -271,7 +271,12 @@ fn the_falcon_9_stands_on_the_pad_and_lifts_off() {
     // Space on the booster: none of its stages is left (the rest are the
     // upper stack's, `craft::program`).
     assert!(booster.clone().next_stage(&w).is_none());
-    assert!(booster.controllable(), "the booster can be flown");
+    // Its own computer on its own bus and batteries (`systems::power::
+    // powered`): it can be flown, it is not dead, and the debris rule
+    // (D083) keeps it.
+    assert!(booster.controllable() && !booster.dead(), "the booster can be flown");
+    let fleet = [v.clone(), booster.clone()];
+    assert!(super::debris::debris(&w, v.time, &fleet, 0).is_empty(), "nothing is debris");
     assert_eq!(crate::landing::Thrust::of_vessel(&v).0.vac, 981.0e3, "the engines its throttle runs: the MVac");
     assert_eq!(v.next_stage(&w).unwrap().0, "Second stage ignition");
     // Saved and loaded, both pieces are the same.

@@ -1,12 +1,12 @@
 //! The debris rule (D083): a piece that broke off is a full vessel until it
 //! is dead, uncontrollable and 10 km or more from every controllable craft;
 //! then it may be deleted. One pure rule ([`deletable`]); what it reads of a
-//! vessel ([`Vessel::controllable`], [`Vessel::dead`]) comes from its parts'
-//! placeholders (`sim::craft::parts`) and its power system.
+//! vessel ([`Vessel::controllable`], [`Vessel::dead`]) comes from its parts
+//! (a control part) and its own buses (`systems::power::powered`).
 //!
 //! * **Controllable**: intact, with a part that can command it (a crew
-//!   cabin or probe core) and power (a part that produces or stores it, and
-//!   the battery not flat or a panel to recharge it).
+//!   cabin or probe core) and power (a bus with a load and a source: the
+//!   pad's umbilical, a charged battery, or solar cells to recharge it).
 //! * **Dead**: destroyed, or no active systems (no power).
 //!
 //! Deleting a vessel changes nothing for the others (vessels do not
@@ -27,12 +27,10 @@ pub fn deletable(controllable: bool, dead: bool, nearest: Option<f64>) -> bool {
 }
 
 impl Vessel {
-    /// Whether the vessel has power: a part that produces or stores it, and
-    /// a panel or charge left in its power system.
+    /// Whether the vessel has power: its ship's buses
+    /// (`systems::power::powered`).
     pub fn powered(&self) -> bool {
-        let p = &self.systems.power;
-        let source = self.craft.design().parts.iter().any(|q| q.power.source());
-        source && (p.spec.panel_area > 0.0 || p.charge > 0.0)
+        self.ship_parts().is_some_and(|(def, state)| crate::systems::power::powered(def, state))
     }
 
     /// Whether the vessel can be commanded (D083): intact, with a control

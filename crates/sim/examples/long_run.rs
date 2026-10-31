@@ -154,7 +154,7 @@ fn non_finite(w: &World, v: &Vessel) -> Option<String> {
         ("skin", th.state.skin.iter().all(|t| t.is_finite() && *t > 0.0)),
         ("nodes", th.state.nodes.iter().all(|t| t.is_finite() && *t > 0.0)),
         ("mass", v.mass().is_finite() && v.mass() > 0.0),
-        ("battery", v.systems.power.charge.is_finite()),
+        ("batteries", v.ship().is_none_or(|s| s.batteries.iter().all(|b| b.charge.is_finite() && b.k.is_finite()))),
     ];
     checks.iter().find(|c| !c.1).map(|c| c.0.to_string())
 }

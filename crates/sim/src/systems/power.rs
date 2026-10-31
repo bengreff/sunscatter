@@ -1,100 +1,36 @@
-//! Electrical power. A craft of parts' buses ([`step_ship`], D104;
-//! ship-model.md §5.5): power flow in watts from the pad's umbilical, the
-//! solar cells and the batteries to every component's load, shedding the
-//! least essential when short; live each tick and on the lattice while
-//! coasting. The test craft's placeholder (D033): a solar panel, a battery
-//! and a constant load, stepped on the systems lattice ([`super::STEP`]).
+//! Electrical power (D104; ship-model.md §5.5): a craft of parts' buses
+//! ([`step_ship`]): power flow in watts from the pad's umbilical, the solar
+//! cells and the batteries to every component's load, shedding the least
+//! essential when short; live each tick and on the systems lattice while
+//! coasting or standing. Whether a vessel has power at all (D083's
+//! controllable and dead) is [`powered`], from the same buses.
 //!
-//! Production is η·A·S·cos θ with S the sunlight at the vessel (eclipses
-//! included) and θ the panel's incidence: a sun-tracking panel has cos θ = 1
-//! whenever lit, a body-fixed one takes the attitude. The battery takes the
-//! surplus up to its capacity (the rest is spilled) and covers the deficit
-//! down to empty; a load the battery cannot cover is recorded as a
-//! shortfall. Numbers are placeholders until parts carry them.
+//! A cell gives η·A·S·cos θ, S the sunlight at the vessel (eclipses
+//! included) and θ its incidence ([`solar_output`]). A battery takes the
+//! surplus up to its capacity and covers the deficit down to empty, each
+//! to its maximum power, losing I²R in its resistance and warming.
 
-use super::Env;
 use crate::craft::ship::{Owner, ShipDef};
 use crate::craft::state::ShipState;
 use crate::time::Epoch;
 use glam::DVec3;
 
-/// What the power system is made of.
-#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct PowerSpec {
-    /// Panel area (m²) and conversion efficiency.
-    pub panel_area: f64,
-    pub efficiency: f64,
-    /// The panel's normal (body axes; its lit side).
-    pub panel_normal: DVec3,
-    /// Turned to the Sun whenever lit (two-axis tracking).
-    pub tracking: bool,
-    /// Battery capacity (J).
-    pub capacity: f64,
-    /// Constant electrical load (W).
-    pub load: f64,
-}
-
-impl Default for PowerSpec {
-    /// A small craft's placeholders: 10 m² of 30 % cells on trackers
-    /// (≈ 4 kW at 1 AU), a 10 kWh battery, 1 kW of loads.
-    fn default() -> Self {
-        PowerSpec {
-            panel_area: 10.0,
-            efficiency: 0.3,
-            panel_normal: DVec3::X,
-            tracking: true,
-            capacity: 3.6e7,
-            load: 1_000.0,
-        }
-    }
-}
-
-/// The power system's state at the last lattice point.
-#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct Power {
-    pub spec: PowerSpec,
-    /// Battery charge (J).
-    pub charge: f64,
-    /// Panel output over the last step (W).
-    pub produced: f64,
-    /// Energy the loads asked for and did not get (J, since the start).
-    pub shortfall: f64,
-}
-
-impl Default for Power {
-    /// The default spec, battery full.
-    fn default() -> Self {
-        let spec = PowerSpec::default();
-        Power { spec, charge: spec.capacity, produced: 0.0, shortfall: 0.0 }
-    }
-}
-
-impl Power {
-    /// The panel's output (W) in sunlight `sun` (W/m², along the light,
-    /// inertial) at the attitude of `env`.
-    pub fn output(&self, env: &Env) -> f64 {
-        let flux = env.sun.length();
-        if flux <= 0.0 {
-            return 0.0;
-        }
-        let s = &self.spec;
-        let cos = if s.tracking { 1.0 } else { (-(env.attitude * s.panel_normal)).dot(env.sun / flux).max(0.0) };
-        s.efficiency * s.panel_area * flux * cos
-    }
-
-    /// One lattice step of `dt` seconds with the environment at its end.
-    pub fn step(&mut self, env: &Env, dt: f64) {
-        self.produced = self.output(env);
-        let charge = self.charge + (self.produced - self.spec.load) * dt;
-        if charge > self.spec.capacity {
-            self.charge = self.spec.capacity;
-        } else if charge < 0.0 {
-            self.shortfall -= charge;
-            self.charge = 0.0;
-        } else {
-            self.charge = charge;
-        }
-    }
+/// Whether a ship has power (D083): a bus with a load on it and a source to
+/// feed it — the pad's umbilical while the clamps hold it, a battery with
+/// charge, or solar cells (which charge it in sunlight) — none of them
+/// lost. A piece of a craft has the buses of its own parts
+/// (`ShipDef::subset`): a stage with its batteries and computer has power;
+/// a trunk with cells and nothing they feed, or a capsule with flat
+/// batteries and no cells, has none.
+pub fn powered(def: &ShipDef, state: &ShipState) -> bool {
+    let lost = |o: Owner| state.lost.iter().any(|l| l.owner == o);
+    def.buses.iter().any(|bus| {
+        let on = |o: Owner| bus.members.iter().any(|m| m.0 == o) && !lost(o);
+        let load = (def.components.iter()).any(|c| c.power > 0.0 && on(Owner::Component(c.n)));
+        let charged = (def.batteries.iter().zip(&state.batteries)).any(|(b, s)| s.charge > 0.0 && on(b.owner));
+        let cells = def.solars.iter().any(|s| on(s.owner));
+        load && (state.clamped || charged || cells)
+    })
 }
 
 /// A bus of a craft of parts as it stood at its last step (D104;
@@ -263,48 +199,9 @@ pub fn step_ship(def: &ShipDef, state: &mut ShipState, sun: DVec3, dt: f64, at: 
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use glam::DQuat;
-
-    #[test]
-    fn production_and_the_battery_table() {
-        let lit = |q: DQuat| Env { sun: DVec3::new(-1_361.0, 0.0, 0.0), attitude: q };
-        let dark = Env { sun: DVec3::ZERO, attitude: DQuat::IDENTITY };
-        let fixed = Power { spec: PowerSpec { tracking: false, ..PowerSpec::default() }, ..Power::default() };
-        // (power, environment, output W): a fixed panel facing the Sun
-        // (+X lit side towards the light, which travels −X), turned 60°
-        // away, turned away, tracking, in shadow.
-        let turn =
-            |deg: f64| DQuat::from_xyzw(0.0, 0.0, (deg.to_radians() / 2.0).sin(), (deg.to_radians() / 2.0).cos());
-        let cases = [
-            (fixed, lit(DQuat::IDENTITY), 0.3 * 10.0 * 1_361.0),
-            (fixed, lit(turn(60.0)), 0.3 * 10.0 * 1_361.0 * 0.5),
-            (fixed, lit(turn(180.0)), 0.0),
-            (Power::default(), lit(turn(123.0)), 0.3 * 10.0 * 1_361.0),
-            (Power::default(), dark, 0.0),
-        ];
-        for (p, env, expected) in cases {
-            assert!((p.output(&env) - expected).abs() < 1e-9 * expected.max(1.0), "{expected}: {}", p.output(&env));
-        }
-        // An hour of eclipse drains 1 kWh; a full battery spills the surplus.
-        let mut p = Power::default();
-        for _ in 0..60 {
-            p.step(&dark, 60.0);
-        }
-        assert!((p.charge - (3.6e7 - 3.6e6)).abs() < 1e-6, "{}", p.charge);
-        for _ in 0..600 {
-            p.step(&lit(DQuat::IDENTITY), 60.0);
-        }
-        assert_eq!(p.charge, p.spec.capacity);
-        // Empty: the rest of the load is a shortfall.
-        let mut p = Power { charge: 30_000.0, ..Power::default() };
-        p.step(&dark, 60.0);
-        assert_eq!((p.charge, p.shortfall), (0.0, 30_000.0));
-    }
-
     mod ship {
         use super::super::*;
-        use crate::craft::state::ShipState;
+        use crate::craft::state::{Lost, ShipState};
         use crate::craft::{default_craft_dir, load_assembly};
 
         fn falcon9() -> std::sync::Arc<ShipDef> {
@@ -313,6 +210,64 @@ mod tests {
 
         fn t0() -> Epoch {
             Epoch::new(845_000_000, 0.0)
+        }
+
+        fn flat(s: &mut ShipState, _: &ShipDef) {
+            s.batteries.iter_mut().for_each(|b| b.charge = 0.0);
+        }
+
+        fn as_built(_: &mut ShipState, _: &ShipDef) {}
+
+        fn on_the_pad_flat(s: &mut ShipState, def: &ShipDef) {
+            flat(s, def);
+            s.clamped = true;
+        }
+
+        fn batteries_lost(s: &mut ShipState, def: &ShipDef) {
+            let lost = def.batteries.iter().map(|b| Lost { part: b.part, owner: b.owner, why: "test".into() });
+            s.lost.extend(lost);
+        }
+
+        /// Whether the Falcon 9 and its pieces have power ([`powered`]),
+        /// each piece with its own parts' buses (`ShipDef::subset`): its
+        /// batteries while charged, the pad's umbilical, Dragon's trunk
+        /// cells while they feed its capsule. (piece, its parts, what is
+        /// done to it, powered.)
+        #[test]
+        fn the_falcon9_and_its_pieces_have_power_by_their_own_buses() {
+            let def = falcon9();
+            let parts = |pick: &dyn Fn(&str) -> bool| -> Vec<u32> {
+                def.parts.iter().filter(|p| pick(&p.id)).map(|p| p.part).collect()
+            };
+            let trunk_part = |n: &str| n == "dragon.trunk" || n.starts_with("dragon.fin");
+            let all = parts(&|_| true);
+            let booster = parts(&|n| n.starts_with("s1."));
+            let second = parts(&|n| n.starts_with("s2."));
+            let dragon = parts(&|n| n.starts_with("dragon."));
+            let capsule = parts(&|n| n.starts_with("dragon.") && !trunk_part(n));
+            let trunk = parts(&|n| trunk_part(n));
+            type Edit = fn(&mut ShipState, &ShipDef);
+            let cases: [(&str, &[u32], Edit, bool); 11] = [
+                ("the stack, released", &all, as_built, true),
+                ("the stack on the pad, batteries flat: the umbilical", &all, on_the_pad_flat, true),
+                ("the booster", &booster, as_built, true),
+                ("the booster, batteries flat", &booster, flat, false),
+                ("the second stage", &second, as_built, true),
+                ("the second stage, its batteries lost", &second, batteries_lost, false),
+                ("Dragon with its trunk", &dragon, as_built, true),
+                ("Dragon with its trunk, batteries flat: its cells", &dragon, flat, true),
+                ("Dragon alone", &capsule, as_built, true),
+                ("Dragon alone, batteries flat", &capsule, flat, false),
+                ("the trunk: cells, and nothing they feed", &trunk, as_built, false),
+            ];
+            for (name, kept, edit, want) in cases {
+                assert!(!kept.is_empty(), "{name}");
+                let piece = def.subset(kept);
+                let mut s = ShipState::initial(&piece);
+                s.clamped = false;
+                edit(&mut s, &piece);
+                assert_eq!(powered(&piece, &s), want, "{name}");
+            }
         }
 
         fn bus<'a>(s: &'a ShipState, name: &str) -> &'a BusRun {

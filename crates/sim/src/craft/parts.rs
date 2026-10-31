@@ -6,9 +6,9 @@
 //!
 //! A [`Part`] owns primitives of the craft's geometry (each primitive
 //! belongs to exactly one part), its dry mass, its engine's lump (the
-//! thermal network's mount node), the parachutes, a power placeholder, a
-//! control flag (a crew cabin or probe core) and a load limit. Its tanks,
-//! thrusters and the rest of its systems are the ship definition's
+//! thermal network's mount node), the parachutes, a control flag (a crew
+//! cabin or probe core) and a load limit. Its tanks, thrusters, batteries,
+//! cells and the rest of its systems are the ship definition's
 //! ([`super::ship`]). The craft's aggregates (mass, centre of mass and
 //! inertia, crew) are computed from its parts; cells and interior nodes
 //! are tagged with the part they belong to ([`super::CraftDesign`]).
@@ -20,25 +20,6 @@
 use super::file::{CraftFile, EngineFile, GeometryFile, Mount, Tank};
 use glam::DVec3;
 use serde::{Deserialize, Serialize};
-
-/// Electrical placeholders (D033): panel output in full sunlight at 1 AU,
-/// constant load and battery capacity.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct PartPower {
-    /// W.
-    pub produced: f64,
-    /// W.
-    pub consumed: f64,
-    /// J.
-    pub battery: f64,
-}
-
-impl PartPower {
-    /// Whether the part can power anything (a panel or a battery).
-    pub fn source(&self) -> bool {
-        self.produced > 0.0 || self.battery > 0.0
-    }
-}
 
 /// One part (placeholder properties).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -66,7 +47,6 @@ pub struct Part {
     /// `internal_max_k` if `None`. Its skin's limit is its primitives'
     /// skin `max_k`.
     pub node_max_k: Option<f64>,
-    pub power: PartPower,
     /// A crew cabin or probe core: the craft can be commanded (D083).
     pub control: bool,
     /// Seats.

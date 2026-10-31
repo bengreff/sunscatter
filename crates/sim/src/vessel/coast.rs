@@ -343,7 +343,7 @@ impl Vessel {
                 }
                 t = e;
                 let (anchor, r, v) = trajectory.eval(e).expect("the lattice epoch is in the trajectory");
-                self.systems.step(&Vessel::systems_env(world, e, (anchor, r), self.attitude.q));
+                self.systems.step();
                 let at = (e, (anchor, r, v), self.attitude.q);
                 let law = law_at(trajectory, e);
                 super::ship_tick::ship_lattice(self.ship.as_mut(), ship_def.as_deref(), world, at, None, law);

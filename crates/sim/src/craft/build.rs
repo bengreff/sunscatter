@@ -14,7 +14,7 @@
 
 use super::assembly::{copies, nth, AssemblyFile, Loading};
 use super::file::{CraftFile, GeometryFile, Tank};
-use super::parts::{aggregate, CraftDef, Part, PartPower};
+use super::parts::{aggregate, CraftDef, Part};
 use super::place::{self, Frame, Pose};
 use super::ship::{BottleDef, ComponentDef, EngineDef, Owned, Owner, PartInfo, ShipDef, TankDef};
 use crate::catalog::{Built, Catalog, Ctx, Function, Kind};
@@ -24,8 +24,6 @@ use std::sync::Arc;
 
 /// Stack mounts whose diameters differ by more than this share do not fit.
 pub const SIZE_TOLERANCE: f64 = 0.01;
-/// Solar constant at 1 AU (W/m²) for the parts' power placeholders.
-const SOLAR_CONSTANT: f64 = 1361.0;
 
 /// What the build reports besides the craft.
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -540,10 +538,6 @@ fn assemble(
         let hosted: Vec<&PlacedComponent> = components.iter().filter(|c| c.part == i).collect();
         let all = || g.functions.iter().chain(hosted.iter().flat_map(|c| c.built.generated.functions.iter()));
         let engine = ship.engines.iter().find(|e| e.part == i && e.main).map(|e| super::engine::file_of(&e.data));
-        let produced: f64 =
-            all().filter_map(|f| if let Function::Solar(s) = f { Some(s.area * s.efficiency) } else { None }).sum();
-        let battery: f64 =
-            all().filter_map(|f| if let Function::Battery(b) = f { Some(b.capacity) } else { None }).sum();
         out.push(Part {
             id: i,
             name: p.id.clone(),
@@ -554,11 +548,6 @@ fn assemble(
             chute: all().any(|f| matches!(f, Function::Chute(_))),
             interior_specific_heat: Some(g.specific_heat),
             node_max_k: Some(g.max_k),
-            power: PartPower {
-                produced: produced * SOLAR_CONSTANT,
-                consumed: g.power + hosted.iter().map(|c| c.built.generated.power).sum::<f64>(),
-                battery,
-            },
             control: all().any(|f| matches!(f, Function::Control)),
             crew: all().filter_map(|f| if let Function::Seat(n) = f { Some(*n) } else { None }).sum(),
             max_load: f64::INFINITY,

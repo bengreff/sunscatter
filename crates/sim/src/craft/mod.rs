@@ -41,7 +41,7 @@ pub use engine::{Engine, EngineOutput};
 pub use file::{AeroFile, ContactFile, CraftFile, GeometryFile, Primitive, Shape, Skin, Spring, Tank, ThermalLimits};
 pub use mass::{MassModel, MassProps};
 pub use mesh::{RenderMesh, Resolution, Surface};
-pub use parts::{CraftDef, Part, PartPower};
+pub use parts::{CraftDef, Part};
 pub use registry::{craft_of, try_craft_of};
 pub use volume::{VolumeGrid, VolumeNode};
 

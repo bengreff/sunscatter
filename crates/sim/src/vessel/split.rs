@@ -24,14 +24,13 @@
 //!   same fill).
 //! * **State carried** ([`Vessel::piece`], every field of the vessel by
 //!   name, no copy of the whole): the ship state item by item with its
-//!   parts (`craft::partition`), else propellant at the craft's fill; skin
-//!   and interior temperatures (each new cell or node takes the temperature
-//!   of the nearest one of its part); systems (power and boil-off shared by
-//!   the parts' placeholders, the ledgers with the vessel's piece); the
-//!   parachutes with the part that carries them; the crew with the seats
-//!   (the vessel's piece first). Copied to every piece: the time, attitude,
-//!   ship clock, debug mode, limbo placeholders, bubble state, launch and a
-//!   wreck's destruction. The vessel keeps its id, attitude control (its
+//!   parts (`craft::partition`: its batteries, cells and buses with theirs),
+//!   else propellant at the craft's fill; skin and interior temperatures
+//!   (each new cell or node takes the temperature of the nearest one of its
+//!   part); the parachutes with the part that carries them; the crew with
+//!   the seats (the vessel's piece first). Copied to every piece: the time,
+//!   attitude, ship clock, the systems lattice's epoch, debug mode, limbo
+//!   placeholders, bubble state, launch and a wreck's destruction. The vessel keeps its id, attitude control (its
 //!   lattice restarts) and helm; a new piece gets a new id, no control,
 //!   and [`Controls::for_piece`](super::Controls::for_piece).
 //!   Every piece starts live with no tick acceleration, rest or repoint,
@@ -221,7 +220,7 @@ impl Vessel {
             let text = "Clamps: release disarmed by the separation; clamps held".to_string();
             crate::systems::propulsion::disarm(state, self.time, text, true);
         }
-        let cut = Cut { old: &old, at: (anchor, r, v), total: Shares::of(&old.parts) };
+        let cut = Cut { old: &old, at: (anchor, r, v) };
         let mut crew = self.crew;
         let mut pieces: Vec<Vessel> = Vec::new();
         for (k, craft) in crafts.iter().enumerate() {
@@ -299,7 +298,7 @@ impl Vessel {
             thermal,
             limbo,
             repoint: _, // a coast restarts from the split anyway
-            systems,
+            systems,    // the lattice's epoch
             breakup: _, // this split applies it
             bubble,
             ship,
@@ -344,7 +343,7 @@ impl Vessel {
             thermal: th,
             limbo: *limbo,
             repoint: false,
-            systems: cut.total.share(&Shares::of(&design.parts), systems, own),
+            systems: systems.clone(),
             breakup: None,
             bubble: *bubble,
             ship,
@@ -369,8 +368,6 @@ struct Cut<'a> {
     old: &'a CraftDesign,
     /// Its state (anchor, position, velocity) at the split.
     at: (NodeId, DVec3, DVec3),
-    /// Its parts' power placeholders.
-    total: Shares,
 }
 
 /// Each separation system that fired (the joints of the `separated` parts,
@@ -397,43 +394,6 @@ fn push_apart(pieces: &mut [Vessel], old: &CraftDesign, separated: &[u32], q: gl
             }
             pieces[k].jolt(push * (sign / m));
         }
-    }
-}
-
-/// The parts' power placeholders, to share a vessel's systems.
-struct Shares {
-    produced: f64,
-    battery: f64,
-    consumed: f64,
-}
-
-impl Shares {
-    fn of(parts: &[crate::craft::Part]) -> Self {
-        let sum = |f: &dyn Fn(&crate::craft::Part) -> f64| parts.iter().map(f).sum::<f64>();
-        Shares {
-            produced: sum(&|p| p.power.produced),
-            battery: sum(&|p| p.power.battery),
-            consumed: sum(&|p| p.power.consumed),
-        }
-    }
-
-    /// The systems of a piece with the placeholders `mine` out of these:
-    /// panel, battery (and its charge) and loads in proportion; the
-    /// vessel's piece (`own`) keeps the ledgers.
-    fn share(&self, mine: &Shares, systems: &crate::systems::Systems, own: bool) -> crate::systems::Systems {
-        let ratio = |a: f64, b: f64| if b > 0.0 { a / b } else { 0.0 };
-        let mut s = systems.clone();
-        let p = &mut s.power;
-        let (sun, battery) = (ratio(mine.produced, self.produced), ratio(mine.battery, self.battery));
-        p.spec.panel_area *= sun;
-        p.produced *= sun;
-        p.spec.capacity *= battery;
-        p.charge *= battery;
-        p.spec.load *= ratio(mine.consumed, self.consumed);
-        if !own {
-            p.shortfall = 0.0;
-        }
-        s
     }
 }
 

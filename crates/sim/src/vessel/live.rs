@@ -591,7 +591,7 @@ impl Vessel {
         }
         let flow = aero.as_ref().map(|a| a.flow(att0));
         self.check_limits(world, flow.as_ref(), contact_body.map(|b| (anchor, b)));
-        self.systems_after_tick(world);
+        self.systems_after_tick();
         if self.breakup.is_some() {
             return true;
         }

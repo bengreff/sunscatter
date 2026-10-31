@@ -43,7 +43,7 @@ Live flight takes over where the coast model's assumptions fail: the attitude la
 
 ### 3. Systems on fixed lattices
 
-`sim::systems`: a vessel's internal systems step on a fixed lattice of epochs (`STEP` apart from the systems' epoch), each step reading the vessel's state at its lattice epoch from the stored trajectory and the pointing (or the live tick at that epoch). The lattice never depends on frames, so any chunking gives the same bits. Placeholder systems: **power** (solar panel: area, efficiency, normal in body axes or sun-tracking, from the sunlight at the lattice point with eclipses; a battery; constant loads; the energy short of the loads is recorded) and **consumables** (the boil-off rate; a mass flow is a continuous law the trajectory must know, so systems that change the vessel's mass give rates to the segment rather than steps). Real systems (D033: power paths, life support, comms, crew) are more `System`s on the same lattice. Saved with the vessel.
+`sim::systems`: a vessel's internal systems step on a fixed lattice of epochs (`STEP` apart from the systems' epoch), each step reading the vessel's state at its lattice epoch from the stored trajectory and the pointing (or the live tick at that epoch). The lattice never depends on frames, so any chunking gives the same bits. `Systems` is only the lattice's clock (its epoch); the systems and their state are the ship's (`craft::state`, D121): at each lattice point the vessel steps its slow systems (`systems::ship::lattice`: the buses' power from the cells in the sunlight at the point, eclipses included, and the batteries, D104; the tanks' boil-off and venting; life support), and on a coast the tanks follow the segment's law instead (`systems::coast_law`, D119: a mass flow is a continuous law the trajectory must know, never a step). Live ticks step the same systems every tick. Saved with the vessel.
 
 ### 4. Warp
 
@@ -89,5 +89,4 @@ Code: `sim::vessel::pointing` (attitude laws, the regime rule), `sim::vessel::li
 - The coast thermal lattice takes the thin air's free-molecular heating ½ρv³ (bridged in Kn) on the cells facing it, orbit-averaged like the sunlight (12 samples; tested: 49.5 W/m² at 200 km = ½ρv³); the continuum heating of the transitional regime just above the boundary is not modelled (the bridge lowers the flux towards it).
 - Drag uses US76 (mean activity): no solar cycle, no diurnal bulge.
 - No planet albedo or infrared pressure; the Sun's disc is the only light.
-- Power is a placeholder (no power paths, D033); consumables are only boil-off; crew and life support come with parts.
 - The D062 rails floor still blocks rails warp for the active ship below 150 km even while it coasts (limbo) there; D081 alone would allow it.
