@@ -53,6 +53,33 @@ Small commits, each passing fmt, clippy and the game's tests you touched (`cargo
 
 ## State
 
+**INTERFACE-11 (2026-10-31), wrapped up.** Did the lead's items 1–4: D126's switch in the game and MCP, Dragon's cabin sensor on the card, finding 67 and INTERFACE-10's small tidy-ups, and the walk of the ascent, separation and orbit at HEAD from fresh saves with `read` beside each shot (findings 68–76). LAYERS-3 ran beside (the fit check, the playtest save, then the warp stop and `notify`, with `agent.rs`, `commands.rs`, `fleet.rs`, `state.rs`, `action_bar.rs`, `events.rs`, `mcp.md` and `owners.md` open at the end). Every commit passed fmt, clippy (game) and the game's whole suite (521); 1ef7972 the sim's touched test; the pre-push check the whole suites.
+
+**Landed:**
+- 38cc650: the part card names Dragon's cabin air monitor (`part_card::content::sensor_for`: a vehicle-wide quantity's sensor by the classes that measure it, `sim::systems::data::provides`), finding 70.
+- 5a76649: **D126's switch** (finding 68): `systems_screen::programs` (pure, table tests: each program aboard, the planned burns, the parachutes' deploy and each installed one, with its switch AUTO / ON PRESS / OFF, what it does, what it is doing now and its press or why not; one rule `programs::set_switch`, `press` → `GameCommand::SetSwitch`, `Press` → `Vessel::set_switch`, `press`, sent like any command); the systems screen's PROGRAMS tab; the Maneuver menu's PROGRAM and its link to the tab (`MenuAction::OpenPrograms`, `SystemsScreen::open_tab`); Landing ▸ PARACHUTE's DEPLOY; the help's ways-in row; MCP `set_switch`, `press`, `read {programs: true}` (`agent::switches`), `shoot {screen: systems, tab}`; each option of a menu choice names its exact call (`read::option_by`: INTERFACE-10's RCS USE item).
+- f123803: P is the parachutes' press by that rule (a second P opens the mains; it only set the arming latch), finding 69.
+- 1ef7972: finding 67, `Reading::shown` the double nearest its decimal (`sim::systems::data`, noted in brief-layers.md first, 5a309fe).
+- 291478b: `get_landing_prediction`'s place to the Landing menu's AT decimals (`format::GROUND_DECIMALS`), INTERFACE-10's digit item.
+- a77d5c6, 48561e5: the programs' wording seen live ("Press: arm the drogues"; "no burn planned" once; an ended burn's "no burn waiting"), finding 75.
+- 5ef3cbd, d0c93c1: MCP's `elapsed_s` and `set_camera`'s angles without binary noise (finding 76's first half).
+- b362ae2: finding 73, the Physical summary's "(and 0 of the pad's)". 89f16ab: finding 74, a cabin's pressures by one rule (`format::CABIN_DECIMALS`).
+- dfc36d0 and the docs commit after this State: mcp.md, interface-map.md (findings 67–76, the parity row, the walk), systems-screen.md (the PROGRAMS tab), flight-menus.md, systems/game.md and avionics.md status words, owners.md's row (`systems_screen::programs`), brief-layers.md notes.
+
+**Live** (headless, debug off, HEAD 291478b's build and later; shots in `/private/tmp/claude-501/-Users-ben-sunscatter/7c5f130a-69ba-45d3-9965-ca858b31253e/scratchpad/interface11/shots/`): the PROGRAMS tab on the pad (`a_pad_programs.png`) and the two menus' switches (`a_pad_menus.png`); a 5 m/s burn held ON PRESS ("burn 1 was due 1s ago: waits for a press", `f_programs_press.png`, `f_maneuver_press.png`), pressed: turning, then "on target", Ap 792 → 811 km; `set_switch {id: 12}` on the spent second stage from Dragon; the walk (`b_liftoff.png`, `c_maxq.png`, `d_sep.png`, `d_booster.png`, `e_orbit.png`, `g_dragon.png`, `h_play.png`, `h_play_thermal.png`). Saves (format 17) in `/private/tmp/claude-501/-Users-ben-sunscatter/7c5f130a-69ba-45d3-9965-ca858b31253e/scratchpad/interface11/home/saves`: `w-pad`, `w-maxq`, `w-s2`, `w-orbit` (199 × 782 km), `w-dragon`, `play` (LAYERS-3's playtest save, loads and flies on).
+
+**Left, in order:**
+1. Finding 76's second half, written and taken back out because LAYERS-3 had `agent.rs` open: `python3 /private/tmp/claude-501/-Users-ben-sunscatter/7c5f130a-69ba-45d3-9965-ca858b31253e/scratchpad/interface11/seconds_edit.py` applies it (`agent::seconds`, the clock's millisecond, for `known_time`, `reach`'s `arrives_in_s` and `set_plan`'s times; `set_plan`'s `available_dv_ms` to the planner's whole m/s), then `session.rs`' `elapsed_s` through `super::seconds` (3 decimals, replacing 5ef3cbd's 6), mcp.md's line. Apply it with `git apply --3way`-care after LAYERS-3 commits `agent.rs`.
+2. Finding 72 (minor): a held note ("predicting the impact…") beside the rows that replaced it, `interface::steady`.
+3. For LAYERS (in brief-layers.md): finding 71, the booster offers Parachutes (`layers::check` takes `ArmChutes` on any piece); the arming latch `Controls::chute` no longer set by P; the maneuver program and the chutes do not check `Health::computing`.
+4. A switch from afar applies at the frame its light arrives (like `SetStages`), not at an order's epoch: an `OrderKind` for a switch and a press would make it epoch-exact (the sim's).
+
+**Open for the owner (INTERFACE-11):**
+- **The autopilot's config menu is the PROGRAMS tab** in the systems screen (with STAGES and FUNCTIONS: the ship computer's software in one place), each program one row: its switch, its press, what it is doing now and what it does; the planned burns' switch also sits in the Maneuver menu, the parachutes' in Landing ▸ PARACHUTE (DEPLOY). The configuration (the heights, the loads, the lines) is shown, not yet edited.
+- **A press is offered only where it does something now**: ON PRESS with a burn waiting; the parachutes at any switch while a canopy is left (D126's manual deploy); otherwise greyed with why. P is that press.
+- The switch labels are AUTO, ON PRESS and OFF (MCP: `auto`, `press`, `off`).
+- The agent's times are to the clock's millisecond and its places to the Landing menu's three decimals (in debug mode too), as the menus' rules.
+
 **INTERFACE-10 (2026-10-31), wrapped up.** Did INTERFACE-9's Left 1–3: finding 58, the menus' `by` naming its item (finding 59), and the walk of every screen at HEAD (pad, ascent, after separation, the booster, orbit, the map, Dragon alone, every layer, tracking, pause, settings, help), each page read through `read` beside its shot; findings 60–67 found, 60–66 fixed at their owners with table tests. LAYERS-2's unfinished sim work sat in the shared tree, so every commit passed fmt, clippy (game) and the touched modules' tests (139) in a private mirror of HEAD plus my files; the pre-push check ran the whole suites.
 
 **Landed:**
