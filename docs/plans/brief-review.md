@@ -29,4 +29,17 @@ Wrap up at about 300k tokens of context: commit the review doc through a private
 
 ## State
 
-(Update as you go: areas done, the review doc's commit, Open for the owner.)
+**Done** (REVIEW, 2026-10-31, at 0476067, which includes LAYERS-2's 215f0ea and 5187deb). The review is [review-2026-10-31.md](../technical/review-2026-10-31.md): 13 findings, ranked, plus what was checked and found clean, and what was read fully, in part, or not at all.
+
+- **Areas:**
+  - Read fully: partition and split, typed handles, saves, `ship_os` (chutes, ullage, commit, program API), `kepler::propagate`.
+  - Read in part: the maneuver program, power, `estimate`, `data`, the advance loop, the bubble.
+  - Swept mechanically over every added line: rule 2, rule 3, name checks, engine-state writes, leftovers.
+  - Not read: `stress.rs`, `mass.rs`, `volume.rs`, the trajectory and segment deletions, `failure/`, `landing/`, `power_guard.rs`.
+- **For the lead, the top five:**
+  1. A save's thermal state and items' identities aren't checked at load: a cell-count change panics at `thermal/mod.rs:301`.
+  2. `Vessel.ship` is always `Some`, but its `None` arms keep the made-up path's behaviour, including perfect knowledge.
+  3. The made-up engine survives as the thermal model's input (`spec.engine`).
+  4. The estimate restates the engine rule.
+  5. `merge` drops the other vessel's orders and slow-systems epoch.
+- **Open for the owner:** none. Each finding goes to its owner's next agent.
