@@ -2,7 +2,7 @@
 
 A SessionStart hook loads this file automatically after `/clear` or at startup. It is kept current by `/handoff`.
 
-*Updated 2026-10-30 (night). Running: PLANNER-4, ONEKIND-5, INTERFACE-2 (all three slots). The owner asked for next steps 1–3 done; answers in [interview-2026-10-30-roadmap.md](../archive/interviews/interview-2026-10-30-roadmap.md) (D120, D126 revised; D128, D129 new; D063, D121 extended).*
+*Updated 2026-10-30 (night). Running: PLANNER-4, ONEKIND-6, INTERFACE-2 (all three slots). The owner asked for next steps 1–3 done; answers in [interview-2026-10-30-roadmap.md](../archive/interviews/interview-2026-10-30-roadmap.md) (D120, D126 revised; D128, D129 new; D063, D121 extended).*
 
 ## Your first job
 
@@ -10,7 +10,7 @@ The owner, 2026-10-31: "Work all night on this please", with at least one agent 
 
 1. **Running:**
    - **PLANNER-4** ([brief-planner.md](brief-planner.md), PLANNER-3's Left): the turn-rate cap from the gas left and the second stage's test, a split mid-burn, the Maneuver menu's nodes, the Falcon 9 mission test, the takeover hand-over, docs.
-   - **ONEKIND-5** ([brief-onekind.md](brief-onekind.md), ONEKIND-4's Left): the game tests' patch, the MCP spawn tool, `tests/parts.rs`, then **the deletion of the made-up path and the test craft** (unblocked: PLANNER-3, fa2bfb0), the decisions, the playtest save.
+   - **ONEKIND-6** ([brief-onekind.md](brief-onekind.md), ONEKIND-5's State): **the deletion of the made-up path and the test craft** in four steps, the decisions, the playtest save. ONEKIND-5 landed the game tests on the small rocket (051f52b), `spawn_vessels` (b055104) and `tests/parts.rs` on the stress craft (84e9b41).
    - **INTERFACE-2** ([brief-interface.md](brief-interface.md), INTERFACE-1's Left): orbit shots of the thermal mesh, an MCP `command` tool, small fixes, then more of the owner's cleanup. INTERFACE-1 landed the map, Esc one level everywhere, the generated help, the thermal mesh and part isolation (723ceec, 85bb56e; the lead looked at the shots).
 2. **Next:** once PLANNER and ONEKIND have landed, the wave one agent at a time, each brief written and reviewed: STATE ([brief-state.md](brief-state.md)), LAYERS ([brief-layers.md](brief-layers.md)), FIXES3 ([brief-fixes3.md](brief-fixes3.md)), ADVANCE ([brief-advance.md](brief-advance.md)), PERF ([brief-perf.md](brief-perf.md); first the coast's tank law at 5,000 parts), DEBRIS ([brief-debris.md](brief-debris.md)). INTERFACE can run beside them (game only). Successor agents continue from a brief's State when one wraps up at ~300k.
 3. **Done tonight:** PLANNER-3 (8b5e8e9: the game's planner, MCP `set_plan` and the landing prediction on nodes); ONEKIND-4 (716e2fd, 4ee9212: sim unit tests and examples on the small rocket); INTERFACE-1 (def10d2, 1183eb1, 723ceec, 85bb56e, f7aff55); RESEARCH (26f4639, 4dd65f9); AUDIT (14c2a4d, 17ec7aa, 08a34c8); PLANNER-1 (bce4379, c7c2de4, 0a382b6); PLANNER-2 (bb43d53, 8de24aa, 835f839); ONEKIND-3 (1721504, be83b64; the stress craft's numbers in `scale-performance.md`). ONEKIND-2, MISSION-2 and DOCS-2 before them (`brief-mission.md`, `brief-docs.md` and `brief-audit.md` to archive when convenient; DOCS-2's Left is still open).
@@ -57,7 +57,8 @@ The owner, 2026-10-31: "Work all night on this please", with at least one agent 
 5. **Small items:**
    - in `bench_limbo` the small rocket held prograde at 900 km loses 6.6 t of its 12.2 t of propellant in 30 days (ONEKIND-4). The lead's hand check: 220 kg/day is ~0.5 kW into the LOX at 213 kJ/kg, and a bare 2 m tank in sunlight at 900 km takes ~0.5–1.5 kW orbit-averaged while a 90 K wall radiates almost nothing: plausible, not a bug. Insulation (MLI) on cryogenic tanks is a part parameter for later;
    - INTERFACE-1's ascent fell back after a surface-prograde hold flattened the stack (pitch 9° at 19.9 km), and MCP `run_until {max_q}` never fired: pilot error or a regression since MISSION-2's flight; PLANNER-4 and INTERFACE-2 fly the guide and will say;
-   - the 11-vessel performance check needs a spawn tool once the test craft is gone (ONEKIND-3 has it);
+   - the 11-vessel performance check: the tool exists now (`spawn_vessels`, developer MCP, b055104); measure headless with `spawn_vessels` then `profile` at warp levels 0, 6 and 9;
+   - a tumbling craft of parts with liquid aboard keeps angular momentum at a split only to ~2e-7 (1e-9 empty): the gap is in the pieces' mass properties with their liquids (ONEKIND-5; `coast-split` test allows 1e-6). For STATE or DEBRIS;
    - the render scale flips between 0.8 and 1.0 every half second in a headless game;
    - stage 2's RP-1 reads 29.70 t against a 29.66 t capacity on the pad (densified load against nominal density?);
    - `tools/gpu_trace.py` still launches the deleted plunge demo.
