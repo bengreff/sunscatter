@@ -160,15 +160,21 @@ pub fn heat_tone(t: f64, limit: f64) -> Tone {
 pub enum Opening {
     /// Not in an atmosphere: a drogue opened here meets the full entry q.
     NoAir,
+    /// In the air, but the craft does not measure its q (no velocity
+    /// reading, D106): no advice either way.
+    Unmeasured,
     Safe,
     TooFast,
 }
 
-pub fn opening(q: Option<f64>, design_q: f64) -> Opening {
-    match q {
-        None => Opening::NoAir,
-        Some(q) if q <= design_q => Opening::Safe,
-        Some(_) => Opening::TooFast,
+/// The advice from the q as the craft reads it (`air`: in an atmosphere;
+/// `q`: its reading, [`dynamic_pressure`]).
+pub fn opening(air: bool, q: Option<f64>, design_q: f64) -> Opening {
+    match (air, q) {
+        (false, _) => Opening::NoAir,
+        (true, None) => Opening::Unmeasured,
+        (true, Some(q)) if q <= design_q => Opening::Safe,
+        (true, Some(_)) => Opening::TooFast,
     }
 }
 
@@ -210,11 +216,14 @@ fn parachute(d: &FlightData) -> Section {
     for p in &d.canopies {
         s.toned(p.name.clone(), &p.state, part_tone(p.tone));
     }
-    let q_text = q.map_or("—".to_string(), |q| format!("{:.1}", q / 1e3));
+    // The q as DYN. PRESSURE reads it (one rule, D106): it read the truth.
+    let read = q.and_then(|q| dynamic_pressure(&d.known, q));
+    let q_text = read.map_or(DASH.to_string(), |q| format!("{:.1}", q / 1e3));
     s.row("q / DESIGN q", format!("{q_text} / {:.1} kPa", design_q / 1e3));
     if !commanded && !d.landed {
-        match opening(q, design_q) {
+        match opening(q.is_some(), read, design_q) {
             Opening::NoAir => s.note("no air: deploy after entry (P or Space)", Tone::Dim),
+            Opening::Unmeasured => s.note("q not measured (no velocity reading): no advice", Tone::Dim),
             Opening::Safe => s.note("safe to deploy (P or Space)", Tone::Good),
             Opening::TooFast => s.note("too fast: the canopy may tear", Tone::Warn),
         };
@@ -364,15 +373,16 @@ mod tests {
 
     #[test]
     fn the_parachute_says_whether_it_is_safe_to_deploy() {
-        // (q Pa, design q Pa, expected)
+        // (in the air, q Pa as read, design q Pa, expected)
         let table = [
-            (None, 5_500.0, Opening::NoAir),
-            (Some(3_210.0), 5_500.0, Opening::Safe),
-            (Some(5_500.0), 5_500.0, Opening::Safe),
-            (Some(9_000.0), 5_500.0, Opening::TooFast),
+            (false, None, 5_500.0, Opening::NoAir),
+            (true, None, 5_500.0, Opening::Unmeasured),
+            (true, Some(3_210.0), 5_500.0, Opening::Safe),
+            (true, Some(5_500.0), 5_500.0, Opening::Safe),
+            (true, Some(9_000.0), 5_500.0, Opening::TooFast),
         ];
-        for (q, design, want) in table {
-            assert_eq!(opening(q, design), want, "{q:?}");
+        for (air, q, design, want) in table {
+            assert_eq!(opening(air, q, design), want, "{q:?}");
         }
         let spec = sim::craft::small::rocket_ref().spec.chute.clone();
         let chute = sim::chute::ChuteState::default();
@@ -386,9 +396,17 @@ mod tests {
         let s = shown(&d);
         assert!(!find(&s, "parachute").unwrap().items.iter().any(|i| matches!(i, Item::Note(..))), "armed: no advice");
         // A craft without canopies (the booster): said so, no advice.
-        let none = FlightData { canopies: Vec::new(), ..d };
+        let none = FlightData { canopies: Vec::new(), ..d.clone() };
         let s = shown(&none);
         assert_eq!(find(&s, "parachute").unwrap().items, [Item::Note("no parachutes aboard".into(), Tone::Dim)]);
+        // The q as DYN. PRESSURE reads it: unmeasured without a velocity
+        // reading, and then no advice (it read the truth, finding 60).
+        d.chute.commanded = false;
+        d.known = Known::from(sim::systems::Knowledge::default());
+        let s = shown(&d);
+        let p = find(&s, "parachute").unwrap();
+        assert_eq!(p.value("q / DESIGN q"), Some("— / 5.5 kPa"));
+        assert!(p.items.contains(&Item::Note("q not measured (no velocity reading): no advice".into(), Tone::Dim)));
     }
 
     /// What the craft cannot measure reads as a dash (D106); what it can,
