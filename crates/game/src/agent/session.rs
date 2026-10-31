@@ -370,6 +370,9 @@ struct Restore {
     help: bool,
     cards: Vec<crate::interface::part_card::Open>,
     ui_scale: Option<f32>,
+    /// The headless view's size (a shot's `width`/`height` stayed for every
+    /// later shot).
+    size: (u32, u32),
 }
 
 struct Run {
@@ -903,6 +906,7 @@ fn start(
                     help: screens.help.open,
                     cards: screens.cards.open.clone(),
                     ui_scale: out.offscreen.ui_scale,
+                    size: out.offscreen.size,
                 };
                 if let Err(e) = show(&spec, sim, screens) {
                     return done(call, Err(e));
@@ -1132,6 +1136,9 @@ fn shot(mut s: Shot, dt: f64, commands: &mut Commands, screens: &mut Screens, ou
             screens.cards.open = r.cards.clone();
             out.offscreen.ui_scale = r.ui_scale;
             let size = out.offscreen.image.as_ref().map(|_| out.offscreen.size);
+            if size.is_some_and(|s| s != r.size) {
+                offscreen::resize(&mut out.offscreen, &mut out.images, r.size);
+            }
             s.call.reply(ToolResult::Ok(json!({"path": s.path, "settled": settled, "size": size})));
             None
         }
