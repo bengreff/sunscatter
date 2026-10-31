@@ -79,6 +79,28 @@ impl Vessel {
         self.craft.design().ship.clone()
     }
 
+    /// The first way its saved state does not fit its craft's current data
+    /// (`None`: it fits): its temperatures against the rebuilt design's
+    /// thermal network (the step indexes the skin and the nodes over it),
+    /// then its ship state ([`ShipState::misfit`]). A load refuses it
+    /// (`sim::save`), so a data or bake change never loads into a panic or
+    /// a misaligned state.
+    pub fn misfit(&self) -> Option<String> {
+        let network = &self.craft.design().network;
+        let t = &self.thermal.state;
+        if (t.skin.len(), t.nodes.len()) != (network.cells(), network.nodes()) {
+            return Some(format!(
+                "{} skin cells and {} thermal nodes, the craft has {} and {}",
+                t.skin.len(),
+                t.nodes.len(),
+                network.cells(),
+                network.nodes()
+            ));
+        }
+        let def = self.ship_def()?;
+        self.ship.as_ref()?.misfit(&def)
+    }
+
     /// Starts the ship state of a craft of catalog parts: tanks at their
     /// loading, the readouts' engine the selected one, the mechanisms of a
     /// configuration's deployed parts deployed (legs out: `craft::configure`);

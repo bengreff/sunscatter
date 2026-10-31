@@ -66,8 +66,9 @@ fn every_field_set(def: &ShipDef) -> ShipState {
     }
     let cabin = s.cabin.as_mut().expect("Dragon's cabin");
     (cabin.o2, cabin.co2, cabin.k) = (20_000.0, 400.0, 297.0);
-    // A keyed list in part order.
-    s.fates = (def.parts.iter().step_by(7))
+    // A keyed list in part order, on parts with a failure mode (a fate's
+    // mode is its owner's: `ShipState::misfit`).
+    s.fates = (def.parts.iter().filter(|p| !p.failures.is_empty()).step_by(2))
         .map(|p| Fate { part: p.part, owner: Owner::Part(p.part), mode: 0, threshold: 1.5, hazard: 0.25, seen: 3 })
         .collect();
     s.clamped = true;
@@ -240,7 +241,7 @@ fn a_split_puts_each_item_in_exactly_one_piece() {
         }
         // Each piece's lists align with its own definition.
         for (p, d) in [(&pa, &da), (&pb, &db)] {
-            assert!(p.fits(d), "{name}");
+            assert_eq!(p.misfit(d), None, "{name}");
             assert_eq!(
                 (p.tanks.len(), p.engines.len(), p.power.len()),
                 (d.tanks.len(), d.engines.len(), d.components.len())

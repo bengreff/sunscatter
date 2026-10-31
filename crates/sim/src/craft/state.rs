@@ -524,17 +524,69 @@ impl ShipState {
     /// Whether every per-item list matches the definition's (a split or a
     /// merge keeps them so by construction: `craft::partition`).
     pub fn fits(&self, def: &ShipDef) -> bool {
-        self.tanks.len() == def.tanks.len()
-            && self.bottles.len() == def.bottles.len()
-            && self.engines.len() == def.engines.len()
-            && self.thrusters.len() == def.thrusters.len()
-            && self.valves.len() == def.valves.len()
-            && self.batteries.len() == def.batteries.len()
-            && self.mechanisms.len() == def.mechanisms.len()
-            && self.joints.len() == def.joints.len()
-            && self.parts.len() == def.parts.len()
-            && self.power.len() == def.components.len()
-            && (self.fins.is_empty() || self.fins.len() == def.surfaces.len())
+        self.misfit(def).is_none()
+    }
+
+    /// The first way this state does not fit `def` (`None`: it fits): a
+    /// per-item list of another length, or an item whose part handle
+    /// (`Part::id`) is not its definition's at the same place (a data edit
+    /// that reorders or replaces items of one kind); a joint between other
+    /// parts; the cabin on a part without a seat; a fate, lost function or
+    /// unpowered load whose owner the definition lacks (or a fate's mode
+    /// beyond its owner's). A save is refused on it (`sim::save`), never
+    /// indexed into later.
+    pub fn misfit(&self, def: &ShipDef) -> Option<String> {
+        fn by_part(kind: &str, state: &[u32], def: &[u32]) -> Option<String> {
+            if state.len() != def.len() {
+                return Some(format!("{} {kind}, the craft has {}", state.len(), def.len()));
+            }
+            let i = state.iter().zip(def).position(|(s, d)| s != d)?;
+            Some(format!("{kind} {i} on part {}, the craft's on part {}", state[i], def[i]))
+        }
+        fn ids<T>(v: &[T], f: impl Fn(&T) -> u32) -> Vec<u32> {
+            v.iter().map(f).collect()
+        }
+        let lists = [
+            ("tanks", ids(&self.tanks, |x| x.part), ids(&def.tanks, |x| x.part)),
+            ("bottles", ids(&self.bottles, |x| x.part), ids(&def.bottles, |x| x.part)),
+            ("engines", ids(&self.engines, |x| x.part), ids(&def.engines, |x| x.part)),
+            ("thrusters", ids(&self.thrusters, |x| x.part), ids(&def.thrusters, |x| x.part)),
+            ("valves", ids(&self.valves, |x| x.part), ids(&def.valves, |x| x.part)),
+            ("batteries", ids(&self.batteries, |x| x.part), ids(&def.batteries, |x| x.part)),
+            ("mechanisms", ids(&self.mechanisms, |x| x.part), ids(&def.mechanisms, |x| x.part)),
+            ("parts", ids(&self.parts, |x| x.part), ids(&def.parts, |x| x.part)),
+            ("power switches", ids(&self.power, |x| x.part), ids(&def.components, |x| x.part)),
+        ];
+        if let Some(e) = lists.iter().find_map(|(kind, s, d)| by_part(kind, s, d)) {
+            return Some(e);
+        }
+        if self.joints.len() != def.joints.len() {
+            return Some(format!("{} joints, the craft has {}", self.joints.len(), def.joints.len()));
+        }
+        if let Some(i) =
+            (self.joints.iter().zip(&def.joints)).position(|(s, d)| (s.parent, s.child) != (d.parent, d.child))
+        {
+            return Some(format!("joint {i} between other parts than the craft's"));
+        }
+        if !self.fins.is_empty() && self.fins.len() != def.surfaces.len() {
+            return Some(format!("{} fin deflections, the craft has {} surfaces", self.fins.len(), def.surfaces.len()));
+        }
+        if let Some(c) = &self.cabin {
+            if !def.seats.iter().any(|s| s.part == c.part) {
+                return Some(format!("the cabin on part {}, which has no seat", c.part));
+            }
+        }
+        if let Some(f) = self
+            .fates
+            .iter()
+            .find(|f| def.owner_part(f.owner) != Some(f.part) || f.mode as usize >= def.failures_of(f.owner).len())
+        {
+            return Some(format!("a failure fate of {:?} mode {}, which the craft lacks", f.owner, f.mode));
+        }
+        if let Some(l) = self.lost.iter().chain(&self.unpowered).find(|l| def.owner_part(l.owner) != Some(l.part)) {
+            return Some(format!("a lost or unpowered {:?}, which the craft lacks", l.owner));
+        }
+        None
     }
 
     /// Whether `owner`'s function is out: lost to a failure, or without

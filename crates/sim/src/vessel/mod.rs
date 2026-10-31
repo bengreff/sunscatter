@@ -574,6 +574,8 @@ impl Vessel {
 }
 
 #[cfg(test)]
+mod fit_tests;
+#[cfg(test)]
 mod mass_tests;
 #[cfg(test)]
 mod sequence_tests;

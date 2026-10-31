@@ -180,14 +180,13 @@ impl SaveGame {
                 return Err(SaveError::Format(format!("vessel id {} duplicated or not issued", v.id())));
             }
             // A craft's state saved against other craft data (its lists of
-            // another length) is refused here, never indexed into later.
-            if let (Some(def), Some(state)) = (v.ship_def(), v.ship()) {
-                if !state.fits(&def) {
-                    return Err(SaveError::Format(format!(
-                        "vessel {}: its ship state does not fit its craft's current data",
-                        v.id()
-                    )));
-                }
+            // another length or other parts, its temperatures over another
+            // network) is refused here, never indexed into later.
+            if let Some(why) = v.misfit() {
+                return Err(SaveError::Format(format!(
+                    "vessel {}: its state does not fit its craft's current data ({why})",
+                    v.id()
+                )));
             }
         }
         Ok(save)
