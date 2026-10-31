@@ -2,7 +2,8 @@
 //! systems' log: stages and functions run, clamps armed and released,
 //! failures, aborts): each new event of the active vessel once, linked to
 //! the vessel, bad news as an alert. Switching to a vessel does not replay
-//! its history.
+//! its history, nor does loading a save (whose vessel ids are those of the
+//! flight it was saved from).
 
 use super::toasts::{Link, Toasts};
 use crate::state::SimState;
@@ -35,29 +36,42 @@ pub fn wording(text: &str) -> String {
     text.strip_prefix("Stage: ").unwrap_or(text).to_string()
 }
 
-/// Notifies the active vessel's new events.
-pub fn toast_events(
-    sim: Res<SimState>,
-    time: Res<Time>,
-    mut toasts: ResMut<Toasts>,
-    mut seen: Local<BTreeMap<VesselId, (Epoch, String)>>,
-) {
-    let v = sim.ship();
-    let events = v.ship_events();
-    let known = seen.contains_key(&v.id());
-    if known {
-        for e in unseen(events, seen.get(&v.id())) {
-            toasts.push_linked(time.elapsed_secs_f64(), wording(&e.text), e.alarm, Some(Link::Vessel(v.id())));
-        }
+/// What has been notified: each vessel's last event shown, in the flight
+/// as it was after `restores` loads (`SimState::restores`).
+#[derive(Default)]
+pub struct Seen {
+    restores: u64,
+    last: BTreeMap<VesselId, (Epoch, String)>,
+}
+
+/// The events of vessel `id` to notify now, and what is then seen. A load
+/// (`restores` changed) forgets everything seen: the loaded flight's
+/// vessels reuse the ids of another timeline, whose last events would hide
+/// theirs (after a revert to launch, the new flight's Ignition came before
+/// the old one's last event, so was never notified) or not match them.
+pub fn to_notify<'a>(events: &'a [Event], id: VesselId, restores: u64, seen: &mut Seen) -> &'a [Event] {
+    if seen.restores != restores {
+        *seen = Seen { restores, last: BTreeMap::new() };
     }
+    let known = seen.last.contains_key(&id);
+    let new = if known { unseen(events, seen.last.get(&id)) } else { &[] };
     match events.last() {
         Some(last) => {
-            seen.insert(v.id(), (last.at, last.text.clone()));
+            seen.last.insert(id, (last.at, last.text.clone()));
         }
         None if !known => {
-            seen.insert(v.id(), (sim::sol::sol_epoch(), String::new()));
+            seen.last.insert(id, (sim::sol::sol_epoch(), String::new()));
         }
         None => {}
+    }
+    new
+}
+
+/// Notifies the active vessel's new events.
+pub fn toast_events(sim: Res<SimState>, time: Res<Time>, mut toasts: ResMut<Toasts>, mut seen: Local<Seen>) {
+    let v = sim.ship();
+    for e in to_notify(v.ship_events(), v.id(), sim.restores, &mut seen) {
+        toasts.push_linked(time.elapsed_secs_f64(), wording(&e.text), e.alarm, Some(Link::Vessel(v.id())));
     }
 }
 
@@ -99,6 +113,30 @@ mod tests {
         ];
         for (seen, want) in table {
             assert_eq!(texts(unseen(&log, seen.as_ref())), want, "{seen:?}");
+        }
+    }
+
+    #[test]
+    fn a_load_forgets_what_was_seen_of_another_timeline() {
+        let t = |s: f64| sim::sol::sol_epoch().add_seconds(s);
+        let e = |s: f64, text: &str| Event { at: t(s), text: text.into(), alarm: false };
+        let texts = |list: &[Event]| list.iter().map(|e| e.text.clone()).collect::<Vec<_>>();
+        let id = VesselId(1);
+        let orbit = [e(10.0, "Stage: Ignition"), e(160.0, "Stage: MECO"), e(6000.0, "Stage: Dragon separation")];
+        let launch: [Event; 0] = [];
+        let flown = [e(10.0, "Stage: Ignition")];
+        let mut seen = Seen::default();
+        // (events of vessel 1, loads so far, notified)
+        let steps: [(&[Event], u64, Vec<&str>); 6] = [
+            (&launch, 0, vec![]),                  // the new game on the pad
+            (&orbit, 1, vec![]),                   // a save in orbit loaded: its history is not replayed
+            (&orbit, 1, vec![]),                   // nothing new
+            (&launch, 2, vec![]),                  // reverted to launch (the launch save)
+            (&flown, 2, vec!["Stage: Ignition"]),  // its Ignition, before the old timeline's last event
+            (&orbit[..2], 2, vec!["Stage: MECO"]), // and what follows
+        ];
+        for (k, (events, restores, want)) in steps.into_iter().enumerate() {
+            assert_eq!(texts(to_notify(events, id, restores, &mut seen)), want, "step {k}");
         }
     }
 }

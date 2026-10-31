@@ -115,6 +115,10 @@ pub struct SimState {
     /// The active vessel was just placed on the pad: its launch save is to
     /// be written before it flies (D114, `saves::record_launch`). Not saved.
     pub launch_pending: bool,
+    /// How many times a save has replaced the flight (`saves::restore`):
+    /// its vessel ids come back with it, so what was seen of a vessel
+    /// before (`interface::events`) belongs to another timeline. Not saved.
+    pub restores: u64,
 }
 
 /// A new game's seed: the wall clock and the process, mixed (tests: 0, so
@@ -190,6 +194,7 @@ impl SimState {
             origin,
             seed,
             launch_pending: true,
+            restores: 0,
         }
     }
 

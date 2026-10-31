@@ -190,6 +190,7 @@ pub fn restore(sim: &mut SimState, save: SaveGame) {
     sim.seed = save.seed;
     // A launch save loaded is already on disk.
     sim.launch_pending = false;
+    sim.restores += 1;
     sim.warp = 0;
     sim.paused = false;
     sim.compute_limited = false;
