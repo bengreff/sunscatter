@@ -38,18 +38,24 @@ fn a_menus_page_is_its_sections_with_the_tool_of_each_control() {
         "The systems screen: THERMAL",
         MenuAction::OpenSystems(Some(crate::systems_screen::rules::Layer::Thermal), None),
     );
-    s.toggle("S1.RCS", true, "on", Tone::Good, MenuAction::Ship(sim::craft::command::ShipCommand::ReleaseClamps));
-    let v = menu_json(MenuId::Landing, &[s]);
+    use sim::craft::command::ShipCommand;
+    let block = ShipCommand::Rcs("dragon.draco_fwd".into(), false);
+    s.toggle("DRAGON.DRACO_FWD", true, "on", Tone::Good, MenuAction::Ship(block.clone()));
+    s.toggle("S1.CLAMPS", true, "held", Tone::Normal, MenuAction::Ship(ShipCommand::ReleaseClamps));
+    // The item that offers each command now, as `command {}` lists them.
+    let items = [("dragon.draco_fwd".to_string(), vec![("RCS dragon.draco_fwd off".to_string(), block)])];
+    let v = menu_json(MenuId::Landing, &[s], &items);
     assert_eq!(v["menu"], "LANDING / REENTRY");
     let items = &v["sections"][0]["items"];
     assert_eq!(items[0], json!({"label": "Ap", "value": "200 km"}), "a normal tone is left out");
     assert_eq!(items[1], json!({"label": "Pe", "value": "—", "tone": "dim"}));
     assert_eq!(items[2], json!({"note": "no target"}));
     assert_eq!(items[3], json!({"button": "The systems screen: THERMAL", "by": "read {layer: thermal}"}));
-    assert_eq!(
-        items[4],
-        json!({"switch": "S1.RCS", "on": true, "value": "on", "tone": "good", "by": "command {item, do}"})
-    );
+    let by = |i: usize| items[i]["by"].as_str().unwrap().to_string();
+    assert_eq!(by(4), r#"command {item: "dragon.draco_fwd", do: "RCS dragon.draco_fwd off"}"#);
+    assert_eq!(items[4]["tone"], "good");
+    // A command no item offers now still says its label.
+    assert_eq!(by(5), r#"command {item, do: "RELEASE CLAMPS"}"#);
 }
 
 #[test]
@@ -58,7 +64,9 @@ fn a_menu_is_read_from_the_snapshot_the_dock_draws() {
     let data = FlightData { body: "Earth".into(), ..Default::default() };
     for (name, menu) in [("orbital", MenuId::Orbital), ("Landing", MenuId::Landing), ("power", MenuId::Power)] {
         let got = read(&json!({"menu": name}), &sim, &seen(&data, None)).unwrap();
-        assert_eq!(got, menu_json(menu, &menu.sections(&data)), "{name}");
+        let v = sim.ship();
+        let items = super::super::command_items(v, &v.ship_def().unwrap(), v.ship().unwrap());
+        assert_eq!(got, menu_json(menu, &menu.sections(&data), &items), "{name}");
     }
     // The RCS menu shows only while RCS is on; nothing in the tracking
     // station; one page a call.
@@ -94,8 +102,15 @@ fn a_card_reads_as_the_card_draws_with_the_sensor_of_what_is_unmeasured() {
     assert_eq!(read(&json!({"card": "s1.tank"}), &sim, &seen(&data, None)).unwrap(), want);
     assert_eq!(want["card"], "s1.tank");
     // The pad's clamps cannot be released again: the card says so.
-    let commands = cards(&sim).into_iter().flat_map(|c| c["commands"].as_array().unwrap().clone());
-    assert!(commands.into_iter().any(|c| c["cannot_be_undone"] == true), "the clamps' release is confirmed");
+    let commands: Vec<Value> =
+        cards(&sim).into_iter().flat_map(|c| c["commands"].as_array().unwrap().clone()).collect();
+    assert!(commands.iter().any(|c| c["cannot_be_undone"] == true), "the clamps' release is confirmed");
+    // Each names its part and label, as `command` takes them.
+    let tank = read(&json!({"card": "s1.tank"}), &sim, &seen(&data, None)).unwrap();
+    for c in tank["commands"].as_array().unwrap() {
+        let want = format!(r#"command {{item: "s1.tank", do: "{}"}}"#, c["label"].as_str().unwrap());
+        assert_eq!(c["by"], want.as_str());
+    }
     // What the craft does not measure names its sensor; debug mode knows
     // everything (D106).
     assert!(!unmeasured(&cards(&sim)).is_empty(), "Dragon's tanks are not measured on the pad");
@@ -128,6 +143,13 @@ fn a_layer_and_an_item_read_as_the_systems_screen_shows_them() {
     let sel = inspect::named(&def, "s1.tank").unwrap();
     assert_eq!(got["item"]["groups"], groups_json(&def, &inspect::details(&def, state, &facts, sel, &known))["groups"]);
     assert_eq!(got["item"]["name"], "s1.tank");
+    // A component's commands name it: a battery's power switch.
+    let battery = def.components.iter().find(|c| c.power > 0.0).map(|c| c.id.clone()).unwrap();
+    let got = read(&json!({"item": battery}), &sim, &seen(&data, None)).unwrap();
+    let power =
+        got["item"]["commands"].as_array().unwrap().iter().find(|c| c["label"].as_str().unwrap().starts_with("POWER"));
+    let label = power.unwrap()["label"].as_str().unwrap();
+    assert_eq!(power.unwrap()["by"], format!(r#"command {{item: "{battery}", do: "{label}"}}"#).as_str());
     // Both at once; a row about a part names it, for `read {item}`.
     let got = read(&json!({"layer": "thermal", "item": "s1.tank"}), &sim, &seen(&data, None)).unwrap();
     assert!(got["layer"].is_object() && got["item"].is_object());

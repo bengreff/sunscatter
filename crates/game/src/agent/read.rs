@@ -10,7 +10,8 @@
 //! (`navball::rules::readouts`, `navball::control_rows`).
 //!
 //! Each control on a page says which tool works it (`by`): the agent
-//! clicks through its own tools, sent like any command.
+//! clicks through its own tools, sent like any command; a command to the
+//! ship names its item and label as `command` takes them.
 
 use super::session::{by_name, names, LAYER_NAMES, MENU_NAMES};
 use super::Seen;
@@ -22,6 +23,7 @@ use crate::state::SimState;
 use crate::systems_screen::inspect::{self, Group, Selection};
 use mcp::Tool;
 use serde_json::{json, Map, Value};
+use sim::craft::command::ShipCommand;
 use sim::craft::ship::ShipDef;
 
 /// The tool's definition.
@@ -73,7 +75,10 @@ pub fn read(args: &Value, sim: &SimState, seen: &Seen) -> Result<Value, String> 
                 return Err("the RCS menu shows while RCS is on: `set_controls {rcs: \"on\"}` first".into());
             }
             let data = seen.flight.ok_or("the menus have not been gathered yet")?;
-            Ok(menu_json(menu, &menu.sections(data)))
+            let v = sim.ship();
+            let items =
+                v.ship_def().zip(v.ship()).map_or(Vec::new(), |(def, state)| super::command_items(v, &def, state));
+            Ok(menu_json(menu, &menu.sections(data), &items))
         }
         (None, Some(part), false, false) => {
             let v = sim.ship();
@@ -113,12 +118,13 @@ fn systems(layer: Option<&str>, item: Option<&str>, sim: &SimState) -> Result<Va
     if let Some(name) = item {
         let sel =
             inspect::named(&def, name).ok_or_else(|| format!("the active vessel has no part or component `{name}`"))?;
+        let id = selection_name(&def, sel);
         let commands: Vec<Value> = inspect::commands(&def, state, sel)
             .into_iter()
-            .map(|(label, _)| json!({"label": label, "by": "command {item, do}"}))
+            .map(|(label, _)| json!({"label": label, "by": command_by(Some(&id), &label)}))
             .collect();
         let mut page = groups_json(&def, &inspect::details(&def, state, &facts, sel, &known));
-        page.insert("name".into(), json!(selection_name(&def, sel)));
+        page.insert("name".into(), json!(id));
         page.insert("commands".into(), json!(commands));
         out.insert("item".into(), Value::Object(page));
     }
@@ -152,50 +158,73 @@ fn with(mut v: Value, key: &str, value: Option<&str>) -> Value {
     v
 }
 
-/// The tool that works a menu's control.
-fn by(action: &MenuAction) -> String {
+/// Each part's and component's commands now, by id (the `command` tool's
+/// list, `agent::command_items`).
+pub type Items = [(String, Vec<(String, ShipCommand)>)];
+
+/// How the agent gives a command: `command {item, do}` with the item (when
+/// it is known) and the label named, as the tool takes them.
+pub fn command_by(item: Option<&str>, label: &str) -> String {
+    match item {
+        Some(item) => format!("command {{item: \"{item}\", do: \"{label}\"}}"),
+        None => format!("command {{item, do: \"{label}\"}}"),
+    }
+}
+
+/// The tool that works a menu's control; a command to the ship by the item
+/// that offers it now (`items`) and its label.
+fn by(action: &MenuAction, items: &Items) -> String {
     match action {
         MenuAction::SetTarget(_) => "set_target".into(),
         MenuAction::OpenPlanner => "set_plan".into(),
         MenuAction::OpenSystems(Some(layer), _) => format!("read {{layer: {}}}", layer.name().to_lowercase()),
         MenuAction::OpenSystems(None, _) => "read {layer}".into(),
-        MenuAction::Ship(_) => "command {item, do}".into(),
+        MenuAction::Ship(c) => {
+            let offered = |(item, list): &(String, Vec<(String, ShipCommand)>)| {
+                list.iter().find(|(_, x)| x == c).map(|(label, _)| command_by(Some(item), label))
+            };
+            items.iter().find_map(offered).unwrap_or_else(|| command_by(None, &crate::staging::parts::label(c)))
+        }
         MenuAction::SetRcs(_) => "set_controls {rcs, rcs_fine}".into(),
     }
 }
 
 /// One line of a menu's section.
-fn item_json(i: &Item) -> Value {
+fn item_json(i: &Item, items: &Items) -> Value {
     match i {
         Item::Row(r) => with(json!({"label": r.label, "value": r.value}), "tone", tone_name(r.tone)),
         Item::Note(text, tone) => with(json!({"note": text}), "tone", tone_name(*tone)),
         Item::Choice { label, current, options } => {
             let options: Vec<Value> =
                 options.iter().map(|(name, selected, _)| json!({"name": name, "selected": selected})).collect();
-            let by = options_by(i);
+            let by = options_by(i, items);
             json!({"choice": label, "current": current, "options": options, "by": by})
         }
-        Item::Button { label, action } => json!({"button": label, "by": by(action)}),
+        Item::Button { label, action } => json!({"button": label, "by": by(action, items)}),
         Item::Toggle { label, on, value, tone, action } => {
-            with(json!({"switch": label, "on": on, "value": value, "by": by(action)}), "tone", tone_name(*tone))
+            with(json!({"switch": label, "on": on, "value": value, "by": by(action, items)}), "tone", tone_name(*tone))
         }
     }
 }
 
 /// The tool a choice's options work (its first option's).
-fn options_by(i: &Item) -> Option<String> {
+fn options_by(i: &Item, items: &Items) -> Option<String> {
     match i {
-        Item::Choice { options, .. } => options.first().map(|(_, _, a)| by(a)),
+        Item::Choice { options, .. } => options.first().map(|(_, _, a)| by(a, items)),
         _ => None,
     }
 }
 
 /// A menu as the agent reads it: its title and its sections (the summary
-/// first, untitled), as `MenuId::sections` gives them.
-pub fn menu_json(menu: MenuId, sections: &[Section]) -> Value {
+/// first, untitled), as `MenuId::sections` gives them; a command to the
+/// ship by the item of `items` that offers it.
+pub fn menu_json(menu: MenuId, sections: &[Section], items: &Items) -> Value {
     let sections: Vec<Value> = sections
         .iter()
-        .map(|s| json!({"id": s.id, "title": s.title, "items": s.items.iter().map(item_json).collect::<Vec<_>>()}))
+        .map(|s| {
+            let lines: Vec<Value> = s.items.iter().map(|i| item_json(i, items)).collect();
+            json!({"id": s.id, "title": s.title, "items": lines})
+        })
         .collect();
     json!({"menu": menu.title(), "sections": sections})
 }
@@ -227,9 +256,7 @@ pub fn card_json(part: &str, card: &content::Card) -> Value {
     let commands: Vec<Value> = card
         .commands
         .iter()
-        .map(
-            |c| json!({"label": c.label, "cannot_be_undone": c.confirm, "by": format!("command {{item: {part}, do}}")}),
-        )
+        .map(|c| json!({"label": c.label, "cannot_be_undone": c.confirm, "by": command_by(Some(part), &c.label)}))
         .collect();
     json!({"card": card.title, "entry": card.entry, "sections": sections, "commands": commands})
 }
