@@ -19,9 +19,12 @@
 //!
 //! What the systems do with it is `sim::systems`. Here: the state
 //! at load (tanks filled at their loading temperatures, bottles at their
-//! pressure) and the plain effect of each [`ShipCommand`] ([`ShipState::apply`]:
-//! engines start and stop at once, valves and mechanisms move at once; the
-//! transients are the systems').
+//! pressure) and the plain effect of the commands that have no transient
+//! ([`ShipState::apply`]: valves, thruster blocks, power switches,
+//! separations, the clamps, the parachutes' arming, the sequence's edits).
+//! An engine or a mechanism is commanded only through
+//! `systems::command::apply`: its start sequence, tail-off and actuator
+//! rate are the engine rule's, in one place (F8 of the fidelity review).
 
 use super::command::{matches, ShipCommand, Stage};
 use super::ship::ShipDef;
@@ -586,52 +589,22 @@ impl ShipState {
 
     /// Applies a command's plain effect (see the module): the state changes
     /// at once; what the vessel must do besides is returned. Naming nothing
-    /// the craft has is an error (nothing changes).
+    /// the craft has is an error (nothing changes), and so is an engine's or
+    /// a mechanism's command: it has a transient, `systems::command::apply`'s.
     pub fn apply(&mut self, def: &ShipDef, command: &ShipCommand) -> Result<Vec<Effect>, String> {
         let none = || Err(format!("{command:?}: names nothing on this craft"));
         let ids = |list: &mut dyn Iterator<Item = &String>, s: &str| -> Vec<usize> {
             list.enumerate().filter(|(_, id)| matches(s, id)).map(|(i, _)| i).collect()
         };
-        // On the pad the clamps' ground supply lights the engines (Falcon 9's
-        // TEA-TEB on the pad: falcon9.md §2.1); in flight each start uses one
-        // of the engine's own ignitions.
-        let ground = self.clamped;
         match command {
-            ShipCommand::Ignite(s)
-            | ShipCommand::Shutdown(s)
-            | ShipCommand::Throttle(s, _)
-            | ShipCommand::Select(s) => {
-                let picked = def.engines_of(s);
-                if picked.is_empty() {
-                    return none();
-                }
-                if matches!(command, ShipCommand::Select(_)) {
-                    for (i, e) in self.engines.iter_mut().enumerate() {
-                        e.selected = picked.contains(&i);
-                    }
-                }
-                for &i in &picked {
-                    let e = &mut self.engines[i];
-                    match command {
-                        ShipCommand::Ignite(_)
-                            if matches!(e.status, EngineStatus::Off) && (ground || e.ignitions > 0) =>
-                        {
-                            e.status = EngineStatus::Running;
-                            e.timer = 0.0;
-                            e.selected = true;
-                            if !ground && e.ignitions != u32::MAX {
-                                e.ignitions -= 1;
-                            }
-                        }
-                        ShipCommand::Shutdown(_) if !matches!(e.status, EngineStatus::Off | EngineStatus::Failed) => {
-                            e.status = EngineStatus::Off;
-                            e.timer = 0.0;
-                        }
-                        ShipCommand::Throttle(_, x) => e.throttle = x.clamp(0.0, 1.0),
-                        _ => {}
-                    }
-                }
-                Ok(Vec::new())
+            ShipCommand::Ignite(_)
+            | ShipCommand::Shutdown(_)
+            | ShipCommand::Throttle(..)
+            | ShipCommand::Select(_)
+            | ShipCommand::Deploy(_)
+            | ShipCommand::Retract(_)
+            | ShipCommand::Angle(..) => {
+                Err(format!("{command:?}: an engine's or a mechanism's command (`systems::command::apply`)"))
             }
             ShipCommand::Open(s) | ShipCommand::Close(s) => {
                 let picked = ids(&mut def.valves.iter().map(|v| &v.id), s);
@@ -645,27 +618,6 @@ impl ShipState {
                         v.open = open;
                         v.cycles += 1;
                     }
-                }
-                Ok(Vec::new())
-            }
-            ShipCommand::Deploy(s) | ShipCommand::Retract(s) | ShipCommand::Angle(s, _) => {
-                let picked = ids(&mut def.mechanisms.iter().map(|m| &m.id), s);
-                if picked.is_empty() {
-                    return none();
-                }
-                for i in picked {
-                    let m = &def.mechanisms[i].item;
-                    let target = match command {
-                        ShipCommand::Deploy(_) => m.deployed_deg,
-                        ShipCommand::Retract(_) if m.retractable => m.stowed_deg,
-                        ShipCommand::Retract(_) => self.mechanisms[i].angle,
-                        ShipCommand::Angle(_, a) => {
-                            a.clamp(m.stowed_deg.min(m.deployed_deg), m.stowed_deg.max(m.deployed_deg))
-                        }
-                        _ => unreachable!(),
-                    };
-                    self.mechanisms[i].target = target;
-                    self.mechanisms[i].angle = target;
                 }
                 Ok(Vec::new())
             }
@@ -712,20 +664,6 @@ impl ShipState {
             }
             ShipCommand::Sequence(e) => edit_sequence(def, &mut self.stages, self.sequence, e).map(|()| Vec::new()),
         }
-    }
-
-    /// Runs the next stage of the sequence in this craft's view
-    /// (`craft::program`): each of its commands' plain effect. `None` when
-    /// it has none left.
-    pub fn next_stage(&mut self, def: &ShipDef) -> Option<(String, Vec<Effect>)> {
-        let k = super::program::next(def, &self.stages, self.sequence)?;
-        let stage = super::program::mine(def, &self.stages[k]);
-        self.sequence = k as u32 + 1;
-        let mut effects = Vec::new();
-        for a in &stage.actions {
-            effects.extend(self.apply(def, a).unwrap_or_default());
-        }
-        Some((stage.name.clone(), effects))
     }
 }
 

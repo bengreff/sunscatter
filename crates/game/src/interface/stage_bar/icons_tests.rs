@@ -56,7 +56,7 @@ fn icons_follow_the_ship_state() {
         };
         icons(def, state, &c, none).iter().map(|i| i.look).collect()
     };
-    state.apply(def, &ShipCommand::Ignite("pair".into())).unwrap();
+    crate::test_rocket::running(def, &mut state, "pair");
     use Look::*;
     assert_eq!(looks(&state, "engines"), [Running, Idle, Running, Idle]);
     state.engines[1].status = EngineStatus::Failed;
@@ -68,7 +68,7 @@ fn icons_follow_the_ship_state() {
     assert_eq!(looks(&state, "engines")[3], Armed, "waiting for its propellant");
     // Legs: one on its way, one deployed.
     state.mechanisms[0].target = 120.0;
-    state.apply(def, &ShipCommand::Deploy("leg#2".into())).unwrap();
+    crate::test_rocket::deployed(def, &mut state, "leg#2");
     assert_eq!(looks(&state, "legs"), [Armed, Running, Idle, Idle]);
     state.apply(def, &ShipCommand::Separate("separation".into())).unwrap();
     assert_eq!(looks(&state, "sep"), [Spent]);

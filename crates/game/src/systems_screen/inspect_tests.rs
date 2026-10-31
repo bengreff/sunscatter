@@ -56,13 +56,13 @@ fn an_engine_and_a_leg_show_their_function_and_commands() {
     assert_eq!(value(&g, "ENGINE engine#2", "throttle range"), "40–100 %");
     let cmds = |state: &ShipState, sel| commands(def, state, sel).into_iter().map(|c| c.0).collect::<Vec<_>>();
     assert_eq!(cmds(&state, Selection::Part(engine)), ["IGNITE engine#2"]);
-    state.apply(def, &ShipCommand::Ignite("engine#2".into())).unwrap();
+    crate::test_rocket::running(def, &mut state, "engine#2");
     assert_eq!(cmds(&state, Selection::Part(engine)), ["SHUT DOWN engine#2"]);
     let leg = def.part_named("leg#1").unwrap();
     assert_eq!(cmds(&state, Selection::Part(leg)), ["DEPLOY leg#1"]);
     let g = details(def, &state, &facts, Selection::Part(leg), &Known::default());
     assert_eq!(value(&g, "MECHANISM leg#1", "angle"), "0°");
-    state.apply(def, &ShipCommand::Deploy("leg#1".into())).unwrap();
+    crate::test_rocket::deployed(def, &mut state, "leg#1");
     assert!(cmds(&state, Selection::Part(leg)).is_empty(), "a leg that cannot retract");
     // The tank's separation joint, the capsule's nothing of its own.
     assert_eq!(cmds(&state, Selection::Part(def.part_named("tank").unwrap())), ["SEPARATE separation"]);

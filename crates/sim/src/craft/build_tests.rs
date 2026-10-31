@@ -4,11 +4,12 @@
 
 use super::assembly::AssemblyFile;
 use super::build::{build, Assembly};
-use super::engine::ship_thrust;
 use super::mass::{parallel_axis, solid_cylinder, MassProps};
 use super::state::{EngineStatus, ShipState};
 use super::{CellOptions, Craft, CraftId, Resolution};
 use crate::catalog::{ron_options, Catalog, Ctx};
+use crate::systems::{command, propulsion};
+use crate::time::Epoch;
 use glam::{DMat3, DVec3};
 
 pub(crate) use super::small::ROCKET as CRAFT;
@@ -179,23 +180,45 @@ fn mass_properties_of_a_draining_multi_tank_craft() {
     }
 }
 
+/// A start's time on the systems' clock.
+fn t0() -> Epoch {
+    Epoch::new(1_000_000_000, 0.0)
+}
+
+/// The lit engines at their held level for the pilot's `throttle` (their
+/// starts done: `propulsion`'s step ramps them there).
+fn at_level(ship: &super::ship::ShipDef, state: &mut ShipState, throttle: f64) {
+    for (e, d) in state.engines.iter_mut().zip(&ship.engines) {
+        if matches!(e.status, EngineStatus::Starting | EngineStatus::Running) {
+            e.status = EngineStatus::Running;
+            e.level = propulsion::setting(&d.data, throttle, e.throttle);
+        }
+    }
+}
+
 /// Four engines on a ring, one off: three quarters of the thrust, the
 /// weighted mount off the axis by a third of the ring radius (a moment
 /// about the centre of mass the gimbal must hold), each tank drawn by the
-/// mixture ratio.
+/// mixture ratio (`systems::propulsion::output`, what the vessel flies).
 #[test]
 fn several_engines_and_one_off() {
     let a = built(CRAFT).unwrap();
     let ship = a.def.ship.clone().unwrap();
     let mut state = ShipState::initial(&ship);
     assert!(state.engines.iter().all(|e| e.selected), "the sequence's first ignition selects them");
-    state.next_stage(&ship).unwrap();
-    assert!(state.engines.iter().all(|e| e.status == EngineStatus::Running && e.ignitions == 2));
-    let all = ship_thrust(&ship, &state, 1.0, 0.0, 0.02, false);
+    command::next_stage(&ship, &mut state, t0()).unwrap();
+    assert!(state.engines.iter().all(|e| e.status == EngineStatus::Starting && e.ignitions == 2));
+    at_level(&ship, &mut state, 1.0);
+    let all = propulsion::output(&ship, &state, 0.0, 0.02, false);
     assert!((all.thrust - 400.0e3).abs() < 1e-6);
     assert!(close(all.pos, DVec3::new(0.0, 0.0, -4.8), 1e-12));
-    state.apply(&ship, &super::command::ShipCommand::Shutdown("engine#3".into())).unwrap();
-    let three = ship_thrust(&ship, &state, 1.0, 0.0, 0.02, false);
+    let cx = command::Context { at: t0(), sequence: false };
+    command::apply(&ship, &mut state, &super::command::ShipCommand::Shutdown("engine#3".into()), cx).unwrap();
+    let off = ship.engines_of("engine#3")[0];
+    assert_eq!(state.engines[off].status, EngineStatus::ShuttingDown);
+    // Its tail-off done.
+    (state.engines[off].status, state.engines[off].level) = (EngineStatus::Off, 0.0);
+    let three = propulsion::output(&ship, &state, 0.0, 0.02, false);
     assert!((three.thrust - 300.0e3).abs() < 1e-6);
     // Engines at +X, +Y, −Y (engine 3 at −X off): the mount moves 0.2 m to +X.
     assert!(close(three.pos, DVec3::new(0.2, 0.0, -4.8), 1e-12), "{}", three.pos);
@@ -206,11 +229,12 @@ fn several_engines_and_one_off() {
     let ox = three.draws[1];
     assert!((ox - mdot * 2.4 / 3.4).abs() < 1e-9 && (three.draws[0] - mdot / 3.4).abs() < 1e-9);
     // Throttle within each engine's range; empty tanks give nothing.
-    let low = ship_thrust(&ship, &state, 0.1, 0.0, 0.02, false);
+    at_level(&ship, &mut state, 0.1);
+    let low = propulsion::output(&ship, &state, 0.0, 0.02, false);
     assert!((low.thrust - 0.4 * 300.0e3).abs() < 1e-6);
     state.tanks[0].liquid = 0.0;
-    assert_eq!(ship_thrust(&ship, &state, 1.0, 0.0, 0.02, false).thrust, 0.0);
-    assert!(ship_thrust(&ship, &state, 1.0, 0.0, 0.02, true).thrust > 0.0, "debug mode");
+    assert_eq!(propulsion::output(&ship, &state, 0.0, 0.02, false).thrust, 0.0);
+    assert!(propulsion::output(&ship, &state, 0.0, 0.02, true).thrust > 0.0, "debug mode");
 }
 
 /// The pieces' definitions and states partition the craft's: every item
@@ -242,8 +266,8 @@ fn ship_definitions_and_states_partition_by_part() {
     // what it has (`craft::program`): the capsule none, the tank both
     // stages less the separation (its joint is gone).
     let mut flown = state.clone();
-    flown.next_stage(&ship).unwrap();
-    flown.next_stage(&ship).unwrap();
+    command::next_stage(&ship, &mut flown, t0()).unwrap();
+    command::next_stage(&ship, &mut flown, t0()).unwrap();
     let (fu, fl) = (flown.partition(&upper, &ship, &du, true), flown.partition(&lower, &ship, &dl, false));
     for p in [&fu, &fl] {
         assert!((&p.stages, &p.functions, p.sequence) == (&flown.stages, &flown.functions, 2));
@@ -267,8 +291,8 @@ fn the_build_is_deterministic() {
     assert_eq!(ca, cb);
     let ship = ca.ship.clone().unwrap();
     let mut state = ShipState::initial(&ship);
-    assert_eq!(state.next_stage(&ship).unwrap().0, "Ignition");
-    let (name, effects) = state.next_stage(&ship).unwrap();
+    assert_eq!(command::next_stage(&ship, &mut state, t0()).unwrap().0, "Ignition");
+    let (name, effects) = command::next_stage(&ship, &mut state, t0()).unwrap();
     assert_eq!((name.as_str(), effects), ("Separation", vec![super::state::Effect::Separate(1)]));
-    assert!(state.next_stage(&ship).is_none());
+    assert!(command::next_stage(&ship, &mut state, t0()).is_none());
 }

@@ -15,6 +15,11 @@ fn falcon9() -> (ShipDef, ShipState, Vec<Hull>) {
     (def, state, hull(&craft.parts))
 }
 
+/// Runs the next stage as a vessel does (`sim::systems::command`).
+fn next_stage(def: &ShipDef, state: &mut ShipState) {
+    sim::systems::command::next_stage(def, state, sim::time::Epoch::new(1_000_000_000, 0.0)).expect("a stage to run");
+}
+
 fn bar(def: &ShipDef, state: &ShipState, hull: &[Hull], k: &Knowledge) -> Vec<Row> {
     let inputs = Inputs { hull, knowledge: k, throttle: 1.0, p: 0.0, g: Some(9.81) };
     rows(def, state, &estimate(def, state, &inputs), (&[], Look::Idle))
@@ -45,7 +50,7 @@ fn on_the_pad_the_next_stage_is_at_the_bottom() {
 #[test]
 fn the_active_stage_shows_the_burn_now() {
     let (def, mut state, hull) = falcon9();
-    state.next_stage(&def).unwrap();
+    next_stage(&def, &mut state);
     for r in state.engines.iter_mut() {
         r.level = 1.0;
     }
@@ -92,7 +97,7 @@ fn after_the_stage_separation_each_piece_shows_its_own_stages() {
     let (def, mut state, hull) = falcon9();
     state.clamped = false;
     for _ in 0..4 {
-        state.next_stage(&def).unwrap();
+        next_stage(&def, &mut state);
     }
     let ids = |f: &dyn Fn(&str) -> bool| def.parts.iter().filter(|p| f(&p.id)).map(|p| p.part).collect::<Vec<_>>();
     let upper = |id: &str| id.starts_with("s2.") || id.starts_with("dragon.");
@@ -188,7 +193,7 @@ fn drops_move_stages_and_commands() {
 #[test]
 fn the_bar_edits_what_a_player_can_drag_delete_or_run_again() {
     let (def, mut state, hull) = falcon9();
-    state.next_stage(&def).unwrap();
+    next_stage(&def, &mut state);
     let rows = bar(&def, &state, &hull, &Knowledge::perfect());
     let edit = |e| Ok(Sent::Edit(e));
     // (op, what it sends or the refusal's words)

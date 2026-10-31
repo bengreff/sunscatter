@@ -5,8 +5,11 @@
 //! settle, `systems::propulsion`), a shutdown its tail-off, a deployment moves a
 //! mechanism at its actuator's rate, and the sequence's clamp release is
 //! armed until every ignited engine delivers its rated thrust (the real
-//! pad's rule); a release commanded by hand lets go at once. Everything
-//! else is the ship state's plain effect (`ShipState::apply`).
+//! pad's rule); a release commanded by hand lets go at once. This is the
+//! one place an engine or a mechanism is commanded (F8 of the fidelity
+//! review: its throttle and selection too). Everything else is the ship
+//! state's plain effect (`ShipState::apply`, which refuses an engine's or
+//! a mechanism's command).
 //!
 //! Commands are applied at a tick: orders wait in the ship state for their
 //! epoch ([`crate::craft::state::ShipState::order`]), so the same orders give the
@@ -94,6 +97,28 @@ pub fn apply(def: &ShipDef, state: &mut ShipState, command: &ShipCommand, cx: Co
             }
             for i in picked {
                 super::propulsion::shut_down(state, i, "commanded");
+            }
+            Ok(Vec::new())
+        }
+        // An engine's own setting (the pilot's throttle scales it).
+        ShipCommand::Throttle(s, x) => {
+            let picked = def.engines_of(s);
+            if picked.is_empty() {
+                return none();
+            }
+            for i in picked {
+                state.engines[i].throttle = x.clamp(0.0, 1.0);
+            }
+            Ok(Vec::new())
+        }
+        // The engines the pilot's throttle and the readouts refer to.
+        ShipCommand::Select(s) => {
+            let picked = def.engines_of(s);
+            if picked.is_empty() {
+                return none();
+            }
+            for (i, e) in state.engines.iter_mut().enumerate() {
+                e.selected = picked.contains(&i);
             }
             Ok(Vec::new())
         }
@@ -323,6 +348,130 @@ mod tests {
             assert_eq!(release_undone(&stages, sequence), want, "{sequence}");
         }
         assert_eq!(release_undone(&stages[..1], 1), 1, "no release run");
+    }
+
+    /// The engine rule, in one place (F8 of the fidelity review): one
+    /// engine of the small rocket (TEA-TEB, three charges) commanded in
+    /// each state that decides what the command does.
+    #[test]
+    fn the_engine_rule() {
+        use crate::catalog::Igniter;
+        use EngineStatus::{Failed, Off, Running, ShuttingDown, Starting};
+        let craft = crate::craft::small::rocket();
+        let at = Epoch::new(1_000_000_000, 0.0);
+        let cx = Context { at, sequence: false };
+        let ignite = || ShipCommand::Ignite("engine#1".into());
+        let shutdown = || ShipCommand::Shutdown("engine#1".into());
+        let throttle = |x: f64| ShipCommand::Throttle("engine#1".into(), x);
+        /// The engine before: its status, the pad's clamps, its charges, a
+        /// hypergolic igniter, its controller lost, its propellant floating,
+        /// waiting for it to settle (s).
+        #[derive(Clone, Copy)]
+        struct Before {
+            status: EngineStatus,
+            clamped: bool,
+            ignitions: u32,
+            hypergolic: bool,
+            lost: bool,
+            floating: bool,
+            settling: Option<f64>,
+        }
+        let off = Before {
+            status: Off,
+            clamped: false,
+            ignitions: 3,
+            hypergolic: false,
+            lost: false,
+            floating: false,
+            settling: None,
+        };
+        /// The engine after: its status, charges, own throttle, waiting to
+        /// settle (s), and an event saying.
+        type After<'a> = (EngineStatus, u32, f64, Option<f64>, Option<&'a str>);
+        // (case, command, before, after)
+        #[rustfmt::skip]
+        let cases: [(&str, ShipCommand, Before, After); 17] = [
+            ("in flight a start spends a charge", ignite(), off, (Starting, 2, 1.0, None, None)),
+            ("on the pad the ground supply lights it", ignite(), Before { clamped: true, ignitions: 0, ..off }, (Starting, 0, 1.0, None, None)),
+            ("no charge left", ignite(), Before { ignitions: 0, ..off }, (Off, 0, 1.0, None, Some("no ignition left"))),
+            ("hypergolic: no charge counted", ignite(), Before { hypergolic: true, ignitions: 0, ..off }, (Starting, 0, 1.0, None, None)),
+            ("hypergolic, unlimited", ignite(), Before { hypergolic: true, ignitions: u32::MAX, ..off }, (Starting, u32::MAX, 1.0, None, None)),
+            ("lit already: nothing", ignite(), Before { status: Running, ..off }, (Running, 3, 1.0, None, None)),
+            ("in its tail-off: nothing", ignite(), Before { status: ShuttingDown, ..off }, (ShuttingDown, 3, 1.0, None, None)),
+            ("failed: nothing", ignite(), Before { status: Failed, ..off }, (Failed, 3, 1.0, None, None)),
+            ("its controller lost: no start", ignite(), Before { lost: true, ..off }, (Off, 3, 1.0, None, Some("no working controller"))),
+            ("floating propellant: it waits", ignite(), Before { floating: true, ..off }, (Off, 3, 1.0, Some(0.0), Some("waiting for its propellant"))),
+            ("waiting, commanded again: it starts now", ignite(), Before { floating: true, settling: Some(5.0), ..off }, (Starting, 2, 1.0, None, None)),
+            ("running: its tail-off", shutdown(), Before { status: Running, ..off }, (ShuttingDown, 3, 1.0, None, None)),
+            ("starting: its tail-off", shutdown(), Before { status: Starting, ..off }, (ShuttingDown, 3, 1.0, None, None)),
+            ("off: nothing", shutdown(), off, (Off, 3, 1.0, None, None)),
+            ("waiting: the wait ends", shutdown(), Before { settling: Some(5.0), ..off }, (Off, 3, 1.0, None, None)),
+            ("its own setting, within 0..1", throttle(1.7), Before { status: Running, ..off }, (Running, 3, 1.0, None, None)),
+            ("closed", throttle(-0.2), Before { status: Running, ..off }, (Running, 3, 0.0, None, None)),
+        ];
+        for (case, command, b, (status, ignitions, own, settling, says)) in cases {
+            let mut def = (**craft.ship.as_ref().unwrap()).clone();
+            let i = def.engines_of("engine#1")[0];
+            if b.hypergolic {
+                def.engines[i].data.igniter = Igniter::Hypergolic;
+            }
+            let mut state = ShipState::initial(&def);
+            state.clamped = b.clamped;
+            let e = &mut state.engines[i];
+            (e.status, e.ignitions, e.settling) = (b.status, b.ignitions, b.settling);
+            if b.lost {
+                let (part, owner) = (def.engines[i].part, def.engines[i].owner);
+                state.lost.push(Lost { part, owner, why: "test".into() });
+            }
+            if b.floating {
+                for t in &mut state.tanks {
+                    t.drift = 100.0;
+                }
+            }
+            let events = state.events.len();
+            apply(&def, &mut state, &command, cx).unwrap();
+            let e = &state.engines[i];
+            assert_eq!((e.status, e.ignitions, e.throttle, e.settling), (status, ignitions, own, settling), "{case}");
+            let said = state.events[events..].iter().map(|e| e.text.as_str()).collect::<Vec<_>>();
+            match says {
+                Some(text) => assert!(said.iter().any(|s| s.contains(text)), "{case}: {said:?}"),
+                None => assert!(said.is_empty(), "{case}: {said:?}"),
+            }
+        }
+        // The selection is exactly the engines named.
+        let def = craft.ship.as_deref().unwrap();
+        let mut state = ShipState::initial(def);
+        apply(def, &mut state, &ShipCommand::Select("pair".into()), cx).unwrap();
+        let pair = def.engines_of("pair");
+        assert!(pair.len() == 2 && (0..def.engines.len()).all(|i| state.engines[i].selected == pair.contains(&i)));
+        // A deployment moves the leg at its actuator's rate
+        // (`systems::mechanisms`), not at once; on the pad's clamps a leg
+        // with a foot stays stowed.
+        let leg = def.mechanisms.iter().position(|m| m.id == "leg#1").unwrap();
+        apply(def, &mut state, &ShipCommand::Deploy("leg#1".into()), cx).unwrap();
+        let m = &state.mechanisms[leg];
+        assert_eq!((m.target, m.angle), (def.mechanisms[leg].item.deployed_deg, def.mechanisms[leg].item.stowed_deg));
+        let mut held = ShipState::initial(def);
+        held.clamped = true;
+        apply(def, &mut held, &ShipCommand::Deploy("leg#1".into()), cx).unwrap();
+        assert_eq!(held.mechanisms[leg].target, def.mechanisms[leg].item.stowed_deg);
+        // The ship state's plain effect refuses every engine and mechanism
+        // command, and nothing changes.
+        let refused = [
+            ignite(),
+            shutdown(),
+            throttle(0.5),
+            ShipCommand::Select("pair".into()),
+            ShipCommand::Deploy("leg#1".into()),
+            ShipCommand::Retract("leg#1".into()),
+            ShipCommand::Angle("leg#1".into(), 30.0),
+        ];
+        for c in refused {
+            let mut s = ShipState::initial(def);
+            let before = s.clone();
+            assert!(s.apply(def, &c).is_err(), "{c:?}");
+            assert_eq!(s, before, "{c:?}");
+        }
     }
 
     /// Without power to the second stage's flight computer the MVac cannot

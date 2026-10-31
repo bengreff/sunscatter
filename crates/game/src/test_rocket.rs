@@ -6,6 +6,8 @@
 //! Registered once per process as [`ID`].
 
 use sim::catalog::{ron_options, Catalog, Ctx, Entry};
+use sim::craft::ship::ShipDef;
+use sim::craft::state::{EngineStatus, ShipState};
 use sim::craft::{craft_of, Craft, CraftId};
 use std::sync::{Arc, OnceLock};
 
@@ -103,4 +105,27 @@ pub fn rocket() -> Arc<Craft> {
         sim::craft::registry::register(&id, built.def);
     });
     craft_of(&id)
+}
+
+/// The engines `sel` names in their run, their starts done. A test of a
+/// readout sets the state it reads; how a command gets there is the engine
+/// rule's (`sim::systems::command`, tested there).
+pub fn running(def: &ShipDef, state: &mut ShipState, sel: &str) {
+    for i in def.engines_of(sel) {
+        state.engines[i].status = EngineStatus::Running;
+    }
+}
+
+/// The mechanisms `sel` names at their deployed angle, their travel done.
+pub fn deployed(def: &ShipDef, state: &mut ShipState, sel: &str) {
+    for (m, d) in state.mechanisms.iter_mut().zip(&def.mechanisms) {
+        if sim::craft::command::matches(sel, &d.id) {
+            (m.target, m.angle) = (d.item.deployed_deg, d.item.deployed_deg);
+        }
+    }
+}
+
+/// Runs the next stage as a vessel does (`sim::systems::command`).
+pub fn next_stage(def: &ShipDef, state: &mut ShipState) {
+    sim::systems::command::next_stage(def, state, sim::time::Epoch::new(1_000_000_000, 0.0)).expect("a stage to run");
 }

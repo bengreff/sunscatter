@@ -182,11 +182,11 @@ mod tests {
         assert_eq!(super::super::next(&s), Some(1));
         assert_eq!(s[1].parts[0].name, "IGNITE main");
         assert_eq!((s[1].parts[0].state.as_str(), s[1].parts[0].tone), ("4 off", PartTone::Idle));
-        // After the ignition: stage 1 done, its engines running; Separation next.
-        state.next_stage(def).unwrap();
+        // After the ignition: stage 1 done, its engines starting; Separation next.
+        crate::test_rocket::next_stage(def, &mut state);
         let s = stack(def, &state, false);
         assert_eq!((s[1].state, s[0].state), (StageState::Active, StageState::Next));
-        assert_eq!(s[1].parts[0].state, "4/4 running");
+        assert_eq!(s[1].parts[0].state, "4/4 starting");
         assert_eq!(
             s[0].parts.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(),
             ["SHUT DOWN main", "SEPARATE separation"]
@@ -231,9 +231,9 @@ mod tests {
         let mut state = ShipState::initial(def);
         let st = |state: &ShipState, c: ShipCommand| status(def, state, &c, false).0;
         assert_eq!(st(&state, ShipCommand::Deploy("leg#*".into())), "stowed");
-        state.apply(def, &ShipCommand::Deploy("leg#*".into())).unwrap();
+        crate::test_rocket::deployed(def, &mut state, "leg#*");
         assert_eq!(st(&state, ShipCommand::Deploy("leg#*".into())), "deployed");
-        state.apply(def, &ShipCommand::Ignite("pair".into())).unwrap();
+        crate::test_rocket::running(def, &mut state, "pair");
         assert_eq!(st(&state, ShipCommand::Ignite("main".into())), "2/4 running");
         assert_eq!(st(&state, ShipCommand::Ignite("engine#1".into())), "running");
         // Engines on their start transient (RUNTIME's): starting.
