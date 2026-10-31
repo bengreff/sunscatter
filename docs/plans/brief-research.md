@@ -35,4 +35,35 @@ Keep it to what the flights' agents need. Each design doc ends with "Open for th
 
 ## State
 
-(Update as you go: docs written with hashes, the picks and their reasons, what is left, Open for the owner.)
+**Done (RESEARCH, 2026-10-30).** All three items are written; each doc's status is *design*, and each ends with its own "Open for the owner". The docs landed in **26f4639**; this State in the commit after it.
+
+1. [landing-guidance.md](../technical/landing-guidance.md).
+   - **Pick:** one layer-2 program, `ship_os::landing`. Its predictor is `sim::landing::model` taking a burn plan, the one owner of predicted descents. A Gauss–Newton corrector with a fixed number of steps per wake steers the boostback (velocity-to-be-gained, least-norm step), the entry burn (ignition and cutoff on the predicted q and heating) and the aero descent (an angle-of-attack command held by SAS through the fins).
+   - **Landing burn:** a lossless-convexification SOCP (2007 thrust bounds, 2013 pointing). Drag is carried as a known acceleration from the last plan, and the back-pressure enters the mass flow exactly. Minimum error and minimum fuel are one exact-penalty solve; t_f is searched across wakes. It is solved every 0.2 s by a custom **primal–dual interior point** (ECOS's algorithm) with a fixed-pattern, pivot-free block-tridiagonal LDLᵀ and a cap of 30 iterations.
+   - **Why the interior point:** the relaxation is tight only at the optimum, and a stage that cannot hover must not get a plan under its minimum throttle. It also certifies infeasibility for the fallback. PIPG/xPIPG (sub-ms) is the upgrade path. Estimate 5–15 ms per solve on one M2 Pro core.
+   - Tests include the Açıkmeşe–Ploen Mars case (81 s, 399.5 kg) and Crew-13's RTLS.
+2. [entry-ablation.md](../technical/entry-ablation.md).
+   - **Ablation:** a FIAT/CMA-class charring column per ablator cell (3-component Arrhenius integrated in closed form, a surface balance with film blowing, a B′c law derived from the atmosphere's oxygen), with TACOT's open parameters as PICA-X (E). Tests: Ablation Test-Cases 2.1 and 2.3 (15.7 / 19.5 / 25.7 mm at 60 s) and Stardust.
+   - **Dragon's entry:** lift from the offset centre of mass through the existing aero model (Trevino 2008: L/D 0.18 at 12°, under 5 g), steered by an FNPEG-type bank predictor–corrector on the same predictor.
+   - **Chutes:** layer-2 deploy from navigation plus barometric altitude, and an optional layer-1 baroswitch in the chute part, after Apollo's ELS (TN D-7437 checked: 24,000 ft, reefing 10 s, mains at 11,000 ft, 6 s and 10 s).
+3. [water-landing.md](../technical/water-landing.md). Per-cell hydrostatics; the slam by von Kármán's momentum method on the wetted footprint with the added mass implicit; drag in water. Checked by hand against TN D-3980: 20.4 g against the rigid theory's ~22 g, and ~490 kPa against 414 kPa measured. Dragon: 6.6 g at 7 m/s flat.
+4. `falcon9.md`: 16 rows tagged (RESEARCH) in §3.2, §4.4, §4.5 and §5.5, and sources [S30]–[S36]. They cover:
+   - Crew-13's RTLS timeline; the RTLS reserve (~57 t, D); relights (no spare); grid-fin authority (order of magnitude); the legs' energy (~5.3 m/s);
+   - the trunk after the deorbit burn and Pacific splashdowns (2025); Crew-9's timeline; L/D; 3-of-4 mains;
+   - LiOH as the CO₂ method, the removal law rate = η·Q·c (it replaces the fixed 4.0 kg/day cap: four crew settle at ~0.2 kPa), the LiOH stock (~60 kg for 4 crew × 10 days), the free-flight endurance (10 days E; Polaris Dawn ~5 days flown);
+   - the "rapidly pressurized to 2,400 psi" second report, and the helium bottles' sizing: ~2 m³ at 41.4 MPa, so §1.5's 2 × 0.1 m³ is too small (reported, not changed).
+
+**Not found:** Crew Dragon's helium bottle count, volume and pressure; its heat-shield thickness, centre-of-mass offset and entry algorithm; its reefing; the Falcon 9's grid-fin deflection range and rate, and the legs' stroke and design touchdown speed; TACOT's k(T) and c_p(T) tables (in the workshop spreadsheet, not fetched); the ICES-2020-333 text (the repository refused downloads); Orion's measured water-impact peaks.
+
+**Left for the lead:** link the three docs from `docs/systems/avionics.md`, `aero-thermal.md` and `motion.md`, and add owners rows when they are built (this brief allowed only the files above).
+
+**Open for the owner** (each doc lists its own; the main ones):
+- the predictor as a ship-OS call (recommended) or inside the program;
+- the predictor's aero: cells or the bake's table;
+- the solver: interior point now (recommended), PIPG later;
+- TACOT for PICA-X;
+- Dragon's shield thickness and its centre-of-mass offset;
+- a layer-1 baroswitch in the chute part;
+- terrain below sea level counts as ocean;
+- von Kármán (recommended) or Wagner;
+- the CO₂ removal law in place of the cap.
