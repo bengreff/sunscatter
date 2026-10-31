@@ -35,6 +35,7 @@ A craft of parts slews no faster than its thrusters' propellant affords (`vessel
 
 - **The window** (`game::planner`): a draft of nodes edited by handles or numbers, sent as one command (`GameCommand::SetNodes`). Its numbers come from `draft_info`.
 - **The line** past a node (`trajectory::predict::past_nodes`): the stored segment is cut at the first unburnt node, then each node's predicted coast is chained, coloured as after a burn.
+- **The navball** draws the controls the vessel flies while the program flies a burn (`Vessel::flown_controls`, b246f9d: SAS, the MANEUVER hold, the program's throttle), not the pilot's.
 - **The Maneuver menu** (key 3): the burn being flown, then the nodes not yet burnt, numbered as the ship's log numbers burns, with Δv, the ignition countdown, the duration, and what the program is doing ("turning to the burn", "settling the propellant", "burning").
 - **MCP `set_plan`** ([mcp.md](mcp.md)): `in_s` is the node; the result gives each node's ignition, duration and warnings, and the Δv available.
 
@@ -52,6 +53,5 @@ Found on the way: `get_vessel`'s apsides come from the predicted path, which the
 
 - **Dragon's Dracos** cannot fly a planned burn: the program burns a craft's main engines, and Dragon has none (its Dracos are thruster blocks). The planner warns "no main engine to burn it". A burn on translation thrusters is the same mechanism with the thrusters as the engine (D125); it needs the program to command a translation in place of an ignition.
 - **A throttle cut with the throttle already closed:** the pilot's controls at the wake are the baseline, so with the throttle at 0 then, X (cut) during the burn changes nothing and does not take over. The program moving the pilot's throttle as it flies (an autothrottle moving the lever) would fix it; open for the owner.
-- **The navball's hold buttons** show the pilot's hold (STAB) while the program flies the maneuver hold.
 - **Low-thrust burns on rails** (`limbo.md`) are D029's warp while thrusting; they come later.
 - No shipped engine has a shutdown impulse (the MVac's is 0), so the cutoff's tail-off term is untested against a real one.

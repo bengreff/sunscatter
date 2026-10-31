@@ -32,7 +32,7 @@ SAS is a controller in the flight software's place: it outputs a torque within t
 
 ## In the game and MCP
 
-- The navball's hold buttons (STAB, PRO, RETRO, TGT, ANTI, MNV) set the mode; target modes need a target and the maneuver mode a node (`navball::rules::hold_available`). T toggles SAS. The SAS row states the mode and, for prograde and retrograde, the speed reference and body (`rules::sas_label`: "PROGRADE (ORBIT Earth)"). The navball reads the same reference rule (`navball::nav_state`).
+- The navball's hold buttons (STAB, PRO, RETRO, TGT, ANTI, MNV) set the mode; target modes need a target and the maneuver mode a node (`navball::rules::hold_available`). T toggles SAS. The SAS row states the mode and, for prograde and retrograde, the speed reference and body (`rules::sas_label`: "PROGRADE (ORBIT Earth)"). The navball reads the same reference rule (`navball::nav_state`). While the maneuver program flies a burn, the navball draws the controls the vessel flies (`Vessel::flown_controls`: SAS on, MANEUVER, the program's throttle), not the pilot's; a click on SAS or another hold takes the burn over (D126).
 - MCP `set_controls` takes `hold` (`stability`, `prograde`, `retrograde`, `target`, `anti_target`, `maneuver`) and `speed_reference` ([mcp.md](mcp.md)).
 - A split's pieces keep the hold (`Controls::for_piece`), and every vessel flies its own controls (`sim::vessel::helm`).
 
@@ -42,5 +42,4 @@ SAS is a controller in the flight software's place: it outputs a torque within t
 
 ## Not done
 
-- **The navball** shows the pilot's hold (STAB) while the maneuver program flies the maneuver hold ([planner.md](planner.md)).
 - **Holds through the fins alone** (an angle of attack held by the grid fins) are in [landing-guidance.md](landing-guidance.md) (design).
