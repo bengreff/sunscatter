@@ -135,11 +135,12 @@ fn the_hottest_and_the_worn_lead() {
 }
 
 /// The electrical summary is the Power menu's: buses, batteries (low
-/// amber, empty red), what is without power (red).
+/// amber, empty red), what is without power (red), named by their ids as
+/// on every layer (the menu writes them in capitals).
 #[test]
 fn electrical_is_the_power_menus() {
-    use crate::interface::menus::power::{Battery, PowerData};
-    let cell = |charge: f64| Battery { id: "b".into(), charge, capacity: 3600.0e3, known: true };
+    use crate::interface::menus::power::{sections, Battery, PowerData};
+    let cell = |charge: f64| Battery { id: "s2.battery#1".into(), charge, capacity: 3600.0e3, known: true };
     let p = PowerData {
         buses: vec![sim::systems::power::BusRun {
             name: "dragon".into(),
@@ -148,11 +149,16 @@ fn electrical_is_the_power_menus() {
             solar: 0.0,
             ground: true,
         }],
+        bus_names: vec!["dragon".into()],
         batteries: vec![cell(3600.0e3), cell(360.0e3), cell(0.0)],
         unpowered: vec![("heater".into(), "shed".into())],
     };
     let g = electrical(Some(&p));
-    assert_eq!(group(&g, "BUSES").value("DRAGON"), Some("28.0 V · 410 W · ground"));
+    assert_eq!(group(&g, "BUSES").value("dragon"), Some("28.0 V · 410 W · ground"));
+    assert_eq!(group(&g, "BATTERIES").rows[0].label, "s2.battery#1");
+    assert_eq!(group(&g, "WITHOUT POWER").rows[0].label, "heater");
+    let menu = sections(Some(&p));
+    assert_eq!(menu[0].value("DRAGON"), Some("28.0 V · 410 W · ground"), "the menu's capitals");
     let levels: Vec<Level> = group(&g, "BATTERIES").rows.iter().map(|r| r.level).collect();
     assert_eq!(levels, [Level::Normal, Level::Warn, Level::Over]);
     assert_eq!(group(&g, "WITHOUT POWER").rows[0].level, Level::Over);

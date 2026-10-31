@@ -218,10 +218,11 @@ fn flows(x: &Inputs) -> Group {
     g
 }
 
-/// The Power menu's sections (one owner) as groups: a warning amber, an
-/// alert red.
+/// The Power menu's sections (one owner) as groups, named by id as every
+/// layer names things (the menu writes them in capitals): a warning amber,
+/// an alert red.
 fn electrical(p: Option<&power::PowerData>) -> Vec<Group> {
-    (power::sections(p).into_iter())
+    (power::sections_by_id(p).into_iter())
         .map(|s| {
             let mut g = Group::new(if s.title.is_empty() { "BUSES".to_string() } else { s.title.clone() });
             for item in &s.items {

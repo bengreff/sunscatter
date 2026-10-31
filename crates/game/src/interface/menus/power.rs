@@ -15,7 +15,10 @@ pub const BATTERY_LOW: f64 = 0.2;
 /// The electrical system (a craft of parts with buses).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct PowerData {
+    /// The buses as the last power step left them (none before the first).
     pub buses: Vec<sim::systems::power::BusRun>,
+    /// The craft's buses by name.
+    pub bus_names: Vec<String>,
     pub batteries: Vec<Battery>,
     /// What has no power: (owner, why).
     pub unpowered: Vec<(String, String)>,
@@ -50,12 +53,25 @@ pub fn gather(v: &Vessel) -> Option<PowerData> {
     let run = &state.runtime;
     Some(PowerData {
         buses: run.buses.clone(),
+        bus_names: def.buses.iter().map(|b| b.name.clone()).collect(),
         batteries,
         unpowered: run.unpowered.iter().map(|l| (l.owner.clone(), l.why.clone())).collect(),
     })
 }
 
+/// The menu's sections, its rows named in capitals as every menu's.
 pub fn sections(p: Option<&PowerData>) -> Vec<Section> {
+    named(p, str::to_uppercase)
+}
+
+/// The same sections with the buses, batteries and loads by their ids, as
+/// the systems screen names everything (its Electrical summary).
+pub fn sections_by_id(p: Option<&PowerData>) -> Vec<Section> {
+    named(p, str::to_string)
+}
+
+/// The sections, each bus, battery and load named by `name` of its id.
+fn named(p: Option<&PowerData>, name: fn(&str) -> String) -> Vec<Section> {
     let mut s = Section::summary();
     let Some(p) = p else {
         s.note("no electrical system", Tone::Dim);
@@ -70,10 +86,18 @@ pub fn sections(p: Option<&PowerData>) -> Vec<Section> {
             text += " · ground";
         }
         let tone = if b.volts <= 0.0 { Tone::Alert } else { Tone::Normal };
-        s.toned(b.name.to_uppercase(), text, tone);
+        s.toned(name(&b.name), text, tone);
     }
     if p.buses.is_empty() {
-        s.note("no buses: nothing draws power", Tone::Dim);
+        // Before the first power step (on the pad, until the systems'
+        // first minute): the craft's buses, not read yet. It said "no
+        // buses" of a craft with three.
+        for b in &p.bus_names {
+            s.toned(name(b), format!("{DASH} (not read yet)"), Tone::Dim);
+        }
+        if p.bus_names.is_empty() {
+            s.note("no buses: nothing draws power", Tone::Dim);
+        }
     }
     let mut cells = Section::new("batteries", format!("BATTERIES · {}", p.batteries.len()));
     for b in &p.batteries {
@@ -89,11 +113,11 @@ pub fn sections(p: Option<&PowerData>) -> Vec<Section> {
             };
             (text, tone)
         };
-        cells.toned(b.id.to_uppercase(), text, tone);
+        cells.toned(name(&b.id), text, tone);
     }
     let mut off = Section::new("unpowered", format!("WITHOUT POWER · {}", p.unpowered.len()));
     for (owner, why) in &p.unpowered {
-        off.toned(owner.to_uppercase(), why.clone(), Tone::Alert);
+        off.toned(name(owner), why.clone(), Tone::Alert);
     }
     vec![s, cells, off]
 }
@@ -101,7 +125,7 @@ pub fn sections(p: Option<&PowerData>) -> Vec<Section> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::interface::menus::find;
+    use crate::interface::menus::{find, Item};
     use sim::systems::power::BusRun;
 
     fn bus(volts: f64, solar: f64, ground: bool) -> BusRun {
@@ -123,6 +147,19 @@ mod tests {
             let s = sections(Some(&p));
             assert_eq!((s[0].value("DRAGON"), s[0].tone("DRAGON")), (Some(value), Some(tone)));
         }
+    }
+
+    /// A craft's buses before the first power step: not read yet, not "no
+    /// buses"; a craft with none says so.
+    #[test]
+    fn buses_not_read_yet_are_named() {
+        let p = PowerData { bus_names: vec!["s1.bus".into(), "dragon.bus".into()], ..Default::default() };
+        let s = sections(Some(&p));
+        assert_eq!(s[0].value("S1.BUS"), Some("— (not read yet)"));
+        assert_eq!(s[0].value("DRAGON.BUS"), Some("— (not read yet)"));
+        assert!(!s[0].items.contains(&Item::Note("no buses: nothing draws power".into(), Tone::Dim)));
+        let none = sections(Some(&PowerData::default()));
+        assert!(none[0].items.contains(&Item::Note("no buses: nothing draws power".into(), Tone::Dim)));
     }
 
     /// Batteries by share of charge, a dash unmeasured; the unpowered in red.
