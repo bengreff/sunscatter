@@ -30,7 +30,7 @@ fn each_layer_summarises_the_craft() {
         facts: &facts,
         known: &known,
         aboard: Aboard { mass: Reading { value: 12_345.0, precision: 0.0 }, dry: 4_000.0 },
-        com: 2.5,
+        com: Reading { value: 2.5, precision: 0.0 },
         power: None,
         accel: DVec3::ZERO,
     };
@@ -84,13 +84,14 @@ fn each_layer_summarises_the_craft() {
     // Blind: dashes and counts.
     let blind = Known::from(Knowledge::default());
     let facts = facts_of(def, &state, &Knowledge::default());
-    // The mass to its precision (every tank from empty to full: the
-    // staging bar's rule, finding 41), the centre of mass a dash.
+    // The mass and the centre of mass to their precision (every tank from
+    // empty to full: the staging bar's rule, finding 41), not dashed.
     let wide = Aboard { mass: Reading { value: 12_345.0, precision: 6_000.0 }, ..x.aboard };
-    let x = Inputs { known: &blind, facts: &facts, aboard: wide, ..x };
+    let com = Reading { value: 2.4, precision: 1.4 };
+    let x = Inputs { known: &blind, facts: &facts, aboard: wide, com, ..x };
     let s = summary(Layer::Structural, &x);
     assert_eq!(group(&s, "STRUCTURE").value("mass"), Some("12 t"));
-    assert_eq!(group(&s, "STRUCTURE").value("centre of mass"), Some(DASH));
+    assert_eq!(group(&s, "STRUCTURE").value("centre of mass"), Some("2 m above the base"));
     assert_eq!(group(&s, "STRUCTURE").value("g-limit"), Some(DASH));
     let joints = group(&s, "JOINTS");
     // The joints the craft gives a capacity are not measured; the rest (the
@@ -133,7 +134,7 @@ fn the_hottest_and_the_worn_lead() {
         facts: &facts,
         known: &known,
         aboard: Aboard { mass: Reading { value: 0.0, precision: 0.0 }, dry: 0.0 },
-        com: 0.0,
+        com: Reading { value: 0.0, precision: 0.0 },
         power: None,
         accel: DVec3::ZERO,
     };
@@ -208,8 +209,16 @@ fn the_lost_read_by_their_owners_ids() {
     let facts = facts_of(def, &state, &all);
     let known = Known::from(all);
     let aboard = Aboard { mass: Reading { value: 0.0, precision: 0.0 }, dry: 0.0 };
-    let x =
-        Inputs { def, state: &state, facts: &facts, known: &known, aboard, com: 0.0, power: None, accel: DVec3::ZERO };
+    let x = Inputs {
+        def,
+        state: &state,
+        facts: &facts,
+        known: &known,
+        aboard,
+        com: Reading { value: 0.0, precision: 0.0 },
+        power: None,
+        accel: DVec3::ZERO,
+    };
     let s = summary(Layer::Health, &x);
     let labels: Vec<&str> = group(&s, "LOST").rows.iter().map(|r| r.label.as_str()).collect();
     assert_eq!(labels, ["tank", computer.id.as_str()]);

@@ -5,7 +5,7 @@
 //!
 //! * **Structure**: the mass now (`sim::systems::estimate::aboard`, the
 //!   staging bar's rule: to the precision the tank sensors give) and the
-//!   centre of mass, the g-limit and what
+//!   centre of mass (`estimate::centre`, the same rule), the g-limit and what
 //!   sets it (`sim::systems::g_limit`), the joints nearest their ultimate.
 //! * **Thermal**: the parts nearest their temperature limits.
 //! * **Plumbing**: each tank's contents, the tanks' and bottles' pressures
@@ -35,8 +35,10 @@ pub struct Inputs<'a> {
     /// What is aboard now: its mass to its precision, its dry mass
     /// (`sim::systems::estimate::aboard`, the staging bar's own).
     pub aboard: sim::systems::estimate::Aboard,
-    /// The centre of mass's height above the base (m).
-    pub com: f64,
+    /// The centre of mass's height above the lowest point aboard, as the
+    /// craft knows it (`sim::systems::estimate::centre`: the pad's mount
+    /// left out, to the tank sensors' precision).
+    pub com: sim::systems::Reading,
     /// The electrical system (`menus::power::gather`).
     pub power: Option<&'a power::PowerData>,
     /// The proper acceleration the craft feels now, body axes: the
@@ -90,7 +92,7 @@ fn structure(x: &Inputs) -> Vec<Group> {
     let mut g = Group::new("STRUCTURE");
     g.row("mass", format::mass(Some(x.aboard.mass)))
         .row("dry mass", exact(x.aboard.dry))
-        .row("centre of mass", k.or_dash(k.propellant, || format!("{:.1} m above the base", x.com)));
+        .row("centre of mass", format!("{} above the base", format::metres(x.com)));
     let g0 = crate::navball::rules::G0;
     let now = x.accel.length() / g0;
     use sim::systems::g_limit::{g_limit, ACCELERATING};

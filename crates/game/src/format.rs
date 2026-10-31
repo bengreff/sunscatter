@@ -140,6 +140,12 @@ pub fn mass(r: Option<Reading>) -> String {
     read(r, mass_unit)
 }
 
+/// A length in metres as it is known (a centre of mass's height), at most
+/// one decimal and no more than its precision gives.
+pub fn metres(r: Reading) -> String {
+    format!("{:.*} m", decimals(r.precision, 1.0, 1), r.shown())
+}
+
 /// A force as it is known.
 pub fn force(r: Option<Reading>) -> String {
     read(r, force_unit)
@@ -343,6 +349,18 @@ mod tests {
         ];
         for (reading, capacity, want) in table {
             assert_eq!(charge(reading, wh(capacity)), want, "{reading:?}");
+        }
+    }
+
+    /// A length to its precision (the centre of mass's height): one
+    /// decimal exact, none past a metre.
+    #[test]
+    fn metres_read_to_their_precision() {
+        let r = |value: f64, precision: f64| Reading { value, precision };
+        let table =
+            [(r(2.5, 0.0), "2.5 m"), (r(29.73, 0.6), "29.7 m"), (r(29.73, 1.4), "30 m"), (r(29.73, 12.0), "30 m")];
+        for (reading, want) in table {
+            assert_eq!(metres(reading), want, "{reading:?}");
         }
     }
 

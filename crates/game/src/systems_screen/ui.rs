@@ -69,7 +69,13 @@ pub fn draw(
                     &sim::systems::estimate::hull(&vessel.craft.design().parts),
                     &known.knowledge,
                 ),
-                com: vessel.contact_height(),
+                com: sim::systems::estimate::centre(
+                    def,
+                    state,
+                    vessel.craft.design(),
+                    &vessel.craft.contacts,
+                    &known.knowledge,
+                ),
                 power: power.as_ref(),
                 accel: crate::navball::felt(&sim, vessel, sim.clock),
             };

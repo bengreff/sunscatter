@@ -114,3 +114,7 @@ Read the ratios, not the last digit (other agents were building). The handles' g
 ### INTERFACE-6 in sim (2026-10-31)
 
 INTERFACE-6 (game crate, [brief-interface.md](brief-interface.md)) adds one function to `sim::systems::estimate` for interface-map finding 41: `estimate::aboard`, the mass aboard now with the precision the tank sensors give (the estimate's own walk and bounds), so the systems screen and the staging bar read one rule. An added function and its test in `estimate_tests.rs`; nothing else in sim changes. STATE's 3b (`estimate`'s joints and `release_engines`) is untouched by it.
+
+### INTERFACE-7 in sim (2026-10-31)
+
+INTERFACE-7 (game crate, [brief-interface.md](brief-interface.md)) adds one function to `sim::systems::estimate` beside INTERFACE-6's `aboard`: `estimate::centre(def, state, design, contacts, knowledge)`, the centre of mass of what is aboard (the pad's mount's mass and foot left out) as a height above the lowest contact point aboard, with the precision the tank sensors give (a search over each tank's known range, its slug precomputed at nine levels). `bound` now reads a per-tank `range` (the same bounds). Its test is a file of its own, `estimate_centre_tests.rs`; nothing else in sim changes. The systems screen's Structural summary reads it instead of `Vessel::contact_height` (which stays the contact model's).

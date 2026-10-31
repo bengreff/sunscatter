@@ -194,14 +194,108 @@ pub fn aboard(def: &ShipDef, state: &ShipState, hull: &[Hull], knowledge: &Knowl
 /// Every tank at the low (or high) end of what is known of it: an
 /// unmeasured one empty (or full).
 fn bound(def: &ShipDef, state: &ShipState, k: &Knowledge, high: bool) -> Vec<f64> {
-    (state.tanks.iter().zip(&def.tanks).enumerate())
-        .map(|(i, (s, d))| match (k.precision(Quantity::TankLevel(i as u32)), high) {
-            (Some(p), false) => (s.liquid - p).max(0.0),
-            (Some(p), true) => (s.liquid + p).min(d.capacity.max(s.liquid)),
-            (None, false) => 0.0,
-            (None, true) => d.capacity.max(s.liquid),
+    (0..def.tanks.len()).map(|i| if high { range(def, state, k, i).1 } else { range(def, state, k, i).0 }).collect()
+}
+
+/// What tank `i` may hold (kg, low and high) as `k` knows it: its reading
+/// within its precision, an unmeasured one empty to full.
+fn range(def: &ShipDef, state: &ShipState, k: &Knowledge, i: usize) -> (f64, f64) {
+    let (s, d) = (&state.tanks[i], &def.tanks[i]);
+    let full = d.capacity.max(s.liquid);
+    match k.precision(Quantity::TankLevel(i as u32)) {
+        Some(p) => ((s.liquid - p).max(0.0), (s.liquid + p).min(full)),
+        None => (0.0, full),
+    }
+}
+
+/// Levels across a tank's range that [`centre`] tries for its extremes.
+const LEVELS: usize = 9;
+
+/// Where the centre of mass of what is aboard sits now: its height above
+/// the lowest point aboard (m, along the craft's axis), to the precision
+/// the tank sensors give: the farthest it moves with each tank anywhere in
+/// what `knowledge` knows of it (an unmeasured one empty to full), found
+/// by a search over each tank's levels. What is aboard is [`aboard`]'s: the
+/// parts less the pad's mount (its mass and its foot left out), their
+/// tanks' liquid where it sits and their gas (`plumbing::contents`' model).
+/// `design` and `contacts` are the vessel's craft's. One rule for the
+/// systems screen's centre of mass (interface-map finding 41: a dash while
+/// any tank was unmeasured, and on the pad the mount's 50 t and its foot
+/// counted).
+pub fn centre(
+    def: &ShipDef,
+    state: &ShipState,
+    design: &crate::craft::design::CraftDesign,
+    contacts: &[crate::craft::cells::ContactPoint],
+    knowledge: &Knowledge,
+) -> Reading {
+    let ground: BTreeSet<u32> = def.parts.iter().filter(|p| p.ground).map(|p| p.part).collect();
+    let on = |part: u32| !ground.contains(&part);
+    let molar = |g: &str| fluids().gas(g).map_or(0.0, |g| g.molar_mass);
+    // The dry parts and the bottles' gas, which no level changes: (mass,
+    // its moment along z).
+    let mut fixed = (0.0, 0.0);
+    for (_, m) in design.parts.iter().zip(&design.part_mass).filter(|(p, _)| on(p.id)) {
+        fixed = (fixed.0 + m.mass, fixed.1 + m.mass * m.com.z);
+    }
+    for (b, d) in state.bottles.iter().zip(&def.bottles).filter(|(_, d)| on(d.part)) {
+        let kg = b.moles * molar(&d.gas);
+        fixed = (fixed.0 + kg, fixed.1 + kg * d.pos.z);
+    }
+    // A tank holding `kg`: its liquid where it sits and its ullage's gas.
+    let tank = |i: usize, kg: f64| {
+        let (d, s) = (&def.tanks[i], &state.tanks[i]);
+        let s = crate::craft::state::TankState { liquid: kg, ..s.clone() };
+        let slug = plumbing::slug(d, &s);
+        let gas = s.ullage_moles * molar(&d.load.pressurant);
+        let z = slug.base.z + slug.axis.z * 0.5 * slug.height;
+        (kg + gas, kg * z + gas * plumbing::ullage_centre(d, &slug).z)
+    };
+    let tanks: Vec<usize> = (0..def.tanks.len()).filter(|&i| on(def.tanks[i].part)).collect();
+    let now: Vec<(f64, f64)> = tanks.iter().map(|&i| tank(i, state.tanks[i].liquid)).collect();
+    let sum = |items: &[(f64, f64)]| items.iter().fold(fixed, |(m, mz), (a, b)| (m + a, mz + b));
+    let height = |(m, mz): (f64, f64)| if m > 0.0 { mz / m } else { 0.0 };
+    let z = height(sum(&now));
+    // Each tank across what is known of it (none when known exactly).
+    let tries: Vec<Vec<(f64, f64)>> = (tanks.iter())
+        .map(|&i| match range(def, state, knowledge, i) {
+            (lo, hi) if hi > lo => {
+                (0..LEVELS).map(|n| tank(i, lo + (hi - lo) * n as f64 / (LEVELS - 1) as f64)).collect()
+            }
+            _ => Vec::new(),
         })
-        .collect()
+        .collect();
+    // The highest (`sign` 1) or lowest (−1): each tank in turn to its best
+    // level with the others held, until no tank moves it.
+    let extreme = |sign: f64| {
+        let mut items = now.clone();
+        let mut best = sign * z;
+        for _ in 0..tanks.len().max(1) {
+            let mut moved = false;
+            for (n, levels) in tries.iter().enumerate() {
+                for &t in levels {
+                    let held = std::mem::replace(&mut items[n], t);
+                    let v = sign * height(sum(&items));
+                    if v > best + 1e-12 {
+                        (best, moved) = (v, true);
+                    } else {
+                        items[n] = held;
+                    }
+                }
+            }
+            if !moved {
+                break;
+            }
+        }
+        sign * best
+    };
+    let precision = if knowledge.perfect { 0.0 } else { (extreme(1.0) - z).max(z - extreme(-1.0)) };
+    // The lowest point aboard: its lowest contact point (the craft's own
+    // bottom, `CraftParams::bottom_z`'s rule, less the mount's).
+    let part_of = |c: &crate::craft::cells::ContactPoint| design.cell_part.get(c.cell as usize).copied();
+    let base = (contacts.iter()).filter(|c| part_of(c).is_some_and(on)).map(|c| c.pos.z).fold(f64::INFINITY, f64::min);
+    let base = if base.is_finite() { base } else { contacts.iter().map(|c| c.pos.z).fold(z, f64::min) };
+    Reading { value: z - base, precision }
 }
 
 /// A burn's raw numbers in one walk.
@@ -553,3 +647,7 @@ fn pieces(parts: &[u32], joined: &[(u32, u32)]) -> Vec<Vec<u32>> {
 #[cfg(test)]
 #[path = "estimate_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "estimate_centre_tests.rs"]
+mod centre_tests;
