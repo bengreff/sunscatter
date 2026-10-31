@@ -61,14 +61,17 @@ pub fn draw(
     mut cmds: MessageWriter<GameCommand>,
     real: Res<Time<Real>>,
     mut steady: Local<std::collections::HashMap<MenuId, super::Steady>>,
+    mut help: ResMut<crate::interface::help::Help>,
 ) -> Result {
     if station.open {
         return Ok(());
     }
     let ctx = contexts.ctx_mut()?;
     let mut menus = iface.menus.clone();
-    if let Some(m) = render::bar(ctx, &menus) {
-        menus.toggle(m);
+    match render::bar(ctx, &menus) {
+        Some(render::BarClick::Menu(m)) => menus.toggle(m),
+        Some(render::BarClick::Help) => help.open = !help.open,
+        None => {}
     }
     let rect = |id: &str| ctx.memory(|m| m.area_rect(egui::Id::new(id)));
     // The navball cluster (the action bar is at the top right).

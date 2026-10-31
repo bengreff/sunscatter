@@ -100,16 +100,22 @@ impl MenuId {
         }
     }
 
-    /// The key as shown (the menu bar, the help); empty without one.
+    /// The key as shown (the menu bar, the help), from [`Self::key`]
+    /// itself; empty without one.
     pub fn key_label(self) -> &'static str {
+        self.key().map_or("", crate::commands::keys::key_name)
+    }
+
+    /// What the menu is for, as the help says it.
+    pub fn about(self) -> &'static str {
         match self {
-            MenuId::Orbital => "1",
-            MenuId::Landing => "2",
-            MenuId::Maneuver => "3",
-            MenuId::Crew => "4",
-            MenuId::Power => "5",
-            MenuId::Comms => "6",
-            MenuId::Rcs => "",
+            MenuId::Rcs => "mode, authority, propellant and every thruster block (shown while RCS is on)",
+            MenuId::Orbital => "the orbit now, the target, the ship's clock",
+            MenuId::Landing => "impact, braking, entry, heat, parachute (shows the impact marker)",
+            MenuId::Maneuver => "the planned burns, the burn planner",
+            MenuId::Crew => "the crew, the cabin's air, life support, injuries",
+            MenuId::Power => "the buses, batteries, what has no power",
+            MenuId::Comms => "the link home, a probe's control delay",
         }
     }
 
@@ -438,10 +444,10 @@ mod tests {
         };
         for m in MenuId::ALL.into_iter().filter(|m| m.key().is_some()) {
             let mut listed = 0;
-            for (group, keys) in crate::interface::help::KEYS {
-                for (k, _) in *keys {
+            for s in crate::interface::help::sections().into_iter().filter(|s| s.title != "Every way in") {
+                for (k, _) in &s.rows {
                     if tokens(k).iter().any(|t| t == m.key_label()) {
-                        assert_eq!(*group, "Menus", "{m:?}'s key {} is also used by `{k}`", m.key_label());
+                        assert!(s.title.starts_with("Menus"), "{m:?}'s key {} is also used by `{k}`", m.key_label());
                         listed += 1;
                     }
                 }

@@ -44,6 +44,165 @@ pub enum Action {
     FocusShip,
 }
 
+/// The help's groups of keys (`interface::help`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Group {
+    Flight,
+    Time,
+    Camera,
+    Screens,
+}
+
+impl Action {
+    /// Every action, in the help's order within its group.
+    pub const ALL: [Action; 18] = [
+        Action::ThrottleFull,
+        Action::ThrottleCut,
+        Action::Sas,
+        Action::Rcs,
+        Action::Chutes,
+        Action::NextStage,
+        Action::PreviousVessel,
+        Action::NextVessel,
+        Action::WarpUp,
+        Action::WarpDown,
+        Action::Warp1x,
+        Action::FocusBody,
+        Action::FocusShip,
+        Action::SystemsScreen,
+        Action::TrackingStation,
+        Action::QuickSave,
+        Action::QuickLoad,
+        Action::Help,
+    ];
+
+    /// The help's group it is listed in.
+    pub fn group(self) -> Group {
+        use Action::*;
+        match self {
+            ThrottleFull | ThrottleCut | Sas | Rcs | Chutes | NextStage | PreviousVessel | NextVessel => Group::Flight,
+            WarpUp | WarpDown | Warp1x => Group::Time,
+            FocusBody | FocusShip => Group::Camera,
+            SystemsScreen | TrackingStation | QuickSave | QuickLoad | Help => Group::Screens,
+        }
+    }
+
+    /// What it does, as the help says it.
+    pub fn about(self) -> &'static str {
+        use Action::*;
+        match self {
+            ThrottleFull => "full throttle",
+            ThrottleCut => "cut the throttle",
+            Sas => "SAS on / off (the hold modes: click them on the navball)",
+            Rcs => "RCS on / off, and its menu with it",
+            Chutes => "parachutes: drogue now, mains low",
+            NextStage => "the next stage of the craft's sequence",
+            PreviousVessel => "the previous vessel, nearest first",
+            NextVessel => "the next vessel, nearest first",
+            WarpUp => "warp up (from stopped time: 1x)",
+            WarpDown => "warp down (at 1x: time stops)",
+            Warp1x => "warp 1x",
+            FocusBody => "the camera on the nearest body",
+            FocusShip => "the camera on the ship",
+            SystemsScreen => "the systems screen: the craft by layer, its commands, stages and functions",
+            TrackingStation => "the tracking station",
+            QuickSave => "quicksave",
+            QuickLoad => "quickload",
+            Help => "this help: the keys and every way in",
+        }
+    }
+}
+
+/// A key's name as the player reads it.
+pub fn key_name(k: KeyCode) -> &'static str {
+    use KeyCode::*;
+    match k {
+        KeyA => "A",
+        KeyB => "B",
+        KeyC => "C",
+        KeyD => "D",
+        KeyE => "E",
+        KeyF => "F",
+        KeyG => "G",
+        KeyH => "H",
+        KeyI => "I",
+        KeyJ => "J",
+        KeyK => "K",
+        KeyL => "L",
+        KeyM => "M",
+        KeyN => "N",
+        KeyO => "O",
+        KeyP => "P",
+        KeyQ => "Q",
+        KeyR => "R",
+        KeyS => "S",
+        KeyT => "T",
+        KeyU => "U",
+        KeyV => "V",
+        KeyW => "W",
+        KeyX => "X",
+        KeyY => "Y",
+        KeyZ => "Z",
+        Digit0 => "0",
+        Digit1 => "1",
+        Digit2 => "2",
+        Digit3 => "3",
+        Digit4 => "4",
+        Digit5 => "5",
+        Digit6 => "6",
+        Digit7 => "7",
+        Digit8 => "8",
+        Digit9 => "9",
+        Space => "Space",
+        Tab => "Tab",
+        Escape => "Esc",
+        Period => ".",
+        Comma => ",",
+        Slash => "/",
+        BracketLeft => "[",
+        BracketRight => "]",
+        Backquote => "`",
+        _ => "?",
+    }
+}
+
+/// A chord as the player reads it: `mac` names Cmd, elsewhere Ctrl+Alt;
+/// Shift+/ is `?`.
+pub fn chord_label(c: Chord, mac: bool) -> String {
+    match c.with {
+        Modifier::None => key_name(c.key).to_string(),
+        Modifier::Shift if c.key == KeyCode::Slash => "?".to_string(),
+        Modifier::Shift => format!("Shift+{}", key_name(c.key)),
+        Modifier::Command if mac => format!("Cmd+{}", key_name(c.key)),
+        Modifier::Command => format!("Ctrl+Alt+{}", key_name(c.key)),
+    }
+}
+
+/// The keys bound to `what` (`mac`: as on a Mac), joined; empty when
+/// none is.
+pub fn labels(what: Action, mac: bool) -> String {
+    let all: Vec<String> = BINDINGS.iter().filter(|(_, a)| *a == what).map(|(c, _)| chord_label(*c, mac)).collect();
+    all.join(" / ")
+}
+
+/// The keys bound to `what` on this machine: the one source of every key
+/// the interface names (the help, the buttons' labels).
+pub fn label(what: Action) -> String {
+    labels(what, cfg!(target_os = "macos"))
+}
+
+/// The held flight keys as the help lists them: (keys, what), from
+/// [`ROTATE`], [`TRANSLATE`] and the throttle's modifiers (`throttle_after`).
+pub fn held_rows() -> Vec<(String, &'static str)> {
+    let pair = |(p, n): (KeyCode, KeyCode)| format!("{} {}", key_name(n), key_name(p));
+    let set = |s: [(KeyCode, KeyCode); 3]| s.map(pair).join(" / ");
+    vec![
+        ("Shift / Ctrl".to_string(), "throttle up / down (hold Alt: fine)"),
+        (set(ROTATE), "pitch / yaw / roll"),
+        (set(TRANSLATE), "translate left right / up down / back forward (RCS on)"),
+    ]
+}
+
 /// A key and the modifiers it needs.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Chord {
@@ -309,34 +468,6 @@ mod tests {
         ];
         for (what, level, stopped, want) in table {
             assert_eq!(warp_command(what, level, stopped), want, "{what:?} {level} {stopped}");
-        }
-    }
-
-    /// The help lists every binding's key, and every menu's.
-    #[test]
-    fn the_help_lists_every_key() {
-        let text: Vec<&str> =
-            crate::interface::help::KEYS.iter().flat_map(|(_, keys)| keys.iter().map(|(k, _)| *k)).collect();
-        let listed = |label: &str| text.iter().any(|k| *k == label || k.split([' ', '/']).any(|t| t == label));
-        let label = |c: &Chord| match c.key {
-            KeyCode::Space => "Space".to_string(),
-            KeyCode::Tab => "Tab".to_string(),
-            KeyCode::Period => ".".to_string(),
-            KeyCode::Comma => ",".to_string(),
-            KeyCode::Slash if c.with == Modifier::Shift => "?".to_string(),
-            KeyCode::Slash => "/".to_string(),
-            KeyCode::BracketLeft => "[".to_string(),
-            KeyCode::BracketRight => "]".to_string(),
-            KeyCode::Backquote => "`".to_string(),
-            k => format!("{k:?}").trim_start_matches("Key").to_string(),
-        };
-        for (c, a) in BINDINGS {
-            let l = label(c);
-            let l = if c.with == Modifier::Command { format!("Cmd+{l}") } else { l };
-            assert!(listed(&l), "{a:?} ({l}) is not in the help");
-        }
-        for m in MenuId::ALL.iter().filter(|m| m.key().is_some()) {
-            assert!(text.iter().any(|k| k.contains(m.key_label())), "{m:?}");
         }
     }
 }

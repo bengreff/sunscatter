@@ -208,7 +208,7 @@ pub fn dock(ctx: &egui::Context, place: DockPlace, menus: &[(MenuId, Vec<Section
 /// The menu bar, top centre: each menu's name in normal type with its key
 /// as a small badge, an open menu lit (an amber wash and underline);
 /// returns the menu clicked.
-pub fn bar(ctx: &egui::Context, settings: &MenuSettings) -> Option<MenuId> {
+pub fn bar(ctx: &egui::Context, settings: &MenuSettings) -> Option<BarClick> {
     let mut clicked = None;
     egui::Area::new(egui::Id::new(BAR_AREA)).anchor(Align2::CENTER_TOP, [0.0, layout::MARGIN]).show(ctx, |ui| {
         theme::bar_frame().show(ui, |ui| {
@@ -219,13 +219,27 @@ pub fn bar(ctx: &egui::Context, settings: &MenuSettings) -> Option<MenuId> {
                     let verb = if open { "Close" } else { "Open" };
                     let r = bar_item(ui, m, open).on_hover_text(m.with_key(&format!("{verb} {}", m.title())));
                     if r.clicked() {
-                        clicked = Some(m);
+                        clicked = Some(BarClick::Menu(m));
                     }
+                }
+                // The help: every key and every way in, by click too.
+                let help = crate::commands::keys::label(crate::commands::keys::Action::Help);
+                let text = RichText::new(" ? ").monospace().size(13.0).color(theme::MUTED);
+                let r = ui.add(egui::Button::new(text).frame(false));
+                if r.on_hover_text(format!("Help: every key and every way in ({help})")).clicked() {
+                    clicked = Some(BarClick::Help);
                 }
             });
         });
     });
     clicked
+}
+
+/// What a click on the menu bar asks for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BarClick {
+    Menu(MenuId),
+    Help,
 }
 
 /// The egui id of a menu's item in the bar.
@@ -330,7 +344,7 @@ mod tests {
         assert!(item.rect.height() >= 24.0, "readable: {:?}", item.rect);
         let [press, release] = click(item.rect.center());
         run(press);
-        assert_eq!(run(release), Some(MenuId::Comms));
+        assert_eq!(run(release), Some(BarClick::Menu(MenuId::Comms)));
     }
 
     /// Flat pages: every section's items are drawn, so the last

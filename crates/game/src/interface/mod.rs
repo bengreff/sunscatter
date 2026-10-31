@@ -3,6 +3,7 @@
 //! overlay. Where everything goes is pure rules in [`layout`] (D080:
 //! designated places, nothing is dragged).
 
+pub mod access;
 pub mod action_bar;
 pub mod events;
 pub mod help;

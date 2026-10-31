@@ -1,12 +1,12 @@
-//! The settings screen (F3, or Settings in the pause menu) and the
-//! performance overlay (F4). Tabs: Orbits, Controls, Interface; everything
+//! The settings screen (Settings in the pause menu) and the performance
+//! overlay (its button there). Tabs: Orbits, Controls, Interface, Visuals;
+//! the task menus open from the menu bar or their keys only. Everything
 //! is saved in `settings.ron`, and each tab can be reset. There are no
 //! graphics settings: one look for everyone (`look`, D073); the Interface
 //! tab measures what its parts cost (`bench`).
 
 use crate::bench::{self, Bench};
 use crate::interface::layout::{self as layout, InterfaceSettings};
-use crate::interface::menus::MenuId;
 use crate::persist::ControlsSettings;
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
@@ -192,14 +192,6 @@ fn interface_tab(ui: &mut egui::Ui, s: &mut InterfaceSettings) {
     ui.add(egui::Slider::new(&mut s.ui_scale, layout::UI_SCALE_RANGE).text("UI scale"));
     ui.add(egui::Slider::new(&mut s.navball_size, layout::NAVBALL_SIZE_RANGE).text("navball size (px)"));
     ui.checkbox(&mut s.show_fps, "Frame rate in the time panel");
-    ui.separator();
-    ui.label("Menus (the menu bar, or their keys; places are fixed):");
-    for m in MenuId::BAR {
-        let mut open = s.menus.is_open(m);
-        if ui.checkbox(&mut open, m.with_key(m.title())).changed() {
-            s.menus.set_open(m, open);
-        }
-    }
     ui.separator();
     ui.checkbox(&mut s.agent.enabled, "AI agent server (MCP, local only)");
     ui.horizontal(|ui| {

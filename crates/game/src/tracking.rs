@@ -1,7 +1,7 @@
 //! Vessel switching and the tracking station (D050).
 //!
 //! `[` / `]` step the active vessel through the fleet, nearest first
-//! ([`Cycle`]). F7 opens the tracking station, a full
+//! ([`Cycle`]). M (or the pause menu) opens the tracking station, a full
 //! screen (KSP-like): the object list on the left (vessels grouped by status
 //! with track toggles, bodies as a star → planet → moon tree), details and
 //! actions (Focus, Switch to, Delete with confirmation) for the selection,
@@ -345,7 +345,8 @@ pub fn draw(
             ui.label(egui::RichText::new(format!("at {} (mission control)", comms.location_name())).small().color(dim));
             let (y, mo, d, h, mi, _) = sim.site_time().to_calendar();
             ui.monospace(format!("{y}-{mo:02}-{d:02} {h:02}:{mi:02} TT   warp {}x", WARP_LEVELS[sim.warp]));
-            if ui.button("Back to flight (F7)").clicked() {
+            let back = format!("Back to flight ({} / Esc)", keys::label(keys::Action::TrackingStation));
+            if ui.button(back).clicked() {
                 actions.push(Action::Close);
             }
             ui.separator();

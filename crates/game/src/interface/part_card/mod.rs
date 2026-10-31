@@ -129,7 +129,8 @@ pub fn show(
     let heights: Vec<f32> = (cards.open.iter().filter(|c| c.from == From::Bar))
         .map(|c| ctx.memory(|m| m.area_rect(id_of(c.serial))).map_or(CARD_GUESS, |r| r.height()))
         .collect();
-    let mut corners = place::stack(&heights, top, screen.max.y - layout::MARGIN, right, CARD_WIDTH, layout::GAP).into_iter();
+    let mut corners =
+        place::stack(&heights, top, screen.max.y - layout::MARGIN, right, CARD_WIDTH, layout::GAP).into_iter();
     let mut closed = Vec::new();
     let mut lines: Vec<(egui::Rect, egui::Pos2)> = Vec::new();
     for k in 0..cards.open.len() {
