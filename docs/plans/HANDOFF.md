@@ -2,12 +2,13 @@
 
 A SessionStart hook loads this file automatically after `/clear` or at startup. It is kept current by `/handoff`.
 
-*Updated 2026-10-30 (night). Running: PLANNER, ONEKIND-3. AUDIT done. The owner asked for next steps 1–3 done; answers in [interview-2026-10-30-roadmap.md](../archive/interviews/interview-2026-10-30-roadmap.md) (D120, D126 revised; D128, D129 new; D063, D121 extended).*
+*Updated 2026-10-30 (night). Running: PLANNER-2, ONEKIND-3, RESEARCH (all three slots). PLANNER-1 and AUDIT done. The owner asked for next steps 1–3 done; answers in [interview-2026-10-30-roadmap.md](../archive/interviews/interview-2026-10-30-roadmap.md) (D120, D126 revised; D128, D129 new; D063, D121 extended).*
 
 ## Your first job
 
 1. Take the three agents' reports as they arrive (each through a message: commits, what is left, questions; their briefs hold their State):
-   - **PLANNER** ([brief-planner.md](brief-planner.md)): closed-loop planned burns for craft of parts, as a layer-2 function (D126, D128); burns live (D129).
+   - **PLANNER-2** ([brief-planner.md](brief-planner.md), its State): PLANNER-1 landed `kepler::propagate`, `sim::systems::maneuver` (the layer-2 burn program) and `Vessel::set_nodes` (bce4379, c7c2de4, 0a382b6). PLANNER-2 does the rest in order: accuracy, vessel tests, moving the planned-burn tests onto nodes (this unblocks ONEKIND-3), MCP `set_plan` and the Falcon 9 mission test, takeover hand-over, docs.
+   - **RESEARCH** ([brief-research.md](brief-research.md)): docs only. Designs for phase 4: `technical/landing-guidance.md` (convex guidance and a deterministic fixed-iteration solver), `entry-ablation.md`, `water-landing.md`, and the data gaps in `falcon9.md` (Dragon's CO₂ removal, helium bottles, the booster's landing-zone return).
    - **ONEKIND-3** ([brief-onekind.md](brief-onekind.md), its ONEKIND-3 section): the unblocked tests and the stress craft first; then it waits for PLANNER before deleting the made-up path.
    - **AUDIT: done** (14c2a4d, 17ec7aa, 08a34c8): `tests/warp_course.rs` (two days of S2 + Dragon give the same bits at 1×–10⁵×; D1–D3 reproduced as `#[ignore]`d tests that ADVANCE un-ignores), `technical/warp-invariance.md`, `technical/software-layers.md` (design), drafts `brief-advance.md` and `brief-layers.md`. Its findings went to the owner; its open points are in its brief (to archive).
 2. When PLANNER lands, tell ONEKIND-3 to go on (Left 3, 4). When AUDIT reports, give the owner its ranked difficulties (they asked), then start the wave (next steps, item 3) one agent at a time as slots free.
