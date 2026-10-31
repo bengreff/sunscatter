@@ -534,6 +534,7 @@ impl ShipState {
             && self.joints.len() == def.joints.len()
             && self.parts.len() == def.parts.len()
             && self.power.len() == def.components.len()
+            && (self.fins.is_empty() || self.fins.len() == def.surfaces.len())
     }
 
     /// Whether `owner`'s function is out: lost to a failure, or without

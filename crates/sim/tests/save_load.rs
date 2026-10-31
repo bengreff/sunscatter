@@ -270,3 +270,24 @@ fn saves_with_duplicate_or_unissued_vessel_ids_are_rejected() {
     let unissued = load(&[pad(VesselId(3))], ids_up_to(2));
     assert!(matches!(unissued, Err(SaveError::Format(_))), "unissued id accepted");
 }
+
+/// A craft's state saved against other craft data (here one power switch
+/// short, as a Crew Dragon saved before its cabin and barometric sensors)
+/// is refused at load as a format error, never indexed into later.
+#[test]
+fn a_ship_state_that_does_not_fit_its_craft_is_refused_at_load() {
+    let w = world();
+    let craft = sim::craft::craft_of(&sim::craft::CraftId("falcon9-crew".into()));
+    let a = Vessel::landed_at(&w, VesselId(1), "Earth", 28.6084, -80.6043, t0(), &craft);
+    let text = SaveGame::capture(&w, t0(), std::slice::from_ref(&a), ids_up_to(1), 0).to_ron();
+    assert!(SaveGame::from_ron(&text).is_ok());
+    let list = text.find("power:").expect("the power switches");
+    let open = list + text[list..].find('[').unwrap() + 1;
+    let first = open + text[open..].find(')').unwrap() + 1;
+    let first = first + text[first..].find(['(', ']']).unwrap();
+    let old = format!("{}{}", &text[..open], &text[first..]);
+    match SaveGame::from_ron(&old) {
+        Err(sim::save::SaveError::Format(e)) => assert!(e.contains("does not fit"), "{e}"),
+        other => panic!("{:?}", other.map(|_| ())),
+    }
+}

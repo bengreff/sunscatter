@@ -31,7 +31,7 @@ use std::fmt;
 use std::path::Path;
 
 /// Version of the save format. Loading any other version is an error.
-pub const SAVE_VERSION: u32 = 16;
+pub const SAVE_VERSION: u32 = 17;
 
 /// Which ephemeris a save was made against. Vessel states are only
 /// meaningful (and only reproducible) with the same body motions.
@@ -178,6 +178,16 @@ impl SaveGame {
         for v in &save.vessels {
             if !save.vessel_ids.issued(v.id()) || !seen.insert(v.id()) {
                 return Err(SaveError::Format(format!("vessel id {} duplicated or not issued", v.id())));
+            }
+            // A craft's state saved against other craft data (its lists of
+            // another length) is refused here, never indexed into later.
+            if let (Some(def), Some(state)) = (v.ship_def(), v.ship()) {
+                if !state.fits(&def) {
+                    return Err(SaveError::Format(format!(
+                        "vessel {}: its ship state does not fit its craft's current data",
+                        v.id()
+                    )));
+                }
             }
         }
         Ok(save)
