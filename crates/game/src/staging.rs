@@ -1,19 +1,13 @@
-//! Staging (D080): the craft's stage stack and what Space activates, as
-//! pure functions. A *skeleton* until the parts model brings real stages
-//! (D060): the test craft has one stage, its engine (lit by the throttle
-//! since launch), and the parachute event above it (D079).
-//!
-//! Stages are numbered as KSP does: the highest number fires first, stage
-//! 0 last, and the stack is listed with stage 0 at the top. A stage is
-//! *next* until it is activated, then *active*. Staging is locked on the
-//! ground (Space is the launch key in KSP habits; here the throttle
-//! launches, and Space on the pad must not arm the parachutes). P is not
+//! Staging (D080): a craft's stages as the staging bar and the menus show
+//! them, as pure functions. Its sequence is the craft's own program
+//! ([`parts::stack`], `sim::craft::program`): Space runs the next stage
+//! (`GameCommand::Stage`), and [`no_stage_left`] says when none is left.
+//! Its parachutes read in their D079 sequence ([`canopies`]); P is not
 //! locked: nothing refuses the parachute command (D079).
 
 pub mod parts;
 
 use sim::chute::{CanopyState, ChuteSpec, ChuteState};
-use sim::vessel::Controls;
 
 /// Where a stage is in the sequence.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -22,7 +16,7 @@ pub enum StageState {
     Next,
     /// Activated.
     Active,
-    /// After the next one (a craft of parts' sequence).
+    /// After the next one.
     Later,
 }
 
@@ -46,95 +40,26 @@ pub struct Part {
 pub struct Stage {
     pub number: u32,
     pub state: StageState,
-    /// Its name in a craft of parts' sequence.
+    /// Its name in the craft's sequence.
     pub name: Option<String>,
     pub parts: Vec<Part>,
 }
 
-/// What activating a stage does.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Activation {
-    /// The parachute command (the same as P, D079).
-    ArmParachutes,
-}
+/// What Space after the sequence's last stage tells the player.
+pub const NO_STAGE_LEFT: &str = "No stage left to activate";
 
-/// Why nothing was activated.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Refusal {
-    /// Landed or wrecked: staging is locked on the ground.
-    Grounded,
-    NoStageLeft,
-}
-
-impl Refusal {
-    /// What the player is told.
-    pub fn message(self) -> &'static str {
-        match self {
-            Refusal::Grounded => "On the ground: staging locked (P still deploys the parachutes)",
-            Refusal::NoStageLeft => "No stage left to activate",
-        }
-    }
-}
-
-/// What a vessel's stages are made of now.
-#[derive(Clone, Copy, Debug)]
-pub struct StageInputs<'a> {
-    pub controls: &'a Controls,
-    pub chute: &'a ChuteState,
-    pub spec: &'a ChuteSpec,
-    pub engine_running: bool,
-    /// Propellant left, or debug mode (D064).
-    pub fuelled: bool,
-}
-
-impl<'a> StageInputs<'a> {
-    /// A vessel's stages under `controls`.
-    pub fn of(vessel: &'a sim::vessel::Vessel, controls: &'a Controls) -> Self {
-        StageInputs {
-            controls,
-            chute: &vessel.chute,
-            spec: &vessel.craft.chute,
-            engine_running: vessel.engine_running(),
-            fuelled: vessel.debug() || vessel.propellant() > 0.0,
-        }
-    }
-}
-
-/// The stack, stage 0 (the parachutes) first.
-pub fn stack(s: &StageInputs) -> Vec<Stage> {
-    let chute_stage = if s.controls.chute { StageState::Active } else { StageState::Next };
-    let mut chutes = Vec::new();
-    if let Some(d) = &s.spec.drogue {
-        chutes.push(canopy_part("DROGUES", d, s.chute.drogue, s.chute.armed, None));
+/// A craft's canopies in the D079 sequence: the drogues (if it has any),
+/// then the mains, each with its state (the Landing menu's PARACHUTE rows).
+pub fn canopies(spec: &ChuteSpec, chute: &ChuteState) -> Vec<Part> {
+    let mut out = Vec::new();
+    if let Some(d) = &spec.drogue {
+        out.push(canopy_part("DROGUES", d, chute.drogue, chute.armed, None));
     }
     // Behind a drogue the main waits for its height; alone it opens on
     // the command (sim::chute).
-    let waiting = (s.chute.armed && s.spec.drogue.is_some()).then_some(s.spec.main_height);
-    chutes.push(canopy_part("MAINS", &s.spec.main, s.chute.main, s.chute.armed, waiting));
-    let engine = if s.engine_running {
-        Part {
-            name: "ENGINE".into(),
-            state: format!("running · {:.0} %", s.controls.throttle * 100.0),
-            tone: PartTone::Working,
-        }
-    } else if !s.fuelled {
-        Part { name: "ENGINE".into(), state: "off · no propellant".into(), tone: PartTone::Failed }
-    } else {
-        Part { name: "ENGINE".into(), state: "off".into(), tone: PartTone::Idle }
-    };
-    vec![
-        Stage { number: 0, state: chute_stage, name: None, parts: chutes },
-        Stage { number: 1, state: StageState::Active, name: None, parts: vec![engine] },
-    ]
-}
-
-/// A vessel's stack under `controls`: a craft of parts' sequence
-/// ([`parts::stack`]), else the test craft's stages.
-pub fn stack_of(vessel: &sim::vessel::Vessel, controls: &Controls) -> Vec<Stage> {
-    match (vessel.ship_def(), vessel.ship()) {
-        (Some(def), Some(state)) => parts::stack(&def, state, controls.chute),
-        _ => stack(&StageInputs::of(vessel, controls)),
-    }
+    let waiting = (chute.armed && spec.drogue.is_some()).then_some(spec.main_height);
+    out.push(canopy_part("MAINS", &spec.main, chute.main, chute.armed, waiting));
+    out
 }
 
 /// One canopy's state in the D079 sequence. `waiting`: the height the
@@ -163,24 +88,6 @@ fn canopy_part(
 /// The stage Space activates now, if any.
 pub fn next(stack: &[Stage]) -> Option<u32> {
     stack.iter().filter(|s| s.state == StageState::Next).map(|s| s.number).max()
-}
-
-/// What activating stage `number` does.
-pub fn activation(number: u32) -> Option<Activation> {
-    (number == 0).then_some(Activation::ArmParachutes)
-}
-
-/// Activates the next stage on `controls`, unless the craft is on the
-/// ground (`grounded`: landed or wrecked); returns what it did.
-pub fn activate_next(s: &StageInputs, grounded: bool, controls: &mut Controls) -> Result<Activation, Refusal> {
-    if grounded {
-        return Err(Refusal::Grounded);
-    }
-    let a = next(&stack(s)).and_then(activation).ok_or(Refusal::NoStageLeft)?;
-    match a {
-        Activation::ArmParachutes => controls.chute = true,
-    }
-    Ok(a)
 }
 
 /// Whether orders arm the parachutes (a craft of parts, `def`): a command
@@ -215,39 +122,13 @@ pub fn no_stage_left(def: &sim::craft::ship::ShipDef, state: &sim::craft::state:
     sim::craft::program::pending(def, &state.stages, state.sequence).len() <= ordered
 }
 
-/// Whether a vessel counts as on the ground for staging.
-pub fn grounded(vessel: &sim::vessel::Vessel) -> bool {
-    matches!(vessel.phase, sim::vessel::Phase::Landed { .. } | sim::vessel::Phase::Crashed { .. })
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn inputs<'a>(c: &'a Controls, chute: &'a ChuteState, spec: &'a ChuteSpec, running: bool) -> StageInputs<'a> {
-        StageInputs { controls: c, chute, spec, engine_running: running, fuelled: true }
-    }
-
     #[test]
-    fn the_test_craft_stacks_parachutes_over_its_engine() {
+    fn canopies_follow_the_parachute_sequence() {
         let spec = sim::craft::small::rocket_ref().spec.chute.clone();
-        let c = Controls { throttle: 0.5, ..Controls::default() };
-        let chute = ChuteState::default();
-        let s = stack(&inputs(&c, &chute, &spec, true));
-        assert_eq!(
-            s.iter().map(|s| (s.number, s.state)).collect::<Vec<_>>(),
-            [(0, StageState::Next), (1, StageState::Active)]
-        );
-        let parts: Vec<_> =
-            s.iter().flat_map(|s| s.parts.iter().map(|p| (p.name.as_str(), p.state.as_str()))).collect();
-        assert_eq!(parts, [("DROGUES", "stowed"), ("MAINS", "stowed"), ("ENGINE", "running · 50 %")]);
-        assert_eq!(next(&s), Some(0));
-    }
-
-    #[test]
-    fn part_states_follow_the_parachute_sequence() {
-        let spec = sim::craft::small::rocket_ref().spec.chute.clone();
-        let c = Controls { chute: true, ..Controls::default() };
         let open = |age| CanopyState::Open { age, diameter: 1.0 };
         // (drogue, main, armed, expected drogue, expected main)
         let table = [
@@ -260,27 +141,18 @@ mod tests {
         ];
         for (drogue, main, armed, want_d, want_m) in table {
             let chute = ChuteState { armed, drogue, main };
-            let s = stack(&inputs(&c, &chute, &spec, false));
-            let states: Vec<&str> = s[0].parts.iter().map(|p| p.state.as_str()).collect();
+            let c = canopies(&spec, &chute);
+            let names: Vec<&str> = c.iter().map(|p| p.name.as_str()).collect();
+            assert_eq!(names, ["DROGUES", "MAINS"]);
+            let states: Vec<&str> = c.iter().map(|p| p.state.as_str()).collect();
             assert_eq!(states, [want_d, want_m], "{drogue:?} {main:?}");
         }
         let torn = ChuteState { armed: true, drogue: CanopyState::Failed, main: CanopyState::Stowed };
-        assert_eq!(stack(&inputs(&c, &torn, &spec, false))[0].parts[0].tone, PartTone::Failed);
-    }
-
-    #[test]
-    fn space_arms_the_parachutes_once_then_there_is_no_next_stage() {
-        let spec = sim::craft::small::rocket_ref().spec.chute.clone();
-        let chute = ChuteState::default();
-        let mut c = Controls::default();
-        let before = c;
-        assert_eq!(activate_next(&inputs(&before, &chute, &spec, false), false, &mut c), Ok(Activation::ArmParachutes));
-        assert!(c.chute);
-        let after = c;
-        let s = stack(&inputs(&after, &chute, &spec, false));
-        assert_eq!(s[0].state, StageState::Active);
-        assert_eq!(next(&s), None);
-        assert_eq!(activate_next(&inputs(&after, &chute, &spec, false), false, &mut c), Err(Refusal::NoStageLeft));
+        assert_eq!(canopies(&spec, &torn)[0].tone, PartTone::Failed);
+        // Mains alone open on the command.
+        let mains = ChuteSpec { drogue: None, ..spec.clone() };
+        let armed = ChuteState { armed: true, ..ChuteState::default() };
+        assert_eq!(canopies(&mains, &armed).iter().map(|p| p.state.as_str()).collect::<Vec<_>>(), ["armed"]);
     }
 
     /// Space after the sequence's last stage is told so (review: it gave
@@ -305,31 +177,5 @@ mod tests {
             state.order(sim.clock, OrderKind::Function("x".into()));
             assert_eq!(no_stage_left(&def, &state), want, "{run} {ordered}");
         }
-    }
-
-    #[test]
-    fn staging_is_locked_on_the_ground_and_changes_nothing() {
-        let spec = sim::craft::small::rocket_ref().spec.chute.clone();
-        let chute = ChuteState::default();
-        // (grounded, result, armed after)
-        let table = [(true, Err(Refusal::Grounded), false), (false, Ok(Activation::ArmParachutes), true)];
-        for (grounded, want, armed) in table {
-            let mut c = Controls::default();
-            let before = c;
-            assert_eq!(activate_next(&inputs(&before, &chute, &spec, false), grounded, &mut c), want, "{grounded}");
-            assert_eq!(c.chute, armed, "{grounded}");
-        }
-        assert!(Refusal::Grounded.message().contains("P still deploys"));
-        let sim = crate::state::SimState::new();
-        assert!(grounded(sim.ship()), "on the pad");
-    }
-
-    #[test]
-    fn an_engine_without_propellant_says_so() {
-        let spec = sim::craft::small::rocket_ref().spec.chute.clone();
-        let (c, chute) = (Controls::default(), ChuteState::default());
-        let dry = StageInputs { fuelled: false, ..inputs(&c, &chute, &spec, false) };
-        let engine = &stack(&dry)[1].parts[0];
-        assert_eq!((engine.state.as_str(), engine.tone), ("off · no propellant", PartTone::Failed));
     }
 }

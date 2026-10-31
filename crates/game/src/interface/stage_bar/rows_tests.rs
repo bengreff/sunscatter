@@ -150,25 +150,6 @@ fn what_is_not_measured_is_a_dash() {
     assert_eq!((f.burnout.as_str(), f.dv.as_str()), ("—", "—"));
 }
 
-/// The test craft (no part system): its engine and parachutes, the
-/// active engine stage at the bottom, nothing to edit or estimate.
-#[test]
-fn the_test_craft_shows_its_engine_and_parachutes() {
-    use crate::staging::{stack, StageInputs};
-    use sim::chute::ChuteState;
-    use sim::vessel::Controls;
-    let controls = Controls { throttle: 1.0, ..Controls::default() };
-    let spec = sim::craft::small::rocket_ref().spec.chute.clone();
-    let chute = ChuteState::default();
-    let inputs = StageInputs { controls: &controls, chute: &chute, spec: &spec, engine_running: true, fuelled: true };
-    let rows = plain(&stack(&inputs));
-    let summary: Vec<(Option<u32>, Place, usize)> = rows.iter().map(|r| (r.number, r.place, r.items.len())).collect();
-    assert_eq!(summary, [(Some(0), Place::Next, 2), (Some(1), Place::Active, 1)]);
-    let engine = &rows[1].items[0].icons[0];
-    assert_eq!((engine.kind, engine.look), (super::super::icons::Kind::Engine, Look::Running));
-    assert!(rows.iter().all(|r| r.stage.is_none() && r.figures.is_none()));
-}
-
 #[test]
 fn amounts_read_in_the_capacity_unit() {
     let r = |value: f64, precision: f64| Some(Reading { value, precision });

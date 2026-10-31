@@ -8,7 +8,7 @@
 //! (D076), never osculating; the elements from `relations` (about the
 //! body's equator); impact and braking from `sim::landing` through
 //! `landing::LandingPrediction`; closest approaches from `rendezvous`;
-//! stages from `staging`; the RCS from `rcs_data`, the crew and power from
+//! the canopies from `staging`; the RCS from `rcs_data`, the crew and power from
 //! their menus' modules.
 
 use crate::comms::{Comms, Signal};
@@ -51,7 +51,9 @@ pub struct FlightData {
     pub chute: ChuteData,
     pub craft: CraftData,
     pub comms: CommsData,
-    pub stages: Vec<crate::staging::Stage>,
+    /// Its parachutes' canopies in their sequence (`staging::canopies`;
+    /// none for a craft without parachutes).
+    pub canopies: Vec<crate::staging::Part>,
     /// The RCS menu's (`rcs_data`), the Crew and Power menus' (a craft of
     /// parts with a cabin, with buses).
     pub rcs: super::rcs::RcsData,
@@ -333,7 +335,11 @@ pub fn gather(s: &Sources) -> FlightData {
         attitude: nav.map(|n| [n.angles.heading, n.angles.pitch, n.angles.roll]),
         craft: craft(sim, body),
         comms: comms(s),
-        stages: crate::staging::stack_of(ship, sim.controls()),
+        canopies: if ship.craft.design().parts.iter().any(|p| p.chute) {
+            crate::staging::canopies(&ship.craft.chute, &ship.chute)
+        } else {
+            Vec::new()
+        },
         rcs: super::rcs_data::gather(ship, sim.controls().rcs),
         crew: super::crew::gather(ship),
         power: super::power::gather(ship),
@@ -637,7 +643,8 @@ mod tests {
         assert!((d.craft.propellant / d.craft.full - 1.0).abs() < 1e-4, "{:?}", d.craft);
         assert!(d.craft.dv_vac > 1000.0 && d.craft.twr_vac.is_some_and(|t| t > 1.0));
         assert!(!d.chute.commanded && d.chute.design_q > 1000.0);
-        assert_eq!(d.stages.len(), 2);
+        let chutes = sim.ship().craft.design().parts.iter().any(|p| p.chute);
+        assert_eq!(d.canopies.is_empty(), !chutes);
         // No temperature sensor on the small rocket: every part counted,
         // none ranked by the truth (D106).
         assert!(d.craft.hottest.parts.is_empty() && d.craft.hottest.unmeasured > 0, "{:?}", d.craft.hottest);

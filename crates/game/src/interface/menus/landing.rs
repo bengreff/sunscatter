@@ -183,14 +183,12 @@ fn part_tone(t: crate::staging::PartTone) -> Tone {
     }
 }
 
-/// The canopies in their sequence (the test craft's parachute stage), and before
-/// the command the q against the design opening q.
+/// The craft's canopies in their sequence, and before the command the q
+/// against the design opening q.
 fn parachute(d: &FlightData) -> Section {
     let mut s = Section::new("parachute", "PARACHUTE");
     let ChuteData { commanded, q, design_q, .. } = d.chute;
-    // The test craft's parachute stage (a craft of parts arms its chutes by a command).
-    let chutes = d.stages.iter().find(|st| st.number == 0 && st.name.is_none());
-    for p in chutes.map(|st| st.parts.as_slice()).unwrap_or_default() {
+    for p in &d.canopies {
         s.toned(p.name.clone(), &p.state, part_tone(p.tone));
     }
     let q_text = q.map_or("—".to_string(), |q| format!("{:.1}", q / 1e3));
@@ -348,16 +346,8 @@ mod tests {
             assert_eq!(opening(q, design), want, "{q:?}");
         }
         let spec = sim::craft::small::rocket_ref().spec.chute.clone();
-        let controls = sim::vessel::Controls::default();
         let chute = sim::chute::ChuteState::default();
-        let inputs = crate::staging::StageInputs {
-            controls: &controls,
-            chute: &chute,
-            spec: &spec,
-            engine_running: false,
-            fuelled: true,
-        };
-        let mut d = FlightData { stages: crate::staging::stack(&inputs), ..FlightData::default() };
+        let mut d = FlightData { canopies: crate::staging::canopies(&spec, &chute), ..FlightData::default() };
         d.chute = ChuteData { commanded: false, state: chute, q: Some(9_000.0), design_q: 5_500.0 };
         let s = shown(&d);
         let p = find(&s, "parachute").unwrap();

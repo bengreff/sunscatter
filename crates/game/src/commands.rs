@@ -75,11 +75,8 @@ pub enum GameCommand {
         /// What prograde and retrograde follow (the navball's speed display).
         speed: Option<sim::vessel::SpeedReference>,
     },
-    /// Activate the active vessel's next stage (Space, the Staging menu);
-    /// for a craft of parts it becomes [`GameCommand::Stage`] of that
-    /// vessel, sent to it.
-    NextStage,
-    /// Run a craft of parts' next stage (its sequence), sent to it.
+    /// Run a vessel's next stage (its sequence; Space and the staging
+    /// bar's for the active one), sent to it.
     Stage(VesselId),
     /// Run stage `stage` of a craft of parts' sequence again, one already
     /// run (D114: the staging bar), sent to it.
@@ -160,11 +157,6 @@ pub fn apply(
     let fresh: Vec<(GameCommand, bool)> = commands.read().map(|c| (c.clone(), true)).collect();
     let arrived = in_flight.arrived(sim.clock).into_iter().map(|c| (c, false));
     for (c, fresh) in fresh.into_iter().chain(arrived) {
-        // Space on a craft of parts: its own sequence's next stage.
-        let c = match c {
-            GameCommand::NextStage if sim.ship().ship().is_some() => GameCommand::Stage(sim.ship().id()),
-            c => c,
-        };
         // A command for a vessel reaches it at once from aboard, else after
         // the signal's light delay, and not at all without one (D067).
         if let Some(id) = addressee(&c).filter(|_| fresh) {
@@ -259,16 +251,6 @@ pub fn apply(
                 Some(i) => apply_controls_with(sim.fleet[i].controls_mut(), (*throttle, *sas, *hold), *speed),
                 None => toasts.push(now, format!("Controls for Vessel {}: no such vessel", vessel.0), true),
             },
-            GameCommand::NextStage => {
-                let mut controls = *sim.controls();
-                let ship = sim.ship();
-                let inputs = crate::staging::StageInputs::of(ship, sim.controls());
-                let done = crate::staging::activate_next(&inputs, crate::staging::grounded(ship), &mut controls);
-                *sim.controls_mut() = controls;
-                if let Err(why) = done {
-                    toasts.push(time.elapsed_secs_f64(), why.message(), false);
-                }
-            }
             GameCommand::SetDebug(on) => {
                 let sim = &mut *sim;
                 for v in &mut sim.fleet {
@@ -401,8 +383,7 @@ fn place(
         let none_left = (def.as_deref().zip(sim.fleet[i].ship()))
             .is_some_and(|(def, state)| crate::staging::no_stage_left(def, state));
         if matches!(kind, OrderKind::Stage) && none_left {
-            let message = crate::staging::Refusal::NoStageLeft.message();
-            toasts.push_linked(now, message, false, to(id));
+            toasts.push_linked(now, crate::staging::NO_STAGE_LEFT, false, to(id));
             continue;
         }
         if let Err(e) = sim.fleet[i].order_at(at, kind) {
@@ -594,7 +575,6 @@ mod tests {
         assert_eq!(orders(&GameCommand::Stage(v)), Some(vec![OrderKind::Stage]));
         assert_eq!(orders(&GameCommand::SetStages { vessel: v, stages: vec![] }), None, "applied as sent");
         assert_eq!(addressee(&GameCommand::SetFunctions { vessel: v, functions: vec![] }), Some(v));
-        assert_eq!(addressee(&GameCommand::NextStage), None, "the test craft's, at once");
         assert_eq!(addressee(&GameCommand::SetWarp(2)), None);
     }
 

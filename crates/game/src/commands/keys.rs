@@ -377,7 +377,7 @@ pub fn read_controls(
             Action::Rcs => c.rcs.on = !c.rcs.on,
             Action::Chutes => c.chute = true,
             Action::NextStage => {
-                commands.write(GameCommand::NextStage);
+                commands.write(GameCommand::Stage(active));
             }
             _ => {}
         }

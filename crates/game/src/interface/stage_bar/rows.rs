@@ -139,41 +139,6 @@ pub fn rows(def: &ShipDef, state: &ShipState, est: &Estimates, chute: (&[u32], L
     out
 }
 
-/// The rows of a craft without the part system (the test craft:
-/// `staging::stack`, stage 0 first): its stages with their parts as icons
-/// (the engine, the canopies), no estimates and no editing; the active
-/// stages at the bottom.
-pub fn plain(stack: &[crate::staging::Stage]) -> Vec<Row> {
-    use super::icons::Kind;
-    use crate::staging::{PartTone, StageState};
-    let row = |s: &crate::staging::Stage| Row {
-        stage: None,
-        number: Some(s.number),
-        name: s.name.clone().unwrap_or_else(|| format!("Stage {}", s.number)),
-        place: match s.state {
-            StageState::Active => Place::Active,
-            StageState::Next => Place::Next,
-            StageState::Later => Place::Later,
-        },
-        items: (s.parts.iter().enumerate())
-            .map(|(action, p)| {
-                let kind = if p.name == "ENGINE" { Kind::Engine } else { Kind::Parachute };
-                let look = match p.tone {
-                    PartTone::Idle => Look::Idle,
-                    PartTone::Working => Look::Running,
-                    PartTone::Failed => Look::Failed,
-                };
-                let icon = Icon { kind, look, part: 0, id: p.state.clone() };
-                Item { action, label: p.name.clone(), icons: vec![icon] }
-            })
-            .collect(),
-        figures: None,
-    };
-    let (active, pending): (Vec<&crate::staging::Stage>, Vec<_>) =
-        stack.iter().partition(|s| s.state == StageState::Active);
-    pending.into_iter().chain(active).map(row).collect()
-}
-
 /// A burn's figures as text (dashes for what is not measured).
 pub fn figures(b: &Burn, active: bool) -> Figures {
     let bars = (b.bars.iter())

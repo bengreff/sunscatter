@@ -782,7 +782,7 @@ fn attitude_json(known: &crate::format::Known, q: glam::DQuat, rel: DVec3, pole:
 fn stages_json(sim: &SimState, i: usize, known: &crate::format::Known, air: stage_bar::Air) -> Result<Value, String> {
     let v = &sim.fleet[i];
     let (Some(def), Some(state)) = (v.ship_def(), v.ship()) else { return Ok(Value::Null) };
-    let stack = crate::staging::stack_of(v, v.controls());
+    let stack = crate::staging::parts::stack(&def, state, v.controls().chute);
     let next = crate::staging::next(&stack);
     let next_name = stack.iter().find(|s| Some(s.number) == next).and_then(|s| s.name.clone());
     let tanks: Vec<Value> = (def.tanks.iter().zip(&state.tanks))

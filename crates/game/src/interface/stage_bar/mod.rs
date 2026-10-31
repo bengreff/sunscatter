@@ -162,14 +162,8 @@ pub fn show(
         return Ok(());
     }
     let v = sim.ship();
-    let rows = match v.ship() {
-        Some(_) => {
-            let Some(cache) = bar.cache.as_ref().filter(|c| c.vessel == v.id()) else { return Ok(()) };
-            rows_of(v, &cache.estimates).unwrap_or_default()
-        }
-        // The test craft: its engine and parachutes (`staging::stack`).
-        None => rows::plain(&crate::staging::stack_of(v, sim.controls())),
-    };
+    let Some(cache) = bar.cache.as_ref().filter(|c| c.vessel == v.id()) else { return Ok(()) };
+    let rows = rows_of(v, &cache.estimates).unwrap_or_default();
     let ctx = contexts.ctx_mut()?;
     let out = draw::bar(ctx, &rows, &mut bar);
     for a in out {
@@ -180,7 +174,7 @@ pub fn show(
             }
             draw::Action::Open(part) => cards.open(v.id(), part, crate::interface::part_card::From::Bar),
             draw::Action::NextStage => {
-                cmds.write(GameCommand::NextStage);
+                cmds.write(GameCommand::Stage(v.id()));
             }
             draw::Action::Again(stage) => {
                 cmds.write(GameCommand::StageAgain { vessel: v.id(), stage });
