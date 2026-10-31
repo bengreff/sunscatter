@@ -19,7 +19,7 @@ use crate::state::SimState;
 use crate::tracking::Tracked;
 use crate::trajectory::apsides::Apsides;
 use bevy::prelude::*;
-use sim::vessel::{BurnEnd, Phase};
+use sim::vessel::Phase;
 
 /// Seconds between refreshes.
 const REFRESH: f64 = 0.1;
@@ -394,49 +394,27 @@ fn target(s: &Sources, body: sim::frame::NodeId) -> TargetData {
     TargetData { current: s.target, choices, info }
 }
 
-/// The planned burns ahead: a craft of parts' nodes not yet burnt, with
-/// the sim's prediction of each (`Vessel::predict_node`, as the planner
-/// shows them); the made-up craft's burns with durations from the rocket
-/// equation at the mass each starts with.
+/// The planned burns ahead: the node being flown, then the nodes not yet
+/// burnt, with the sim's prediction of each (`Vessel::predict_node`, as
+/// the planner shows them).
 fn burns(sim: &SimState) -> Vec<Burn> {
     let ship = sim.ship();
-    if ship.ship().is_some() {
-        // The burn being flown, then the nodes not yet burnt.
-        let program = ship.program().filter(|p| p.step.flying());
-        let unburnt = ship.nodes_unburnt();
-        let first = ship.nodes().len() - unburnt.len();
-        let burning = program.filter(|p| p.node < first).map(|p| p.node);
-        return (burning.into_iter().chain(first..ship.nodes().len()))
-            .map(|i| {
-                let n = &ship.nodes()[i];
-                let next = program.is_none() && i == first;
-                let p = ship.predict_node(&sim.world, n, next, None);
-                // The program's own schedule for the node it flies.
-                let flying = program.filter(|p| p.node == i);
-                let ignite = flying.map_or_else(|| p.as_ref().map_or(n.t, |p| p.ignite), |p| p.ignite);
-                let step = flying.map(|p| p.step);
-                let duration = p.and_then(|p| p.duration).unwrap_or(0.0);
-                let in_s = ignite.seconds_since(sim.clock);
-                Burn { dv: Some(n.dv.length()), in_s, duration, number: i + 1, step }
-            })
-            .collect();
-    }
-    let mut mass = ship.mass();
-    let ahead = ship.plan().burns.iter().filter(|b| b.t_start.seconds_since(sim.clock) > 0.0);
-    ahead
-        .enumerate()
-        .map(|(k, b)| {
-            let ve = b.law.thrust / b.law.mass_flow.max(1e-12);
-            let (dv, duration) = match b.end {
-                BurnEnd::DeltaV(dv) => {
-                    (Some(dv), crate::planner::burn_time(dv, mass, b.law.thrust, ve / sim::vessel::G0))
-                }
-                BurnEnd::Duration(d) => (None, d),
-            };
-            if !ship.debug() {
-                mass = (mass - b.law.mass_flow * duration).max(ship.craft.mass.dry_mass);
-            }
-            Burn { dv, in_s: b.t_start.seconds_since(sim.clock), duration, number: k + 1, step: None }
+    let program = ship.program().filter(|p| p.step.flying());
+    let unburnt = ship.nodes_unburnt();
+    let first = ship.nodes().len() - unburnt.len();
+    let burning = program.filter(|p| p.node < first).map(|p| p.node);
+    (burning.into_iter().chain(first..ship.nodes().len()))
+        .map(|i| {
+            let n = &ship.nodes()[i];
+            let next = program.is_none() && i == first;
+            let p = ship.predict_node(&sim.world, n, next, None);
+            // The program's own schedule for the node it flies.
+            let flying = program.filter(|p| p.node == i);
+            let ignite = flying.map_or_else(|| p.as_ref().map_or(n.t, |p| p.ignite), |p| p.ignite);
+            let step = flying.map(|p| p.step);
+            let duration = p.and_then(|p| p.duration).unwrap_or(0.0);
+            let in_s = ignite.seconds_since(sim.clock);
+            Burn { dv: Some(n.dv.length()), in_s, duration, number: i + 1, step }
         })
         .collect()
 }

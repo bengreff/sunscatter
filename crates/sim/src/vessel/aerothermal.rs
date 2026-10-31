@@ -38,9 +38,7 @@
 //! Radiation goes to deep space ([`SINK_K`]) everywhere for now: planet IR,
 //! albedo and convective cooling come later.
 
-use super::burn::BurnLaw;
 use super::coast_heat::CoastSun;
-use super::segment::{Segment, SegmentKind};
 use crate::aero::{self, Flow};
 use crate::craft::design::Aboard;
 use crate::craft::CraftDesign;
@@ -90,17 +88,9 @@ pub struct VesselThermal {
     /// Coasts: the sunlight (body axes, W/m²) of the last solve and how
     /// long after it (s) the next solve is due while that sunlight holds.
     hold: Option<(DVec3, f64)>,
-    /// Coasts: planned burns not yet stepped past: start, end (once known)
-    /// and the engine's heat (W), in start order.
-    burns: Vec<(Epoch, Option<Epoch>, f64)>,
     /// Coasts: the spacing (s) to the next lattice point ([`lattice_step`]).
     #[serde(default = "lattice_default")]
     step: f64,
-    /// Coasts: the engine heat (W) of the last solve: a steady burn (a
-    /// low-thrust burn of days) lets lattice points be skipped like steady
-    /// sunlight.
-    #[serde(default)]
-    hold_power: f64,
     /// Coasts: the thin air's key ([`CoastSun`]) at the last solve.
     #[serde(default)]
     hold_air: DVec3,
@@ -220,9 +210,7 @@ impl VesselThermal {
             epoch,
             lattice: epoch,
             hold: None,
-            burns: Vec::new(),
             step: LATTICE,
-            hold_power: 0.0,
             hold_air: DVec3::ZERO,
             capacities: Capacities::default(),
             shock: None,
@@ -246,48 +234,17 @@ impl VesselThermal {
         thermal::hottest(&self.state.nodes).map_or((0.0, 0), |(i, t)| (t, i))
     }
 
-    /// Records the planned burns of `segments` that reach past the last
-    /// lattice point and start by `reach`, with the engine heat `heat(law)`
-    /// (W), before the trajectory drops them.
-    pub fn record_burns(&mut self, segments: &[Segment], reach: Epoch, heat: impl Fn(&BurnLaw) -> f64) {
-        for seg in segments {
-            let SegmentKind::Burn(law) = &seg.kind else { continue };
-            let end = seg.end.map(|e| seg.t0.add_seconds(e.t));
-            if seg.t0.seconds_since(reach) > 0.0 || end.is_some_and(|e| e.seconds_since(self.lattice) <= 0.0) {
-                continue;
-            }
-            match self.burns.iter_mut().find(|b| b.0 == seg.t0) {
-                Some(b) => b.1 = end,
-                None => self.burns.push((seg.t0, end, heat(law))),
-            }
-        }
-        self.burns.sort_by(|a, b| a.0.seconds_since(b.0).total_cmp(&0.0));
-    }
-
-    /// Engine heat (J) of the recorded burns over (a, b].
-    fn burn_energy(&self, a: Epoch, b: Epoch) -> f64 {
-        (self.burns.iter())
-            .map(|&(start, end, w)| {
-                let from = if start.seconds_since(a) > 0.0 { start } else { a };
-                let to = end.filter(|e| e.seconds_since(b) < 0.0).unwrap_or(b);
-                w * to.seconds_since(from).max(0.0)
-            })
-            .sum()
-    }
-
     /// Whether the coast lattice point `e` can be passed without even
     /// evaluating the sunlight, for a vessel whose attitude does not change
-    /// (the caller's judgement): the last solve's hold still runs, no
-    /// planned burn heats the span, and `e` is not one of the points every
+    /// (the caller's judgement): the last solve's hold still runs, and `e`
+    /// is not one of the points every
     /// [`SUN_CHECK`] after the last solve where the sunlight is compared.
     pub fn passes(&self, e: Epoch) -> bool {
         let Some((_, span)) = self.hold else { return false };
         let dt = e.seconds_since(self.epoch);
         let k = libm::round(dt / LATTICE) as u64;
-        let power = if dt > 0.0 { self.burn_energy(self.epoch, e) / dt } else { 0.0 };
-        let steady = (power - self.hold_power).abs() <= SUN_SAME * self.hold_power.max(1.0);
         // Thin air turns in body axes with the orbit even for a still craft.
-        dt < span && !k.is_multiple_of(SUN_CHECK_POINTS) && steady && self.hold_air == DVec3::ZERO
+        dt < span && !k.is_multiple_of(SUN_CHECK_POINTS) && self.hold_air == DVec3::ZERO
     }
 
     /// Passes lattice point `e` (see [`Self::passes`]).
@@ -300,7 +257,6 @@ impl VesselThermal {
         self.epoch = epoch;
         self.lattice = epoch;
         self.hold = None;
-        self.burns.clear();
     }
 
     /// The next coast lattice point.
@@ -612,10 +568,9 @@ pub fn live_step(
 /// The coast step at `epoch` (a lattice point; or, with `last`, the end of
 /// the coast) with the sunlight `sun_body` (W/m², body axes) and `aboard`
 /// in the tanks: solves from the state's epoch (spanning skipped
-/// lattice points; the planned burns' engine heat over that span goes into
-/// the nozzle), or skips the point. A point is skipped while the
-/// sunlight is the same as at the last solve (within [`SUN_SAME`]), no
-/// burn heats the span and the last solve's rate of change says the
+/// lattice points), or skips the point. A point is skipped while the
+/// sunlight is the same as at the last solve (within [`SUN_SAME`]) and the
+/// last solve's rate of change says the
 /// temperatures have moved less than [`STEP_CHANGE_K`] since (at most
 /// [`MAX_SKIP`]): error control on a deterministic lattice. Returns
 /// whether the network was solved.
@@ -637,13 +592,9 @@ pub fn coast_step(
         return false;
     }
     let (suns, sun_body) = (&sun.suns[..], sun.key);
-    let burn = th.burn_energy(th.epoch, epoch);
-    // A burn's heat over the span must be steady too (a low-thrust burn of
-    // days); one starting, ending or changing makes the step solve.
-    let steady = (burn / dt - th.hold_power).abs() <= SUN_SAME * th.hold_power.max(1.0);
     let air_key = sun.air_key();
     let same_air = (air_key - th.hold_air).length() <= SUN_SAME * th.hold_air.length().max(1.0);
-    if let Some((s, span)) = th.hold.filter(|_| !last && steady && same_air) {
+    if let Some((s, span)) = th.hold.filter(|_| !last && same_air) {
         if dt < span && (sun_body - s).length() <= SUN_SAME * s.length().max(1.0) {
             return false;
         }
@@ -654,9 +605,6 @@ pub fn coast_step(
     // averaged over the samples.
     let mut exposure = std::mem::take(&mut b.scratch);
     thermal::coast_heat(&design.bake, &design.cells, suns, &sun.air, &mut exposure, &mut b.heat);
-    for &(i, share) in &design.nozzle_cells {
-        b.heat[i as usize] += burn / dt * share;
-    }
     let before = th.state.clone();
     let (heat, node_heat, capacity) = (&b.heat, &b.node_heat, th.capacities.get(design, aboard));
     design.network.step_to(&mut th.state, heat, node_heat, capacity, SINK_K, dt, DEFAULT_SWEEPS, COAST_CONVERGED);
@@ -666,10 +614,8 @@ pub fn coast_step(
     // will have moved by STEP_CHANGE_K.
     let span = if change > 0.0 { (STEP_CHANGE_K * dt / change).min(MAX_SKIP) } else { MAX_SKIP };
     th.hold = (!last).then_some((sun_body, span));
-    th.hold_power = burn / dt;
     th.hold_air = air_key;
     th.epoch = epoch;
     th.step = lattice_step(design, &th.state);
-    th.burns.retain(|b| b.1.is_none_or(|end| end.seconds_since(epoch) > 0.0));
     true
 }

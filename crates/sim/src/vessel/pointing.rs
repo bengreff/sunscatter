@@ -55,7 +55,7 @@ pub struct TrackRule {
     pub reference: NodeId,
     pub surface: bool,
     /// The held direction in the frame (unit): (1, 0, 0) prograde,
-    /// (−1, 0, 0) retrograde, a burn law's axes.
+    /// (−1, 0, 0) retrograde, a node's Δv axes.
     pub dir: DVec3,
     /// The body axis held on it (+Z the nose, or the engine's axis).
     pub axis: DVec3,
@@ -221,9 +221,8 @@ impl Rule {
     }
 }
 
-/// The rule the controls ask for: `controls` (with the maneuver hold
-/// forced during a planned burn's turn), `burn` the law of the next
-/// planned burn (the maneuver hold's direction), `auto` the automatic
+/// The rule the controls ask for: `controls`, `burn` the law of the next
+/// node (the maneuver hold's direction), `auto` the automatic
 /// reference body (asked only if the controls name none,
 /// [`super::hold::hold_reference`]), `engine_axis` the thrust axis in body
 /// axes.
@@ -310,52 +309,25 @@ pub fn lawful(
         Rule::Stability => matches!(aim, Aim::Stability).then_some(Pointing::Fixed { q: att.q, rule: *rule }),
         Rule::Inertial { dir, axis } => matches!(aim, Aim::Direction { .. })
             .then(|| Pointing::Fixed { q: snap_axis(att.q, *axis, *dir), rule: *rule }),
-        Rule::Track(t) => {
-            if !matches!(aim, Aim::Direction { .. }) {
-                return None;
-            }
-            let (rr, rv) = t.motion(world, snap, anchor, r, v);
-            let p = frame(rr, rv)?;
-            let q = snap_axis(att.q, t.axis, p * t.dir);
-            Some(Pointing::Track { rule: *t, rel: (p.inverse() * q).normalize() })
-        }
+        Rule::Track(t) => matches!(aim, Aim::Direction { .. }).then(|| track(t, att, world, snap, (anchor, r, v)))?,
     }
 }
 
-/// The pointing of a low-thrust burn on direction law `law` flown from
-/// attitude `att` (the maneuver hold settled on it, D075): body axis
-/// `axis` (the engine's) on the law's direction, inertially fixed or fixed
-/// in the law's orbital frame, the roll taken from `att`. The vessel is at
+/// The pointing that holds `rule` from attitude `att`: its axis snapped
+/// onto the rule's direction, the roll kept, fixed in the rule's frame.
+/// `None` without an orbital frame (radial motion). The vessel is at
 /// `(r, v)` relative to `anchor` at the snapshot's time.
-pub fn on_law(
-    law: &DirectionLaw,
+pub fn track(
+    rule: &TrackRule,
     att: &Attitude,
-    axis: DVec3,
     world: &World,
     snap: &Snapshot,
     (anchor, r, v): (NodeId, DVec3, DVec3),
-) -> Pointing {
-    match *law {
-        DirectionLaw::Inertial(d) => {
-            let dir = d.normalize();
-            Pointing::Fixed { q: snap_axis(att.q, axis, dir), rule: Rule::Inertial { dir, axis } }
-        }
-        DirectionLaw::Tracking { reference, axes } => {
-            let rule = TrackRule { reference, surface: false, dir: axes.normalize(), axis, auto: false };
-            let (rr, rv) = rule.motion(world, snap, anchor, r, v);
-            match frame(rr, rv) {
-                Some(p) => {
-                    let q = snap_axis(att.q, axis, p * rule.dir);
-                    Pointing::Track { rule, rel: (p.inverse() * q).normalize() }
-                }
-                // No orbital frame (radial motion): along the law now.
-                None => {
-                    let dir = law.direction(snap, anchor, r, v);
-                    Pointing::Fixed { q: snap_axis(att.q, axis, dir), rule: Rule::Inertial { dir, axis } }
-                }
-            }
-        }
-    }
+) -> Option<Pointing> {
+    let (rr, rv) = rule.motion(world, snap, anchor, r, v);
+    let p = frame(rr, rv)?;
+    let q = snap_axis(att.q, rule.axis, p * rule.dir);
+    Some(Pointing::Track { rule: *rule, rel: (p.inverse() * q).normalize() })
 }
 
 /// `q` turned by the smallest rotation that puts body axis `axis` exactly

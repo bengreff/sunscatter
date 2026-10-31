@@ -31,9 +31,9 @@
 //!   parachutes with the part that carries them; the crew with the seats
 //!   (the vessel's piece first). Copied to every piece: the time, attitude,
 //!   ship clock, debug mode, limbo placeholders, bubble state, launch and a
-//!   wreck's destruction. The vessel keeps its id, flight plan, attitude
-//!   control (its lattice restarts) and helm; a new piece gets a new id, no
-//!   plan or control, and [`Controls::for_piece`](super::Controls::for_piece).
+//!   wreck's destruction. The vessel keeps its id, attitude control (its
+//!   lattice restarts) and helm; a new piece gets a new id, no control,
+//!   and [`Controls::for_piece`](super::Controls::for_piece).
 //!   Every piece starts live with no tick acceleration, rest or repoint,
 //!   and the split's pieces are clear of each other.
 //! * **Phase**: live stays live, a coast restarts as coasts from the split
@@ -292,7 +292,6 @@ impl Vessel {
             crew: _,       // by seats, the vessel's piece first (`crew`)
             propellant: _, // the piece's tanks (a made-up craft: the craft's fill)
             debug,
-            plan,
             tick_accel: _, // a new live start
             control,
             rest_ticks: _,
@@ -341,9 +340,8 @@ impl Vessel {
             crew,
             propellant,
             debug: *debug,
-            // The vessel keeps its flight plan and attitude control (its
-            // coast's lattice restarts); a new piece starts with neither.
-            plan: if own { plan.clone() } else { Default::default() },
+            // The vessel keeps its attitude control (its coast's lattice
+            // restarts); a new piece starts without.
             tick_accel: None,
             control: if own { AttitudeControl { base: None, ..*control } } else { Default::default() },
             rest_ticks: 0,

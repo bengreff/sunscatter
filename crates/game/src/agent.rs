@@ -155,11 +155,10 @@ fn flight_tools() -> Vec<Tool> {
             "set_plan",
             "Replace a vessel's planned burns (those that can still change). Each burn: `in_s` seconds from \
              now, and Δv components (m/s) prograde, normal and radial-out relative to the body the vessel is \
-             about now. For a craft of parts a burn is a node (D126): `in_s` is the burn's middle, and the \
-             maneuver program flies it closed-loop (turn, settle, start, cut off on the target orbit; the \
-             result's `nodes` give the predicted ignition, duration and warnings). For the made-up craft \
-             `in_s` is the ignition. From anywhere but aboard, the plan travels with the signal's light \
-             delay; without a signal it cannot be sent. Read the result with get_trajectory.",
+             about now. A burn is a node (D126): `in_s` is the burn's middle, and the maneuver program flies \
+             it closed-loop (turn, settle, start, cut off on the target orbit; the result's `nodes` give the \
+             predicted ignition, duration and warnings). From anywhere but aboard, the plan travels with the \
+             signal's light delay; without a signal it cannot be sent. Read the result with get_trajectory.",
             schema(
                 json!({"id": id, "burns": {"type": "array", "items": {"type": "object", "properties": {
                     "in_s": {"type": "number", "minimum": 0},
@@ -679,7 +678,7 @@ fn get_vessel(
     // Apsides from the predicted trajectory (D076), not the conic: the
     // line's segments (D089).
     let segs = crate::trajectory::apsides::vessel_segments(sim, prediction, i);
-    let aps = crate::trajectory::apsides::of_segments(sim, &segs);
+    let aps = crate::trajectory::apsides::of_segments(sim, &segs, v.nodes());
     let (ap, pe) = aps.next_after(sim.clock);
     let upcoming: Vec<Value> = aps
         .list
@@ -951,24 +950,20 @@ fn set_plan(args: &Value, sim: &SimState, comms: &Comms) -> Result<(Value, Vec<E
         draft.push(crate::planner::DraftBurn { t_start: sim.clock.add_seconds(in_s), dv, reference: body });
     }
     let vessel = &sim.fleet[i];
-    let command = crate::planner::command_for(vessel, &draft, sim.clock.add_seconds(delay));
-    // A craft of parts: the prediction of each node (the planner's).
-    let (info, available, _) = crate::planner::draft_info(&sim.world, vessel, &draft);
+    let command = crate::planner::command_for(vessel, &draft);
+    // The prediction of each node (the planner's).
+    let (info, available) = crate::planner::draft_info(&sim.world, vessel, &draft);
     let nodes: Vec<Value> = draft
         .iter()
         .zip(&info)
-        .filter(|_| vessel.ship().is_some())
         .map(|(d, b)| {
             json!({"node_in_s": d.t_start.seconds_since(sim.clock), "ignite_in_s": b.ignite.seconds_since(sim.clock),
                 "duration_s": b.duration, "warnings": b.warnings})
         })
         .collect();
     let effect = if delay > 0.0 { Effect::Send { delay, command } } else { Effect::Command(command) };
-    let mut out = json!({"sent": draft.len(), "arrives_in_s": delay, "about": name(body)});
-    if vessel.ship().is_some() {
-        out["nodes"] = json!(nodes);
-        out["available_dv_ms"] = json!(available);
-    }
+    let out = json!({"sent": draft.len(), "arrives_in_s": delay, "about": name(body), "nodes": nodes,
+        "available_dv_ms": available});
     Ok((out, vec![effect]))
 }
 

@@ -10,8 +10,8 @@
 //!   it freezes into `Landed`. Thrust, rotation input, a change of the
 //!   attitude mode or of debug mode, or a pose that no longer holds (checked
 //!   once after a load) wakes a landed vessel.
-//! * `Coasting` — on rails: a stored [`Trajectory`] of coasts and planned
-//!   burns ([`FlightPlan`]) that is sampled at any warp. A coast ends
+//! * `Coasting` — on rails: a stored [`Trajectory`] of coasts that is
+//!   sampled at any warp. A coast ends
 //!   [`live_height`](Vessel::live_height) above a surface; contact is flown live.
 //! * `Crashed` — a wreck at rest. A vessel is destroyed when a contact
 //!   point hits too fast (D066) or it overheats (D065) ([`Vessel::destruction`]);
@@ -23,13 +23,12 @@
 //! Rotation input never breaks a coast: its drag (for predictions through
 //! an atmosphere) is attitude-independent and gravity does not depend on
 //! attitude, so translation and attitude are independent while unpowered.
-//! A planned burn is flown by the attitude (D075): the maneuver hold turns
-//! the craft before ignition and the thrust follows the attitude
-//! ([`flown`]). The skin and interior temperatures step on a fixed lattice
-//! while coasting.
+//! A planned burn is a node (D126), flown live by the craft's maneuver
+//! program ([`maneuver`]). The skin and interior temperatures step on a
+//! fixed lattice while coasting.
 //!
-//! The vessel carries its propellant (burned by the engine in powered ticks
-//! and in planned burns) and the **debug mode** flag (D064): infinite
+//! The vessel carries its propellant (burned by the engine in powered
+//! ticks) and the **debug mode** flag (D064): infinite
 //! propellant, no overheating, infinite impact tolerance, all together. A
 //! craft of catalog parts holds its propellant only in its ship state's
 //! tanks and bottles (F2): every total is derived from them.
@@ -45,7 +44,6 @@ mod coast;
 mod coast_heat;
 mod create;
 pub mod debris;
-mod flown;
 mod helm;
 mod hold;
 mod id;
@@ -74,16 +72,13 @@ pub use coast_heat::{coast_air, coast_suns, CoastSun};
 
 pub use anchor::preferred_anchor;
 pub use attitude::{quat_from_rotvec, quat_z_to, rotvec_of, Attitude, AttitudeControl, RotationBase};
-pub use burn::{
-    prograde_normal_radial, BurnEnd, BurnLaw, BurnLimits, DirectionLaw, FlightPlan, PlanError, PlannedBurn, G0,
-};
+pub use burn::{node_direction, prograde_normal_radial, DirectionLaw, PlanError, G0};
 pub use clock::{landed_rate, ShipClock, SiteClock, LANDED_STEP};
-pub use flown::BurnCraft;
 pub use helm::{fleet_controls, Helm};
 pub use hold::{hold_direction, hold_reference, laplace_radius, primary, quat_arc, turn_lead};
 pub use hold::{HoldInputs, HoldMode, SpeedReference, TargetState};
 pub use id::{VesselId, VesselIds};
-pub use segment::{coast_tolerance, CoastStart, EndKind, Sample, Segment, SegmentEnd, SegmentKind};
+pub use segment::{coast_tolerance, CoastStart, EndKind, Sample, Segment, SegmentEnd};
 pub use split::{Breakup, SplitPlan};
 pub use trajectory::Trajectory;
 
@@ -212,8 +207,6 @@ pub struct Vessel {
     /// impact tolerance.
     #[serde(default)]
     debug: bool,
-    /// Planned burns, flown when coasting (at any warp).
-    plan: FlightPlan,
     /// Mean acceleration over the last powered tick, relative to the anchor
     /// (display only: [`Vessel::state_at`] carries a powered vessel from its
     /// own time to the clock with it). `None` outside powered flight.
@@ -368,8 +361,8 @@ impl Vessel {
         self.debug
     }
 
-    /// Turns debug mode on or off. A coast is restarted from now (its burns
-    /// depend on it; a planned burn in progress is dropped).
+    /// Turns debug mode on or off. A coast is restarted from now (its mass
+    /// law depends on it).
     pub fn set_debug(&mut self, world: &World, on: bool) {
         if self.debug == on {
             return;
@@ -418,60 +411,6 @@ impl Vessel {
         }
         let out = self.craft.engine.tick_output(throttle, p, self.propellant, TICK, self.debug);
         self.attitude.q * self.craft.engine.mount_dir * (out.thrust / self.mass())
-    }
-
-    /// Limits of planned burns: the propellant, unless debug mode.
-    fn burn_limits(&self) -> BurnLimits {
-        BurnLimits { dry_mass: self.craft.mass.dry_mass, infinite: self.debug }
-    }
-
-    /// The flight plan.
-    pub fn plan(&self) -> &FlightPlan {
-        &self.plan
-    }
-
-    /// Replaces the flight plan. Burns that have started (or been skipped)
-    /// cannot change, nor can a changed burn ignite before the vessel's
-    /// time. Trajectory segments before the first changed burn are kept bit
-    /// for bit; the rest is rebuilt. A craft of parts flies nodes instead
-    /// ([`Vessel::set_nodes`]).
-    pub fn set_plan(&mut self, world: &World, plan: FlightPlan) -> Result<(), PlanError> {
-        if !plan.is_sorted() {
-            return Err(PlanError::NotSorted);
-        }
-        let changed = self.plan.first_difference(&plan);
-        if changed == usize::MAX {
-            return Ok(());
-        }
-        if self.ship.is_some() && !plan.burns.is_empty() {
-            return Err(PlanError::PartsUnsupported);
-        }
-        let started = match &self.phase {
-            Phase::Coasting { trajectory } => trajectory.burns_started(),
-            _ => 0,
-        };
-        if changed < started {
-            return Err(PlanError::Started);
-        }
-        if plan.burns[changed.min(plan.burns.len())..].iter().any(|b| b.t_start.seconds_since(self.time) < 0.0) {
-            return Err(PlanError::InThePast);
-        }
-        if let Phase::Coasting { trajectory } = &mut self.phase {
-            trajectory.replan(world, &plan, changed, self.time);
-        }
-        self.plan = plan;
-        Ok(())
-    }
-
-    /// The burn being flown, if the vessel is in a planned burn.
-    pub fn burn(&self) -> Option<&BurnLaw> {
-        match &self.phase {
-            Phase::Coasting { trajectory } => match &trajectory.current().kind {
-                SegmentKind::Burn(law) => Some(law),
-                SegmentKind::Coast => None,
-            },
-            _ => None,
-        }
     }
 
     /// Landed and crashed vessels rotate rigidly with their body.
@@ -589,8 +528,6 @@ impl Vessel {
             fixed_anchor: false,
             proper_time: self.clock.offset,
         };
-        let seed = (self.attitude, self.control);
-        let (plan, limits, craft) = (&self.plan, self.burn_limits(), BurnCraft::of(&self.craft));
         // A craft of parts' tanks go by their law from now (D119); its total
         // is the segment's mass.
         let mut model = self.limbo_model(p);
@@ -600,7 +537,7 @@ impl Vessel {
             _ => self.mass(),
         };
         model.law = law.map(Box::new);
-        let trajectory = Trajectory::perturbed(world, self.time, start, mass, plan, limits, craft, seed, Some(model));
+        let trajectory = Trajectory::perturbed(world, self.time, start, mass, model);
         self.phase = Phase::Coasting { trajectory: Box::new(trajectory) };
         self.repoint = false;
     }
@@ -610,7 +547,7 @@ impl Vessel {
     /// segment, so looking ahead never changes where the vessel will go.
     pub fn extend_coast(&mut self, world: &World, until: Epoch, max_steps: usize) {
         if let Phase::Coasting { trajectory } = &mut self.phase {
-            trajectory.extend(world, &self.plan, until, max_steps);
+            trajectory.extend(world, until, max_steps);
         }
     }
 
@@ -637,7 +574,7 @@ impl Vessel {
         Segment::new_limbo(world, t, start, mass, self.limbo_model(pointing::Pointing::Mean))
     }
 
-    /// The current segment (coast or planned burn), if on rails.
+    /// The current coast segment, if on rails.
     pub fn segment(&self) -> Option<&Segment> {
         self.trajectory().map(Trajectory::current)
     }

@@ -9,7 +9,7 @@
 
 use super::file::EngineFile;
 use crate::math;
-use crate::vessel::{BurnLaw, DirectionLaw, G0};
+use crate::vessel::G0;
 use glam::DVec3;
 
 /// Sea-level pressure the Isp pair refers to (Pa).
@@ -105,12 +105,6 @@ impl Engine {
         }
         let f = (propellant / (out.mdot * dt)).max(0.0);
         EngineOutput { thrust: out.thrust * f, mdot: out.mdot * f }
-    }
-
-    /// A planned burn at full throttle in vacuum (burns on rails run above
-    /// the atmosphere).
-    pub fn burn_law(&self, direction: DirectionLaw) -> BurnLaw {
-        BurnLaw::from_isp(self.thrust_vac, self.isp_vac, direction)
     }
 }
 
@@ -328,16 +322,6 @@ pub(crate) mod tests {
         let left = 0.25 * full.mdot * 0.02;
         let o = e.tick_output(1.0, 0.0, left, 0.02, false);
         assert!((o.mdot * 0.02 - left).abs() < 1e-15 && (o.thrust - 0.25 * full.thrust).abs() < 1e-9);
-    }
-
-    #[test]
-    fn planned_burns_use_the_vacuum_engine() {
-        let e = engine();
-        let law = e.burn_law(DirectionLaw::Inertial(DVec3::X));
-        assert_eq!((law.thrust, law.mass_flow), (300e3, e.mdot_max()));
-        // Δv of a full tank: ≈ 5.05 km/s (20 t → 4 t at 320 s).
-        let dv = e.isp_vac * G0 * math::ln(20_000.0 / 4_000.0);
-        assert!((dv - 5050.6).abs() < 1.0, "{dv}");
     }
 
     #[test]

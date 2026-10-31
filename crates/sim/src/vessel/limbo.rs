@@ -11,9 +11,6 @@
 //! * **Radiation pressure** of every star with eclipses
 //!   ([`crate::forces::radiation`]) on the exposed cells, with placeholder
 //!   specular and diffuse reflectivities ([`Optics`]).
-//! * **Low thrust**: a planned burn below [`LOW_THRUST`] flown as a
-//!   perturbed segment, thrust along the engine axis at the pointing's
-//!   attitude (D075); its mass flow is the segment's.
 //! * **Boil-off**: a craft of parts' tanks by their law through the coast
 //!   ([`crate::systems::coast_law`], D119), the one its ship state reads
 //!   at the lattice points; a made-up craft's, a constant propellant mass
@@ -37,16 +34,6 @@ use crate::systems::plumbing::{self, HeatLaw};
 use crate::time::Epoch;
 use crate::world::World;
 use glam::DVec3;
-
-/// Planned burns whose thrust acceleration at ignition is below this
-/// (m/s², about a milli-g) are flown as perturbed segments (thrust along
-/// the held attitude, adaptive steps of minutes) instead of on the 20 ms
-/// tick lattice: electric propulsion (0.1–1 N on 100 kg–1 t: 1e-4 to
-/// 1e-2 m/s²) burns for days to months, where attitude dynamics during
-/// the burn are negligible and ticks unaffordable at high warp. Chemical
-/// burns (the test craft: ≥ 1.5 m/s² at its lowest throttle) stay flown
-/// tick by tick (D075).
-pub const LOW_THRUST: f64 = 0.01;
 
 /// Where a coast hands over to live flight (`docs/technical/limbo.md` §2):
 /// any of these reached, inside an atmosphere's `top` (live flight sees no
@@ -107,14 +94,6 @@ pub struct LimboSpec {
     pub boundary: LiveBoundary,
 }
 
-/// Continuous thrust in a perturbed segment: `thrust` (N) along body axis
-/// `axis` (the engine's).
-#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct LowThrust {
-    pub thrust: f64,
-    pub axis: DVec3,
-}
-
 /// A segment's perturbation model.
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Limbo {
@@ -125,9 +104,6 @@ pub struct Limbo {
     pub optics: Optics,
     /// The attitude within the segment.
     pub pointing: Pointing,
-    /// Continuous thrust (a low-thrust planned burn).
-    #[serde(default)]
-    pub thrust: Option<LowThrust>,
     /// Propellant boil-off (kg/s), down to `dry_mass`.
     #[serde(default)]
     pub boil_off: f64,
@@ -210,14 +186,13 @@ pub fn each_air(world: &World, snap: &Snapshot, anchor: NodeId, r: DVec3, v: DVe
 
 impl Limbo {
     /// A model for craft `craft` (its design in `design`), with the
-    /// default optics and boundary and no thrust.
+    /// default optics and boundary.
     pub fn new(craft: CraftId, design: DesignSlot, pointing: Pointing, dry_mass: f64) -> Self {
         Limbo {
             craft,
             design,
             optics: Optics::default(),
             pointing,
-            thrust: None,
             boil_off: 0.0,
             dry_mass,
             chute_area: 0.0,
@@ -271,32 +246,24 @@ impl Limbo {
         &self.design.get(&self.craft).surfaces
     }
 
-    /// The same model with another pointing (and thrust), its law as it is
-    /// (a burn's has none: [`Self::without_law`]).
-    pub fn with(&self, pointing: Pointing, thrust: Option<LowThrust>) -> Self {
-        Limbo { pointing, thrust, ..self.clone() }
+    /// The same model with another pointing, its law as it is.
+    pub fn with(&self, pointing: Pointing) -> Self {
+        Limbo { pointing, ..self.clone() }
     }
 
-    /// The same model without a law of the tanks (a burn, or a coast after
-    /// a predicted burn: its mass is its segment's own law).
-    pub fn without_law(mut self) -> Self {
-        self.law = None;
-        self
-    }
-
-    /// Mass at local time `t` of a segment starting at `mass0` whose own
-    /// mass flow (a burn's) is `flow`: a craft of parts' law of its tanks
-    /// (a coast's), else boil-off on top, never below the dry mass.
-    pub fn mass(&self, mass0: f64, flow: f64, t: f64) -> f64 {
+    /// Mass at local time `t` of a segment starting at `mass0`: a craft of
+    /// parts' law of its tanks, else less boil-off, never below the dry
+    /// mass.
+    pub fn mass(&self, mass0: f64, t: f64) -> f64 {
         if let Some(law) = self.law.as_deref() {
             if let Some(def) = self.ship_def() {
                 return self.dry_mass + law.total(def, t);
             }
         }
         if self.boil_off > 0.0 {
-            (mass0 - (flow + self.boil_off) * t).max(self.dry_mass.min(mass0))
+            (mass0 - self.boil_off * t).max(self.dry_mass.min(mass0))
         } else {
-            mass0 - flow * t
+            mass0
         }
     }
 
@@ -329,12 +296,6 @@ impl Limbo {
             };
             a += force * (pressure / mass);
         });
-        // No thrust from a tank boiled empty (the burn ends there; this
-        // guards the last stage's rounding at the dry-mass floor).
-        let fed = self.boil_off == 0.0 || mass > self.dry_mass;
-        if let (Some(t), Some(att)) = (self.thrust.filter(|_| fed), att) {
-            a += att.q * t.axis * (t.thrust / mass);
-        }
         a
     }
 

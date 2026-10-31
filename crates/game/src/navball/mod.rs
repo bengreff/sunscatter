@@ -283,9 +283,9 @@ pub fn nav_state(sim: &SimState, tracked: &Tracked, aps: &Apsides, nav: &mut Nav
         body: src.name.clone(),
         reference: body,
         target: target.map(|(name, tr, _)| (name, (tr - r).length())),
-        maneuver: vessel.plan().burns.iter().find(|b| b.t_start.seconds_since(t) > 0.0).map(|b| {
-            let snap = sim.world.snapshot(t);
-            (b.law.direction.direction(&snap, anchor, r, v), b.t_start.seconds_since(t))
+        maneuver: vessel.nodes().iter().find(|n| n.t.seconds_since(t) > 0.0).and_then(|n| {
+            let law = sim::vessel::node_direction(std::slice::from_ref(n), n.t)?;
+            Some((law.direction(&sim.world.snapshot(t), anchor, r, v), n.t.seconds_since(t)))
         }),
         known: crate::format::Known::of(vessel),
     })

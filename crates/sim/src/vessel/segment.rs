@@ -1,33 +1,26 @@
 //! Trajectory segments: "the prediction is the truth" (D024).
 //!
-//! A segment is a coast or a burn ([`SegmentKind`]). It is integrated once,
-//! in chunks of accepted steps, and stores the step endpoints. The vessel's state at any time inside it is a quintic
+//! A segment is a coast. It is integrated once, in chunks of accepted
+//! steps, and stores the step endpoints. The vessel's state at any time inside it is a quintic
 //! Hermite evaluation of those samples, so time warp only changes how fast the
 //! segment is sampled. Extending in chunks is bit-identical to one long run
 //! because the integrator state (including compensation terms and the next
 //! step size) is stored and the step limit (`horizon`) never changes.
 //!
-//! Mass is part of the state: constant in a coast, `m0 − ṁ·t` in a burn
-//! (constant mass flow, so the exact expression replaces integration).
+//! Mass is part of the state: a craft of parts' tanks by their law
+//! ([`super::limbo`], D119), else constant (less boil-off).
 //! Proper time (δ = τ − t, realism-1 §4a) is the integrator's extra scalar:
 //! integrated with the same stages, outside error control (so the steps are
 //! those of the translation alone), stored with each sample with its rate
 //! and evaluated between samples by cubic Hermite interpolation.
 //! Segments are chained into a [`super::Trajectory`].
-//!
-//! A burn advances on the tick lattice, its attitude flown with it
-//! ([`super::flown`], D075): one "step" of a burn is one tick, its samples
-//! the tick ends.
 
 use super::anchor::preferred_anchor;
-use super::attitude::{Attitude, AttitudeControl};
-use super::burn::BurnLaw;
-use super::flown::Flight;
 use super::limbo::Limbo;
 use crate::ephem::{Snapshot, SnapshotCache};
 use crate::forces::{ActiveSources, DragModel, ForceContext};
 use crate::frame::NodeId;
-use crate::integrate::{hermite5, Dop853, Dopri5, Dynamics, NonFinite, StepSample, StepState, Tolerance};
+use crate::integrate::{hermite5, Dop853, Dopri5, Dynamics, StepSample, StepState, Tolerance};
 use crate::math::{Compensated, CompensatedScalar};
 use crate::time::Epoch;
 use crate::world::World;
@@ -36,7 +29,7 @@ use glam::DVec3;
 mod events;
 mod recorded;
 
-/// Integration tolerance for coasts and low-thrust burns, per step of
+/// Integration tolerance for coasts, per step of
 /// [`Dop853`] (position 10 cm and velocity 10 µm/s absolute, 1e-10
 /// relative; steps of at most 3 h): over a day in LEO ~10 m from the
 /// converged orbit, against 53 m for the 1 cm per step of the former
@@ -65,10 +58,9 @@ pub enum EndKind {
     Surface { body: NodeId },
     /// Reached the maximum horizon (the vessel starts a new segment there).
     Horizon,
-    /// A coast reached the ignition of the next planned burn.
+    /// A prediction cut where a node's burn starts (the game's line past
+    /// a node, [`Segment::cut_at`]).
     BurnStart,
-    /// A burn completed.
-    BurnEnd,
     /// Reached the end of the ephemeris window: nothing is simulated past it.
     EphemerisEnd,
     /// The integration could not continue (non-finite state or force). The
@@ -87,18 +79,10 @@ pub struct SegmentEnd {
     pub kind: EndKind,
 }
 
-/// What moves the vessel during a segment (besides gravity and drag).
-#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-pub enum SegmentKind {
-    Coast,
-    Burn(BurnLaw),
-}
-
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Segment {
     /// Epoch of local time 0.
     pub t0: Epoch,
-    pub kind: SegmentKind,
     pub samples: Vec<Sample>,
     pub end: Option<SegmentEnd>,
     state: StepState,
@@ -115,10 +99,8 @@ pub struct Segment {
     mass0: f64,
     /// How the segment ends when it reaches `horizon` before the ephemeris end.
     horizon_end: EndKind,
-    /// The initial conditions (to rebuild the segment when a plan changes).
+    /// The initial conditions.
     start: CoastStart,
-    /// Planned burns started before this segment (its own index if a burn).
-    pub(super) plan_index: usize,
     /// Where the segment first descends into an atmosphere from above
     /// (local time, body): a vessel is flown live from there
     /// ([`super::aerothermal`]); the rest of the segment is a rough
@@ -127,11 +109,8 @@ pub struct Segment {
     /// (`crate::landing::air_path`, D089).
     #[serde(default)]
     pub entry: Option<(f64, NodeId)>,
-    /// A burn's attitude, flown with it.
-    #[serde(default)]
-    flight: Option<Box<Flight>>,
-    /// The perturbation model of a vessel's coast or low-thrust burn
-    /// ([`super::limbo`]): its drag, radiation pressure and thrust replace
+    /// The perturbation model of a vessel's coast ([`super::limbo`]): its
+    /// drag and radiation pressure replace
     /// the attitude-independent drag of `drag`, and it marks the live
     /// boundary as `entry`.
     #[serde(default)]
@@ -161,45 +140,31 @@ impl Segment {
     /// Starts a coast at `t0` (mass from the drag model, if any).
     pub fn new(world: &World, t0: Epoch, start: CoastStart) -> Self {
         let mass = start.drag.map_or(0.0, |d| d.mass);
-        Self::start(world, t0, start, mass, SegmentKind::Coast, EndKind::Horizon, 0, None, None)
+        Self::start(world, t0, start, mass, EndKind::Horizon, None)
     }
 
     /// Starts a perturbed coast at `t0` with mass `mass` ([`super::limbo`]).
     pub fn new_limbo(world: &World, t0: Epoch, start: CoastStart, mass: f64, limbo: Limbo) -> Self {
         let limbo = Some(Box::new(limbo));
-        Self::start(world, t0, start, mass, SegmentKind::Coast, EndKind::Horizon, 0, None, limbo)
+        Self::start(world, t0, start, mass, EndKind::Horizon, limbo)
     }
 
-    /// Starts a segment of `kind` at `t0` with mass `mass`; reaching
-    /// `start.horizon` ends it with `horizon_end`. A burn whose law or
-    /// duration cannot be flown ends at once as [`EndKind::Failed`]. A burn
-    /// is flown from `flight` (its attitude at ignition), unless `limbo`
-    /// gives it a continuous thrust.
-    #[allow(clippy::too_many_arguments)]
+    /// Starts a coast at `t0` with mass `mass`; reaching `start.horizon`
+    /// ends it with `horizon_end`.
     pub(super) fn start(
         world: &World,
         t0: Epoch,
         start: CoastStart,
         mass: f64,
-        kind: SegmentKind,
         horizon_end: EndKind,
-        plan_index: usize,
-        flight: Option<Flight>,
         limbo: Option<Box<Limbo>>,
     ) -> Self {
         let CoastStart { anchor, r, v, drag, contact_height, horizon, fixed_anchor, proper_time } = start;
-        let valid = match kind {
-            SegmentKind::Coast => true,
-            SegmentKind::Burn(law) => {
-                law.is_valid() && horizon.is_finite() && horizon >= 0.0 && mass - law.mass_flow * horizon > 0.0
-            }
-        };
-        let horizon = if valid { horizon.min(world.end().seconds_since(t0)).max(0.0) } else { 0.0 };
+        let horizon = horizon.min(world.end().seconds_since(t0)).max(0.0);
         let snaps = SnapshotCache::new(&world.eph);
         let active = snaps.with(t0, |snap| ActiveSources::select(world, snap, anchor, r));
         let mut seg = Segment {
             t0,
-            kind,
             samples: Vec::new(),
             end: None,
             state: StepState {
@@ -220,9 +185,7 @@ impl Segment {
             mass0: mass,
             horizon_end,
             start,
-            plan_index,
             entry: None,
-            flight: flight.filter(|_| matches!(kind, SegmentKind::Burn(_))).map(Box::new),
             limbo,
         };
         let integ = Dopri5::new(coast_tolerance());
@@ -231,9 +194,6 @@ impl Segment {
         seg.state.x = CompensatedScalar::new(proper_time);
         let s = StepSample { t: 0.0, r, v, a: seg.state.a };
         seg.samples.push(Sample { anchor, s, delta: proper_time, delta_rate: seg.state.x_rate });
-        if !valid {
-            seg.end = Some(SegmentEnd { t: 0.0, kind: EndKind::Failed });
-        }
         seg
     }
 
@@ -246,15 +206,13 @@ impl Segment {
             active: &self.active,
             drag: self.drag,
             mass0: self.mass0,
-            kind: &self.kind,
-            thrust: self.flight.as_ref().map_or(DVec3::ZERO, |f| f.thrust),
             limbo: self.limbo.as_deref(),
         }
     }
 
     /// Mass at local time `t` (kg).
     pub fn mass_at(&self, t: f64) -> f64 {
-        mass_at(&self.kind, self.mass0, self.limbo.as_deref(), t)
+        mass_at(self.mass0, self.limbo.as_deref(), t)
     }
 
     /// The perturbation model, if this is a perturbed segment.
@@ -309,11 +267,7 @@ impl Segment {
     /// past it), the segment ends, or `max_steps` steps were taken. Returns
     /// the number of steps taken. Where it stops never changes the steps.
     pub fn extend_until(&mut self, world: &World, until: f64, max_steps: usize) -> usize {
-        // Coasts and low-thrust burns take the 8th-order method's long steps;
-        // a burn flown by ticks takes one short step per tick, where the
-        // 5th order's six evaluations a step are cheaper.
         let coast = Dop853::new(coast_tolerance());
-        let integ = Dopri5::new(coast_tolerance());
         let snaps = SnapshotCache::new(&world.eph);
         for taken in 0..max_steps {
             if self.end.is_some() || self.computed_until() >= until {
@@ -326,40 +280,19 @@ impl Segment {
                 return taken;
             }
             let prev = *self.samples.last().expect("segment has a first sample");
-            let step = match (&self.kind, self.flight.as_deref_mut()) {
-                (SegmentKind::Burn(law), Some(flight)) => {
-                    let f = Forces {
-                        world,
-                        snaps: &snaps,
-                        t0: self.t0,
-                        anchor: self.anchor,
-                        active: &self.active,
-                        drag: self.drag,
-                        mass0: self.mass0,
-                        kind: &self.kind,
-                        thrust: DVec3::ZERO,
-                        limbo: self.limbo.as_deref(),
-                    };
-                    burn_tick(&integ, f, law, &mut self.state, flight, self.horizon)
-                }
-                _ => {
-                    // Field-level borrows: the forces read `active`/`drag` while
-                    // the integrator mutates `state`.
-                    let f = Forces {
-                        world,
-                        snaps: &snaps,
-                        t0: self.t0,
-                        anchor: self.anchor,
-                        active: &self.active,
-                        drag: self.drag,
-                        mass0: self.mass0,
-                        kind: &self.kind,
-                        thrust: DVec3::ZERO,
-                        limbo: self.limbo.as_deref(),
-                    };
-                    coast.step(&f, &mut self.state, self.horizon)
-                }
+            // Field-level borrows: the forces read `active`/`drag` while
+            // the integrator mutates `state`.
+            let f = Forces {
+                world,
+                snaps: &snaps,
+                t0: self.t0,
+                anchor: self.anchor,
+                active: &self.active,
+                drag: self.drag,
+                mass0: self.mass0,
+                limbo: self.limbo.as_deref(),
             };
+            let step = coast.step(&f, &mut self.state, self.horizon);
             let Ok(sample) = step else {
                 self.end = Some(SegmentEnd { t: prev.s.t, kind: EndKind::Failed });
                 return taken + 1;
@@ -398,7 +331,7 @@ impl Segment {
         let Some(super::pointing::Pointing::Track { rule, .. }) = self.limbo.as_deref().map(|l| &l.pointing) else {
             return false;
         };
-        if !rule.auto || !matches!(self.kind, SegmentKind::Coast) {
+        if !rule.auto {
             return false;
         }
         let r = self.state.r.value();
@@ -422,7 +355,7 @@ impl Segment {
         // A coast's law of its tanks starts its next span here, at a stored
         // sample (D119): its mass may move (relief), so the acceleration is
         // taken again.
-        let spanned = matches!(self.kind, SegmentKind::Coast) && {
+        let spanned = {
             let (t, epoch) = (self.state.t, self.t0.add_seconds(self.state.t));
             let state = (self.anchor, self.state.r.value(), self.state.v.value());
             self.limbo.as_deref_mut().is_some_and(|l| l.next_span(world, (t, epoch), state))
@@ -440,8 +373,6 @@ impl Segment {
                     active: &self.active,
                     drag: self.drag,
                     mass0: self.mass0,
-                    kind: &self.kind,
-                    thrust: self.flight.as_ref().map_or(DVec3::ZERO, |f| f.thrust),
                     limbo: self.limbo.as_deref(),
                 };
                 (self.state.a, self.state.x_rate) = f.accel_rate_with(snap, self.state.t, r, v);
@@ -487,34 +418,9 @@ impl Segment {
             }
             self.samples.drain(..keep_from);
         }
-        if let Some(f) = self.flight.as_deref_mut() {
-            f.prune_before(t);
-        }
         if let Some(law) = self.limbo.as_deref_mut().and_then(|l| l.law.as_deref_mut()) {
             law.prune_before(t);
         }
-    }
-
-    /// A burn's attitude at local time `t` (`None` for a coast or a bare
-    /// burn, or before the burn).
-    pub fn attitude_at(&self, t: f64) -> Option<Attitude> {
-        let f = self.flight.as_deref().filter(|f| f.craft.is_some())?;
-        f.attitude_at(t.min(self.computed_until()))
-    }
-
-    /// A burn's attitude and control at ignition.
-    pub fn flight_start(&self) -> Option<(Attitude, AttitudeControl)> {
-        self.flight.as_deref().filter(|f| f.craft.is_some()).map(|f| f.start)
-    }
-
-    /// A burn's attitude and control after its last computed tick.
-    pub fn flight_end(&self) -> Option<(Attitude, AttitudeControl)> {
-        self.flight.as_deref().filter(|f| f.craft.is_some()).map(|f| (f.att, f.control))
-    }
-
-    /// The flight a burn was started with (to fly it again).
-    pub(super) fn flight(&self) -> Option<&Flight> {
-        self.flight.as_deref()
     }
 
     /// State at local time `t`: (anchor, r, v). `None` if not computed yet.
@@ -569,20 +475,14 @@ fn hermite3(a: &Sample, b: &Sample, t: f64) -> f64 {
     h00 * a.delta + h10 * h * a.delta_rate + h01 * b.delta + h11 * h * b.delta_rate
 }
 
-/// Mass at local time `t` of a segment of `kind` starting with `mass0`
-/// (with the limbo model's boil-off, if any).
-fn mass_at(kind: &SegmentKind, mass0: f64, limbo: Option<&Limbo>, t: f64) -> f64 {
-    let flow = match kind {
-        SegmentKind::Coast => 0.0,
-        SegmentKind::Burn(law) => law.mass_flow,
-    };
-    match limbo {
-        Some(l) => l.mass(mass0, flow, t),
-        None => mass0 - flow * t,
-    }
+/// Mass at local time `t` of a segment starting with `mass0` (the limbo
+/// model's law of the tanks or boil-off, if any).
+fn mass_at(mass0: f64, limbo: Option<&Limbo>, t: f64) -> f64 {
+    limbo.map_or(mass0, |l| l.mass(mass0, t))
 }
 
-/// The dynamics of a segment: gravity, drag and (in a burn) thrust.
+/// The dynamics of a segment: gravity and drag (or the limbo model's
+/// perturbations).
 struct Forces<'a, 'w> {
     world: &'a World,
     /// The snapshots of the ephemeris, reused across evaluations.
@@ -592,10 +492,7 @@ struct Forces<'a, 'w> {
     active: &'a ActiveSources,
     drag: Option<DragModel>,
     mass0: f64,
-    kind: &'a SegmentKind,
-    /// A burn's thrust acceleration for the current tick (inertial, m/s²).
-    thrust: DVec3,
-    /// The perturbation model (drag, radiation pressure, low thrust).
+    /// The perturbation model (drag, radiation pressure).
     limbo: Option<&'a Limbo>,
 }
 
@@ -604,9 +501,9 @@ impl Dynamics for Forces<'_, '_> {
     fn accel(&self, t: f64, r: DVec3, v: DVec3) -> DVec3 {
         self.snaps.with(self.t0.add_seconds(t), |snap| match self.limbo {
             Some(l) => {
-                self.context(t).accel_with(snap, r, v) + l.accel(self.world, snap, self.anchor, r, v, self.mass(t))
+                self.context().accel_with(snap, r, v) + l.accel(self.world, snap, self.anchor, r, v, self.mass(t))
             }
-            None => self.context(t).accel_with(snap, r, v),
+            None => self.context().accel_with(snap, r, v),
         })
     }
 
@@ -617,13 +514,13 @@ impl Dynamics for Forces<'_, '_> {
 
     /// Steps that resolve the gravity fields (D090).
     fn max_step(&self, t: f64, r: DVec3, v: DVec3) -> f64 {
-        self.snaps.with(self.t0.add_seconds(t), |snap| self.context(t).max_step(snap, r, v))
+        self.snaps.with(self.t0.add_seconds(t), |snap| self.context().max_step(snap, r, v))
     }
 }
 
 impl Forces<'_, '_> {
     fn accel_rate_with(&self, snap: &Snapshot, t: f64, r: DVec3, v: DVec3) -> (DVec3, f64) {
-        let (a, rate) = self.context(t).accel_rate(snap, r, v);
+        let (a, rate) = self.context().accel_rate(snap, r, v);
         match self.limbo {
             Some(l) => (a + l.accel(self.world, snap, self.anchor, r, v, self.mass(t)), rate),
             None => (a, rate),
@@ -631,44 +528,12 @@ impl Forces<'_, '_> {
     }
 
     fn mass(&self, t: f64) -> f64 {
-        mass_at(self.kind, self.mass0, self.limbo, t)
+        mass_at(self.mass0, self.limbo, t)
     }
 
-    /// The forces at local time `t` (thrust and drag mass of a burn; a
-    /// perturbed segment's drag is the limbo model's).
-    fn context(&self, t: f64) -> ForceContext<'_> {
-        let (drag, thrust) = match self.kind {
-            _ if self.limbo.is_some() => (None, self.thrust),
-            SegmentKind::Coast => (self.drag, DVec3::ZERO),
-            SegmentKind::Burn(_) => (self.drag.map(|d| DragModel { mass: self.mass(t), ..d }), self.thrust),
-        };
-        ForceContext { world: self.world, anchor: self.anchor, active: self.active, drag, thrust }
-    }
-}
-
-/// One tick of a burn ([`super::flown`]): the attitude and thrust for the
-/// tick from the state at its start, then the translation to its end with
-/// that thrust (one or more integrator steps, the last clamped to the
-/// tick's end). Returns the sample at the tick's end.
-fn burn_tick(
-    integ: &Dopri5,
-    mut f: Forces,
-    law: &BurnLaw,
-    state: &mut StepState,
-    flight: &mut Flight,
-    horizon: f64,
-) -> Result<StepSample, NonFinite> {
-    let t = state.t;
-    let t_end = flight.next_tick_end(horizon);
-    let (r, v) = (state.r.value(), state.v.value());
-    let dir = f.snaps.with(f.t0.add_seconds(t), |snap| law.direction.direction(snap, f.anchor, r, v));
-    let masses = (f.mass(t), f.mass(t_end));
-    f.thrust = flight.tick(law, dir, masses, t_end - t, t_end);
-    (state.a, state.x_rate) = f.accel_rate(t, r, v);
-    loop {
-        let sample = integ.step(&f, state, t_end)?;
-        if state.t >= t_end {
-            return Ok(sample);
-        }
+    /// The forces (a perturbed segment's drag is the limbo model's).
+    fn context(&self) -> ForceContext<'_> {
+        let drag = if self.limbo.is_some() { None } else { self.drag };
+        ForceContext { world: self.world, anchor: self.anchor, active: self.active, drag, thrust: DVec3::ZERO }
     }
 }

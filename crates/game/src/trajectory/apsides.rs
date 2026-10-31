@@ -25,7 +25,7 @@ use glam::DVec3;
 use sim::frame::NodeId;
 use sim::frame::Vec3;
 use sim::time::Epoch;
-use sim::vessel::{EndKind, Segment, SegmentEnd, SegmentKind, VesselId};
+use sim::vessel::{EndKind, Segment, SegmentEnd, VesselId};
 use std::collections::HashMap;
 
 /// An extremum is kept when it differs from its neighbouring extremum by
@@ -137,8 +137,8 @@ impl Scanner {
         self.prev.map(|p| p.body)
     }
 
-    /// Starts a new run at the next point (a burn starts or ends): the
-    /// orbits either side have their own apsides. An extremum between the
+    /// Starts a new run at the next point (a coast from a node: its burn
+    /// changed the orbit): the orbits either side have their own apsides. An extremum between the
     /// last point and the next goes to the new run.
     pub fn split(&mut self) {
         self.split = true;
@@ -372,8 +372,9 @@ fn resume_point(keys: &[SegKey], segs: &[&Segment]) -> Option<(usize, usize)> {
 }
 
 impl Entry {
-    /// Scans what is new in `segs`; returns whether anything changed.
-    fn update(&mut self, sim: &SimState, segs: &[&Segment]) -> bool {
+    /// Scans what is new in `segs` (the coasts from `nodes` start new
+    /// runs); returns whether anything changed.
+    fn update(&mut self, sim: &SimState, segs: &[&Segment], nodes: &[sim::systems::maneuver::Node]) -> bool {
         let (from_seg, from_sample) = match resume_point(&self.keys, segs) {
             Some(p) => p,
             None => {
@@ -386,10 +387,9 @@ impl Entry {
             return false;
         }
         let eph = &sim.world.eph;
-        let burn = |seg: &Segment| matches!(seg.kind, SegmentKind::Burn(_));
         for (k, seg) in segs.iter().enumerate().skip(from_seg) {
             let start = if k == from_seg { from_sample } else { 0 };
-            if start == 0 && k > 0 && burn(seg) != burn(segs[k - 1]) {
+            if start == 0 && k > 0 && nodes.iter().any(|n| n.t == seg.t0) {
                 self.scanner.split();
             }
             for s in &seg.samples[start.min(seg.samples.len())..] {
@@ -424,10 +424,11 @@ impl Entry {
     }
 }
 
-/// The apsides along `segs` (in time order), computed now, uncached.
-pub fn of_segments(sim: &SimState, segs: &[&Segment]) -> VesselApsides {
+/// The apsides along `segs` (in time order) of a vessel with `nodes`,
+/// computed now, uncached.
+pub fn of_segments(sim: &SimState, segs: &[&Segment], nodes: &[sim::systems::maneuver::Node]) -> VesselApsides {
     let mut e = Entry::default();
-    e.update(sim, segs);
+    e.update(sim, segs, nodes);
     e.result
 }
 
@@ -452,7 +453,7 @@ impl Apsides {
             let id = sim.fleet[i].id();
             let segs = vessel_segments(sim, pred, i);
             let e = self.entries.entry(id).or_default();
-            e.update(sim, &segs);
+            e.update(sim, &segs, sim.fleet[i].nodes());
             e.result.impact = match landing.filter(|l| l.vessel == id) {
                 Some(l) => l.impact.map(|h| Impact { t: h.t, body: h.body }),
                 None => e.stored_impact,
@@ -463,7 +464,7 @@ impl Apsides {
     /// A list computed now, uncached (tests).
     #[cfg(test)]
     pub fn compute(sim: &SimState, pred: &Prediction, i: usize) -> VesselApsides {
-        of_segments(sim, &vessel_segments(sim, pred, i))
+        of_segments(sim, &vessel_segments(sim, pred, i), sim.fleet[i].nodes())
     }
 }
 

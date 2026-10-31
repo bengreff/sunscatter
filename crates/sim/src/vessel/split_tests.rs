@@ -33,8 +33,6 @@ fn every_field_set(w: &World) -> Vessel {
     v.attitude.omega = DVec3::new(0.0, 0.01, 0.002);
     v.chute.armed = true;
     v.debug = true;
-    let burn = PlannedBurn::delta_v(t0().add_seconds(3_600.0), DVec3::new(10.0, 0.0, 0.0), 981.0e3, 348.0, None);
-    v.plan = FlightPlan { burns: vec![burn] };
     v.tick_accel = Some(DVec3::new(0.0, 0.0, 9.0));
     (v.control.hold, v.control.tracking) = (Some(v.attitude.q), true);
     v.rest_ticks = 3;
@@ -97,9 +95,8 @@ fn every_vessel_field_has_its_rule_at_a_split() {
     // The crew with the seats, the parachutes with their parts.
     assert_eq!((v.crew(), b.crew()), (before.crew(), 0));
     assert_eq!((v.chute, b.chute), (before.chute, split::LOST_CHUTE));
-    // The vessel keeps its plan, control (its lattice restarts) and helm; the
+    // The vessel keeps its control (its lattice restarts) and helm; the
     // booster starts with none, and the controls of a piece.
-    assert_eq!((v.plan.clone(), b.plan.clone()), (before.plan.clone(), FlightPlan::default()));
     assert_eq!(v.control, AttitudeControl { base: v.control.base, ..before.control });
     assert_eq!(b.control.hold, None);
     assert_eq!((v.controls(), b.controls()), (before.controls(), &before.controls().for_piece()));

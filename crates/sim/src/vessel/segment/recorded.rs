@@ -3,7 +3,7 @@
 //! needs live flight), and a stored segment cut where such a prediction
 //! takes over. Both are finished: sampled, never extended (rule 4).
 
-use super::{CoastStart, EndKind, Sample, Segment, SegmentEnd, SegmentKind};
+use super::{CoastStart, EndKind, Sample, Segment, SegmentEnd};
 use crate::ephem::SnapshotCache;
 use crate::forces::ActiveSources;
 use crate::frame::NodeId;
@@ -40,7 +40,6 @@ impl Segment {
             SnapshotCache::new(&world.eph).with(t0, |snap| ActiveSources::select(world, snap, anchor, first.r));
         Segment {
             t0,
-            kind: SegmentKind::Coast,
             samples: samples.iter().map(|&s| Sample { anchor, s, delta: proper_time, delta_rate: 0.0 }).collect(),
             end: Some(SegmentEnd { t: last.t, kind: end }),
             state: StepState {
@@ -61,9 +60,7 @@ impl Segment {
             mass0: mass,
             horizon_end: end,
             start,
-            plan_index: 0,
             entry: None,
-            flight: None,
             limbo: None,
         }
     }

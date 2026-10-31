@@ -29,7 +29,7 @@
 use super::aerothermal::{self, air_at, AeroTick, Air, LEAVE_ATMOSPHERE};
 use super::attitude::{self, Command};
 use super::coast_tolerance;
-use super::{Attitude, AttitudeControl, Controls, Destruction, FlightPlan, Phase, Vessel, TICK};
+use super::{Attitude, AttitudeControl, Controls, Destruction, Phase, Vessel, TICK};
 use crate::chute;
 use crate::contact::{self, Ground, Pose};
 use crate::craft::{CraftDesign, EngineOutput, MassProps};
@@ -263,12 +263,11 @@ impl Vessel {
         }
     }
 
-    /// Destroyed by `cause`: engine and controls are cut (the flight plan
-    /// and the parachute go with them); it flies on until it rests.
+    /// Destroyed by `cause`: engine and controls are cut (the parachute
+    /// goes with them); it flies on until it rests.
     pub(super) fn destroy(&mut self, cause: Destruction) {
         self.destroyed = Some(cause);
         self.chute = Default::default();
-        self.plan = FlightPlan::default();
         self.control = AttitudeControl::default();
     }
 

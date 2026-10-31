@@ -165,7 +165,7 @@ pub fn pick_on_line(
     }
     // Aboard, the plan is set when a drag ends (re-predicted at once).
     if released && comms.location == Location::Vessel(id) {
-        commands.write(command_for(&sim.fleet[i], &planner.draft, sim.clock));
+        commands.write(command_for(&sim.fleet[i], &planner.draft));
     }
 
     // A click on the drawn line adds a burn there, about the dominant body

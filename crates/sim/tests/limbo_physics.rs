@@ -11,9 +11,9 @@ use sim::forces::Optics;
 use sim::kepler::Elements;
 use sim::sol;
 use sim::time::Epoch;
-use sim::vessel::limbo::{Limbo, LowThrust};
-use sim::vessel::pointing::{self, Pointing, Rule};
-use sim::vessel::{Attitude, CoastStart, Controls, DirectionLaw, HoldMode, Phase, Segment, Vessel, VesselId};
+use sim::vessel::limbo::Limbo;
+use sim::vessel::pointing::{self, Pointing, Rule, TrackRule};
+use sim::vessel::{Attitude, CoastStart, Controls, HoldMode, Phase, Segment, Vessel, VesselId};
 use sim::world::World;
 use std::sync::Arc;
 
@@ -283,8 +283,8 @@ fn a_decaying_orbit_hands_over_to_live_flight_at_the_boundary() {
 
 #[test]
 fn a_perturbed_coast_does_not_depend_on_its_anchor() {
-    // Drag at 300 km, radiation pressure and a 1 N thrust held prograde,
-    // integrated about Earth and about the Earth–Moon barycentre.
+    // Drag at 300 km and radiation pressure held prograde, integrated about
+    // Earth and about the Earth–Moon barycentre.
     let w = world();
     let earth = w.find("Earth").unwrap();
     let emb = w.eph.find("EMB").unwrap();
@@ -293,12 +293,9 @@ fn a_perturbed_coast_does_not_depend_on_its_anchor() {
     let craft = sim::craft::small::rocket();
     let snap = w.snapshot(t0());
     let att = Attitude { q: sim::vessel::quat_z_to(v.normalize()), omega: DVec3::ZERO };
-    let law = DirectionLaw::Tracking { reference: earth.node, axes: DVec3::X };
-    let p = pointing::on_law(&law, &att, DVec3::Z, &w, &snap, (earth.node, r, v));
-    let limbo =
-        Limbo::new(craft.id.clone(), DesignSlot::filled(craft.design().clone()), p, 4_000.0).with(Pointing::Mean, None);
-    let p = pointing::on_law(&law, &att, DVec3::Z, &w, &snap, (earth.node, r, v));
-    let limbo = limbo.with(p, Some(LowThrust { thrust: 1.0, axis: DVec3::Z }));
+    let rule = TrackRule { reference: earth.node, surface: false, dir: DVec3::X, axis: DVec3::Z, auto: false };
+    let p = pointing::track(&rule, &att, &w, &snap, (earth.node, r, v)).unwrap();
+    let limbo = Limbo::new(craft.id.clone(), DesignSlot::filled(craft.design().clone()), p, 4_000.0);
     let start = |anchor, r, v| CoastStart {
         anchor,
         r,
@@ -328,7 +325,7 @@ fn a_perturbed_coast_does_not_depend_on_its_anchor() {
         worst = worst.max(dr);
         assert!(dr < 0.05 && dv < 5e-5, "t={t}: dr={dr} m dv={dv} m/s");
     }
-    // The perturbations act: 1 N on 20 t for 6 h is ≈ 0.5 m/s.
+    // The perturbations act: against a bare coast from the same start.
     let (_, r_bare, _) = {
         let mut bare = Segment::new(&w, t0(), start(earth.node, r, v));
         while bare.computed_until() < span {
@@ -338,7 +335,9 @@ fn a_perturbed_coast_does_not_depend_on_its_anchor() {
     };
     let (_, r_end, _) = about_earth.eval(span).unwrap();
     println!("anchor invariance: worst {worst:.2e} m; perturbations moved it {:.0} m", (r_end - r_bare).length());
-    assert!((r_end - r_bare).length() > 1_000.0);
+    // Drag and radiation pressure act (137 m over the span), far above the
+    // anchors' difference.
+    assert!((r_end - r_bare).length() > 100.0);
 }
 
 #[test]
@@ -354,8 +353,8 @@ fn thin_air_heats_a_coasting_craft_at_the_free_molecular_rate() {
     let (r, v) = (DVec3::new(r0, 0.0, 0.0), DVec3::new(0.0, v0, 0.0));
     let snap = w.snapshot(t0());
     let att = Attitude { q: sim::vessel::quat_z_to(v.normalize()), omega: DVec3::ZERO };
-    let law = DirectionLaw::Tracking { reference: earth.node, axes: DVec3::X };
-    let pointing = pointing::on_law(&law, &att, DVec3::Z, &w, &snap, (earth.node, r, v));
+    let rule = TrackRule { reference: earth.node, surface: false, dir: DVec3::X, axis: DVec3::Z, auto: false };
+    let pointing = pointing::track(&rule, &att, &w, &snap, (earth.node, r, v)).unwrap();
     let length = sim::craft::small::rocket().design().bake.length;
     let air = sim::vessel::coast_air(&w, t0(), (earth.node, r, v), Some(&pointing), &att, length);
     let mean = air.iter().map(|a| a.1).sum::<f64>() / air.len() as f64;

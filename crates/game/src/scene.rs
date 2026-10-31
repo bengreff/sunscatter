@@ -179,15 +179,12 @@ pub fn light_up(dir: Vec3) -> Vec3 {
     }
 }
 
-/// Whether vessel `i`'s engine is running now: a burn segment of its stored
-/// trajectory, or live flight with an engine giving thrust at the pilot's
-/// throttle (`Vessel::engine_running`: propellant or debug mode; a craft of
-/// parts' running engines).
+/// Whether vessel `i`'s engine is running now: live flight with an engine
+/// giving thrust at the pilot's throttle (`Vessel::engine_running`:
+/// propellant or debug mode; a craft of parts' running engines). Nothing
+/// burns on rails.
 pub fn engine_on(sim: &SimState, i: usize) -> bool {
     let v = &sim.fleet[i];
-    if let Some(seg) = v.trajectory().and_then(|tr| tr.segment_at(sim.clock)) {
-        return matches!(seg.kind, sim::vessel::SegmentKind::Burn(_));
-    }
     i == sim.active && matches!(v.phase, sim::vessel::Phase::Powered { .. }) && v.engine_running(sim.controls())
 }
 

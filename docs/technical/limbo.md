@@ -1,6 +1,6 @@
 # Feature: limbo (perturbed coasts and system lattices)
 
-**Status:** playable in the sim (2026-10-26, overnight LIMBO workstream): every coasting vessel is a perturbed coast and has systems; tested for warp invariance and against references (below). No UI yet (systems are not shown; the planner builds burns from the craft's engine, and the test craft has no low-thrust engine, so low thrust is reached through a plan's law). Decisions: D081 (limbo for 10+ craft, warp-invariant), D024/rule 4 (the stored trajectory is the truth), D025 (radiation pressure, thin-air drag, rotation through coasts), D029 (burns on rails), D033 (systems), D062 (rails floor), D075 (thrust along the attitude from the hold).
+**Status:** playable in the sim (2026-10-26, overnight LIMBO workstream): every coasting vessel is a perturbed coast and has systems; tested for warp invariance and against references (below). No UI yet (systems are not shown). Low thrust on rails went with the made-up craft's open-loop burns (D121); it returns with D029's warp while thrusting. Decisions: D081 (limbo for 10+ craft, warp-invariant), D024/rule 4 (the stored trajectory is the truth), D025 (radiation pressure, thin-air drag, rotation through coasts), D029 (burns on rails), D033 (systems), D062 (rails floor), D075 (thrust along the attitude from the hold).
 
 The owner (2026-10-26): "absolutely ensure 10+ craft can be in a limbo state where there are constant forces acting on them and their internal systems are evolving according to extrapolated models that DO NOT change behavior as timewarp changes", up to 1,000,000×.
 
@@ -13,7 +13,6 @@ The owner (2026-10-26): "absolutely ensure 10+ craft can be in a limbo state whe
 | Kerbalism (background resources) | Resource rates for unloaded vessels evaluated per frame, sunlight sampled per frame | Systems advance without the vessel being loaded | Per-frame steps: solar output in eclipse and battery state changed with warp, a known Kerbalism problem; we step on fixed lattices instead |
 | King-Hele, *Satellite Orbits in an Atmosphere* (1987); Vallado, *Fundamentals of Astrodynamics* | Circular-orbit decay da/dt = −ρ·√(μa)·C_D·A/m | The reference for the drag-decay test | Analytic decay as the model: we integrate the force |
 | Montenbruck & Gill, *Satellite Orbits* (2000) §3.4 | Radiation pressure on a surface: F = P·A·cosθ·[(1−ε)·ŝ − 2(ε·cosθ + δ/3)·n] | Per-cell SRP with specular ε and diffuse δ reflectivity | — |
-| Edelbaum (1961) | Δv of a low-thrust transfer between circular orbits: √(v₀² + v₁² − 2v₀v₁cos(πΔi/2)) | Reference for the spiral test | — |
 
 ## Design
 
@@ -36,7 +35,6 @@ While a segment's pointing is not `Mean`, the vessel's attitude is read from it 
 
 - **Drag** in every atmosphere up to its table's top (Earth: US76 to 1,000 km): a = −v_rel·½ρ|v_rel|·C_D A/m, with C_D A = C + (2A − C)·b(Kn), b Wilmoth's bridge (the live model's free-molecular force is 2qA along the flow, so above the boundary coast and live drag agree), Kn = λ/L from the table's mean free path and the bake's length; v_rel relative to the rotating air. `Mean`: the design's mean areas.
 - **Solar radiation pressure** from every star: P = L/(4πd²c) times the visible fraction of the star's disc (`sim::light::eclipse_factor`, the one eclipse rule, with occluders pre-filtered by a conservative test that cannot change its result); F = P·[(1−ε_s)·A·ŝ + 2ε_s·N₂ + (2ε_d/3)·N₁] (Montenbruck & Gill), ε_s, ε_d placeholders per vessel.
-- **Low thrust:** a planned burn whose thrust acceleration at ignition is below `LOW_THRUST` is flown as a perturbed segment instead of on the 20 ms tick lattice: thrust F along the engine axis at the pointing's attitude (the maneuver hold settled on the burn's direction law: `Track` for laws relative to a body, `Fixed` for inertial ones; D075), mass m(t) = m₀ − ṁt exactly. Its duration comes from the burn's end (Δv by the rocket equation). Heavier burns keep the flown-burn model (D075, `vessel::flown`).
 - **Boil-off:** a craft of parts' tanks by the coast's law of time (D119, `systems::coast_law`: warming, venting at the relief, boil-off at saturation, in closed form), the segment's mass the dry mass plus its consumables, the same bits as the ship state at the lattice points; a made-up craft's, a constant propellant mass flow (placeholder per vessel, default zero) in coasts, continuous burns and live ticks: m(t) = max(m₀ − ṁ_boil·t, dry). Not while landed.
 
 ### 2. The live/coast boundary
@@ -49,13 +47,13 @@ Live flight takes over where the coast model's assumptions fail: the attitude la
 
 ### 4. Warp
 
-D081: rails warp is refused while any craft is live (`game::state::rails_block`); limbo craft coast, so they never block it. Planned low-thrust burns are coast segments and take any warp (D029).
+D081: rails warp is refused while any craft is live (`game::state::rails_block`); limbo craft coast, so they never block it.
 
 ## Tests (the specification)
 
 - Invariance: a month of low thrust, a year of drag decay, a year of SRP and a year of systems give the same bits advanced in one call, in 1× frames (a shorter span), at 1,000× and at 1,000,000× frames.
 - Anchor invariance of a perturbed coast (rule 1).
-- Physics: drag decay against King-Hele's rate and an ISS-like ballistic coefficient; SRP against the flat-plate value; a low-thrust spiral's Δv against Edelbaum; a decaying orbit hands over to live flight at the boundary and the live descent continues.
+- Physics: drag decay against King-Hele's rate and an ISS-like ballistic coefficient; SRP against the flat-plate value; a decaying orbit hands over to live flight at the boundary and the live descent continues.
 - Save/load mid-limbo and mid-lattice continue bit for bit.
 - Cost: ten limbo craft at 1,000,000× (`examples/bench_limbo`), µs per vessel per frame.
 
@@ -69,8 +67,7 @@ Code: `sim::vessel::pointing` (attitude laws, the regime rule), `sim::vessel::li
 - The `Track` frame's reference is a player's explicit choice (a control input, applied at a frame like any command) or, by default, the automatic one: `hold::hold_reference`, the deepest body whose Laplace sphere d·(m/M)^(2/5) about its primary contains the vessel at that instant (D056's dominance as a pure function of time and state, the same for every anchor; the game no longer feeds its display dominance into the controls each frame, and its navball reads this rule). A coast held in an automatic frame ends at the integrator step where that body changes (`EndKind::Regime`; the rule costs ~1 µs a step, far moon systems and dwarf planets skipped unevaluated through `World::may_reach`); the next coast starts with the attitude unknown and the hold turns (control ticks) to the new body's frame. Review 2026-10-26: following the anchor broke rule 1, and the per-frame dominance restarted coasts at frame times (rule 4).
 - A planned burn's turn forces the maneuver hold from its start whatever the coast's pointing: the advance stops there, and a turn that settles is reported at its control tick, or at the start of the advance when ticks resumed from a base behind it settle (a command or the turn's start, epochs every frame rate shares). Tested for every hold mode at 1×, 1 s, 10 s and 1,000× frames through a burn (`tests/limbo_regime.rs`).
 - `Track` holds the roll fixed in the orbital frame, not the follow lattice's chain of smallest rotations (`attitude::advance_coast`): the two agree for planar motion and differ slowly in roll when the orbit plane precesses; inside a known segment the law is the truth.
-- Low-thrust burns are flown held on their law from ignition (the turn before them is still flown by the controller during the coast's turn lead); a burn whose craft is not settled at ignition has its attitude snapped onto the law there (an instant turn: documented simplification).
-- Boil-off is excluded from tick-flown (chemical) burns, whose thrust comes from the engine's mass flow alone. A low-thrust burn's length counts it: the burn ends when the tank is empty, and a Δv end uses the rocket equation with the total flow (F/(ṁ + boil-off)·ln(m₀/m₁)), so boiled propellant never gives thrust (tested: 41.63 m/s against 41.67). In a coast it floors at the dry mass. `Vessel::set_boil_off` restarts the coast with a new rate.
+- Boil-off is a craft of parts' tank law (D119) on every coast; it floors at the dry mass.
 - `Vessel::advance` returns where a coast reaches the live boundary, so the game holds its clock and caps the warp instead of flying a rails-warp frame of live ticks through the air.
 - Live flight still sees no air above `top` (150 km), so the boundary never hands over above it; a thrusting live vessel above 150 km feels no drag (≈1e-5 of its thrust for the test craft).
 - The systems lattice step is 60 s; its environment is the instantaneous sunlight with eclipses at the vessel (the eclipse swing of the battery is resolved), unlike the thermal lattice's orbit averages.
@@ -80,13 +77,12 @@ Code: `sim::vessel::pointing` (attitude laws, the regime rule), `sim::vessel::li
 
 | What | Result | Reference |
 |---|---|---|
-| Invariance | a month of 0.5 N low thrust, a year of drag decay at 300 km with systems (battery, boil-off), a year of radiation pressure at 20,000 km (held and tumbling): the same bits in one call and in game frames at 1×, 1,000×, 1,000,000×; save/load mid-burn and between lattice points | rule 4 |
+| Invariance | a month held prograde (the small rocket), a year of drag decay at 300 km with systems (battery, boil-off), a year of radiation pressure at 20,000 km (held and tumbling): the same bits in one call and in game frames at 1×, 1,000×, 1,000,000×; save/load mid-burn and between lattice points | rule 4 |
 | Drag decay, broadside, 400 km equatorial | 127.5 m/day | King-Hele 127.8 m/day (US76 ρ) |
 | ISS-like ballistic number 86.5 kg/m² | 3.8 km/month | observed 1.5–4 km/month at solar minimum to ~100 m/day near maximum (NASA SpaceMath; BN: Oleson & Benson, NASA/TM-2002-211313) |
 | SRP on a 10 m plate, 0–60°, specular and diffuse | within 0.2 % | Montenbruck & Gill eq. 3.73 |
-| 20-day 2 N spiral from 1,000 km | 778.2 m/s (rocket eq.) | Edelbaum 776.3 m/s |
 | Hand-over from a decaying 165 km orbit | live at 140.8 km, q 0.100 Pa; energy loss 0.7 J/(kg·s) live, 0.7 in the coast at the boundary | — |
-| Anchor invariance (drag, light, 1 N), Earth vs Earth–Moon barycentre | 3.4 mm in 6 h | rule 1 |
+| Anchor invariance (drag and light), Earth vs Earth–Moon barycentre | under 5 cm in 6 h, while drag and light move it 137 m | rule 1 |
 | Cost at 1,000,000× (release, one thread, after 30 days to settle; on the deleted test craft: `bench_limbo` now flies the small rocket of parts, its four low-thrust craft held prograde at 900–1,050 km, since low thrust on rails went with the made-up craft until D029 returns it) | per vessel per frame: LEO drag at 250–370 km 7.3 ms (integration 3.8, lattices 3.0), low thrust 3.8 ms, high orbit 1.1 ms, mean 4.7 ms; ten craft 47 ms serially, never compute-limited, 1,000,000× reached; a perturbed LEO step 14–16 µs (bare 10–11 µs with the full Solar System); 1,000×: 3 µs. Since COAST's f6ec8bc and fd22069 (DOP853, `scale-performance.md` §6), the integration per frame is drag 0.75 ms, low thrust 0.51, high orbit 0.10, and ten craft take 5.2 ms serially; a perturbed LEO step is 18 µs for 12 evaluations, 14 steps per orbit (84 before) | the game advances vessels in parallel (`ComputeTaskPool`) |
 
 **Not done / limits:**

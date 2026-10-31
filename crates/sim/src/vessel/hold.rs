@@ -4,7 +4,7 @@
 //! [`hold_direction`] is the one rule: a pure function of the vessel's
 //! state relative to a **reference body** (for prograde and retrograde:
 //! orbital or surface velocity), the target's relative state, and the next
-//! planned burn. The reference body is a control choice stated with the
+//! node (D126). The reference body is a control choice stated with the
 //! mode (the game passes the navball's reference, [`Controls::reference`]);
 //! it never changes the physics (rule 1).
 //!
@@ -15,7 +15,6 @@
 //! carried from where the hold began.
 
 use super::attitude::{quat_from_rotvec, Attitude, RotationBase};
-use super::burn::FlightPlan;
 use super::Controls;
 use crate::ephem::{Ephemeris, NodeKind, Snapshot};
 use crate::frame::NodeId;
@@ -36,7 +35,8 @@ pub enum HoldMode {
     /// Nose towards the target.
     Target,
     AntiTarget,
-    /// Engine axis along the next planned burn's thrust direction.
+    /// Engine axis along the next node's thrust direction (or the
+    /// maneuver program's, while it flies one).
     Maneuver,
 }
 
@@ -113,7 +113,7 @@ pub struct HoldInputs {
     pub v_surface: DVec3,
     /// The target relative to the vessel: position and velocity.
     pub target: Option<(DVec3, DVec3)>,
-    /// Thrust direction of the next planned burn now.
+    /// Thrust direction of the next node now.
     pub maneuver: Option<DVec3>,
 }
 
@@ -310,16 +310,14 @@ pub fn hold_inputs(
     HoldInputs { v_orbit: rel_v, v_surface: rel_v - spin.cross(rel_r), target, maneuver }
 }
 
-/// The thrust direction of the plan's next burn (from index `from`, igniting
-/// at or after `t`) for a vessel at `(r, v)` relative to `anchor`.
+/// The thrust direction of the first of `nodes` at or after the snapshot's
+/// time for a vessel at `(r, v)` relative to `anchor`.
 pub fn maneuver_direction(
-    plan: &FlightPlan,
     nodes: &[crate::systems::maneuver::Node],
-    from: usize,
     snap: &LazySnapshot,
     (anchor, r, v): (NodeId, DVec3, DVec3),
 ) -> Option<DVec3> {
-    let law = plan.next_direction(nodes, from, snap.t)?;
+    let law = super::burn::node_direction(nodes, snap.t)?;
     Some(law.direction_from(|node| snap.get().relative(node, anchor), anchor, r, v))
 }
 
@@ -343,7 +341,8 @@ pub struct AimKey {
 }
 
 impl AimKey {
-    /// The key of a planned burn's (or the turn before it) maneuver hold.
+    /// The key of the maneuver hold (no speed reference or body named: it
+    /// follows the next node).
     pub const BURN: AimKey = AimKey { mode: HoldMode::Maneuver, speed: SpeedReference::Orbit, reference: None };
 }
 
@@ -417,7 +416,7 @@ pub fn follow(base: &RotationBase, axis: DVec3, dir: DVec3) -> Attitude {
 impl super::Vessel {
     /// What SAS aims at for a vessel at `state` (relative to its anchor) at
     /// the snapshot's epoch with `controls`; the maneuver hold follows the
-    /// plan's next burn.
+    /// program's direction, else the next node.
     pub(super) fn aim(
         &self,
         world: &World,
@@ -429,9 +428,9 @@ impl super::Vessel {
             return Aim::Stability;
         }
         let snap = LazySnapshot::of(world, snap);
-        // A flying maneuver program's direction, else the plan's next burn or node.
+        // A flying maneuver program's direction, else the next node.
         let maneuver = (controls.hold == HoldMode::Maneuver)
-            .then(|| self.program_direction().or_else(|| maneuver_direction(&self.plan, &self.nodes, 0, &snap, state)));
+            .then(|| self.program_direction().or_else(|| maneuver_direction(&self.nodes, &snap, state)));
         let inputs = hold_inputs(world, &snap, state, controls, maneuver.flatten());
         aim(controls, &inputs, self.craft.engine.mount_dir)
     }

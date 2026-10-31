@@ -5,7 +5,7 @@
 use super::aerothermal::{self, VesselThermal};
 use super::attitude::{quat_z_to, Attitude, AttitudeControl};
 use super::live::Checked;
-use super::{limbo, FlightPlan, Phase, ShipClock, Vessel, VesselId};
+use super::{limbo, Phase, ShipClock, Vessel, VesselId};
 use crate::craft::Craft;
 use crate::frame::NodeId;
 use crate::math;
@@ -30,7 +30,6 @@ impl Vessel {
             chute: Default::default(),
             crew,
             debug: false,
-            plan: FlightPlan::default(),
             tick_accel: None,
             control: AttitudeControl::default(),
             rest_ticks: 0,

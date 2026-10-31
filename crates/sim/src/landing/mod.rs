@@ -34,7 +34,7 @@ use crate::frame::{BodyFixed, NodeId, Vec3};
 use crate::integrate::{hermite5, StepSample};
 use crate::time::Epoch;
 use crate::vessel::limbo::LiveBoundary;
-use crate::vessel::{EndKind, Phase, Segment, SegmentKind, Vessel};
+use crate::vessel::{EndKind, Phase, Segment, Vessel};
 use crate::world::World;
 use glam::{DQuat, DVec3};
 use model::{End, Model, Run};
@@ -91,9 +91,7 @@ pub struct LandingStart {
 
 impl LandingStart {
     /// A flying vessel's prediction start with `throttle` and its chutes
-    /// (armed by `chute_command`). A coast with planned burns starts after the
-    /// last one, once its trajectory is computed that far (the plan is
-    /// flown). `None` for landed and crashed vessels, and for one whose
+    /// (armed by `chute_command`), from the vessel's time. `None` for landed and crashed vessels, and for one whose
     /// flight software has no navigation solution (`flight::can_predict`).
     pub fn of_vessel(
         world: &World,
@@ -112,16 +110,9 @@ impl LandingStart {
         chute.armed |= chute_command;
         let (t, (anchor, r, v), mass, throttle) = match &vessel.phase {
             Phase::Landed { .. } | Phase::Crashed { .. } => return None,
-            Phase::Coasting { trajectory } => {
-                let last = trajectory.last();
-                let after_burns = matches!(last.kind, SegmentKind::Coast) && last.t0 > vessel.time;
-                if after_burns {
-                    (last.t0, last.eval(0.0)?, last.initial_mass(), 0.0)
-                } else {
-                    (vessel.time, vessel.state(world), vessel.mass(), throttle)
-                }
+            Phase::Coasting { .. } | Phase::Powered { .. } => {
+                (vessel.time, vessel.state(world), vessel.mass(), throttle)
             }
-            Phase::Powered { .. } => (vessel.time, vessel.state(world), vessel.mass(), throttle),
         };
         let body = nearest_surface(world, &world.snapshot(t), anchor, r)?;
         let infinite = vessel.debug();

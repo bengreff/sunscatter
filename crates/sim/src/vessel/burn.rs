@@ -1,10 +1,6 @@
-//! Burns: thrust laws and flight plans (realism-1 §6a, review sim 11).
-//!
-//! A [`BurnLaw`] is steady thrust with a constant mass flow along a direction
-//! law. A [`FlightPlan`] is a list of [`PlannedBurn`]s; a coasting vessel's
-//! trajectory is built from it as coast → burn → coast …, so rails warp only
-//! samples a stored trajectory (rule 4) and a planned burn gives the same
-//! result at every warp.
+//! Burn directions: where a planned burn (a craft of parts' node, D126,
+//! flown by its maneuver program) points, and why a plan of nodes is
+//! refused.
 //!
 //! The `Tracking` direction law names a reference body only to say what
 //! "prograde" means (a display choice): the direction is a function of the
@@ -13,7 +9,6 @@
 
 use crate::ephem::{Kinematics, Snapshot};
 use crate::frame::NodeId;
-use crate::math;
 use crate::time::Epoch;
 use glam::DVec3;
 
@@ -71,236 +66,30 @@ pub fn prograde_normal_radial(r: DVec3, v: DVec3) -> (DVec3, DVec3, DVec3) {
     (prograde, normal, prograde.cross(normal))
 }
 
-/// Steady thrust along a direction law, burning propellant at a constant rate.
-#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct BurnLaw {
-    /// Thrust (N).
-    pub thrust: f64,
-    /// Propellant mass flow (kg/s, ≥ 0).
-    pub mass_flow: f64,
-    pub direction: DirectionLaw,
-}
-
-impl BurnLaw {
-    /// A law from thrust and specific impulse (s): `ṁ = F / (Isp·g0)`.
-    pub fn from_isp(thrust: f64, isp: f64, direction: DirectionLaw) -> Self {
-        BurnLaw { thrust, mass_flow: thrust / (isp * G0), direction }
-    }
-
-    /// Whether the numbers can be integrated.
-    pub fn is_valid(&self) -> bool {
-        self.thrust.is_finite() && self.thrust > 0.0 && self.mass_flow.is_finite() && self.mass_flow >= 0.0
-    }
-}
-
-/// When a burn stops.
-#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-pub enum BurnEnd {
-    /// After this many seconds.
-    Duration(f64),
-    /// Once the thrust has delivered this Δv (m/s): the rocket equation gives
-    /// the duration from the mass at ignition.
-    DeltaV(f64),
-}
-
-/// What limits planned burns: the propellant (the mass cannot drop below
-/// `dry_mass`; a burn stops at burnout), or none in debug mode (`infinite`:
-/// burns take no mass, D064). The default (no dry mass) only requires the
-/// mass to stay positive.
-#[derive(Clone, Copy, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct BurnLimits {
-    pub dry_mass: f64,
-    pub infinite: bool,
-}
-
-impl BurnLimits {
-    /// The law actually flown: no mass flow with infinite propellant.
-    pub fn effective(&self, law: BurnLaw) -> BurnLaw {
-        if self.infinite {
-            BurnLaw { mass_flow: 0.0, ..law }
-        } else {
-            law
-        }
-    }
-}
-
-impl BurnEnd {
-    /// The burn's duration (s) for a vessel of mass `m0` at ignition. `None`
-    /// if it cannot be flown (invalid law, or the mass would reach zero).
-    pub fn duration(&self, law: &BurnLaw, m0: f64) -> Option<f64> {
-        self.duration_limited(law, m0, 0.0)
-    }
-
-    /// As [`BurnEnd::duration`], but stopping at burnout when the mass
-    /// reaches `dry_mass` (if positive).
-    pub fn duration_limited(&self, law: &BurnLaw, m0: f64, dry_mass: f64) -> Option<f64> {
-        self.duration_with_loss(law, m0, dry_mass, 0.0)
-    }
-
-    /// As [`BurnEnd::duration_limited`], with propellant also lost at
-    /// `loss` kg/s (boil-off) while the engine burns: the tank empties at
-    /// `(m0 − dry)/(ṁ + loss)`, and the Δv of a falling mass under constant
-    /// thrust is `F/(ṁ + loss)·ln(m0/m1)`.
-    pub fn duration_with_loss(&self, law: &BurnLaw, m0: f64, dry_mass: f64, loss: f64) -> Option<f64> {
-        if !law.is_valid() || !(m0.is_finite() && m0 > 0.0) || !(loss.is_finite() && loss >= 0.0) {
-            return None;
-        }
-        let flow = law.mass_flow + loss;
-        let d = match *self {
-            BurnEnd::Duration(d) => d,
-            // Δv = (F/ṁ) ln(m0/m1)  ⇒  t = (m0/ṁ)(1 − exp(−Δv ṁ/F)).
-            BurnEnd::DeltaV(dv) if flow > 0.0 => m0 / flow * (1.0 - math::exp(-dv * flow / law.thrust)),
-            BurnEnd::DeltaV(dv) => dv * m0 / law.thrust,
-        };
-        let d = if dry_mass > 0.0 && flow > 0.0 { d.min((m0 - dry_mass).max(0.0) / flow) } else { d };
-        (d.is_finite() && d >= 0.0 && m0 - flow * d > 0.0).then_some(d)
-    }
-}
-
-/// One burn of a flight plan.
-#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct PlannedBurn {
-    /// Ignition epoch.
-    pub t_start: Epoch,
-    pub law: BurnLaw,
-    pub end: BurnEnd,
-}
-
-impl PlannedBurn {
-    /// A burn of `dv` (m/s, components in the direction law's axes: inertial,
-    /// or prograde/normal/radial) with the given engine.
-    pub fn delta_v(t_start: Epoch, dv: DVec3, thrust: f64, isp: f64, tracking: Option<NodeId>) -> Self {
-        let direction = match tracking {
-            Some(reference) => DirectionLaw::Tracking { reference, axes: dv },
-            None => DirectionLaw::Inertial(dv),
-        };
-        PlannedBurn { t_start, law: BurnLaw::from_isp(thrust, isp, direction), end: BurnEnd::DeltaV(dv.length()) }
-    }
-
-    /// A burn of `dv` flown by a craft's engine (full throttle, vacuum).
-    pub fn delta_v_with(t_start: Epoch, dv: DVec3, engine: &crate::craft::Engine, tracking: Option<NodeId>) -> Self {
-        PlannedBurn::delta_v(t_start, dv, engine.thrust_vac, engine.isp_vac, tracking)
-    }
-}
-
-/// A vessel's planned burns, in order of ignition (saved with the vessel).
-/// Burns stay in the list after they are flown; the trajectory remembers how
-/// many it has started. A craft of parts flies **nodes** instead, closed-loop
-/// and live (D126, D129; `systems::maneuver`, `Vessel::set_nodes`).
-#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct FlightPlan {
-    pub burns: Vec<PlannedBurn>,
-}
-
-/// Why a flight plan was not accepted.
+/// Why a plan of nodes was not accepted ([`super::Vessel::set_nodes`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum PlanError {
-    /// Burns must be in order of ignition.
+    /// Nodes must be in order of time.
     NotSorted,
-    /// The edit changes a burn that has already started (or was skipped).
+    /// The edit changes a node that has already started (or was skipped).
     Started,
-    /// A changed burn ignites before the vessel's current time.
+    /// A changed node falls before the vessel's current time.
     InThePast,
-    /// A craft of catalog parts flies nodes (`Vessel::set_nodes`), not
-    /// open-loop burns.
-    PartsUnsupported,
-    /// Nodes are flown by a craft of parts' maneuver program; the made-up
-    /// craft flies open-loop burns.
+    /// Nodes are flown by a craft of parts' maneuver program.
     NodesNeedParts,
 }
 
-impl FlightPlan {
-    pub fn is_sorted(&self) -> bool {
-        self.burns.windows(2).all(|w| w[0].t_start.seconds_since(w[1].t_start) <= 0.0)
-    }
-
-    /// Index of the first burn that differs between two plans.
-    pub fn first_difference(&self, other: &FlightPlan) -> usize {
-        let same = self.burns.iter().zip(&other.burns).take_while(|(a, b)| a == b).count();
-        if same == self.burns.len() && same == other.burns.len() {
-            usize::MAX
-        } else {
-            same
-        }
-    }
-
-    /// The direction law of the next burn from index `from` igniting at or
-    /// after `t`, else of the next of `nodes` at or after `t` (its Δv's
-    /// axes): what the maneuver hold points along before a burn.
-    pub fn next_direction(
-        &self,
-        nodes: &[crate::systems::maneuver::Node],
-        from: usize,
-        t: Epoch,
-    ) -> Option<DirectionLaw> {
-        if let Some(b) = self.burns.get(self.next_from(from, t)) {
-            return Some(b.law.direction);
-        }
-        let n = nodes.iter().find(|n| n.t >= t)?;
-        Some(DirectionLaw::Tracking { reference: n.reference, axes: n.dv })
-    }
-
-    /// The first burn at or after index `from` that ignites at or after `t`
-    /// (earlier ones were missed), or `burns.len()`.
-    pub fn next_from(&self, from: usize, t: Epoch) -> usize {
-        let mut i = from.min(self.burns.len());
-        while i < self.burns.len() && self.burns[i].t_start.seconds_since(t) < 0.0 {
-            i += 1;
-        }
-        i
-    }
+/// The direction law of the first of `nodes` at or after `t` (its Δv's
+/// prograde, normal and radial components): what the maneuver hold points
+/// along before it.
+pub fn node_direction(nodes: &[crate::systems::maneuver::Node], t: Epoch) -> Option<DirectionLaw> {
+    let n = nodes.iter().find(|n| n.t >= t)?;
+    Some(DirectionLaw::Tracking { reference: n.reference, axes: n.dv })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn law(mass_flow: f64) -> BurnLaw {
-        BurnLaw { thrust: 600_000.0, mass_flow, direction: DirectionLaw::Inertial(DVec3::X) }
-    }
-
-    #[test]
-    fn delta_v_duration_follows_the_rocket_equation() {
-        // (thrust law, m0, Δv) → duration, then Δv back from the rocket equation.
-        for (mdot, m0, dv) in [(174.8, 20_000.0, 100.0), (50.0, 5_000.0, 2_000.0), (1.0, 1_000.0, 0.0)] {
-            let l = law(mdot);
-            let t = BurnEnd::DeltaV(dv).duration(&l, m0).unwrap();
-            let m1 = m0 - mdot * t;
-            let back = l.thrust / mdot * math::ln(m0 / m1);
-            assert!((back - dv).abs() < 1e-9 * dv.max(1.0), "Δv {dv}: got {back}");
-        }
-        // No mass flow: constant acceleration.
-        assert_eq!(BurnEnd::DeltaV(30.0).duration(&law(0.0), 20_000.0), Some(1.0));
-    }
-
-    #[test]
-    fn burns_stop_at_burnout() {
-        // (end, m0, dry) → duration: 100 kg/s, 5 t of propellant = 50 s.
-        let l = law(100.0);
-        let cases = [
-            (BurnEnd::Duration(20.0), 9_000.0, 4_000.0, Some(20.0)),
-            (BurnEnd::Duration(80.0), 9_000.0, 4_000.0, Some(50.0)),
-            (BurnEnd::Duration(200.0), 9_000.0, 4_000.0, Some(50.0)),
-            (BurnEnd::Duration(10.0), 4_000.0, 4_000.0, Some(0.0)),
-            (BurnEnd::DeltaV(1e6), 9_000.0, 4_000.0, Some(50.0)),
-        ];
-        for (end, m0, dry, expected) in cases {
-            assert_eq!(end.duration_limited(&l, m0, dry), expected, "{end:?}");
-        }
-        // Infinite propellant: no mass flow, the rocket equation degenerates.
-        let inf = BurnLimits { dry_mass: 4_000.0, infinite: true }.effective(l);
-        assert_eq!(inf.mass_flow, 0.0);
-        assert_eq!(BurnEnd::DeltaV(30.0).duration_limited(&inf, 20_000.0, 4_000.0), Some(1.0));
-    }
-
-    #[test]
-    fn burns_that_cannot_be_flown_have_no_duration() {
-        assert_eq!(BurnEnd::Duration(200.0).duration(&law(100.0), 20_000.0), None, "burns all the mass");
-        assert_eq!(BurnEnd::Duration(-1.0).duration(&law(100.0), 20_000.0), None);
-        assert_eq!(BurnEnd::Duration(1.0).duration(&law(f64::NAN), 20_000.0), None);
-        let zero_thrust = BurnLaw { thrust: 0.0, ..law(1.0) };
-        assert_eq!(BurnEnd::DeltaV(1.0).duration(&zero_thrust, 20_000.0), None);
-    }
 
     #[test]
     fn tracking_axes_table() {

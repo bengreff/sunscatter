@@ -23,7 +23,7 @@ use crate::trajectory::settings::OrbitSettings;
 use bevy::prelude::*;
 use glam::DVec3;
 use sim::time::Epoch;
-use sim::vessel::{Segment, SegmentKind, VesselId};
+use sim::vessel::{Segment, VesselId};
 
 /// Largest turn of the velocity between two drawn points (rad).
 pub const MAX_TURN: f64 = 0.035;
@@ -302,14 +302,12 @@ pub fn draw(
                 t_end
             };
             line.end = seg.t0.add_seconds(t_end);
-            let burn = matches!(seg.kind, SegmentKind::Burn(_));
-            // A coast from a node is after a burn too (its predicted orbit).
-            after_burn |= burn || vessel.nodes().iter().any(|n| n.t == seg.t0);
-            let colour = match (burn, after_burn, active) {
-                (true, _, _) => Color::srgb(1.0, 0.35, 0.2),
-                (false, true, _) => Color::srgb(0.3, 0.85, 1.0),
-                (false, false, true) => Color::srgb(1.0, 0.85, 0.2),
-                (false, false, false) => Color::srgba(0.7, 0.75, 0.8, 0.6),
+            // A coast from a node is after a burn (its predicted orbit).
+            after_burn |= vessel.nodes().iter().any(|n| n.t == seg.t0);
+            let colour = match (after_burn, active) {
+                (true, _) => Color::srgb(0.3, 0.85, 1.0),
+                (false, true) => Color::srgb(1.0, 0.85, 0.2),
+                (false, false) => Color::srgba(0.7, 0.75, 0.8, 0.6),
             };
             // The first line starts at the ship as drawn.
             let start = (active && n == 0).then(|| {

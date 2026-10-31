@@ -24,7 +24,7 @@ use sim::craft::command::{ShipCommand, Stage};
 use sim::save::SaveGame;
 use sim::systems::OrderKind;
 use sim::time::Epoch;
-use sim::vessel::{Controls, FlightPlan, HoldMode, VesselId};
+use sim::vessel::{Controls, HoldMode, VesselId};
 
 #[derive(Message, Clone, Debug, PartialEq)]
 pub enum GameCommand {
@@ -49,14 +49,9 @@ pub enum GameCommand {
     /// Debug mode (D064) on every vessel: infinite propellant, no
     /// overheating, infinite impact tolerance.
     SetDebug(bool),
-    /// Replace a vessel's flight plan (a vessel-directed command: from
-    /// anywhere but aboard it, it travels with the signal's light delay).
-    SetPlan {
-        vessel: VesselId,
-        plan: FlightPlan,
-    },
-    /// Replace a craft of parts' planned burns (D126: nodes; routed as
-    /// `SetPlan`).
+    /// Replace a craft of parts' planned burns (D126: nodes; a
+    /// vessel-directed command: from anywhere but aboard it, it travels
+    /// with the signal's light delay).
     SetNodes {
         vessel: VesselId,
         nodes: Vec<sim::systems::maneuver::Node>,
@@ -248,11 +243,6 @@ pub fn apply(
             GameCommand::SetFunctions { vessel, functions } => {
                 let done = sim.index_of(*vessel).map(|i| sim.fleet[i].set_functions(functions.clone()));
                 edited(&mut toasts, time.elapsed_secs_f64(), *vessel, "Functions", done);
-            }
-            GameCommand::SetPlan { vessel, plan } => {
-                let sim = &mut *sim;
-                let done = sim.index_of(*vessel).map(|i| sim.fleet[i].set_plan(&sim.world, plan.clone()));
-                planned(&mut toasts, time.elapsed_secs_f64(), *vessel, done);
             }
             GameCommand::SetNodes { vessel, nodes } => {
                 let done = sim.index_of(*vessel).map(|i| sim.fleet[i].set_nodes(nodes.clone()));
