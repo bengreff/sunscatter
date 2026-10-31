@@ -147,7 +147,7 @@ pub fn card(live: &Live, part: u32) -> Option<Card> {
     sections.extend(super::inside::sections(live, &inside));
     let mut own = vec![];
     if let Some(c) = live.state.cabin.as_ref().filter(|c| c.part == part) {
-        let kpa = |r: sim::systems::Reading| scaled(r, 1e3, 1, "kPa");
+        let kpa = |r: sim::systems::Reading| scaled(r, 1e3, format::CABIN_DECIMALS, "kPa");
         let total = c.o2 + c.n2 + c.co2 + c.h2o;
         own.push(line("cabin pressure", live.value(Quantity::CabinPressure, total, kpa)));
         own.push(line("O₂", live.value(Quantity::CabinO2, c.o2, kpa)));

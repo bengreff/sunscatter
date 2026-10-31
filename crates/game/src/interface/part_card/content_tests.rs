@@ -232,3 +232,21 @@ fn a_hot_part_reads_amber_then_red() {
         assert!(s.lines.iter().all(|l| l.label != "interior" && l.label != "temperature"), "{share}");
     }
 }
+
+/// The capsule's cabin rows read as the Crew menu reads them: one rule for
+/// a cabin's kPa (`format::CABIN_DECIMALS`), measured by its air monitor
+/// and to the truth's digits in debug mode.
+#[test]
+fn the_cabin_reads_as_the_crew_menu() {
+    let (def, state) = falcon9();
+    let capsule = part(&def, "dragon.capsule");
+    let cabin = state.cabin.as_ref().expect("Dragon's cabin");
+    let thrusts = vec![0.0; def.engines.len()];
+    for k in [data::knowledge(&def, &state, false), Knowledge::perfect()] {
+        let live = Live { def: &def, state: &state, knowledge: &k, thrusts: &thrusts, temps: &[], chute: None };
+        let card = card(&live, capsule).unwrap();
+        let menu =
+            format::Known::from(k.clone()).value(Quantity::CabinCo2, cabin.co2, 1e3, format::CABIN_DECIMALS, "kPa");
+        assert_eq!(value(&card, "PART", "CO₂"), &Value::Shown(menu));
+    }
+}

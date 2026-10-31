@@ -58,6 +58,10 @@ pub const ECCENTRICITY_DECIMALS: usize = 5;
 /// The decimals the attitude's heading, pitch and roll are shown to (deg,
 /// once the attitude is known): the Landing menu and `get_vessel`.
 pub const ATTITUDE_DECIMALS: usize = 1;
+/// The most decimals a cabin's pressures are shown to (kPa: the total, O₂,
+/// CO₂), its sensors' precision giving fewer: the Crew menu and the part
+/// card (the card read CO₂ "0.1 kPa" where the menu read "0.11 kPa").
+pub const CABIN_DECIMALS: usize = 2;
 /// The decimals a place on the ground is shown to (latitude and longitude,
 /// deg: about 100 m on Earth), once the orbit is known: the Landing menu's
 /// AT and `get_landing_prediction`.

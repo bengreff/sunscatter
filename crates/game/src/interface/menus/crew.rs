@@ -114,7 +114,7 @@ pub fn sections(c: Option<&CrewData>, k: &Known) -> Vec<Section> {
     };
     s.row("CREW", if c.crew == 0 { "none aboard".to_string() } else { format!("{} aboard", c.crew) });
     if let Some(cabin) = &c.cabin {
-        let kpa = |q: Quantity, v: f64| k.value(q, v, 1e3, 2, "kPa");
+        let kpa = |q: Quantity, v: f64| k.value(q, v, 1e3, crate::format::CABIN_DECIMALS, "kPa");
         let total = cabin.total();
         let tone = |q: Quantity, t: Tone| if k.knows(q) { t } else { Tone::Normal };
         let pressure = under(total, PRESSURE_WARN, PRESSURE_ALERT);
