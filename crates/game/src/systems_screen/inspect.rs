@@ -224,6 +224,24 @@ pub fn ullage_pressure(def: &sim::craft::ship::TankDef, s: &sim::craft::state::T
     sim::fluids::pressure(s.ullage_moles, volume, s.ullage_k)
 }
 
+/// What bottle `j` holds (kg) as the craft knows it (finding 48; one rule
+/// for the systems screen's bottle and the RCS menu's feeds): through its
+/// pressure transducer, the gas law at the bottle's temperature giving the
+/// pressure's precision as a mass (D106's simplified error: the temperature
+/// is taken as known); `None` where nothing measures the pressure.
+pub fn bottle_contents(
+    def: &ShipDef,
+    state: &ShipState,
+    knowledge: &sim::systems::Knowledge,
+    j: usize,
+) -> Option<sim::systems::Reading> {
+    let (b, s) = (&def.bottles[j], &state.bottles[j]);
+    let molar = sim::fluids::fluids().gas(&b.gas).map_or(0.0, |g| g.molar_mass);
+    let p = knowledge.read(Quantity::BottlePressure(j as u32), 0.0)?.precision;
+    let precision = sim::fluids::moles(p, b.volume, s.k.max(1.0)) * molar;
+    Some(sim::systems::Reading { value: s.moles * molar, precision })
+}
+
 /// The groups about part `id` (with its layers' facts `f`), in the one
 /// layout (see the module).
 fn part_groups(def: &ShipDef, state: &ShipState, id: u32, f: Option<&PartFacts>, k: &Known, out: &mut Vec<Group>) {

@@ -31,10 +31,11 @@ pub struct RcsData {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Feed {
     pub name: String,
-    pub kg: f64,
+    /// What it holds as measured (D106: a tank's level, a bottle's
+    /// pressure as mass, `inspect::bottle_contents`); `None` unmeasured.
+    pub kg: Option<sim::systems::Reading>,
+    /// What it holds full (kg).
     pub full: f64,
-    /// Measured (its level or pressure, D106).
-    pub known: bool,
 }
 
 /// A thruster block.
@@ -124,17 +125,17 @@ fn authority(r: &RcsData) -> Section {
     s
 }
 
-/// Each feed's propellant (kg/kg), measured or a dash.
+/// Each feed's propellant of its full load (`format::amount`, the tanks'
+/// and bottles' one rule), measured or a dash.
 fn feeds(r: &RcsData) -> Section {
     let mut s = Section::new("feeds", "PROPELLANT");
     for f in &r.feeds {
-        let value = if f.known { format!("{:.1} / {:.1} kg", f.kg, f.full) } else { crate::format::DASH.to_string() };
-        let tone = match f.known {
-            true if f.kg <= 0.0 => Tone::Alert,
-            true if f.kg < 0.1 * f.full => Tone::Warn,
+        let tone = match f.kg.map(|r| r.shown()) {
+            Some(kg) if kg <= 0.0 => Tone::Alert,
+            Some(kg) if kg < 0.1 * f.full => Tone::Warn,
             _ => Tone::Normal,
         };
-        s.toned(f.name.to_uppercase(), value, tone);
+        s.toned(f.name.to_uppercase(), crate::format::amount(f.kg, f.full), tone);
     }
     s
 }
@@ -169,6 +170,7 @@ mod tests {
     use super::*;
     use crate::interface::menus::find;
     use glam::DVec3;
+    use sim::systems::Reading;
 
     fn block(id: &str, on: bool, state: BlockState) -> Block {
         Block { id: id.into(), nozzles: 4, thrust: 400.0, on, state, kelvin: None }
@@ -181,7 +183,7 @@ mod tests {
         RcsData {
             mode: RcsMode { on: true, ..Default::default() },
             authority: a,
-            feeds: vec![Feed { name: "s2.n2".into(), kg: 3.0, full: 50.0, known: true }],
+            feeds: vec![Feed { name: "s2.n2".into(), kg: Some(Reading { value: 3.0, precision: 0.1 }), full: 50.0 }],
             blocks: vec![
                 block("s2.rcs#1", true, BlockState::Ready),
                 block("s1.coldgas#1", false, BlockState::Ready),
@@ -256,14 +258,24 @@ mod tests {
     /// Propellant amber under a tenth, red when empty, a dash unmeasured.
     #[test]
     fn feeds_read_their_level() {
-        let feed = |kg: f64, known| Feed { name: "n2".into(), kg, full: 50.0, known };
-        let table = [(feed(30.0, true), Tone::Normal), (feed(3.0, true), Tone::Warn), (feed(0.0, true), Tone::Alert)];
-        for (f, tone) in table {
+        let feed = |kg: Option<f64>| Feed {
+            name: "n2".into(),
+            kg: kg.map(|value| Reading { value, precision: 0.12 }),
+            full: 50.0,
+        };
+        // (feed, text, tone): to the transducer's precision, `amount`'s rule.
+        let table = [
+            (feed(Some(30.4)), "30/50 kg", Tone::Normal),
+            (feed(Some(3.0)), "3/50 kg", Tone::Warn),
+            (feed(Some(0.0)), "0/50 kg", Tone::Alert),
+            (feed(None), "—/50 kg", Tone::Normal),
+        ];
+        for (f, text, tone) in table {
             let r = RcsData { feeds: vec![f.clone()], ..Default::default() };
-            assert_eq!(find(&sections(&r), "feeds").unwrap().tone("N2"), Some(tone), "{f:?}");
+            let s = sections(&r);
+            let feeds = find(&s, "feeds").unwrap();
+            assert_eq!((feeds.value("N2"), feeds.tone("N2")), (Some(text), Some(tone)), "{f:?}");
         }
-        let r = RcsData { feeds: vec![feed(3.0, false)], ..Default::default() };
-        assert_eq!(find(&sections(&r), "feeds").unwrap().value("N2"), Some(crate::format::DASH));
     }
 
     /// A craft without thruster blocks: said so, no authority per

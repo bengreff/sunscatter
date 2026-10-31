@@ -42,22 +42,19 @@ pub fn gather(v: &Vessel, mode: RcsMode) -> RcsData {
         });
     }
     for b in bottles {
-        let (d, s) = (&def.bottles[b as usize], &state.bottles[b as usize]);
-        let molar = sim::fluids::fluids().gas(&d.gas).map_or(0.0, |g| g.molar_mass);
+        let d = &def.bottles[b as usize];
         r.feeds.push(Feed {
             name: d.id.clone(),
-            kg: s.moles * molar,
+            kg: crate::systems_screen::inspect::bottle_contents(&def, state, &knowledge, b as usize),
             full: def.bottle_gas(d),
-            known: knowledge.knows(Quantity::BottlePressure(b)),
         });
     }
     for t in tanks {
         let (d, s) = (&def.tanks[t as usize], &state.tanks[t as usize]);
         r.feeds.push(Feed {
             name: d.id.clone(),
-            kg: s.liquid,
+            kg: knowledge.read(Quantity::TankLevel(t), s.liquid),
             full: d.capacity,
-            known: knowledge.knows(Quantity::TankLevel(t)),
         });
     }
     r
@@ -104,7 +101,8 @@ mod tests {
         }
         assert!(!r.feeds.is_empty());
         for f in &r.feeds {
-            assert!(f.full > 0.0 && (f.kg - f.full).abs() < 1e-3 * f.full, "{f:?}");
+            // Full where measured (its bottle has no transducer: a dash).
+            assert!(f.full > 0.0 && f.kg.is_none_or(|r| (r.value - f.full).abs() < 1e-3 * f.full), "{f:?}");
         }
     }
 
