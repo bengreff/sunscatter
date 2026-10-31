@@ -236,9 +236,10 @@ fn attitude(d: &FlightData) -> Section {
     if let Some([heading, pitch, roll]) = d.attitude {
         let k = &d.known;
         let known = k.knows(Attitude);
-        s.row("HEADING", k.or_dash(known, || format!("{heading:05.1}°")));
-        s.row("PITCH", k.or_dash(known, || format!("{pitch:+.1}°")));
-        s.row("ROLL", k.or_dash(known, || format!("{roll:+.1}°")));
+        let d = crate::format::ATTITUDE_DECIMALS;
+        s.row("HEADING", k.or_dash(known, || format!("{heading:0w$.d$}°", w = d + 4)));
+        s.row("PITCH", k.or_dash(known, || format!("{pitch:+.d$}°")));
+        s.row("ROLL", k.or_dash(known, || format!("{roll:+.d$}°")));
     }
     s
 }

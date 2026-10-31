@@ -855,8 +855,13 @@ fn known_time(known: &crate::format::Known, t: f64) -> Option<f64> {
 /// A number of the orbit the menus show to `decimals` once it is known
 /// (its angles, `format::DEGREE_DECIMALS`; its eccentricity).
 fn known_digits(known: &crate::format::Known, x: f64, decimals: usize) -> Option<f64> {
+    known.orbit().then(|| digits(x, decimals))
+}
+
+/// `x` to `decimals`, as a menu shows it.
+fn digits(x: f64, decimals: usize) -> f64 {
     let scale = 10f64.powi(decimals as i32);
-    known.orbit().then(|| (x * scale).round() / scale)
+    (x * scale).round() / scale
 }
 
 /// A place on the ground (a latitude or longitude, rad) of a body of
@@ -884,8 +889,14 @@ fn attitude_json(known: &crate::format::Known, q: glam::DQuat, rel: DVec3, pole:
     }
     let local = local_frame(rel, pole);
     let a = attitude_angles(&ship_axes(q), &local);
-    let enu = |d: DVec3| [d.dot(local.east), d.dot(local.north), d.dot(local.up)];
-    json!({"heading_deg": a.heading, "pitch_deg": a.pitch, "roll_deg": a.roll,
+    // The angles to the Landing menu's decimals; an axis's components (of a
+    // unit vector, so each off by about the angle's error) to the attitude's
+    // precision. They read raw digits (`heading_deg` 9.340000000000003).
+    let deg = |x: f64| digits(x, crate::format::ATTITUDE_DECIMALS);
+    let enu = |d: DVec3| {
+        [d.dot(local.east), d.dot(local.north), d.dot(local.up)].map(|c| known_value(known, Quantity::Attitude, c))
+    };
+    json!({"heading_deg": deg(a.heading), "pitch_deg": deg(a.pitch), "roll_deg": deg(a.roll),
            "axes_enu": {"x": enu(q * DVec3::X), "y": enu(q * DVec3::Y), "z": enu(q * DVec3::Z)}})
 }
 
@@ -1494,6 +1505,31 @@ mod tests {
         assert!(seen["attitude"]["pitch_deg"].as_f64().is_some_and(|p| p > 80.0), "upright: {}", seen["attitude"]);
         assert!(seen["stages"]["tanks"][0]["liquid_kg"].as_f64().is_some());
         assert!(seen["stages"]["next"].is_u64(), "{}", seen["stages"]);
+    }
+
+    #[test]
+    fn the_attitude_reads_to_the_menus_digits_and_its_precision() {
+        use crate::format::Known;
+        use sim::systems::Knowledge;
+        let mut k = Knowledge::default();
+        k.learn(Quantity::Attitude, 2e-4);
+        let known = Known::from(k);
+        let q = glam::DQuat::from_rotation_y(0.3) * glam::DQuat::from_rotation_x(0.163);
+        let (rel, pole) = (DVec3::X * 6.4e6, DVec3::Z);
+        let v = attitude_json(&known, q, rel, pole);
+        // The angles to the Landing menu's tenth of a degree; the axes'
+        // components to the attitude's 1e-4 (the decade of its 2e-4).
+        let to = |x: &Value, scale: f64| {
+            let x = x.as_f64().unwrap() * scale;
+            (x - x.round()).abs() < 1e-6
+        };
+        for key in ["heading_deg", "pitch_deg", "roll_deg"] {
+            assert!(to(&v[key], 10.0), "{key}: {v}");
+        }
+        for axis in ["x", "y", "z"] {
+            assert!(v["axes_enu"][axis].as_array().unwrap().iter().all(|c| to(c, 1e4)), "{axis}: {v}");
+        }
+        assert_eq!(attitude_json(&Known::from(Knowledge::default()), q, rel, pole), Value::Null, "no attitude sensor");
     }
 
     #[test]

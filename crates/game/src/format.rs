@@ -55,6 +55,9 @@ pub const DASH: &str = "—";
 pub const DEGREE_DECIMALS: usize = 2;
 /// The decimals an orbit's eccentricity is shown to.
 pub const ECCENTRICITY_DECIMALS: usize = 5;
+/// The decimals the attitude's heading, pitch and roll are shown to (deg,
+/// once the attitude is known): the Landing menu and `get_vessel`.
+pub const ATTITUDE_DECIMALS: usize = 1;
 
 /// Decimals of a value shown in a unit of `scale` SI units when it is known
 /// to `precision` (SI; 0: exactly): down to the precision's decade, at
