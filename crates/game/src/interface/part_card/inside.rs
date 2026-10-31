@@ -56,15 +56,10 @@ pub fn counts<'a>(words: impl IntoIterator<Item = &'a str>) -> String {
 }
 
 /// The sum of the readings of `items` (quantity, true value), if every one
-/// is measured; else the first unmeasured quantity.
+/// is measured, by `Reading`'s one rule for a sum (the precisions add, as
+/// the estimate's bounds do); else the first unmeasured quantity.
 fn total(live: &Live, items: impl IntoIterator<Item = (Quantity, f64)>) -> Result<Reading, Quantity> {
-    let mut sum = Reading { value: 0.0, precision: 0.0 };
-    for (q, truth) in items {
-        let r = live.knowledge.read(q, truth).ok_or(q)?;
-        sum.value += r.value;
-        sum.precision = sum.precision.max(r.precision);
-    }
-    Ok(sum)
+    items.into_iter().map(|(q, truth)| live.knowledge.read(q, truth).ok_or(q)).sum()
 }
 
 /// A total as shown, or unknown with the sensor that would measure it.

@@ -70,9 +70,12 @@ fn a_batterys_charge_reads_by_the_one_rule() {
     let live = Live { def: &def, state: &state, knowledge: &k, thrusts: &[], temps: &[], chute: None };
     let card = card(&live, def.batteries[s2[0]].part).unwrap();
     let r = |j: usize| k.read(Quantity::BatteryCharge(j as u32), state.batteries[j].charge).unwrap();
-    let sum = sim::systems::Reading { value: r(s2[0]).value + r(s2[1]).value, precision: r(s2[0]).precision };
+    // A sum by `Reading`'s one rule: the precisions add (the estimate's
+    // worst case), never the largest of them.
+    let sum = r(s2[0]) + r(s2[1]);
+    assert_eq!(sum.precision, 2.0 * r(s2[0]).precision);
     let want = format::charge(Some(sum), 4000.0 * 3600.0);
-    assert_eq!(want, "2800/4000 Wh (70.0 %)", "to the sensors' 20 Wh, half a per cent of the two");
+    assert_eq!(want, "2800/4000 Wh (70 %)", "to the sensors' 20 Wh each, added: 1 % of the two, as one battery");
     assert_eq!(value(&card, "BATTERIES", "charge"), &Value::Shown(want));
     assert_eq!(format::charge(Some(r(s2[0])), 7.2e6), "1400/2000 Wh (70 %)", "one of them, to 1 %");
 }

@@ -341,7 +341,7 @@ fn finish<'a>(def: &ShipDef, inp: &Inputs, raw: &Raw, alts: impl Iterator<Item =
         let b = &mut bars[at];
         b.capacity += d.capacity;
         b.tanks.push(t);
-        b.kg = b.kg.zip(level(t)).map(|(r, p)| Reading { value: r.value + held, precision: r.precision + p });
+        b.kg = b.kg.zip(level(t)).map(|(r, p)| r + Reading { value: held, precision: p });
     }
     let reading = |f: &dyn Fn(&Raw) -> f64| Reading { value: f(raw), precision: spread(f) };
     let thrust_known = raw.engines.iter().map(|&i| k.precision(Quantity::EngineThrust(i)));

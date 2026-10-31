@@ -118,3 +118,7 @@ INTERFACE-6 (game crate, [brief-interface.md](brief-interface.md)) adds one func
 ### INTERFACE-7 in sim (2026-10-31)
 
 INTERFACE-7 (game crate, [brief-interface.md](brief-interface.md)) adds one function to `sim::systems::estimate` beside INTERFACE-6's `aboard`: `estimate::centre(def, state, design, contacts, knowledge)`, the centre of mass of what is aboard (the pad's mount's mass and foot left out) as a height above the lowest contact point aboard, with the precision the tank sensors give (a search over each tank's known range, its slug precomputed at nine levels). `bound` now reads a per-tank `range` (the same bounds). Its test is a file of its own, `estimate_centre_tests.rs`; nothing else in sim changes. The systems screen's Structural summary reads it instead of `Vessel::contact_height` (which stays the contact model's).
+
+### INTERFACE-8 in sim (2026-10-31)
+
+INTERFACE-8 (game crate, [brief-interface.md](brief-interface.md)) adds one rule to `sim::systems::data` (not one of STATE-4's open files): `impl Add` and `Sum` for `Reading`, a sum's precision the sum of its terms' (the worst case, as the estimate's bounds already add them), so the part card's group totals and `estimate`'s fuel bars read one rule. `estimate.rs`' tank bar uses it in place of its inline sum; its test in `data.rs`' tests. Nothing else in sim changes.

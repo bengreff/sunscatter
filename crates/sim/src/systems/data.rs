@@ -111,6 +111,24 @@ impl Reading {
     }
 }
 
+/// A sum of readings (a group's charge, a fluid's tanks, a stage's
+/// propellant): the values add, and so do the precisions, the worst case of
+/// every sensor off the same way (D106's simplified errors: a sum never
+/// reads finer than its terms allow). The one rule for a sum's precision:
+/// the part card's totals and the estimate's bars read it.
+impl std::ops::Add for Reading {
+    type Output = Reading;
+    fn add(self, other: Reading) -> Reading {
+        Reading { value: self.value + other.value, precision: self.precision + other.precision }
+    }
+}
+
+impl std::iter::Sum for Reading {
+    fn sum<I: Iterator<Item = Reading>>(items: I) -> Reading {
+        items.fold(Reading { value: 0.0, precision: 0.0 }, |a, b| a + b)
+    }
+}
+
 /// What a vessel knows now: each known quantity's precision.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Knowledge {
@@ -259,6 +277,26 @@ mod tests {
             assert!((r.shown() - shown).abs() < 1e-9 * shown.abs().max(1.0), "{value} ± {precision}: {}", r.shown());
             assert_eq!(r.text("m"), text);
         }
+    }
+
+    /// A sum's precision is its terms' added (the worst case), never the
+    /// largest of them: four batteries each to ±25 Wh are known to ±100 Wh
+    /// together; an exact term adds nothing; an empty sum is an exact 0.
+    #[test]
+    fn a_sum_adds_its_terms_precisions() {
+        let r = |value: f64, precision: f64| Reading { value, precision };
+        // (terms, the sum)
+        let cases: [(&[Reading], Reading); 4] = [
+            (&[r(2450.0, 25.0), r(2450.0, 25.0), r(2450.0, 25.0), r(2450.0, 25.0)], r(9800.0, 100.0)),
+            (&[r(150.0, 1.5), r(5.0, 0.0)], r(155.0, 1.5)),
+            (&[r(1.0, 0.1)], r(1.0, 0.1)),
+            (&[], r(0.0, 0.0)),
+        ];
+        for (terms, sum) in cases {
+            let got: Reading = terms.iter().copied().sum();
+            assert!((got.value - sum.value).abs() < 1e-9 && (got.precision - sum.precision).abs() < 1e-12, "{terms:?}");
+        }
+        assert_eq!(r(1.0, 0.5) + r(2.0, 0.25), r(3.0, 0.75));
     }
 
     #[test]
