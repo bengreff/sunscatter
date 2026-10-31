@@ -290,7 +290,6 @@ mod tests {
         ];
         for (case, piece, change, f, want) in table {
             let mut state = ShipState::initial(piece);
-            state.runtime.refit(piece);
             change(piece, &mut state);
             assert_eq!(offered(piece, &state, f), want, "{case}");
         }

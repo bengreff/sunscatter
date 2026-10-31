@@ -46,7 +46,6 @@ pub fn reachable(def: &ShipDef, state: &ShipState, owner: &str) -> bool {
 /// returned. Naming nothing the craft has is an error (nothing changes).
 pub fn apply(def: &ShipDef, state: &mut ShipState, command: &ShipCommand, cx: Context) -> Result<Vec<Effect>, String> {
     let none = || Err(format!("{command:?}: names nothing on this craft"));
-    state.runtime.refit(def);
     match command {
         ShipCommand::Ignite(s) => {
             let picked = def.engines_of(s);
@@ -514,7 +513,6 @@ mod tests {
             .expect("the second stage's ignition");
         state.sequence = ignition as u32;
         // Floating: the liquids drifted off their outlets in free fall.
-        state.runtime.refit(&def);
         for t in state.tanks.iter_mut() {
             t.drift = 100.0;
         }
@@ -552,7 +550,6 @@ mod tests {
         for (case, clamped, running) in cases {
             let mut state = ShipState::initial(&def);
             state.clamped = clamped;
-            state.runtime.refit(&def);
             for (i, d) in def.engines.iter().enumerate() {
                 if d.id.starts_with(running) {
                     state.engines[i].status = EngineStatus::Running;

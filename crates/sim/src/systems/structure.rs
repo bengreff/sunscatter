@@ -627,7 +627,7 @@ pub fn step(def: &ShipDef, state: &mut ShipState, b: &Bodies, m: &Motion, at: Ep
         let (sec, r) = scaled(1.0);
         let a = motion.accel.length();
         let to_ultimate = (a > 1e-3).then(|| ultimate_scale(|k| scaled(k).1, LIMIT_SEARCH / a)).flatten();
-        if let Some(run) = state.runtime.joints.get_mut(j) {
+        if let Some(run) = state.joints.get_mut(j) {
             (run.force, run.moment, run.ratio, run.to_ultimate) = (force, moment, r, to_ultimate);
         }
         if let Some(p) = state.parts.iter_mut().find(|p| p.part == d.child) {

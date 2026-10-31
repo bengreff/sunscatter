@@ -8,8 +8,7 @@ use glam::DVec3;
 fn falcon9() -> (ShipDef, ShipState) {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/craft/falcon9-crew");
     let def = crate::craft::load_definition(&path).unwrap().ship.unwrap();
-    let mut state = ShipState::initial(&def);
-    state.runtime.refit(&def);
+    let state = ShipState::initial(&def);
     ((*def).clone(), state)
 }
 

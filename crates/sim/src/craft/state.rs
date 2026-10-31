@@ -21,6 +21,7 @@ use super::ship::ShipDef;
 use crate::catalog::Igniter;
 use crate::fluids::{self, fluids};
 use crate::systems::command::edit_sequence;
+use glam::DVec3;
 use serde::{Deserialize, Serialize};
 
 /// Room temperature for what is not loaded cold (K).
@@ -129,11 +130,28 @@ pub struct MechanismState {
     pub target: f64,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+/// A joint and its load at the last live tick (`systems::structure`).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct JointState {
     pub parent: u32,
     pub child: u32,
     pub intact: bool,
+    /// Force the parent side exerts on the child side (body axes, N) and
+    /// the moment about the joint's centre (N·m).
+    #[serde(default)]
+    pub force: DVec3,
+    #[serde(default)]
+    pub moment: DVec3,
+    /// The equivalent line load over the allowable at temperature (1 is the
+    /// ultimate load).
+    #[serde(default)]
+    pub ratio: f64,
+    /// The factor the load as it stands (every force on the craft, and so
+    /// its proper acceleration, scaled together) could grow by before the
+    /// joint reaches its ultimate load (`structure::ultimate_scale`; `None`:
+    /// no capacity data, no acceleration, or over 100 g).
+    #[serde(default)]
+    pub to_ultimate: Option<f64>,
 }
 
 /// A part's life across flights (D105 §6.6).
@@ -335,7 +353,9 @@ impl ShipState {
             mechanisms: (def.mechanisms.iter())
                 .map(|m| MechanismState { part: m.part, angle: m.item.stowed_deg, target: m.item.stowed_deg })
                 .collect(),
-            joints: def.joints.iter().map(|j| JointState { parent: j.parent, child: j.child, intact: true }).collect(),
+            joints: (def.joints.iter())
+                .map(|j| JointState { parent: j.parent, child: j.child, intact: true, ..JointState::default() })
+                .collect(),
             severed: Vec::new(),
             parts: (def.parts.iter())
                 .map(|p| PartState {
@@ -361,8 +381,23 @@ impl ShipState {
             sequence: 0,
             stages: def.sequence.clone(),
             functions: def.functions.clone(),
-            runtime: crate::systems::Runtime::initial(def),
+            runtime: crate::systems::Runtime::default(),
         }
+    }
+
+    /// Whether every per-item list matches the definition's (a split or a
+    /// merge keeps them so by construction: `craft::partition`).
+    pub fn fits(&self, def: &ShipDef) -> bool {
+        self.tanks.len() == def.tanks.len()
+            && self.bottles.len() == def.bottles.len()
+            && self.engines.len() == def.engines.len()
+            && self.thrusters.len() == def.thrusters.len()
+            && self.valves.len() == def.valves.len()
+            && self.batteries.len() == def.batteries.len()
+            && self.mechanisms.len() == def.mechanisms.len()
+            && self.joints.len() == def.joints.len()
+            && self.parts.len() == def.parts.len()
+            && self.power.len() == def.components.len()
     }
 
     /// Liquid in the tanks (kg).

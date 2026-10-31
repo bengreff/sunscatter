@@ -150,7 +150,6 @@ impl CoastLaw {
     /// Sets `state`'s tanks, bottles and their ledgers to the law's at local
     /// time `t`.
     pub fn apply(&self, def: &ShipDef, state: &mut ShipState, t: f64) {
-        state.runtime.refit(def);
         let span = self.span(t);
         for (i, l) in span.tanks.iter().enumerate() {
             let (s, vented) = l.at(def, i, t - span.t);

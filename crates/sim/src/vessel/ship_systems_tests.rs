@@ -61,7 +61,7 @@ fn the_clamps_release_only_when_all_nine_run_at_rated_thrust() {
     let hold = |v: &Vessel| {
         let def = v.ship_def().unwrap();
         let j = def.joints.iter().position(|j| j.name == "hold-down clamps").unwrap();
-        v.ship().unwrap().runtime.joints[j].clone()
+        v.ship().unwrap().joints[j].clone()
     };
     let up = |v: &Vessel| {
         let (_, r, _) = v.state(&w);
@@ -200,7 +200,7 @@ fn falcon9_ascent_profile() {
         let alt = crate::forces::altitude_above(&w, &w.snapshot(v.time), anchor, anchor, r).0;
         let s = v.ship().unwrap();
         let left: f64 = s1.iter().map(|&i| s.tanks[i].liquid).sum();
-        let worst = s.runtime.joints.iter().map(|j| j.ratio).fold(0.0, f64::max);
+        let worst = s.joints.iter().map(|j| j.ratio).fold(0.0, f64::max);
         println!(
             "T+{:>3.0} s alt {:>7.0} m speed {:>6.1} m/s mass {:>7.0} kg s1 {:>5.1} % drawn {:>7.0} kg worst joint {:.2} accel {:.1}",
             v.time.seconds_since(start),
@@ -322,7 +322,7 @@ fn falcon9_gravity_turn_profile() {
         let alpha = crate::math::acos(nose.dot(surf.normalize()).clamp(-1.0, 1.0)).to_degrees();
         let pitch = crate::math::acos(nose.dot(r.normalize()).clamp(-1.0, 1.0)).to_degrees();
         let st = v.ship().unwrap();
-        let worst = st.runtime.joints.iter().map(|j| j.ratio).fold(0.0, f64::max);
+        let worst = st.joints.iter().map(|j| j.ratio).fold(0.0, f64::max);
         worst_all = worst_all.max(worst);
         let gimbal =
             st.runtime.thrust_dir.map_or(0.0, |d| crate::math::acos(d.normalize().z.clamp(-1.0, 1.0)).to_degrees());

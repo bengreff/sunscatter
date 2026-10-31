@@ -13,7 +13,7 @@
 //! * **A joint** goes with its two parts; a joint the split cuts goes with
 //!   its child's piece (the joint whose child part is this, as
 //!   `Effect::Separate` names it), held in `severed` until a merge joins
-//!   its parts again.
+//!   its parts again, with its load at the cut.
 //! * **The cabin** goes with its part; the crew's exposure with it
 //!   (`Runtime::partition`).
 //! * **The vessel's own** (by name): the clamps to the piece keeping a
@@ -177,7 +177,12 @@ impl ShipState {
                 let i = severed.iter().position(|s| s.parent == d.parent && s.child == d.child)?;
                 Some(severed.remove(i))
             });
-            joints.push(j.unwrap_or(JointState { parent: d.parent, child: d.child, intact: true }));
+            joints.push(j.unwrap_or(JointState {
+                parent: d.parent,
+                child: d.child,
+                intact: true,
+                ..JointState::default()
+            }));
         }
         let union = |x: &[Stage], y: &[Stage]| -> Vec<Stage> {
             x.iter().chain(y.iter().filter(|s| !x.iter().any(|t| t.name == s.name))).cloned().collect()

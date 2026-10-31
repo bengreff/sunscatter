@@ -1,6 +1,6 @@
 //! The ship systems' own state (D104, D105; ship-model.md §5): what the
 //! behaviour of a craft of parts needs beyond the plain ship state of
-//! `craft::state` — each joint's load, the orders waiting for their epoch, the
+//! `craft::state` — the orders waiting for their epoch, the
 //! clamps' armed release, the last tick's motion as the systems felt it,
 //! the failure seed and the event log. Saved inside the ship state
 //! (`ShipState::runtime`); every per-item list is aligned with its
@@ -12,26 +12,6 @@ use crate::craft::ship::ShipDef;
 use crate::time::Epoch;
 use glam::DVec3;
 use serde::{Deserialize, Serialize};
-
-/// A joint's load at the last live tick.
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct JointRun {
-    pub parent: u32,
-    pub child: u32,
-    /// Force the parent side exerts on the child side (body axes, N) and
-    /// the moment about the joint's centre (N·m).
-    pub force: DVec3,
-    pub moment: DVec3,
-    /// The equivalent line load over the allowable at temperature (1 is the
-    /// ultimate load).
-    pub ratio: f64,
-    /// The factor the load as it stands (every force on the craft, and so
-    /// its proper acceleration, scaled together) could grow by before the
-    /// joint reaches its ultimate load (`structure::ultimate_scale`; `None`:
-    /// no capacity data, no acceleration, or over 100 g).
-    #[serde(default)]
-    pub to_ultimate: Option<f64>,
-}
 
 /// What an order does when its epoch comes.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -80,11 +60,6 @@ pub const EVENTS_KEPT: usize = 64;
 /// The ship systems' state.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Runtime {
-    pub joints: Vec<JointRun>,
-    /// The loads of joints a split cut, with their child's piece
-    /// (`ShipState::severed`).
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub severed: Vec<JointRun>,
     /// Orders not yet applied, in the order given (applied by epoch, ties
     /// in that order).
     pub orders: Vec<Order>,
@@ -146,23 +121,11 @@ pub struct Runtime {
 }
 
 impl Runtime {
-    /// The systems' state of a ship as loaded: liquids settled, engines
-    /// off, joints unloaded, nothing waiting.
-    pub fn initial(def: &ShipDef) -> Runtime {
-        Runtime {
-            joints: (def.joints.iter())
-                .map(|j| JointRun { parent: j.parent, child: j.child, ..JointRun::default() })
-                .collect(),
-            ..Runtime::default()
-        }
-    }
-
     /// The state of the piece holding the parts `kept` (`whole` and `piece`
     /// the definitions; `own`: the piece the vessel keeps), each field by
     /// its rule (`craft::partition`):
     /// * by part: the lost functions, unpowered loads, the
-    ///   aero surfaces' deflections; the joints within the piece, and those
-    ///   the split cuts with their child's piece (`severed`);
+    ///   aero surfaces' deflections;
     /// * the bus readouts of the buses the piece keeps (a bus the split
     ///   cuts is read in both until each piece's next power step);
     /// * the crew's exposure with the cabin's part (else the vessel's piece);
@@ -179,8 +142,6 @@ impl Runtime {
     pub fn partition(&self, kept: &[u32], whole: &ShipDef, piece: &ShipDef, own: bool) -> Runtime {
         use crate::craft::partition::by;
         let Runtime {
-            joints,
-            severed,
             orders,
             release_armed,
             release_engines,
@@ -202,14 +163,7 @@ impl Runtime {
         } = self;
         let clamps = piece.joints.iter().any(|j| j.kind == crate::craft::assembly::JointKind::HoldDown);
         let cabin = whole.seats.first().map_or(own, |s| kept.contains(&s.part));
-        let within = |j: &JointRun| kept.contains(&j.parent) && kept.contains(&j.child);
-        let cut = |j: &JointRun| !kept.contains(&j.parent) && kept.contains(&j.child);
         Runtime {
-            joints: joints.iter().filter(|j| within(j)).cloned().collect(),
-            severed: (severed.iter().filter(|j| kept.contains(&j.child)))
-                .chain(joints.iter().filter(|j| cut(j)))
-                .cloned()
-                .collect(),
             orders: if own { orders.clone() } else { Vec::new() },
             release_armed: *release_armed && clamps,
             release_engines: if clamps {
@@ -238,7 +192,7 @@ impl Runtime {
     /// The inverse of [`Self::partition`] (`ShipState::merge`): `a` the
     /// vessel's piece, whose orders, last throttle, motion, seed, launch and
     /// slow epoch the whole keeps; the per-part lists back in the whole's
-    /// order; a joint neither piece has starts unloaded; the events of both
+    /// order; the events of both
     /// in epoch order (the history they share once); the crew's exposure of
     /// the piece with the cabin (else `a`'s).
     pub fn merge(
@@ -252,8 +206,6 @@ impl Runtime {
         let a_parts: Vec<u32> = a_def.parts.iter().map(|p| p.part).collect();
         let in_a = |p: u32| a_parts.contains(&p);
         let Runtime {
-            joints: _,
-            severed: _,
             orders,
             release_armed,
             release_engines: _,
@@ -273,21 +225,6 @@ impl Runtime {
             buses,
             crew,
         } = a;
-        let mut severed: Vec<JointRun> = a.severed.iter().chain(&b.severed).cloned().collect();
-        let (mut ja, mut jb) = (a.joints.iter(), b.joints.iter());
-        let mut out_joints = Vec::new();
-        for d in &whole.joints {
-            let j = match (in_a(d.parent), in_a(d.child)) {
-                (true, true) => ja.next().cloned(),
-                (false, false) => jb.next().cloned(),
-                _ => None,
-            };
-            let j = j.or_else(|| {
-                let i = severed.iter().position(|s| s.parent == d.parent && s.child == d.child)?;
-                Some(severed.remove(i))
-            });
-            out_joints.push(j.unwrap_or(JointRun { parent: d.parent, child: d.child, ..JointRun::default() }));
-        }
         // Each piece's surfaces' deflections, by id (none: never deflected).
         let deflection = |s: &crate::craft::ship::Owned<crate::catalog::AeroSurface>| {
             let (run, def) = if in_a(s.part) { (fins, a_def) } else { (&b.fins, b_def) };
@@ -302,8 +239,6 @@ impl Runtime {
         let waits = |r: &Runtime, d: &ShipDef| renumber(&r.release_engines, &d.engines, &whole.engines);
         let b_has_cabin = !b_def.seats.is_empty() && a_def.seats.is_empty();
         Ok(Runtime {
-            joints: out_joints,
-            severed,
             orders: orders.clone(),
             release_armed: *release_armed || b.release_armed,
             release_engines: if b.release_armed && !release_armed { waits(b, b_def) } else { waits(a, a_def) },
@@ -325,30 +260,6 @@ impl Runtime {
                 .collect(),
             crew: if b_has_cabin { b.crew.clone() } else { crew.clone() },
         })
-    }
-
-    /// Whether the per-item lists match the definition.
-    pub fn fits(&self, def: &ShipDef) -> bool {
-        self.joints.len() == def.joints.len()
-    }
-
-    /// Builds the per-item lists as loaded for a state saved before the
-    /// systems ran (none of them yet). Lists that disagree with the
-    /// definition otherwise are a bug (a split or merge without its rule):
-    /// a debug assertion, and in a release build the lists rebuilt with an
-    /// alarm in the log rather than state stepped against the wrong items.
-    pub fn refit(&mut self, def: &ShipDef) {
-        if self.fits(def) {
-            return;
-        }
-        let never_ran = self.joints.is_empty();
-        debug_assert!(never_ran, "the systems' lists disagree with the definition {}", def.name);
-        let fresh = Runtime::initial(def);
-        self.joints = fresh.joints;
-        if !never_ran {
-            let at = self.stepped.or(self.launch).unwrap_or(Epoch::new(0, 0.0));
-            self.event(at, "Systems: their state disagreed with the craft and was reset (a bug)", true);
-        }
     }
 
     /// Whether `owner`'s function is out: lost to a failure, or without
@@ -429,7 +340,7 @@ mod tests {
     fn a_split_partitions_the_fin_deflections() {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/craft/falcon9-crew");
         let def = crate::craft::load_definition(&path).unwrap().ship.unwrap();
-        let mut whole = Runtime::initial(&def);
+        let mut whole = Runtime::default();
         assert!(whole.partition(&[], &def, &def.subset(&[]), true).fins.is_empty(), "never deflected");
         whole.fins = (0..def.surfaces.len()).map(|i| 0.01 * (i + 1) as f64).collect();
         let booster: Vec<u32> = (def.surfaces.iter()).filter(|s| s.id.starts_with("s1.")).map(|s| s.part).collect();

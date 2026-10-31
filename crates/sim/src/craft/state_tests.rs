@@ -55,7 +55,7 @@ fn every_field_set(def: &ShipDef) -> ShipState {
     }
     let child = def.parts.iter().find(|p| p.id.starts_with("dragon.")).unwrap().part;
     // Cut at an earlier split from a part this craft no longer has.
-    s.severed = vec![JointState { parent: 9_999, child, intact: false }];
+    s.severed = vec![JointState { parent: 9_999, child, intact: false, ratio: 0.5, ..Default::default() }];
     for (i, x) in s.parts.iter_mut().enumerate() {
         (x.integrity, x.thermal_damage, x.vibration_damage) = (v(i, 0.5), v(i, 0.01), v(i, 0.02));
         x.history.run_time = v(i, 60.0);
@@ -77,12 +77,11 @@ fn every_field_set(def: &ShipDef) -> ShipState {
     for (i, x) in s.engines.iter_mut().enumerate() {
         (x.level, x.cutoff, x.reason, x.settling) = (v(i, 0.5), v(i, 0.6), Some(format!("{i}")), Some(v(i, 0.3)));
     }
-    let r = &mut s.runtime;
-    for (i, x) in r.joints.iter_mut().enumerate() {
+    for (i, x) in s.joints.iter_mut().enumerate() {
         (x.force, x.moment, x.ratio, x.to_ultimate) =
             (DVec3::splat(v(i, 1e3)), DVec3::X * v(i, 9.0), v(i, 0.3), Some(v(i, 2.0)));
     }
-    r.severed = vec![crate::systems::runtime::JointRun { parent: 9_999, child, ratio: 0.5, ..Default::default() }];
+    let r = &mut s.runtime;
     r.orders = vec![Order { at: t0.add_seconds(5.0), kind: OrderKind::Stage }];
     r.release_armed = true;
     r.release_engines =
@@ -157,8 +156,6 @@ fn assert_every_field_set(s: &ShipState, at_load: &ShipState) {
         (functions != &l.functions, "functions"),
     ];
     let Runtime {
-        joints,
-        severed,
         orders,
         release_armed,
         release_engines,
@@ -180,8 +177,6 @@ fn assert_every_field_set(s: &ShipState, at_load: &ShipState) {
     } = runtime;
     let r = &l.runtime;
     let run = [
-        (joints != &r.joints, "runtime.joints"),
-        (severed != &r.severed, "runtime.severed"),
         (orders != &r.orders, "orders"),
         (release_armed != &r.release_armed, "release_armed"),
         (release_engines != &r.release_engines, "release_engines"),
@@ -237,7 +232,6 @@ fn a_split_puts_each_item_in_exactly_one_piece() {
                 x.power.len(),
                 x.cabin.iter().count(),
                 x.fates.len(),
-                r.joints.len() + r.severed.len(),
                 r.fins.len(),
                 r.lost.len(),
                 r.unpowered.len(),
@@ -251,7 +245,7 @@ fn a_split_puts_each_item_in_exactly_one_piece() {
         }
         // Each piece's lists align with its own definition.
         for (p, d) in [(&pa, &da), (&pb, &db)] {
-            assert!(p.runtime.fits(d), "{name}");
+            assert!(p.fits(d), "{name}");
             assert_eq!(
                 (p.tanks.len(), p.engines.len(), p.power.len()),
                 (d.tanks.len(), d.engines.len(), d.components.len())
@@ -304,8 +298,7 @@ fn a_merge_refuses_two_cabins_and_starts_a_new_joint_unloaded() {
     let (dx, dy) = (def.subset(&x), def.subset(&y));
     let (mut px, py) = (s.partition(&x, &def, &dx, true), s.partition(&y, &def, &dy, false));
     px.severed.clear();
-    px.runtime.severed.clear();
     let m = ShipState::merge(&px, &dx, &py, &dy, &def).unwrap();
     assert!(m.joints.iter().all(|j| j.intact));
-    assert!(m.runtime.joints.iter().all(|j| j.force == DVec3::ZERO && j.ratio == 0.0));
+    assert!(m.joints.iter().all(|j| j.force == DVec3::ZERO && j.ratio == 0.0));
 }

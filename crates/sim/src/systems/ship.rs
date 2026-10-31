@@ -47,7 +47,6 @@ pub struct TickEnv<'a> {
 /// tank over it (kg/s, `propulsion::output`), `rcs` the kilograms each
 /// thruster block fired. Returns the effects the vessel acts on.
 pub fn tick(def: &ShipDef, state: &mut ShipState, env: &TickEnv, draws: &[f64], rcs: &[f64]) -> Vec<Effect> {
-    state.runtime.refit(def);
     let before = plumbing::ullages(def, state);
     if !env.debug {
         for (s, d) in state.tanks.iter_mut().zip(draws) {
@@ -147,7 +146,6 @@ pub fn busy(state: &ShipState) -> bool {
 /// they last stepped to `at`, under the proper acceleration `accel` (body
 /// axes). Returns the mass vented overboard (kg).
 pub fn lattice(def: &ShipDef, state: &mut ShipState, at: Epoch, env: &plumbing::Surroundings, accel: DVec3) -> f64 {
-    state.runtime.refit(def);
     let dt = state.runtime.stepped.map_or(0.0, |s| at.seconds_since(s));
     if state.runtime.stepped.is_none() || dt > 0.0 {
         state.runtime.stepped = Some(at);
@@ -175,7 +173,6 @@ pub fn coast_lattice(
     env: &plumbing::Surroundings,
     (law, t): (&super::coast_law::CoastLaw, f64),
 ) {
-    state.runtime.refit(def);
     let dt = state.runtime.stepped.map_or(0.0, |s| at.seconds_since(s));
     if state.runtime.stepped.is_none() || dt > 0.0 {
         state.runtime.stepped = Some(at);

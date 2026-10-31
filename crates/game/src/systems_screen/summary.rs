@@ -106,7 +106,7 @@ fn structure(x: &Inputs) -> Vec<Group> {
     let rated = |i: usize| sim::systems::structure::rated(def, &def.joints[i]);
     let mut loads: Vec<(usize, f64)> = (0..def.joints.len())
         .filter(|&i| intact(i) && rated(i) && k.knows(Quantity::JointLoad(i as u32)))
-        .filter_map(|i| Some((i, state.runtime.joints.get(i)?.ratio)))
+        .filter_map(|i| Some((i, state.joints.get(i)?.ratio)))
         .collect();
     loads.sort_by(|a, b| b.1.total_cmp(&a.1));
     for &(i, r) in loads.iter().take(TOP) {

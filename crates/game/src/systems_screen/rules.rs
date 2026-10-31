@@ -274,7 +274,7 @@ pub fn facts(
                     intact: state.joints.get(i).is_none_or(|s| s.intact),
                     allowable: rated.then_some(j.allowable),
                     radius: j.radius,
-                    ratio: (state.runtime.joints.get(i))
+                    ratio: (state.joints.get(i))
                         .filter(|_| rated && known.knows(Quantity::JointLoad(i as u32)))
                         .map(|r| r.ratio),
                 }

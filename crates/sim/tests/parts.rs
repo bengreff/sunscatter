@@ -264,7 +264,7 @@ fn an_overloaded_part_tears_off_with_what_hangs_from_it() {
     assert!(!torn.is_empty());
     for &(p, _) in &b.torn {
         let j = def.joints.iter().position(|j| j.child == d.parts[p as usize].id).expect("its joint");
-        let ratio = state.runtime.joints[j].ratio;
+        let ratio = state.joints[j].ratio;
         assert!(!state.joints[j].intact && ratio >= 1.0, "{}: {ratio}", def.joints[j].name);
     }
     let plan = a.plan_breakup().unwrap();

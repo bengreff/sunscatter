@@ -179,7 +179,7 @@ impl Vessel {
             let mut effects = Vec::new();
             for (j, d) in def.joints.iter().enumerate().filter(|(_, d)| d.kind == JointKind::HoldDown) {
                 let capacity = d.allowable * 2.0 * crate::math::PI * d.radius;
-                let run = &mut state.runtime.joints[j];
+                let run = &mut state.joints[j];
                 run.force = -on_vehicle;
                 run.moment = DVec3::ZERO;
                 run.ratio = if capacity > 0.0 { on_vehicle.length() / capacity } else { 0.0 };
@@ -217,7 +217,6 @@ impl Vessel {
         let Some(def) = self.ship_def() else { return };
         let body = self.attitude.q.inverse() * dv;
         let Some(state) = self.ship.as_mut() else { return };
-        state.runtime.refit(&def);
         for (t, s) in def.tanks.iter().zip(state.tanks.iter_mut()) {
             s.drift_speed -= body.dot(t.region.axis.normalize());
         }

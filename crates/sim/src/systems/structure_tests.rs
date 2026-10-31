@@ -85,7 +85,7 @@ fn lift_off_loads_by_hand() {
     {
         let j = joint(def, name);
         let d = &def.joints[j];
-        let run = &state.runtime.joints[j];
+        let run = &state.joints[j];
         let expect = above(d) * a;
         // The parent pushes the child's side away from it (down the stack).
         let along = run.force.dot(d.normal);
@@ -150,7 +150,7 @@ fn near_meco_the_upper_stack_is_heaviest() {
     let m = Motion { accel: DVec3::Z * a, ..Motion::default() };
     let effects = step(def, &mut state, &b, &m, Epoch::new(1_000_000_000, 0.0), false);
     for (j, d) in def.joints.iter().enumerate() {
-        let r = &state.runtime.joints[j];
+        let r = &state.joints[j];
         if r.ratio > 0.0 {
             println!("{:28} {:8.0} kN ratio {:.3}", d.name, r.force.dot(d.normal) / 1e3, r.ratio);
         }
@@ -158,7 +158,7 @@ fn near_meco_the_upper_stack_is_heaviest() {
     assert!(effects.is_empty(), "{effects:?}");
     // Without its pressure the second stage's tank would buckle here.
     let d = &def.joints[joint(def, "s2.tank|s2.skirt")];
-    let run = &state.runtime.joints[joint(def, "s2.tank|s2.skirt")];
+    let run = &state.joints[joint(def, "s2.tank|s2.skirt")];
     let bare = section(run.force, run.moment, d.normal, d.radius, 0.0);
     assert!(bare.compression > d.buckling, "{} against {}", bare.compression, d.buckling);
 }
@@ -244,7 +244,7 @@ fn max_q_at_a_few_degrees_bends_the_stack_safely() {
     let effects = step(def, &mut state, &b, &Motion::default(), Epoch::new(1_000_000_000, 0.0), false);
     assert!(effects.is_empty());
     for (j, d) in def.joints.iter().enumerate() {
-        let r = &state.runtime.joints[j];
+        let r = &state.joints[j];
         if r.ratio > 0.05 {
             println!(
                 "{:28} {:6.0} kN, {:5.0} kN·m, ratio {:.3}",
@@ -289,7 +289,7 @@ fn an_unregulated_tank_keeps_its_flight_pressure() {
     let total: f64 = part_masses(def, &state, &b).iter().map(|m| m.mass).sum();
     let m = Motion { accel: DVec3::Z * (9.0 * 914e3 / total), ..Motion::default() };
     let t0 = Epoch::new(1_000_000_000, 0.0);
-    let ratio = |state: &ShipState, name: &str| state.runtime.joints[joint(def, name)].ratio;
+    let ratio = |state: &ShipState, name: &str| state.joints[joint(def, name)].ratio;
     assert!(!state.runtime.pressure_regulated);
     assert!(step(def, &mut state, &b, &m, t0, false).is_empty());
     for name in ["s1.interstage|s1.tank", "s1.tank|s1.octaweb"] {
@@ -338,14 +338,14 @@ fn an_overload_snaps_the_joint() {
     );
     // A leg hangs by its hinge and strut, not a ring: its load is shown,
     // never judged (its feet's overload is the contact's).
-    let leg = &state.runtime.joints[joint(def, "s1.octaweb|s1.leg#1")];
+    let leg = &state.joints[joint(def, "s1.octaweb|s1.leg#1")];
     assert!(leg.force.length() > 1e4 && leg.ratio == 0.0, "{leg:?}");
     // Snapped joints are not judged again.
     let again = step(def, &mut state, &b, &m, t0, false);
     assert!(again.iter().all(|e| !effects.contains(e)), "{again:?}");
 }
 
-/// The g-limit's scale (`JointRun::to_ultimate`): at lift-off the weakest
+/// The g-limit's scale (`JointState::to_ultimate`): at lift-off the weakest
 /// joint's, and the forces scaled by it bring that joint to its ultimate
 /// load (just under: not yet; just over: there).
 #[test]
@@ -371,7 +371,7 @@ fn the_scale_to_the_ultimate_is_where_the_weakest_joint_fails() {
         state
     };
     let now = run(1.0);
-    let (j, k) = (now.runtime.joints.iter().enumerate())
+    let (j, k) = (now.joints.iter().enumerate())
         .filter_map(|(j, r)| r.to_ultimate.map(|k| (j, k)))
         .min_by(|a, b| a.1.total_cmp(&b.1))
         .expect("a joint with data");
@@ -380,10 +380,10 @@ fn the_scale_to_the_ultimate_is_where_the_weakest_joint_fails() {
     println!("weakest at lift-off: {} at {k:.2}× ({:.1} g)", def.joints[j].name, k * 1.5);
     assert_eq!(def.joints[j].name, "s1.tank|s1.octaweb");
     assert!(k > 2.0 && k < 22.0, "{k}");
-    assert!(run(k * 0.995).runtime.joints[j].ratio < 1.0);
-    assert!(run(k * 1.005).runtime.joints[j].ratio >= 1.0);
+    assert!(run(k * 0.995).joints[j].ratio < 1.0);
+    assert!(run(k * 1.005).joints[j].ratio >= 1.0);
     // A leg (no capacity data) never limits.
-    assert_eq!(now.runtime.joints[joint(def, "s1.octaweb|s1.leg#1")].to_ultimate, None);
+    assert_eq!(now.joints[joint(def, "s1.octaweb|s1.leg#1")].to_ultimate, None);
 }
 
 #[test]

@@ -319,7 +319,6 @@ pub fn stop(def: &ShipDef, state: &mut ShipState, i: usize, why: Stop, at: Epoch
 /// and cavitation, the run time; then the pad's armed release. Returns the
 /// effects the vessel acts on (the clamps' release).
 pub fn step(def: &ShipDef, state: &mut ShipState, env: &Env, feeds: &[Feed]) -> Vec<Effect> {
-    state.runtime.refit(def);
     close_throttle(def, state, env);
     safe(def, state, env.at);
     settle_or_start(def, state, env);

@@ -76,7 +76,7 @@ fn a_gravity_turn_to_meco_and_the_mvac_lights_like_the_real_one() {
             let c = v.attitude.nose().dot(surface.normalize()).clamp(-1.0, 1.0);
             alpha_max = alpha_max.max(sim::math::acos(c).to_degrees());
         }
-        worst = v.ship().unwrap().runtime.joints.iter().map(|j| j.ratio).fold(worst, f64::max);
+        worst = v.ship().unwrap().joints.iter().map(|j| j.ratio).fold(worst, f64::max);
     }
     let (anchor, r, vel) = v.state(&w);
     let alt = sim::forces::altitude_above(&w, &w.snapshot(v.time), anchor, anchor, r).0;

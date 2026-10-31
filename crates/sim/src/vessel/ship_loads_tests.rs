@@ -24,10 +24,10 @@ fn full() -> Controls {
 }
 
 /// The run of the joint named `name` and its definition.
-fn joint(v: &Vessel, name: &str) -> (crate::craft::ship::JointDef, crate::systems::runtime::JointRun) {
+fn joint(v: &Vessel, name: &str) -> (crate::craft::ship::JointDef, crate::craft::state::JointState) {
     let def = v.ship_def().unwrap();
     let j = def.joints.iter().position(|j| j.name == name).unwrap_or_else(|| panic!("{name}"));
-    (def.joints[j].clone(), v.ship().unwrap().runtime.joints[j].clone())
+    (def.joints[j].clone(), v.ship().unwrap().joints[j].clone())
 }
 
 /// The mass (kg) of the parts not hanging from `child` (the capsule's side).
@@ -107,7 +107,7 @@ fn the_falcon_9_joints_on_the_pad_and_after_lift_off() {
         t = if next < end { next } else { end };
         frames.advance(&w, t, &full(), usize::MAX);
     }
-    assert_eq!(frames.ship().unwrap().runtime.joints, v.ship().unwrap().runtime.joints);
+    assert_eq!(frames.ship().unwrap().joints, v.ship().unwrap().joints);
 }
 
 /// The ascent at full throttle (straight up, SAS holding): lift-off, MECO
@@ -146,7 +146,7 @@ fn the_falcon_9_ascent_breaks_nothing() {
     println!("MECO at T+{t:.0} s: {:.1} km up, {:.0} m/s", up / 1e3, vel.length());
     let peak = |v: &Vessel| {
         let s = v.ship().unwrap();
-        s.runtime.joints.iter().map(|j| j.ratio).fold(0.0, f64::max)
+        s.joints.iter().map(|j| j.ratio).fold(0.0, f64::max)
     };
     println!("peak joint ratio now {:.2}", peak(&v));
     assert!(bad(&v).is_empty(), "{:?}", bad(&v));
@@ -203,7 +203,7 @@ fn the_demo_gravity_turn_breaks_nothing() {
         let (anchor, r, vel) = v.state(&w);
         let q = crate::vessel::air_at(&w, &snap, anchor, r, vel).map_or(0.0, |a| 0.5 * a.rho * a.wind.length_squared());
         q_max = q_max.max(q);
-        peak = peak.max(v.ship().unwrap().runtime.joints[ring].ratio);
+        peak = peak.max(v.ship().unwrap().joints[ring].ratio);
     }
     println!("max-Q {:.1} kPa; the Dragon ring's peak ratio {peak:.2}", q_max / 1e3);
     assert!(q_max > 30e3, "through max-Q: {q_max}");
