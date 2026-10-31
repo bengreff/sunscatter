@@ -48,7 +48,23 @@ Small commits, one purpose each; `cargo test -p sim` and the game's touched test
 
 ## State
 
-(Update as you land: commits with hashes, what is left in order, Open for the owner.)
+### LAYERS-1 (2026-10-31)
+
+**Landed** (each passed fmt, clippy, the whole sim suite with `warp_course`, and the game's check and touched tests; no bits changed except D123's case):
+- f57d46b **step 1**: `systems::flight` is `systems::ship_os` (`mod`: `View`, `sense`, `Health`, `engine_readings`, `feeds_read`, `can_predict`; `sas`; `commit`: the rule and the pad's armed release, `commit::step` after the engines step, `disarm`, `await_lit`). The data links both layers read (`works`, `read_by_computer`, `commanded`, `controller`) are `systems::links`, so neither layer calls the other. The fail-safe is the engine controller's own: `propulsion::safes` (table test `the_fail_safe_table`), each controller reading its own links, **D123's lost controller included** (it safes its engine, in debug mode too; `a_lost_controller_on_the_pad_aborts_the_launch` updated). The game's navball names `ship_os::Sas`.
+- 7ea2ab2 **step 2**: the settling wait and push are `ship_os::ullage` (`hold`, `push`, `step`, `SETTLE_LIMIT`); the engine keeps only its start on command (`propulsion::light`; floating propellant: gas ingestion). `propulsion::protect` (the closed throttle, the fail-safe) runs before the ullage step, so the order is today's. Open point 1 decided (below).
+- cf87fb7 **step 3a**: `next_stage`, `again`, `function`, `edit_sequence`, `release_undone` and the legs' `interlock` are `ship_os::sequence` (tests in `ship_os/sequence_tests.rs`); `command::apply` stays the native boundary, `carry_out` dispatches orders.
+- Docs with each: software-layers.md's status item by item (§2's rows, §7's items 1–3 *built*), flight-software.md, avionics.md, engines.md, systems/propulsion.md, planner.md, staging-bar.md, owners.md, D043's module path.
+
+**Left, in order:**
+1. **Step 3b, the chutes** (`ship_os::chutes`). Today `chute::ChuteState::step` arms on `Controls::chute` and opens the main at the true height (`vessel/live.rs:435`, `Flow::height`; `predicted_cd_area` the same). Move the main's decision out: `chute::step` takes "open the main now" from the ship computer, which decides it from `Knowledge`'s `Quantity::Altitude` (GNSS's `position` gives it at 1.5× its accuracy, an `altitude` sensor directly; Dragon's barometric altimeter is not in its data: add it, sourced or E, with the cabin sensors below) and the drogue's reefing state. Then Dragon's automatic arming on barometric altitude, with D126's switch (step 4's). Without an altitude reading the main does not open by height: the pilot's "deploy" command opens it (D126: the manual deploy runs the same function). The landing prediction (`predicted_cd_area`) reads the same rule. Expect bits to change only where the altitude is unknown.
+2. **Step 4, the program API** (software-layers.md §6): `View` in, `Commands` out, saved program state; the schedule as orders (each due epoch stops the advance as `order_stop` does; ADVANCE's arrivals have not been built: build the stop here); D126's switch per program; `systems::maneuver` moved in as `ship_os::maneuver` (its `Commands` is the model; `vessel::maneuver` is its vessel side).
+3. **Step 5, the warp stop**, then **step 6, the bare minimum proven**, as the brief says. For step 6: INTERFACE-2's finding 19 (Dragon's cabin sensors) first.
+4. Small: `systems::flight`'s old tests file and module are gone; `Vessel::flight_health` kept its name (it is the computers' health). STATE's note: `Systems` (the lattice clock) and `ship_tick::ship_lattice` could be one call.
+
+**Open for the owner (LAYERS-1):**
+- **The settling wait is layer 2** (software-layers.md §8, open point 1, by D128's rule): the wait reads the feed tanks and fires other parts' thrusters, so it coordinates parts, and the real sequence's ullage burn is the stage computer's. With layer 1 alone an ignition on floating propellant ingests gas; a pilot settles by hand (translation, then ignite), as D126 allows. The wait's state stays each engine's `settling` (saved, and the game reads it), and it still reads the true liquid position (FIXES3: the level sensors, a timed burn where they do not read the tanks).
+- **D123 in debug mode:** a lost controller safes its engine in debug mode too (D123: "a dead or unpowered computer is still dead"); before, debug's launch went ahead with a lost controller.
 
 ### From the lead (2026-10-31)
 
