@@ -76,6 +76,15 @@ impl Vessel {
         estimate::lit(def, state, &inp, engines)
     }
 
+    /// A burn still waiting, scheduled again from now: the planned burns'
+    /// settings changed (its wake leads its ignition by their settling
+    /// time). A burn flying or ended keeps its own.
+    pub(super) fn reschedule_waiting(&mut self) {
+        if let Some(i) = self.program.as_ref().filter(|p| p.step == Step::Wait).map(|p| p.node) {
+            self.program = self.schedule_node(i);
+        }
+    }
+
     /// The program of node `i` of the plan, scheduled from the stage
     /// estimate now. Nodes already past (missed) are skipped.
     fn schedule_node(&self, i: usize) -> Option<Program> {

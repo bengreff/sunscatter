@@ -126,3 +126,30 @@ fn the_maneuver_program_waits_for_its_switch() {
     v.advance(&w, t.add_seconds(1_020.0), &Controls::default(), usize::MAX);
     assert_ne!(v.program().unwrap().step, Step::Wait, "pressed: it wakes");
 }
+
+/// The planned burns' settings (D126's config menu): a longer settling
+/// time wakes a waiting burn earlier by as much (its schedule again), its
+/// ignition the same; a setting it refuses changes nothing.
+#[test]
+fn the_maneuver_settings_reschedule_a_waiting_burn() {
+    use sim::systems::maneuver::{Node, Step};
+    use sim::systems::ship_os::program::Setting;
+    let w = world();
+    let t = sol::sol_epoch().add_seconds(3.0 * 86_400.0);
+    let mut v = guarded(&w, t);
+    let earth = w.find("Earth").unwrap().node;
+    v.set_nodes(vec![Node { t: t.add_seconds(900.0), dv: glam::DVec3::new(5.0, 0.0, 0.0), reference: earth }]).unwrap();
+    let (wake, ignite) = {
+        let p = v.program().unwrap();
+        (p.wake, p.ignite)
+    };
+    let lead = v.software().maneuver_settings.settle_lead;
+    v.configure("maneuver", &[Setting::SettleLead(lead + 30.0)]).unwrap();
+    let p = v.program().unwrap();
+    assert_eq!(p.step, Step::Wait);
+    assert!((wake.seconds_since(p.wake) - 30.0).abs() < 1e-6, "woken 30 s earlier");
+    assert!(p.ignite.seconds_since(ignite).abs() < 1e-9, "the same ignition");
+    let before = v.software().clone();
+    assert!(v.configure("maneuver", &[Setting::SettleLead(-1.0)]).is_err());
+    assert_eq!(*v.software(), before);
+}

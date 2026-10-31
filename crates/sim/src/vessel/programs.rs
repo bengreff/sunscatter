@@ -50,10 +50,15 @@ impl Vessel {
     /// [`Self::set_switch`]), all or none, by its owner's rule
     /// (`ship_os::program::configure`): the parachutes' heights by the
     /// craft's chutes, a load manager's loads from the components that draw
-    /// power.
+    /// power; a planned burn still waiting is scheduled again by the new
+    /// settings.
     pub fn configure(&mut self, name: &str, settings: &[Setting]) -> Result<(), String> {
         let offered = self.ship_def().map_or_else(Vec::new, |d| power_guard::switchable(&d));
-        program::configure(&mut self.software, (&self.craft.chute, &offered), name, settings, self.time)
+        program::configure(&mut self.software, (&self.craft.chute, &offered), name, settings, self.time)?;
+        if name == "maneuver" {
+            self.reschedule_waiting();
+        }
+        Ok(())
     }
 
     /// The player's press for a program (the names of [`Self::set_switch`]):
