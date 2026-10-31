@@ -16,7 +16,12 @@ enable dual_source_blending;
 // - from outside, that in-scatter is looked up in the table from space our
 //   `aerial_view_lut.wgsl` fills (screen direction × altitude of the
 //   ground hit, `ground_from_space`), raymarched per pixel only near the
-//   limb, where the table's texels around a pixel look past the hit.
+//   limb, where the table's texels around a pixel look past the hit;
+// - from outside, geometry the ray meets before the air (a craft in orbit)
+//   takes no aerial perspective: the table assumed a hit in the air and,
+//   for a ray rising from the camera, read the light back down through the
+//   planet (craft drawn dark red above a line across the view whenever
+//   the camera looked up at them more than ~15°, 2026-10-31).
 // sunscatter sky override
 #import bevy_pbr::atmosphere::{
     bindings::{view, settings, atmosphere, aerial_view_lut, atmosphere_lut_sampler},
@@ -95,6 +100,17 @@ fn space_slice_coord(h: f32, n: f32, thickness: f32) -> f32 {
 // limb): its ray's distance from the centre (`b`) can differ from the
 // pixel's by the texel's angle times sqrt(r² − b²).
 fn ground_from_space(pos: vec3<f32>, ray_dir: vec3<f32>, t: f32, uv: vec2<f32>) -> RaymarchResult {
+    var result: RaymarchResult;
+    result.inscattering = vec3(0.0);
+    result.transmittance = vec3(1.0);
+    // Geometry the ray meets before the air (a craft above it), or a ray
+    // that never enters the air: nothing between (`sky::haze::air_before`,
+    // mirrored for its tests).
+    let r = length(pos);
+    let segment = get_raymarch_segment(r, dot(ray_dir, pos / r));
+    if min(segment.end, t) <= segment.start {
+        return result;
+    }
     let thickness = atmosphere.outer_radius - atmosphere.inner_radius;
     let n = f32(settings.aerial_view_lut_size.z);
     let hit = pos + ray_dir * t;
@@ -110,7 +126,6 @@ fn ground_from_space(pos: vec3<f32>, ray_dir: vec3<f32>, t: f32, uv: vec2<f32>) 
     if b + margin > r_lo {
         return raymarch_from_space(pos, ray_dir, t);
     }
-    var result: RaymarchResult;
     let lut = textureSampleLevel(aerial_view_lut, atmosphere_lut_sampler, vec3(uv, w), 0.0).rgb;
     result.inscattering = exp(lut);
     result.transmittance = sample_transmittance_lut(r_hit, dot(-ray_dir, hit) / length(hit));
