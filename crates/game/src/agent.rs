@@ -398,7 +398,9 @@ fn reach(args: &Value, sim: &SimState, comms: &Comms) -> Result<(VesselId, f64),
         return Ok((id, 0.0));
     }
     let delay = comms.signal(id).map(|s| s.delay).ok_or_else(|| format!("no signal to vessel {}", id.0))?;
-    Ok((id, delay))
+    // Shown only (the command's route takes its own): to the millisecond
+    // (it read 4.583767688959715e-08 to a craft 14 m away).
+    Ok((id, seconds(delay)))
 }
 
 /// Answers one call: the result, and what the game must do.
@@ -874,7 +876,17 @@ fn known_altitude(known: &crate::format::Known, altitude: f64) -> Option<f64> {
 /// approach's): known with the position and the velocity, as the menus
 /// show it (`Known::orbit`).
 fn known_time(known: &crate::format::Known, t: f64) -> Option<f64> {
-    known.orbit().then_some(t)
+    known.orbit().then(|| seconds(t))
+}
+
+/// The decimals the agent's times are given to: the clock's millisecond
+/// (`get_state`'s clock, `epoch_text`).
+pub(crate) const SECOND_DECIMALS: usize = 3;
+
+/// A time in seconds to the clock's millisecond (it read
+/// 118.44442996130809).
+pub(crate) fn seconds(t: f64) -> f64 {
+    digits(t, SECOND_DECIMALS)
 }
 
 /// A number of the orbit the menus show to `decimals` once it is known
@@ -1158,13 +1170,15 @@ fn set_plan(args: &Value, sim: &SimState, comms: &Comms) -> Result<(Value, Vec<E
         .iter()
         .zip(&info)
         .map(|(d, b)| {
-            json!({"node_in_s": d.t_start.seconds_since(sim.clock), "ignite_in_s": b.ignite.seconds_since(sim.clock),
-                "duration_s": b.duration, "warnings": b.warnings})
+            json!({"node_in_s": seconds(d.t_start.seconds_since(sim.clock)),
+                "ignite_in_s": seconds(b.ignite.seconds_since(sim.clock)), "duration_s": b.duration.map(seconds),
+                "warnings": b.warnings})
         })
         .collect();
     let effect = if delay > 0.0 { Effect::Send { delay, command } } else { Effect::Command(command) };
-    let out = json!({"sent": draft.len(), "arrives_in_s": delay, "about": name(body), "nodes": nodes,
-        "available_dv_ms": available});
+    // The Δv available as the planner shows it, to the m/s.
+    let out = json!({"sent": draft.len(), "arrives_in_s": seconds(delay), "about": name(body), "nodes": nodes,
+        "available_dv_ms": available.map(|a| digits(a, 0))});
     Ok((out, vec![effect]))
 }
 
@@ -1595,6 +1609,15 @@ mod tests {
             assert_eq!(known_time(k, 12.5), time);
             assert_eq!(known_digits(k, 0.123_456_789, crate::format::ECCENTRICITY_DECIMALS), e);
         }
+        // Times to the clock's millisecond, without the binary noise they
+        // read (finding 76).
+        // (seconds, as the agent reads them)
+        let times =
+            [(118.444_429_961_308_09, 118.444), (0.099_999_999_999_999_98, 0.1), (4.58e-8, 0.0), (-12.0005, -12.001)];
+        for (t, want) in times {
+            assert_eq!(seconds(t), want, "{t}");
+        }
+        assert_eq!(known_time(&fixed, 118.444_429_961_308_09), Some(118.444));
         // A place on the ground: to the position's precision along it and
         // the Landing menu's AT's decimals, in debug mode too.
         let r = 6.378e6;

@@ -1306,9 +1306,10 @@ fn run_job(
         return Some(Job::Run(r));
     }
     let out = json!({
-        // The game time run, to the microsecond (0.1, not 0.09999999999999998).
+        // The game time run, to the clock's millisecond (0.1, not
+        // 0.09999999999999998).
         "reached": why, "clock": super::epoch_text(sim.clock),
-        "elapsed_s": super::digits(sim.clock.seconds_since(r.started), 6),
+        "elapsed_s": super::seconds(sim.clock.seconds_since(r.started)),
         "wall_s": r.wall, "time_stopped": sim.paused, "vessel": r.vessel.0, "state": s.json(),
         "active_vessel": sim.ship().id().0,
     });
