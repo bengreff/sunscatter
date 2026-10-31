@@ -371,10 +371,19 @@ impl SimState {
         clock
     }
 
-    /// Debug: spawn `n` small rockets (`sim::craft::small`, craft of parts)
-    /// coasting in low Earth orbit (performance).
+    /// Tests: [`Self::spawn_in_orbit`] of `n` small rockets
+    /// (`sim::craft::small`, craft of parts).
+    #[cfg(test)]
     pub fn spawn_test_ships(&mut self, n: usize) {
+        self.spawn_in_orbit(sim::craft::small::rocket_ref(), n);
+    }
+
+    /// Developer (the `spawn_vessels` tool) and tests: `n` vessels of
+    /// `craft` coasting in low Earth orbit, each on its own orbit, every
+    /// other one uncrewed (a probe, flown with light delay). Their ids.
+    pub fn spawn_in_orbit(&mut self, craft: &Craft, n: usize) -> Vec<VesselId> {
         let earth = self.world.find("Earth").expect("Earth").clone();
+        let mut ids = Vec::with_capacity(n);
         for k in 0..n {
             let el = Elements {
                 a: 6_778_137.0 + 20_000.0 * k as f64,
@@ -386,15 +395,15 @@ impl SimState {
             };
             let (r, v) = el.to_state(earth.gm);
             let id = self.vessel_ids.allocate();
-            let vessel =
-                Vessel::coasting(&self.world, id, self.clock, earth.node, r, v, sim::craft::small::rocket_ref());
+            let vessel = Vessel::coasting(&self.world, id, self.clock, earth.node, r, v, craft);
             let mut vessel = self.synchronised(vessel);
-            // Every other one is an uncrewed probe (flown with light delay).
             if k % 2 == 1 {
                 vessel.set_crew(0);
             }
             self.fleet.push(vessel);
+            ids.push(id);
         }
+        ids
     }
 }
 

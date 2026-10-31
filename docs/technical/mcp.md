@@ -48,6 +48,7 @@ The agent is at a **control location** like you (D067): mission control when the
 | `set_debug` | Debug mode (D064) for every vessel; a dead computer is still dead (D123) |
 | `bench` | Developer flag only: the look's benchmark from the current view (each part's cost); `only` measures the whole look and the parts it names |
 | `profile` | Developer flag only: frame statistics over a real-time window (fps, worst and 95th-percentile frame, the warp achieved), with the profiler's report when started with `SUNSCATTER_PROFILE=1` |
+| `spawn_vessels` | Developer flag only: `count` vessels (1–50, default 10) of `craft` (any craft id, default `small-rocket`) coasting in low Earth orbit, each on its own orbit, every other one uncrewed; answers with their ids. The fleet of the performance check (with `profile`). It replaced the pause menu's "Spawn 10 test ships" |
 
 `step` and `run_until` stop time at the end (unless `keep_running`), and every command sent while time is stopped applies at that clock, so a mission test is deterministic.
 
@@ -56,7 +57,7 @@ The agent is at a **control location** like you (D067): mission control when the
 - `crates/mcp`: the transport (JSON-RPC 2.0 over HTTP POST, plain JSON responses; `initialize`, `ping`, `tools/list`, `tools/call`). It knows nothing about the game.
 - `crates/mcp` serves each request on its own thread; a call waits up to 15 minutes for the game (the long tools bound their own wait).
 - `game::agent`: the flying tools, answered once per frame in the input stage; actions become `GameCommand`s (`game::commands`), exactly as the keyboard's. `game::agent::session`: the session tools, answered after the simulation each frame, the long ones over several frames (a shot once the view has settled, a run once the clock stops).
-- `SUNSCATTER_AGENT=<port>:<token>` turns the server on at start. `SUNSCATTER_DEV=1` is the developer flag (`bench`, `profile`). `SUNSCATTER_OFFSCREEN=1` renders into an image with no window (`game::offscreen`; shots work with the screen locked, and the game keeps running when the display goes, e.g. the lid closed).
+- `SUNSCATTER_AGENT=<port>:<token>` turns the server on at start. `SUNSCATTER_DEV=1` is the developer flag (`bench`, `profile`, `spawn_vessels`). `SUNSCATTER_OFFSCREEN=1` renders into an image with no window (`game::offscreen`; shots work with the screen locked, and the game keeps running when the display goes, e.g. the lid closed).
 - **The headless game for a mission test** (D122): `./run headless [port]` sets all three (port 7777 by default, token `dev`) and a fresh home dir for shots and saves (`SUNSCATTER_HOME` to keep one). Headless games neither load nor save settings, and a shader that fails to compile exits with code 3. One game at a time on the machine (the lock in [agent-rules.md](../plans/agent-rules.md)). How to fly a mission test is in [testing.md](testing.md).
 - Test a running game by hand:
 

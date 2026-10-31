@@ -205,13 +205,13 @@ At 1,000,000× the frame now stays under the 60 fps budget and the warp falls to
 - **Line ends are recomputed every frame** (`trajectory::vessel_line_end`): 1.4 ms for all 50 vessels tracked in map view (7 ms under heavy load). Acceptable at 50 craft; a per-segment prefix sum of the swept angle would make each O(log n).
 - **Drawing 50 craft** costs 50 draw calls with one material each (per-ship light, D055) and one shared mesh: not measured on the GPU here.
 
-## Verify in the offscreen demo
+## Verify in the headless game
 
-The lead runs (one game at a time; the window is not needed):
+The lead or an agent runs (one game at a time; no window: `./run headless`, D122, with the developer tools):
 
-1. `SUNSCATTER_DEMO=<dir> SUNSCATTER_DEMO_OFFSCREEN=1 cargo run -p game --release` and read the `demo perf:` lines (11 vessels at 1×, 1,000×, 1,000,000×): every average should be ≥ 60 fps with the worst frame under ~20 ms; at 1,000,000× "compute-limited N/M" may now be non-zero (the clock is held back instead of the frame stretched), and the effective warp is what the machine achieved.
-2. A screenshot of the time panel at 1,000,000× with Show FPS on: "fps, sim X ms" beside the rate, and "limited: compute, Nkx achieved" when the warp is held back.
-3. Optional, the scale case: spawn more vessels (F2 adds 10 test craft per press) and warp to 1,000,000×: the frame rate should stay near 60 with the achieved warp shown.
+1. `spawn_vessels` (10 small rockets of parts in low orbit by default; `craft` for another), then `set_warp` and `profile` at 1×, 1,000× and 1,000,000× (levels 0, 6 and 9): every average should be ≥ 60 fps with the worst frame under ~20 ms; at 1,000,000× the compute-limited frames may be non-zero (the clock is held back instead of the frame stretched), and the warp achieved is what the machine managed. The old demo's numbers were on the deleted test craft (one part); a craft of parts costs more per coast (its tank law, below).
+2. A `shoot` of the time panel at 1,000,000× with Show FPS on: "fps, sim X ms" beside the rate, and "limited: compute, Nkx achieved" when the warp is held back.
+3. Optional, the scale case: `spawn_vessels` again (up to 50 a call) and warp to 1,000,000×: the frame rate should stay near 60 with the achieved warp shown.
 4. Watch for vessels drawn ahead of the clock at 1,000,000× while compute-limited (an icon a little ahead on its orbit, by at most a quarter of a frame's progress): expected, see the frame's span above.
 
 ## What remains

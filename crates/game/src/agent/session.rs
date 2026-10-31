@@ -1,7 +1,8 @@
 //! The agent's tools on the game session (D044, D122): what the player can
 //! see and do besides flying, for every agent (a shot of the view or of a
 //! screen, the camera, time, a new flight, saves, debug mode), and behind
-//! the developer flag ([`DEV_VAR`]) the look's benchmark and the profiler.
+//! the developer flag ([`DEV_VAR`]) the look's benchmark, the profiler and
+//! a fleet in orbit for the performance check.
 //!
 //! Game time runs while an agent thinks, as it does for the player. `pause`
 //! stops it; `step` and `run_until` run it to an epoch or an event and stop
@@ -31,13 +32,15 @@ use bevy::render::view::screenshot::{save_to_disk, Screenshot, ScreenshotCapture
 use glam::DVec3;
 use mcp::{Call, Tool, ToolResult};
 use serde_json::{json, Value};
+use sim::craft::{craft_of, CraftId};
 use sim::time::Epoch;
 use sim::vessel::VesselId;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 
-/// The developer flag: the look's benchmark and the profiler's tools.
+/// The developer flag: the look's benchmark, the profiler's and the
+/// fleet's tools.
 pub const DEV_VAR: &str = "SUNSCATTER_DEV";
 
 /// Whether the developer flag is set (not `0`).
@@ -48,7 +51,9 @@ pub fn developer() -> bool {
 /// Every agent's session tools, and the developer's.
 const SESSION: [&str; 9] =
     ["shoot", "set_camera", "pause", "step", "run_until", "new_flight", "save_game", "load_game", "set_debug"];
-const DEVELOPER: [&str; 2] = ["bench", "profile"];
+const DEVELOPER: [&str; 3] = ["bench", "profile", "spawn_vessels"];
+/// The most vessels one `spawn_vessels` call adds.
+const SPAWN_MAX: u64 = 50;
 
 /// Whether `tool` is answered here.
 pub fn handles(tool: &str) -> bool {
@@ -237,8 +242,31 @@ pub fn tools(dev: bool) -> Vec<Tool> {
              pass group, the counts that drive the cost).",
             schema(json!({"seconds": num("Real seconds, 1–60 (default 5)"), "label": {"type": "string"}}), &[]),
         ));
+        list.push(t(
+            "spawn_vessels",
+            "Developer: add `count` vessels of `craft` coasting in low Earth orbit, each on its own orbit, every \
+             other one uncrewed (a probe flown with light delay): the fleet of the performance check. `craft`: a \
+             craft id (a directory under data/craft, or a craft built in code: small-rocket, stress-<parts>), \
+             default small-rocket. Answers with their ids.",
+            schema(json!({"count": num("Vessels to add, 1–50 (default 10)"), "craft": {"type": "string"}}), &[]),
+        ));
     }
     list
+}
+
+/// What a `spawn_vessels` call asks for: the craft and how many.
+pub fn spawn_args(args: &Value) -> Result<(CraftId, usize), String> {
+    let count = match args.get("count") {
+        None => 10,
+        Some(c) => {
+            c.as_u64().filter(|n| (1..=SPAWN_MAX).contains(n)).ok_or_else(|| format!("`count` is 1–{SPAWN_MAX}"))?
+        }
+    };
+    let craft = match args.get("craft") {
+        None => sim::craft::small::id("rocket"),
+        Some(c) => CraftId(c.as_str().filter(|c| !c.is_empty()).ok_or("`craft` is a craft id")?.to_string()),
+    };
+    Ok((craft, count as usize))
 }
 
 /// Where a step or a run stops the clock: the frame's advance ends there
@@ -787,7 +815,9 @@ fn start(
     let dev = developer();
     let tool = call.tool.clone();
     match tool.as_str() {
-        "bench" | "profile" if !dev => done(call, Err(format!("a developer tool: start the game with {DEV_VAR}=1"))),
+        "bench" | "profile" | "spawn_vessels" if !dev => {
+            done(call, Err(format!("a developer tool: start the game with {DEV_VAR}=1")))
+        }
         "shoot" => match ShotSpec::parse(&args) {
             Err(e) => done(call, Err(e)),
             Ok(spec) => {
@@ -929,6 +959,14 @@ fn start(
                 started,
                 cut: false,
             }))
+        }
+        "spawn_vessels" => {
+            let r = spawn_args(&args).and_then(|(craft, count)| {
+                sim::craft::registry::definition(&craft).map_err(|e| format!("craft `{}`: {e}", craft.0))?;
+                let ids = sim.spawn_in_orbit(&craft_of(&craft), count);
+                Ok(json!({"craft": craft.0, "ids": ids.iter().map(|id| id.0).collect::<Vec<_>>()}))
+            });
+            done(call, r)
         }
         other => done(call, Err(format!("unknown tool {other}"))),
     }
@@ -1343,10 +1381,48 @@ mod tests {
     fn developer_tools_only_with_the_flag() {
         let names = |dev| tools(dev).into_iter().map(|t| t.name).collect::<Vec<_>>();
         assert!(!names(false).iter().any(|n| DEVELOPER.contains(&n.as_str())));
-        assert!(names(true).iter().any(|n| n == "bench") && names(true).iter().any(|n| n == "profile"));
+        for d in DEVELOPER {
+            assert!(names(true).iter().any(|n| n == d), "{d}");
+        }
         for t in tools(true) {
             assert!(handles(&t.name), "{}", t.name);
             assert_eq!(t.input_schema["type"], "object", "{}", t.name);
+        }
+    }
+
+    #[test]
+    fn a_fleet_is_some_vessels_of_a_craft() {
+        // (arguments, the craft and count asked for, or an error)
+        let ok = |c: &str, n| Ok((CraftId(c.into()), n));
+        let cases = [
+            (json!({}), ok("small-rocket", 10)),
+            (json!({"count": 1}), ok("small-rocket", 1)),
+            (json!({"count": 50, "craft": "falcon9-crew"}), ok("falcon9-crew", 50)),
+            (json!({"craft": "stress-300"}), ok("stress-300", 10)),
+            (json!({"count": 0}), Err("`count` is 1–50".to_string())),
+            (json!({"count": 51}), Err("`count` is 1–50".to_string())),
+            (json!({"count": 2.5}), Err("`count` is 1–50".to_string())),
+            (json!({"craft": ""}), Err("`craft` is a craft id".to_string())),
+            (json!({"craft": 3}), Err("`craft` is a craft id".to_string())),
+        ];
+        for (args, want) in cases {
+            assert_eq!(spawn_args(&args), want, "{args}");
+        }
+    }
+
+    #[test]
+    fn spawned_vessels_coast_on_their_own_orbits_every_other_one_a_probe() {
+        let mut sim = SimState::new();
+        let before = sim.fleet.len();
+        let ids = sim.spawn_in_orbit(sim::craft::small::rocket_ref(), 3);
+        assert_eq!(ids.len(), 3);
+        assert_eq!(sim.fleet.len(), before + 3);
+        let crews: Vec<u32> = ids.iter().map(|&id| sim.fleet[sim.index_of(id).unwrap()].crew()).collect();
+        assert!(crews[0] > 0 && crews[1] == 0 && crews[2] > 0, "{crews:?}");
+        for &id in &ids {
+            let v = &sim.fleet[sim.index_of(id).unwrap()];
+            assert!(v.ship().is_some(), "a craft of parts");
+            assert!(matches!(v.phase, sim::vessel::Phase::Coasting { .. }), "{:?}", v.phase);
         }
     }
 }

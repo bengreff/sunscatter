@@ -39,7 +39,7 @@ End the game with `taskkill /im game.exe /f` over SSH.
 
 ## Performance numbers (interactive session)
 
-Frame times over plain SSH are 3–4x worse (session 0). For perf or benchmark numbers run in the logged-in console session with a scheduled task (check `ssh backhouse "query user"` shows `ben / console / Active`), and read them with the `profile` and `bench` tools. `C:\Users\Ben\run_demo.cmd` (CRLF line endings) still sets the deleted demo's variables: change it to the four above, keeping `target\release\game.exe >> C:\Users\Ben\sunscatter_demo.log 2>&1` and the appended `EXIT %ERRORLEVEL%`. The 11-vessel numbers below need a tool that spawns vessels, which does not exist yet ([brief-mission.md](../plans/brief-mission.md)).
+Frame times over plain SSH are 3–4x worse (session 0). For perf or benchmark numbers run in the logged-in console session with a scheduled task (check `ssh backhouse "query user"` shows `ben / console / Active`), and read them with the `profile` and `bench` tools. `C:\Users\Ben\run_demo.cmd` (CRLF line endings) still sets the deleted demo's variables: change it to the four above, keeping `target\release\game.exe >> C:\Users\Ben\sunscatter_demo.log 2>&1` and the appended `EXIT %ERRORLEVEL%`. The 11-vessel numbers below were the deleted demo's on the test craft; measure them again with the developer tools: `spawn_vessels` (10 small rockets by default) then `profile` at each warp.
 
 ```
 ssh backhouse "schtasks /create /tn SunscatterDemo /tr C:\Users\Ben\run_demo.cmd /sc once /st 00:00 /ru ben /it /f && schtasks /run /tn SunscatterDemo"

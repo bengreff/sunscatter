@@ -46,8 +46,6 @@ pub enum GameCommand {
     /// A new flight: the active vessel replaced by a new craft `.0` (a
     /// directory under `data/craft`) on the pad.
     NewFlight(String),
-    /// Debug: spawn test ships in low Earth orbit.
-    SpawnTestShips(usize),
     /// Debug mode (D064) on every vessel: infinite propellant, no
     /// overheating, infinite impact tolerance.
     SetDebug(bool),
@@ -251,7 +249,6 @@ pub fn apply(
                 let done = sim.index_of(*vessel).map(|i| sim.fleet[i].set_functions(functions.clone()));
                 edited(&mut toasts, time.elapsed_secs_f64(), *vessel, "Functions", done);
             }
-            GameCommand::SpawnTestShips(n) => sim.spawn_test_ships(*n),
             GameCommand::SetPlan { vessel, plan } => {
                 let sim = &mut *sim;
                 let done = sim.index_of(*vessel).map(|i| sim.fleet[i].set_plan(&sim.world, plan.clone()));

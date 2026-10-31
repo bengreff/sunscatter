@@ -1,9 +1,9 @@
 //! The Esc pause menu. Esc pauses (the clock stops, flight keys are ignored,
 //! the camera still works) and opens a centred menu: Resume, Settings, Save,
-//! Load, New flight (a choice of craft: the Falcon 9 Crew, the test craft as
-//! the debug craft), Revert to launch, Debug mode (and, in it, Spawn 10
-//! test ships), Tracking station, Help, the performance overlay, Quit to
-//! desktop. Revert and Quit ask first.
+//! Load, New flight (a choice of craft), Revert to launch, Debug mode,
+//! Tracking station, Help, the performance overlay, Quit to desktop.
+//! Revert and Quit ask first. (A fleet for the performance check is the
+//! developer's `spawn_vessels` MCP tool.)
 //! Esc again steps back (confirmation → menu → resume). These were F-keys
 //! before D111 (no function keys: they need fn on a Mac).
 //!
@@ -48,7 +48,6 @@ enum Choice {
     Saves,
     Page(Page),
     Debug,
-    SpawnTestShips,
     TrackingStation,
     Help,
     Overlay,
@@ -210,9 +209,6 @@ fn main_page(ui: &mut egui::Ui, debug: bool, overlay: bool) -> Option<Choice> {
     button(ui, "New flight…", Choice::Page(Page::NewFlight));
     button(ui, "Revert to launch…", Choice::Page(Page::ConfirmRevert));
     button(ui, if debug { "Debug mode: ON" } else { "Debug mode: off" }, Choice::Debug);
-    if debug {
-        button(ui, "Spawn 10 test ships", Choice::SpawnTestShips);
-    }
     button(ui, &format!("Tracking station  {}", keys::label(keys::Action::TrackingStation)), Choice::TrackingStation);
     button(ui, &format!("Help: keys and ways in  {}", keys::label(keys::Action::Help)), Choice::Help);
     button(ui, if overlay { "Performance overlay: ON" } else { "Performance overlay: off" }, Choice::Overlay);
@@ -272,9 +268,6 @@ pub fn draw(
                         Some(Choice::Page(p)) => menu.page = p,
                         Some(Choice::Debug) => {
                             commands.write(GameCommand::SetDebug(!debug));
-                        }
-                        Some(Choice::SpawnTestShips) => {
-                            commands.write(GameCommand::SpawnTestShips(10));
                         }
                         Some(Choice::TrackingStation) => {
                             station.open = true;
