@@ -75,6 +75,13 @@ pub struct OpenWindows {
     pub station: bool,
 }
 
+/// Whether the pause menu shows: not while a window it opened is open
+/// (Settings, Saves, which take the centre, `layout::page_place`); Esc or
+/// their × brings it back. The help covers it whole and keeps it.
+pub fn menu_shown(open: OpenWindows) -> bool {
+    !(open.settings || open.saves)
+}
+
 /// What Esc does, given what is open: the innermost thing first, one level
 /// at a time (the order of [`ESC_ORDER`]).
 pub fn on_escape(open: OpenWindows, menu: &PauseMenu) -> EscAction {
@@ -250,6 +257,9 @@ pub fn draw(
         ui.label(egui::RichText::new("PAUSED").monospace().size(20.0).color(theme::ACCENT));
     });
     let (settings, saves, help) = (&mut windows.0, &mut windows.1, &mut windows.2);
+    if !menu_shown(OpenWindows { settings: settings.open, saves: saves.open, ..Default::default() }) {
+        return Ok(());
+    }
     let button = |ui: &mut egui::Ui, text: &str| ui.add_sized([220.0, 30.0], egui::Button::new(text)).clicked();
     egui::Window::new("pause_menu")
         .title_bar(false)
@@ -364,6 +374,26 @@ mod tests {
         for (open, menu, expected) in cases {
             assert_eq!(on_escape(open, menu), expected, "{open:?}, {:?}", menu.page);
         }
+    }
+
+    /// The pause menu steps aside for the windows it opens, and comes back
+    /// when they close (table: help, settings, saves → shown).
+    #[test]
+    fn the_menu_steps_aside_for_settings_and_saves() {
+        let w = |help, settings, saves| OpenWindows { help, settings, saves, ..Default::default() };
+        let table = [
+            (w(false, false, false), true),
+            (w(true, false, false), true),
+            (w(false, true, false), false),
+            (w(false, false, true), false),
+            (w(true, true, true), false),
+        ];
+        for (open, shown) in table {
+            assert_eq!(menu_shown(open), shown, "{open:?}");
+        }
+        // Esc closes Settings first, after which the menu shows again.
+        let main = PauseMenu { open: true, ..Default::default() };
+        assert_eq!(on_escape(w(false, true, false), &main), EscAction::CloseSettings);
     }
 
     /// Every Esc level is in the order the help lists, once.

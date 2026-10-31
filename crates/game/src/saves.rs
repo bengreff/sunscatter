@@ -290,32 +290,43 @@ pub fn draw(
         }
     }
     let (mut open, mut save_as, mut to_load, mut to_delete) = (true, false, None, None);
-    egui::Window::new("Saves").open(&mut open).default_width(360.0).show(ctx, |w| {
-        w.horizontal(|w| {
-            if w.text_edit_singleline(&mut ui.name).changed() {
-                ui.name_is_default = false;
-            }
-            save_as = w.button("Save as…").clicked();
-        });
-        w.label(egui::RichText::new(dir.display().to_string()).weak().small());
-        w.separator();
-        if ui.list.is_empty() {
-            w.label("No saves yet (Cmd+S quicksaves).");
-        }
-        egui::Grid::new("saves").striped(true).show(w, |w| {
-            for (k, e) in ui.list.iter().enumerate() {
-                w.monospace(&e.name);
-                w.monospace(e.modified.map_or_else(|| "?".into(), fmt_time));
-                if w.small_button("Load").clicked() {
-                    to_load = Some(k);
+    let place = crate::interface::layout::page_place_in(ctx);
+    let room = (place.max_height - crate::interface::layout::PAGE_CHROME).max(120.0);
+    egui::Window::new("Saves")
+        .open(&mut open)
+        .default_width(360.0)
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_TOP, [0.0, place.top])
+        .show(ctx, |w| {
+            w.horizontal(|w| {
+                if w.text_edit_singleline(&mut ui.name).changed() {
+                    ui.name_is_default = false;
                 }
-                if w.small_button("Delete").clicked() {
-                    to_delete = Some(k);
-                }
-                w.end_row();
+                save_as = w.button("Save as…").clicked();
+            });
+            w.label(egui::RichText::new(dir.display().to_string()).weak().small());
+            w.separator();
+            if ui.list.is_empty() {
+                let quick = crate::commands::keys::label(crate::commands::keys::Action::QuickSave);
+                w.label(format!("No saves yet ({quick} quicksaves)."));
             }
+            egui::ScrollArea::vertical().max_height(room).show(w, |w| {
+                egui::Grid::new("saves").striped(true).show(w, |w| {
+                    for (k, e) in ui.list.iter().enumerate() {
+                        w.monospace(&e.name);
+                        w.monospace(e.modified.map_or_else(|| "?".into(), fmt_time));
+                        if w.small_button("Load").clicked() {
+                            to_load = Some(k);
+                        }
+                        if w.small_button("Delete").clicked() {
+                            to_delete = Some(k);
+                        }
+                        w.end_row();
+                    }
+                })
+            });
         });
-    });
     ui.open = open;
     if save_as {
         match sanitize(&ui.name) {

@@ -96,45 +96,54 @@ pub fn draw(
         return Ok(());
     }
     let mut open = true;
-    egui::Window::new("Settings").open(&mut open).default_width(420.0).collapsible(false).show(ctx, |ui_| {
-        ui_.horizontal(|ui_| {
-            for t in SettingsTab::ALL {
-                if ui_.selectable_label(ui.tab == t, t.name()).clicked() {
-                    ui.tab = t;
+    let place = layout::page_place_in(ctx);
+    egui::Window::new("Settings")
+        .open(&mut open)
+        .default_width(420.0)
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_TOP, [0.0, place.top])
+        .show(ctx, |ui_| {
+            ui_.horizontal(|ui_| {
+                for t in SettingsTab::ALL {
+                    if ui_.selectable_label(ui.tab == t, t.name()).clicked() {
+                        ui.tab = t;
+                    }
                 }
-            }
+            });
+            ui_.separator();
+            let tab = ui.tab;
+            // The title bar and the tabs above, the rest scrolls.
+            let room = (place.max_height - layout::PAGE_CHROME).max(120.0);
+            egui::ScrollArea::vertical().max_height(room).show(ui_, |ui_| match tab {
+                // Each tab edits a copy, written back only if it changed: a
+                // `&mut` through ResMut marks it changed every frame.
+                SettingsTab::Orbits => {
+                    let eph = &sim.world.eph;
+                    let bodies: Vec<_> = eph.bodies().map(|n| (n, eph.node(n).name.clone())).collect();
+                    let mut o = orbits.clone();
+                    crate::trajectory::settings::settings_ui(ui_, &mut o, &bodies);
+                    orbits.set_if_neq(o);
+                }
+                SettingsTab::Controls => {
+                    let mut c = *controls;
+                    controls_tab(ui_, &mut c);
+                    controls.set_if_neq(c);
+                }
+                SettingsTab::Interface => {
+                    let mut i = iface.clone();
+                    interface_tab(ui_, &mut i);
+                    iface.set_if_neq(i);
+                    ui_.separator();
+                    performance(ui_, &mut ui, &mut bench);
+                }
+                SettingsTab::Visuals => {
+                    let mut v = *visuals;
+                    visuals_tab(ui_, &mut v);
+                    visuals.set_if_neq(v);
+                }
+            });
         });
-        ui_.separator();
-        let tab = ui.tab;
-        egui::ScrollArea::vertical().max_height(560.0).show(ui_, |ui_| match tab {
-            // Each tab edits a copy, written back only if it changed: a
-            // `&mut` through ResMut marks it changed every frame.
-            SettingsTab::Orbits => {
-                let eph = &sim.world.eph;
-                let bodies: Vec<_> = eph.bodies().map(|n| (n, eph.node(n).name.clone())).collect();
-                let mut o = orbits.clone();
-                crate::trajectory::settings::settings_ui(ui_, &mut o, &bodies);
-                orbits.set_if_neq(o);
-            }
-            SettingsTab::Controls => {
-                let mut c = *controls;
-                controls_tab(ui_, &mut c);
-                controls.set_if_neq(c);
-            }
-            SettingsTab::Interface => {
-                let mut i = iface.clone();
-                interface_tab(ui_, &mut i);
-                iface.set_if_neq(i);
-                ui_.separator();
-                performance(ui_, &mut ui, &mut bench);
-            }
-            SettingsTab::Visuals => {
-                let mut v = *visuals;
-                visuals_tab(ui_, &mut v);
-                visuals.set_if_neq(v);
-            }
-        });
-    });
     ui.open = open;
     Ok(())
 }

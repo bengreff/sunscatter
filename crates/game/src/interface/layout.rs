@@ -24,6 +24,11 @@ pub const GAP: f32 = 8.0;
 pub const DOCK_WIDTH: f32 = 300.0;
 /// A dock never gets shorter than this before it scrolls.
 pub const MIN_DOCK_HEIGHT: f32 = 120.0;
+/// A window the pause menu opens never gets shorter than this.
+pub const MIN_PAGE_HEIGHT: f32 = 240.0;
+/// Such a window's title bar and what sits above its scrolling part (its
+/// tabs, the save name), with the frame's margins.
+pub const PAGE_CHROME: f32 = 96.0;
 /// The egui areas of the fixed panels (the docks keep clear of them).
 pub const TIME_AREA: &str = "hud_time";
 pub const BAR_AREA: &str = "menu_bar";
@@ -123,6 +128,24 @@ pub fn dock_place(screen: Rect, top: f32, cluster: Option<Rect>, corner: Option<
     DockPlace { x, top, max_height: (bottom - top).max(MIN_DOCK_HEIGHT) }
 }
 
+/// Where a window the pause menu opens goes (Settings, Saves): centred
+/// across the screen, from `top` (under the menu bar) to above the navball
+/// cluster (or the bottom margin without it), never shorter than
+/// [`MIN_PAGE_HEIGHT`]; it scrolls within that. Centred, it stays clear of
+/// the action and staging bars on the right edge (it opened over them,
+/// interface-map.md finding 12); the pause menu steps aside while it is
+/// open (`pause::menu_shown`).
+pub fn page_place(screen: Rect, top: f32, cluster: Option<Rect>) -> DockPlace {
+    let bottom = cluster.map_or(screen.max.y - MARGIN, |c| c.min.y - GAP);
+    DockPlace { x: screen.center().x, top, max_height: (bottom - top).max(MIN_PAGE_HEIGHT) }
+}
+
+/// [`page_place`] from the panels as last drawn.
+pub fn page_place_in(ctx: &bevy_egui::egui::Context) -> DockPlace {
+    let rect = |id: &str| ctx.memory(|m| m.area_rect(bevy_egui::egui::Id::new(id)));
+    page_place(ctx.content_rect(), dock_top(None, rect(BAR_AREA)), rect(crate::navball::AREA))
+}
+
 /// Whether a mark at `r` falls behind any of the HUD's panels (`hud`, as
 /// last drawn): such a mark is not drawn, so it does not show through
 /// their translucent backgrounds.
@@ -195,6 +218,28 @@ mod tests {
         }
         // Without the cluster drawn (the tracking station), to the bottom.
         assert_eq!(dock_place(rect(0.0, 0.0, 900.0, 800.0), top, None, None).max_height, 706.0);
+    }
+
+    /// A window the pause menu opens (table): under the menu bar, down to
+    /// above the navball cluster at 1600×900, the reference Mac and
+    /// 1280×800; to the bottom margin without the cluster; never shorter
+    /// than the minimum.
+    #[test]
+    fn a_page_stops_above_the_navball_cluster() {
+        let top = 50.0;
+        let cluster = |w: f32, h: f32| rect(w / 2.0 - 235.0, h - 258.0, w / 2.0 + 235.0, h - 8.0);
+        // (window w, h, cluster drawn, max height)
+        let table = [
+            (1600.0, 900.0, true, 584.0),
+            (1512.0, 982.0, true, 666.0),
+            (1280.0, 800.0, true, 484.0),
+            (1280.0, 800.0, false, 740.0),
+            (700.0, 400.0, true, MIN_PAGE_HEIGHT),
+        ];
+        for (w, h, drawn, max_height) in table {
+            let place = page_place(rect(0.0, 0.0, w, h), top, drawn.then(|| cluster(w, h)));
+            assert_eq!(place, DockPlace { x: w / 2.0, top, max_height }, "{w}x{h} {drawn}");
+        }
     }
 
     /// The notifications window in the bottom-left corner: the dock ends

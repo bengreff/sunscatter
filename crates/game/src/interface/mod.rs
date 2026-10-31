@@ -25,6 +25,9 @@ pub mod theme {
     use bevy_egui::egui::{Color32, CornerRadius, Frame, Margin, Stroke};
 
     pub const PANEL: Color32 = Color32::from_rgba_premultiplied(7, 10, 15, 210);
+    /// The panel's colour without its translucency: a window of text read
+    /// over the HUD (the help), whose numbers would show through.
+    pub const SOLID: Color32 = Color32::from_rgb(7, 10, 15);
     pub const BORDER: Color32 = Color32::from_rgba_premultiplied(60, 80, 100, 90);
     pub const DIM: Color32 = Color32::from_rgb(130, 150, 170);
     pub const TEXT: Color32 = Color32::from_rgb(225, 235, 245);

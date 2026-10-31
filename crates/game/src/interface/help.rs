@@ -116,6 +116,7 @@ pub fn draw(mut contexts: EguiContexts, mut help: ResMut<Help>) -> Result {
         .resizable(false)
         .default_width(760.0)
         .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+        .frame(theme::panel_frame().fill(theme::SOLID))
         .show(ctx, |ui| {
             ui.set_max_height(height);
             egui::ScrollArea::vertical().max_height(height).show(ui, |ui| grid(ui, &sections()));
