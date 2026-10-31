@@ -74,10 +74,10 @@ fn every_field_set(def: &ShipDef) -> ShipState {
     s.sequence = 1;
     s.stages[0].pinned = !s.stages[0].pinned;
     s.functions[0].pinned = !s.functions[0].pinned;
-    let r = &mut s.runtime;
-    for (i, x) in r.engines.iter_mut().enumerate() {
+    for (i, x) in s.engines.iter_mut().enumerate() {
         (x.level, x.cutoff, x.reason, x.settling) = (v(i, 0.5), v(i, 0.6), Some(format!("{i}")), Some(v(i, 0.3)));
     }
+    let r = &mut s.runtime;
     for (i, x) in r.joints.iter_mut().enumerate() {
         (x.force, x.moment, x.ratio, x.to_ultimate) =
             (DVec3::splat(v(i, 1e3)), DVec3::X * v(i, 9.0), v(i, 0.3), Some(v(i, 2.0)));
@@ -157,7 +157,6 @@ fn assert_every_field_set(s: &ShipState, at_load: &ShipState) {
         (functions != &l.functions, "functions"),
     ];
     let Runtime {
-        engines,
         joints,
         severed,
         orders,
@@ -181,7 +180,6 @@ fn assert_every_field_set(s: &ShipState, at_load: &ShipState) {
     } = runtime;
     let r = &l.runtime;
     let run = [
-        (engines != &r.engines, "runtime.engines"),
         (joints != &r.joints, "runtime.joints"),
         (severed != &r.severed, "runtime.severed"),
         (orders != &r.orders, "orders"),
@@ -239,7 +237,6 @@ fn a_split_puts_each_item_in_exactly_one_piece() {
                 x.power.len(),
                 x.cabin.iter().count(),
                 x.fates.len(),
-                r.engines.len(),
                 r.joints.len() + r.severed.len(),
                 r.fins.len(),
                 r.lost.len(),

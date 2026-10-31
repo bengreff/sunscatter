@@ -138,7 +138,7 @@ fn each_outcome() {
     s.fates[k].threshold = 1e-12;
     step(&def, &mut s, &env(0.02, false));
     assert_eq!(s.engines[e5].status, EngineStatus::Off);
-    assert!(s.runtime.engines[e5].reason.as_deref().unwrap_or("").contains("ignition"));
+    assert!(s.engines[e5].reason.as_deref().unwrap_or("").contains("ignition"));
     // The MVac's restart: uncontained, the engine destroyed.
     let mvac = engine(&def, "s2.mvac");
     s.engines[mvac].status = EngineStatus::Starting;

@@ -195,7 +195,7 @@ fn flows(x: &Inputs) -> Group {
     let mut g = Group::new("FLOWS NOW");
     let mut total = 0.0;
     for (i, e) in x.def.engines.iter().enumerate() {
-        let level = x.state.runtime.engines.get(i).map_or(0.0, |r| r.level);
+        let level = x.state.engines.get(i).map_or(0.0, |r| r.level);
         if level <= 0.0 || !x.known.knows(Quantity::EngineThrust(i as u32)) {
             continue;
         }

@@ -149,7 +149,7 @@ pub fn card(live: &Live, part: u32) -> Option<Card> {
 /// controller's reading) and ignitions left.
 fn engine(live: &Live, i: usize) -> Section {
     let (d, s) = (&live.def.engines[i], &live.state.engines[i]);
-    let run = live.state.runtime.engines.get(i);
+    let run = live.state.engines.get(i);
     let state = engine_words(live, i);
     let thrust = live.thrusts.get(i).copied().unwrap_or(0.0);
     let rated = format::force(Some(sim::systems::Reading { value: d.data.thrust_vac, precision: 0.0 }));
@@ -174,7 +174,7 @@ fn engine(live: &Live, i: usize) -> Section {
 
 /// Engine `i`'s state in words.
 pub(super) fn engine_words(live: &Live, i: usize) -> &'static str {
-    let run = live.state.runtime.engines.get(i);
+    let run = live.state.engines.get(i);
     match live.state.engines[i].status {
         EngineStatus::Off if run.is_some_and(|r| r.settling.is_some()) => "waiting for settled propellant",
         EngineStatus::Off => "off",

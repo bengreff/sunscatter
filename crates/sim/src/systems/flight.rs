@@ -162,7 +162,7 @@ pub fn engine_readings(def: &ShipDef, state: &ShipState, k: &Knowledge) -> Vec<O
     (0..def.engines.len())
         .map(|i| {
             k.knows(Quantity::EngineThrust(i as u32)).then(|| {
-                let run = state.runtime.engines.get(i);
+                let run = state.engines.get(i);
                 EngineReading {
                     status: state.engines[i].status,
                     level: run.map_or(0.0, |r| r.level),

@@ -168,7 +168,7 @@ fn joint_icon(d: &sim::craft::ship::JointDef, intact: bool, state: &ShipState) -
 /// else ready.
 pub fn engine_look(def: &ShipDef, state: &ShipState, i: usize) -> Look {
     let (d, e) = (&def.engines[i], &state.engines[i]);
-    let settling = state.runtime.engines.get(i).is_some_and(|r| r.settling.is_some());
+    let settling = state.engines.get(i).is_some_and(|r| r.settling.is_some());
     let fed = d.feeds.iter().all(|l| l.iter().any(|&t| state.tanks[t as usize].liquid > 0.0));
     match e.status {
         EngineStatus::Failed => Look::Failed,

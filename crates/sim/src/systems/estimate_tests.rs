@@ -74,7 +74,7 @@ fn on_the_pad_the_sequence_has_two_burns() {
 fn the_burn_now_carries_thrust_weight_ratio_and_mean_isp() {
     let (def, mut state, hull) = falcon9();
     state.next_stage(&def).unwrap();
-    for r in state.runtime.engines.iter_mut() {
+    for r in state.engines.iter_mut() {
         r.level = 1.0;
     }
     let k = Knowledge::perfect();

@@ -379,7 +379,7 @@ fn engine_group(state: &ShipState, i: usize, e: &sim::craft::ship::EngineDef, k:
     if let Some(s) = state.engines.get(i) {
         let ignitions =
             if s.ignitions == u32::MAX { "unlimited (hypergolic)".to_string() } else { s.ignitions.to_string() };
-        let level = state.runtime.engines.get(i).map_or(0.0, |r| r.level);
+        let level = state.engines.get(i).map_or(0.0, |r| r.level);
         let chamber =
             k.or_dash(k.knows(Quantity::EngineThrust(i as u32)), || format!("{:.0} % / 100 %", level * 100.0));
         g.row("status", format!("{:?}", s.status))

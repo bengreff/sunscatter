@@ -51,7 +51,10 @@ pub fn thermal(def: &ShipDef, state: &mut ShipState, b: &Bodies, dt: f64) -> Vec
 /// 1 this tick.
 pub fn vibration(def: &ShipDef, state: &mut ShipState, b: &Bodies, dt: f64) -> Vec<u32> {
     let index = |id: u32| b.ids.iter().position(|&x| x == id);
-    let sources: Vec<(usize, f64)> = (def.engines.iter().zip(&state.runtime.engines))
+    let sources: Vec<(usize, f64)> = def
+        .engines
+        .iter()
+        .zip(&state.engines)
         .filter(|(_, r)| r.level > 0.0)
         .filter_map(|(e, r)| Some((index(e.part)?, damage::ENGINE_GRMS * r.level.min(1.0))))
         .collect();

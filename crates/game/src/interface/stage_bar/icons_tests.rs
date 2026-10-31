@@ -65,7 +65,7 @@ fn icons_follow_the_ship_state() {
     assert_eq!(looks(&state, "engines"), [Running, Failed, Running, Spent]);
     state.runtime.refit(def);
     state.engines[3].ignitions = 1;
-    state.runtime.engines[3].settling = Some(0.5);
+    state.engines[3].settling = Some(0.5);
     assert_eq!(looks(&state, "engines")[3], Armed, "waiting for its propellant");
     // Legs: one on its way, one deployed.
     state.mechanisms[0].target = 120.0;

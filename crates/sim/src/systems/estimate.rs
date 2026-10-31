@@ -263,7 +263,7 @@ fn walk(def: &ShipDef, state: &ShipState, inp: &Inputs, levels: &[f64]) -> Walke
     // The burn now: what is starting, running or waiting to start.
     for i in 0..def.engines.len() {
         let e = &w.s.engines[i];
-        let settling = state.runtime.engines.get(i).is_some_and(|r| r.settling.is_some());
+        let settling = state.engines.get(i).is_some_and(|r| r.settling.is_some());
         let burning = matches!(e.status, EngineStatus::Starting | EngineStatus::Running);
         if (burning || (settling && e.status == EngineStatus::Off)) && !w.gone.contains(&def.engines[i].part) {
             w.light(i);
@@ -296,8 +296,6 @@ impl<'a> Walk<'a> {
             clamped: state.clamped,
             ..ShipState::default()
         };
-        s.runtime.engines = state.runtime.engines.clone();
-        s.runtime.engines.resize_with(def.engines.len(), Default::default);
         s.runtime.lost = state.runtime.lost.clone();
         s.runtime.unpowered = state.runtime.unpowered.clone();
         // Each burn of the walk settles its liquids on their outlets.
@@ -331,12 +329,12 @@ impl<'a> Walk<'a> {
         let d = &self.def.engines[i].data;
         let e = &mut self.s.engines[i];
         e.status = EngineStatus::Running;
-        self.s.runtime.engines[i].level = propulsion::setting(d, self.throttle, e.throttle);
+        self.s.engines[i].level = propulsion::setting(d, self.throttle, e.throttle);
     }
 
     fn douse(&mut self, i: usize) {
         self.s.engines[i].status = EngineStatus::Off;
-        self.s.runtime.engines[i].level = 0.0;
+        self.s.engines[i].level = 0.0;
     }
 
     fn lit(&self) -> Vec<usize> {

@@ -256,7 +256,7 @@ fn a_rotation_nudge_mid_burn_hands_the_burn_over_as_it_was_flying() {
     s.set_nodes(vec![node, later]).unwrap();
     // The pilot's controls: SAS on, prograde, the throttle closed.
     let pilot = Controls { sas: true, hold: HoldMode::Prograde, ..Controls::default() };
-    let burning = |s: &Vessel| s.ship().unwrap().runtime.engines.iter().any(|e| e.level > 0.5);
+    let burning = |s: &Vessel| s.ship().unwrap().engines.iter().any(|e| e.level > 0.5);
     let mut lit = None;
     while lit.is_none_or(|t: sim::time::Epoch| s.time.seconds_since(t) < 1.0) {
         let t = s.time.add_seconds(0.25);

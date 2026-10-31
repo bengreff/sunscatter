@@ -104,7 +104,7 @@ pub fn lit(state: &ShipState) -> Vec<u32> {
 pub fn active(state: &ShipState) -> bool {
     (state.engines.iter())
         .any(|e| matches!(e.status, EngineStatus::Starting | EngineStatus::Running | EngineStatus::ShuttingDown))
-        || state.runtime.engines.iter().any(|r| r.settling.is_some())
+        || state.engines.iter().any(|r| r.settling.is_some())
 }
 
 /// The longest an engine's start sequence waits for its propellant to
@@ -133,7 +133,7 @@ pub fn light(def: &ShipDef, state: &mut ShipState, i: usize) {
     if !ground && d.data.igniter != crate::catalog::Igniter::Hypergolic && e.ignitions != u32::MAX && e.ignitions > 0 {
         e.ignitions -= 1;
     }
-    let run = &mut state.runtime.engines[i];
+    let run = &mut state.engines[i];
     run.reason = None;
     run.settling = None;
     if let Some(p) = state.parts.iter_mut().find(|p| p.part == d.part) {
@@ -144,7 +144,10 @@ pub fn light(def: &ShipDef, state: &mut ShipState, i: usize) {
 /// The direction (body axes) the waiting engines' start sequences want the
 /// thrusters to push (their thrust's), if any engine is settling.
 pub fn ullage(def: &ShipDef, state: &ShipState) -> DVec3 {
-    let want: DVec3 = (def.engines.iter().zip(&state.runtime.engines))
+    let want: DVec3 = def
+        .engines
+        .iter()
+        .zip(&state.engines)
         .filter(|(_, r)| r.settling.is_some())
         .map(|(d, _)| d.data.dir.normalize())
         .sum();
@@ -159,18 +162,18 @@ pub fn ullage(def: &ShipDef, state: &ShipState) -> DVec3 {
 /// after [`SETTLE_LIMIT`].
 fn settle_or_start(def: &ShipDef, state: &mut ShipState, env: &Env) {
     for i in 0..def.engines.len() {
-        let Some(waited) = state.runtime.engines.get(i).and_then(|r| r.settling) else { continue };
+        let Some(waited) = state.engines.get(i).and_then(|r| r.settling) else { continue };
         if state.engines[i].status != EngineStatus::Off {
-            state.runtime.engines[i].settling = None;
+            state.engines[i].settling = None;
         } else if feeds_settled(def, state, i) || env.debug {
             light(def, state, i);
             state.runtime.event(env.at, format!("{}: settled after {waited:.1} s, starting", def.engines[i].id), false);
         } else if waited + env.dt > SETTLE_LIMIT {
-            state.runtime.engines[i].settling = None;
+            state.engines[i].settling = None;
             let text = format!("{}: start abandoned, its propellant would not settle", def.engines[i].id);
             state.runtime.event(env.at, text, true);
         } else {
-            state.runtime.engines[i].settling = Some(waited + env.dt);
+            state.engines[i].settling = Some(waited + env.dt);
         }
     }
 }
@@ -194,7 +197,7 @@ pub fn output(def: &ShipDef, state: &ShipState, p: f64, dt: f64, infinite: bool)
     let mut draws = vec![0.0; def.tanks.len()];
     let mut running: Vec<(usize, f64, f64, [Option<usize>; 2])> = Vec::new();
     for (i, (e, s)) in def.engines.iter().zip(&state.engines).enumerate() {
-        let level = state.runtime.engines.get(i).map_or(0.0, |r| r.level);
+        let level = state.engines.get(i).map_or(0.0, |r| r.level);
         if level <= 0.0 || matches!(s.status, EngineStatus::Off | EngineStatus::Failed) {
             continue;
         }
@@ -304,7 +307,7 @@ pub fn stop(def: &ShipDef, state: &mut ShipState, i: usize, why: Stop, at: Epoch
     let e = &mut state.engines[i];
     e.status = status;
     e.timer = 0.0;
-    let run = &mut state.runtime.engines[i];
+    let run = &mut state.engines[i];
     run.level = 0.0;
     run.cutoff = 0.0;
     run.reason = Some(text.clone());
@@ -333,8 +336,8 @@ pub fn step(def: &ShipDef, state: &mut ShipState, env: &Env, feeds: &[Feed]) -> 
 /// every flight computer is lost or unpowered is shut down by its own
 /// controller.
 fn safe(def: &ShipDef, state: &mut ShipState, at: Epoch) {
-    let lit: Vec<bool> = (state.engines.iter().zip(&state.runtime.engines))
-        .map(|(e, r)| matches!(e.status, EngineStatus::Starting | EngineStatus::Running) || r.settling.is_some())
+    let lit: Vec<bool> = (state.engines.iter())
+        .map(|e| matches!(e.status, EngineStatus::Starting | EngineStatus::Running) || e.settling.is_some())
         .collect();
     if !lit.contains(&true) {
         return;
@@ -348,12 +351,12 @@ fn safe(def: &ShipDef, state: &mut ShipState, at: Epoch) {
 /// Starts engine `i`'s shutdown (its tail-off) for `why`, and drops a
 /// start waiting for its propellant; nothing for an engine not lit.
 pub fn shut_down(state: &mut ShipState, i: usize, why: &str) {
-    state.runtime.engines[i].settling = None;
+    state.engines[i].settling = None;
     let e = &mut state.engines[i];
     if matches!(e.status, EngineStatus::Starting | EngineStatus::Running) {
         e.status = EngineStatus::ShuttingDown;
         e.timer = 0.0;
-        let run = &mut state.runtime.engines[i];
+        let run = &mut state.engines[i];
         run.cutoff = run.level;
         run.reason = Some(why.into());
     }
@@ -370,7 +373,7 @@ fn close_throttle(def: &ShipDef, state: &mut ShipState, env: &Env) {
     let lit: Vec<usize> = (0..def.engines.len())
         .filter(|&i| {
             matches!(state.engines[i].status, EngineStatus::Starting | EngineStatus::Running)
-                || state.runtime.engines[i].settling.is_some()
+                || state.engines[i].settling.is_some()
         })
         .collect();
     for &i in &lit {
@@ -393,7 +396,7 @@ fn inlet_trouble(def: &ShipDef, state: &mut ShipState, i: usize, env: &Env, feed
     if !matches!(status, EngineStatus::Starting | EngineStatus::Running) {
         return false;
     }
-    let level = state.runtime.engines[i].level;
+    let level = state.engines[i].level;
     let mut trouble = None;
     for (list, need) in d.feeds.iter().zip([d.data.npsp_ox, d.data.npsp_fuel]) {
         let Some(t) = first(list, state, false) else { continue };
@@ -419,7 +422,7 @@ fn step_engine(def: &ShipDef, state: &mut ShipState, i: usize, env: &Env) {
     let e = &state.engines[i];
     let (status, timer, own) = (e.status, e.timer + env.dt, e.throttle);
     if matches!(status, EngineStatus::Off | EngineStatus::Failed) {
-        state.runtime.engines[i].level = 0.0;
+        state.engines[i].level = 0.0;
         return;
     }
     let dry = |list: &[u32]| first(list, state, env.debug).is_none();
@@ -435,7 +438,7 @@ fn step_engine(def: &ShipDef, state: &mut ShipState, i: usize, env: &Env) {
         EngineStatus::Running => (EngineStatus::Running, target),
         _ => {
             let tau = tail_off(&d.data);
-            let cutoff = state.runtime.engines[i].cutoff;
+            let cutoff = state.engines[i].cutoff;
             if tau <= 0.0 || timer >= 5.0 * tau {
                 (EngineStatus::Off, 0.0)
             } else {
@@ -446,7 +449,7 @@ fn step_engine(def: &ShipDef, state: &mut ShipState, i: usize, env: &Env) {
     let e = &mut state.engines[i];
     e.timer = if next == status { timer } else { 0.0 };
     e.status = next;
-    state.runtime.engines[i].level = level;
+    state.engines[i].level = level;
     if matches!(next, EngineStatus::Running | EngineStatus::Starting) {
         if let Some(p) = state.parts.iter_mut().find(|p| p.part == d.part) {
             p.history.run_time += env.dt;
@@ -480,7 +483,7 @@ fn release(def: &ShipDef, state: &mut ShipState, at: Epoch, debug: bool) -> Vec<
         if state.runtime.release_engines.is_empty() {
             // None lit (one waiting for its propellant to settle is about
             // to): armed, it would hold the vessel in live ticks for ever.
-            if !state.runtime.engines.iter().any(|r| r.settling.is_some()) {
+            if !state.engines.iter().any(|r| r.settling.is_some()) {
                 disarm(state, at, "Clamps: release disarmed: no engine lit; clamps held".into(), true);
             }
             return Vec::new();

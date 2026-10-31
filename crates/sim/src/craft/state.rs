@@ -67,7 +67,8 @@ pub enum EngineStatus {
     Failed,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+/// An engine's state and its output as delivered (the transients').
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct EngineState {
     pub part: u32,
     pub status: EngineStatus,
@@ -81,6 +82,20 @@ pub struct EngineState {
     pub gimbal: [f64; 2],
     /// The pilot's throttle and the readouts refer to it.
     pub selected: bool,
+    /// Thrust level now, as a fraction of full flow (0 off; ramps up in a
+    /// start, decays in the tail-off).
+    #[serde(default)]
+    pub level: f64,
+    /// The level when the shutdown began (the tail-off decays from it).
+    #[serde(default)]
+    pub cutoff: f64,
+    /// Why it stopped or failed last, for the player.
+    #[serde(default)]
+    pub reason: Option<String>,
+    /// Waiting to start while its propellant settles (seconds waited): its
+    /// start sequence fires the thrusters that push along its thrust.
+    #[serde(default)]
+    pub settling: Option<f64>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -302,6 +317,7 @@ impl ShipState {
                 throttle: 1.0,
                 gimbal: [0.0; 2],
                 selected: first.as_ref().is_some_and(|f| f.contains(&i)),
+                ..EngineState::default()
             })
             .collect();
         let crewed = def.seats.first().map(|s| s.part);

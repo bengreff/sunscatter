@@ -73,9 +73,9 @@ pub fn apply(def: &ShipDef, state: &mut ShipState, command: &ShipCommand, cx: Co
                 // settle (its acceleration history says when), firing the
                 // thrusters that push along the engine's thrust if it has
                 // any; commanded again while it waits, it starts at once.
-                let waiting = state.runtime.engines[i].settling.is_some();
+                let waiting = state.engines[i].settling.is_some();
                 if !waiting && !super::propulsion::feeds_settled(def, state, i) {
-                    state.runtime.engines[i].settling = Some(0.0);
+                    state.engines[i].settling = Some(0.0);
                     let how = if super::rcs::can_push(def, state, d.data.dir) { "settling" } else { "waiting for" };
                     // From the sequence, the next stage order starts it
                     // ([`next_stage`]).
@@ -198,7 +198,7 @@ pub fn release_undone(stages: &[Stage], sequence: u32) -> u32 {
 
 /// Whether an engine named by `s` waits for its propellant to settle.
 fn settling(def: &ShipDef, state: &ShipState, s: &str) -> bool {
-    let waits = |i: usize| state.runtime.engines.get(i).is_some_and(|r| r.settling.is_some());
+    let waits = |i: usize| state.engines.get(i).is_some_and(|r| r.settling.is_some());
     def.engines_of(s).into_iter().any(|i| waits(i) && state.engines[i].status == EngineStatus::Off)
 }
 
@@ -344,10 +344,7 @@ mod tests {
         assert!(state.runtime.events.last().unwrap().text.contains("no working controller"));
         state.runtime.unpowered.clear();
         apply(&def, &mut state, &ShipCommand::Ignite("s2".into()), cx).unwrap();
-        assert!(
-            matches!(state.engines[mvac].status, EngineStatus::Starting)
-                || state.runtime.engines[mvac].settling.is_some()
-        );
+        assert!(matches!(state.engines[mvac].status, EngineStatus::Starting) || state.engines[mvac].settling.is_some());
     }
 
     /// A stage run again (D114) starts the engines that are off and can
@@ -524,7 +521,7 @@ mod tests {
         let (name, _) = next_stage(&def, &mut state, at).unwrap();
         println!("{name}: {:?}", state.runtime.events.last());
         assert_eq!(state.engines[mvac].status, EngineStatus::Off);
-        assert!(state.runtime.engines[mvac].settling.is_some());
+        assert!(state.engines[mvac].settling.is_some());
         assert!(state.runtime.events.iter().any(|e| e.text.contains("stage again to start now")));
         let (name, _) = next_stage(&def, &mut state, at).unwrap();
         assert!(name.ends_with("start now"), "{name}");
@@ -559,7 +556,7 @@ mod tests {
             for (i, d) in def.engines.iter().enumerate() {
                 if d.id.starts_with(running) {
                     state.engines[i].status = EngineStatus::Running;
-                    state.runtime.engines[i].level = 1.0;
+                    state.engines[i].level = 1.0;
                 }
             }
             let effects = function(&def, &mut state, "Launch abort", at).expect("the function");

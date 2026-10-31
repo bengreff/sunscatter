@@ -161,7 +161,7 @@ fn the_falcon_9_ascent_breaks_nothing() {
         booster.advance(&w, next, &Controls::default(), usize::MAX);
         assert!(v.plan_breakup().is_none() && booster.plan_breakup().is_none(), "{:?} {:?}", bad(&v), bad(&booster));
     }
-    let mvac = v.ship().unwrap().runtime.engines.iter().map(|e| e.level).fold(0.0, f64::max);
+    let mvac = v.ship().unwrap().engines.iter().map(|e| e.level).fold(0.0, f64::max);
     println!("MVac level {mvac:.2}; events: {:?}", v.ship_events().iter().map(|e| &e.text).collect::<Vec<_>>());
     assert!(bad(&v).is_empty() && bad(&booster).is_empty(), "{:?} {:?}", bad(&v), bad(&booster));
 }

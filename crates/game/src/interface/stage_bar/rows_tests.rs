@@ -46,7 +46,7 @@ fn on_the_pad_the_next_stage_is_at_the_bottom() {
 fn the_active_stage_shows_the_burn_now() {
     let (def, mut state, hull) = falcon9();
     state.next_stage(&def).unwrap();
-    for r in state.runtime.engines.iter_mut() {
+    for r in state.engines.iter_mut() {
         r.level = 1.0;
     }
     let rows = bar(&def, &state, &hull, &Knowledge::perfect());

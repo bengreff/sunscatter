@@ -1,7 +1,6 @@
 //! The ship systems' own state (D104, D105; ship-model.md §5): what the
 //! behaviour of a craft of parts needs beyond the plain ship state of
-//! `craft::state` — each engine's delivered thrust
-//! level, each joint's load, the orders waiting for their epoch, the
+//! `craft::state` — each joint's load, the orders waiting for their epoch, the
 //! clamps' armed release, the last tick's motion as the systems felt it,
 //! the failure seed and the event log. Saved inside the ship state
 //! (`ShipState::runtime`); every per-item list is aligned with its
@@ -13,24 +12,6 @@ use crate::craft::ship::ShipDef;
 use crate::time::Epoch;
 use glam::DVec3;
 use serde::{Deserialize, Serialize};
-
-/// An engine's output as delivered (the transients' state).
-#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
-pub struct EngineRun {
-    pub part: u32,
-    /// Thrust level now, as a fraction of full flow (0 off; ramps up in a
-    /// start, decays in the tail-off).
-    pub level: f64,
-    /// The level when the shutdown began (the tail-off decays from it).
-    pub cutoff: f64,
-    /// Why it stopped or failed last, for the player.
-    #[serde(default)]
-    pub reason: Option<String>,
-    /// Waiting to start while its propellant settles (seconds waited): its
-    /// start sequence fires the thrusters that push along its thrust.
-    #[serde(default)]
-    pub settling: Option<f64>,
-}
 
 /// A joint's load at the last live tick.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -99,7 +80,6 @@ pub const EVENTS_KEPT: usize = 64;
 /// The ship systems' state.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Runtime {
-    pub engines: Vec<EngineRun>,
     pub joints: Vec<JointRun>,
     /// The loads of joints a split cut, with their child's piece
     /// (`ShipState::severed`).
@@ -170,7 +150,6 @@ impl Runtime {
     /// off, joints unloaded, nothing waiting.
     pub fn initial(def: &ShipDef) -> Runtime {
         Runtime {
-            engines: def.engines.iter().map(|e| EngineRun { part: e.part, ..EngineRun::default() }).collect(),
             joints: (def.joints.iter())
                 .map(|j| JointRun { parent: j.parent, child: j.child, ..JointRun::default() })
                 .collect(),
@@ -181,7 +160,7 @@ impl Runtime {
     /// The state of the piece holding the parts `kept` (`whole` and `piece`
     /// the definitions; `own`: the piece the vessel keeps), each field by
     /// its rule (`craft::partition`):
-    /// * by part: the engines, lost functions, unpowered loads, the
+    /// * by part: the lost functions, unpowered loads, the
     ///   aero surfaces' deflections; the joints within the piece, and those
     ///   the split cuts with their child's piece (`severed`);
     /// * the bus readouts of the buses the piece keeps (a bus the split
@@ -200,7 +179,6 @@ impl Runtime {
     pub fn partition(&self, kept: &[u32], whole: &ShipDef, piece: &ShipDef, own: bool) -> Runtime {
         use crate::craft::partition::by;
         let Runtime {
-            engines,
             joints,
             severed,
             orders,
@@ -227,7 +205,6 @@ impl Runtime {
         let within = |j: &JointRun| kept.contains(&j.parent) && kept.contains(&j.child);
         let cut = |j: &JointRun| !kept.contains(&j.parent) && kept.contains(&j.child);
         Runtime {
-            engines: by(engines, |e| e.part, kept),
             joints: joints.iter().filter(|j| within(j)).cloned().collect(),
             severed: (severed.iter().filter(|j| kept.contains(&j.child)))
                 .chain(joints.iter().filter(|j| cut(j)))
@@ -271,11 +248,10 @@ impl Runtime {
         b_def: &ShipDef,
         whole: &ShipDef,
     ) -> Result<Runtime, String> {
-        use crate::craft::partition::{keyed, zip_merge};
+        use crate::craft::partition::keyed;
         let a_parts: Vec<u32> = a_def.parts.iter().map(|p| p.part).collect();
         let in_a = |p: u32| a_parts.contains(&p);
         let Runtime {
-            engines,
             joints: _,
             severed: _,
             orders,
@@ -323,11 +299,9 @@ impl Runtime {
         log.sort_by(|x, y| x.at.partial_cmp(&y.at).unwrap_or(std::cmp::Ordering::Equal));
         let drop = log.len().saturating_sub(EVENTS_KEPT);
         log.drain(..drop);
-        let engine_run = zip_merge(whole.engines.iter().map(|x| x.part), &in_a, engines, &b.engines, "engine runs")?;
         let waits = |r: &Runtime, d: &ShipDef| renumber(&r.release_engines, &d.engines, &whole.engines);
         let b_has_cabin = !b_def.seats.is_empty() && a_def.seats.is_empty();
         Ok(Runtime {
-            engines: engine_run,
             joints: out_joints,
             severed,
             orders: orders.clone(),
@@ -355,7 +329,7 @@ impl Runtime {
 
     /// Whether the per-item lists match the definition.
     pub fn fits(&self, def: &ShipDef) -> bool {
-        self.engines.len() == def.engines.len() && self.joints.len() == def.joints.len()
+        self.joints.len() == def.joints.len()
     }
 
     /// Builds the per-item lists as loaded for a state saved before the
@@ -367,10 +341,10 @@ impl Runtime {
         if self.fits(def) {
             return;
         }
-        let never_ran = self.engines.is_empty() && self.joints.is_empty();
+        let never_ran = self.joints.is_empty();
         debug_assert!(never_ran, "the systems' lists disagree with the definition {}", def.name);
         let fresh = Runtime::initial(def);
-        (self.engines, self.joints) = (fresh.engines, fresh.joints);
+        self.joints = fresh.joints;
         if !never_ran {
             let at = self.stepped.or(self.launch).unwrap_or(Epoch::new(0, 0.0));
             self.event(at, "Systems: their state disagreed with the craft and was reset (a bug)", true);
