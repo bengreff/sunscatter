@@ -28,8 +28,9 @@ The agent is at a **control location** like you (D067): mission control when the
 | `set_warp` | Time warp level; resumes stopped time |
 | `switch_vessel` | Fly a vessel: it becomes active, and the control location moves aboard it if it is crewed (mission control if not) |
 | `go_to_mission_control` | Open the tracking station (mission control) |
-| `set_controls` | Throttle, SAS, the hold and the speed reference of any vessel (`id`, default the active one; D112), after the light delay from anywhere but aboard; `rotate`, the pilot's rotation keys held aboard the active vessel |
+| `set_controls` | Throttle, SAS, the hold and the speed reference of any vessel (`id`, default the active one; D112), after the light delay from anywhere but aboard; `rotate`, the pilot's rotation keys held, and `rcs` (off, on, translate, rotate) with `rcs_fine`, the pilot's RCS mode (R and the RCS menu), aboard the active vessel |
 | `stage` | A craft of parts' next stage (`id`, default the active one), sent like any command |
+| `command` | A craft of parts' commands as the player gives them, sent like any command: `function` runs one of its functions by name (the action bar's: an abort, the legs, the grid fins); `item` (a part's or component's id) with `do` runs one of its commands by its label, as its part card and the systems screen show them (IGNITE, SHUT DOWN, DEPLOY, OPEN, SEPARATE, RCS … on, POWER … off, ARM PARACHUTES). `item` alone lists its commands now; neither lists the functions and every item with commands |
 | `set_plan` | Replace a vessel's planned burns (prograde/normal/radial Δv, time); sent with light delay. A craft of parts gets nodes (D126: `in_s` is the burn's middle, flown closed-loop by the maneuver program); the result gives each node's predicted ignition, duration and warnings, and the Δv available |
 | `get_landing_prediction` | Where, when and how fast the active vessel meets the ground (needs a navigation solution) |
 | `closest_approaches` | Closest approaches between two vessels (nearest first) |

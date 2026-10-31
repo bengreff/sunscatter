@@ -275,16 +275,36 @@ fn joints_and_mechanisms(live: &Live, part: u32, inside: &Inside, out: &mut Vec<
     }
 }
 
-/// The part's own commands (its components' are on the systems screen)
-/// and arming the parachutes it carries.
+/// The part's commands on its card, each with whether it asks first.
 fn commands(live: &Live, part: u32) -> Vec<Command> {
-    let (def, state) = (live.def, live.state);
+    (part_commands(live.def, live.state, live.chute, part).into_iter())
+        .map(|(label, command)| Command { confirm: irreversible(live.def, &command), label, command })
+        .collect()
+}
+
+/// A part's own commands (its components' are on the systems screen,
+/// `inspect::commands`) and arming the parachutes it carries while they
+/// are stowed (`chute`: the parachutes' parts and their state's words,
+/// [`chutes`]): the one list its card and the agent's `command` tool give.
+pub fn part_commands(
+    def: &ShipDef,
+    state: &ShipState,
+    chute: Option<(&[u32], &str)>,
+    part: u32,
+) -> Vec<(String, ShipCommand)> {
     let mut list = inspect::commands(def, state, Selection::Part(part));
-    if live.chute.is_some_and(|(parts, words)| parts.contains(&part) && words == "stowed") {
+    if chute.is_some_and(|(parts, words)| parts.contains(&part) && words == "stowed") {
         list.push((crate::staging::parts::label(&ShipCommand::ArmChutes), ShipCommand::ArmChutes));
     }
     list.dedup_by(|a, b| a.1 == b.1);
-    list.into_iter().map(|(label, command)| Command { confirm: irreversible(def, &command), label, command }).collect()
+    list
+}
+
+/// A vessel's parachutes: the parts that carry them and their state in
+/// words (empty and "stowed" without any).
+pub fn chutes(v: &sim::vessel::Vessel) -> (Vec<u32>, &'static str) {
+    let parts = v.craft.design().parts.iter().filter(|p| p.chute).map(|p| p.id).collect();
+    (parts, chute_words(crate::interface::stage_bar::icons::chute_look(&v.chute)))
 }
 
 /// The parachutes' state in words (from their look, `stage_bar::icons`).

@@ -23,6 +23,10 @@ use bevy::prelude::*;
 use glam::DVec3;
 use mcp::{Server, Tool, ToolResult};
 use serde_json::{json, Value};
+use sim::craft::command::ShipCommand;
+use sim::craft::ship::ShipDef;
+use sim::craft::state::ShipState;
+use sim::systems::rcs::{RcsMode, RcsOnly};
 use sim::systems::Quantity;
 use sim::vessel::{HoldMode, Phase, SpeedReference, VesselId};
 
@@ -173,7 +177,8 @@ fn flight_tools() -> Vec<Tool> {
              reference body; a planned burn is flown by the maneuver hold on its own. `rotate` is the pilot's \
              rotation keys held (body axes, each −1–1: x pitch, y yaw, z roll; [0,0,0] lets go), aboard the active \
              vessel only: for a short manoeuvre such as a pitch kick, flown from stopped time with `step` (agents \
-             fly by decisions, D044).",
+             fly by decisions, D044). `rcs` (off, on, translate or rotate only) and `rcs_fine` are the pilot's RCS \
+             mode (R and the RCS menu), aboard the active vessel only.",
             schema(
                 json!({
                     "id": id,
@@ -182,7 +187,9 @@ fn flight_tools() -> Vec<Tool> {
                     "hold": {"type": "string", "enum": HOLD_NAMES.map(|(n, _)| n)},
                     "speed_reference": {"type": "string", "enum": SPEED_NAMES.map(|(n, _)| n)},
                     "rotate": {"type": "array", "items": {"type": "number", "minimum": -1, "maximum": 1},
-                               "minItems": 3, "maxItems": 3}
+                               "minItems": 3, "maxItems": 3},
+                    "rcs": {"type": "string", "enum": RCS_NAMES.map(|(n, _)| n)},
+                    "rcs_fine": {"type": "boolean"}
                 }),
                 &[],
             ),
@@ -193,7 +200,21 @@ fn flight_tools() -> Vec<Tool> {
              pieces separated, as its stage list says. It travels like any command (`arrives_in_s`).",
             schema(json!({"id": id}), &[]),
         ),
+        command_tool(&id),
     ]
+}
+
+/// The `command` tool's definition (`flight_tools`).
+fn command_tool(id: &Value) -> Tool {
+    let description = "A craft of parts' commands as the player gives them (`id`, default the active vessel; they \
+        travel like any command, `arrives_in_s`). `function`: run one of its functions by name (the action bar's and \
+        the systems screen's FUNCTIONS: an abort, the legs, the grid fins). `item` (a part's or a component's id, as \
+        the systems screen names it) with `do`: one of its commands by its label, as its part card and the systems \
+        screen show them (IGNITE, SHUT DOWN, DEPLOY, OPEN, SEPARATE, RCS … on, POWER … off, ARM PARACHUTES). `item` \
+        alone lists its commands now; neither lists the functions and every item that has commands now.";
+    let properties =
+        json!({"id": id, "function": {"type": "string"}, "item": {"type": "string"}, "do": {"type": "string"}});
+    Tool { name: "command".into(), description: description.into(), input_schema: schema(properties, &[]) }
 }
 
 fn epoch_text(t: sim::time::Epoch) -> String {
@@ -392,11 +413,19 @@ fn run(
                 }
                 effects.push(Effect::Rotate(id, DVec3::new(x, y, z)));
             }
+            let rcs = rcs_mode(args, sim.controls().rcs)?;
+            if let Some(mode) = rcs {
+                if comms.location != Location::Vessel(id) || id != sim.ship().id() {
+                    return Err("RCS's mode is the pilot's: go aboard the active vessel".into());
+                }
+                effects.push(Effect::Command(GameCommand::SetRcs(mode)));
+            }
             let command = GameCommand::SetControls { vessel: id, throttle, sas, hold, speed };
             let hold = hold.and_then(|m| HOLD_NAMES.iter().find(|(_, h)| *h == m)).map(|(n, _)| *n);
             let speed = speed.and_then(|m| SPEED_NAMES.iter().find(|(_, s)| *s == m)).map(|(n, _)| *n);
+            let rcs = rcs.map(|m| json!({"mode": rcs_name(m), "fine": m.fine}));
             let reply = json!({"id": id.0, "throttle": throttle, "sas": sas, "hold": hold, "speed_reference": speed,
-                               "rotate": args.get("rotate"), "arrives_in_s": arrives});
+                               "rotate": args.get("rotate"), "rcs": rcs, "arrives_in_s": arrives});
             effects.push(Effect::Command(command));
             (reply, effects)
         }
@@ -408,8 +437,104 @@ fn run(
             }
             (json!({"id": id.0, "arrives_in_s": arrives}), vec![Effect::Command(GameCommand::Stage(id))])
         }
+        "command" => command(args, sim, comms)?,
         _ => return Err(format!("unknown tool {tool}")),
     })
+}
+
+/// The pilot's RCS modes by name (`set_controls`' `rcs`).
+const RCS_NAMES: [(&str, Option<RcsOnly>); 4] = [
+    ("off", None),
+    ("on", Some(RcsOnly::Both)),
+    ("translate", Some(RcsOnly::Translate)),
+    ("rotate", Some(RcsOnly::Rotate)),
+];
+
+fn rcs_name(m: RcsMode) -> &'static str {
+    let only = m.on.then_some(m.only);
+    RCS_NAMES.iter().find(|(_, o)| *o == only).map_or("on", |(n, _)| n)
+}
+
+/// `set_controls`' `rcs` and `rcs_fine` applied to the pilot's mode now
+/// (`None`: neither given).
+fn rcs_mode(args: &Value, now: RcsMode) -> Result<Option<RcsMode>, String> {
+    let name = args.get("rcs").and_then(Value::as_str);
+    let fine = args.get("rcs_fine").and_then(Value::as_bool);
+    if name.is_none() && fine.is_none() {
+        return Ok(None);
+    }
+    let mut mode = now;
+    if let Some(name) = name {
+        let only = RCS_NAMES.iter().find(|(n, _)| *n == name).ok_or(format!("unknown RCS mode `{name}`"))?.1;
+        mode.on = only.is_some();
+        mode.only = only.unwrap_or(mode.only);
+    }
+    mode.fine = fine.unwrap_or(mode.fine);
+    Ok(Some(mode))
+}
+
+/// Each part's and component's commands now, by id, those with any: a
+/// part's as its card gives them (`part_card::content::part_commands`), a
+/// component's as the systems screen does (`inspect::commands`).
+fn command_items(
+    v: &sim::vessel::Vessel,
+    def: &ShipDef,
+    state: &ShipState,
+) -> Vec<(String, Vec<(String, ShipCommand)>)> {
+    use crate::interface::part_card::content::{chutes, part_commands};
+    use crate::systems_screen::inspect::{self, Selection};
+    let (chute_parts, words) = chutes(v);
+    let chute = (!chute_parts.is_empty()).then_some((chute_parts.as_slice(), words));
+    let parts = def.parts.iter().map(|p| (p.id.clone(), part_commands(def, state, chute, p.part)));
+    let components = (def.components.iter().enumerate())
+        .map(|(i, c)| (c.id.clone(), inspect::commands(def, state, Selection::Component(i))));
+    parts.chain(components).filter(|(_, list)| !list.is_empty()).collect()
+}
+
+/// The `command` tool: a craft's functions and its parts' and components'
+/// commands, as the action bar, the part cards and the systems screen give
+/// them (interface-map.md finding 10), sent like any command.
+fn command(args: &Value, sim: &SimState, comms: &Comms) -> Result<(Value, Vec<Effect>), String> {
+    let (id, arrives) = reach(args, sim, comms)?;
+    let v = &sim.fleet[sim.index_of(id).ok_or("no such vessel")?];
+    let (Some(def), Some(state)) = (v.ship_def(), v.ship()) else {
+        return Err(format!("vessel {} is not a craft of parts (it has no commands)", id.0));
+    };
+    let s = |k: &str| args.get(k).and_then(Value::as_str);
+    let functions: Vec<&str> = state.functions.iter().map(|f| f.name.as_str()).collect();
+    if let Some(name) = s("function") {
+        let Some(name) = functions.iter().find(|f| f.eq_ignore_ascii_case(name)) else {
+            return Err(format!("no function `{name}`: it has {functions:?}"));
+        };
+        let run = GameCommand::Function { vessel: id, name: name.to_string() };
+        return Ok((json!({"id": id.0, "function": name, "arrives_in_s": arrives}), vec![Effect::Command(run)]));
+    }
+    let items = command_items(v, &def, state);
+    let labels = |list: &[(String, ShipCommand)]| list.iter().map(|(l, _)| l.clone()).collect::<Vec<_>>();
+    match (s("item"), s("do")) {
+        (Some(item), Some(label)) => {
+            let list = items.iter().find(|(i, _)| i == item).map_or(&[][..], |(_, l)| l.as_slice());
+            let Some((label, c)) = list.iter().find(|(l, _)| l.eq_ignore_ascii_case(label)) else {
+                return Err(format!("`{label}` is not one of {item}'s commands now: {:?}", labels(list)));
+            };
+            let send = GameCommand::Ship { vessel: id, commands: vec![c.clone()] };
+            Ok((json!({"id": id.0, "item": item, "do": label, "arrives_in_s": arrives}), vec![Effect::Command(send)]))
+        }
+        (Some(item), None) => {
+            let known = def.parts.iter().any(|p| p.id == item) || def.components.iter().any(|c| c.id == item);
+            if !known {
+                return Err(format!("no part or component `{item}`"));
+            }
+            let list = items.iter().find(|(i, _)| i == item).map_or(Vec::new(), |(_, l)| labels(l));
+            Ok((json!({"id": id.0, "item": item, "commands": list}), Vec::new()))
+        }
+        (None, Some(_)) => Err("`do` needs the `item` it is about".into()),
+        (None, None) => {
+            let items: serde_json::Map<String, Value> =
+                items.iter().map(|(i, l)| (i.clone(), json!(labels(l)))).collect();
+            Ok((json!({"id": id.0, "functions": functions, "items": items}), Vec::new()))
+        }
+    }
 }
 
 /// The `get_vessel` tool.
@@ -905,5 +1030,78 @@ mod tests {
         let (r, e) = answer("stage", &json!({}), &sim, &comms, &Default::default());
         assert_eq!(e, vec![Effect::Command(GameCommand::Stage(sim.ship().id()))]);
         assert!(matches!(r, ToolResult::Ok(v) if v["arrives_in_s"] == 0.0));
+    }
+
+    /// The `command` tool (interface-map.md finding 10): it lists the
+    /// craft's functions and each item's commands, runs a function by name
+    /// and an item's command by its label (any case), and refuses what the
+    /// craft or the item cannot do now.
+    #[test]
+    fn a_script_runs_functions_and_part_commands() {
+        let sim = SimState::with_craft(&crate::test_rocket::rocket());
+        let me = sim.ship().id();
+        let mut comms = Comms::load();
+        comms.location = Location::Vessel(me);
+        let call = |args: Value| answer("command", &args, &sim, &comms, &Default::default());
+        let (ToolResult::Ok(v), e) = call(json!({})) else { panic!() };
+        assert!(e.is_empty());
+        assert!(v["functions"].as_array().unwrap().iter().any(|f| f == "Legs"), "{v}");
+        assert!(v["items"]["tank"].as_array().unwrap().iter().any(|c| c == "SEPARATE separation"), "{v}");
+        assert!(v["items"]["engine#1"].as_array().unwrap().iter().any(|c| c == "IGNITE engine#1"), "{v}");
+        let (ToolResult::Ok(v), e) = call(json!({"item": "tank"})) else { panic!() };
+        assert!(e.is_empty() && v["commands"].as_array().is_some_and(|c| !c.is_empty()), "{v}");
+        let (_, e) = call(json!({"function": "legs"}));
+        assert_eq!(e, vec![Effect::Command(GameCommand::Function { vessel: me, name: "Legs".into() })]);
+        let (r, e) = call(json!({"item": "tank", "do": "separate separation"}));
+        let separate = vec![ShipCommand::Separate("separation".into())];
+        assert_eq!(e, vec![Effect::Command(GameCommand::Ship { vessel: me, commands: separate })]);
+        assert!(matches!(r, ToolResult::Ok(v) if v["do"] == "SEPARATE separation" && v["arrives_in_s"] == 0.0));
+        // Refused, with nothing sent.
+        let refused = [
+            json!({"function": "Warp drive"}),
+            json!({"item": "tank", "do": "IGNITE tank"}),
+            json!({"item": "nothing"}),
+            json!({"do": "ARM PARACHUTES"}),
+        ];
+        for args in refused {
+            let (r, e) = call(args.clone());
+            assert!(matches!(r, ToolResult::Err(_)) && e.is_empty(), "{args}: {r:?}");
+        }
+    }
+
+    /// The pilot's RCS mode through `set_controls` (table: what is given,
+    /// the mode before, the mode sent), aboard the active vessel only.
+    #[test]
+    fn a_script_sets_the_rcs_mode() {
+        let off = RcsMode::default();
+        let on = |only, fine| RcsMode { on: true, only, fine };
+        let table = [
+            (json!({}), off, None),
+            (json!({"rcs": "on"}), off, Some(on(RcsOnly::Both, false))),
+            (json!({"rcs": "translate"}), off, Some(on(RcsOnly::Translate, false))),
+            (json!({"rcs": "rotate", "rcs_fine": true}), off, Some(on(RcsOnly::Rotate, true))),
+            (json!({"rcs_fine": true}), on(RcsOnly::Both, false), Some(on(RcsOnly::Both, true))),
+            (
+                json!({"rcs": "off"}),
+                on(RcsOnly::Translate, true),
+                Some(RcsMode { on: false, ..on(RcsOnly::Translate, true) }),
+            ),
+        ];
+        for (args, before, want) in table {
+            assert_eq!(rcs_mode(&args, before), Ok(want), "{args}");
+        }
+        let names = [(off, "off"), (on(RcsOnly::Both, true), "on"), (on(RcsOnly::Rotate, false), "rotate")];
+        for (mode, name) in names {
+            assert_eq!(rcs_name(mode), name);
+        }
+        assert!(rcs_mode(&json!({"rcs": "warp"}), off).is_err());
+        let sim = SimState::with_craft(&crate::test_rocket::rocket());
+        let mut comms = Comms::load();
+        comms.location = Location::Vessel(sim.ship().id());
+        let (_, e) = answer("set_controls", &json!({"rcs": "on"}), &sim, &comms, &Default::default());
+        assert!(e.contains(&Effect::Command(GameCommand::SetRcs(on(RcsOnly::Both, false)))), "{e:?}");
+        comms.location = Location::Site(0);
+        let (r, e) = answer("set_controls", &json!({"rcs": "on"}), &sim, &comms, &Default::default());
+        assert!(matches!(r, ToolResult::Err(_)) && e.is_empty(), "{r:?}");
     }
 }
