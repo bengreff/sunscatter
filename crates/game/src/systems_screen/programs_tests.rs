@@ -217,7 +217,7 @@ fn each_programs_settings() {
             (LOADS, "LOADS", "a, b".to_string()),
             (OFF_BELOW, "OFF BELOW", "25 %".into()),
             (ON_AT, "ON AGAIN AT", "60 %".into()),
-            (PERIOD, "EVERY", duration(600.0)),
+            (PERIOD, "EVERY", "600 s".into()),
         ]
     );
     assert_eq!(r.settings[0].value, Value::Loads { chosen: vec!["a".into(), "b".into()], offered: offered.to_vec() });
@@ -227,11 +227,11 @@ fn each_programs_settings() {
     assert_eq!(
         burns.iter().map(|p| (p.key, p.label, p.value.text())).collect::<Vec<_>>(),
         [
-            (ALIGN, "ALIGNED WITHIN", "2.0°".to_string()),
+            (ALIGN, "ALIGNED WITHIN", "2.01°".to_string()),
             (ALIGN_RATE, "TURNING UNDER", "0.52°/s".into()),
-            (SETTLE, "SETTLES FOR", duration(20.0)),
-            (SETTLE_WAIT, "IGNITES ANYWAY AFTER", duration(60.0)),
-            (STEER_HOLD, "HOLDS ITS AIM FOR THE LAST", duration(2.0)),
+            (SETTLE, "SETTLES FOR", "20 s".into()),
+            (SETTLE_WAIT, "IGNITES ANYWAY AFTER", "60 s".into()),
+            (STEER_HOLD, "HOLDS ITS AIM FOR THE LAST", "2 s".into()),
         ]
     );
 }
@@ -341,4 +341,29 @@ fn the_warp_stops_by_notify_program_and_computer() {
         set_switch(&rows, v, "warp_stop", Switch::Off),
         Ok(GameCommand::SetSwitch { vessel: v, program: "warp_stop".into(), switch: Switch::Off })
     );
+}
+
+/// A setting's one shown form (the tab's field, the row's text, the
+/// menus' rows): its unit and decimals, trailing zeros trimmed; the field
+/// back to the key's unit (a share's percent to 0–1).
+#[test]
+fn a_settings_field_and_text() {
+    // (value, text, the field's shown value, its input back)
+    let cases = [
+        (Value::Height(Some(5_500.0)), "5500 m", 5_500.0, 5_500.0),
+        (Value::Height(None), "none set", 0.0, 0.0),
+        (Value::Share(0.3), "30 %", 30.0, 0.3),
+        (Value::Share(0.255), "25.5 %", 25.5, 0.255),
+        (Value::Seconds(20.0), "20 s", 20.0, 20.0),
+        (Value::Seconds(0.126), "0.13 s", 0.126, 0.126),
+        (Value::Angle(0.035), "2.01°", 0.035f64.to_degrees(), 0.035f64.to_degrees()),
+        (Value::Rate(0.009), "0.52°/s", 0.009f64.to_degrees(), 0.009f64.to_degrees()),
+    ];
+    for (v, text, shown, input) in cases {
+        let f = v.field().expect("a number");
+        assert_eq!((v.text().as_str(), f.shown), (text, shown), "{v:?}");
+        assert!((f.input(f.shown) - input).abs() < 1e-12, "{v:?}");
+    }
+    let loads = Value::Loads { chosen: vec![], offered: vec!["a".into()] };
+    assert_eq!((loads.field(), loads.text().as_str()), (None, "none"));
 }

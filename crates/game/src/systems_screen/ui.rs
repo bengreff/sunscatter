@@ -478,27 +478,10 @@ fn settings(
         for p in &r.settings {
             ui.label(egui::RichText::new(p.label).small().color(theme::MUTED));
             let id = egui::Id::new(("program_setting", vessel.0, &r.name, p.key));
-            let tick = sim::vessel::TICK;
-            let change = match &p.value {
-                Value::Height(h) => {
-                    let field = number(ui, id, h.unwrap_or(0.0), (0.0, 100_000.0), (10.0, " m", 0));
-                    field.map(super::programs::Input::Number)
-                }
-                Value::Share(s) => {
-                    let field = number(ui, id, s * 100.0, (0.0, 100.0), (0.5, " %", 1));
-                    field.map(|v| super::programs::Input::Number(v / 100.0))
-                }
-                Value::Seconds(s) => {
-                    let min = if p.key == super::programs::PERIOD { tick } else { 0.0 };
-                    number(ui, id, *s, (min, 1.0e7), (1.0, " s", 2)).map(super::programs::Input::Number)
-                }
-                Value::Angle(a) => {
-                    number(ui, id, a.to_degrees(), (0.01, 90.0), (0.05, "°", 2)).map(super::programs::Input::Number)
-                }
-                Value::Rate(w) => {
-                    number(ui, id, w.to_degrees(), (0.01, 90.0), (0.05, "°/s", 2)).map(super::programs::Input::Number)
-                }
-                Value::Loads { chosen, offered } => loads(ui, id, chosen, offered),
+            let change = match (&p.value, p.value.field()) {
+                (Value::Loads { chosen, offered }, _) => loads(ui, id, chosen, offered),
+                (_, Some(f)) => number(ui, id, &f).map(|v| super::programs::Input::Number(f.input(v))),
+                (_, None) => None,
             };
             if let Some(input) = change {
                 match configure(x, vessel, &r.name, &[(p.key.to_string(), input)]) {
@@ -524,15 +507,10 @@ fn settings(
 /// (egui's memory, so a drag is not reset by the vessel's value each
 /// frame), and the value once the edit ends, if it changed by more than
 /// the field shows (a field left as it was sends nothing).
-fn number(
-    ui: &mut egui::Ui,
-    id: egui::Id,
-    shown: f64,
-    (min, max): (f64, f64),
-    (speed, suffix, decimals): (f64, &str, usize),
-) -> Option<f64> {
+fn number(ui: &mut egui::Ui, id: egui::Id, f: &super::programs::Field) -> Option<f64> {
+    let (shown, (min, max), decimals) = (f.shown, f.range, f.decimals);
     let mut v = ui.data(|d| d.get_temp::<f64>(id)).unwrap_or(shown);
-    let field = egui::DragValue::new(&mut v).range(min..=max).speed(speed).suffix(suffix).max_decimals(decimals);
+    let field = egui::DragValue::new(&mut v).range(min..=max).speed(f.speed).suffix(f.suffix).max_decimals(decimals);
     let r = ui.add(field);
     let ended = r.drag_stopped() || r.lost_focus();
     if !ended && (r.dragged() || r.has_focus()) {

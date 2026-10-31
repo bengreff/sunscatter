@@ -108,18 +108,57 @@ pub enum Value {
     Loads { chosen: Vec<String>, offered: Vec<String> },
 }
 
-impl Value {
-    /// As the tab shows it.
+/// How a number setting is shown and edited: its value in the field's unit
+/// (`shown`, the setting's times `scale`), the field's range, drag speed,
+/// unit and decimals. One rule for the tab's field, the row's text and the
+/// menus' rows.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Field {
+    pub shown: f64,
+    /// The key's unit times this is the field's (a share's 0.3 is 30 %).
+    pub scale: f64,
+    pub range: (f64, f64),
+    pub speed: f64,
+    pub suffix: &'static str,
+    pub decimals: usize,
+}
+
+impl Field {
+    /// The field's value as the key's input (MCP's unit).
+    pub fn input(&self, shown: f64) -> f64 {
+        shown / self.scale
+    }
+
+    /// As the field shows it: to its decimals, without trailing zeros.
     pub fn text(&self) -> String {
-        match self {
-            Value::Height(Some(m)) => distance(*m),
-            Value::Height(None) => "none set".into(),
-            Value::Share(x) => format!("{:.0} %", x * 100.0),
-            Value::Seconds(s) => duration(*s),
-            Value::Angle(a) => format!("{:.1}°", a.to_degrees()),
-            Value::Rate(w) => format!("{:.2}°/s", w.to_degrees()),
-            Value::Loads { chosen, .. } if chosen.is_empty() => "none".into(),
-            Value::Loads { chosen, .. } => chosen.join(", "),
+        let s = format!("{:.*}", self.decimals, self.shown);
+        let s = if s.contains('.') { s.trim_end_matches('0').trim_end_matches('.').to_string() } else { s };
+        format!("{s}{}", self.suffix)
+    }
+}
+
+impl Value {
+    /// A number setting's field (`None`: the loads, a list).
+    pub fn field(&self) -> Option<Field> {
+        let f = |shown, scale, range, speed, suffix, decimals| Field { shown, scale, range, speed, suffix, decimals };
+        Some(match *self {
+            Value::Height(h) => f(h.unwrap_or(0.0), 1.0, (0.0, 100_000.0), 10.0, " m", 0),
+            Value::Share(x) => f(x * 100.0, 100.0, (0.0, 100.0), 0.5, " %", 1),
+            Value::Seconds(s) => f(s, 1.0, (0.0, 1.0e7), 1.0, " s", 2),
+            Value::Angle(a) => f(a.to_degrees(), 1.0, (0.01, 90.0), 0.05, "°", 2),
+            Value::Rate(w) => f(w.to_degrees(), 1.0, (0.01, 90.0), 0.05, "°/s", 2),
+            Value::Loads { .. } => return None,
+        })
+    }
+
+    /// As the tab's field shows it (a list: its ids).
+    pub fn text(&self) -> String {
+        match (self, self.field()) {
+            (Value::Height(None), _) => "none set".into(),
+            (_, Some(f)) => f.text(),
+            (Value::Loads { chosen, .. }, None) if chosen.is_empty() => "none".into(),
+            (Value::Loads { chosen, .. }, None) => chosen.join(", "),
+            _ => String::new(),
         }
     }
 }

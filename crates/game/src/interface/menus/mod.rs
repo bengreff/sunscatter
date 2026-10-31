@@ -294,8 +294,9 @@ impl Section {
     }
 
     /// A ship-computer program (`systems_screen::programs::Row`): its
-    /// switch as a choice under `label`, what it is doing now, and its
-    /// press while one does something.
+    /// switch as a choice under `label`, what it is doing now, its press
+    /// while one does something, and its settings as rows (the PROGRAMS
+    /// tab edits them).
     pub fn program(&mut self, label: impl Into<String>, r: &crate::systems_screen::programs::Row) -> &mut Self {
         use crate::systems_screen::programs::{label as switch_label, SWITCHES};
         let options = SWITCHES
@@ -306,6 +307,9 @@ impl Section {
         self.note(&r.now, r.tone);
         if let Ok(what) = &r.press {
             self.button(format!("Press: {what}"), MenuAction::Press(r.name.clone()));
+        }
+        for p in &r.settings {
+            self.row(p.label, p.value.text());
         }
         self
     }
