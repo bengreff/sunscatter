@@ -72,6 +72,10 @@ The booster, uncontrolled after separation (its return guidance is not built, D1
 
 From an orbit save (step 10 above), `set_plan {id, burns: [{in_s, prograde}]}` with `in_s` the node: the burn's middle, here the apoapsis's `in_s` from `get_vessel`. Its answer gives each node's ignition, duration and warnings, and the Δv available. `run_until {seconds, warp: 6}` to a few minutes before the node: the vessel wakes at the program's epoch whatever the warp ("burn 1: turning to the burn" in the log; the Maneuver menu says what the program is doing). Then `step` through the settling, the ignition and the cutoff ("burn 1: on target (0.26 m/s left)"). Read the orbit from a `step` or `run_until` answer (`apoapsis_m`, osculating, from the state) rather than `get_vessel`'s apsides, which come from the predicted path and lag the state while an engine runs. Flown numbers and shots: [planner.md](planner.md).
 
+### Worked example: the playtest save, Dragon alone in orbit (2026-10-31)
+
+Steps 1 to 10 above with debug off (orbit 194 × 489 km at 28.7°), then `stage` (Dragon separation): Dragon stays vessel 1 (the capsule is the craft's root) and the second stage leaves. The booster has meanwhile broken up on its uncontrolled entry and its pieces have gone as debris. The second stage has a flight computer on charged batteries, so the debris rule keeps it (D083): deorbit it with `set_plan {id, burns: [{in_s, prograde: -100}]}` at its apoapsis (`get_vessel`'s `orbit.apsides` give each apsis's `in_s`; 100 m/s there puts the periapsis under the ground), then `run_until {seconds: 2700, warp: 6}`, `step` through the burn and `run_until` on: it re-enters, breaks up and goes. `pause`, `save_game`, and copy the file over `docs/plans/playtest-2026-10-01-orbit.ron` (`./run play` copies it to its quicksave). Check it in a fresh game: the file as `saves/quicksave.ron` in a new home, `load_game {name: "quicksave"}`, then `step` on. The save is 686 KB, nearly all the coast's samples; the craft is named by its id (`falcon9-crew#0-7`).
+
 ### What to check
 
 - Each call's `reached` is the stop you asked for, not `timeout`, `paused` or `vessel_gone`.

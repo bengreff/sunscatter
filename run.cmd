@@ -2,7 +2,7 @@
 rem Run the game (Windows).
 rem   run          the game (release build)
 rem   run dev      faster rebuilds while iterating (Bevy dynamic linking; never for releases)
-rem   run play     the 2026-10-01 low-orbit playtest save (own home dir; Ctrl+Alt+L at the pad)
+rem   run play     the low-orbit playtest save: Dragon alone in orbit (own home dir; Ctrl+Alt+L at the pad)
 cd /d "%~dp0"
 if "%1"=="" goto release
 if /i "%1"=="dev" goto dev

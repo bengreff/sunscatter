@@ -3,7 +3,7 @@
 #
 #   ./run           the game (release build)
 #   ./run dev       faster rebuilds while iterating (Bevy dynamic linking; never for releases)
-#   ./run play      the 2026-10-01 low-orbit playtest save (in its own home dir; Cmd+L at the pad)
+#   ./run play      the low-orbit playtest save: Dragon alone in orbit (in its own home dir; Cmd+L at the pad)
 #   ./run headless [port]  no window: an agent drives it through MCP at http://127.0.0.1:<port>/mcp
 #                   (default 7777, token "dev"), developer tools on, a fresh home dir (a mission test, D122)
 #
