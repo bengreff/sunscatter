@@ -50,3 +50,7 @@ Small commits, one purpose each. `cargo test -p sim` and `-p game`'s touched tes
 ## State
 
 (Update as you land: commits with hashes, what is left in order, the warp restrictions added, Open for the owner.)
+
+### From the lead (2026-10-31)
+
+- INTERFACE-2's finding 18: a part's peak interior temperature may not update during a warp-6 coast. A record kept per part (peaks, run time, damage) must come out the same at every warp (D129).

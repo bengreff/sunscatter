@@ -49,3 +49,7 @@ Small commits, one purpose each; `cargo test -p sim` and the game's touched test
 ## State
 
 (Update as you land: commits with hashes, what is left in order, Open for the owner.)
+
+### From the lead (2026-10-31)
+
+- INTERFACE-2's finding 19: Crew Dragon has no cabin sensors in its data (`data/parts/dragon*`). The bare minimum's crew-at-risk line reads the cabin through `Knowledge` (D106), so give the cabin its real sensors (CO₂, O₂, pressure, temperature; sourced or E) before the warp-stop test.
