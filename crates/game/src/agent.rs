@@ -131,7 +131,7 @@ fn flight_tools() -> Vec<Tool> {
         description: description.into(),
         input_schema,
     };
-    let id = json!({"type": "integer", "description": "Vessel id"});
+    let id = json!({"type": "integer", "description": "Vessel id (default: the active vessel)"});
     vec![
         t(
             "get_state",
@@ -158,13 +158,13 @@ fn flight_tools() -> Vec<Tool> {
              number, name, place, commands, and the figures it shows: Δv, burnout, propellant, the active stage's \
              thrust, TWR, mass, Isp; in vacuum, or the current air with `air: \"current\"`, D120). Dashes (null \
              or \"—\") where the vessel measures nothing (D106). Fails without a signal.",
-            schema(json!({"id": id, "air": {"type": "string", "enum": ["vacuum", "current"]}}), &["id"]),
+            schema(json!({"id": id, "air": {"type": "string", "enum": ["vacuum", "current"]}}), &[]),
         ),
         t(
             "get_trajectory",
             "A vessel's predicted path from now, through its planned burns: `points` samples (time from now \
              in s, position relative to the body it is about now, m, to the position's precision).",
-            schema(json!({"id": id, "points": {"type": "integer", "minimum": 2, "maximum": 1000}}), &["id"]),
+            schema(json!({"id": id, "points": {"type": "integer", "minimum": 2, "maximum": 1000}}), &[]),
         ),
         t(
             "set_warp",
@@ -200,7 +200,7 @@ fn flight_tools() -> Vec<Tool> {
                     "in_s": {"type": "number", "minimum": 0},
                     "prograde": {"type": "number"}, "normal": {"type": "number"}, "radial": {"type": "number"}},
                     "required": ["in_s"]}}}),
-                &["id", "burns"],
+                &["burns"],
             ),
         ),
         t(
@@ -365,12 +365,22 @@ fn vessel_id(args: &Value) -> Result<VesselId, String> {
     args.get("id").and_then(Value::as_u64).map(VesselId).ok_or_else(|| "missing integer `id`".into())
 }
 
+/// The vessel a call is about: `id`, default the active one (one rule for
+/// every tool that takes a vessel; `get_vessel` required it, finding 65).
+fn vessel_or_active(args: &Value, sim: &SimState) -> Result<VesselId, String> {
+    if args.get("id").is_some() {
+        vessel_id(args)
+    } else {
+        Ok(sim.ship().id())
+    }
+}
+
 /// The vessel a command is for (`id`, default the active one) and how long
 /// it takes to reach it from the agent's location (s: 0 aboard, else the
 /// signal's light delay); an error without a signal. The command itself is
 /// routed by `commands::apply` (D067, D034).
 fn reach(args: &Value, sim: &SimState, comms: &Comms) -> Result<(VesselId, f64), String> {
-    let id = if args.get("id").is_some() { vessel_id(args)? } else { sim.ship().id() };
+    let id = vessel_or_active(args, sim)?;
     sim.index_of(id).ok_or("no such vessel")?;
     if comms.location == Location::Vessel(id) {
         return Ok((id, 0.0));
@@ -457,7 +467,7 @@ fn run(
         }
         "get_vessel" => get_vessel(args, sim, comms, prediction)?,
         "get_trajectory" => {
-            let id = vessel_id(args)?;
+            let id = vessel_or_active(args, sim)?;
             let i = sim.index_of(id).ok_or("no such vessel")?;
             if comms.signal(id).is_none() {
                 return Err(format!("no signal from vessel {}", id.0));
@@ -730,7 +740,7 @@ fn get_vessel(
     prediction: &crate::state::Prediction,
 ) -> Result<(Value, Vec<Effect>), String> {
     let name = |n: sim::frame::NodeId| sim.world.eph.node(n).name.clone();
-    let id = vessel_id(args)?;
+    let id = vessel_or_active(args, sim)?;
     let i = sim.index_of(id).ok_or("no such vessel")?;
     let signal = comms.signal(id).ok_or_else(|| {
         let heard = comms.last_contact.get(&id).map(|t| epoch_text(*t)).unwrap_or_else(|| "never".into());
@@ -1084,7 +1094,7 @@ fn approaches(args: &Value, sim: &SimState, comms: &Comms) -> Result<(Value, Vec
 /// The `set_plan` tool.
 fn set_plan(args: &Value, sim: &SimState, comms: &Comms) -> Result<(Value, Vec<Effect>), String> {
     let name = |n: sim::frame::NodeId| sim.world.eph.node(n).name.clone();
-    let id = vessel_id(args)?;
+    let id = vessel_or_active(args, sim)?;
     let i = sim.index_of(id).ok_or("no such vessel")?;
     let delay = if comms.location == Location::Vessel(id) {
         0.0
@@ -1484,6 +1494,21 @@ mod tests {
         assert!(seen["attitude"]["pitch_deg"].as_f64().is_some_and(|p| p > 80.0), "upright: {}", seen["attitude"]);
         assert!(seen["stages"]["tanks"][0]["liquid_kg"].as_f64().is_some());
         assert!(seen["stages"]["next"].is_u64(), "{}", seen["stages"]);
+    }
+
+    #[test]
+    fn get_vessel_and_the_plan_default_to_the_active_vessel() {
+        let (sim, mut comms) = setup();
+        let active = sim.ship().id();
+        comms.signals.insert(active, Some(comms::Signal { delay: 0.0, rate: 1e6, via: vec![] }));
+        assert_eq!(vessel_or_active(&json!({}), &sim), Ok(active));
+        assert_eq!(vessel_or_active(&json!({"id": 7}), &sim), Ok(VesselId(7)));
+        assert!(vessel_or_active(&json!({"id": "seven"}), &sim).is_err());
+        let read = |args: Value| match answer("get_vessel", &args, &sim, &comms, &Default::default()).0 {
+            ToolResult::Ok(v) => v,
+            _ => panic!("get_vessel {args}"),
+        };
+        assert_eq!(read(json!({})), read(json!({"id": active.0})));
     }
 
     #[test]
