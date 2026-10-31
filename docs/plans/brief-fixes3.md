@@ -21,8 +21,7 @@ Each item gets a table test (rule 8) and fixes the model or the default, never t
 8. **D123's switch for random failures:** statistical failures off until both flights fly end to end, then on. It is per save, set at a new flight and by MCP's `new_flight`, and it stays off by default for now. The physical triggers stay on.
 9. **The pilot's throttle under a program** (PLANNER-4): a throttle cut (X) during a planned burn does nothing if the pilot's throttle was already 0 when the program woke. Default: the program moves the pilot's throttle as it flies, so X disagrees and takes over (D126's takeover rule); record it under Open for the owner.
 10. **Small items from the hand-off**, each only if it is quick:
-   - the render scale flips between 0.8 and 1.0 every half second in a headless game;
-   - `tools/gpu_trace.py` still launches the deleted plunge demo.
+   - the render scale flips between 0.8 and 1.0 every half second in a headless game.
 
 Docs in the same round: the systems docs' "Not built" lines (avionics, failures, crew, propulsion), `owners.md` rows, the technical docs touched. Small commits, each passing fmt, clippy, `cargo test -p sim` and the game's touched tests. End with the report agent-rules asks for.
 
