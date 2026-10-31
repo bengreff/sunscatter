@@ -347,7 +347,7 @@ mod tests {
         for (q, design, want) in table {
             assert_eq!(opening(q, design), want, "{q:?}");
         }
-        let spec = sim::craft::test_craft().params().chute;
+        let spec = sim::craft::small::rocket_ref().spec.chute.clone();
         let controls = sim::vessel::Controls::default();
         let chute = sim::chute::ChuteState::default();
         let inputs = crate::staging::StageInputs {

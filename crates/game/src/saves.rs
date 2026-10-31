@@ -397,7 +397,7 @@ mod tests {
         assert_eq!(launch_of(&sim, &dir), None, "another game's launches are not this one's");
         sim.seed ^= 1;
         sim.launch_pending = false;
-        sim.new_flight(&crate::state::craft_or_test("test-craft"));
+        sim.new_flight(&sim::craft::small::legs_out());
         assert!(sim.launch_pending && sim.ship().launch == Some(sim.ship().id()));
         assert_eq!(launch_of(&sim, &dir), None, "a new flight is a new launch");
         let save = read(&sim, &path).unwrap();

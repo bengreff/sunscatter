@@ -151,7 +151,7 @@ mod tests {
     /// The Falcon 9 on the pad: its buses on ground power, nothing out.
     #[test]
     fn the_falcon_9_stands_on_ground_power() {
-        assert!(gather(crate::state::SimState::new().ship()).is_none(), "the test craft");
+        assert!(gather(crate::state::SimState::new().ship()).is_some(), "the small rocket's bus");
         if !crate::state::craft_exists("falcon9-crew") {
             return;
         }

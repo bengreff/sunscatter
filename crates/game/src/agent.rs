@@ -769,7 +769,8 @@ mod tests {
         let args = json!({"id": id.0, "burns": [{"in_s": 600.0, "prograde": 100.0}]});
         let (r, e) = answer("set_plan", &args, &sim, &comms, &Default::default());
         assert!(matches!(r, ToolResult::Ok(_)), "{r:?}");
-        assert!(matches!(&e[..], [Effect::Send { delay, command: GameCommand::SetPlan { .. } }] if *delay == 0.02));
+        // A craft of parts' plan is its nodes (D126).
+        assert!(matches!(&e[..], [Effect::Send { delay, command: GameCommand::SetNodes { .. } }] if *delay == 0.02));
         comms.signals.insert(id, None);
         let (r, _) = answer("set_plan", &args, &sim, &comms, &Default::default());
         assert!(matches!(r, ToolResult::Err(e) if e.contains("no signal")));
@@ -805,8 +806,10 @@ mod tests {
         let (r, _) =
             answer("set_controls", &json!({"id": probe.0, "hold": "sideways"}), &sim, &comms, &Default::default());
         assert!(matches!(r, ToolResult::Err(e) if e.contains("unknown hold")));
-        let (r, _) = answer("stage", &json!({"id": probe.0}), &sim, &comms, &Default::default());
-        assert!(matches!(r, ToolResult::Err(e) if e.contains("not a craft of parts")));
+        // Its next stage (the small rocket's Ignition) after the light delay.
+        let (r, e) = answer("stage", &json!({"id": probe.0}), &sim, &comms, &Default::default());
+        assert_eq!(e, vec![Effect::Command(GameCommand::Stage(probe))]);
+        assert!(matches!(r, ToolResult::Ok(v) if v["arrives_in_s"] == 0.02));
         comms.signals.insert(probe, None);
         let (r, _) = answer("set_controls", &args, &sim, &comms, &Default::default());
         assert!(matches!(r, ToolResult::Err(e) if e.contains("no signal")));

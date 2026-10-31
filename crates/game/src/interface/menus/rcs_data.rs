@@ -69,12 +69,19 @@ mod tests {
     use super::*;
     use sim::systems::rcs::RcsOnly;
 
-    /// The test craft: the mode, no thrusters, no authority to compute.
+    /// The small rocket: the mode, its four thruster blocks (two 400 N
+    /// nozzles each) on, fed by its nitrogen bottle, and their authority.
     #[test]
-    fn the_test_craft_has_the_mode_only() {
+    fn the_small_rocket_has_its_four_blocks_on_their_bottle() {
         let sim = crate::state::SimState::new();
         let mode = RcsMode { on: true, only: RcsOnly::Rotate, fine: true };
-        assert_eq!(gather(sim.ship(), mode), RcsData { mode, ..Default::default() });
+        let d = gather(sim.ship(), mode);
+        assert!(d.mode == mode && d.authority.is_some());
+        let blocks: Vec<(&str, usize, f64, bool)> =
+            d.blocks.iter().map(|b| (b.id.as_str(), b.nozzles, b.thrust, b.on)).collect();
+        let want: Vec<(String, usize, f64, bool)> = (1..=4).map(|k| (format!("rcs#{k}"), 2, 400.0, true)).collect();
+        assert_eq!(blocks, want.iter().map(|w| (w.0.as_str(), w.1, w.2, w.3)).collect::<Vec<_>>());
+        assert_eq!(d.feeds.iter().map(|f| f.name.as_str()).collect::<Vec<_>>(), ["bottle"]);
     }
 
     /// A craft of parts: every block once, enabled as its file says, fed

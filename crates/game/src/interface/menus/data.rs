@@ -585,7 +585,7 @@ mod tests {
     }
 
     #[test]
-    fn on_the_pad_the_snapshot_is_landed_with_a_full_tank_and_stowed_chutes() {
+    fn on_the_pad_the_snapshot_is_landed_with_its_tanks_loaded_and_stowed_chutes() {
         let sim = SimState::new();
         let f = fixture();
         let d = gather(&sources(&sim, &f));
@@ -593,8 +593,9 @@ mod tests {
         assert!(d.landed && d.impact.is_none() && d.braking.is_none() && d.air.is_none());
         let s = d.surface.expect("over Earth");
         assert!(s.radar.abs() < 1.0, "on its feet: {}", s.radar);
-        assert!(s.twr > 1.0, "the test craft lifts off: {}", s.twr);
-        assert!((d.craft.propellant - d.craft.full).abs() < 1e-6);
+        assert!(s.twr > 1.0, "the small rocket lifts off: {}", s.twr);
+        // As loaded (its tanks' liquids, ullages and bottle).
+        assert!((d.craft.propellant / d.craft.full - 1.0).abs() < 1e-4, "{:?}", d.craft);
         assert!(d.craft.dv_vac > 1000.0 && d.craft.twr_vac.is_some_and(|t| t > 1.0));
         assert!(!d.chute.commanded && d.chute.design_q > 1000.0);
         assert_eq!(d.stages.len(), 2);
@@ -642,7 +643,7 @@ mod tests {
         let (r, v) = el.to_state(earth.gm);
         let id = sim.vessel_ids.allocate();
         let mut ship =
-            sim::vessel::Vessel::coasting(&sim.world, id, sim.clock, earth.node, r, v, sim::craft::test_craft());
+            sim::vessel::Vessel::coasting(&sim.world, id, sim.clock, earth.node, r, v, sim::craft::small::rocket_ref());
         ship.extend_coast(&sim.world, sim.clock.add_seconds(3_000.0), 200_000);
         sim.fleet.push(ship);
         sim.active = 1;

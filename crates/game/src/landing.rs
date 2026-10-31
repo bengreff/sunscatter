@@ -231,7 +231,7 @@ mod tests {
         let r = p.rotation.to_inertial(fixed, sim.clock).raw();
         let v = p.rotation.omega(sim.clock).raw().cross(r) - r.normalize() * 50.0;
         let id = sim.vessel_ids.allocate();
-        let ship = Vessel::coasting(&sim.world, id, sim.clock, moon.node, r, v, sim::craft::test_craft());
+        let ship = Vessel::coasting(&sim.world, id, sim.clock, moon.node, r, v, sim::craft::small::rocket_ref());
         sim.fleet.push(ship);
         let ship = sim.fleet.last().unwrap();
         let start = start_of(&sim.world, ship, &Controls::default()).expect("flying");

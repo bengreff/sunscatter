@@ -53,9 +53,11 @@ fn a_shrinking_target_never_moves_a_vessel_back() {
     let w = world();
     let controls = |_: usize| Controls { sas: true, ..Default::default() };
     let mut fleet = leo_fleet(&w, 3);
-    let engine = sim::craft::test_craft().params().engine;
-    let burn = sim::vessel::PlannedBurn::delta_v_with(t(2_000.0), glam::DVec3::X * 50.0, &engine, None);
-    fleet[1].set_plan(&w, sim::vessel::FlightPlan { burns: vec![burn] }).expect("plan");
+    // Vessel 1 burns 50 m/s prograde at a node (its program wakes it ~a
+    // minute before: the turn, the settling, the ignition).
+    let earth = w.find("Earth").expect("Earth").node;
+    let node = sim::systems::maneuver::Node { t: t(2_000.0), dv: glam::DVec3::X * 50.0, reference: earth };
+    fleet[1].set_nodes(vec![node]).expect("a node");
     let end = t(4_000.0);
     let mut reference = fleet.clone();
     for (i, v) in reference.iter_mut().enumerate() {
@@ -151,7 +153,7 @@ fn leo_fleet(w: &World, n: usize) -> Vec<Vessel> {
             };
             let (r, v) = el.to_state(earth.gm);
             let id = sim::vessel::VesselId(k as u64 + 1);
-            Vessel::coasting(w, id, t(0.0), earth.node, r, v, sim::craft::test_craft())
+            Vessel::coasting(w, id, t(0.0), earth.node, r, v, sim::craft::small::rocket_ref())
         })
         .collect()
 }
@@ -196,8 +198,9 @@ fn deadlines_and_threads_change_the_clock_not_the_motion() {
 /// The frame loop with 50 craft (`docs/technical/scale-performance.md`):
 /// BENCH's fleet (`sim/examples/bench_scale.rs`): ten limbo stand-ins
 /// tumbling (half 300-part stress craft, two on lunar transfers), 40 quiet
-/// craft holding attitude (20 test craft and 15 300-part craft in low
-/// orbit, four on lunar transfers, a test craft on the pad), vessel 0 (300
+/// craft holding attitude (20 small rockets and 15 300-part craft in low
+/// orbit, four on lunar transfers, a small rocket on its legs on the pad),
+/// vessel 0 (300
 /// parts) active; settled 30 days first. Each frame as `state::advance`:
 /// the fleet within `SIM_FRAME_TIME` on 7 threads (the game's compute
 /// pool), then the look-ahead of the active vessel and one other. Release:
@@ -211,7 +214,8 @@ fn fleet_frames() {
     let w = world();
     let big = (*sim::craft::stress::craft(300)).clone();
     let _ = big.design();
-    let small = sim::craft::test_craft();
+    let small = sim::craft::small::rocket_ref();
+    let standing = sim::craft::small::legs_out();
     let earth = w.find("Earth").expect("Earth").clone();
     let re = 6_378_137.0;
     let orbit = |craft: &sim::craft::Craft, k: usize, h: f64| {
@@ -233,7 +237,7 @@ fn fleet_frames() {
         let craft = if limbo { [&big, small][k % 2] } else { [small, &big][usize::from((30..45).contains(&k))] };
         let mut v = match k {
             8 | 9 | 45..=48 => orbit(if k < 10 { craft } else { [small, &big][k % 2] }, k, 20_000e3),
-            49 => Vessel::landed_at(&w, sim::vessel::VesselId(50), "Earth", 28.6082, -80.66, t(86_400.0), small),
+            49 => Vessel::landed_at(&w, sim::vessel::VesselId(50), "Earth", 28.6082, -80.66, t(86_400.0), &standing),
             _ => orbit(craft, k, 300e3 + 5e3 * (k % 40) as f64),
         };
         if limbo {

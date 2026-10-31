@@ -230,7 +230,7 @@ mod tests {
 
     #[test]
     fn the_test_craft_stacks_parachutes_over_its_engine() {
-        let spec = sim::craft::test_craft().params().chute;
+        let spec = sim::craft::small::rocket_ref().spec.chute.clone();
         let c = Controls { throttle: 0.5, ..Controls::default() };
         let chute = ChuteState::default();
         let s = stack(&inputs(&c, &chute, &spec, true));
@@ -246,7 +246,7 @@ mod tests {
 
     #[test]
     fn part_states_follow_the_parachute_sequence() {
-        let spec = sim::craft::test_craft().params().chute;
+        let spec = sim::craft::small::rocket_ref().spec.chute.clone();
         let c = Controls { chute: true, ..Controls::default() };
         let open = |age| CanopyState::Open { age, diameter: 1.0 };
         // (drogue, main, armed, expected drogue, expected main)
@@ -270,7 +270,7 @@ mod tests {
 
     #[test]
     fn space_arms_the_parachutes_once_then_there_is_no_next_stage() {
-        let spec = sim::craft::test_craft().params().chute;
+        let spec = sim::craft::small::rocket_ref().spec.chute.clone();
         let chute = ChuteState::default();
         let mut c = Controls::default();
         let before = c;
@@ -309,7 +309,7 @@ mod tests {
 
     #[test]
     fn staging_is_locked_on_the_ground_and_changes_nothing() {
-        let spec = sim::craft::test_craft().params().chute;
+        let spec = sim::craft::small::rocket_ref().spec.chute.clone();
         let chute = ChuteState::default();
         // (grounded, result, armed after)
         let table = [(true, Err(Refusal::Grounded), false), (false, Ok(Activation::ArmParachutes), true)];
@@ -326,7 +326,7 @@ mod tests {
 
     #[test]
     fn an_engine_without_propellant_says_so() {
-        let spec = sim::craft::test_craft().params().chute;
+        let spec = sim::craft::small::rocket_ref().spec.chute.clone();
         let (c, chute) = (Controls::default(), ChuteState::default());
         let dry = StageInputs { fuelled: false, ..inputs(&c, &chute, &spec, false) };
         let engine = &stack(&dry)[1].parts[0];

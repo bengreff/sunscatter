@@ -39,7 +39,7 @@ fn a_straight_path_keeps_its_ends_and_the_clock_limit() {
     let id = sim.vessel_ids.allocate();
     let r = DVec3::new(3.0e9, 0.0, 0.0);
     let v = DVec3::new(0.0, 12_000.0, 0.0);
-    let vessel = sim::vessel::Vessel::coasting(&sim.world, id, sim.clock, earth, r, v, sim::craft::test_craft());
+    let vessel = sim::vessel::Vessel::coasting(&sim.world, id, sim.clock, earth, r, v, sim::craft::small::rocket_ref());
     sim.fleet.push(vessel);
     let world = sim.world.clone();
     let until = sim.clock.add_seconds(10.0 * 3_600.0);

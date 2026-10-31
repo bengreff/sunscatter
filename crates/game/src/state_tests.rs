@@ -53,7 +53,6 @@ fn lookahead_takes_turns_and_skips_the_active_vessel() {
 /// low-thrust burn under way) never refuse it.
 #[test]
 fn only_live_craft_refuse_rails_warp_and_limbo_craft_do_not() {
-    use sim::vessel::{BurnEnd, BurnLaw, DirectionLaw, FlightPlan, PlannedBurn, SegmentKind};
     let mut sim = SimState::new();
     let w = sim.world.clone();
     let earth = w.find("Earth").unwrap();
@@ -65,19 +64,14 @@ fn only_live_craft_refuse_rails_warp_and_limbo_craft_do_not() {
     let craft = |sim: &mut SimState, h: f64| {
         let (r, v) = circular(h);
         let id = sim.vessel_ids.allocate();
-        Vessel::coasting(&w, id, sim.clock, earth.node, r, v, test_craft())
+        Vessel::coasting(&w, id, sim.clock, earth.node, r, v, sim::craft::small::rocket_ref())
     };
     // On the pad, nothing else flying: allowed.
     assert_eq!(sim.rails_block(), None);
-    // Limbo: drag decay at 300 km, and a 0.5 N burn spiralling up.
+    // Limbo: drag decay at 300 km. (A low-thrust burn on rails went with
+    // the made-up craft's open-loop law, D121; it returns with D029.)
     let decaying = craft(&mut sim, 300_000.0);
-    let mut spiral = craft(&mut sim, 700_000.0);
-    let law = BurnLaw::from_isp(0.5, 3_000.0, DirectionLaw::Tracking { reference: earth.node, axes: DVec3::X });
-    let burn = PlannedBurn { t_start: sim.clock, law, end: BurnEnd::Duration(30.0 * 86_400.0) };
-    spiral.set_plan(&w, FlightPlan { burns: vec![burn] }).unwrap();
-    spiral.advance(&w, sim.clock.add_seconds(3_600.0), &Controls { sas: true, ..Default::default() }, 1_200);
-    assert!(matches!(spiral.segment().unwrap().kind, SegmentKind::Burn(_)), "burning on rails");
-    sim.fleet.extend([decaying, spiral]);
+    sim.fleet.push(decaying);
     assert_eq!(sim.rails_block(), None, "limbo craft do not refuse rails warp");
     // A craft in the air (live below the boundary, 100 km): refused, named.
     let entering = craft(&mut sim, 100_000.0);
@@ -85,10 +79,9 @@ fn only_live_craft_refuse_rails_warp_and_limbo_craft_do_not() {
     assert!(matches!(entering.phase, Phase::Powered { .. }));
     sim.fleet.push(entering);
     assert_eq!(sim.rails_block(), Some(RailsBlock::OtherLive(id)));
-    // The active vessel's own reasons come first.
-    sim.controls_mut().throttle = 0.5;
+    // The active vessel's own reasons come first: its engines lit.
+    sim.fleet[0].next_stage(&w).expect("the ignition");
     assert_eq!(sim.rails_block(), Some(RailsBlock::Thrust));
-    sim.controls_mut().throttle = 0.0;
     sim.active = sim.fleet.len() - 1;
     assert_eq!(sim.rails_block(), Some(RailsBlock::Live));
 }
@@ -104,16 +97,17 @@ fn a_craft_held_in_a_bubble_names_its_leader() {
     let (pos, vel) = (DVec3::new(r, 0.0, 0.0), DVec3::new(0.0, (earth.gm / r).sqrt(), 0.0));
     let craft = |sim: &mut SimState, along: f64| {
         let id = sim.vessel_ids.allocate();
-        Vessel::coasting(&w, id, sim.clock, earth.node, pos + DVec3::Y * along, vel, test_craft())
+        Vessel::coasting(&w, id, sim.clock, earth.node, pos + DVec3::Y * along, vel, sim::craft::small::rocket_ref())
     };
-    let (ship, other) = (craft(&mut sim, 0.0), craft(&mut sim, 2_000.0));
+    let (ship, mut other) = (craft(&mut sim, 0.0), craft(&mut sim, 2_000.0));
+    other.next_stage(&w).expect("the ignition");
     let other_id = other.id();
     sim.fleet = vec![ship, other];
     sim.active = 0;
     assert_eq!(sim.rails_block(), None, "both coasting");
-    // The other craft burns: a bubble forms around it and holds the
-    // active one live.
-    let burn = |i: usize| Controls { sas: true, throttle: if i == 1 { 0.1 } else { 0.0 }, ..Default::default() };
+    // The other craft burns (at its engines' least throttle): a bubble
+    // forms around it and holds the active one live.
+    let burn = |i: usize| Controls { sas: true, throttle: if i == 1 { 0.4 } else { 0.0 }, ..Default::default() };
     sim::vessel::bubble::advance(&w, &mut sim.fleet, &burn, sim.clock.add_seconds(0.1));
     assert!(sim.fleet[0].in_bubble() && matches!(sim.fleet[0].phase, Phase::Powered { .. }));
     assert_eq!(sim.rails_block(), Some(RailsBlock::Near(other_id)));
@@ -186,7 +180,7 @@ fn a_craft_held_live_on_the_pad_refuses_rails_warp() {
     let r = earth.physical.as_ref().unwrap().radius_eq + 400_000.0;
     let (pos, vel) = (DVec3::new(r, 0.0, 0.0), DVec3::new(0.0, (earth.gm / r).sqrt(), 0.0));
     let id = sim.vessel_ids.allocate();
-    sim.fleet.push(Vessel::coasting(&w, id, sim.clock, earth.node, pos, vel, test_craft()));
+    sim.fleet.push(Vessel::coasting(&w, id, sim.clock, earth.node, pos, vel, sim::craft::small::rocket_ref()));
     sim.active = sim.fleet.len() - 1;
     assert_eq!(sim.rails_block(), Some(RailsBlock::OtherHeld(f9)));
     // A craft of parts on the pad with nothing lit is not held live.
@@ -195,16 +189,15 @@ fn a_craft_held_live_on_the_pad_refuses_rails_warp() {
 }
 
 /// D111: rails warp is refused once thrust is produced, not by where the
-/// throttle sits (table): the test craft's engine with its throttle open
-/// and propellant; a craft of parts only with an engine lit (or settling)
-/// or the pilot's RCS translation with RCS on.
+/// throttle sits (table): only with an engine lit (or settling) or the
+/// pilot's RCS translation with RCS on.
 #[test]
 fn thrust_not_the_throttle_refuses_rails_warp() {
     use sim::systems::rcs::RcsMode;
-    let test = SimState::new();
-    let w = test.world.clone();
-    let mut dry = test.ship().clone();
-    dry.set_propellant(&w, 0.0);
+    let small = SimState::new();
+    let w = small.world.clone();
+    let mut burning = small.ship().clone();
+    burning.next_stage(&w).expect("the ignition");
     let f9 = SimState::with_craft(&craft_or_test("falcon9-crew"));
     let mut lit = f9.ship().clone();
     lit.next_stage(&w).expect("the ignition");
@@ -213,9 +206,9 @@ fn thrust_not_the_throttle_refuses_rails_warp() {
     let translate = Controls { translate: DVec3::Z, ..Controls::default() };
     // (vessel, controls, produces thrust)
     let table = [
-        (test.ship(), Controls::default(), false),
-        (test.ship(), open, true),
-        (&dry, open, false),
+        (small.ship(), Controls::default(), false),
+        (small.ship(), open, false),
+        (&burning, open, true),
         (f9.ship(), open, false),
         (&lit, Controls::default(), true),
         (f9.ship(), translate, false),
@@ -257,13 +250,16 @@ fn a_script_flies_an_inactive_probe_through_the_step() {
     sim.spawn_test_ships(2);
     sim.active = 1;
     assert_eq!((sim.fleet[1].crew() > 0, sim.fleet[2].crew()), (true, 0), "active crewed, probe uncrewed");
-    let (fuel, coast) = (sim.fleet[2].propellant(), sim.fleet[1].propellant());
+    let fuel = sim.fleet[2].propellant();
     let probe = sim.fleet[2].controls_mut();
-    crate::commands::apply_controls(probe, Some(0.1), None, Some(sim::vessel::HoldMode::Prograde));
+    crate::commands::apply_controls(probe, Some(0.4), None, Some(sim::vessel::HoldMode::Prograde));
     fly_frames(&mut sim, 0.2, 0.1, 0.3);
-    assert_eq!(sim.fleet[2].propellant(), fuel, "the setting is still on its way");
+    assert!(sim.fleet[2].controls_in_flight() > 0, "the setting is still on its way");
     fly_frames(&mut sim, 0.8, 0.1, 0.3);
     assert_eq!(sim.fleet[2].controls_in_flight(), 0, "the setting has arrived");
+    // Its engines lit (at the throttle that arrived: their least, 40 %).
+    let w = sim.world.clone();
+    sim.fleet[2].next_stage(&w).expect("the ignition");
     // The same from here in 0.1 s and 0.5 s frames.
     let mut chunked = SimState::new();
     (chunked.fleet, chunked.active, chunked.clock) = (sim.fleet.clone(), sim.active, sim.clock);
@@ -274,10 +270,10 @@ fn a_script_flies_an_inactive_probe_through_the_step() {
         assert_eq!(sim.fleet[i].state(&sim.world), chunked.fleet[i].state(&sim.world), "vessel {i}");
         assert_eq!(sim.fleet[i].attitude, chunked.fleet[i].attitude, "vessel {i}");
     }
-    assert!(sim.fleet[2].propellant() < fuel, "the probe burns");
-    assert_eq!(sim.fleet[1].propellant(), coast, "the active vessel coasts");
+    assert!(sim.fleet[2].propellant() < fuel - 1_000.0, "the probe burns");
+    assert!(matches!(sim.fleet[1].phase, Phase::Coasting { .. }), "the active vessel coasts");
     let off = off_prograde(&sim, &sim.fleet[2]);
     assert!(off < 2.0, "the probe holds prograde: {off:.2} deg off");
-    assert_eq!(sim.fleet[2].controls().throttle, 0.1, "its own controls, kept");
+    assert_eq!(sim.fleet[2].controls().throttle, 0.4, "its own controls, kept");
     assert_eq!(sim.controls().throttle, 0.0, "the active vessel's untouched");
 }

@@ -339,7 +339,6 @@ impl Navball {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sim::craft::test_craft;
     use sim::kepler::Elements;
     use sim::vessel::VesselId;
     use std::sync::Arc;
@@ -354,21 +353,29 @@ mod tests {
     fn g_load_is_one_on_the_pad_zero_in_orbit_and_thrust_when_powered() {
         let w = world();
         let t = sim::sol::sol_epoch();
-        let pad = Vessel::landed_at(&w, VesselId(1), "Earth", 28.6, -80.6, t, test_craft());
+        let pad = Vessel::landed_at(&w, VesselId(1), "Earth", 28.6, -80.6, t, &sim::craft::small::legs_out());
         let g = proper_accel(&w, t, &pad, 0.0).length() / rules::G0;
         assert!((g - 1.0).abs() < 0.01, "pad {g}");
 
         let earth = w.find("Earth").expect("Earth").clone();
         let el = Elements { a: 6_778_137.0, e: 0.001, i: 0.9, raan: 0.3, argp: 0.0, mean_anomaly: 1.0 };
         let (r, v) = el.to_state(earth.gm);
-        let leo = Vessel::coasting(&w, VesselId(1), t, earth.node, r, v, test_craft());
+        let leo = Vessel::coasting(&w, VesselId(1), t, earth.node, r, v, sim::craft::small::rocket_ref());
         let g = proper_accel(&w, t, &leo, 0.0).length() / rules::G0;
         assert!(g < 1e-6, "coasting in vacuum {g}");
 
+        // Its engines lit and run up (a 1 s start) at full throttle.
         let mut burn = leo.clone();
         burn.phase = Phase::Powered { anchor: earth.node, r, v };
+        burn.next_stage(&w).expect("the ignition");
+        burn.advance(
+            &w,
+            t.add_seconds(3.0),
+            &sim::vessel::Controls { throttle: 1.0, ..Default::default() },
+            usize::MAX,
+        );
         let expected = burn.craft.engine.thrust_vac / burn.mass() / rules::G0;
-        let g = proper_accel(&w, t, &burn, 1.0).length() / rules::G0;
+        let g = proper_accel(&w, burn.time, &burn, 1.0).length() / rules::G0;
         assert!((g - expected).abs() < 1e-6, "full thrust {g} vs {expected}");
     }
 }

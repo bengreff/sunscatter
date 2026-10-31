@@ -194,7 +194,7 @@ mod tests {
     /// The Falcon 9's Dragon: four seats, a fresh cabin, life support on.
     #[test]
     fn the_falcon_9_carries_four_in_a_fresh_cabin() {
-        assert!(gather(crate::state::SimState::new().ship()).is_none(), "the test craft");
+        assert!(gather(crate::state::SimState::new().ship()).is_some(), "the small rocket's seat");
         if !crate::state::craft_exists("falcon9-crew") {
             return;
         }

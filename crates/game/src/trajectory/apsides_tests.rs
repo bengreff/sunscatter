@@ -229,7 +229,7 @@ fn a_suborbital_coast_ends_in_an_impact_not_a_periapsis() {
     let el = Elements { a: 6_000_000.0, e: 0.1, i: 0.5, raan: 0.0, argp: 0.0, mean_anomaly: 3.0 };
     let (r, v) = el.to_state(earth.gm);
     let id = sim.vessel_ids.allocate();
-    let vessel = Vessel::coasting(&sim.world, id, sim.clock, earth.node, r, v, sim::craft::test_craft());
+    let vessel = Vessel::coasting(&sim.world, id, sim.clock, earth.node, r, v, sim::craft::small::rocket_ref());
     sim.fleet.push(vessel);
     let i = sim.fleet.len() - 1;
     let world = sim.world.clone();
@@ -255,7 +255,7 @@ fn fly_an_orbit(el: Elements, warp: f64, frames: usize) -> Vec<(Epoch, Shown)> {
     let earth = sim.world.find("Earth").unwrap().clone();
     let (r, v) = el.to_state(earth.gm);
     let id = sim.vessel_ids.allocate();
-    sim.fleet.push(Vessel::coasting(&sim.world, id, sim.clock, earth.node, r, v, sim::craft::test_craft()));
+    sim.fleet.push(Vessel::coasting(&sim.world, id, sim.clock, earth.node, r, v, sim::craft::small::rocket_ref()));
     sim.active = sim.fleet.len() - 1;
     let (orbits, pred, controls) =
         (crate::trajectory::settings::OrbitSettings::default(), Prediction::default(), *sim.controls());

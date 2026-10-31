@@ -7,7 +7,7 @@ use crate::trajectory::{self, settings::OrbitSettings};
 use bevy::prelude::*;
 use bevy::tasks::{futures::check_ready, AsyncComputeTaskPool, Task};
 use glam::DVec3;
-use sim::craft::{craft_of, test_craft, Craft, CraftId};
+use sim::craft::{craft_of, Craft, CraftId};
 use sim::ephem::Ephemeris;
 use sim::frame::NodeId;
 use sim::kepler::Elements;
@@ -154,10 +154,11 @@ fn load_world() -> World {
 }
 
 impl SimState {
-    /// A new game with the test craft on the pad (tests).
+    /// A new game with the small rocket on its legs on the pad (tests:
+    /// `sim::craft::small`, a craft of parts).
     #[cfg(test)]
     pub fn new() -> Self {
-        Self::with_craft(test_craft())
+        Self::with_craft(&sim::craft::small::legs_out())
     }
 
     /// A new game with `craft` on the pad, in daylight over Florida:
@@ -370,7 +371,8 @@ impl SimState {
         clock
     }
 
-    /// Debug: spawn `n` coasting test ships in low Earth orbit (performance).
+    /// Debug: spawn `n` small rockets (`sim::craft::small`, craft of parts)
+    /// coasting in low Earth orbit (performance).
     pub fn spawn_test_ships(&mut self, n: usize) {
         let earth = self.world.find("Earth").expect("Earth").clone();
         for k in 0..n {
@@ -384,7 +386,8 @@ impl SimState {
             };
             let (r, v) = el.to_state(earth.gm);
             let id = self.vessel_ids.allocate();
-            let vessel = Vessel::coasting(&self.world, id, self.clock, earth.node, r, v, test_craft());
+            let vessel =
+                Vessel::coasting(&self.world, id, self.clock, earth.node, r, v, sim::craft::small::rocket_ref());
             let mut vessel = self.synchronised(vessel);
             // Every other one is an uncrewed probe (flown with light delay).
             if k % 2 == 1 {

@@ -158,7 +158,7 @@ fn the_test_craft_shows_its_engine_and_parachutes() {
     use sim::chute::ChuteState;
     use sim::vessel::Controls;
     let controls = Controls { throttle: 1.0, ..Controls::default() };
-    let spec = sim::craft::test_craft().params().chute;
+    let spec = sim::craft::small::rocket_ref().spec.chute.clone();
     let chute = ChuteState::default();
     let inputs = StageInputs { controls: &controls, chute: &chute, spec: &spec, engine_running: true, fuelled: true };
     let rows = plain(&stack(&inputs));

@@ -161,16 +161,15 @@ pub fn update(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sim::craft::test_craft;
 
     #[test]
     fn no_breakup_no_work() {
         let sim = SimState::new();
         assert_eq!(next_breakup(&standings(&sim.fleet)), None);
-        // The test craft is one part: never debris while it can be commanded.
-        assert!(sim.fleet[0].controllable());
+        // The small rocket on the pad: never debris while it can be
+        // commanded.
+        assert!(sim.fleet[0].controllable() && sim::craft::craft_of(&sim.fleet[0].craft.id).parts.len() > 1);
         assert_eq!(sim::vessel::debris::debris(&sim.world, sim.clock, &sim.fleet, 0), Vec::<usize>::new());
-        assert_eq!(test_craft().parts.len(), 1);
     }
 
     /// The order the rule applies breakups in, one per call, over frames
