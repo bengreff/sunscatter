@@ -18,7 +18,7 @@ How a craft makes thrust and feeds it: tanks and their pressures, the pressurant
 ## What exists
 
 - **Plumbing** (`sim::systems::plumbing`): tank pressures, pressurisation from heated helium bottles within the lines' choked flow, relief, boil-off, NPSP at the inlets, settling by Bond number. *Playable*; slosh pendulums, line transients and valves' effect on flow are not built.
-- **Engines** (`sim::systems::propulsion`): the state machine, start transients, tail-off, settling before a start, gas ingestion and cavitation; the Merlin 1D, MVac, SuperDraco and Draco on one model. *Playable*; SuperDraco thrust ignores feed pressure (the fidelity review's gap), and per-engine heat and gimbals are not built.
+- **Engines** (`sim::systems::propulsion`, the controllers: layer 1 of D128): the state machine, start transients, tail-off, the fail-safe, gas ingestion and cavitation (the settling before a start is the ship computer's, `ship_os::ullage`); the Merlin 1D, MVac, SuperDraco and Draco on one model. *Playable*; SuperDraco thrust ignores feed pressure (the fidelity review's gap), and per-engine heat and gimbals are not built.
 - **RCS** (`sim::systems::rcs`): translation from the nozzles' geometry, drawing their gas; rotation keeps the per-axis authority. *Playable.*
 - **Gimbal and SAS for a big stack** (`sim::vessel::attitude::limits`): the slowest running engine's actuator rate, SAS from the authority along the error, a slew cap by dynamic pressure. *Playable.*
 - **Stage estimates** (D111, D120, `sim::systems::estimate`): per burn, the tanks it draws on, burnout, Δv (in vacuum by default) and thrust-to-weight, through what the craft knows (D106). *Playable.*

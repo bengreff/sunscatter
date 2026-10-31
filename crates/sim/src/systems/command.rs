@@ -1,8 +1,8 @@
 //! Ship commands as the systems carry them out (D104, D107, D108;
 //! ship-model.md §5.0, §5.3, §8): an ignition starts an engine's start
 //! sequence (one of its igniter charges, or the ground's supply while the
-//! pad's clamps hold it; on floating propellant it first waits for it to
-//! settle, `systems::propulsion`), a shutdown its tail-off, a deployment moves a
+//! pad's clamps hold it; on floating propellant the ship computer first
+//! waits for it to settle, `ship_os::ullage`), a shutdown its tail-off, a deployment moves a
 //! mechanism at its actuator's rate, and the sequence's clamp release is
 //! armed until every ignited engine delivers its rated thrust (the real
 //! pad's rule); a release commanded by hand lets go at once. This is the
@@ -71,19 +71,10 @@ pub fn apply(def: &ShipDef, state: &mut ShipState, command: &ShipCommand, cx: Co
                     continue;
                 }
                 e.selected = true;
-                // Floating propellant: the start sequence waits for it to
-                // settle (its acceleration history says when), firing the
-                // thrusters that push along the engine's thrust if it has
-                // any; commanded again while it waits, it starts at once.
-                let waiting = state.engines[i].settling.is_some();
-                if !waiting && !super::propulsion::feeds_settled(def, state, i) {
-                    state.engines[i].settling = Some(0.0);
-                    let how = if super::rcs::can_push(def, state, d.data.dir) { "settling" } else { "waiting for" };
-                    // From the sequence, the next stage order starts it
-                    // ([`next_stage`]).
-                    let again = if cx.sequence { "stage" } else { "ignite" };
-                    let text = format!("{}: {how} its propellant before the start ({again} again to start now)", d.id);
-                    state.event(cx.at, text, false);
+                // Floating propellant: the ship computer's ullage function
+                // holds the ignition while the thrusters settle it;
+                // commanded again while it waits, it starts at once.
+                if super::ship_os::ullage::hold(def, state, i, cx.at, cx.sequence) {
                     continue;
                 }
                 super::propulsion::light(def, state, i);

@@ -27,6 +27,8 @@
 //! - The pad's launch commit ([`commit`]): the armed release lets the
 //!   clamps go when every engine reports its rated thrust through its
 //!   controller.
+//! - The settling push before a start ([`ullage`]): an ignition on floating
+//!   propellant waits while the thrusters along its thrust settle it.
 //! - What the landing prediction needs ([`can_predict`]); the stage
 //!   estimates read the same `Knowledge` (`systems::estimate`).
 //!
@@ -41,6 +43,7 @@
 
 pub mod commit;
 pub mod sas;
+pub mod ullage;
 
 pub use commit::{commit, Commit};
 pub use sas::{sas, Sas};

@@ -28,8 +28,8 @@ Neither: the physics (what happens), the native boundary (sensors to `Knowledge`
 | Flame-out when dry | an engine whose feed runs dry stops (not a failure) | `propulsion` | stays (physics) | |
 | **The fail-safe shutdown** (D123) | a lit engine whose linked computers are all lost or unpowered shuts down; D123 adds its own controller lost | was `systems::flight::safing`, called from `propulsion` | **built:** `propulsion::safes` (a table test), each controller reading its own links (`systems::links::controller`), D123's lost controller included | |
 | Benign shutdown on a failure | the controller stops an engine whose mode is benign | `failure::outcome` → `propulsion::stop` | stays | |
-| **The wait for settled propellant** | an engine commanded on floating propellant waits up to `SETTLE_LIMIT`, then starts; commanded again it starts at once | `propulsion::settle_or_start` | see the next row | PLANNER's `systems::maneuver` calls the settling wait layer 1 |
-| **The push that settles it** | the thrusters along the thrust fire during the wait (the S2's nitrogen pods) | `propulsion::ullage` → `systems::rcs` | **layer 2**: the stage computer's ullage function | an engine commanding another part's thrusters is the "mingling" D128 forbids. The real sequence's timed ullage burn is the flight computer's (flight-software.md: "an adaptive function"). Open point 1 |
+| **The wait for settled propellant** | an engine commanded on floating propellant waits up to `SETTLE_LIMIT`, then starts; commanded again it starts at once | was `propulsion::settle_or_start` | **built: layer 2**, `ship_os::ullage::{hold, step}` (open point 1, decided below) | PLANNER's `systems::maneuver` called the settling wait layer 1 |
+| **The push that settles it** | the thrusters along the thrust fire during the wait (the S2's nitrogen pods) | was `propulsion::ullage` → `systems::rcs` | **built: layer 2**, `ship_os::ullage::push` | an engine commanding another part's thrusters is the "mingling" D128 forbids. The real sequence's timed ullage burn is the flight computer's (flight-software.md: "an adaptive function"). Open point 1 |
 | Relief valves | a tank above its MEOP vents; at saturation it boils off | `plumbing::relieve`; the coast law in closed form | stays; MEOP a parameter | |
 | Regulators | the ullage held at its setpoint while the bottle can | `plumbing::fast` (`pressure_regulated`); the coast law's top-up | stays; setpoint a parameter | |
 | Valves | open, closed, stuck | `ShipState::apply` (`Open`, `Close`); failure outcomes | stays (a mechanism commanded from outside) | |
@@ -53,7 +53,7 @@ Neither: the physics (what happens), the native boundary (sensors to `Knowledge`
 | Interlocks | the legs refused while the clamps hold; a stage with nothing left refused | `systems::command`, `game::staging` | `ship_os::sequence` | |
 | **Aborts** (D120) | the procedure's commands; the automatic decision on a thrust-to-weight margin | the procedure: a function (`program::offered` for the offer); the decision: not built | `ship_os::abort` | the offer stays an interface rule |
 | **Parachute deploy** (D126) | arming on command; Dragon's automatic arming on barometric altitude; the main's opening at `main_height` | arming: `Controls::chute` / `ArmChutes`; the main's height: `chute::step` reads the true height | `ship_os::chutes`: arming and the main's height from `Knowledge` (barometric) | flight-software.md: "the parachutes' deploy heights read the true height" |
-| The ullage push | see layer 1's settling rows | `propulsion::ullage` | `ship_os::ullage` (or inside the maneuver and sequence programs) | open point 1 |
+| The ullage push | see layer 1's settling rows | **built:** `ship_os::ullage` | | open point 1, decided |
 | **The maneuver program** (D126) | a planned burn closed-loop to its node's orbit | `systems::maneuver` (PLANNER, c7c2de4: `step(&Inputs, &mut Program) -> Commands`) | `ship_os::maneuver` | the first program on the layer-2 API |
 | Landing guidance, docking (D117, D123) | the booster's burns; Dragon's approach | not built | `ship_os` programs | |
 | The warp-stop line, replaced | §4 | not built | a program's `warp_stop` | |
@@ -157,7 +157,7 @@ sim::systems::
 ## 7. The moves for LAYERS, in order
 
 1. *Built.* `systems::flight` → `systems::ship_os::{mod, sas, commit}`; `safing` → `propulsion`'s engine controller (D123's lost controller with it); the data links both layers read → `systems::links`.
-2. The ullage push out of `propulsion` into `ship_os::ullage`, with the engine's own start rule left in `propulsion` (open point 1).
+2. *Built.* The ullage push out of `propulsion` into `ship_os::ullage`, with the engine's own start rule left in `propulsion` (open point 1: the wait goes with the push). The wait's state stays each engine's `settling` (saved; the game reads it), and it still reads the true liquid position (FIXES3: the level sensors, a timed burn without them).
 3. The sequence, functions and interlocks out of `systems::command` into `ship_os::sequence`; `command::apply` stays the native boundary.
 4. The chutes' arming and main height into `ship_os::chutes`, from the barometric altitude in `Knowledge`.
 5. The schedule: programs at fixed epochs that stop the advance like orders (with ADVANCE's arrivals-as-orders, [warp-invariance.md](warp-invariance.md) §7, point 4).
@@ -166,6 +166,6 @@ sim::systems::
 
 ## 8. Open
 
-1. **The settling wait.** PLANNER's maneuver doc puts the engine's wait for settled propellant in layer 1. This doc puts the push that settles it (another part's thrusters) in layer 2, and leaves to the engine only its start on command (gas ingestion if it is floating). Decision for the owner, or for LAYERS by D128's rule (§1).
+1. **The settling wait** (decided by LAYERS by D128's rule, §1; for the owner to confirm). The wait goes with the push into layer 2 (`ship_os::ullage`): it reads the feed tanks and fires other parts' thrusters, so it coordinates parts, and the real sequence's ullage burn is the stage computer's. The engine keeps only its start on command (gas ingestion if its propellant floats), so with layer 1 alone a pilot settles by hand (translation, then ignite), as D126 allows.
 2. **The warp-stop thresholds:** E until D116's crew thresholds and NASA-STD-3001's limits are sourced.
 3. **Whether the attitude controller is one program or the layer itself.** SAS runs on every live tick today. As a program it would run on its schedule, the tick.

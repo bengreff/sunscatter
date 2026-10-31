@@ -392,7 +392,7 @@ fn commands(x: &Inputs, p: &mut Program) -> Commands {
         Step::Burn => {
             p.lit_seen |= p.engines.iter().any(|&i| burning(x.view, i));
             let stopped = p.lit_seen && !p.engines.iter().any(|&i| burning(x.view, i));
-            let never = !p.lit_seen && since(p.ignited) > super::propulsion::SETTLE_LIMIT + 1.0;
+            let never = !p.lit_seen && since(p.ignited) > super::ship_os::ullage::SETTLE_LIMIT + 1.0;
             if stopped || never {
                 p.step = Step::Short;
                 p.left = go.map(|g| g.length());

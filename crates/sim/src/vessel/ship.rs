@@ -259,8 +259,9 @@ impl Vessel {
         let total: f64 = weights.iter().map(|w| w.1).sum();
         let blocks = weights.into_iter().map(|(i, w)| (i, w / total)).collect();
         let out = EngineOutput { thrust: t.thrust, mdot: t.mdot };
-        let want = (controls.translate.clamp(DVec3::splat(-1.0), DVec3::splat(1.0)) + propulsion::ullage(def, state))
-            .clamp_length_max(1.0);
+        let want = (controls.translate.clamp(DVec3::splat(-1.0), DVec3::splat(1.0))
+            + ship_os::ullage::push(def, state))
+        .clamp_length_max(1.0);
         let push = crate::systems::rcs::translate(def, state, props.com, want, self.debug);
         let limits = Some(limits(def, state, &t, dt, q, gas));
         let tick = ShipTick {

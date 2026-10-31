@@ -68,6 +68,8 @@ pub fn tick(def: &ShipDef, state: &mut ShipState, env: &TickEnv, draws: &[f64], 
     state.stepped = Some(end);
     let feeds = plumbing::feeds(def, state, &a);
     let penv = propulsion::Env { at: env.at, dt: env.dt, throttle: env.throttle, debug: env.debug };
+    propulsion::protect(def, state, &penv);
+    super::ship_os::ullage::step(def, state, env.at, env.dt, env.debug);
     let mut effects = propulsion::step(def, state, &penv, &feeds);
     effects.extend(super::ship_os::commit::step(def, state, env.at, env.debug));
     if let Some(b) = &env.bodies {
