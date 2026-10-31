@@ -226,6 +226,68 @@ pub fn drop_edit(drag: Drag, onto: usize) -> Option<SequenceEdit> {
     }
 }
 
+/// Whether a row's stage can be edited on the bar (dragged, deleted, its
+/// commands dragged, a drop onto it): the stages still to run.
+pub fn editable(row: &Row) -> bool {
+    matches!(row.place, Place::Next | Place::Later) && row.stage.is_some()
+}
+
+/// Whether a row has AGAIN (D114): the active stage and those run before.
+pub fn runs_again(row: &Row) -> bool {
+    matches!(row.place, Place::Active | Place::Done) && row.stage.is_some()
+}
+
+/// An edit of the bar, by the stages' indices in the program
+/// ([`Row::stage`]): a stage dragged onto another, one of its commands
+/// dragged to another stage, × (delete), AGAIN. The agent's
+/// `edit_stages` (D044).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Op {
+    Move { stage: usize, to: usize },
+    MoveCommand { stage: usize, command: usize, to: usize },
+    Delete(usize),
+    Again(usize),
+}
+
+/// What an [`Op`] sends: a sequence edit, or a stage to run again.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Sent {
+    Edit(SequenceEdit),
+    Again(u32),
+}
+
+/// What `op` does on the bar showing `rows`, refused with why where the
+/// bar would not let a player do it (the same rules: [`editable`],
+/// [`runs_again`], [`drop_edit`]).
+pub fn check(op: Op, rows: &[Row]) -> Result<Sent, String> {
+    let row = |j: usize| rows.iter().find(|r| r.stage == Some(j)).ok_or_else(|| format!("no stage {j} on the bar"));
+    let pending = |j: usize| {
+        let r = row(j)?;
+        editable(r).then_some(r).ok_or_else(|| format!("stage {j} ({}) has run: only AGAIN", r.name))
+    };
+    let dropped = |drag: Drag, to: usize| {
+        pending(to)?;
+        drop_edit(drag, to).map(Sent::Edit).ok_or_else(|| format!("already in stage {to}"))
+    };
+    match op {
+        Op::Move { stage, to } => {
+            pending(stage)?;
+            dropped(Drag::Stage(stage), to)
+        }
+        Op::MoveCommand { stage, command, to } => {
+            if !pending(stage)?.items.iter().any(|i| i.action == command) {
+                return Err(format!("stage {stage} has no command {command} acting on this piece"));
+            }
+            dropped(Drag::Action { stage, action: command }, to)
+        }
+        Op::Delete(j) => pending(j).map(|_| Sent::Edit(SequenceEdit::Delete(j as u32))),
+        Op::Again(j) => {
+            let r = row(j)?;
+            runs_again(r).then_some(Sent::Again(j as u32)).ok_or_else(|| format!("stage {j} ({}) has not run", r.name))
+        }
+    }
+}
+
 #[cfg(test)]
 #[path = "rows_tests.rs"]
 mod tests;

@@ -95,7 +95,7 @@ impl Plugin for StageBarPlugin {
 /// Takes the active vessel's estimates again when they are stale.
 pub fn refresh(sim: Res<SimState>, time: Res<Time>, mut bar: ResMut<StageBar>) {
     let v = sim.ship();
-    let (Some(def), Some(state)) = (v.ship_def(), v.ship()) else {
+    let Some(state) = v.ship() else {
         bar.cache = None;
         return;
     };
@@ -103,6 +103,25 @@ pub fn refresh(sim: Res<SimState>, time: Res<Time>, mut bar: ResMut<StageBar>) {
     if bar.cache.as_ref().is_some_and(|c| fresh(c, v.id(), state.sequence, &state.stages, bar.air, now)) {
         return;
     }
+    let Some(estimates) = estimates_of(&sim, sim.active, bar.air) else { return };
+    let air = bar.air;
+    bar.cache = Some(Cached {
+        vessel: v.id(),
+        at: now,
+        air,
+        sequence: state.sequence,
+        stages: state.stages.clone(),
+        estimates,
+    });
+}
+
+/// Vessel `i`'s stage estimates in `air` (`sim::systems::estimate`, from
+/// what it knows), as the bar shows them for the active vessel and the
+/// agent reads them for any (`get_vessel`); `None` for a vessel without
+/// parts.
+pub fn estimates_of(sim: &SimState, i: usize, air: Air) -> Option<Estimates> {
+    let v = &sim.fleet[i];
+    let (def, state) = (v.ship_def()?, v.ship()?);
     let (anchor, r, v_rel) = v.state_at(&sim.world, sim.clock);
     let snap = sim.world.snapshot(sim.clock);
     let motion = sim::landing::nearest_surface(&sim.world, &snap, anchor, r)
@@ -113,20 +132,19 @@ pub fn refresh(sim: Res<SimState>, time: Res<Time>, mut bar: ResMut<StageBar>) {
     let inputs = Inputs {
         hull: &hull,
         knowledge: &knowledge,
-        throttle: sim.controls().throttle,
-        p: ambient(bar.air, motion.map_or(0.0, |m| m.pressure)),
+        throttle: v.controls().throttle,
+        p: ambient(air, motion.map_or(0.0, |m| m.pressure)),
         g: motion.map(|m| m.gravity).filter(|_| known),
     };
-    let estimates = estimate::estimate(&def, state, &inputs);
-    let air = bar.air;
-    bar.cache = Some(Cached {
-        vessel: v.id(),
-        at: now,
-        air,
-        sequence: state.sequence,
-        stages: state.stages.clone(),
-        estimates,
-    });
+    Some(estimate::estimate(&def, state, &inputs))
+}
+
+/// Vessel `v`'s rows on the bar with `estimates` (its parachutes' look
+/// from their state); `None` for a vessel without parts.
+pub fn rows_of(v: &sim::vessel::Vessel, estimates: &Estimates) -> Option<Vec<rows::Row>> {
+    let (def, state) = (v.ship_def()?, v.ship()?);
+    let chute_parts: Vec<u32> = v.craft.design().parts.iter().filter(|p| p.chute).map(|p| p.id).collect();
+    Some(rows::rows(&def, state, estimates, (&chute_parts, icons::chute_look(&v.chute))))
 }
 
 /// Draws the bar in the flight view and sends what it asks for.
@@ -144,14 +162,13 @@ pub fn show(
         return Ok(());
     }
     let v = sim.ship();
-    let rows = match (v.ship_def(), v.ship()) {
-        (Some(def), Some(state)) => {
+    let rows = match v.ship() {
+        Some(_) => {
             let Some(cache) = bar.cache.as_ref().filter(|c| c.vessel == v.id()) else { return Ok(()) };
-            let chute_parts: Vec<u32> = v.craft.design().parts.iter().filter(|p| p.chute).map(|p| p.id).collect();
-            rows::rows(&def, state, &cache.estimates, (&chute_parts, icons::chute_look(&v.chute)))
+            rows_of(v, &cache.estimates).unwrap_or_default()
         }
         // The test craft: its engine and parachutes (`staging::stack`).
-        _ => rows::plain(&crate::staging::stack_of(v, sim.controls())),
+        None => rows::plain(&crate::staging::stack_of(v, sim.controls())),
     };
     let ctx = contexts.ctx_mut()?;
     let out = draw::bar(ctx, &rows, &mut bar);

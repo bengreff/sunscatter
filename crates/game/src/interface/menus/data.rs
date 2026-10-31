@@ -363,9 +363,13 @@ fn elements(sim: &SimState, body: sim::frame::NodeId) -> Option<Elements> {
 fn target(s: &Sources, body: sim::frame::NodeId) -> TargetData {
     let sim = s.sim;
     let mut choices = vec![("none".to_string(), None)];
-    choices.extend(sim.world.surfaces().map(|src| (src.name.clone(), Some(NavTarget::Body(src.node)))));
-    let others = sim.fleet.iter().map(|v| v.id()).filter(|&id| id != sim.ship().id());
-    choices.extend(others.map(|id| (s.tracked.name(id), Some(NavTarget::Vessel(id)))));
+    choices.extend(crate::navball::target_choices(sim).into_iter().map(|t| {
+        let name = match t {
+            NavTarget::Body(node) => sim.world.source(node).map_or_else(String::new, |src| src.name.clone()),
+            NavTarget::Vessel(id) => s.tracked.name(id),
+        };
+        (name, Some(t))
+    }));
     let info = s.target.and_then(|tg| {
         let (anchor, r, v) = sim.ship().state_at(&sim.world, sim.clock);
         let (name, tr, tv) = crate::navball::target_state(sim, s.tracked, tg, anchor, sim.clock)?;

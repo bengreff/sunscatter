@@ -123,6 +123,15 @@ pub struct NavState {
     pub known: crate::format::Known,
 }
 
+/// What can be targeted, in the Orbital menu's picker's order and the
+/// agent's `set_target`'s (D044): every body with a surface, then every
+/// vessel but the active one.
+pub fn target_choices(sim: &SimState) -> Vec<NavTarget> {
+    let bodies = sim.world.surfaces().map(|src| NavTarget::Body(src.node));
+    let others = sim.fleet.iter().map(|v| v.id()).filter(|&id| id != sim.ship().id()).map(NavTarget::Vessel);
+    bodies.chain(others).collect()
+}
+
 /// A target's name, position and velocity relative to `anchor` at `t`.
 pub(crate) fn target_state(
     sim: &SimState,

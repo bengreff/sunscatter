@@ -21,16 +21,19 @@ The agent is at a **control location** like you (D067): mission control when the
 
 | Tool | Does |
 |---|---|
-| `get_state` | Clock (TDB), the origin's clock (TT, D088) and the active ship clock's offset from it, warp, location, active vessel, every vessel's status and signal |
+| `get_state` | Clock (TDB), the origin's clock (TT, D088) and the active ship clock's offset from it, warp, location, active vessel, every vessel's status and signal, the navigation target |
 | `list_bodies` | Bodies: name, GM, radius, what they orbit |
-| `get_vessel` | A vessel as seen from the location, as far as its sensors measure: position, velocity, altitude above the ellipsoid, orbit, attitude (heading, pitch, roll and the body axes in east-north-up), signal; for a craft of parts, `stages` (the next stage, tank levels, engines, the feeding tanks' share) |
+| `get_vessel` | A vessel as seen from the location, as far as its sensors measure: position, velocity, altitude above the ellipsoid, orbit, attitude (heading, pitch, roll and the body axes in east-north-up), signal; for a craft of parts, `stages` (the next stage, tank levels, engines, the feeding tanks' share, and `sequence`: the staging bar's rows top to bottom, each stage's `stage` number, KSP number, name, place, commands and figures, Δv, burnout, propellant and the active stage's thrust, TWR, mass and Isp, in vacuum or with `air: "current"`, D120) |
 | `get_trajectory` | A vessel's predicted path from now, sampled (needs a navigation solution) |
 | `set_warp` | Time warp level; resumes stopped time |
 | `switch_vessel` | Fly a vessel: it becomes active, and the control location moves aboard it if it is crewed (mission control if not) |
 | `go_to_mission_control` | Open the tracking station (mission control) |
 | `set_controls` | Throttle, SAS, the hold and the speed reference of any vessel (`id`, default the active one; D112), after the light delay from anywhere but aboard; `rotate`, the pilot's rotation keys held, and `rcs` (off, on, translate, rotate) with `rcs_fine`, the pilot's RCS mode (R and the RCS menu), aboard the active vessel |
 | `stage` | A craft of parts' next stage (`id`, default the active one), sent like any command |
-| `command` | A craft of parts' commands as the player gives them, sent like any command: `function` runs one of its functions by name (the action bar's: an abort, the legs, the grid fins); `item` (a part's or component's id) with `do` runs one of its commands by its label, as its part card and the systems screen show them (IGNITE, SHUT DOWN, DEPLOY, OPEN, SEPARATE, RCS … on, POWER … off, ARM PARACHUTES). `item` alone lists its commands now; neither lists the functions and every item with commands |
+| `command` | A craft of parts' commands as the player gives them, sent like any command: `function` runs one of its functions by name (the action bar's: an abort, the legs, the grid fins); `item` (a part's or component's id) with `do` runs one of its commands by its label, as its part card and the systems screen show them (IGNITE, SHUT DOWN, DEPLOY, OPEN, SEPARATE, RCS … on, POWER … off, ARM PARACHUTES). `item` alone lists its commands now; neither lists the functions and every item with commands. The functions are those the action bar and the systems screen offer: the ones the piece's parts still take, an abort only while it would save the crew (D120); the rest are refused with why |
+| `edit_stages` | The staging bar's edits, one a call, by the stages' `stage` numbers from `get_vessel`: `move` a stage still to run, `move_command` one of its commands to another stage, `delete` one, or run one already run `again` (D114); the bar's own rules (`stage_bar::rows::check`), sent like any command |
+| `set_target` | The navigation target from the Orbital menu's choices (`navball::target_choices`): a `vessel` (not the active one), a `body` with a surface, or `none` |
+| `notifications` | The notifications' messages as the player reads them, numbered: those `after` the last one read, with whether each is an error and the vessel it is about |
 | `set_plan` | Replace a vessel's planned burns (prograde/normal/radial Δv, time); sent with light delay. A craft of parts gets nodes (D126: `in_s` is the burn's middle, flown closed-loop by the maneuver program); the result gives each node's predicted ignition, duration and warnings, and the Δv available |
 | `get_landing_prediction` | Where, when and how fast the active vessel meets the ground (needs a navigation solution) |
 | `closest_approaches` | Closest approaches between two vessels (nearest first) |
@@ -39,7 +42,7 @@ The agent is at a **control location** like you (D067): mission control when the
 
 | Tool | Does |
 |---|---|
-| `shoot` | A screenshot (PNG) once the view has settled, the clock held meanwhile: the flight view or a named screen (`systems` on a `layer` with a `part` selected, `tracking`, `pause`, `settings` on a tab), with `menus` open, at a `width`/`height` (headless), at an interface scale (`ui_scale`: 0.2 shrinks it to specks). Returns the file's path (default `shots/` under the game's home) |
+| `shoot` | A screenshot (PNG) once the view has settled, the clock held meanwhile: the flight view or a named screen (`systems` on a `layer` with a `part` selected, `tracking`, `pause`, `settings` on a tab, `saves`, `help`), with `menus` open (the RCS menu while RCS is on), at a `width`/`height` (headless), at an interface scale (`ui_scale`: 0.2 shrinks it to specks). Returns the file's path (default `shots/` under the game's home) |
 | `set_camera` | The camera's focus (the active vessel, another vessel or a body), distance, pitch and yaw about the focus's up, or the angle from a body's subsolar point |
 | `pause` | Stop time (the player's `,`) |
 | `step` | Run `seconds` of game time and stop exactly there, at a warp level; answers when the clock has stopped |

@@ -17,6 +17,9 @@ pub mod session;
 use crate::commands::GameCommand;
 use crate::comms::{self, Comms, Location};
 use crate::interface::layout::InterfaceSettings;
+use crate::interface::stage_bar::{self, rows};
+use crate::interface::toasts::{Link, Toasts};
+use crate::navball::NavTarget;
 use crate::state::{SimState, WARP_LEVELS};
 use crate::tracking::TrackingStation;
 use bevy::prelude::*;
@@ -43,6 +46,16 @@ pub enum Effect {
     },
     /// The rotation input held on the active vessel ([`HeldRotation`]).
     Rotate(VesselId, DVec3),
+    /// The navigation target (the Orbital menu's picker; `None` clears it).
+    Target(Option<NavTarget>),
+}
+
+/// What the player's interface holds that the agent reads as the player
+/// does (D044): the navigation target and the notifications.
+#[derive(Clone, Copy, Default)]
+pub struct Seen<'a> {
+    pub target: Option<NavTarget>,
+    pub toasts: Option<&'a Toasts>,
 }
 
 /// The rotation input an agent aboard holds on the active vessel, like the
@@ -104,8 +117,12 @@ fn flight_tools() -> Vec<Tool> {
             "get_vessel",
             "A vessel as seen from your location (light-delayed): position and velocity relative to the body it is \
              about (inertial axes, m and m/s), altitude, orbit (the next apsides and any impact along the predicted \
-             trajectory; inclination, eccentricity and period osculating), signal. Fails without a signal.",
-            schema(json!({"id": id}), &["id"]),
+             trajectory; inclination, eccentricity and period osculating), signal, and its stages: tanks, engines, \
+             and `sequence`, the staging bar's rows top to bottom (each stage's `stage` number for edit_stages, KSP \
+             number, name, place, commands, and the figures it shows: Δv, burnout, propellant, the active stage's \
+             thrust, TWR, mass, Isp; in vacuum, or the current air with `air: \"current\"`, D120). Dashes (null \
+             or \"—\") where the vessel measures nothing (D106). Fails without a signal.",
+            schema(json!({"id": id, "air": {"type": "string", "enum": ["vacuum", "current"]}}), &["id"]),
         ),
         t(
             "get_trajectory",
@@ -194,13 +211,61 @@ fn flight_tools() -> Vec<Tool> {
                 &[],
             ),
         ),
+        command_tool(&id),
+    ]
+    .into_iter()
+    .chain(interface_tools(&id))
+    .collect()
+}
+
+/// The tools that reach what the player's interface holds: the staging
+/// bar (the next stage, its edits), the target, the notifications
+/// (interface-map.md finding 10).
+fn interface_tools(id: &Value) -> Vec<Tool> {
+    let t = |name: &str, description: &str, input_schema: Value| Tool {
+        name: name.into(),
+        description: description.into(),
+        input_schema,
+    };
+    vec![
         t(
             "stage",
             "Run a craft of parts' next stage of its sequence (`id`, default the active vessel): engines lit, \
              pieces separated, as its stage list says. It travels like any command (`arrives_in_s`).",
             schema(json!({"id": id}), &[]),
         ),
-        command_tool(&id),
+        t(
+            "edit_stages",
+            "Edit a craft of parts' stage sequence as the player does on the staging bar (`id`, default the active \
+             vessel), one edit a call, by the stages' `stage` numbers in get_vessel's `stages.sequence`: `move` a \
+             stage still to run to another's place ({stage, to}), `move_command` one of its commands to the end \
+             of another ({stage, command, to}), `delete` a stage still to run, or run a stage already run `again` \
+             (D114). It travels like any command (`arrives_in_s`).",
+            schema(
+                json!({"id": id,
+                       "move": {"type": "object", "properties": {"stage": {"type": "integer"}, "to": {"type": "integer"}},
+                                "required": ["stage", "to"]},
+                       "move_command": {"type": "object", "properties": {"stage": {"type": "integer"},
+                                "command": {"type": "integer"}, "to": {"type": "integer"}},
+                                "required": ["stage", "command", "to"]},
+                       "delete": {"type": "integer"}, "again": {"type": "integer"}}),
+                &[],
+            ),
+        ),
+        t(
+            "set_target",
+            "The navigation target, as the Orbital menu's TARGET picks it: a `vessel` (id, not the active one) or a \
+             `body` with a surface (name), or `none: true`. The navball's TARGET speed and holds and the Orbital \
+             menu's distance and closest approach follow it; get_state gives it.",
+            schema(json!({"vessel": id, "body": {"type": "string"}, "none": {"type": "boolean"}}), &[]),
+        ),
+        t(
+            "notifications",
+            "The notifications' messages, as the player reads them bottom left (saves, events, commands' replies), \
+             oldest first, each with its number `n`, whether it is an error and the vessel it is about: those \
+             after number `after` (default 0: all still kept, the last 200). `count` is the newest's number.",
+            schema(json!({"after": {"type": "integer", "minimum": 0}}), &[]),
+        ),
     ]
 }
 
@@ -263,6 +328,7 @@ fn reach(args: &Value, sim: &SimState, comms: &Comms) -> Result<(VesselId, f64),
 
 /// Answers one call: the result, and what the game must do.
 /// `prediction`: the active vessel's background coast while it flies live.
+#[cfg(test)]
 pub fn answer(
     tool: &str,
     args: &Value,
@@ -270,7 +336,19 @@ pub fn answer(
     comms: &Comms,
     prediction: &crate::state::Prediction,
 ) -> (ToolResult, Vec<Effect>) {
-    match run(tool, args, sim, comms, prediction) {
+    answer_seen(tool, args, sim, comms, prediction, Seen::default())
+}
+
+/// [`answer`], with what the player's interface holds (`seen`).
+pub fn answer_seen(
+    tool: &str,
+    args: &Value,
+    sim: &SimState,
+    comms: &Comms,
+    prediction: &crate::state::Prediction,
+    seen: Seen,
+) -> (ToolResult, Vec<Effect>) {
+    match run(tool, args, sim, comms, prediction, seen) {
         Ok((v, effects)) => (ToolResult::Ok(v), effects),
         Err(e) => (ToolResult::Err(e), Vec::new()),
     }
@@ -283,6 +361,7 @@ fn run(
     sim: &SimState,
     comms: &Comms,
     prediction: &crate::state::Prediction,
+    seen: Seen,
 ) -> Result<(Value, Vec<Effect>), String> {
     let eph = &sim.world.eph;
     let name = |n: sim::frame::NodeId| eph.node(n).name.clone();
@@ -305,6 +384,7 @@ fn run(
                 "warp_factor": if sim.paused { 0.0 } else { WARP_LEVELS[sim.effective_warp()] },
                 "time_stopped": sim.paused,
                 "location": comms.location_name(), "active_vessel": sim.ship().id().0, "vessels": vessels,
+                "target": target_json(sim, seen.target),
             });
             (v, Vec::new())
         }
@@ -438,6 +518,15 @@ fn run(
             (json!({"id": id.0, "arrives_in_s": arrives}), vec![Effect::Command(GameCommand::Stage(id))])
         }
         "command" => command(args, sim, comms)?,
+        "edit_stages" => edit_stages(args, sim, comms)?,
+        "set_target" => {
+            let t = target_arg(args, sim)?;
+            (json!({"target": target_json(sim, t)}), vec![Effect::Target(t)])
+        }
+        "notifications" => {
+            let after = args.get("after").and_then(Value::as_u64).unwrap_or(0);
+            (notifications_json(seen.toasts, after), Vec::new())
+        }
         _ => return Err(format!("unknown tool {tool}")),
     })
 }
@@ -491,6 +580,32 @@ fn command_items(
     parts.chain(components).filter(|(_, list)| !list.is_empty()).collect()
 }
 
+/// The functions a piece offers now, as the action bar and the systems
+/// screen offer them: those its parts still aboard take (`program::view`),
+/// an abort only while it would save the crew (`program::offered`, D120).
+fn functions_now<'a>(def: &ShipDef, state: &'a ShipState) -> Vec<&'a str> {
+    let list = &state.functions;
+    (sim::craft::program::view(def, list).into_iter())
+        .filter(|v| sim::craft::program::offered(def, state, &list[v.index]).is_ok())
+        .map(|v| list[v.index].name.as_str())
+        .collect()
+}
+
+/// The function `name` (any case) if the piece offers it now; else why not.
+fn function_named<'a>(def: &ShipDef, state: &'a ShipState, name: &str) -> Result<&'a str, String> {
+    if let Some(f) = functions_now(def, state).into_iter().find(|f| f.eq_ignore_ascii_case(name)) {
+        return Ok(f);
+    }
+    let now = functions_now(def, state);
+    let Some(f) = state.functions.iter().find(|f| f.name.eq_ignore_ascii_case(name)) else {
+        return Err(format!("no function `{name}`: it has {now:?}"));
+    };
+    match sim::craft::program::offered(def, state, f) {
+        Err(why) => Err(format!("`{}` would save no one here: {}", f.name, why.describe())),
+        Ok(()) => Err(format!("`{}` acts on nothing aboard this piece: it has {now:?}", f.name)),
+    }
+}
+
 /// The `command` tool: a craft's functions and its parts' and components'
 /// commands, as the action bar, the part cards and the systems screen give
 /// them (interface-map.md finding 10), sent like any command.
@@ -501,11 +616,9 @@ fn command(args: &Value, sim: &SimState, comms: &Comms) -> Result<(Value, Vec<Ef
         return Err(format!("vessel {} is not a craft of parts (it has no commands)", id.0));
     };
     let s = |k: &str| args.get(k).and_then(Value::as_str);
-    let functions: Vec<&str> = state.functions.iter().map(|f| f.name.as_str()).collect();
+    let functions = functions_now(&def, state);
     if let Some(name) = s("function") {
-        let Some(name) = functions.iter().find(|f| f.eq_ignore_ascii_case(name)) else {
-            return Err(format!("no function `{name}`: it has {functions:?}"));
-        };
+        let name = function_named(&def, state, name)?;
         let run = GameCommand::Function { vessel: id, name: name.to_string() };
         return Ok((json!({"id": id.0, "function": name, "arrives_in_s": arrives}), vec![Effect::Command(run)]));
     }
@@ -552,6 +665,11 @@ fn get_vessel(
         format!("no signal from vessel {} at {} (last heard {heard})", id.0, comms.location_name())
     })?;
     let v = &sim.fleet[i];
+    let air = match args.get("air").and_then(Value::as_str) {
+        None | Some("vacuum") => stage_bar::Air::Vacuum,
+        Some("current") => stage_bar::Air::Current,
+        Some(other) => return Err(format!("`air` is vacuum or current, not `{other}`")),
+    };
     let body = sim.dominant_of(i);
     let (anchor, r, vel) = v.state_at(&sim.world, sim.clock);
     let k = sim.world.snapshot(sim.clock).relative(body, anchor);
@@ -599,7 +717,7 @@ fn get_vessel(
         "altitude_m": known_value(&known, Quantity::Altitude, altitude)
             .or_else(|| known_value(&known, Quantity::Position, altitude)),
         "orbit": orbit.filter(|_| known.orbit()), "attitude": attitude_json(&known, v.attitude.q, rel, pole),
-        "stages": stages_json(v, &known), "signal": signal_json(Some(signal)),
+        "stages": stages_json(sim, i, &known, air)?, "signal": signal_json(Some(signal)),
     });
     Ok((out, Vec::new()))
 }
@@ -634,8 +752,9 @@ fn attitude_json(known: &crate::format::Known, q: glam::DQuat, rel: DVec3, pole:
 /// A craft of parts' sequence and propellant as it knows them: the next
 /// stage, each tank's level (kg, null where unmeasured) and each engine's
 /// state.
-fn stages_json(v: &sim::vessel::Vessel, known: &crate::format::Known) -> Value {
-    let (Some(def), Some(state)) = (v.ship_def(), v.ship()) else { return Value::Null };
+fn stages_json(sim: &SimState, i: usize, known: &crate::format::Known, air: stage_bar::Air) -> Result<Value, String> {
+    let v = &sim.fleet[i];
+    let (Some(def), Some(state)) = (v.ship_def(), v.ship()) else { return Ok(Value::Null) };
     let stack = crate::staging::stack_of(v, v.controls());
     let next = crate::staging::next(&stack);
     let next_name = stack.iter().find(|s| Some(s.number) == next).and_then(|s| s.name.clone());
@@ -649,8 +768,107 @@ fn stages_json(v: &sim::vessel::Vessel, known: &crate::format::Known) -> Value {
     let engines: Vec<Value> = (def.engines.iter().zip(&state.engines))
         .map(|(e, s)| json!({"id": e.id, "main": e.main, "status": format!("{:?}", s.status), "throttle": s.throttle}))
         .collect();
-    json!({"next": next, "next_name": next_name, "feeding_share": session::feeding_share(v),
-           "tanks": tanks, "engines": engines})
+    let estimates = stage_bar::estimates_of(sim, i, air).unwrap_or_default();
+    let sequence: Vec<Value> = stage_bar::rows_of(v, &estimates).unwrap_or_default().iter().map(row_json).collect();
+    Ok(json!({"next": next, "next_name": next_name, "feeding_share": session::feeding_share(v),
+           "tanks": tanks, "engines": engines, "sequence": sequence}))
+}
+
+/// A staging bar row as the agent reads it (`get_vessel`'s
+/// `stages.sequence`): what the player sees on it.
+fn row_json(r: &rows::Row) -> Value {
+    let place = match r.place {
+        rows::Place::Active => "active",
+        rows::Place::Next => "next",
+        rows::Place::Later => "later",
+        rows::Place::Done => "done",
+    };
+    let commands: Vec<Value> = r.items.iter().map(|i| json!({"command": i.action, "label": i.label})).collect();
+    let figures = r.figures.as_ref().map(|f| {
+        let propellant: Vec<Value> = f.bars.iter().map(|b| json!({"fluid": b.fluid, "held": b.text})).collect();
+        let active = f.active.as_ref().map(|a| json!({"thrust": a.thrust, "twr": a.twr, "mass": a.mass, "isp": a.isp}));
+        json!({"dv": f.dv, "burnout": f.burnout, "propellant": propellant, "active": active})
+    });
+    json!({"stage": r.stage, "number": r.number, "name": r.name, "place": place, "commands": commands,
+           "figures": figures})
+}
+
+/// The `edit_stages` tool: one of the staging bar's edits (`rows::check`,
+/// the bar's own rules), sent like any command.
+fn edit_stages(args: &Value, sim: &SimState, comms: &Comms) -> Result<(Value, Vec<Effect>), String> {
+    let (id, arrives) = reach(args, sim, comms)?;
+    let v = &sim.fleet[sim.index_of(id).ok_or("no such vessel")?];
+    let shown = stage_bar::rows_of(v, &Default::default())
+        .ok_or_else(|| format!("vessel {} is not a craft of parts (it has no stage sequence)", id.0))?;
+    let op = stage_op(args)?;
+    let command = match rows::check(op, &shown)? {
+        rows::Sent::Edit(e) => GameCommand::Ship { vessel: id, commands: vec![ShipCommand::Sequence(e)] },
+        rows::Sent::Again(stage) => GameCommand::StageAgain { vessel: id, stage },
+    };
+    Ok((json!({"id": id.0, "edit": format!("{op:?}"), "arrives_in_s": arrives}), vec![Effect::Command(command)]))
+}
+
+/// `edit_stages`' one edit from its arguments.
+fn stage_op(args: &Value) -> Result<rows::Op, String> {
+    let n = |v: &Value, k: &str| -> Result<usize, String> {
+        v.get(k).and_then(Value::as_u64).map(|n| n as usize).ok_or_else(|| format!("missing integer `{k}`"))
+    };
+    let given: Vec<&str> =
+        ["move", "move_command", "delete", "again"].into_iter().filter(|k| args.get(*k).is_some()).collect();
+    match given[..] {
+        ["move"] => Ok(rows::Op::Move { stage: n(&args["move"], "stage")?, to: n(&args["move"], "to")? }),
+        ["move_command"] => {
+            let m = &args["move_command"];
+            Ok(rows::Op::MoveCommand { stage: n(m, "stage")?, command: n(m, "command")?, to: n(m, "to")? })
+        }
+        ["delete"] => Ok(rows::Op::Delete(n(args, "delete")?)),
+        ["again"] => Ok(rows::Op::Again(n(args, "again")?)),
+        _ => Err("one edit a call: `move`, `move_command`, `delete` or `again`".into()),
+    }
+}
+
+/// `set_target`'s target, one of the picker's choices
+/// (`navball::target_choices`); `None` for `none`.
+fn target_arg(args: &Value, sim: &SimState) -> Result<Option<NavTarget>, String> {
+    let choices = crate::navball::target_choices(sim);
+    let body = args.get("body").and_then(Value::as_str);
+    let vessel = args.get("vessel").and_then(Value::as_u64);
+    let none = args.get("none").and_then(Value::as_bool) == Some(true);
+    let wanted = match (body, vessel, none) {
+        (Some(name), None, false) => (choices.iter())
+            .find(|t| matches!(t, NavTarget::Body(n) if session::same_name(&sim.world.eph.node(*n).name, name)))
+            .copied()
+            .ok_or_else(|| format!("no body with a surface named `{name}`"))?,
+        (None, Some(id), false) => (choices.iter())
+            .find(|t| **t == NavTarget::Vessel(VesselId(id)))
+            .copied()
+            .ok_or_else(|| format!("vessel {id} cannot be targeted: no such vessel, or it is the active one"))?,
+        (None, None, true) => return Ok(None),
+        _ => return Err("one of `vessel`, `body` or `none: true`".into()),
+    };
+    Ok(Some(wanted))
+}
+
+/// A target as the agent reads it.
+fn target_json(sim: &SimState, t: Option<NavTarget>) -> Value {
+    match t {
+        None => Value::Null,
+        Some(NavTarget::Body(n)) => json!({"body": sim.world.eph.node(n).name}),
+        Some(NavTarget::Vessel(id)) => json!({"vessel": id.0}),
+    }
+}
+
+/// The `notifications` tool: the messages after number `after`.
+fn notifications_json(toasts: Option<&Toasts>, after: u64) -> Value {
+    let Some(toasts) = toasts else { return json!({"count": 0, "messages": []}) };
+    let messages: Vec<Value> = toasts
+        .since(after)
+        .map(|(n, t)| {
+            let vessel = t.link.map(|Link::Vessel(id)| id.0);
+            json!({"n": n, "text": t.text, "error": t.error, "vessel": vessel})
+        })
+        .collect();
+    json!({"count": toasts.count(), "messages": messages})
 }
 
 /// The `get_landing_prediction` tool: the landing panel's numbers.
@@ -783,6 +1001,7 @@ pub fn serve(
     mut commands: MessageWriter<GameCommand>,
     mut session: ResMut<session::Session>,
     mut held: ResMut<HeldRotation>,
+    (mut nav, toasts): (ResMut<crate::navball::Navball>, Res<Toasts>),
 ) {
     // `SUNSCATTER_AGENT=<port>:<token>` turns the server on (demos, tests).
     if state.server.is_none() && state.env.is_none() {
@@ -818,7 +1037,8 @@ pub fn serve(
             session.incoming.push(call);
             continue;
         }
-        let (result, effects) = answer(&call.tool, &call.arguments, &sim, &comms, &pred);
+        let seen = Seen { target: nav.target, toasts: Some(&toasts) };
+        let (result, effects) = answer_seen(&call.tool, &call.arguments, &sim, &comms, &pred, seen);
         for e in effects {
             match e {
                 Effect::Command(c) => {
@@ -827,6 +1047,7 @@ pub fn serve(
                 Effect::Station(open) => station.open = open,
                 Effect::Send { delay, command } => in_flight.send(sim.clock, delay, command),
                 Effect::Rotate(id, r) => held.0 = (r != DVec3::ZERO).then_some((id, r)),
+                Effect::Target(t) => nav.set_target(t),
             }
         }
         call.reply(result);
@@ -843,6 +1064,7 @@ pub fn connect_command(port: u16, token: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sim::craft::command::SequenceEdit;
 
     fn setup() -> (SimState, Comms) {
         let mut sim = SimState::new();
@@ -1066,6 +1288,133 @@ mod tests {
         for args in refused {
             let (r, e) = call(args.clone());
             assert!(matches!(r, ToolResult::Err(_)) && e.is_empty(), "{args}: {r:?}");
+        }
+    }
+
+    /// The agent's last ways in (interface-map.md finding 10): the target
+    /// the Orbital menu's picker sets, read back by get_state.
+    #[test]
+    fn a_script_sets_the_target_from_the_pickers_choices() {
+        let (sim, comms) = setup();
+        let (me, other) = (sim.ship().id(), sim.fleet[1].id());
+        let moon = sim.world.find("Moon").expect("the Moon").node;
+        // (arguments, the target set or the refusal's words)
+        let table: [(Value, Result<Option<NavTarget>, &str>); 7] = [
+            (json!({"vessel": other.0}), Ok(Some(NavTarget::Vessel(other)))),
+            (json!({"body": "moon"}), Ok(Some(NavTarget::Body(moon)))),
+            (json!({"none": true}), Ok(None)),
+            (json!({"vessel": me.0}), Err("cannot be targeted")),
+            (json!({"body": "Vulcan"}), Err("no body")),
+            (json!({}), Err("one of")),
+            (json!({"vessel": other.0, "none": true}), Err("one of")),
+        ];
+        for (args, want) in table {
+            match (answer("set_target", &args, &sim, &comms, &Default::default()), want) {
+                ((ToolResult::Ok(_), e), Ok(t)) => assert_eq!(e, vec![Effect::Target(t)], "{args}"),
+                ((ToolResult::Err(e), effects), Err(words)) => {
+                    assert!(e.contains(words) && effects.is_empty(), "{args}: {e}")
+                }
+                (got, want) => panic!("{args}: {got:?}, want {want:?}"),
+            }
+        }
+        let seen = Seen { target: Some(NavTarget::Body(moon)), toasts: None };
+        let (ToolResult::Ok(v), _) = answer_seen("get_state", &json!({}), &sim, &comms, &Default::default(), seen)
+        else {
+            panic!()
+        };
+        assert_eq!(v["target"], json!({"body": "Moon"}));
+    }
+
+    /// The staging bar's rows in get_vessel, and its edits by the bar's
+    /// rules (`rows::check`), on the small rocket at the pad (Ignition
+    /// next, Separation later).
+    #[test]
+    fn a_script_reads_and_edits_the_staging_bar() {
+        let (sim, mut comms) = setup();
+        let me = sim.ship().id();
+        comms.location = Location::Vessel(me);
+        comms.signals.insert(me, Some(comms::Signal { delay: 0.0, rate: 1e6, via: vec![] }));
+        let v = match answer("get_vessel", &json!({"id": me.0}), &sim, &comms, &Default::default()) {
+            (ToolResult::Ok(v), _) => v,
+            (r, _) => panic!("{r:?}"),
+        };
+        let rows = v["stages"]["sequence"].as_array().expect("the bar's rows");
+        let line = |r: &Value| (r["stage"].as_u64(), r["place"].as_str().unwrap().to_string());
+        assert_eq!(rows.iter().map(line).collect::<Vec<_>>(), [(Some(1), "later".into()), (Some(0), "next".into())]);
+        assert!(rows[1]["figures"]["dv"].is_string() && rows[1]["commands"][0]["label"].is_string(), "{}", rows[1]);
+        let sequence =
+            |e| vec![Effect::Command(GameCommand::Ship { vessel: me, commands: vec![ShipCommand::Sequence(e)] })];
+        // (arguments, what is sent; empty: refused)
+        let table = [
+            (json!({"move": {"stage": 1, "to": 0}}), sequence(SequenceEdit::Move { from: 1, to: 0 })),
+            (json!({"delete": 1}), sequence(SequenceEdit::Delete(1))),
+            (json!({"again": 0}), vec![]),
+            (json!({"delete": 1, "again": 0}), vec![]),
+            (json!({"move": {"stage": 1}}), vec![]),
+        ];
+        for (args, want) in table {
+            let (r, e) = answer("edit_stages", &args, &sim, &comms, &Default::default());
+            assert_eq!(e, want, "{args}: {r:?}");
+        }
+    }
+
+    /// The notifications as the player reads them, after the last seen.
+    #[test]
+    fn a_script_reads_the_notifications() {
+        let (sim, comms) = setup();
+        let mut toasts = Toasts::default();
+        toasts.push(0.0, "Saved", false);
+        toasts.push_linked(1.0, "Stage separation", false, Some(Link::Vessel(VesselId(2))));
+        toasts.push(2.0, "Nothing to load", true);
+        let seen = Seen { target: None, toasts: Some(&toasts) };
+        let (ToolResult::Ok(v), e) =
+            answer_seen("notifications", &json!({"after": 1}), &sim, &comms, &Default::default(), seen)
+        else {
+            panic!()
+        };
+        assert!(e.is_empty());
+        assert_eq!(v["count"], 3);
+        assert_eq!(
+            v["messages"],
+            json!([{"n": 2, "text": "Stage separation", "error": false, "vessel": 2},
+                   {"n": 3, "text": "Nothing to load", "error": true, "vessel": null}])
+        );
+    }
+
+    /// `command` offers the functions the action bar and the systems screen
+    /// offer (interface-map.md finding 23): those the piece's parts still
+    /// take, an abort only while it would save the crew (D120); the rest are
+    /// refused with why.
+    #[test]
+    fn a_script_runs_only_the_functions_the_piece_offers() {
+        let f9 = sim::craft::craft_of(&sim::craft::CraftId("falcon9-crew".into()));
+        let def = SimState::with_craft(&f9).ship().ship_def().unwrap();
+        let piece = |keep: &dyn Fn(&str) -> bool| {
+            def.subset(&def.parts.iter().filter(|p| keep(&p.id)).map(|p| p.part).collect::<Vec<_>>())
+        };
+        let upper = piece(&|id| id.starts_with("s2.") || id.starts_with("dragon."));
+        let dragon = piece(&|id| id.starts_with("dragon."));
+        // (case, piece, grid fins listed, the abort listed)
+        let table = [
+            ("the stack", &*def, true, true),
+            ("the upper stack", &upper, false, true),
+            ("Dragon", &dragon, false, false),
+        ];
+        for (case, d, fins, abort) in table {
+            let state = ShipState::initial(d);
+            let now = functions_now(d, &state);
+            assert_eq!((now.contains(&"Grid fins"), now.contains(&"Launch abort")), (fins, abort), "{case}: {now:?}");
+            assert_eq!(function_named(d, &state, "launch abort").is_ok(), abort, "{case}");
+        }
+        // (piece, function, the refusal says)
+        let refused = [
+            (&upper, "grid fins", "acts on nothing aboard"),
+            (&dragon, "Launch abort", "would save no one here"),
+            (&dragon, "Warp drive", "no function"),
+        ];
+        for (d, f, says) in refused {
+            let e = function_named(d, &ShipState::initial(d), f).unwrap_err();
+            assert!(e.contains(says), "{f}: {e}");
         }
     }
 

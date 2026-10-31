@@ -54,6 +54,9 @@ pub struct Toast {
 #[derive(Resource, Default)]
 pub struct Toasts {
     items: VecDeque<Toast>,
+    /// How many messages have come since the game started (the newest's
+    /// number): an agent reads those after the last it saw ([`Toasts::since`]).
+    count: u64,
     pub folded: bool,
 }
 
@@ -77,6 +80,19 @@ impl Toasts {
             self.items.pop_front();
         }
         self.items.push_back(Toast { text, error, at: now, link });
+        self.count += 1;
+    }
+
+    /// How many messages have come (the newest's number, from 1).
+    pub fn count(&self) -> u64 {
+        self.count
+    }
+
+    /// The messages still kept that came after number `after`, oldest
+    /// first, each with its number (the MCP `notifications` tool, D044).
+    pub fn since(&self, after: u64) -> impl Iterator<Item = (u64, &Toast)> {
+        let first = self.count - self.items.len() as u64 + 1;
+        (first..).zip(self.items.iter()).filter(move |(n, _)| *n > after)
     }
 
     /// The history, oldest first.
@@ -263,6 +279,28 @@ mod tests {
         let texts: Vec<&str> = q.history().map(|t| t.text.as_str()).collect();
         assert_eq!(texts.len(), HISTORY);
         assert_eq!((texts[0], texts[HISTORY - 1]), ("m3", "m202"), "oldest dropped first");
+    }
+
+    /// Messages are numbered as they come; an agent reads those after the
+    /// last it saw, the oldest dropped from the history no longer there.
+    #[test]
+    fn messages_are_read_after_the_last_seen() {
+        let mut q = Toasts::default();
+        assert_eq!((q.count(), q.since(0).count()), (0, 0));
+        for k in 1..=HISTORY + 2 {
+            q.push(0.0, format!("m{k}"), false);
+        }
+        let read = |after: u64| q.since(after).map(|(n, t)| (n, t.text.clone())).collect::<Vec<_>>();
+        // (after, the first and last numbers read, the first's text)
+        let table = [(0, Some((3, 202)), "m3"), (200, Some((201, 202)), "m201"), (202, None, "")];
+        for (after, numbers, first) in table {
+            let got = read(after);
+            let ends = got.first().zip(got.last()).map(|(a, b)| (a.0, b.0));
+            assert_eq!(ends, numbers, "after {after}");
+            assert!(got.windows(2).all(|w| w[1].0 == w[0].0 + 1), "after {after}: consecutive");
+            assert_eq!(got.first().map_or("", |g| g.1.as_str()), first, "after {after}");
+        }
+        assert_eq!(q.count(), 202);
     }
 
     /// A link to another vessel switches to it; to the active vessel, opens

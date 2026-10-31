@@ -144,8 +144,9 @@ pub fn tools(dev: bool) -> Vec<Tool> {
              the flight view, or a named screen. Returns the file's path (default under the game's home, `shots/`). \
              `width`/`height` size the image of a headless game (SUNSCATTER_OFFSCREEN=1); `ui_scale` scales the \
              interface for this shot (0.2 shrinks it to specks: a shot of the scene); `menus` are the flight view's \
-             menus open for the shot (the others closed); the systems screen opens on `layer` with `part` (a \
-             craft-file id) isolated, the thermal layer's cut-away at `cut` (0 none, 1 all); `help` shows the keys and every way in; `cards` opens those parts' cards \
+             menus open for the shot (the others closed; the RCS menu shows while RCS is on); the systems screen opens on `layer` with `part` (a \
+             craft-file id) isolated, the thermal layer's cut-away at `cut` (0 none, 1 all); `help` shows the keys and every way in, `saves` the \
+             Saves window; `cards` opens those parts' cards \
              (craft-file ids) by the staging bar. Everything is put back after the shot.",
             schema(
                 json!({
@@ -153,7 +154,7 @@ pub fn tools(dev: bool) -> Vec<Tool> {
                     "width": {"type": "integer", "minimum": 16, "maximum": 8192},
                     "height": {"type": "integer", "minimum": 16, "maximum": 8192},
                     "ui_scale": {"type": "number", "exclusiveMinimum": 0},
-                    "screen": {"type": "string", "enum": ["flight", "systems", "tracking", "pause", "settings", "help"]},
+                    "screen": {"type": "string", "enum": ["flight", "systems", "tracking", "pause", "settings", "saves", "help"]},
                     "layer": {"type": "string", "enum": names(&LAYER_NAMES)},
                     "part": {"type": "string"},
                     "menus": {"type": "array", "items": {"type": "string", "enum": names(&MENU_NAMES)}},
@@ -315,6 +316,7 @@ struct Restore {
     station: bool,
     pause_menu: bool,
     settings: (bool, SettingsTab),
+    saves: bool,
     help: bool,
     cards: Vec<crate::interface::part_card::Open>,
     ui_scale: Option<f32>,
@@ -370,6 +372,8 @@ pub enum Screen {
     Tracking,
     Pause,
     Settings(SettingsTab),
+    /// The pause menu's Saves window.
+    Saves,
     /// The keys and every way in (`?`).
     Help,
 }
@@ -397,6 +401,7 @@ impl ShotSpec {
             "tracking" => Screen::Tracking,
             "pause" => Screen::Pause,
             "help" => Screen::Help,
+            "saves" => Screen::Saves,
             "settings" => {
                 Screen::Settings(by_name(&TAB_NAMES, s("settings_tab").unwrap_or("interface"), "settings tab")?)
             }
@@ -697,6 +702,7 @@ pub struct Screens<'w> {
     station: ResMut<'w, crate::tracking::TrackingStation>,
     menu: ResMut<'w, crate::interface::pause::PauseMenu>,
     settings: ResMut<'w, SettingsUi>,
+    saves: ResMut<'w, crate::saves::SaveUi>,
     help: ResMut<'w, crate::interface::help::Help>,
     cards: ResMut<'w, crate::interface::part_card::PartCards>,
 }
@@ -839,6 +845,7 @@ fn start(
                     station: screens.station.open,
                     pause_menu: screens.menu.open,
                     settings: (screens.settings.open, screens.settings.tab),
+                    saves: screens.saves.open,
                     help: screens.help.open,
                     cards: screens.cards.open.clone(),
                     ui_scale: out.offscreen.ui_scale,
@@ -975,6 +982,9 @@ fn start(
 /// Opens what a shot shows.
 fn show(spec: &ShotSpec, sim: &SimState, s: &mut Screens) -> Result<(), String> {
     if let Some(menus) = &spec.menus {
+        if menus.contains(&MenuId::Rcs) && !sim.controls().rcs.on {
+            return Err("the RCS menu shows while RCS is on: `set_controls {rcs: \"on\"}` first".into());
+        }
         s.iface.menus.show_only(None);
         for m in menus {
             s.iface.menus.set_open(*m, true);
@@ -984,6 +994,7 @@ fn show(spec: &ShotSpec, sim: &SimState, s: &mut Screens) -> Result<(), String> 
     s.station.open = false;
     s.menu.open = false;
     s.settings.open = false;
+    s.saves.open = false;
     s.help.open = false;
     if let Some(cards) = &spec.cards {
         let (vessel, def) = (sim.ship().id(), sim.ship().ship_def());
@@ -1017,6 +1028,10 @@ fn show(spec: &ShotSpec, sim: &SimState, s: &mut Screens) -> Result<(), String> 
         Screen::Tracking => s.station.open = true,
         Screen::Pause => s.menu.open = true,
         Screen::Help => s.help.open = true,
+        Screen::Saves => {
+            s.menu.open = true;
+            s.saves.show_list();
+        }
         Screen::Settings(tab) => {
             s.menu.open = true;
             (s.settings.open, s.settings.tab) = (true, *tab);
@@ -1067,6 +1082,7 @@ fn shot(
             screens.station.open = r.station;
             screens.menu.open = r.pause_menu;
             (screens.settings.open, screens.settings.tab) = r.settings;
+            screens.saves.open = r.saves;
             screens.help.open = r.help;
             screens.cards.open = r.cards.clone();
             out.offscreen.ui_scale = r.ui_scale;
@@ -1259,6 +1275,7 @@ mod tests {
             ShotSpec::parse(&json!({"screen": "settings"})).unwrap().screen,
             Screen::Settings(SettingsTab::Interface)
         );
+        assert_eq!(ShotSpec::parse(&json!({"screen": "saves"})).unwrap().screen, Screen::Saves);
         let spec = ShotSpec::parse(&json!({"screen": "help", "cards": ["s1.tank", "m1d#1"]})).unwrap();
         assert_eq!((spec.screen, spec.cards), (Screen::Help, Some(vec!["s1.tank".into(), "m1d#1".into()])));
         // (arguments, the error's words)

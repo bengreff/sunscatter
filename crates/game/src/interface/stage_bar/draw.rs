@@ -138,7 +138,7 @@ fn switch(ui: &mut egui::Ui, bar: &mut StageBar) {
 /// One stage: its header, figures and icons; drops onto it edit the
 /// sequence.
 fn stage(ui: &mut egui::Ui, row: &Row, bar: &mut StageBar, out: &mut Vec<Action>) {
-    let editable = matches!(row.place, Place::Next | Place::Later) && row.stage.is_some();
+    let editable = super::rows::editable(row);
     let border = match row.place {
         Place::Next => theme::ACCENT,
         Place::Active => theme::GOOD,

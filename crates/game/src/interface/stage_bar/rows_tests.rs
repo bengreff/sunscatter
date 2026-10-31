@@ -200,3 +200,36 @@ fn drops_move_stages_and_commands() {
     let c = ShipCommand::Sequence(drop_edit(Drag::Stage(2), 4).unwrap());
     assert!(matches!(c, ShipCommand::Sequence(SequenceEdit::Move { .. })));
 }
+
+/// The edits a player makes on the bar, as the agent sends them
+/// (`edit_stages`): only the stages still to run are dragged or deleted,
+/// only those run have AGAIN. The Falcon 9 after its first stage.
+#[test]
+fn the_bar_edits_what_a_player_can_drag_delete_or_run_again() {
+    let (def, mut state, hull) = falcon9();
+    state.next_stage(&def).unwrap();
+    let rows = bar(&def, &state, &hull, &Knowledge::perfect());
+    let edit = |e| Ok(Sent::Edit(e));
+    // (op, what it sends or the refusal's words)
+    let table: [(Op, Result<Sent, &str>); 12] = [
+        (Op::Move { stage: 2, to: 4 }, edit(SequenceEdit::Move { from: 2, to: 4 })),
+        (Op::Move { stage: 0, to: 2 }, Err("has run")),
+        (Op::Move { stage: 2, to: 0 }, Err("has run")),
+        (Op::Move { stage: 2, to: 2 }, Err("already in")),
+        (Op::Move { stage: 2, to: 99 }, Err("no stage 99")),
+        (Op::MoveCommand { stage: 3, command: 1, to: 6 }, edit(SequenceEdit::MoveAction { from: 3, action: 1, to: 6 })),
+        (Op::MoveCommand { stage: 3, command: 7, to: 6 }, Err("no command 7")),
+        (Op::MoveCommand { stage: 3, command: 1, to: 3 }, Err("already in")),
+        (Op::Delete(6), edit(SequenceEdit::Delete(6))),
+        (Op::Delete(0), Err("has run")),
+        (Op::Again(0), Ok(Sent::Again(0))),
+        (Op::Again(1), Err("has not run")),
+    ];
+    for (op, want) in table {
+        match (check(op, &rows), want) {
+            (Ok(got), Ok(want)) => assert_eq!(got, want, "{op:?}"),
+            (Err(e), Err(words)) => assert!(e.contains(words), "{op:?}: {e}"),
+            (got, want) => panic!("{op:?}: {got:?}, want {want:?}"),
+        }
+    }
+}
