@@ -1,6 +1,7 @@
 use super::*;
 use crate::state::SimState;
 use crate::trajectory::{LineFrame, Plotter};
+use sim::craft::small;
 
 /// A craft flying live 25 km above the Cape: 1,200 m/s north over the
 /// ground and 300 m/s up (falling back into the air, as after a cut-off
@@ -15,7 +16,7 @@ fn climbing(sim: &mut SimState) -> Vessel {
     let north = (rot.pole(sim.clock) - up * rot.pole(sim.clock).dot(up)).normalize();
     let v = rot.omega(sim.clock).raw().cross(r) + north * 1_200.0 + up * 300.0;
     let id = sim.vessel_ids.allocate();
-    let vessel = Vessel::coasting(&sim.world, id, sim.clock, earth.node, r, v, sim::craft::test_craft());
+    let vessel = Vessel::coasting(&sim.world, id, sim.clock, earth.node, r, v, small::rocket_ref());
     assert!(matches!(vessel.phase, Phase::Powered { .. }), "flown live in the air");
     vessel
 }
@@ -55,7 +56,7 @@ fn largest_turn(points: &[DVec3]) -> f64 {
 /// piece. Over the ground (SURFACE) the same path does not turn.
 #[test]
 fn the_line_through_the_air_kinked_where_the_air_carried_the_craft() {
-    let mut sim = SimState::new();
+    let mut sim = SimState::with_craft(small::rocket_ref());
     let vessel = climbing(&mut sim);
     let earth = sim.world.find("Earth").unwrap().node;
     let mut old = vessel.coast_from_now(&sim.world);
@@ -74,7 +75,7 @@ fn the_line_through_the_air_kinked_where_the_air_carried_the_craft() {
 /// prediction (the Landing menu's marker) puts the impact.
 #[test]
 fn the_path_through_the_air_is_the_vessels_own_model() {
-    let mut sim = SimState::new();
+    let mut sim = SimState::with_craft(small::rocket_ref());
     let vessel = climbing(&mut sim);
     let earth = sim.world.find("Earth").unwrap().node;
     let controls = Controls::default();
@@ -115,7 +116,7 @@ fn the_path_through_the_air_is_the_vessels_own_model() {
 /// there and the path through the air follows from the same state.
 #[test]
 fn a_coast_into_the_air_hands_over_at_its_entry() {
-    let mut sim = SimState::new();
+    let mut sim = SimState::with_craft(small::rocket_ref());
     let earth = sim.world.find("Earth").unwrap();
     let re = earth.physical.as_ref().unwrap().radius_eq;
     // From 200 km, a perigee 40 km below the ground: it enters the air.
@@ -130,7 +131,7 @@ fn a_coast_into_the_air_hands_over_at_its_entry() {
     };
     let (r, v) = el.to_state(earth.gm);
     let id = sim.vessel_ids.allocate();
-    let mut vessel = Vessel::coasting(&sim.world, id, sim.clock, earth.node, r, v, sim::craft::test_craft());
+    let mut vessel = Vessel::coasting(&sim.world, id, sim.clock, earth.node, r, v, small::rocket_ref());
     vessel.extend_coast(&sim.world, sim.clock.add_seconds(3_000.0), 200_000);
     assert!(needed(&vessel));
     let last = vessel.trajectory().unwrap().last().clone();
@@ -145,4 +146,57 @@ fn a_coast_into_the_air_hands_over_at_its_entry() {
     assert_eq!(a, b);
     assert!((r_cut - r_air).length() < 1e-6 && (v_cut - v_air).length() < 1e-9);
     assert!(matches!(air.end.unwrap().kind, EndKind::Surface { .. }));
+}
+
+/// A node ahead (D126): the stored coast does not hold it, so the path
+/// takes over from the stored segment it falls in, cut at the node, and
+/// the coast after it starts from the state its Δv gives (the planner's
+/// prediction, `Vessel::predict_node`), with the mass after the burn. The
+/// line shows the stored segments before it, then the path.
+#[test]
+fn a_node_ahead_predicts_the_coast_after_it() {
+    let mut sim = SimState::with_craft(small::rocket_ref());
+    let earth = sim.world.find("Earth").unwrap();
+    let el = sim::kepler::Elements { a: 6_778_137.0, e: 0.0005, i: 0.9, raan: 1.0, argp: 0.5, mean_anomaly: 0.0 };
+    let (r, v) = el.to_state(earth.gm);
+    let id = sim.fleet[0].id();
+    let mut vessel = Vessel::coasting(&sim.world, id, sim.clock, earth.node, r, v, small::rocket_ref());
+    vessel.extend_coast(&sim.world, sim.clock.add_seconds(3_000.0), 200_000);
+    assert!(!needed(&vessel), "no node and no air: the stored coast is the line");
+    let node = sim::systems::maneuver::Node {
+        t: sim.clock.add_seconds(900.0),
+        dv: DVec3::new(100.0, 0.0, 0.0),
+        reference: earth.node,
+    };
+    vessel.set_nodes(vec![node]).unwrap();
+    assert!(needed(&vessel), "a node waits");
+    let path = path(&sim.world, &vessel, &Controls::default(), &OrbitSettings::default());
+    let tr = vessel.trajectory().unwrap();
+    let stored = tr.segments.iter().find(|s| s.t0 <= node.t && node.t <= s.t0.add_seconds(s.computed_until())).unwrap();
+    assert_eq!(path.after, Some((id, stored.t0)));
+    let (cut, after) = (&path.segments[0], &path.segments[1]);
+    assert_eq!(cut.t0.add_seconds(cut.computed_until()), node.t, "cut at the node");
+    assert_eq!(after.t0, node.t);
+    // The coast after starts from the planner's prediction, its mass after
+    // the burn.
+    let p = vessel.node_prediction(&sim.world, 0).unwrap();
+    let (anchor, r1, v1) = after.eval(0.0).unwrap();
+    let k = sim.world.eph.relative(anchor, p.after.0, node.t);
+    assert!((r1 + k.r - p.after.1).length() < 1e-6 && (v1 + k.v - p.after.2).length() < 1e-9);
+    assert!(p.mass < vessel.mass() && (after.mass_at(0.0) - p.mass).abs() < 1e-9);
+    // 100 m/s prograde in low orbit raises the semi-major axis ~177 km.
+    let (anchor, r2, v2) = after.eval(after.computed_until() * 0.5).unwrap();
+    let t2 = after.t0.add_seconds(after.computed_until() * 0.5);
+    let k = sim.world.eph.relative(anchor, earth.node, t2);
+    let a = sim::kepler::Elements::from_state(r2 + k.r, v2 + k.v, earth.gm).a;
+    assert!((a - el.a - 177e3).abs() < 15e3, "{:.0} km higher", (a - el.a) / 1e3);
+    // The line: the stored segments before the node's, then the path.
+    sim.fleet[0] = vessel;
+    let mut pred = crate::state::Prediction::default();
+    (pred.segments, pred.after) = (path.segments.clone(), path.after);
+    let segs = crate::trajectory::apsides::vessel_segments(&sim, &pred, 0);
+    let t0 = path.after.unwrap().1;
+    let before = sim.fleet[0].trajectory().unwrap().segments.iter().take_while(|s| s.t0 != t0).count();
+    assert_eq!(segs.len(), before + path.segments.len());
+    assert!(std::ptr::eq(segs[before], &pred.segments[0]));
 }

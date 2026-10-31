@@ -76,6 +76,11 @@ pub(super) struct Model<'a> {
     world: &'a World,
     craft: &'a CraftParams,
     design: &'a CraftDesign,
+    thrust: super::Thrust,
+    /// A craft of parts' mass and centre of mass at the start, and the
+    /// propellant then (`LandingStart::mass`).
+    mass: Option<(f64, DVec3)>,
+    propellant0: f64,
     body: NodeId,
     attitude: AssumedAttitude,
     chute: crate::chute::ChuteState,
@@ -112,6 +117,9 @@ impl<'a> Model<'a> {
             world,
             craft,
             design: craft.design(),
+            thrust: start.thrust,
+            mass: start.mass,
+            propellant0: start.propellant,
             body: start.body,
             attitude: start.attitude,
             chute: start.chute,
@@ -135,9 +143,21 @@ impl<'a> Model<'a> {
         })
     }
 
+    /// Mass (kg) and centre of mass (body axes) with `propellant` aboard.
+    pub(super) fn props(&self, propellant: f64) -> (f64, DVec3) {
+        match self.mass {
+            Some((m0, com)) if self.propellant0.is_finite() => (m0 - (self.propellant0 - propellant), com),
+            Some(held) => held,
+            None => {
+                let p = self.craft.mass.at(propellant);
+                (p.mass, p.com)
+            }
+        }
+    }
+
     /// Propellant at local time `t` of a run.
     fn propellant(&self, run: &Run, t: f64) -> f64 {
-        let mdot = self.craft.engine.output(run.throttle, 0.0).mdot;
+        let mdot = self.thrust.output(run.throttle, 0.0).1;
         if self.infinite || mdot == 0.0 {
             run.propellant
         } else {
@@ -162,7 +182,7 @@ impl<'a> Model<'a> {
                 } else {
                     (r - snap.relative_r(self.body, anchor)).normalize()
                 };
-                (quat_z_to(dir) * quat_z_to(self.craft.engine.mount_dir).inverse()).normalize()
+                (quat_z_to(dir) * quat_z_to(self.thrust.axis).inverse()).normalize()
             }
         }
     }
@@ -178,12 +198,12 @@ impl<'a> Model<'a> {
         v: DVec3,
     ) -> DVec3 {
         let propellant = self.propellant(run, t);
-        let props = self.craft.mass.at(propellant);
+        let (mass, com) = self.props(propellant);
         let q = self.attitude(snap, run.anchor, r, v);
         let running = run.throttle > 0.0 && (self.infinite || propellant > 0.0);
         let thrust = if running {
             let p = ambient_pressure(self.world, snap, run.anchor, r);
-            self.craft.engine.output(run.throttle, p).thrust
+            self.thrust.output(run.throttle, p).0
         } else {
             0.0
         };
@@ -195,10 +215,10 @@ impl<'a> Model<'a> {
         };
         let chute = (chute_area > 0.0).then_some((chute_area, self.craft.chute.mount));
         let air = air_at(self.world, snap, run.anchor, r, v);
-        let aero = air.as_ref().and_then(|a| AeroTick::new(self.design, a, props.com, chute));
-        let (cd_area, lift) = aero.map_or((0.0, DVec3::ZERO), |a| a.drag_and_lift(q, props.mass));
-        let thrust = q * self.craft.engine.mount_dir * (thrust / props.mass) + lift;
-        let drag = Some(DragModel { cd_area, mass: props.mass });
+        let aero = air.as_ref().and_then(|a| AeroTick::new(self.design, a, com, chute));
+        let (cd_area, lift) = aero.map_or((0.0, DVec3::ZERO), |a| a.drag_and_lift(q, mass));
+        let thrust = q * self.thrust.axis * (thrust / mass) + lift;
+        let drag = Some(DragModel { cd_area, mass });
         ForceContext { world: self.world, anchor: run.anchor, active, drag, thrust }.accel_with(snap, r, v)
     }
 
@@ -221,7 +241,7 @@ impl<'a> Model<'a> {
             return h;
         }
         let q = self.attitude(snap, anchor, r, v);
-        let com = self.craft.mass.at(prop).com;
+        let com = self.props(prop).1;
         (self.craft.contacts.iter()).map(|c| ground.clearance(r + q * (c.pos - com))).fold(f64::INFINITY, f64::min)
     }
 

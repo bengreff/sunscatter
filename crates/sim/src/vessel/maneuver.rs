@@ -25,6 +25,8 @@ pub struct NodePrediction {
     /// Ignition, and the burn's duration from the stage estimate (s).
     pub ignite: Epoch,
     pub duration: Option<f64>,
+    /// The mass just after the burn (kg; the coast after it).
+    pub mass: f64,
     /// The Δv the engines have (m/s), if measured.
     pub available: Option<f64>,
     pub warnings: Vec<String>,
@@ -39,7 +41,7 @@ impl Vessel {
 
     /// The engines a planned burn lights: the main engines the throttle
     /// refers to (those selected, else all), still aboard.
-    fn burn_engines(&self) -> Vec<u32> {
+    pub(crate) fn burn_engines(&self) -> Vec<u32> {
         let Some((def, state)) = self.ship_parts() else { return Vec::new() };
         let main: Vec<u32> = (0..def.engines.len() as u32).filter(|&i| def.engines[i as usize].main).collect();
         let selected: Vec<u32> = main.iter().copied().filter(|&i| state.engines[i as usize].selected).collect();
@@ -53,19 +55,29 @@ impl Vessel {
     /// The stage estimate of a burn of `engines` lit now at full throttle
     /// in vacuum (`estimate::lit`).
     fn burn_estimate(&self, engines: &[u32]) -> Option<estimate::Burn> {
+        self.burn_estimate_at(engines, 0.0)
+    }
+
+    /// The same at ambient pressure `p` (Pa), held over the burn.
+    pub(crate) fn burn_estimate_at(&self, engines: &[u32], p: f64) -> Option<estimate::Burn> {
         let (def, state) = self.ship_parts()?;
         let k = self.knowledge();
         let hull = estimate::hull(&self.craft.design().parts);
-        let inp = estimate::Inputs { hull: &hull, knowledge: &k, throttle: 1.0, p: 0.0, g: None };
+        let inp = estimate::Inputs { hull: &hull, knowledge: &k, throttle: 1.0, p, g: None };
         estimate::lit(def, state, &inp, engines)
     }
 
     /// The program of node `i` of the plan, scheduled from the stage
-    /// estimate now (`maneuver::schedule`); a wake already past is now.
-    /// Nodes already past (missed) are skipped.
+    /// estimate now. Nodes already past (missed) are skipped.
     fn schedule_node(&self, i: usize) -> Option<Program> {
         let i = (i..self.nodes.len()).find(|&j| self.nodes[j].t >= self.time)?;
-        let node = &self.nodes[i];
+        self.schedule_of(&self.nodes[i], i)
+    }
+
+    /// The program of `node` as the plan's node `i` (set, or a draft the
+    /// planner shows), scheduled from the stage estimate now
+    /// (`maneuver::schedule`); a wake already past is now.
+    fn schedule_of(&self, node: &Node, i: usize) -> Option<Program> {
         let (def, _) = self.ship_parts()?;
         let engines = self.burn_engines();
         let burn = self.burn_estimate(&engines);
@@ -91,6 +103,25 @@ impl Vessel {
         &self.nodes
     }
 
+    /// The index of the first node [`Vessel::set_nodes`] may change: the
+    /// waiting program's, else the one after the program's (a node being
+    /// turned to, settled for or burnt cannot change).
+    pub fn first_editable_node(&self) -> usize {
+        self.program.as_ref().map_or(0, |p| if p.step == Step::Wait { p.node } else { p.node + 1 })
+    }
+
+    /// The nodes whose burns have not begun (from the program's while it
+    /// waits, turns or settles), missed ones left out: those the drawn
+    /// line predicts past.
+    pub fn nodes_unburnt(&self) -> &[Node] {
+        let from = self.program.as_ref().map_or(0, |p| match p.step {
+            Step::Wait | Step::Turn | Step::Settle => p.node,
+            _ => p.node + 1,
+        });
+        let rest = self.nodes.get(from..).unwrap_or_default();
+        &rest[rest.partition_point(|n| n.t < self.time)..]
+    }
+
     /// Replaces a craft of parts' nodes, by the rules of
     /// [`Vessel::set_plan`]: in order; a node flown or being flown cannot
     /// change, and a changed one cannot be in the past. They leave the
@@ -107,7 +138,7 @@ impl Vessel {
         if same == self.nodes.len() && same == nodes.len() {
             return Ok(());
         }
-        let started = self.program.as_ref().map_or(0, |p| if p.step == Step::Wait { p.node } else { p.node + 1 });
+        let started = self.first_editable_node();
         if same < started {
             return Err(PlanError::Started);
         }
@@ -273,16 +304,32 @@ impl Vessel {
         self.program.as_ref().filter(|p| p.step.flying()).and_then(|p| p.dir)
     }
 
-    /// What the planner shows of node `i` before it is flown: the orbit it
-    /// gives from the stored coast's state at the node, and the stage
-    /// estimate's ignition and duration (see [`NodePrediction`]).
+    /// What the planner shows of node `i` before it is flown (see
+    /// [`Vessel::predict_node`]), from the stored coast's state at it.
     pub fn node_prediction(&self, world: &World, i: usize) -> Option<NodePrediction> {
-        let node = *self.nodes.get(i)?;
+        let node = self.nodes.get(i)?;
+        let first = self.nodes_unburnt().first().is_some_and(|n| std::ptr::eq(n, node));
+        self.predict_node(world, node, first, None)
+    }
+
+    /// What the planner shows of `node` (set, or a draft not yet sent)
+    /// before it is flown: the orbit it gives from the state at it, and
+    /// the stage estimate's ignition, duration and mass after it. The state
+    /// at the node is `at` (a predicted path's, past an earlier node), else
+    /// the stored coast's where it is computed that far, else the state now
+    /// carried there along its conic. `first`: the next node to fly (only
+    /// it can come too soon).
+    pub fn predict_node(
+        &self,
+        world: &World,
+        node: &Node,
+        first: bool,
+        at: Option<(crate::frame::NodeId, DVec3, DVec3)>,
+    ) -> Option<NodePrediction> {
+        let node = *node;
         let (def, state) = self.ship_parts()?;
-        // The stored coast at the node where it is computed that far, else
-        // the state now carried there along its conic.
         let traj = self.trajectory().filter(|tr| tr.computed_until() >= node.t);
-        let (r, v) = match traj.and_then(|tr| tr.eval(node.t)) {
+        let (r, v) = match at.or_else(|| traj.and_then(|tr| tr.eval(node.t))) {
             Some((anchor, r, v)) => {
                 let k = world.eph.relative(anchor, node.reference, node.t);
                 (r + k.r, v + k.v)
@@ -296,15 +343,20 @@ impl Vessel {
         };
         let (p, n, radial) = super::prograde_normal_radial(r, v);
         let after = (node.reference, r, v + p * node.dv.x + n * node.dv.y + radial * node.dv.z);
-        let program = self.schedule_node(i)?;
+        let program = self.schedule_of(&node, 0)?;
         let burn = self.burn_estimate(&program.engines);
         let available = burn.as_ref().and_then(|b| b.dv.map(|d| d.value));
+        let dv = node.dv.length();
         let duration = burn.as_ref().and_then(|b| {
             let (f, m0) = (b.thrust?.value, b.mass.value);
             let mdot = if b.isp > 0.0 { f / (b.isp * super::G0) } else { 0.0 };
-            let dv = node.dv.length();
             Some(if mdot > 0.0 { m0 / mdot * (1.0 - crate::math::exp(-dv * mdot / f)) } else { dv * m0 / f })
         });
+        // The rocket equation at the estimate's exhaust speed.
+        let mass = burn.as_ref().map_or_else(
+            || self.mass(),
+            |b| if b.isp > 0.0 { b.mass.value * crate::math::exp(-dv / (b.isp * super::G0)) } else { b.mass.value },
+        );
         let mut warnings = Vec::new();
         let axis = program.engines.iter().map(|&e| def.engines[e as usize].data.dir.normalize()).sum::<DVec3>();
         if axis.length() > 0.0 && !crate::systems::rcs::can_push(def, state, axis.normalize()) {
@@ -317,9 +369,9 @@ impl Vessel {
                 node.dv.length()
             ));
         }
-        if program.wake <= self.time && i == self.program.as_ref().map_or(0, |p| p.node) {
+        if program.wake <= self.time && first {
             warnings.push("too soon: the burn starts before the craft is turned and settled".into());
         }
-        Some(NodePrediction { after, ignite: program.ignite, duration, available, warnings })
+        Some(NodePrediction { after, ignite: program.ignite, duration, mass, available, warnings })
     }
 }

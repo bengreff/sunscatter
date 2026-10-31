@@ -49,7 +49,7 @@ pub(super) struct ShipTick {
 
 impl Vessel {
     /// The ship definition and state of a craft of catalog parts.
-    pub(super) fn ship_parts(&self) -> Option<(&ShipDef, &ShipState)> {
+    pub(crate) fn ship_parts(&self) -> Option<(&ShipDef, &ShipState)> {
         let state = self.ship.as_ref()?;
         let def = self.craft.design().ship.as_deref()?;
         Some((def, state))

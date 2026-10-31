@@ -1,11 +1,15 @@
 //! The burn planner (realism-1 §6a): a draft of burns for a vessel, edited
-//! here and sent to it as one `GameCommand::SetPlan`.
+//! here and sent to it as one command ([`command_for`]).
 //!
-//! A burn is its ignition time and a Δv in prograde, normal and radial-out
-//! components relative to a named body (a display choice of axes: the law is
-//! a direction function of the state, rule 1). The sim integrates the plan
-//! with the same laws it flies, so the drawn prediction is what happens
-//! (burns under any warp, D024, D029).
+//! A burn is a time and a Δv in prograde, normal and radial-out components
+//! relative to a named body (a display choice of axes, rule 1). For a craft
+//! of parts it is a node (D126: the time is the burn's middle), flown
+//! closed-loop by the maneuver program (`sim::systems::maneuver`); the
+//! window shows the sim's prediction of it (`Vessel::predict_node`) and the
+//! line the coast after it (`trajectory::predict`), labelled as a
+//! prediction: the stored trajectory is what was flown. For the made-up
+//! craft it is the ignition of an open-loop burn the sim integrates into
+//! the stored trajectory.
 //!
 //! From anywhere but aboard the vessel, the plan travels at light speed
 //! (D063, D067); without a signal it cannot be sent.
@@ -22,12 +26,14 @@ use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 use glam::DVec3;
 use sim::frame::NodeId;
+use sim::systems::maneuver::Node;
 use sim::time::Epoch;
 use sim::vessel::{BurnEnd, DirectionLaw, FlightPlan, PlannedBurn, Vessel, VesselId, G0};
 
 /// One burn being edited.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct DraftBurn {
+    /// A node's time (a craft of parts), or the ignition (the made-up craft).
     pub t_start: Epoch,
     /// Δv (m/s): prograde, normal, radial-out.
     pub dv: DVec3,
@@ -68,9 +74,20 @@ pub fn drag_dv(px: f64) -> f64 {
     10.0 * (px / 100.0).powi(3)
 }
 
-/// The draft form of a vessel's plan: the burns not yet ignited.
-pub fn draft_from(plan: &FlightPlan, now: Epoch) -> Vec<DraftBurn> {
-    plan.burns
+/// The draft form of a vessel's plan: a craft of parts' nodes that may
+/// still change, else the burns not yet ignited.
+pub fn draft_from(vessel: &Vessel, now: Epoch) -> Vec<DraftBurn> {
+    if vessel.ship().is_some() {
+        let nodes = vessel.nodes().get(vessel.first_editable_node()..).unwrap_or_default();
+        return nodes
+            .iter()
+            .filter(|n| n.t.seconds_since(now) > 0.0)
+            .map(|n| DraftBurn { t_start: n.t, dv: n.dv, reference: n.reference })
+            .collect();
+    }
+    vessel
+        .plan()
+        .burns
         .iter()
         .filter(|b| b.t_start.seconds_since(now) > 0.0)
         .filter_map(|b| match (b.law.direction, b.end) {
@@ -80,6 +97,31 @@ pub fn draft_from(plan: &FlightPlan, now: Epoch) -> Vec<DraftBurn> {
             _ => None,
         })
         .collect()
+}
+
+/// The nodes to send to a craft of parts: those that can no longer change
+/// (flown, or being flown) followed by the draft's, in time order. Nodes
+/// with no Δv are dropped.
+pub fn nodes_from(vessel: &Vessel, draft: &[DraftBurn]) -> Vec<Node> {
+    let kept = vessel.nodes().get(..vessel.first_editable_node()).unwrap_or(vessel.nodes());
+    let mut new: Vec<Node> = draft
+        .iter()
+        .filter(|d| d.dv.length() > 1e-6)
+        .map(|d| Node { t: d.t_start, dv: d.dv, reference: d.reference })
+        .collect();
+    new.sort_by(|a, b| a.t.seconds_since(b.t).total_cmp(&0.0));
+    kept.iter().copied().chain(new).collect()
+}
+
+/// The command that sets `draft` on `vessel`, arriving at `now`: its nodes
+/// for a craft of parts, else its plan.
+pub fn command_for(vessel: &Vessel, draft: &[DraftBurn], now: Epoch) -> GameCommand {
+    let id = vessel.id();
+    if vessel.ship().is_some() {
+        GameCommand::SetNodes { vessel: id, nodes: nodes_from(vessel, draft) }
+    } else {
+        GameCommand::SetPlan { vessel: id, plan: plan_from(vessel, draft, now) }
+    }
 }
 
 /// The plan to send: the vessel's burns already ignited (kept as they
@@ -102,6 +144,71 @@ pub fn plan_from(vessel: &Vessel, draft: &[DraftBurn], now: Epoch) -> FlightPlan
 /// the craft is aligned.
 pub fn turn_warning(until: f64, lead: f64) -> Option<String> {
     (until < lead).then(|| format!("turning takes ~{lead:.0} s: ignition before the craft is aligned"))
+}
+
+/// What the window shows of one draft burn.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BurnInfo {
+    /// Its ignition (a node's from the program's schedule).
+    pub ignite: Epoch,
+    /// Its burn time (s), if the engines' thrust is known.
+    pub duration: Option<f64>,
+    /// When it ends (the first apsides after it are shown from there).
+    pub end: Epoch,
+    pub warnings: Vec<String>,
+}
+
+/// What the draft's burns predict: for a craft of parts each node's
+/// prediction (`Vessel::predict_node`, one owner: the stage estimate's
+/// duration and warnings), else the rocket equation at the made-up
+/// engine's vacuum figures, mass carried from burn to burn. The second
+/// value is the Δv the craft has (m/s), if known, and the third the
+/// propellant the draft spends (kg), if known.
+pub fn draft_info(
+    world: &sim::world::World,
+    vessel: &Vessel,
+    draft: &[DraftBurn],
+) -> (Vec<BurnInfo>, Option<f64>, Option<f64>) {
+    let now = vessel.time;
+    if vessel.ship().is_some() {
+        // The draft's first node is the next to fly unless one is being flown.
+        let flying = vessel.program().is_some_and(|p| p.step.flying());
+        let mut available = None;
+        let info = draft
+            .iter()
+            .enumerate()
+            .map(|(k, b)| {
+                let node = Node { t: b.t_start, dv: b.dv, reference: b.reference };
+                let p = vessel.predict_node(world, &node, k == 0 && !flying, None);
+                if k == 0 {
+                    available = p.as_ref().and_then(|p| p.available);
+                }
+                let duration = p.as_ref().and_then(|p| p.duration);
+                let ignite = p.as_ref().map_or(b.t_start, |p| p.ignite);
+                let end = ignite.add_seconds(duration.unwrap_or(0.0));
+                BurnInfo { ignite, duration, end, warnings: p.map(|p| p.warnings).unwrap_or_default() }
+            })
+            .collect();
+        return (info, available, None);
+    }
+    let engine = &vessel.craft.engine;
+    let m0 = vessel.mass_props().mass;
+    let mut mass = m0;
+    let info = draft
+        .iter()
+        .map(|b| {
+            let dv = b.dv.length();
+            let t = burn_time(dv, mass, engine.thrust_vac, engine.isp_vac);
+            // The maneuver hold turns the craft this long before ignition
+            // (D075); a burn sooner than that starts unaligned.
+            let lead = sim::vessel::BurnCraft::of(&vessel.craft).turn_lead(mass);
+            let warnings = turn_warning(b.t_start.seconds_since(now), lead).into_iter().collect();
+            mass *= (-dv / (engine.isp_vac * G0)).exp();
+            BurnInfo { ignite: b.t_start, duration: Some(t), end: b.t_start.add_seconds(t), warnings }
+        })
+        .collect();
+    let available = crate::hud::delta_v(engine.isp_vac, m0, vessel.propellant());
+    (info, Some(available), Some(m0 - mass))
 }
 
 /// Burn time (s) for `dv` from mass `m0` at vacuum thrust and Isp.
@@ -195,7 +302,7 @@ impl Planner {
         }
         self.open = true;
         self.vessel = Some(vessel.id());
-        self.draft = draft_from(vessel.plan(), now);
+        self.draft = draft_from(vessel, now);
     }
 }
 
@@ -222,7 +329,6 @@ pub fn draw(
         return Ok(());
     };
     let vessel = &sim.fleet[i];
-    let engine = &vessel.craft.engine;
     let now = sim.clock;
     let body = sim.dominant_of(i);
     let body_name = sim.world.eph.node(body).name.clone();
@@ -231,22 +337,22 @@ pub fn draw(
     let list = aps.get(id).cloned().unwrap_or_default();
     let (next_ap, next_pe) = list.next_after(now);
     let (next_ap, next_pe) = (next_ap.copied(), next_pe.copied());
-    let predicted = planner.draft == draft_from(vessel.plan(), now);
+    let predicted = planner.draft == draft_from(vessel, now);
+    let (info, available, spent) = draft_info(&sim.world, vessel, &planner.draft);
+    let parts = vessel.ship().is_some();
     let mut open = planner.open;
     let mut send = false;
     egui::Window::new(format!("Burn planner: Vessel {} (N)", id.0)).open(&mut open).default_width(380.0).show(
         ctx,
         |ui| {
             let mut remove = None;
-            let mut mass = vessel.mass_props().mass;
-            let available = crate::hud::delta_v(engine.isp_vac, mass, vessel.propellant());
             let mut total = 0.0;
-            for (k, b) in planner.draft.iter_mut().enumerate() {
+            for ((k, b), info) in planner.draft.iter_mut().enumerate().zip(&info) {
                 ui.separator();
                 ui.horizontal(|ui| {
                     ui.strong(format!("Burn {}", k + 1));
                     let mut dt = b.t_start.seconds_since(now);
-                    ui.label("in");
+                    ui.label(if parts { "node in" } else { "in" });
                     if ui.add(egui::DragValue::new(&mut dt).range(1.0..=1e9).speed(1.0).suffix(" s")).changed() {
                         b.t_start = now.add_seconds(dt);
                     }
@@ -263,16 +369,19 @@ pub fn draw(
                     }
                 });
                 let dv = b.dv.length();
-                let t = burn_time(dv, mass, engine.thrust_vac, engine.isp_vac);
-                ui.label(egui::RichText::new(format!("{dv:.1} m/s about {name}, burn {}", fmt_duration(t))).small());
-                ui.label(egui::RichText::new(after_burn(&sim, &list, b.t_start.add_seconds(t), predicted)).small());
-                // The maneuver hold turns the craft this long before
-                // ignition (D075); a burn sooner than that starts unaligned.
-                let lead = sim::vessel::BurnCraft::of(&vessel.craft).turn_lead(mass);
-                if let Some(text) = turn_warning(b.t_start.seconds_since(now), lead) {
+                let time =
+                    info.duration.map_or_else(|| "burn time unknown".into(), |t| format!("burn {}", fmt_duration(t)));
+                let text = if parts {
+                    let ignite = fmt_duration(info.ignite.seconds_since(now));
+                    format!("predicted: {dv:.1} m/s about {name}, ignition in {ignite}, {time}")
+                } else {
+                    format!("{dv:.1} m/s about {name}, {time}")
+                };
+                ui.label(egui::RichText::new(text).small());
+                ui.label(egui::RichText::new(after_burn(&sim, &list, info.end, predicted)).small());
+                for text in &info.warnings {
                     ui.label(egui::RichText::new(text).small().color(crate::interface::theme::WARN));
                 }
-                mass *= (-dv / (engine.isp_vac * G0)).exp();
                 total += dv;
             }
             if let Some(k) = remove {
@@ -307,21 +416,18 @@ pub fn draw(
                 }
             }
             ui.label(format!("axes about {body_name} (prograde, normal, radial-out)"));
-            let short = total > available;
+            let short = available.is_some_and(|a| total > a);
             let colour =
                 if short && !vessel.debug() { crate::interface::theme::WARN } else { crate::interface::theme::TEXT };
-            ui.label(
-                egui::RichText::new(format!("total {total:.0} m/s of {available:.0} m/s available")).color(colour),
-            );
-            let m0 = vessel.mass_props().mass;
-            ui.label(
-                egui::RichText::new(format!(
-                    "propellant {:.0} kg of {:.0} kg on board",
-                    m0 - mass,
-                    vessel.propellant()
-                ))
-                .color(colour),
-            );
+            let of = available
+                .map_or_else(|| "(the craft's Δv is not measured)".into(), |a| format!("of {a:.0} m/s available"));
+            ui.label(egui::RichText::new(format!("total {total:.0} m/s {of}")).color(colour));
+            if let Some(spent) = spent {
+                ui.label(
+                    egui::RichText::new(format!("propellant {spent:.0} kg of {:.0} kg on board", vessel.propellant()))
+                        .color(colour),
+                );
+            }
             let delay = plan_delay(&comms, id);
             ui.horizontal(|ui| {
                 let label = match delay {
@@ -331,7 +437,7 @@ pub fn draw(
                 };
                 send = ui.add_enabled(delay.is_some(), egui::Button::new(label)).clicked();
                 if ui.button("Revert").clicked() {
-                    planner.draft = draft_from(vessel.plan(), now);
+                    planner.draft = draft_from(vessel, now);
                 }
             });
         },
@@ -339,8 +445,7 @@ pub fn draw(
     planner.open = open;
     if send {
         let delay = plan_delay(&comms, id).unwrap_or(0.0);
-        let plan = plan_from(vessel, &planner.draft, now.add_seconds(delay));
-        let cmd = GameCommand::SetPlan { vessel: id, plan };
+        let cmd = command_for(vessel, &planner.draft, now.add_seconds(delay));
         if delay > 0.0 {
             in_flight.send(now, delay, cmd);
             toasts.push(time.elapsed_secs_f64(), format!("Plan sent to Vessel {} ({})", id.0, fmt_delay(delay)), false);
@@ -444,27 +549,75 @@ mod tests {
         assert!(t > 55.0 && t < 60.0, "{t}");
     }
 
+    /// The small rocket of parts coasting in low orbit, its coast computed
+    /// an hour ahead.
+    fn parts_in_orbit() -> SimState {
+        let craft = sim::craft::small::rocket();
+        let mut sim = SimState::with_craft(&craft);
+        let earth = sim.world.find("Earth").unwrap();
+        let el = sim::kepler::Elements { a: 6_778_137.0, e: 0.0005, i: 0.9, raan: 1.0, argp: 0.5, mean_anomaly: 0.0 };
+        let (r, v) = el.to_state(earth.gm);
+        let mut ship = Vessel::coasting(&sim.world, sim.fleet[0].id(), sim.clock, earth.node, r, v, &craft);
+        ship.extend_coast(&sim.world, sim.clock.add_seconds(3600.0), usize::MAX);
+        sim.fleet[0] = ship;
+        sim
+    }
+
     #[test]
-    fn a_plan_round_trips_through_the_draft_and_keeps_ignited_burns() {
-        let sim = SimState::new();
-        let v = sim.ship();
+    fn a_craft_of_parts_gets_nodes_that_round_trip_and_keep_the_one_being_flown() {
+        let mut sim = parts_in_orbit();
         let now = sim.clock;
         let body = sim.world.find("Earth").unwrap().node;
-        let past = PlannedBurn::delta_v_with(now.add_seconds(-5.0), DVec3::X * 10.0, &v.craft.engine, Some(body));
         let draft = vec![
-            DraftBurn { t_start: now.add_seconds(900.0), dv: DVec3::new(50.0, 0.0, 5.0), reference: body },
-            DraftBurn { t_start: now.add_seconds(300.0), dv: DVec3::new(100.0, 0.0, 0.0), reference: body },
-            DraftBurn { t_start: now.add_seconds(600.0), dv: DVec3::ZERO, reference: body },
+            DraftBurn { t_start: now.add_seconds(1500.0), dv: DVec3::new(50.0, 0.0, 5.0), reference: body },
+            DraftBurn { t_start: now.add_seconds(900.0), dv: DVec3::new(40.0, 0.0, 0.0), reference: body },
+            DraftBurn { t_start: now.add_seconds(1200.0), dv: DVec3::ZERO, reference: body },
         ];
-        let plan = plan_from(v, &draft, now);
-        assert!(plan.is_sorted());
-        assert_eq!(plan.burns.len(), 2, "zero burns are dropped");
-        let back = draft_from(&plan, now);
-        assert_eq!(back[0].t_start, now.add_seconds(300.0));
-        assert!((back[1].dv - DVec3::new(50.0, 0.0, 5.0)).length() < 1e-9);
-        // An ignited burn stays at the front of a new plan.
-        let mut plan = FlightPlan { burns: vec![past] };
-        plan.burns.extend(plan_from(v, &draft, now).burns);
-        assert!(draft_from(&plan, now).iter().all(|d| d.t_start.seconds_since(now) > 0.0));
+        let GameCommand::SetNodes { vessel, nodes } = command_for(sim.ship(), &draft, now) else {
+            panic!("a craft of parts is sent nodes")
+        };
+        assert_eq!(vessel, sim.ship().id());
+        assert_eq!(nodes.len(), 2, "zero Δv is dropped");
+        assert!(nodes[0].t < nodes[1].t, "in time order");
+        sim.fleet[0].set_nodes(nodes.clone()).unwrap();
+        let back = draft_from(sim.ship(), now);
+        assert_eq!(back.len(), 2);
+        assert_eq!((back[0].t_start, back[0].dv), (nodes[0].t, nodes[0].dv));
+        assert_eq!(nodes_from(sim.ship(), &back), nodes, "the draft of the plan is the plan");
+        // Woken for the first node, the program turns to it: it can no
+        // longer change, and a new draft keeps it at the front.
+        let wake = sim.ship().program().unwrap().wake;
+        let world = sim.world.clone();
+        sim.fleet[0].advance(&world, wake.add_seconds(1.0), &sim::vessel::Controls::default(), usize::MAX);
+        assert!(sim.ship().program().is_some_and(|p| p.step.flying()));
+        let later = draft_from(sim.ship(), sim.clock);
+        assert_eq!(later.len(), 1, "only the second node is editable");
+        let edited = [DraftBurn { dv: DVec3::new(20.0, 0.0, 0.0), ..later[0] }];
+        let sent = nodes_from(sim.ship(), &edited);
+        assert_eq!(sent[0], nodes[0]);
+        assert_eq!(sent[1].dv, DVec3::new(20.0, 0.0, 0.0));
+        sim.fleet[0].set_nodes(sent).expect("the edit is accepted");
+    }
+
+    #[test]
+    fn the_window_shows_the_sims_prediction_of_each_node() {
+        let sim = parts_in_orbit();
+        let now = sim.clock;
+        let body = sim.world.find("Earth").unwrap().node;
+        let soon = DraftBurn { t_start: now.add_seconds(10.0), dv: DVec3::new(40.0, 0.0, 0.0), reference: body };
+        let later = DraftBurn { t_start: now.add_seconds(900.0), ..soon };
+        let (info, available, spent) = draft_info(&sim.world, sim.ship(), &[soon, later]);
+        // The prediction (`predict_node`): the stage estimate's burn time
+        // about the node, its ignition before it, and the warnings.
+        for (b, d) in info.iter().zip([soon, later]) {
+            let t = b.duration.expect("the engines' thrust is known");
+            assert!(t > 0.1 && t < 10.0, "{t}");
+            assert!(b.ignite < d.t_start && d.t_start < b.end, "{b:?}");
+            assert!(b.warnings.iter().any(|w| w.contains("cannot be settled")), "{:?}", b.warnings);
+        }
+        assert!(info[0].warnings.iter().any(|w| w.contains("too soon")), "{:?}", info[0].warnings);
+        assert!(!info[1].warnings.iter().any(|w| w.contains("too soon")), "only the first can come too soon");
+        // The small rocket reads no tank levels: its Δv is not measured.
+        assert_eq!((available, spent), (None, None));
     }
 }

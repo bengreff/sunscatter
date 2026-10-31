@@ -5,7 +5,7 @@
 //! once so the re-predicted line shows the result; from elsewhere the plan
 //! is sent from the window (light delay, D067).
 
-use super::{drag_dv, nearest_on_screen, plan_from, DraftBurn, Drag, Planner};
+use super::{command_for, drag_dv, nearest_on_screen, DraftBurn, Drag, Planner};
 use crate::camera::{CameraRig, MainCamera};
 use crate::commands::GameCommand;
 use crate::comms::{Comms, Location};
@@ -165,8 +165,7 @@ pub fn pick_on_line(
     }
     // Aboard, the plan is set when a drag ends (re-predicted at once).
     if released && comms.location == Location::Vessel(id) {
-        let plan = plan_from(&sim.fleet[i], &planner.draft, sim.clock);
-        commands.write(GameCommand::SetPlan { vessel: id, plan });
+        commands.write(command_for(&sim.fleet[i], &planner.draft, sim.clock));
     }
 
     // A click on the drawn line adds a burn there, about the dominant body

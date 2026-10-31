@@ -57,6 +57,12 @@ pub enum GameCommand {
         vessel: VesselId,
         plan: FlightPlan,
     },
+    /// Replace a craft of parts' planned burns (D126: nodes; routed as
+    /// `SetPlan`).
+    SetNodes {
+        vessel: VesselId,
+        nodes: Vec<sim::systems::maneuver::Node>,
+    },
     /// The active vessel's attitude hold (D075); turns SAS on.
     SetHold(HoldMode),
     /// The active vessel's throttle, 0–1 (the navball's throttle bar).
@@ -248,14 +254,12 @@ pub fn apply(
             GameCommand::SpawnTestShips(n) => sim.spawn_test_ships(*n),
             GameCommand::SetPlan { vessel, plan } => {
                 let sim = &mut *sim;
-                let now = time.elapsed_secs_f64();
-                match sim.index_of(*vessel) {
-                    None => toasts.push(now, format!("Plan for Vessel {}: no such vessel", vessel.0), true),
-                    Some(i) => match sim.fleet[i].set_plan(&sim.world, plan.clone()) {
-                        Ok(()) => toasts.push_linked(now, "Flight plan accepted", false, to(*vessel)),
-                        Err(e) => toasts.push_linked(now, format!("Flight plan rejected: {e:?}"), true, to(*vessel)),
-                    },
-                }
+                let done = sim.index_of(*vessel).map(|i| sim.fleet[i].set_plan(&sim.world, plan.clone()));
+                planned(&mut toasts, time.elapsed_secs_f64(), *vessel, done);
+            }
+            GameCommand::SetNodes { vessel, nodes } => {
+                let done = sim.index_of(*vessel).map(|i| sim.fleet[i].set_nodes(nodes.clone()));
+                planned(&mut toasts, time.elapsed_secs_f64(), *vessel, done);
             }
             GameCommand::SetHold(mode) => {
                 sim.controls_mut().hold = *mode;
@@ -425,6 +429,20 @@ fn place(
 
 /// The toast after an edit of `what` (stages or functions) of `vessel`:
 /// saved, or refused with the reasons (`None`: no such vessel).
+/// The toast of a plan or nodes set on `vessel` (`None`: no such vessel).
+fn planned(
+    toasts: &mut crate::interface::toasts::Toasts,
+    now: f64,
+    vessel: VesselId,
+    done: Option<Result<(), sim::vessel::PlanError>>,
+) {
+    match done {
+        Some(Ok(())) => toasts.push_linked(now, "Flight plan accepted", false, to(vessel)),
+        Some(Err(e)) => toasts.push_linked(now, format!("Flight plan rejected: {e:?}"), true, to(vessel)),
+        None => toasts.push(now, format!("Plan for Vessel {}: no such vessel", vessel.0), true),
+    }
+}
+
 fn edited(
     toasts: &mut crate::interface::toasts::Toasts,
     now: f64,

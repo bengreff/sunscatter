@@ -313,10 +313,16 @@ pub fn vessel_segments<'a>(sim: &'a SimState, pred: &'a Prediction, i: usize) ->
     let vessel = &sim.fleet[i];
     let active = i == sim.active;
     match vessel.trajectory() {
-        // Coasting into air that needs live flight: the stored segments, the
-        // last one cut at its entry, and the path through the air (D089).
-        Some(tr) if active && pred.after == Some((vessel.id(), tr.last().t0)) && !pred.segments.is_empty() => {
-            tr.segments[..tr.segments.len() - 1].iter().chain(&pred.segments).collect()
+        // Coasting into air that needs live flight, or towards a node: the
+        // stored segments up to the one the prediction takes over from (cut
+        // at the entry or the node), and the predicted path (D089, D126).
+        Some(tr)
+            if active
+                && !pred.segments.is_empty()
+                && pred.after.is_some_and(|(id, t0)| id == vessel.id() && tr.segments.iter().any(|s| s.t0 == t0)) =>
+        {
+            let t0 = pred.after.map(|a| a.1);
+            tr.segments.iter().take_while(|s| Some(s.t0) != t0).chain(&pred.segments).collect()
         }
         Some(tr) => tr.segments.iter().collect(),
         None if active => pred.segments.iter().collect(),

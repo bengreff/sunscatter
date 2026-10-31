@@ -303,7 +303,8 @@ pub fn draw(
             };
             line.end = seg.t0.add_seconds(t_end);
             let burn = matches!(seg.kind, SegmentKind::Burn(_));
-            after_burn |= burn;
+            // A coast from a node is after a burn too (its predicted orbit).
+            after_burn |= burn || vessel.nodes().iter().any(|n| n.t == seg.t0);
             let colour = match (burn, after_burn, active) {
                 (true, _, _) => Color::srgb(1.0, 0.35, 0.2),
                 (false, true, _) => Color::srgb(0.3, 0.85, 1.0),

@@ -26,6 +26,7 @@
 
 mod model;
 
+use crate::craft::engine::P_SEA_LEVEL;
 use crate::craft::CraftParams;
 use crate::ephem::Snapshot;
 use crate::forces::ambient_pressure;
@@ -66,8 +67,16 @@ pub struct LandingStart {
     pub anchor: NodeId,
     pub r: DVec3,
     pub v: DVec3,
-    /// Propellant at `t` (kg).
+    /// Propellant at `t` the engines burn (kg). Infinite when the craft
+    /// does not measure it (no level sensor on a tank they draw from): the
+    /// prediction assumes they do not run dry, and holds the mass.
     pub propellant: f64,
+    /// The engines the throttle runs, lumped ([`Thrust::of_vessel`]).
+    pub thrust: Thrust,
+    /// A craft of parts: its mass (kg) and centre of mass (body axes) at
+    /// `t`; the mass falls with the flow and the centre is held. `None`:
+    /// the made-up craft's mass model (`CraftParams::mass`, until it goes).
+    pub mass: Option<(f64, DVec3)>,
     /// Debug mode (D064): the propellant never runs out.
     pub infinite: bool,
     /// Throttle held throughout (0: engine off).
@@ -101,24 +110,111 @@ impl LandingStart {
         }
         let mut chute = if vessel.destruction().is_none() { vessel.chute } else { Default::default() };
         chute.armed |= chute_command;
-        let (t, (anchor, r, v), propellant, throttle) = match &vessel.phase {
+        let (t, (anchor, r, v), mass, throttle) = match &vessel.phase {
             Phase::Landed { .. } | Phase::Crashed { .. } => return None,
             Phase::Coasting { trajectory } => {
                 let last = trajectory.last();
                 let after_burns = matches!(last.kind, SegmentKind::Coast) && last.t0 > vessel.time;
                 if after_burns {
-                    let prop = (last.initial_mass() - vessel.craft.mass.dry_mass).max(0.0);
-                    (last.t0, last.eval(0.0)?, prop, 0.0)
+                    (last.t0, last.eval(0.0)?, last.initial_mass(), 0.0)
                 } else {
-                    (vessel.time, vessel.state(world), vessel.propellant(), throttle)
+                    (vessel.time, vessel.state(world), vessel.mass(), throttle)
                 }
             }
-            Phase::Powered { .. } => (vessel.time, vessel.state(world), vessel.propellant(), throttle),
+            Phase::Powered { .. } => (vessel.time, vessel.state(world), vessel.mass(), throttle),
         };
         let body = nearest_surface(world, &world.snapshot(t), anchor, r)?;
         let infinite = vessel.debug();
-        Some(LandingStart { t, anchor, r, v, propellant, infinite, throttle, chute, attitude, body })
+        let (propellant, thrust, mass) = propulsion_of(vessel, mass);
+        Some(LandingStart { t, anchor, r, v, propellant, thrust, mass, infinite, throttle, chute, attitude, body })
     }
+
+    /// Thrust-to-weight ratio at full throttle with thrust at ambient
+    /// pressure `pressure` against local gravity `gravity`, at the start.
+    pub fn twr(&self, craft: &CraftParams, pressure: f64, gravity: f64) -> f64 {
+        let mass = self.mass.map_or(craft.mass.dry_mass + self.propellant, |m| m.0);
+        self.thrust.output(1.0, pressure).0 / (mass * gravity)
+    }
+}
+
+/// The engines a prediction burns, lumped into one (the software's model,
+/// D128): thrust and flow at a throttle setting, along one axis.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Thrust {
+    /// Thrust at full throttle in vacuum (N), and its fall with the ambient
+    /// pressure (m²: a fixed nozzle's exit area, linear in pressure).
+    pub vac: f64,
+    pub exit_area: f64,
+    /// Mass flow at full throttle (kg/s).
+    pub mdot: f64,
+    /// The lowest setting above off.
+    pub min_throttle: f64,
+    /// The thrust's direction (body axes, unit).
+    pub axis: DVec3,
+}
+
+impl Thrust {
+    /// The made-up craft's engine (the same law: `Engine::output`).
+    pub fn of_engine(e: &crate::craft::Engine) -> Self {
+        Thrust {
+            vac: e.thrust_vac,
+            exit_area: e.exit_area,
+            mdot: e.mdot_max(),
+            min_throttle: e.min_throttle,
+            axis: e.mount_dir,
+        }
+    }
+
+    /// A vessel's main engines (one owner): for a craft of parts, the stage
+    /// estimate of the engines its throttle runs (those selected, else all
+    /// main engines; `estimate::lit`, the staging bar's walk) at full
+    /// throttle in vacuum and at sea level, along their mean axis; else the
+    /// made-up craft's engine. Also the propellant they burn (kg; to the
+    /// estimate's burnout; infinite if that is not measured, see
+    /// [`LandingStart::propellant`]).
+    pub fn of_vessel(vessel: &Vessel) -> (Self, f64) {
+        let Some((def, _)) = vessel.ship_parts() else {
+            return (Thrust::of_engine(&vessel.craft.engine), vessel.propellant());
+        };
+        let engines = vessel.burn_engines();
+        let (vac, sl) = (vessel.burn_estimate_at(&engines, 0.0), vessel.burn_estimate_at(&engines, P_SEA_LEVEL));
+        let force =
+            |b: &Option<crate::systems::estimate::Burn>| b.as_ref().and_then(|b| b.thrust).map_or(0.0, |t| t.value);
+        let (f_vac, f_sl) = (force(&vac), force(&sl));
+        let isp = vac.as_ref().map_or(0.0, |b| b.isp);
+        let burnable = match vac.as_ref() {
+            Some(b) => b.burnout_mass.map_or(f64::INFINITY, |m1| b.mass.value - m1.value),
+            None => 0.0,
+        };
+        let axis = engines.iter().map(|&e| def.engines[e as usize].data.dir.normalize()).sum::<DVec3>();
+        let thrust = Thrust {
+            vac: f_vac,
+            exit_area: (f_vac - f_sl).max(0.0) / P_SEA_LEVEL,
+            mdot: if isp > 0.0 { f_vac / (isp * crate::vessel::G0) } else { 0.0 },
+            min_throttle: engines.iter().map(|&e| def.engines[e as usize].data.throttle_min).fold(0.0, f64::max),
+            axis: axis.try_normalize().unwrap_or(DVec3::Z),
+        };
+        (thrust, burnable.max(0.0))
+    }
+
+    /// Thrust (N) and mass flow (kg/s) at `throttle` and ambient pressure
+    /// `p` (Pa).
+    pub fn output(&self, throttle: f64, p: f64) -> (f64, f64) {
+        let s = if throttle > 0.0 { throttle.clamp(self.min_throttle, 1.0) } else { 0.0 };
+        (s * (self.vac - self.exit_area * p).max(0.0), s * self.mdot)
+    }
+}
+
+/// What a prediction from `vessel` at mass `mass` (kg) burns: the
+/// propellant its engines burn, their lumped thrust, and a craft of parts'
+/// mass and centre of mass (see [`LandingStart`]).
+pub fn propulsion_of(vessel: &Vessel, mass: f64) -> (f64, Thrust, Option<(f64, DVec3)>) {
+    let (thrust, burnable) = Thrust::of_vessel(vessel);
+    if vessel.ship().is_some() {
+        let spent = vessel.mass() - mass;
+        return ((burnable - spent).max(0.0), thrust, Some((mass, vessel.mass_props().com)));
+    }
+    ((mass - vessel.craft.mass.dry_mass).max(0.0), thrust, None)
 }
 
 /// The surface body whose ground is nearest `r` (anchor-relative).
@@ -268,7 +364,7 @@ pub fn air_path(
         End::Failed => (EndKind::Failed, false),
         _ => (EndKind::Horizon, false),
     };
-    let mass = craft.mass.at(start.propellant).mass;
+    let mass = model.props(start.propellant).0;
     let segment = Segment::recorded(world, start.t, start.anchor, &flight.samples, end, mass, proper_time);
     AirPath { segment, cleared }
 }
@@ -299,7 +395,7 @@ pub fn braking_solution(world: &World, craft: &CraftParams, descent: &Descent, m
     let mut braking = *start;
     braking.attitude = AssumedAttitude::SurfaceRetrograde;
     let model = Model::new(world, craft, &braking);
-    let mdot = craft.engine.output(start.throttle, 0.0).mdot;
+    let mdot = start.thrust.output(start.throttle, 0.0).1;
     // The stop height (lowest point above the ground) igniting at local
     // time `ti`; a crash counts as minus the contact speed.
     let shoot = |ti: f64| -> (f64, f64) {
@@ -396,3 +492,5 @@ pub fn twr(craft: &CraftParams, propellant: f64, pressure: f64, gravity: f64) ->
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod thrust_tests;

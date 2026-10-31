@@ -132,10 +132,13 @@ fn flight_tools() -> Vec<Tool> {
         ),
         t(
             "set_plan",
-            "Replace a vessel's planned burns (not yet ignited). Each burn: `in_s` seconds from now, and Δv \
-             components (m/s) prograde, normal and radial-out relative to the body the vessel is about now. \
-             From anywhere but aboard, the plan travels with the signal's light delay; without a signal it \
-             cannot be sent. Read the result with get_trajectory.",
+            "Replace a vessel's planned burns (those that can still change). Each burn: `in_s` seconds from \
+             now, and Δv components (m/s) prograde, normal and radial-out relative to the body the vessel is \
+             about now. For a craft of parts a burn is a node (D126): `in_s` is the burn's middle, and the \
+             maneuver program flies it closed-loop (turn, settle, start, cut off on the target orbit; the \
+             result's `nodes` give the predicted ignition, duration and warnings). For the made-up craft \
+             `in_s` is the ignition. From anywhere but aboard, the plan travels with the signal's light \
+             delay; without a signal it cannot be sent. Read the result with get_trajectory.",
             schema(
                 json!({"id": id, "burns": {"type": "array", "items": {"type": "object", "properties": {
                     "in_s": {"type": "number", "minimum": 0},
@@ -553,7 +556,7 @@ fn landing_json(sim: &SimState) -> Value {
             "stop_in_s": b.t_stop.seconds_since(sim.clock), "stop_height_m": b.stop_height,
         })
     });
-    let twr = sim::landing::twr(&ship.craft, ship.propellant(), m.pressure, m.gravity);
+    let twr = start.twr(&ship.craft, m.pressure, m.gravity);
     let surface = json!({
         "body": name(start.body), "radar_altitude_m": known_value(&known, Quantity::Altitude, m.height - ship.contact_height()),
         "vertical_ms": m.v_vertical, "horizontal_ms": m.v_horizontal,
@@ -604,10 +607,26 @@ fn set_plan(args: &Value, sim: &SimState, comms: &Comms) -> Result<(Value, Vec<E
         let dv = glam::DVec3::new(get("prograde"), get("normal"), get("radial"));
         draft.push(crate::planner::DraftBurn { t_start: sim.clock.add_seconds(in_s), dv, reference: body });
     }
-    let plan = crate::planner::plan_from(&sim.fleet[i], &draft, sim.clock.add_seconds(delay));
-    let command = GameCommand::SetPlan { vessel: id, plan };
+    let vessel = &sim.fleet[i];
+    let command = crate::planner::command_for(vessel, &draft, sim.clock.add_seconds(delay));
+    // A craft of parts: the prediction of each node (the planner's).
+    let (info, available, _) = crate::planner::draft_info(&sim.world, vessel, &draft);
+    let nodes: Vec<Value> = draft
+        .iter()
+        .zip(&info)
+        .filter(|_| vessel.ship().is_some())
+        .map(|(d, b)| {
+            json!({"node_in_s": d.t_start.seconds_since(sim.clock), "ignite_in_s": b.ignite.seconds_since(sim.clock),
+                "duration_s": b.duration, "warnings": b.warnings})
+        })
+        .collect();
     let effect = if delay > 0.0 { Effect::Send { delay, command } } else { Effect::Command(command) };
-    Ok((json!({"sent": draft.len(), "arrives_in_s": delay, "about": name(body)}), vec![effect]))
+    let mut out = json!({"sent": draft.len(), "arrives_in_s": delay, "about": name(body)});
+    if vessel.ship().is_some() {
+        out["nodes"] = json!(nodes);
+        out["available_dv_ms"] = json!(available);
+    }
+    Ok((out, vec![effect]))
 }
 
 /// The running server, if the setting is on.
