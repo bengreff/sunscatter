@@ -53,6 +53,36 @@ Small commits, each passing fmt, clippy and the game's tests you touched (`cargo
 
 ## State
 
+**INTERFACE-10 (2026-10-31), wrapped up.** Did INTERFACE-9's Left 1–3: finding 58, the menus' `by` naming its item (finding 59), and the walk of every screen at HEAD (pad, ascent, after separation, the booster, orbit, the map, Dragon alone, every layer, tracking, pause, settings, help), each page read through `read` beside its shot; findings 60–67 found, 60–66 fixed at their owners with table tests. LAYERS-2's unfinished sim work sat in the shared tree, so every commit passed fmt, clippy (game) and the touched modules' tests (139) in a private mirror of HEAD plus my files; the pre-push check ran the whole suites.
+
+**Landed:**
+- 3d3ada5: finding 58, `step`'s and `run_until`'s state through the craft's knowledge: `session::Sample::read` (the menus' rules; `agent::known_altitude`, `menus::landing::dynamic_pressure`, the feeding share as a sum of tank readings, `share_of`); the stops compare the readings.
+- 390355a: finding 59, `read::command_by`: every control's `by` names its item and label (`command {item: "dragon.draco#1", do: "RCS dragon.draco#1 off"}`), a menu's ship command by the item that offers it now.
+- 7bc08b0: finding 62, the run's apsides above the ellipsoid under them (`session::osculating_apsides` through `sim::kepler`), as the menus' Ap and Pe; they read 4.7–5.4 km low at Kennedy's latitude.
+- be21ddc: finding 60, the Landing menu's parachute q through `dynamic_pressure`; no advice when unmeasured (`Opening::Unmeasured`).
+- ed7d29e: finding 61, `stage_bar::draw::scroll_room`: the pad shows every stage (Dragon separation was scrolled out of view).
+- 8aead09: finding 63, `tracking::left_lit_notice` links back to the vessel left burning.
+- 542556c: finding 65, `agent::vessel_or_active`: `get_vessel`, `get_trajectory`, `set_plan` default to the active vessel.
+- fc34d4d: finding 66, `get_vessel`'s attitude to the Landing menu's decimals (`format::ATTITUDE_DECIMALS`), its axes to the attitude's precision.
+- be09730: finding 64, Dragon's Parachutes and Nosecone pinned (the craft file and the playtest save): Dragon alone had an empty action bar.
+- the docs commit after them: owners.md rows, this State, the plan's row, a note in brief-layers.md.
+
+**Live** (headless, debug off, HEAD be09730): the pad's bar shows all seven stages and the action bar Parachutes and Nosecone (`/private/tmp/claude-501/-Users-ben-sunscatter/7c5f130a-69ba-45d3-9965-ca858b31253e/scratchpad/interface10/shots/v_pad.png`); `step` on the pad reads `altitude_m` 30.0, `apoapsis_m` 30.0; at T+62 s `apoapsis_m` 15869 against the navball's 15.6 km (was 10949; the rest is the predicted path's drag); `get_vessel` without `id`, attitude 9.3 / 90.0 / 0.0; the engines-lit notice with "Vessel 1 ›" and `vessel: 1` (`/private/tmp/claude-501/-Users-ben-sunscatter/7c5f130a-69ba-45d3-9965-ca858b31253e/scratchpad/interface10/shots/v_notice_link_crop.png`). Before the fixes: `/private/tmp/claude-501/-Users-ben-sunscatter/7c5f130a-69ba-45d3-9965-ca858b31253e/scratchpad/interface10/shots/a_pad.png` (the hidden stage), `/private/tmp/claude-501/-Users-ben-sunscatter/7c5f130a-69ba-45d3-9965-ca858b31253e/scratchpad/interface10/shots/b_t60.png` (the parachute q, Ap 15.6 km), `/private/tmp/claude-501/-Users-ben-sunscatter/7c5f130a-69ba-45d3-9965-ca858b31253e/scratchpad/interface10/shots/c_booster.png` (the notice without a link), `/private/tmp/claude-501/-Users-ben-sunscatter/7c5f130a-69ba-45d3-9965-ca858b31253e/scratchpad/interface10/shots/e_dragon_rcs.png` (Dragon's empty bar; its RCS authority BACK only, INTERFACE-7's open item).
+
+**Found, not mine:** since LAYERS-2's f2806ca added Dragon's cabin and barometric sensors as components, **every older `falcon9-crew` save crashes the game at its first power step**, the playtest save (`./run play`) included: `sim::systems::power` index out of bounds (the save's 39 power entries against 41 components). Noted in brief-layers.md.
+
+**Left, in order:**
+1. After the save crash is fixed (a save whose ship state does not fit its craft refused at load, or SAVE_VERSION bumped, and the playtest save flown again, testing.md): walk the ascent, separation and orbit again from fresh saves (this walk used INTERFACE-8's, which now crash).
+2. Finding 67: `Reading::shown`'s binary noise in the agent's numbers (`speed_ms` 2000.8000000000002): round through the step's inverse (`sim::systems::data`, LAYERS-2's this round).
+3. Small: the RCS menu's USE options could each carry their exact `set_controls` arguments (`by` per option: "translate only" is `rcs: "translate"`); `get_landing_prediction`'s latitude and longitude print 15 digits (quantised to the position's precision along the ground, D106-right but noisy).
+
+**Open for the owner (INTERFACE-10):**
+- `step` and `run_until` stop on what the craft reads (its readings, not the truth), so an answer always agrees with what stopped it; the dynamic pressure reads to the Landing menu's 10 Pa in every mode, as the orbit's angles keep the menu's decimals in debug mode.
+- The run's apsides are osculating (two-body from now), measured above the ellipsoid under each apsis like the menus' Ap and Pe; the menus' come from the predicted path, so under drag or J2 they still differ by that physics (270 m at T+62 s, ~10 km at a 640 km apoapsis).
+- The agent's heights (`altitude_m`, the run's apsides) are above the reference ellipsoid; the navball's above the datum. The same on Earth (sea level 0), off by the lowest ground on the Moon and Mars; one rule would read the navball's datum (`navball::altitude::body_datum`, kept per body).
+- Without a velocity reading the parachute's advice says "q not measured (no velocity reading): no advice" rather than guessing safe or too fast.
+- Parachutes and Nosecone are pinned on the Falcon 9's action bar (eight entries on the pad, two on Dragon alone).
+
 **INTERFACE-9 (2026-10-31), wrapped up.** Closed INTERFACE-8's Left 1–5, the parity table's gaps and overs (interface-map.md's parity section now reads "yes" on every row), found and fixed finding 57, and wrote the `owners.md` rows (INTERFACE-8's and mine, in the docs commit after this State's first). Not done: the walk of every screen (only the new tools were checked live). LAYERS' sim move left the shared tree uncompilable mid-round, so every commit passed fmt, clippy (game) and the touched modules' tests in a private mirror of HEAD plus my files; the pre-push check ran the whole suites.
 
 **Landed:**

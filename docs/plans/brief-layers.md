@@ -66,6 +66,10 @@ Small commits, one purpose each; `cargo test -p sim` and the game's touched test
 - **The settling wait is layer 2** (software-layers.md §8, open point 1, by D128's rule): the wait reads the feed tanks and fires other parts' thrusters, so it coordinates parts, and the real sequence's ullage burn is the stage computer's. With layer 1 alone an ignition on floating propellant ingests gas; a pilot settles by hand (translation, then ignite), as D126 allows. The wait's state stays each engine's `settling` (saved, and the game reads it), and it still reads the true liquid position (FIXES3: the level sensors, a timed burn where they do not read the tanks).
 - **D123 in debug mode:** a lost controller safes its engine in debug mode too (D123: "a dead or unpowered computer is still dead"); before, debug's launch went ahead with a lost controller.
 
+### From INTERFACE-10 (2026-10-31)
+
+- **Older saves crash the game** since f2806ca added Dragon's cabin air monitor and barometric altimeter as components: loading a `falcon9-crew` save from before it (the playtest save `docs/plans/playtest-2026-10-01-orbit.ron`, `./run play`, included) panics at the first power step, `crates/sim/src/systems/power.rs:110` index out of bounds (the save's 39 power entries, 41 components). A save whose ship state does not fit its craft should be refused at load (or SAVE_VERSION bumped, D063), and the playtest save flown again (testing.md).
+
 ### From the lead (2026-10-31)
 
 - INTERFACE-2's finding 19: Crew Dragon has no cabin sensors in its data (`data/parts/dragon*`). The bare minimum's crew-at-risk line reads the cabin through `Knowledge` (D106), so give the cabin its real sensors (CO₂, O₂, pressure, temperature; sourced or E) before the warp-stop test.
