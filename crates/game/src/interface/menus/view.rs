@@ -47,6 +47,14 @@ pub fn keys(keys: Res<ButtonInput<KeyCode>>, ctx: Res<InputContext>, mut iface: 
     }
 }
 
+/// The menus as held (`super::Steady`), within one flight
+/// (`SimState::flight`).
+#[derive(Default)]
+pub struct Held {
+    flight: Option<(sim::vessel::VesselId, u64)>,
+    menus: std::collections::HashMap<MenuId, super::Steady>,
+}
+
 /// The menu bar and the docks, in the flight view only.
 #[allow(clippy::too_many_arguments)]
 pub fn draw(
@@ -60,7 +68,7 @@ pub fn draw(
     mut planner: ResMut<crate::planner::Planner>,
     mut cmds: MessageWriter<GameCommand>,
     real: Res<Time<Real>>,
-    mut steady: Local<std::collections::HashMap<MenuId, super::Steady>>,
+    mut steady: Local<Held>,
     mut help: ResMut<crate::interface::help::Help>,
 ) -> Result {
     if station.open {
@@ -83,10 +91,16 @@ pub fn draw(
         let top = layout::dock_top(rect(TIME_AREA), rect(BAR_AREA));
         let corner = rect(crate::interface::toasts::AREA);
         let place = layout::dock_place(screen, top, cluster, corner);
-        // Nothing flickers (`interface::steady`): each menu as held.
+        // Nothing flickers (`interface::steady`): each menu as held, within
+        // one flight (`SimState::flight`): what a load or a switch of vessel
+        // left behind is not held over the next.
         let now = real.elapsed_secs_f64();
+        if steady.flight != Some(sim.flight()) {
+            *steady = Held { flight: Some(sim.flight()), menus: Default::default() };
+        }
+        let held = &mut steady.menus;
         let content: Vec<_> =
-            open.iter().map(|m| (*m, steady.entry(*m).or_default().update(m.sections(&data), now).to_vec())).collect();
+            open.iter().map(|m| (*m, held.entry(*m).or_default().update(m.sections(&data), now).to_vec())).collect();
         for (m, input) in render::dock(ctx, place, &content) {
             if input.close && m == MenuId::Rcs {
                 actions.push(MenuAction::SetRcs(sim::systems::rcs::RcsMode { on: false, ..sim.controls().rcs }));

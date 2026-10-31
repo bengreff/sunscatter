@@ -470,7 +470,7 @@ impl Apsides {
 
 /// Keeps [`Apsides`] current (after the simulation step).
 pub fn update(sim: Res<SimState>, pred: Res<Prediction>, landing: Res<LandingPrediction>, mut aps: ResMut<Apsides>) {
-    aps.refresh(&sim, &pred, landing.latest.as_ref());
+    aps.refresh(&sim, &pred, landing.of(sim.flight()));
 }
 
 #[cfg(test)]

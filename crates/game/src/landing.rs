@@ -68,17 +68,34 @@ pub fn predict(world: &World, craft: &CraftParams, vessel: VesselId, start: &Lan
     Landing { vessel, impact: descent.impact, braking }
 }
 
-/// The latest prediction for the active vessel, and the one being computed.
+/// The latest prediction for the active vessel, and the one being computed,
+/// of one flight (`SimState::flight`).
 #[derive(Resource, Default)]
 pub struct LandingPrediction {
-    pub latest: Option<Landing>,
+    latest: Option<Landing>,
     task: Option<Task<Landing>>,
     since_last: f64,
+    flight: Option<(VesselId, u64)>,
+}
+
+impl LandingPrediction {
+    /// The latest prediction if it is of `flight`. (It was kept by vessel id
+    /// alone, and a load brings the ids back: after loading an orbit, the
+    /// Landing menu showed the ascent's impact.)
+    pub fn of(&self, flight: (VesselId, u64)) -> Option<&Landing> {
+        self.latest.as_ref().filter(|_| self.flight == Some(flight))
+    }
 }
 
 /// Starts a background prediction for the active vessel every [`EVERY`]
-/// seconds (one at a time) and swaps in the finished one.
+/// seconds (one at a time) and swaps in the finished one; another flight
+/// (a load, a switch) drops the last one's, and the one being computed,
+/// and starts at once.
 pub fn update(time: Res<Time>, sim: Res<SimState>, mut pred: ResMut<LandingPrediction>) {
+    let flight = sim.flight();
+    if pred.flight != Some(flight) {
+        *pred = LandingPrediction { flight: Some(flight), since_last: EVERY, ..Default::default() };
+    }
     if let Some(task) = pred.task.as_mut() {
         if let Some(done) = check_ready(task) {
             pred.latest = Some(done);
@@ -86,9 +103,6 @@ pub fn update(time: Res<Time>, sim: Res<SimState>, mut pred: ResMut<LandingPredi
         }
     }
     let ship = sim.ship();
-    if pred.latest.is_some_and(|l| l.vessel != ship.id()) {
-        pred.latest = None;
-    }
     pred.since_last += time.delta_secs_f64();
     if pred.task.is_some() || pred.since_last < EVERY {
         return;
@@ -145,8 +159,7 @@ pub fn draw(
     marker.drawn = false;
     let ship = sim.ship();
     let grounded = matches!(ship.phase, Phase::Landed { .. } | Phase::Crashed { .. });
-    let latest = pred.latest.filter(|l| l.vessel == ship.id());
-    let hit = latest.and_then(|l| l.impact).filter(|h| from_now(h.t, sim.clock) > 0.0);
+    let hit = pred.of(sim.flight()).and_then(|l| l.impact).filter(|h| from_now(h.t, sim.clock) > 0.0);
     let open = iface.menus.is_open(crate::interface::menus::MenuId::Landing);
     let Some(hit) = hit.filter(|_| impact_marker_shown(open, station.open, grounded, true)) else { return Ok(()) };
     let ctx = contexts.ctx_mut()?;
@@ -176,6 +189,24 @@ pub fn draw(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A prediction is of the flight it was made for: the same vessel on
+    /// the same timeline. A load gives the same vessel id another timeline.
+    #[test]
+    fn a_prediction_is_of_its_flight_only() {
+        let made = (VesselId(1), 0);
+        let pred = LandingPrediction {
+            latest: Some(Landing { vessel: VesselId(1), impact: None, braking: None }),
+            flight: Some(made),
+            ..Default::default()
+        };
+        // (the flight now, shown)
+        let cases = [(made, true), ((VesselId(1), 1), false), ((VesselId(2), 0), false)];
+        for (now, shown) in cases {
+            assert_eq!(pred.of(now).is_some(), shown, "{now:?}");
+        }
+        assert!(LandingPrediction::default().of(made).is_none(), "none made yet");
+    }
 
     #[test]
     fn the_assumed_attitude_follows_the_controls() {

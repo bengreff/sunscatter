@@ -240,6 +240,14 @@ impl SimState {
         &self.fleet[self.active]
     }
 
+    /// The flight the interface shows: the active vessel on the timeline
+    /// (`restores`). A load or a switch of vessel starts another, and what
+    /// was read or predicted of the last (the menus' snapshot and holds,
+    /// the impact) is dropped at once: a save brings its vessel ids back.
+    pub fn flight(&self) -> (VesselId, u64) {
+        (self.ship().id(), self.restores)
+    }
+
     /// The active vessel's controls as set (D112: each vessel keeps its
     /// own; what the navball, the menus and the keys show and change).
     pub fn controls(&self) -> &Controls {

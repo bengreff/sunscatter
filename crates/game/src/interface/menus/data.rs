@@ -19,7 +19,7 @@ use crate::state::SimState;
 use crate::tracking::Tracked;
 use crate::trajectory::apsides::Apsides;
 use bevy::prelude::*;
-use sim::vessel::Phase;
+use sim::vessel::{Phase, VesselId};
 
 /// Seconds between refreshes.
 const REFRESH: f64 = 0.1;
@@ -263,6 +263,14 @@ pub struct Sources<'a> {
     pub fps: String,
 }
 
+/// Whether the snapshot is refreshed at `now`, last taken at `last.0` of
+/// flight `last.1`: every [`REFRESH`] seconds, and at once for another
+/// flight (`SimState::flight`: a load, a switch of vessel), so no menu
+/// shows the last one's numbers.
+fn refresh_due<F: PartialEq>(now: f64, last: (f64, Option<F>), flight: F) -> bool {
+    now - last.0 >= REFRESH || last.1 != Some(flight)
+}
+
 /// Refreshes [`FlightData`] every [`REFRESH`] seconds (not in the
 /// tracking station, where the flight view is not drawn).
 #[allow(clippy::too_many_arguments)]
@@ -280,20 +288,20 @@ pub fn update(
     station: Res<crate::tracking::TrackingStation>,
     profile: Res<crate::profile::Profile>,
     mut data: ResMut<FlightData>,
-    mut last: Local<f64>,
+    mut last: Local<(f64, Option<(VesselId, u64)>)>,
 ) {
     let now = time.elapsed_secs_f64();
-    if station.open || now - *last < REFRESH {
+    if station.open || !refresh_due(now, *last, sim.flight()) {
         return;
     }
-    *last = now;
+    *last = (now, Some(sim.flight()));
     let sources = Sources {
         sim: &sim,
         pred: &pred,
         nav: nav.now.as_ref(),
         target: nav.target,
         aps: &aps,
-        landing: landing.latest.as_ref(),
+        landing: landing.of(sim.flight()),
         rv: &rv,
         comms: &comms,
         tracked: &tracked,
@@ -563,6 +571,24 @@ fn plane(r: glam::DVec3, v: glam::DVec3) -> glam::DVec3 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The snapshot refreshes every REFRESH seconds, and at once for
+    /// another flight (a load gives the vessel's id another timeline).
+    #[test]
+    fn the_snapshot_refreshes_on_time_and_for_another_flight() {
+        let a = (VesselId(1), 0_u64);
+        // (now, last taken, of flight, flight now, due)
+        let cases = [
+            (0.0, 0.0, None, a, true),
+            (REFRESH / 2.0, 0.0, Some(a), a, false),
+            (REFRESH, 0.0, Some(a), a, true),
+            (REFRESH / 2.0, 0.0, Some(a), (VesselId(1), 1), true),
+            (REFRESH / 2.0, 0.0, Some(a), (VesselId(2), 0), true),
+        ];
+        for (now, at, of, flight, due) in cases {
+            assert_eq!(refresh_due(now, (at, of), flight), due, "{now} {at} {of:?} {flight:?}");
+        }
+    }
 
     struct Fixture {
         pred: crate::state::Prediction,
