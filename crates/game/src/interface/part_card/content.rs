@@ -187,8 +187,7 @@ fn tank(live: &Live, t: usize) -> Section {
     let (d, s) = (&live.def.tanks[t], &live.state.tanks[t]);
     let i = t as u32;
     let cap = d.capacity;
-    let level =
-        live.value(Quantity::TankLevel(i), s.liquid, |r| crate::interface::stage_bar::rows::amount(Some(r), cap));
+    let level = live.value(Quantity::TankLevel(i), s.liquid, |r| crate::format::amount(Some(r), cap));
     let rated = d.pressure / 1e5;
     let p = inspect::ullage_pressure(d, s);
     let pressure =

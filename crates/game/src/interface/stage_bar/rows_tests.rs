@@ -5,7 +5,7 @@
 use super::*;
 use sim::craft::command::ShipCommand;
 use sim::systems::estimate::{estimate, hull, Hull, Inputs};
-use sim::systems::{Knowledge, Quantity};
+use sim::systems::{Knowledge, Quantity, Reading};
 
 fn falcon9() -> (ShipDef, ShipState, Vec<Hull>) {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/craft/falcon9-crew");

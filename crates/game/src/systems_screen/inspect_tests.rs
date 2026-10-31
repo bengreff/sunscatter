@@ -106,9 +106,10 @@ fn values_without_a_sensor_read_as_a_dash() {
     let def = craft.ship.as_deref().unwrap();
     let blind = Known::from(sim::systems::Knowledge::default());
     let tank = details(def, &state, &facts, Selection::Part(def.part_named("tank").unwrap()), &blind);
-    for label in ["liquid", "liquid temperature", "ullage temperature"] {
+    for label in ["liquid temperature", "ullage temperature"] {
         assert_eq!(value(&tank, "TANK tank:ox", label), DASH, "{label}");
     }
+    assert!(value(&tank, "TANK tank:ox", "liquid").starts_with("—/"), "against the design's capacity");
     assert!(value(&tank, "TANK tank:ox", "ullage pressure").starts_with("— / "), "against the design's burst");
     assert_eq!(value(&tank, "TANK tank:ox", "fluid"), "LOX");
     assert!(value(&tank, "TANK tank:ox", "operating").ends_with("bar"), "the design's");

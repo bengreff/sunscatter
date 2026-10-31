@@ -12,13 +12,12 @@
 //! edits ([`drop_edit`]).
 
 use super::icons::{icons, Icon, Look};
-use crate::format;
+use crate::format::{self, amount};
 use sim::craft::command::SequenceEdit;
 use sim::craft::program;
 use sim::craft::ship::ShipDef;
 use sim::craft::state::ShipState;
 use sim::systems::estimate::{Burn, Estimates};
-use sim::systems::Reading;
 
 /// Where a row's stage is in the sequence.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -160,15 +159,6 @@ pub fn figures(b: &Burn, active: bool) -> Figures {
         isp: format!("{:.0} s", b.isp),
     });
     Figures { bars, burnout, dv: format::speed_of(b.dv), active }
-}
-
-/// What tanks hold of their capacity, in the capacity's unit: `kg/kg`.
-pub fn amount(kg: Option<Reading>, capacity: f64) -> String {
-    let (scale, unit, max) = if capacity < 1.0e4 { (1.0, "kg", 0) } else { (1e3, "t", 1) };
-    let held = kg.map_or(format::DASH.to_string(), |r| {
-        format!("{:.*}", format::decimals(r.precision, scale, max), r.shown() / scale)
-    });
-    format!("{held}/{:.*} {unit}", max, capacity / scale)
 }
 
 /// What is dragged on the bar: a stage, or one of a stage's commands.

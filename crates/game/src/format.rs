@@ -95,6 +95,16 @@ fn force_unit(n: f64) -> (f64, &'static str, usize) {
     }
 }
 
+/// What tanks hold of their capacity, in the capacity's unit (`kg/kg`), the
+/// held to its reading's precision, a dash when no sensor measures it (one
+/// rule: the staging bar's bars, the part card's tanks, the systems
+/// screen's tank and its Plumbing summary).
+pub fn amount(kg: Option<Reading>, capacity: f64) -> String {
+    let (scale, unit, max) = if capacity < 1.0e4 { (1.0, "kg", 0) } else { (1e3, "t", 1) };
+    let held = kg.map_or(DASH.to_string(), |r| format!("{:.*}", decimals(r.precision, scale, max), r.shown() / scale));
+    format!("{held}/{:.*} {unit}", max, capacity / scale)
+}
+
 /// A mass as it is known (D106: an estimate's reading, a dash when unknown).
 pub fn mass(r: Option<Reading>) -> String {
     read(r, mass_unit)

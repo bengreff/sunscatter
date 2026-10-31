@@ -171,7 +171,7 @@ fn tanks(live: &Live, tanks: &[usize]) -> Section {
         let of: Vec<usize> = tanks.iter().copied().filter(|&t| def.tanks[t].fluid == fluid).collect();
         let cap: f64 = of.iter().map(|&t| def.tanks[t].capacity).sum();
         let held = total(live, of.iter().map(|&t| (Quantity::TankLevel(t as u32), state.tanks[t].liquid)));
-        let text = |r: Reading| crate::interface::stage_bar::rows::amount(Some(r), cap);
+        let text = |r: Reading| crate::format::amount(Some(r), cap);
         lines.push(line(fluid, value(live, held, text)));
     }
     // The tank nearest its burst pressure stands for them all.

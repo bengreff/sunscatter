@@ -62,14 +62,6 @@ pub fn summary(layer: Layer, x: &Inputs) -> Vec<Group> {
     out
 }
 
-fn tonnes(kg: f64) -> String {
-    if kg >= 1e4 {
-        format!("{:.2} t", kg / 1e3)
-    } else {
-        format!("{kg:.0} kg")
-    }
-}
-
 /// A mass the craft's files give exactly (its dry mass), read as every mass
 /// is (`format::mass`).
 fn exact(kg: f64) -> String {
@@ -165,8 +157,8 @@ fn fluids(x: &Inputs) -> Vec<Group> {
     let mut pressures = Group::new("PRESSURES (burst)");
     for (i, (d, s)) in def.tanks.iter().zip(&state.tanks).enumerate() {
         let q = |f: fn(u32) -> Quantity| f(i as u32);
-        let level = k.or_dash(k.knows(q(Quantity::TankLevel)), || tonnes(s.liquid));
-        tanks.row(&format!("{} · {}", d.id, d.fluid), format!("{level} / {}", tonnes(d.capacity)));
+        let level = format::amount(k.knowledge.read(q(Quantity::TankLevel), s.liquid), d.capacity);
+        tanks.row(&format!("{} · {}", d.id, d.fluid), level);
         tanks.opens(Selection::Part(d.part));
         let p = super::inspect::ullage_pressure(d, s);
         let known = k.knows(q(Quantity::TankPressure));

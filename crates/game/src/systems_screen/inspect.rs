@@ -356,10 +356,17 @@ fn tank_group(def: &ShipDef, state: &ShipState, i: usize, k: &Known) -> Group {
     let (t, s) = (&def.tanks[i], &state.tanks[i]);
     let q = |f: fn(u32) -> Quantity| f(i as u32);
     let mut g = Group::new(format!("TANK {}", t.id));
-    let fill = if t.capacity > 0.0 { s.liquid / t.capacity } else { 0.0 };
-    let level = k.or_dash(k.knows(q(Quantity::TankLevel)), || {
-        format!("{} / {} ({:.1} %)", kg(s.liquid), kg(t.capacity), fill * 100.0)
-    });
+    // What it holds to its sensor's precision (`format::amount`, the
+    // card's and the staging bar's rule), and its share of full.
+    let read = k.knowledge.read(q(Quantity::TankLevel), s.liquid);
+    let level = match read.filter(|_| t.capacity > 0.0) {
+        Some(r) => {
+            let share = 100.0 / t.capacity;
+            let pct = format!("{:.*}", crate::format::decimals(r.precision * share, 1.0, 1), r.shown() * share);
+            format!("{} ({pct} %)", crate::format::amount(read, t.capacity))
+        }
+        None => crate::format::amount(read, t.capacity),
+    };
     let warm = k.knows(q(Quantity::TankTemperature));
     let p = ullage_pressure(t, s);
     let known_p = k.knows(q(Quantity::TankPressure));

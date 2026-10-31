@@ -56,7 +56,12 @@ fn each_layer_summarises_the_craft() {
     let p = summary(Layer::Plumbing, &x);
     let tanks = group(&p, "TANKS");
     assert_eq!(tanks.rows.len(), def.tanks.len());
-    assert!(tanks.rows[0].value.contains(" / "), "{:?}", tanks.rows[0]);
+    // What each holds of its capacity, as the card and the bar read it.
+    let (d, s) = (&def.tanks[0], &state.tanks[0]);
+    assert_eq!(
+        tanks.rows[0].value,
+        crate::format::amount(Some(Reading { value: s.liquid, precision: 0.0 }), d.capacity)
+    );
     // A row per owner a line starts from.
     let mut owners: Vec<&str> = def.lines.iter().map(|l| l.from.split(':').next().unwrap()).collect();
     owners.sort();
