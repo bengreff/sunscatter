@@ -53,6 +53,33 @@ Small commits, each passing fmt, clippy and the game's tests you touched (`cargo
 
 ## State
 
+**INTERFACE-5 (2026-10-31), wrapped up at its context cap.** Did INTERFACE-4's Left 1–4 in the brief's order of value: walked every screen again at HEAD (findings 32–43 in [interface-map.md](../technical/interface-map.md)), fixed what disagreed, then the first half of ONEKIND-7's (d2). Every commit passed fmt, clippy (sim and game) and the game's whole suite (485; 480 after 5d87517 deleted the test craft's tests); the g-load commit also the whole sim suite.
+
+**Landed:**
+- ff0409a: MCP, a shot sent while another is in flight waits its turn, the calls behind it too (`session::starting`), the clock held between them. Finding 38 (INTERFACE-4's Left 4).
+- 8dad37a: **the g-load had three readings.** The navball's G under thrust used the coast's drag area (averaged over every direction): 0.42 g at max-Q for the trajectory's 2.03 g. The systems screen's g-limit read the last live tick's acceleration through coasts (4.4 g / 7.5 g in orbit against 0.00 g) and said "not accelerating" on the pad (1.00 g). One owner, `navball::proper_accel` / `felt`; `sim::systems::g_limit(def, state, a)` takes the acceleration (a sim API change, committed before STATE-2's step 2d at the lead's request); `Vessel::thrust_accel` deleted. Finding 32.
+- 3f7b720: a load starts the menus afresh (`SimState::flight`): the landing prediction of one flight (`LandingPrediction::of`), the snapshot refreshed at once, the hold restarted (`menus::view::Held`). Finding 33.
+- a07162a: the Electrical summary names by id (`power::sections_by_id`; INTERFACE-4's Left 2); the pad's buses before their first reading, "— (not read yet)", not "no buses". Findings 34, 35.
+- ee125a5: the data layer counts the craft's parts, not the pad's (3 of 32). Finding 36.
+- ab5609f: MCP `shoot` puts the view's size back. Finding 37.
+- 1da4e29: the pause menu's "Saves" without the quicksave key; the Saves window names both quick keys (`saves::quick_keys`). Finding 39.
+- 5d87517, ONEKIND-7's (d2) first half, finding 40: the test craft's stage stack, `StageInputs`, `activate_next`, `Activation`, `Refusal`, `grounded`, `stack_of` and `rows::plain` with their tests gone; `GameCommand::NextStage` gone (Space and the bar send `Stage` of the active vessel); Landing ▸ PARACHUTE lists the craft's own canopies (`staging::canopies`, `FlightData::canopies`). (STATE-2's 3fc9a0a carried this round's owners.md rows, written for it.)
+- the docs commit after them: interface-map findings 32–43, this State, the plan's row.
+
+**Shots for the lead** (`/private/tmp/claude-501/-Users-ben-sunscatter/7c5f130a-69ba-45d3-9965-ca858b31253e/scratchpad/interface5/shots/`): `f_g_compare.png` (after: the navball and the systems screen at T+63 s, 2.02 g and 2.0 g / 4.9 g; in orbit 0.00 g and "none: not accelerating"; the Landing menu after a load with only "no impact predicted"); before: `b_asc2_nav.png` with `b_asc2_struct_crop.png` (0.42 g against 2.0 g), `c_orbit.png` (the ascent's impact over "no impact predicted", 0.00 g), `c_sys_structural.png` (4.4 g in orbit). The pad after: `f_pad_power_c.png`, `f_pad_elec_c.png`, `f_pad_data_c.png`, `f_pad_struct_c.png`. The walk: `a_*.png` (pad), `b_*.png` (T+60 s), `c_*.png` (orbit), `g_sep.png`, `g_map.png`.
+
+**Left, in order:**
+1. ONEKIND-7's (d2) second half: the `None` cases of `menus::{power, crew, rcs_data}::gather` and `rcs.rs`' "ideal torque" note with its test; `FlightData::parts` (always true for a vessel now; `menus/mod.rs:507`'s test says "the test craft's do not"); `scene/ships.rs`' plain model and colours; `systems_screen/ui.rs`' "one part" message; the comments (`action_bar.rs:8`, `comms.rs:53`, `tracking.rs:597`, `state.rs:~519`).
+2. Finding 41: the mass now with its precision as one rule (the sim's estimate's owner), read by the systems screen and the bar. For STATE or the estimate's owner.
+3. Finding 34's model side, for STATE: a power step of no length at a systems lattice's first point, so the buses' readout exists from the start (the interface's dashes then last a frame).
+4. Small: finding 42 (hypergolic engines' ignitions on the pad, one rule for the card's two places), the Landing ▸ PARACHUTE canopies on screen during a descent (tested, not shot).
+
+**Open for the owner (INTERFACE-5):**
+- The G row and the g-limit read the felt acceleration of the last live tick while the vessel flies live; on a coast the trajectory's own drag, on the ground the ground's push. The g-limit then holds only while the craft accelerates (D111's rule), so in orbit it reads "none: not accelerating" rather than the last burn's.
+- After a load or a switch of vessel the menus drop what they held of the last flight at once (the anti-flicker hold applies within a flight).
+- Before the first power step the Power menu lists the craft's buses with "— (not read yet)" rather than a voltage.
+- The Saves button carries no key; the window says which keys quicksave and quickload.
+
 **INTERFACE-4 (2026-10-31), wrapped up at its context cap.** Did INTERFACE-3's Left, the red cone, gpu_trace.py; found and fixed three more on the way. Every commit passed fmt, clippy and the game's suite (478) in a private mirror of HEAD plus my files.
 
 **Landed:**
