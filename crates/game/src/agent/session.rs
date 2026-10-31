@@ -663,8 +663,9 @@ pub fn parse_epoch(s: &str) -> Option<Epoch> {
 pub struct Sample {
     /// m above the body's ellipsoid.
     pub altitude: Option<f64>,
-    /// Osculating apsides' altitudes above the equatorial radius (m); an
-    /// open orbit's apoapsis is infinite.
+    /// Osculating apsides' altitudes above the body's reference ellipsoid
+    /// under each (m), as the menus' Ap and Pe are measured; an open
+    /// orbit's apoapsis is infinite.
     pub apoapsis: Option<f64>,
     pub periapsis: Option<f64>,
     /// The share of propellant left in the tanks feeding its running engines.
@@ -760,6 +761,16 @@ fn share_of(held: Option<sim::systems::Reading>, capacity: f64) -> Option<f64> {
     Some(sim::systems::Reading { value: r.value / capacity, precision: r.precision / capacity }.shown())
 }
 
+/// The osculating orbit's apsides as points from the body's centre (the
+/// apoapsis `None` on an open orbit), where the run measures their heights
+/// above the ellipsoid under them, as the trajectory's apsides and the
+/// menus' Ap and Pe are (above the equatorial radius they read 5 km low at
+/// Kennedy's latitude, finding 62).
+fn osculating_apsides(el: &sim::kepler::Elements, gm: f64) -> (Option<DVec3>, DVec3) {
+    let at = |m: f64| sim::kepler::Elements { mean_anomaly: m, ..*el }.to_state(gm).0;
+    ((el.e < 1.0).then(|| at(std::f64::consts::PI)), at(0.0))
+}
+
 /// The vessel at fleet index `i` as it knows itself now ([`Sample::read`]).
 pub fn sample(sim: &SimState, i: usize) -> Sample {
     let v = &sim.fleet[i];
@@ -771,12 +782,15 @@ pub fn sample(sim: &SimState, i: usize) -> Sample {
     let (rel, vrel) = (r - k.r, vel - k.v);
     let src = sim.world.source(body);
     let physical = src.and_then(|s| s.physical.as_ref());
-    let altitude = physical.map(|p| p.altitude(p.rotation.to_fixed(sim::frame::Vec3::from_raw(rel), sim.clock)));
+    let height = |p: &sim::body::BodyPhysical, x: DVec3| {
+        p.altitude(p.rotation.to_fixed(sim::frame::Vec3::from_raw(x), sim.clock))
+    };
+    let altitude = physical.map(|p| height(p, rel));
     let (apo, peri) = match (src, physical) {
         (Some(s), Some(p)) => {
             let el = sim::kepler::Elements::from_state(rel, vrel, s.gm);
-            let apo = if el.e < 1.0 { el.apoapsis() - p.radius_eq } else { f64::INFINITY };
-            (Some(apo), Some(el.periapsis() - p.radius_eq))
+            let (apo, peri) = osculating_apsides(&el, s.gm);
+            (Some(apo.map_or(f64::INFINITY, |x| height(p, x))), Some(height(p, peri)))
         }
         _ => (None, None),
     };
@@ -1662,6 +1676,37 @@ mod tests {
         assert_eq!(share_of(held(43_210.0, 0.0), 100_000.0), Some(0.4321), "exactly, in debug mode");
         assert_eq!(share_of(None, 100_000.0), None, "a level unknown");
         assert_eq!(share_of(held(0.0, 0.0), 0.0), None, "no tanks feed it");
+    }
+
+    #[test]
+    fn the_osculating_apsides_are_points_where_the_run_measures_their_height() {
+        use sim::kepler::Elements;
+        let gm = 3.986e14;
+        // (case, a, e, argp, mean anomaly now, apoapsis point, periapsis point)
+        let x = DVec3::X;
+        let cases = [
+            ("bound, at periapsis", 7.0e6, 0.1, 0.0, 0.0, Some(-x * 7.7e6), x * 6.3e6),
+            ("bound, elsewhere on it", 7.0e6, 0.1, 0.0, 2.0, Some(-x * 7.7e6), x * 6.3e6),
+            (
+                "its periapsis a quarter turn on",
+                7.0e6,
+                0.1,
+                std::f64::consts::FRAC_PI_2,
+                1.0,
+                Some(-DVec3::Y * 7.7e6),
+                DVec3::Y * 6.3e6,
+            ),
+            ("open: no apoapsis", -7.0e6, 1.5, 0.0, 0.5, None, x * 3.5e6),
+        ];
+        for (case, a, e, argp, m, apo, peri) in cases {
+            let el = Elements { a, e, i: 0.0, raan: 0.0, argp, mean_anomaly: m };
+            let (got_apo, got_peri) = osculating_apsides(&el, gm);
+            assert!((got_peri - peri).length() < 1e-3, "{case}: {got_peri}");
+            match (got_apo, apo) {
+                (Some(g), Some(w)) => assert!((g - w).length() < 1e-3, "{case}: {g}"),
+                (g, w) => assert_eq!(g, w, "{case}"),
+            }
+        }
     }
 
     #[test]
