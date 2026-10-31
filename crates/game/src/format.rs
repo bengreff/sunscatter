@@ -96,13 +96,16 @@ fn force_unit(n: f64) -> (f64, &'static str, usize) {
 }
 
 /// What tanks hold of their capacity, in the capacity's unit (`kg/kg`), the
-/// held to its reading's precision, a dash when no sensor measures it (one
-/// rule: the staging bar's bars, the part card's tanks, the systems
-/// screen's tank and its Plumbing summary).
+/// held to its reading's precision and the capacity to the same digits
+/// (a full tank read to the sensor's tonne said "286/285.8 t", more than
+/// full), a dash when no sensor measures it (one rule: the staging bar's
+/// bars, the part card's tanks, the systems screen's tank and its Plumbing
+/// summary, the RCS menu's feeds).
 pub fn amount(kg: Option<Reading>, capacity: f64) -> String {
     let (scale, unit, max) = if capacity < 1.0e4 { (1.0, "kg", 0) } else { (1e3, "t", 1) };
-    let held = kg.map_or(DASH.to_string(), |r| format!("{:.*}", decimals(r.precision, scale, max), r.shown() / scale));
-    format!("{held}/{:.*} {unit}", max, capacity / scale)
+    let Some(r) = kg else { return format!("{DASH}/{:.*} {unit}", max, capacity / scale) };
+    let d = decimals(r.precision, scale, max);
+    format!("{:.*}/{:.*} {unit}", d, r.shown() / scale, d, capacity / scale)
 }
 
 /// The share of `capacity` (the reading's unit) a reading holds, in % to
@@ -117,8 +120,8 @@ pub fn share(r: Reading, capacity: f64) -> String {
 const WH: f64 = 3600.0;
 
 /// A battery's charge of its capacity (J): `amount`'s rule in Wh (kWh from
-/// 10 kWh), the charge rounded to its reading's precision in that unit,
-/// with its share of full; a dash when no sensor measures it (one rule:
+/// 10 kWh), the charge rounded to its reading's precision in that unit and
+/// the capacity to the same digits, with its share of full; a dash when no sensor measures it (one rule:
 /// the Power menu and the systems screen's Electrical summary, the part
 /// card's battery and batteries, the systems screen's battery).
 pub fn charge(j: Option<Reading>, capacity: f64) -> String {
@@ -127,7 +130,8 @@ pub fn charge(j: Option<Reading>, capacity: f64) -> String {
     let Some(r) = j else { return format!("{DASH}/{full}") };
     // In the shown unit, so the rounding is to the precision's decade there.
     let r = Reading { value: r.value / scale, precision: r.precision / scale };
-    let held = format!("{:.*}/{full}", decimals(r.precision, 1.0, max), r.shown());
+    let d = decimals(r.precision, 1.0, max);
+    let held = format!("{:.*}/{:.*} {unit}", d, r.shown(), d, capacity / scale);
     if capacity > 0.0 {
         format!("{held} ({})", share(r, capacity / scale))
     } else {
