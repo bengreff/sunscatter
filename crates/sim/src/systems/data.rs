@@ -19,6 +19,9 @@
 //! `inertial` (an IMU: attitude, angular rates, specific force), `attitude`
 //! (a star tracker), `position` (a GNSS receiver: position, velocity and
 //! altitude), `rates`, `acceleration`, `altitude` (a radar altimeter),
+//! `barometric` (a static-pressure altimeter: the altitude while the air
+//! outside is above [`BAROMETRIC_FLOOR`]), `cabin` (the cabin's air:
+//! total pressure, O₂ and CO₂),
 //! `tank-level`, `pressure` (the tanks), `bottle-pressure` (the bottles),
 //! `temperature` (the tanks' liquids and the part), each of its own part;
 //! `strain` (the joints at its part). A sensor
@@ -174,11 +177,18 @@ impl Knowledge {
     }
 }
 
+/// The static pressure below which a barometric altimeter reads nothing
+/// (Pa; E: about 31 km in Earth's standard atmosphere, above any parachute
+/// decision).
+pub const BAROMETRIC_FLOOR: f64 = 1_000.0;
+
 /// What a vehicle-wide sensor class measures, with the precisions its
 /// accuracy gives (class values of falcon9.md §5.2 where one number does
 /// not say: an IMU's gyros to 1e-5 rad/s and accelerometers to 50 µg, a
 /// GNSS receiver's velocity to 0.1 m/s per 3 m of position and its altitude
-/// to 1.5× its position).
+/// to 1.5× its position, a cabin monitor's CO₂ to a tenth of its pressure
+/// accuracy (E: CO₂ sensors read a few pascals)). A barometric altimeter's
+/// altitude depends on the air outside: [`knowledge`] gives it.
 pub fn provides(quantity: &str, accuracy: f64) -> Vec<(Quantity, f64)> {
     match quantity {
         "inertial" => {
@@ -194,6 +204,11 @@ pub fn provides(quantity: &str, accuracy: f64) -> Vec<(Quantity, f64)> {
         ],
         "velocity" => vec![(Quantity::Velocity, accuracy)],
         "altitude" => vec![(Quantity::Altitude, accuracy)],
+        "cabin" => vec![
+            (Quantity::CabinPressure, accuracy),
+            (Quantity::CabinO2, accuracy),
+            (Quantity::CabinCo2, accuracy / 10.0),
+        ],
         _ => Vec::new(),
     }
 }
@@ -234,6 +249,7 @@ pub fn knowledge(def: &ShipDef, state: &ShipState, debug: bool) -> Knowledge {
                     k.learn(Quantity::PartTemperature(s.part), acc);
                 }
             }
+            "barometric" if state.ambient >= BAROMETRIC_FLOOR => k.learn(Quantity::Altitude, acc),
             "strain" => {
                 for (i, _) in def.joints.iter().enumerate().filter(|(_, j)| mine(j.parent) || mine(j.child)) {
                     k.learn(Quantity::JointLoad(i as u32), acc);
@@ -359,5 +375,31 @@ mod tests {
         }
         let k = knowledge(&def, &state, false);
         assert!(!k.knows(Quantity::Position) && k.knows(Quantity::Attitude));
+    }
+
+    /// Crew Dragon's cabin air monitor reads the cabin (INTERFACE-2's
+    /// finding 19), and its barometric altimeter the altitude only while
+    /// the air outside is above its floor: with both GNSS receivers lost
+    /// the altitude is the barometer's in the air and unknown above it.
+    #[test]
+    fn dragon_reads_its_cabin_and_its_barometric_altitude_in_the_air() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/craft/falcon9-crew");
+        let def = crate::craft::load_definition(&path).unwrap().ship.unwrap();
+        let mut state = ShipState::initial(&def);
+        let k = knowledge(&def, &state, false);
+        assert_eq!(k.precision(Quantity::CabinPressure), Some(100.0));
+        assert_eq!(k.precision(Quantity::CabinO2), Some(100.0));
+        assert_eq!(k.precision(Quantity::CabinCo2), Some(10.0));
+        for id in ["s1.gps#1", "s1.gps#2", "s2.gps#1", "s2.gps#2", "dragon.gps#1", "dragon.gps#2"] {
+            let part = def.sensors.iter().find(|s| s.id == id).unwrap().part;
+            let owner = def.owner_named(id).unwrap();
+            state.lost.push(crate::craft::state::Lost { part, owner, why: "test".into() });
+        }
+        // (the pressure outside, the altitude's precision)
+        for (ambient, altitude) in [(0.0, None), (999.0, None), (BAROMETRIC_FLOOR, Some(30.0)), (50_000.0, Some(30.0))]
+        {
+            state.ambient = ambient;
+            assert_eq!(knowledge(&def, &state, false).precision(Quantity::Altitude), altitude, "{ambient} Pa");
+        }
     }
 }

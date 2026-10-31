@@ -1,0 +1,11 @@
+// Catalog entry (D101; sim::catalog). A static-pressure altimeter, as
+// Apollo's Earth Landing System's baroswitches read (NASA TN D-7437, 1973).
+// Crew Dragon's own is not public (falcon9.md §5.2: E): the class's values.
+// `barometric` gives the altitude while the air outside is above 1 kPa
+// (`systems::data::BAROMETRIC_FLOOR`, E), to ±30 m (E: pressure altitude
+// against the true height, weather and calibration).
+(
+    id: "barometric-altimeter", name: "Barometric altimeter", era: 1965, provisional: true,
+    generator: Component(envelope: Box(0.1, 0.08, 0.05), power: 2.0,
+        equipment: Sensor(quantity: "barometric", accuracy: 30.0, rate_hz: 10.0, mass: 0.5)),
+)

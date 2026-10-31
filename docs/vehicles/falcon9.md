@@ -469,7 +469,8 @@ The countdown itself is abstracted as a time and funds sink (D104); the sim star
 | Engine controller readouts | each engine | chamber pressure, turbopump speed, inlet pressures, valve positions | | E |
 | Strain gauges | structure (development and early flights) | strain | | E |
 | Dragon docking sensors | under the nosecone | range, bearing (lidar, thermal cameras) | | P [S12] (sensors present) / E |
-| Dragon cabin sensors | cabin | total pressure, ppO₂, ppCO₂, humidity, temperature, smoke | | E |
+| Dragon cabin sensors | cabin | total pressure, ppO₂, ppCO₂, humidity, temperature, smoke | for the sim (`cabin-air-monitor`): total and ppO₂ ±100 Pa, ppCO₂ ±10 Pa, 1 Hz, 3 kg, 15 W (class of electrochemical O₂ and infrared CO₂ cells) | E |
+| Dragon barometric altimeter | capsule | static pressure → altitude, for the chutes | not public; for the sim (`barometric-altimeter`): ±30 m below 1 kPa outside, 10 Hz, 0.5 kg, 2 W (the class of Apollo's ELS baroswitches, NASA TN D-7437) | E |
 
 ### 5.3 Power
 

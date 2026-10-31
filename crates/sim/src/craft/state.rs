@@ -328,6 +328,11 @@ pub struct ShipState {
     pub omega: glam::DVec3,
     #[serde(default)]
     pub alpha: glam::DVec3,
+    /// The static pressure outside as the systems last felt it (Pa): the
+    /// last live tick's, 0 on a coast (above the air). A barometric
+    /// altimeter reads it (`systems::data`).
+    #[serde(default)]
+    pub ambient: f64,
     /// Where the slow systems (the plumbing's heat, relief and boil-off)
     /// last stepped to.
     #[serde(default)]

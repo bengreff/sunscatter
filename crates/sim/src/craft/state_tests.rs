@@ -88,6 +88,7 @@ fn every_field_set(def: &ShipDef) -> ShipState {
     }
     s.throttle_was = 0.75;
     (s.accel, s.omega, s.alpha) = (DVec3::new(1.0, 2.0, 30.0), DVec3::new(0.01, 0.0, 0.02), DVec3::Y * 0.003);
+    s.ambient = 42_000.0;
     s.thrust_dir = Some(DVec3::new(0.01, 0.0, 1.0).normalize());
     s.fins = (0..def.surfaces.len()).map(|i| v(i, 0.01)).collect();
     s.seed = 42;
@@ -148,6 +149,7 @@ fn assert_every_field_set(s: &ShipState, at_load: &ShipState) {
         accel,
         omega,
         alpha,
+        ambient,
         stepped,
         events,
     } = s;
@@ -176,7 +178,7 @@ fn assert_every_field_set(s: &ShipState, at_load: &ShipState) {
         (orders != &r.orders, "orders"),
         (release_armed != &r.release_armed, "release_armed"),
         (throttle_was != &r.throttle_was, "throttle_was"),
-        (accel != &r.accel && omega != &r.omega && alpha != &r.alpha, "motion"),
+        (accel != &r.accel && omega != &r.omega && alpha != &r.alpha && ambient != &r.ambient, "motion"),
         (thrust_dir != &r.thrust_dir, "thrust_dir"),
         (fins != &r.fins, "fins"),
         (seed != &r.seed, "seed"),

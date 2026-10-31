@@ -125,6 +125,7 @@ impl ShipState {
             accel,
             omega,
             alpha,
+            ambient,
             stepped,
             events,
         } = self;
@@ -169,6 +170,7 @@ impl ShipState {
             accel: *accel,
             omega: *omega,
             alpha: *alpha,
+            ambient: *ambient,
             stepped: *stepped,
             events: events.clone(),
         }
@@ -225,6 +227,7 @@ impl ShipState {
             accel,
             omega,
             alpha,
+            ambient,
             stepped,
             events,
         } = a;
@@ -303,6 +306,7 @@ impl ShipState {
             accel: *accel,
             omega: *omega,
             alpha: *alpha,
+            ambient: *ambient,
             stepped: *stepped,
             events: log,
         })

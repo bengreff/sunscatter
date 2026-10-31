@@ -77,6 +77,9 @@
         (id: "dragon.tank-pressure", entry: "high-pressure-transducer", in: "dragon.capsule", pos: (1.0, -0.5, 0.6)),
         (id: "dragon.copv-pressure", entry: "copv-pressure-transducer", in: "dragon.capsule", pos: (0.9, 0.4, 0.45)),
         (id: "dragon.thermocouple", entry: "thermocouple", in: "dragon.capsule", pos: (0.8, 0.0, 1.2)),
+        // falcon9.md §5.2: the cabin's air sensors (E), and a barometric altimeter for the chutes (E).
+        (id: "dragon.cabin-air", entry: "cabin-air-monitor", in: "dragon.capsule", pos: (0.4, 0.6, 1.4)),
+        (id: "dragon.baro", entry: "barometric-altimeter", in: "dragon.capsule", pos: (0.7, -0.4, 2.2)),
         // Second stage (tank frame: z 0 at falcon9.md's 47.99).
         (id: "s2.helium", entry: "f9-s2-helium-copv", pattern: Radial(count: 3, start_deg: 0.0), in: "s2.tank", pos: (0.9, 0.0, 6.0)),
         (id: "s2.transfer-tube", entry: "f9-s2-transfer-tube", in: "s2.tank", pos: (0.0, 0.0, 1.76)),
@@ -176,7 +179,7 @@
         (name: "dragon.bus", voltage: 120.0,
          members: ["dragon.battery#*", "dragon.solar", "dragon.computer", "dragon.imu#*", "dragon.gps#*", "dragon.star#*",
                    "dragon.eclss", "dragon.docking", "dragon.superdraco#*", "dragon.draco#*", "dragon.draco-forward",
-                   "dragon.tank-pressure", "dragon.copv-pressure", "dragon.thermocouple"]),
+                   "dragon.tank-pressure", "dragon.copv-pressure", "dragon.thermocouple", "dragon.cabin-air", "dragon.baro"]),
     ],
     data: [
         (from: "s1.computer", to: ["s1.imu#*", "s1.gps#*", "s1.merlin.*", "s1.gridfin#*", "s1.leg#*", "s1.coldgas#*", "s1.lox-valve", "s1.rp1-valve",
@@ -185,7 +188,8 @@
                                    "s2.lox-level", "s2.rp1-level", "s2.lox-pressure", "s2.rp1-pressure", "s2.copv-pressure", "s2.n2-pressure", "s2.thermocouple"]),
         (from: "dragon.computer", to: ["dragon.imu#*", "dragon.gps#*", "dragon.star#*", "dragon.superdraco#*", "dragon.draco#*",
                                        "dragon.draco-forward", "dragon.chutes", "dragon.nose", "dragon.docking", "dragon.eclss",
-                                       "dragon.tank-pressure", "dragon.copv-pressure", "dragon.thermocouple"]),
+                                       "dragon.tank-pressure", "dragon.copv-pressure", "dragon.thermocouple",
+                                       "dragon.cabin-air", "dragon.baro"]),
     ],
     // Densified propellants (P: LOX 66.5 K, RP-1 266.5 K); 3.5 bar flight ullage (E).
     // Dragon's tanks at 2,400 psi (E: SpaceX, 15 July 2019, as reported;

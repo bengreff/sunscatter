@@ -58,6 +58,7 @@ pub fn tick(def: &ShipDef, state: &mut ShipState, env: &TickEnv, draws: &[f64], 
     }
     super::mechanisms::step(def, state, env.dt);
     (state.accel, state.omega, state.alpha) = (env.accel, env.omega, env.alpha);
+    state.ambient = env.p;
     let a = plumbing::accels(def, state, env.com, env.accel, env.omega, env.alpha);
     plumbing::fast(def, state, &before, &a, env.dt);
     // The slow part covers the time since it last stepped (the lattice's,
@@ -180,6 +181,7 @@ pub fn coast_lattice(
         state.stepped = Some(at);
     }
     law.apply(def, state, t);
+    state.ambient = 0.0;
     // The regulator holds the ullages at span starts (the law's top-up).
     state.pressure_regulated = true;
     if dt <= 0.0 {

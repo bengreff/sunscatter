@@ -1,0 +1,10 @@
+// Catalog entry (D101; sim::catalog). falcon9.md §5.2: Crew Dragon's cabin
+// sensors read total pressure, ppO₂, ppCO₂, humidity, temperature and smoke
+// (E: present on every crewed cabin; the units are not public). `cabin`
+// gives the total pressure and ppO₂ to ±100 Pa and ppCO₂ to ±10 Pa (E:
+// electrochemical O₂ and infrared CO₂ cells of the class), 1 Hz.
+(
+    id: "cabin-air-monitor", name: "Cabin air monitor", era: 2010, provisional: true,
+    generator: Component(envelope: Box(0.3, 0.2, 0.15), power: 15.0,
+        equipment: Sensor(quantity: "cabin", accuracy: 100.0, rate_hz: 1.0, mass: 3.0)),
+)
