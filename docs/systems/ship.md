@@ -30,7 +30,7 @@ D125's universal physics holds on the parts path, with the gaps listed under Not
 - **The program** (D107, D111, D114, `sim::craft::program`): the stages and functions, each piece's view of them, what can start and what is offered (D120: an abort only when it would save the crew or the vehicle). *Playable.*
 - **Splits** (`sim::vessel::split`): momentum and angular momentum exact, every field of the vessel by its own rule. *Playable.* See [structure](structure.md).
 - **Small craft of parts** (`sim::craft::small`, D121): rockets of catalog test parts built in code for tests and benchmarks, never offered in the game (`small-rocket`: a capsule with a computer, a seat, cold-gas thrusters, Apollo parachutes, an IMU and a GPS receiver, on an RP-1/LOX tank and four 100 kN engines with legs). They replace the test craft in the tests (ONEKIND).
-- **The stress craft** (`sim::craft::stress`): N synthetic parts for benchmarks and tests (D081). They are still placeholder parts; ONEKIND moves them onto real catalog types.
+- **The stress craft** (`sim::craft::stress`, `stress-<n>`): exactly N catalog parts for benchmarks and tests (D081, D121): a capsule on a core stack with rings of radial boosters. The placeholder layout is deleted.
 - **The made-up path** (the test craft, `data/craft/test-craft`; placeholder parts with a scalar propellant, D078's ideal couples): still in the code, being deleted (D121, ONEKIND).
 
 ## Not built

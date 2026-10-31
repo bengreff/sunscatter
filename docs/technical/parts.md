@@ -144,7 +144,7 @@ So a 300-part craft splits into two in **0.5–1 s of work** (the remainder's ne
 
 ## Not done / limits
 
-- No craft editor: a craft of parts is a file (D102). A craft file's placeholder parts (the test craft, the stress craft) keep their placeholders: power is D033's panel and battery, a part's load is the flow's pressure ceiling (`max_load`), and their tanks feed together at one fill fraction. A craft of catalog parts has buses, joint loads and each tank's own contents (`sim::systems`, `MassModel::with_contents`).
+- No craft editor: a craft of parts is a file (D102). A craft file's placeholder part (the test craft) keeps its placeholders: power is D033's panel and battery, a part's load is the flow's pressure ceiling (`max_load`), and their tanks feed together at one fill fraction. A craft of catalog parts has buses, joint loads and each tank's own contents (`sim::systems`, `MassModel::with_contents`).
 - Overheating is judged in live ticks only, not on the coast thermal lattice (a coast never heats a part past its limit today: sunlight and thin air are below every limit).
 - Designs of large pieces cost seconds (the remainder of a 300-part craft is a new design); built crafts are kept for the process (no eviction).
 - A breakup applies one impact per tick (the first point); further hard points break on following ticks.
