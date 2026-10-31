@@ -36,4 +36,4 @@ What holds a craft together, what breaks it apart, and what it touches. Every jo
 
 - Owners: [owners.md, Structure](../owners.md#structure-joints-loads-mechanisms-separation-contact).
 - Decisions: D032, D037, D064, D066, D082, D083, D103, D111, D112, D117, D121, D123, D125, D127.
-- Technical: [joint-loads.md](../technical/joint-loads.md), [mechanisms.md](../technical/mechanisms.md) (mechanisms, grid fins and legs), [parts.md](../technical/parts.md) (splits, breakage, debris), [proximity.md](../technical/proximity.md), [ship-model.md](../technical/ship-model.md) §5.4, §5.6.
+- Technical: [joint-loads.md](../technical/joint-loads.md), [water-landing.md](../technical/water-landing.md) (the calm sea: buoyancy per cell, the slam, design), [mechanisms.md](../technical/mechanisms.md) (mechanisms, grid fins and legs), [parts.md](../technical/parts.md) (splits, breakage, debris), [proximity.md](../technical/proximity.md), [ship-model.md](../technical/ship-model.md) §5.4, §5.6.

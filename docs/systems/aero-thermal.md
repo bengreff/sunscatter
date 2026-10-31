@@ -35,4 +35,4 @@ The air's forces on a craft, the heat it takes and loses, and where that heat go
 
 - Owners: [owners.md, Aero and thermal](../owners.md#aero-and-thermal).
 - Decisions: D061, D062, D065, D070, D077, D079, D085, D109, D119, D121, D123, D125, D127.
-- Technical: [aero-thermal.md](../technical/aero-thermal.md) (the model, the bake, the live tick, coasts, limits, tests), [reentry.md](../technical/reentry.md), [scale-performance.md](../technical/scale-performance.md) (the thermal solve and the coast thermal lattice).
+- Technical: [aero-thermal.md](../technical/aero-thermal.md) (the model, the bake, the live tick, coasts, limits, tests), [entry-ablation.md](../technical/entry-ablation.md) (1-D charring ablation per cell, Dragon's lifting entry: design), [reentry.md](../technical/reentry.md), [scale-performance.md](../technical/scale-performance.md) (the thermal solve and the coast thermal lattice).

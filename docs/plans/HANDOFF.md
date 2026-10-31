@@ -2,7 +2,7 @@
 
 A SessionStart hook loads this file automatically after `/clear` or at startup. It is kept current by `/handoff`.
 
-*Updated 2026-10-30 (night). Running: PLANNER-3, INTERFACE, RESEARCH (all three slots); ONEKIND-4 next. The owner asked for next steps 1–3 done; answers in [interview-2026-10-30-roadmap.md](../archive/interviews/interview-2026-10-30-roadmap.md) (D120, D126 revised; D128, D129 new; D063, D121 extended).*
+*Updated 2026-10-30 (night). Running: PLANNER-3, INTERFACE, ONEKIND-4 (all three slots). The owner asked for next steps 1–3 done; answers in [interview-2026-10-30-roadmap.md](../archive/interviews/interview-2026-10-30-roadmap.md) (D120, D126 revised; D128, D129 new; D063, D121 extended).*
 
 ## Your first job
 
@@ -11,9 +11,9 @@ The owner, 2026-10-31: "Work all night on this please", with at least one agent 
 1. **Running:**
    - **PLANNER-3** ([brief-planner.md](brief-planner.md), "For PLANNER-3"): the game's planner on nodes, then `predict_tests`, `landing::model`, the second stage's slew cap, MCP `set_plan` and the Falcon 9 mission test.
    - **INTERFACE** ([brief-interface.md](brief-interface.md)): the map of the interface and its cleanup; the systems screen's thermal mesh and part isolation (D123's freeze lifted for the interface).
-   - **RESEARCH** ([brief-research.md](brief-research.md)): docs only, the flights' designs.
-2. **Next:** when a slot frees, **ONEKIND-4** ([brief-onekind.md](brief-onekind.md), its section). Then, once PLANNER and ONEKIND have landed, the wave one agent at a time: STATE, LAYERS, FIXES3, ADVANCE (from `brief-advance.md`), PERF (first: the coast's tank law at 5,000 parts), DEBRIS. Successor agents continue from a brief's State when one wraps up at ~300k.
-3. **Done tonight:** AUDIT (14c2a4d, 17ec7aa, 08a34c8); PLANNER-1 (bce4379, c7c2de4, 0a382b6); PLANNER-2 (bb43d53, 8de24aa, 835f839); ONEKIND-3 (1721504, be83b64; the stress craft's numbers in `scale-performance.md`). ONEKIND-2, MISSION-2 and DOCS-2 before them (`brief-mission.md`, `brief-docs.md` and `brief-audit.md` to archive when convenient; DOCS-2's Left is still open).
+   - **ONEKIND-4** ([brief-onekind.md](brief-onekind.md), its section): the rest of the tests, then the made-up path's deletion once PLANNER-3 says so.
+2. **Next:** once PLANNER and ONEKIND have landed, the wave one agent at a time: STATE, LAYERS, FIXES3, ADVANCE (from `brief-advance.md`), PERF (first: the coast's tank law at 5,000 parts), DEBRIS. Successor agents continue from a brief's State when one wraps up at ~300k.
+3. **Done tonight:** RESEARCH (26f4639, 4dd65f9); AUDIT (14c2a4d, 17ec7aa, 08a34c8); PLANNER-1 (bce4379, c7c2de4, 0a382b6); PLANNER-2 (bb43d53, 8de24aa, 835f839); ONEKIND-3 (1721504, be83b64; the stress craft's numbers in `scale-performance.md`). ONEKIND-2, MISSION-2 and DOCS-2 before them (`brief-mission.md`, `brief-docs.md` and `brief-audit.md` to archive when convenient; DOCS-2's Left is still open).
 
 ## State
 
@@ -51,7 +51,7 @@ The owner, 2026-10-31: "Work all night on this please", with at least one agent 
    - **ADVANCE** (from AUDIT's `warp-invariance.md` and `brief-advance.md`): one advance law per subsystem; the same bits at 1× and 10⁵× for every subsystem and event (D129); events at their own epoch; warp restricted, not models changed.
    - **PERF:** aero once per tick; thermal at its own rate; analytic coast heat; a spatial index for the geometry scans; per-vessel threads with bit-identical cross-machine tests (D127). The game's side by judgement, not arbitrary cubes (D121, extended).
    - **DEBRIS:** the controllability check; ballistic lumps; designs precomputed at build.
-4. **The two flights, in parallel** (D117, D123, D125, D126), each checked by an MCP mission test (D122):
+4. **The two flights, in parallel** (D117, D123, D125, D126), each checked by an MCP mission test (D122). RESEARCH's designs are ready: `technical/landing-guidance.md`, `entry-ablation.md`, `water-landing.md`, and 16 tagged rows in `falcon9.md` (26f4639; its open points in `brief-research.md`):
    - **Crew Dragon:** the trunk joint, entry with 1-D ablation by material, the chutes' real logic as the automatic option, a calm sea, D116's doses, a rigid placeholder station.
    - **The booster:** relight, boostback and entry by predictor–corrector, convex landing guidance written as WASM-ready flight-layer code (D043), a landing zone first.
 5. **Small items:**
