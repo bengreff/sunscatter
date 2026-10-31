@@ -158,7 +158,7 @@ fn flight_tools() -> Vec<Tool> {
         t(
             "get_trajectory",
             "A vessel's predicted path from now, through its planned burns: `points` samples (time from now \
-             in s, position relative to the body it is about now, m).",
+             in s, position relative to the body it is about now, m, to the position's precision).",
             schema(json!({"id": id, "points": {"type": "integer", "minimum": 2, "maximum": 1000}}), &["id"]),
         ),
         t(
@@ -206,13 +206,15 @@ fn flight_tools() -> Vec<Tool> {
              the body, latitude/longitude (deg), ground height (m), vertical and horizontal speed relative \
              to the ground (m/s); the full-thrust braking burn that stops 10 m above the ground (seconds \
              to ignition, its altitude; null if it cannot stop); and the current radar altitude, vertical \
-             and horizontal surface speed and TWR (thrust at ambient pressure, local gravity).",
+             and horizontal surface speed and TWR (thrust at ambient pressure, local gravity). Each as the Landing \
+             menu shows it (D106): null where the craft cannot measure it, to its sensors' precision.",
             schema(json!({}), &[]),
         ),
         t(
             "closest_approaches",
-            "Closest approaches between two vessels over their stored trajectories (nearest first): seconds \
-             from now, distance (m), relative speed (m/s).",
+            "Vessel `a`'s closest approaches to `b` over their stored trajectories (nearest first), as the \
+             Orbital menu shows the active vessel's to its target: seconds from now, distance (m), relative \
+             speed (m/s), each as `a` measures it (null where it cannot; D106). Both need a signal.",
             schema(json!({"a": id, "b": id}), &["a", "b"]),
         ),
         controls_tool(&id),
@@ -466,13 +468,15 @@ fn run(
                 return Err("no prediction yet".into());
             }
             let body = sim.dominant_of(i);
+            // Each point to the position's precision (D106).
+            let known = crate::format::Known::of(&sim.fleet[i]);
             let points: Vec<Value> = (0..n)
                 .filter_map(|k| {
                     let s = span * k as f64 / (n - 1) as f64;
                     let at = t0.add_seconds(s);
                     let (anchor, r, _) = crate::trajectory::eval_at(&segs, at)?;
                     let b = sim.world.snapshot(at).relative_r(body, anchor);
-                    Some(json!({"t_s": s, "position_m": (r - b).to_array()}))
+                    Some(json!({"t_s": s, "position_m": known_vec(&known, Quantity::Position, r - b)}))
                 })
                 .collect();
             (json!({"about": name(body), "points": points}), Vec::new())
@@ -498,7 +502,7 @@ fn run(
         "go_to_mission_control" => (json!({"location": "mission control"}), vec![Effect::Station(true)]),
         "set_plan" => set_plan(args, sim, comms)?,
         "get_landing_prediction" => (landing_json(sim), Vec::new()),
-        "closest_approaches" => approaches(args, sim)?,
+        "closest_approaches" => approaches(args, sim, comms)?,
         "set_controls" => {
             let (id, arrives) = reach(args, sim, comms)?;
             let throttle = args.get("throttle").and_then(Value::as_f64);
@@ -730,6 +734,10 @@ fn get_vessel(
         Some("current") => stage_bar::Air::Current,
         Some(other) => return Err(format!("`air` is vacuum or current, not `{other}`")),
     };
+    // What the vessel knows (D106): a dash (null) where no working sensor
+    // measures it, and each value to its precision, by the menus' rules;
+    // the truth in debug mode.
+    let known = crate::format::Known::of(v);
     let body = sim.dominant_of(i);
     let (anchor, r, vel) = v.state_at(&sim.world, sim.clock);
     let k = sim.world.snapshot(sim.clock).relative(body, anchor);
@@ -748,27 +756,28 @@ fn get_vessel(
         .take(8)
         .map(|a| {
             json!({"kind": if a.is_apo { "apoapsis" } else { "periapsis" }, "body": name(a.body),
-                   "altitude_m": a.altitude, "in_s": a.t.seconds_since(sim.clock),
-                   "near_circular": a.near_circular})
+                   "altitude_m": known_value(&known, Quantity::Position, a.altitude),
+                   "in_s": known_time(&known, a.t.seconds_since(sim.clock)), "near_circular": a.near_circular})
         })
         .collect();
     let impact = aps.impact.filter(|m| m.t.seconds_since(sim.clock) > 0.0);
     let live = i == sim.active && matches!(v.phase, Phase::Powered { .. });
     let age = prediction_age(sim.clock, live, prediction.segments.first().map(|s| s.t0));
+    let at = |x: f64| known_value(&known, Quantity::Position, x);
     let orbit = orbit.map(|o| {
         let (peri, apo) = two_body_apsides(o.elements.a, o.elements.e);
-        json!({"periapsis_altitude_m": pe.map(|a| a.altitude), "apoapsis_altitude_m": ap.map(|a| a.altitude),
+        json!({"periapsis_altitude_m": pe.and_then(|a| at(a.altitude)),
+               "apoapsis_altitude_m": ap.and_then(|a| at(a.altitude)),
                "prediction_age_s": age,
-               "now_two_body": {"periapsis_from_centre_m": peri, "apoapsis_from_centre_m": apo,
-                                "semi_major_axis_m": o.elements.a},
+               "now_two_body": {"periapsis_from_centre_m": at(peri), "apoapsis_from_centre_m": apo.and_then(at),
+                                "semi_major_axis_m": at(o.elements.a)},
                "apsides": upcoming,
-               "impact": impact.map(|m| json!({"body": name(m.body), "in_s": m.t.seconds_since(sim.clock)})),
-               "inclination_deg": o.elements.i.to_degrees(), "eccentricity": o.elements.e,
-               "period_s": o.period()})
+               "impact": impact.map(|m| json!({"body": name(m.body),
+                                                "in_s": known_time(&known, m.t.seconds_since(sim.clock))})),
+               "inclination_deg": known_digits(&known, o.elements.i.to_degrees(), crate::format::DEGREE_DECIMALS),
+               "eccentricity": known_digits(&known, o.elements.e, crate::format::ECCENTRICITY_DECIMALS),
+               "period_s": o.period().and_then(|p| known_time(&known, p))})
     });
-    // What the vessel knows (D106): a dash (null) where no working sensor
-    // measures it, and each value to its precision; the truth in debug mode.
-    let known = crate::format::Known::of(v);
     // Above the reference ellipsoid (the equatorial radius reads −4.9 km on
     // the pad at 28.6° N).
     let physical = sim.world.source(body).and_then(|s| s.physical.as_ref());
@@ -810,6 +819,28 @@ fn two_body_apsides(a: f64, e: f64) -> (f64, Option<f64>) {
 /// A value as the vessel knows it: shown to its precision, or null.
 fn known_value(known: &crate::format::Known, q: Quantity, truth: f64) -> Option<f64> {
     known.knowledge.read(q, truth).map(|r| r.shown())
+}
+
+/// A time from the orbit (an apsis's, an impact's, a period, a closest
+/// approach's): known with the position and the velocity, as the menus
+/// show it (`Known::orbit`).
+fn known_time(known: &crate::format::Known, t: f64) -> Option<f64> {
+    known.orbit().then_some(t)
+}
+
+/// A number of the orbit the menus show to `decimals` once it is known
+/// (its angles, `format::DEGREE_DECIMALS`; its eccentricity).
+fn known_digits(known: &crate::format::Known, x: f64, decimals: usize) -> Option<f64> {
+    let scale = 10f64.powi(decimals as i32);
+    known.orbit().then(|| (x * scale).round() / scale)
+}
+
+/// A place on the ground (a latitude or longitude, rad) of a body of
+/// `radius` (m), in degrees to the position's precision along the ground;
+/// known with the orbit, as the Landing menu's AT.
+fn known_ground(known: &crate::format::Known, angle: f64, radius: f64) -> Option<f64> {
+    let r = known.knowledge.read(Quantity::Position, angle * radius).filter(|_| known.orbit())?;
+    Some((r.shown() / radius).to_degrees())
 }
 
 fn known_vec(known: &crate::format::Known, q: Quantity, a: DVec3) -> Value {
@@ -971,32 +1002,51 @@ fn landing_json(sim: &SimState) -> Value {
     let (anchor, r, v) = ship.state_at(&sim.world, sim.clock);
     let snap = sim.world.snapshot(sim.clock);
     let m = sim::landing::surface_motion(&sim.world, &snap, anchor, start.body, r, v);
+    // Each number as the Landing menu shows it (D106): times and the place
+    // with the orbit, heights through the position's reading, speeds
+    // through the velocity's, the braking burn with the propellant too.
+    let (at, speed) =
+        (|x: f64| known_value(&known, Quantity::Position, x), |v: f64| known_value(&known, Quantity::Velocity, v));
     let impact = l.impact.map(|h| {
+        let radius = sim.world.source(h.body).and_then(|s| s.physical.as_ref()).map_or(1.0, |p| p.radius_eq);
         json!({
-            "in_s": h.t.seconds_since(sim.clock), "body": name(h.body),
-            "lat_deg": h.lat.to_degrees(), "lon_deg": h.lon.to_degrees(), "ground_height_m": h.height,
-            "speed_ms": h.speed, "vertical_ms": h.v_vertical, "horizontal_ms": h.v_horizontal,
+            "in_s": known_time(&known, h.t.seconds_since(sim.clock)), "body": name(h.body),
+            "lat_deg": known_ground(&known, h.lat, radius), "lon_deg": known_ground(&known, h.lon, radius),
+            "ground_height_m": at(h.height),
+            "speed_ms": speed(h.speed), "vertical_ms": speed(h.v_vertical), "horizontal_ms": speed(h.v_horizontal),
         })
     });
+    let burn = |x: Option<f64>| x.filter(|_| known.propellant);
     let braking = l.braking.map(|b| {
         json!({
-            "ignite_in_s": b.t_ignite.seconds_since(sim.clock), "ignite_altitude_m": b.ignite_height,
-            "stop_in_s": b.t_stop.seconds_since(sim.clock), "stop_height_m": b.stop_height,
+            "ignite_in_s": burn(known_time(&known, b.t_ignite.seconds_since(sim.clock))),
+            "ignite_altitude_m": burn(at(b.ignite_height)),
+            "stop_in_s": burn(known_time(&known, b.t_stop.seconds_since(sim.clock))),
+            "stop_height_m": burn(at(b.stop_height)),
         })
     });
     let twr = crate::interface::menus::data::local_twr(ship, m.pressure, m.gravity);
     let surface = json!({
         "body": name(start.body), "radar_altitude_m": known_value(&known, Quantity::Altitude, m.height - ship.contact_height()),
-        "vertical_ms": m.v_vertical, "horizontal_ms": m.v_horizontal,
+        "vertical_ms": speed(m.v_vertical), "horizontal_ms": speed(m.v_horizontal),
         "twr": twr.shown(),
     });
     json!({"impact": impact, "braking": braking, "surface": surface})
 }
 
-/// The `closest_approaches` tool.
-fn approaches(args: &Value, sim: &SimState) -> Result<(Value, Vec<Effect>), String> {
+/// The `closest_approaches` tool: vessel `a`'s approaches to `b`, as the
+/// Orbital menu shows the active vessel's to its target (D106): both seen
+/// from the agent's location, each number through `a`'s knowledge.
+fn approaches(args: &Value, sim: &SimState, comms: &Comms) -> Result<(Value, Vec<Effect>), String> {
     let get = |k: &str| args.get(k).and_then(Value::as_u64).map(VesselId).ok_or(format!("missing `{k}`"));
     let (a, b) = (get("a")?, get("b")?);
+    for id in [a, b] {
+        sim.index_of(id).ok_or(format!("no vessel {}", id.0))?;
+        if comms.location != Location::Vessel(id) && comms.signal(id).is_none() {
+            return Err(format!("no signal from vessel {} at {}", id.0, comms.location_name()));
+        }
+    }
+    let known = crate::format::Known::of(&sim.fleet[sim.index_of(a).expect("checked")]);
     let tr = |id: VesselId| {
         sim.index_of(id)
             .and_then(|i| sim.fleet[i].trajectory())
@@ -1008,7 +1058,11 @@ fn approaches(args: &Value, sim: &SimState) -> Result<(Value, Vec<Effect>), Stri
     let out: Vec<Value> = list
         .iter()
         .take(5)
-        .map(|c| json!({"in_s": c.t.seconds_since(sim.clock), "distance_m": c.distance, "speed_ms": c.speed}))
+        .map(|c| {
+            json!({"in_s": known_time(&known, c.t.seconds_since(sim.clock)),
+                   "distance_m": known_value(&known, Quantity::Position, c.distance),
+                   "speed_ms": known_value(&known, Quantity::Velocity, c.speed)})
+        })
         .collect();
     Ok((json!({"approaches": out}), Vec::new()))
 }
@@ -1408,6 +1462,56 @@ mod tests {
         assert!(seen["attitude"]["pitch_deg"].as_f64().is_some_and(|p| p > 80.0), "upright: {}", seen["attitude"]);
         assert!(seen["stages"]["tanks"][0]["liquid_kg"].as_f64().is_some());
         assert!(seen["stages"]["next"].is_u64(), "{}", seen["stages"]);
+    }
+
+    #[test]
+    fn the_orbits_and_the_landings_numbers_read_as_the_menus_show_them() {
+        use crate::format::Known;
+        use sim::systems::Knowledge;
+        let known = |qs: &[(Quantity, f64)]| {
+            let mut k = Knowledge::default();
+            for (q, p) in qs {
+                k.learn(*q, *p);
+            }
+            Known::from(k)
+        };
+        let blind = known(&[]);
+        let position = known(&[(Quantity::Position, 25.0)]);
+        let fixed = known(&[(Quantity::Position, 25.0), (Quantity::Velocity, 0.05)]);
+        let truth = Known::from(Knowledge::perfect());
+        // Times and the orbit's numbers: with the position and the velocity.
+        // (known, a time, the eccentricity 0.123456789 to 5 decimals)
+        let cases = [(&blind, None, None), (&position, None, None), (&fixed, Some(12.5), Some(0.12346))];
+        for (k, time, e) in cases {
+            assert_eq!(known_time(k, 12.5), time);
+            assert_eq!(known_digits(k, 0.123_456_789, crate::format::ECCENTRICITY_DECIMALS), e);
+        }
+        // A place on the ground: to the position's precision along it (to
+        // the 10 m decade of ±25 m: 1e-4° on Earth), the truth in debug mode.
+        let r = 6.378e6;
+        let lat = 0.5 + 3.0 / r; // 3 m north of 0.5 rad
+        let shown = known_ground(&fixed, lat, r).unwrap();
+        assert!((shown - 0.5f64.to_degrees()).abs() < 1e-9, "{shown}");
+        assert_eq!(known_ground(&truth, lat, r), Some(lat.to_degrees()));
+        assert_eq!(known_ground(&position, lat, r), None, "an impact needs the orbit");
+        // A distance and a speed through their readings.
+        assert_eq!(known_value(&fixed, Quantity::Position, 1234.0), Some(1230.0));
+        assert_eq!(known_value(&fixed, Quantity::Velocity, 7.6543), Some(7.65));
+    }
+
+    #[test]
+    fn closest_approaches_need_a_signal_to_both_vessels() {
+        let (sim, mut comms) = setup();
+        let (a, b) = (sim.fleet[0].id(), sim.fleet[1].id());
+        let args = json!({"a": a.0, "b": b.0});
+        comms.location = Location::Site(0);
+        comms.signals.insert(a, Some(comms::Signal { delay: 0.0, rate: 1e6, via: vec![] }));
+        comms.signals.insert(b, None);
+        let (r, _) = answer("closest_approaches", &args, &sim, &comms, &Default::default());
+        assert!(matches!(&r, ToolResult::Err(e) if e.contains(&format!("no signal from vessel {}", b.0))), "{r:?}");
+        comms.signals.insert(b, Some(comms::Signal { delay: 0.0, rate: 1e6, via: vec![] }));
+        let (r, _) = answer("closest_approaches", &args, &sim, &comms, &Default::default());
+        assert!(!matches!(&r, ToolResult::Err(e) if e.contains("no signal")), "{r:?}");
     }
 
     #[test]

@@ -49,6 +49,13 @@ pub fn speed(v: f64) -> String {
 /// What the interface shows for a quantity the craft cannot measure (D106).
 pub const DASH: &str = "—";
 
+/// The decimals an orbit's angles are shown to (degrees: inclination, the
+/// node, the periapsis's argument, the true anomaly), once the orbit is
+/// known: the Orbital menu and the agent's `get_vessel`.
+pub const DEGREE_DECIMALS: usize = 2;
+/// The decimals an orbit's eccentricity is shown to.
+pub const ECCENTRICITY_DECIMALS: usize = 5;
+
 /// Decimals of a value shown in a unit of `scale` SI units when it is known
 /// to `precision` (SI; 0: exactly): down to the precision's decade, at
 /// most `max` (the format's own), never fewer than none.

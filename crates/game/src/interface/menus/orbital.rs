@@ -3,7 +3,7 @@
 
 use super::data::{Elements, FlightData, TargetData};
 use super::{MenuAction, Section, Tone};
-use crate::format::{duration as fmt_duration, Known};
+use crate::format::{duration as fmt_duration, Known, DEGREE_DECIMALS, ECCENTRICITY_DECIMALS};
 use crate::hud::clock_offset;
 use crate::navball::ApsisReadout;
 use sim::systems::Quantity::{Position, Velocity};
@@ -27,8 +27,8 @@ fn summary(d: &FlightData) -> Section {
         if let Some(p) = el.period {
             s.row("PERIOD", k.or_dash(k.orbit(), || fmt_duration(p)));
         }
-        s.row("INCLINATION", k.or_dash(k.orbit(), || format!("{:.2}°", el.inclination)));
-        s.row("ECCENTRICITY", k.or_dash(k.orbit(), || format!("{:.5}", el.e)));
+        s.row("INCLINATION", k.or_dash(k.orbit(), || format!("{:.*}°", DEGREE_DECIMALS, el.inclination)));
+        s.row("ECCENTRICITY", k.or_dash(k.orbit(), || format!("{:.*}", ECCENTRICITY_DECIMALS, el.e)));
     }
     if d.ap.is_none() && d.elements.is_some_and(|e| e.e >= 1.0) {
         s.note(format!("escaping {}", d.body), Tone::Dim);
@@ -56,7 +56,7 @@ fn elements(d: &FlightData) -> Section {
     let mut s = Section::new("elements", format!("ORBIT NOW · two-body · about {}'s centre", d.body));
     let Some(Elements { a, lan, argp, true_anomaly, speed, .. }) = d.elements else { return s };
     let k = &d.known;
-    let angle = |x: f64| k.or_dash(k.orbit(), || format!("{x:.2}°"));
+    let angle = |x: f64| k.or_dash(k.orbit(), || format!("{:.*}°", DEGREE_DECIMALS, x));
     s.row("SEMI-MAJOR AXIS (from the centre)", k.distance(Position, a));
     s.row("ASC. NODE", angle(lan));
     s.row("ARG. PERIAPSIS", angle(argp));
