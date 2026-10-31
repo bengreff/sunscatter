@@ -342,7 +342,8 @@ impl Section {
 
 /// A menu as shown (`interface::steady`, the one rule: nothing flickers):
 /// a section or a line that vanished less than `steady::HOLD` ago stays,
-/// in its place, with its last content.
+/// in its place, with its last content; except a note that new lines
+/// replaced ([`held_items`]).
 #[derive(Clone, Debug, Default)]
 pub struct Steady {
     shown: Vec<Section>,
@@ -362,8 +363,7 @@ impl Steady {
             |old, mut s| {
                 let id = s.id;
                 let before = old.map_or_else(Vec::new, |o| keyed(&o.items));
-                let held = steady::hold(&before, keyed(&s.items), |k| (id, k.0.clone()), |_, k| k, items, now);
-                s.items = held.into_iter().map(|k| k.1).collect();
+                s.items = held_items(id, &before, keyed(&s.items), items, now);
                 s
             },
             &mut self.sections,
@@ -371,6 +371,25 @@ impl Steady {
         );
         &self.shown
     }
+}
+
+/// A section's lines as shown: held by the one rule (`steady::hold`), but a
+/// note stands for what is not there yet ("predicting the impact…"), so a
+/// note that has vanished goes at once when new lines came in its stead
+/// (finding 72: it stayed 1.5 s beside the impact's rows). A note that
+/// only comes and goes is held like a row.
+fn held_items(
+    id: &'static str,
+    before: &[(String, Item)],
+    new: Vec<(String, Item)>,
+    seen: &mut steady::Seen<(&'static str, String)>,
+    now: f64,
+) -> Vec<Item> {
+    let keys: Vec<String> = new.iter().map(|k| k.0.clone()).collect();
+    let replaced = keys.iter().any(|k| !before.iter().any(|b| b.0 == *k));
+    let held = steady::hold(before, new, |k| (id, k.0.clone()), |_, k| k, seen, now);
+    let stale_note = |k: &(String, Item)| matches!(k.1, Item::Note(..)) && !keys.contains(&k.0);
+    held.into_iter().filter(|k| !(replaced && stale_note(k))).map(|k| k.1).collect()
 }
 
 /// A section's lines with their keys: a row, switch, pick list or button by
@@ -534,6 +553,37 @@ mod tests {
         // Gone for good: it goes after the hold.
         let drawn = steady.update(page(false), 2.0 + steady::HOLD);
         assert_eq!(drawn[0].rows().len(), 2);
+    }
+
+    /// A note stands for what is not there yet: once the lines it stood for
+    /// come, it goes at once (finding 72: "predicting the impact…" stayed
+    /// beside the impact's rows); a note that only comes and goes is held.
+    #[test]
+    fn a_note_goes_when_lines_replace_it() {
+        let predicting = || {
+            let mut s = Section::summary();
+            s.note("predicting the impact…", Tone::Dim);
+            vec![s]
+        };
+        let impact = |warn: bool| {
+            let mut s = Section::summary();
+            s.row("IMPACT IN", "12m 00s");
+            s.row("AT", "+28.5° -80.6°");
+            if warn {
+                s.note("steep", Tone::Warn);
+            }
+            vec![s]
+        };
+        let mut steady = Steady::default();
+        steady.update(predicting(), 0.0);
+        let drawn = steady.update(impact(false), 0.1);
+        assert_eq!(drawn[0].items.len(), 2, "{:?}", drawn[0].items);
+        assert_eq!(drawn[0].rows(), [("IMPACT IN", "12m 00s"), ("AT", "+28.5° -80.6°")]);
+        // (frame, the note there): it comes and goes; held meanwhile.
+        for k in 2..10 {
+            let drawn = steady.update(impact(k % 2 == 0), 0.1 * k as f64);
+            assert!(k == 2 || drawn[0].items.contains(&Item::Note("steep".into(), Tone::Warn)), "frame {k}");
+        }
     }
 
     /// Every page ends with a link into the systems screen at its layer;
