@@ -95,7 +95,7 @@ impl Action {
             ThrottleCut => "cut the throttle",
             Sas => "SAS on / off (the hold modes: click them on the navball)",
             Rcs => "RCS on / off, and its menu with it",
-            Chutes => "parachutes: drogue now, mains low",
+            Chutes => "parachutes: drogues now, mains low; again: the mains now",
             NextStage => "the next stage of the craft's sequence",
             PreviousVessel => "the previous vessel, nearest first",
             NextVessel => "the next vessel, nearest first",
@@ -350,6 +350,13 @@ pub fn read_controls(
         }
     }
     let active = sim.ship().id();
+    // P is the parachutes' press (D126: the manual deploy runs the same
+    // function): it arms them, and a second calls the mains, by the
+    // programs' one rule (nothing where nothing is left to open).
+    let chutes = just.contains(&Action::Chutes).then(|| {
+        let x = crate::systems_screen::programs::Inputs::of(sim.ship(), sim.clock)?;
+        crate::systems_screen::programs::press(&crate::systems_screen::programs::rows(&x), active, "chutes").ok()
+    });
     let c = sim.controls_mut();
     // Typing in a text field, the pause menu and the tracking station do
     // not fly the ship.
@@ -375,7 +382,9 @@ pub fn read_controls(
             Action::ThrottleCut => c.throttle = 0.0,
             Action::Sas => c.sas = !c.sas,
             Action::Rcs => c.rcs.on = !c.rcs.on,
-            Action::Chutes => c.chute = true,
+            Action::Chutes => {
+                commands.write_batch(chutes.clone().flatten());
+            }
             Action::NextStage => {
                 commands.write(GameCommand::Stage(active));
             }
