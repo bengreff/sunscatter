@@ -270,29 +270,6 @@ pub fn clock_offset(s: f64) -> String {
     }
 }
 
-/// Rocket-equation Δv (m/s) of `propellant` (kg) burnt from mass `mass`.
-pub fn delta_v(isp: f64, mass: f64, propellant: f64) -> f64 {
-    let dry = (mass - propellant).max(1e-9);
-    isp * sim::vessel::G0 * (mass / dry).ln()
-}
-
-/// The vehicle's mass (kg): the vessel's less the ground it still holds
-/// (a craft of parts' `PartInfo::ground` parts and their components: the
-/// pad's launch mount until the clamps release), so mass, thrust-to-weight
-/// and Δv readouts are the vehicle's.
-pub fn vehicle_mass(v: &sim::vessel::Vessel) -> f64 {
-    let Some(def) = v.ship_def() else { return v.mass() };
-    let ground: Vec<u32> = def.parts.iter().filter(|p| p.ground).map(|p| p.part).collect();
-    let parts: f64 = def.parts.iter().filter(|p| p.ground).map(|p| p.mass).sum();
-    let components: f64 = def.components.iter().filter(|c| ground.contains(&c.part)).map(|c| c.mass).sum();
-    v.mass() - parts - components
-}
-
-/// Thrust-to-weight ratio in local gravity `g` (m/s²); `None` in free space.
-pub fn twr(thrust: f64, mass: f64, g: f64) -> Option<f64> {
-    (g > 1e-6).then(|| thrust / (mass * g))
-}
-
 /// The double-click body menu (in flight and in the tracking station).
 pub fn draw_body_menu(
     mut contexts: EguiContexts,
@@ -462,18 +439,6 @@ mod tests {
         assert_eq!(clock_offset(-3.2e-7), "-0.32 µs");
         assert_eq!(clock_offset(0.0123), "+12.300 ms");
         assert_eq!(clock_offset(-1.5), "-1.500 s");
-    }
-
-    #[test]
-    fn delta_v_and_twr_follow_the_rocket_equation() {
-        // 20 t with 16 t of propellant at Isp 320 s: 320·g0·ln 5.
-        let dv = delta_v(320.0, 20_000.0, 16_000.0);
-        assert!((dv - 320.0 * sim::vessel::G0 * 5f64.ln()).abs() < 1e-9);
-        assert!((dv - 5051.0).abs() < 1.0, "{dv}");
-        assert_eq!(delta_v(320.0, 4_000.0, 0.0), 0.0);
-        let t = twr(300e3, 20_000.0, 9.81).unwrap();
-        assert!((t - 1.529).abs() < 1e-3);
-        assert_eq!(twr(300e3, 20_000.0, 0.0), None);
     }
 
     #[test]

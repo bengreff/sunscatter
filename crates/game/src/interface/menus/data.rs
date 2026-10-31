@@ -203,16 +203,6 @@ pub struct ChuteData {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CraftData {
     pub debug: bool,
-    pub propellant: f64,
-    /// The full load (kg).
-    pub full: f64,
-    pub dv_vac: f64,
-    /// In the dominant body's gravity here; `None` in free space.
-    pub twr_vac: Option<f64>,
-    pub mass: f64,
-    pub thrust_vac: f64,
-    pub isp_vac: f64,
-    pub isp_sl: f64,
     /// The skin cell nearest its own limit, with its limit (K).
     pub skin: (f64, f64),
     /// The shock layer at the nose this tick (D109), and the highest
@@ -332,7 +322,7 @@ pub fn gather(s: &Sources) -> FlightData {
         burns: burns(sim),
         g_load: nav.map_or(0.0, |n| n.g.load),
         attitude: nav.map(|n| [n.angles.heading, n.angles.pitch, n.angles.roll]),
-        craft: craft(sim, body),
+        craft: craft(sim),
         comms: comms(s),
         canopies: if ship.craft.design().parts.iter().any(|p| p.chute) {
             crate::staging::canopies(&ship.craft.chute, &ship.chute)
@@ -537,33 +527,12 @@ fn marked_entry(s: &Sources) -> Option<(f64, f64)> {
     })
 }
 
-fn craft(sim: &SimState, body: sim::frame::NodeId) -> CraftData {
+fn craft(sim: &SimState) -> CraftData {
     let ship = sim.ship();
-    // The engines its throttle runs, lumped (the landing prediction's).
-    let (engine, _) = sim::landing::Thrust::of_vessel(ship);
-    let isp = |p: f64| if engine.mdot > 0.0 { engine.output(1.0, p).0 / (engine.mdot * sim::vessel::G0) } else { 0.0 };
-    let (isp_vac, isp_sl) = (isp(0.0), isp(sim::craft::engine::P_SEA_LEVEL));
-    // Its propellant as loaded.
-    let loaded = ship.ship_def().map_or(0.0, |d| sim::craft::state::ShipState::initial(&d).consumables(&d));
-    // The vehicle's: not the pad's launch mount it stands on.
-    let mass = crate::hud::vehicle_mass(ship);
-    let (anchor, r, _) = ship.state_at(&sim.world, sim.clock);
-    let g = sim.world.source(body).map_or(0.0, |b| {
-        let d = (r - sim.world.snapshot(sim.clock).relative_r(b.node, anchor)).length();
-        b.gm / (d * d)
-    });
     CraftData {
         shock: ship.thermal().shock,
         peak_heating: ship.thermal().peak_heating,
         debug: ship.debug(),
-        propellant: ship.propellant(),
-        full: loaded.max(1.0),
-        dv_vac: crate::hud::delta_v(isp_vac, mass, ship.propellant()),
-        twr_vac: crate::hud::twr(engine.vac, mass, g),
-        mass,
-        thrust_vac: engine.vac,
-        isp_vac,
-        isp_sl,
         skin: ship.skin_nearest_limit(),
         hottest: super::hottest::listed(ship, &[], HOTTEST),
         clock_offset: sim.ship_clock_offset(sim.active),
@@ -667,9 +636,6 @@ mod tests {
         let s = d.surface.expect("over Earth");
         assert!(s.radar.abs() < 1.0, "on its feet: {}", s.radar);
         assert!(s.twr.value > 1.0, "the small rocket lifts off: {:?}", s.twr);
-        // As loaded (its tanks' liquids, ullages and bottle).
-        assert!((d.craft.propellant / d.craft.full - 1.0).abs() < 1e-4, "{:?}", d.craft);
-        assert!(d.craft.dv_vac > 1000.0 && d.craft.twr_vac.is_some_and(|t| t > 1.0));
         assert!(!d.chute.commanded && d.chute.design_q > 1000.0);
         let chutes = sim.ship().craft.design().parts.iter().any(|p| p.chute);
         assert_eq!(d.canopies.is_empty(), !chutes);

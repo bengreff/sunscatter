@@ -89,21 +89,4 @@ mod tests {
         let shares: Vec<f64> = hot.parts.iter().map(|p| p.1 / p.2).collect();
         assert!(shares.windows(2).all(|w| w[0] >= w[1]), "nearest first: {shares:?}");
     }
-
-    /// The launch mount's mass is not the vehicle's.
-    #[test]
-    fn the_vehicle_mass_leaves_out_the_ground() {
-        let rocket = crate::test_rocket::rocket();
-        let sim = crate::state::SimState::with_craft(&rocket);
-        assert_eq!(crate::hud::vehicle_mass(sim.ship()), sim.ship().mass(), "no ground part");
-        let test = crate::state::SimState::new();
-        assert_eq!(crate::hud::vehicle_mass(test.ship()), test.ship().mass());
-        if crate::state::craft_exists("falcon9-crew") {
-            let f9 = crate::state::SimState::with_craft(&crate::state::craft_or_fallback("falcon9-crew"));
-            let def = f9.ship().ship_def().unwrap();
-            let mount: f64 = def.parts.iter().filter(|p| p.ground).map(|p| p.mass).sum();
-            assert!(mount > 0.0);
-            assert!((f9.ship().mass() - crate::hud::vehicle_mass(f9.ship()) - mount).abs() < 1e-6);
-        }
-    }
 }
