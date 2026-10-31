@@ -52,6 +52,11 @@ Also remove the 700-line file cap. Follow [agent-rules.md](agent-rules.md). Your
 8. **DOCS-2: ship-systems.md split** (ae6bf93) into `technical/{ship-commands, plumbing, engines, mechanisms, knowledge, flight-software, joint-loads, failure-modes, power, life-support}.md`, each pointing at its system; stale lines fixed (the agent reads Knowledge, SAS on coasts is FIXES3, D043).
 9. **DOCS-2: specs out of the archive, first two** (a068d59): `technical/comms.md` (realism-1 §4b–§4c, checked against the code) and `technical/proper-time.md` (§4a, with TDB's L_B; motion-model.md's formula corrected).
 
+10. **DOCS-3: the specs left in archived plans, as technical docs** (5e1bdd6, 75be157), each checked against the code: `attitude-holds.md` (playtest-1 B: the modes, SAS's controller, the slew caps, the turn lead), `landing-prediction.md` (playtest-1 C, realism-1 §6b), `rendezvous.md` (realism-1 §6c; the intercept helper a *skeleton*: no N-body correction), `map-view.md` (map-view plan §2, §5), `camera.md` (§1, §7), `lighting.md` (§3 as D055, D087, D110 revised it). The pause menu and settings (§6) are mapped in `interface-map.md` (INTERFACE's), so no new doc. `game::map_view`'s comment, D054's details, `systems/game.md`, `motion.md` (also: the Lambert intercept helper exists), `avionics.md` and `landing-guidance.md` point at them; the navball's display of a planned burn's controls (b246f9d) in `attitude-holds.md` and `planner.md`.
+11. **DOCS-3: stale status lines** (c31ecaf, 0aa89de): `solar-visuals.md` (*playable*, frozen by D123; the tour's section says it is deleted and what replaced it), `parts.md` (*playable*), `scale-performance.md`'s status and anchor, `reentry.md` item 3, `crisp-surfaces.md` and `staging-bar.md` (seen on screen in the README's shots). `exhaust.md`'s and `systems-screen.md`'s "seen in the demo" kept as history.
+12. **DOCS-3: the README's images** (d651286): two shots from the headless game through MCP, built from an export of HEAD 8cc38b4 in the scratchpad (not a worktree), so other agents' unfinished files were not compiled: the Falcon 9 on the pad in the flight view, and the second stage's 412 × 343 km orbit after PLANNER-4's two planned burns, in the map view with the Orbital menu (PLANNER-4's save). In `docs/images/v0.2/`; the old two stay in `v0.2-visual/` (an archived plan cites them). The v0.2 row reaches orbit.
+13. **DOCS-3: the finished briefs archived** (9815184): `brief-planner.md`, `brief-audit.md`, `brief-research.md`, `brief-mission.md` to `archive/briefs/`, every link relinked by its resolved target (the running agents' briefs, the workstream table, HANDOFF, `game.md`, `planner.md`); `game.md`'s mission-test lines say flown.
+
 ### DOCS-3 (2026-10-31)
 
 You continue DOCS-2's Left below. Your name is DOCS-3; you build nothing and need no target dir. Running alongside: ONEKIND-7 (deleting the test craft and the made-up path; **the test-craft mentions in the docs are its, so skip Left 3**) and INTERFACE-3 (the game's interface; `interface-map.md`, `systems-screen.md` and `flight-menus.md` are its). Since DOCS-2: PLANNER wrote `technical/planner.md` (the burn planner's spec is done: skip it in Left 1); MISSION's guide is in `testing.md` (Left 4 is done). Work only in docs, commit through a private index, and push.
@@ -60,15 +65,12 @@ Order: Left 1 (except the planner), Left 2, Left 5 (the README's images: shots f
 
 ### Left, in order (for the lead or a fresh agent)
 
-1. **The remaining specs in archived plans**, into technical docs, each checked against the code:
-   - the burn planner and rendezvous (`archive/plans/realism-1.md` §6a, §6c; `game::planner`, `sim::approach`), with D126's closed-loop direction and today's state (open-loop, made-up path only);
-   - attitude holds (`archive/plans/playtest-1.md` B; `sim::vessel::hold`, `flown`) and the landing prediction (playtest-1 C and realism-1 §6b; `sim::landing`: the attitude now follows the controls' hold, gated by `flight::can_predict`);
-   - the map view, orbit-line length and hover (`archive/plans/map-view-lighting-controls.md` §2, §5; `game::map_view`, `game::trajectory::line`), lighting (§3, as revised by D055, D087, D110; `game::lighting::rules`), the pause menu and settings (§6), camera collision (§7). Then point `game::map_view`'s comment, `systems/game.md` and `systems/motion.md` at them.
-2. **Stale status lines** in technical docs, checked against the code: crisp-surfaces.md ("not yet seen on screen", acceptance "screenshots from the demo"), solar-visuals.md (its line 7 runs the deleted tour; "in progress"), parts.md ("skeleton"), staging-bar.md ("not yet seen on screen"), scale-performance.md's Verify section (the deleted demo's `demo perf:` lines), reentry.md item 3 ("a reentry view in the demo"), systems-screen.md and exhaust.md ("seen in the demo": history, keep).
-3. **ONEKIND's later changes**, as its State lists them (the test-craft mentions in technical/aero-thermal.md's opening, parts.md, limbo.md, engines.md, knowledge.md and the systems docs once it is deleted; D064, D074, D078, D100, D104 citations).
-4. MISSION-2's guide lands in `technical/testing.md` (its file); then `systems/game.md`'s "being flown" lines and testing.md's demo row.
-5. The README's two images are from before the one look (D073): replace them with shots from the session tools.
-6. `windows.md`'s headless procedure was written, not run: check it on backhouse, and update `run_demo.cmd` there.
+Done by DOCS-3: Left 1, 2, 4, 5 and the archive. Left:
+
+1. **ONEKIND's doc changes** (its State lists them; the test-craft mentions are ONEKIND-7's own). Its step (c) edits `landing-prediction.md` (the made-up engine's fallback, `LandingStart.mass`), which it held uncommitted when DOCS-3 stopped.
+2. **`windows.md`'s headless procedure** on backhouse, and `run_demo.cmd` there: backhouse did not connect (2026-10-30, 23:3x: port 22 timed out).
+3. `tools/gpu_trace.py` still launches the plunge demo (MISSION's Left 4; a tool, not a doc: it needs `./run headless` and a `profile` call, or deleting).
+4. Archive `brief-docs.md` itself when the lead is done with it.
 
 ### Open for the owner
 
@@ -80,3 +82,5 @@ Order: Left 1 (except the planner), Left 2, Left 5 (the README's images: shots f
 - **D034's routing** (DOCS-2): the docs say commands from a crewed vessel to a probe still leave from the crewed vessel, against D034's revision ("a crewed ship nearby does not command probes"). Recorded as *not built*; no code changed.
 - **D123's random failures off** (DOCS-2): no switch exists and the game still seeds fates for every vessel. Recorded as *not built* in `systems/failures.md`.
 - **The game lock** keeps its name `target/demo.lock` though the demo is gone (agents and CLAUDE.md use it); renaming it is the lead's call.
+- **The pause menu and settings** (map-view plan §6) have no technical doc of their own: `interface-map.md` maps every screen and way in, and a settings spec would repeat it (DOCS-3).
+- **A red translucent shape** at the second stage's forward end in orbit after Dragon's separation (PLANNER-4's save loaded headless; shot `scratchpad/docs3/shots/orbit.png`): for the lead to look at; not in the README.
