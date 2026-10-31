@@ -39,6 +39,11 @@ fn summary(d: &FlightData) -> Section {
         None if d.landed => {
             s.note("on the ground", Tone::Dim);
         }
+        // Just after a load or a switch, before the first prediction of
+        // this flight (it said "no impact predicted" of a falling booster).
+        None if d.predicting => {
+            s.note("predicting the impact…", Tone::Dim);
+        }
         None => {
             s.note("no impact predicted", Tone::Dim);
         }
@@ -187,6 +192,12 @@ fn part_tone(t: crate::staging::PartTone) -> Tone {
 /// against the design opening q.
 fn parachute(d: &FlightData) -> Section {
     let mut s = Section::new("parachute", "PARACHUTE");
+    // A craft without canopies (the booster) has nothing to deploy: no q
+    // against a design q, no "safe to deploy".
+    if d.canopies.is_empty() {
+        s.note("no parachutes aboard", Tone::Dim);
+        return s;
+    }
     let ChuteData { commanded, q, design_q, .. } = d.chute;
     for p in &d.canopies {
         s.toned(p.name.clone(), &p.state, part_tone(p.tone));
@@ -284,6 +295,11 @@ mod tests {
         let landed = FlightData { landed: true, surface: falling().surface, ..FlightData::default() };
         let summary = shown(&landed).into_iter().next().unwrap();
         assert_eq!(summary.items, [Item::Note("on the ground".into(), Tone::Dim)], "no motion rows on the ground");
+        // Before the first prediction of a flight (a load, a switch):
+        // predicting, not "none".
+        let first = FlightData { predicting: true, ..FlightData::default() };
+        let summary = shown(&first).into_iter().next().unwrap();
+        assert_eq!(summary.items, [Item::Note("predicting the impact…".into(), Tone::Dim)]);
         // A braking solution without an impact (stale) is not shown.
         let stale = FlightData { impact: None, ..falling() };
         assert!(!ids(&stale).contains(&"braking"));
@@ -361,6 +377,10 @@ mod tests {
         d.chute.commanded = true;
         let s = shown(&d);
         assert!(!find(&s, "parachute").unwrap().items.iter().any(|i| matches!(i, Item::Note(..))), "armed: no advice");
+        // A craft without canopies (the booster): said so, no advice.
+        let none = FlightData { canopies: Vec::new(), ..d };
+        let s = shown(&none);
+        assert_eq!(find(&s, "parachute").unwrap().items, [Item::Note("no parachutes aboard".into(), Tone::Dim)]);
     }
 
     /// What the craft cannot measure reads as a dash (D106); what it can,

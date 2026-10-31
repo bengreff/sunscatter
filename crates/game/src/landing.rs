@@ -82,6 +82,8 @@ impl LandingPrediction {
     /// The latest prediction if it is of `flight`. (It was kept by vessel id
     /// alone, and a load brings the ids back: after loading an orbit, the
     /// Landing menu showed the ascent's impact.)
+    /// `None` until the first prediction of `flight` is made (a flight
+    /// with nothing to predict from has one with no impact).
     pub fn of(&self, flight: (VesselId, u64)) -> Option<&Landing> {
         self.latest.as_ref().filter(|_| self.flight == Some(flight))
     }
@@ -109,7 +111,9 @@ pub fn update(time: Res<Time>, sim: Res<SimState>, mut pred: ResMut<LandingPredi
     }
     pred.since_last = 0.0;
     let Some(start) = start_of(&sim.world, ship, sim.controls()) else {
-        pred.latest = None;
+        // Nothing to predict from: a prediction of no impact, not one
+        // still being made.
+        pred.latest = Some(Landing { vessel: ship.id(), impact: None, braking: None });
         return;
     };
     let (world, craft, id) = (sim.world.clone(), ship.craft.clone(), ship.id());

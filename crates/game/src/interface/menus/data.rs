@@ -40,6 +40,9 @@ pub struct FlightData {
     pub burns: Vec<Burn>,
     pub surface: Option<Surface>,
     pub impact: Option<ImpactData>,
+    /// The impact is still being predicted: no prediction of this flight
+    /// yet (just after a load or a switch of vessel).
+    pub predicting: bool,
     pub braking: Option<Brake>,
     /// In an atmosphere now.
     pub air: Option<AirData>,
@@ -485,6 +488,7 @@ fn landing(s: &Sources) -> FlightData {
     FlightData {
         surface,
         impact,
+        predicting: s.landing.is_none() && !grounded,
         braking,
         air: air.map(|a| AirData {
             q: a.q(),
