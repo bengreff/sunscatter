@@ -111,6 +111,20 @@ Read the ratios, not the last digit (other agents were building). The handles' g
 - The pad release's engines are a flag on each engine, not a list of typed ids: a flag needs no renumbering at a split or merge (D121's "by construction").
 - The game's tests of readouts now set the engine and leg states they read directly, instead of through `ShipState::apply`'s instant ignite and deploy (which is gone); after the ignition the staging bar reads "4/4 starting", as the vessel does.
 
+### STATE-4 (2026-10-31)
+
+**Landed** (each passed fmt, clippy, the whole sim suite in a private mirror of HEAD plus its files, and the game's touched tests):
+- 223af2a **5a**, saves without the craft's static data: `CraftParams` is saved as its `CraftId` (hand-written `Serialize`/`Deserialize`) and rebuilt at load through `registry::try_craft_of` (`craft_of` without the panic; a save naming a craft this build lacks is a format error). `SAVE_VERSION` 15. Tests (`tests/save_load.rs`): the Falcon 9 on the pad, saved and loaded, goes through its ignition and liftoff the same bits as never saved, and its text holds no contact points, drag area or bottom; an unknown craft is refused.
+- 2ddecb8 **5b**, the test craft's power placeholder deleted (`Systems::power`, `systems::power::{Power, PowerSpec}`, `Part::power`/`PartPower`, the split's `Shares`, `systems::Env`, `Vessel::systems_env`): `Vessel::powered()` is `systems::power::powered`, one pure rule over the ship's own buses (a bus with a load and a source: the pad's umbilical, a charged battery or solar cells, none lost). `Systems` is the lattice's clock only. `SAVE_VERSION` 16. Table test on the Falcon 9 and its pieces (11 cases: the booster, the second stage, Dragon with and without its trunk, the trunk alone, flat and lost batteries, the umbilical); after a real stage separation the booster is controllable, not dead and not debris (INTERFACE-7's case, `vessel/ship_tests.rs`).
+- **6**, docs: `sim::save`'s module doc (a save holds state, never static data), `ship-model.md` §5's intro (the one state by subsystem, saved without static data, `powered` derived) and §4 (`Runtime::merge` gone), `systems/ship.md`, `owners.md` (the lattice, power, saves), `parts.md`, `limbo.md`.
+
+**Left, in order** (scratchpad `…/scratchpad/state4/`: `sync` and `check` as STATE-3's, `ascent.py` and `insert.py` the flight's MCP drivers on port 7791):
+1. **The playtest save**: the game's lock was held by INTERFACE-8; fly the Falcon 9 headless (`ascent.py pad`, `kick`, `maxq`, `meco`, `stage2`, then `insert.py 80`, then `ascent.py dragon`), deorbit the second stage (`ascent.py deorbit <id>`: it has a control computer and batteries, so the debris rule never deletes it in orbit) and let the booster crash, then `save_game` Dragon alone, copy it over `docs/plans/playtest-2026-10-01-orbit.ron`, and check a fresh headless game loads it (`load_game`).
+
+**Open for the owner (STATE-4):**
+- Dragon's trunk alone has no power by the new rule (its cells feed nothing once the capsule has left: D083's "no active systems"), so once it is 10 km from every controllable craft it is debris and goes. Before, the placeholder gave every piece with a cell a panel, and the trunk stayed for ever.
+- Two save versions in one session (15, then 16): each commit that changed a saved type bumped it, as `sim::save` asks.
+
 ### INTERFACE-6 in sim (2026-10-31)
 
 INTERFACE-6 (game crate, [brief-interface.md](brief-interface.md)) adds one function to `sim::systems::estimate` for interface-map finding 41: `estimate::aboard`, the mass aboard now with the precision the tank sensors give (the estimate's own walk and bounds), so the systems screen and the staging bar read one rule. An added function and its test in `estimate_tests.rs`; nothing else in sim changes. STATE's 3b (`estimate`'s joints and `release_engines`) is untouched by it.
