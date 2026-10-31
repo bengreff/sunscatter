@@ -89,6 +89,19 @@ fn components_show_their_equipment_and_switches() {
     let g = details(def, &state, &facts, Selection::Component(index("bottle")), &Known::default());
     assert_eq!(value(&g, "BOTTLE bottle", "gas"), "nitrogen");
     assert!(value(&g, "BOTTLE bottle", "pressure").starts_with("300.00 bar"));
+    // Its contents of its full load, as the RCS menu reads its feed
+    // (finding 48: `bottle_contents`), exact in debug mode; through a
+    // transducer to 0.41 bar, the gas law's kilograms of that.
+    let j = def.bottles.iter().position(|b| b.id == "bottle").unwrap();
+    let full = def.bottle_gas(&def.bottles[j]);
+    let exact = crate::format::amount(Some(sim::systems::Reading { value: full, precision: 0.0 }), full);
+    assert_eq!(value(&g, "BOTTLE bottle", "contents"), exact);
+    let mut k = sim::systems::Knowledge::default();
+    k.learn(Quantity::BottlePressure(j as u32), 4.1e4);
+    let r = bottle_contents(def, &state, &k, j).unwrap();
+    assert!(r.precision > 0.0 && r.precision < 1e-2 * full, "{r:?} of {full} kg");
+    let g = details(def, &state, &facts, Selection::Component(index("bottle")), &Known::from(k));
+    assert_eq!(value(&g, "BOTTLE bottle", "contents"), crate::format::amount(Some(r), full));
     let g = details(def, &state, &facts, Selection::Component(index("computer")), &Known::default());
     assert_eq!(value(&g, "COMPONENT computer", "power"), "50 W · on");
     assert_eq!(value(&g, "COMPUTER computer", "commands"), "engine#1, engine#2, engine#3, engine#4, rcs#1, rcs#2");
@@ -115,7 +128,7 @@ fn values_without_a_sensor_read_as_a_dash() {
     assert!(value(&tank, "TANK tank:ox", "operating").ends_with("bar"), "the design's");
     let bottle = def.components.iter().position(|c| c.id == "bottle").unwrap();
     let g = details(def, &state, &facts, Selection::Component(bottle), &blind);
-    assert_eq!(value(&g, "BOTTLE bottle", "contents"), DASH);
+    assert!(value(&g, "BOTTLE bottle", "contents").starts_with("—/"), "against its full load");
     assert!(value(&g, "BOTTLE bottle", "pressure").starts_with("— / "));
     // A pressure transducer to 0.1 bar: one decimal.
     let mut k = sim::systems::Knowledge::default();

@@ -447,13 +447,15 @@ fn engine_group(state: &ShipState, i: usize, e: &sim::craft::ship::EngineDef, k:
 fn stores(def: &ShipDef, state: &ShipState, id: &str, k: &Known, out: &mut Vec<Group>) {
     for (j, b) in def.bottles.iter().enumerate().filter(|(_, b)| b.id == id) {
         let s = &state.bottles[j];
-        let gas = sim::fluids::fluids().gas(&b.gas).map_or(0.0, |g| g.molar_mass);
         let q = Quantity::BottlePressure(j as u32);
-        let pressure = k.value(q, sim::fluids::pressure(s.moles, b.volume, s.k), 1e5, 2, "bar");
         let p = sim::fluids::pressure(s.moles, b.volume, s.k);
+        let pressure = k.value(q, p, 1e5, 2, "bar");
+        // What it holds to its transducer's precision, of its full load
+        // (`bottle_contents`, the RCS menu's feeds' rule too).
+        let contents = crate::format::amount(bottle_contents(def, state, &k.knowledge, j), def.bottle_gas(b));
         let mut g = Group::new(format!("BOTTLE {}", b.id));
         g.row("gas", b.gas.clone())
-            .row("contents", k.or_dash(k.knows(q), || kg(s.moles * gas)))
+            .row("contents", contents)
             .limit("pressure", format!("{pressure} / {}", bar(b.burst)), k.knows(q).then_some(p), b.burst)
             .row("rated", bar(b.pressure))
             .row("temperature", k.or_dash(k.knowledge.perfect, || kelvin(s.k)));
