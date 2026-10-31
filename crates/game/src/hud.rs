@@ -276,6 +276,14 @@ pub fn clock_offset(s: f64) -> String {
     }
 }
 
+/// The distance from the active vessel to body `node`'s centre now (m): the
+/// body menu's, and the agent's `list_bodies`, each through the vessel's
+/// position reading (D106).
+pub fn body_distance(sim: &SimState, node: sim::frame::NodeId) -> f64 {
+    let (anchor, r, _) = sim.ship().state_at(&sim.world, sim.clock);
+    (sim.world.snapshot(sim.clock).relative(node, anchor).r - r).length()
+}
+
 /// The double-click body menu (in flight and in the tracking station).
 pub fn draw_body_menu(
     mut contexts: EguiContexts,
@@ -285,15 +293,15 @@ pub fn draw_body_menu(
 ) -> Result {
     let Some((node, pos)) = ui.menu else { return Ok(()) };
     let ctx = contexts.ctx_mut()?;
-    let (anchor, r, _) = sim.ship().state_at(&sim.world, sim.clock);
-    let snap = sim.world.snapshot(sim.clock);
     let mut open = true;
     let name = sim.world.eph.node(node).name.clone();
-    let dist = (snap.relative(node, anchor).r - r).length();
+    // As the active vessel knows its position (D106; the truth in debug mode).
+    let dist =
+        crate::format::Known::of(sim.ship()).distance(sim::systems::Quantity::Position, body_distance(&sim, node));
     egui::Window::new(name).open(&mut open).fixed_pos([pos.x, pos.y]).resizable(false).collapsible(false).show(
         ctx,
         |ui_| {
-            ui_.monospace(format!("distance {}", crate::format::distance(dist)));
+            ui_.monospace(format!("distance {dist}"));
             if ui_.button("Focus").clicked() {
                 camera::focus_body(&mut rig, &sim, node);
                 ui.menu = None;

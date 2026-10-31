@@ -140,7 +140,12 @@ fn flight_tools() -> Vec<Tool> {
              status and signal at your location.",
             schema(json!({}), &[]),
         ),
-        t("list_bodies", "Celestial bodies: name, GM (m³/s²), radius (m), what they orbit.", schema(json!({}), &[])),
+        t(
+            "list_bodies",
+            "Celestial bodies: name, GM (m³/s²), radius (m), what they orbit, and the distance from the active \
+             vessel to the centre (m; its body menu's, as the vessel knows its position: null where it cannot).",
+            schema(json!({}), &[]),
+        ),
         t(
             "get_vessel",
             "A vessel as seen from your location (light-delayed): position and velocity relative to the body it is \
@@ -437,12 +442,15 @@ fn run(
             (v, Vec::new())
         }
         "list_bodies" => {
+            // The body menu's distance, as the active vessel knows it (D106).
+            let known = crate::format::Known::of(sim.ship());
             let bodies: Vec<Value> = eph
                 .bodies()
                 .map(|b| {
                     let radius = sim.world.source(b).and_then(|s| s.physical.as_ref()).map(|p| p.radius_eq);
+                    let distance = known_value(&known, Quantity::Position, crate::hud::body_distance(sim, b));
                     json!({"name": name(b), "gm": eph.node(b).gm, "radius_m": radius,
-                           "orbits": crate::relations::primary(eph, b).map(name)})
+                           "orbits": crate::relations::primary(eph, b).map(name), "distance_m": distance})
                 })
                 .collect();
             (json!({"bodies": bodies}), Vec::new())
@@ -1454,8 +1462,16 @@ mod tests {
             panic!()
         };
         assert!(l["surface"].is_null());
+        let bodies = |sim: &SimState| match answer("list_bodies", &json!({}), sim, &comms, &Default::default()) {
+            (ToolResult::Ok(v), _) => v["bodies"].as_array().unwrap().clone(),
+            (r, _) => panic!("{r:?}"),
+        };
+        let earth = |list: Vec<Value>| list.into_iter().find(|b| b["name"] == "Earth").unwrap();
+        assert!(earth(bodies(&sim))["distance_m"].is_null(), "a blind craft knows no distance");
         let s = &mut sim;
         s.fleet[s.active].set_debug(&s.world, true);
+        let d = earth(bodies(&sim))["distance_m"].as_f64().unwrap();
+        assert!((6.3e6..6.4e6).contains(&d), "the pad from Earth's centre: {d}");
         let seen = get(&sim);
         assert_eq!(seen["position_m"].as_array().map(Vec::len), Some(3));
         assert!(seen["altitude_m"].as_f64().is_some_and(|a| a.abs() < 100.0), "on the pad: {}", seen["altitude_m"]);
