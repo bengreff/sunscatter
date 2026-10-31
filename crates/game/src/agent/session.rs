@@ -72,7 +72,7 @@ const RUN_TIMEOUT_MAX: f64 = 840.0;
 const MAX_Q_FLOOR: f64 = 5_000.0;
 const MAX_Q_FALL: f64 = 0.97;
 
-const MENU_NAMES: [(&str, MenuId); 7] = [
+pub(super) const MENU_NAMES: [(&str, MenuId); 7] = [
     ("rcs", MenuId::Rcs),
     ("orbital", MenuId::Orbital),
     ("landing", MenuId::Landing),
@@ -81,7 +81,7 @@ const MENU_NAMES: [(&str, MenuId); 7] = [
     ("power", MenuId::Power),
     ("comms", MenuId::Comms),
 ];
-const LAYER_NAMES: [(&str, Layer); 7] = [
+pub(super) const LAYER_NAMES: [(&str, Layer); 7] = [
     ("physical", Layer::Physical),
     ("structural", Layer::Structural),
     ("thermal", Layer::Thermal),
@@ -98,11 +98,11 @@ const TAB_NAMES: [(&str, SettingsTab); 4] = [
 ];
 const STATUSES: [&str; 4] = ["landed", "crashed", "coasting", "powered"];
 
-fn names<T>(list: &[(&'static str, T)]) -> Vec<&'static str> {
+pub(super) fn names<T>(list: &[(&'static str, T)]) -> Vec<&'static str> {
     list.iter().map(|(n, _)| *n).collect()
 }
 
-fn by_name<T: Copy>(list: &[(&str, T)], name: &str, what: &str) -> Result<T, String> {
+pub(super) fn by_name<T: Copy>(list: &[(&str, T)], name: &str, what: &str) -> Result<T, String> {
     list.iter().find(|(n, _)| n.eq_ignore_ascii_case(name)).map(|(_, v)| *v).ok_or_else(|| {
         format!("unknown {what} `{name}` (one of {})", list.iter().map(|(n, _)| *n).collect::<Vec<_>>().join(", "))
     })

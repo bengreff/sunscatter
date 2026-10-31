@@ -202,16 +202,24 @@ pub fn part_temperatures(t: &Temps, parts: usize) -> Vec<PartTemps> {
 /// Vessel `v`'s [`part_temperatures`] now, by part id (`Part::id`).
 pub fn vessel_temperatures(v: &sim::vessel::Vessel) -> Vec<(u32, PartTemps)> {
     let design = v.craft.design();
-    let st = &v.thermal().state;
-    let t = Temps {
-        skin: &st.skin,
-        nodes: &st.nodes,
-        cell_part: &design.cell_part,
-        node_part: &design.node_part,
-        skin_max: &design.skin_max,
-        node_max: &design.node_max,
-    };
-    design.parts.iter().map(|p| p.id).zip(part_temperatures(&t, design.parts.len())).collect()
+    design.parts.iter().map(|p| p.id).zip(part_temperatures(&Temps::of(v), design.parts.len())).collect()
+}
+
+impl<'a> Temps<'a> {
+    /// Vessel `v`'s thermal network now: its cells' and nodes' temperatures,
+    /// parts and limits.
+    pub fn of(v: &'a sim::vessel::Vessel) -> Temps<'a> {
+        let design = v.craft.design();
+        let st = &v.thermal().state;
+        Temps {
+            skin: &st.skin,
+            nodes: &st.nodes,
+            cell_part: &design.cell_part,
+            node_part: &design.node_part,
+            skin_max: &design.skin_max,
+            node_max: &design.node_max,
+        }
+    }
 }
 
 /// The nearer its limit of two temperatures (K, limit K); the second on a

@@ -57,29 +57,9 @@ pub fn draw(
         // definition has nothing to show but the bar that closes the screen.
         let Some((def, state)) = ship.as_ref() else { return };
         region(ui, regions.left, |ui| {
-            let power = crate::interface::menus::power::gather(vessel);
-            let x = super::summary::Inputs {
-                def,
-                state,
-                facts: &view.facts,
-                known: &known,
-                aboard: sim::systems::estimate::aboard(
-                    def,
-                    state,
-                    &sim::systems::estimate::hull(&vessel.craft.design().parts),
-                    &known.knowledge,
-                ),
-                com: sim::systems::estimate::centre(
-                    def,
-                    state,
-                    vessel.craft.design(),
-                    &vessel.craft.contacts,
-                    &known.knowledge,
-                ),
-                power: power.as_ref(),
-                accel: crate::navball::felt(&sim, vessel, sim.clock),
-            };
-            left_column(ui, &mut screen, &craft, &x);
+            super::summary::with_inputs(&sim, (def, state), &view.facts, &known, |x| {
+                left_column(ui, &mut screen, &craft, x);
+            });
         });
         view_image(ui, &mut screen, regions.view, id, (view.framed_radius, view.distance_now));
         region(ui, regions.right, |ui| {

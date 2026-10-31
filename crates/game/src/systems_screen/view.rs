@@ -258,6 +258,30 @@ fn rebuild(
     view.craft = Some(craft.id.0.clone());
 }
 
+/// Each part's layer facts on `vessel` now ([`rules::facts`]: its colour,
+/// joint, temperatures and what it measures), as the view keeps them while
+/// the screen is open: one builder for the screen and the agent's
+/// `read {layer}` (`agent::read`). None for a craft without a ship
+/// definition.
+pub fn facts_of(vessel: &sim::vessel::Vessel) -> Option<Vec<rules::PartFacts>> {
+    let (def, state) = vessel.ship_def().zip(vessel.ship())?;
+    let craft = sim::craft::craft_of(&vessel.craft.id);
+    Some(facts_with(&craft, &def, state, &Temps::of(vessel), &vessel.knowledge()))
+}
+
+/// [`facts_of`] from its pieces (the view keeps the temperatures and the
+/// knowledge for the thermal texture).
+fn facts_with(
+    craft: &Craft,
+    def: &sim::craft::ship::ShipDef,
+    state: &sim::craft::state::ShipState,
+    temps: &Temps,
+    known: &sim::systems::Knowledge,
+) -> Vec<rules::PartFacts> {
+    let colours = parts::part_colours(craft, def, sim::materials::materials());
+    rules::facts(&craft.parts, &colours, def, state, Some(temps), known)
+}
+
 /// Keeps the view on the active vessel while the screen is open: its parts
 /// (rebuilt when its craft changes), their layer colours, ghosts and
 /// mechanisms, the thermal texture, the camera's framing and image size,
@@ -296,18 +320,9 @@ pub fn update(
         return;
     }
     // What each part is now, and its colour in the layer shown.
-    let colours = parts::part_colours(&craft, &def, sim::materials::materials());
-    let t = &vessel.thermal().state;
-    let temps = Temps {
-        skin: &t.skin,
-        nodes: &t.nodes,
-        cell_part: &design.cell_part,
-        node_part: &design.node_part,
-        skin_max: &design.skin_max,
-        node_max: &design.node_max,
-    };
+    let temps = Temps::of(vessel);
     let known = vessel.knowledge();
-    view.facts = rules::facts(&craft.parts, &colours, &def, state, Some(&temps), &known);
+    view.facts = facts_with(&craft, &def, state, &temps, &known);
     // The isolated part (the selection's), if any.
     let isolated_id = screen.back.and(screen.selected).and_then(|s| match s {
         Selection::Part(id) => Some(id),

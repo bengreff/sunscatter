@@ -46,6 +46,34 @@ pub struct Inputs<'a> {
     pub accel: glam::DVec3,
 }
 
+/// `f` of the active vessel's summaries' inputs (its ship `def` in
+/// `state`, the parts' `facts`, what it knows): one builder for the screen
+/// (`ui.rs`) and the agent's `read {layer}` (`agent::read`), so the two
+/// cannot differ.
+pub fn with_inputs<R>(
+    sim: &crate::state::SimState,
+    (def, state): (&ShipDef, &ShipState),
+    facts: &[PartFacts],
+    known: &Known,
+    f: impl FnOnce(&Inputs) -> R,
+) -> R {
+    use sim::systems::estimate;
+    let vessel = sim.ship();
+    let power = power::gather(vessel);
+    let design = vessel.craft.design();
+    let x = Inputs {
+        def,
+        state,
+        facts,
+        known,
+        aboard: estimate::aboard(def, state, &estimate::hull(&design.parts), &known.knowledge),
+        com: estimate::centre(def, state, design, &vessel.craft.contacts, &known.knowledge),
+        power: power.as_ref(),
+        accel: crate::navball::felt(sim, vessel, sim.clock),
+    };
+    f(&x)
+}
+
 /// How many joints or parts a "nearest their limits" list shows.
 pub const TOP: usize = 6;
 

@@ -65,6 +65,9 @@ pub struct FlightData {
     pub diagnostics: Diagnostics,
     /// What the craft knows (D106): every readout through it.
     pub known: crate::format::Known,
+    /// The clock it was gathered at (the agent's `read {menu}` waits for
+    /// the stopped clock's, `agent::read::fresh`).
+    pub clock: Option<sim::time::Epoch>,
 }
 
 /// Osculating elements about the dominant body's equator.
@@ -336,6 +339,7 @@ pub fn gather(s: &Sources) -> FlightData {
         crew: super::crew::gather(ship),
         power: super::power::gather(ship),
         known: crate::format::Known::of(ship),
+        clock: Some(sim.clock),
         diagnostics: Diagnostics {
             anchor: sim.world.eph.node(anchor).name.clone(),
             fps: s.fps.clone(),

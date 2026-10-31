@@ -79,6 +79,42 @@ impl Plugin for PartCardPlugin {
     }
 }
 
+/// What the active vessel's cards read besides the ship ([`Live`]), gathered
+/// once a frame: one builder for the cards and the agent's `read {card}`
+/// (`agent::read`), so the two cannot differ.
+pub struct Gathered {
+    knowledge: sim::systems::Knowledge,
+    thrusts: Vec<f64>,
+    temps: Vec<(u32, crate::systems_screen::rules::PartTemps)>,
+    chute_parts: Vec<u32>,
+    chute_words: &'static str,
+}
+
+impl Gathered {
+    /// The active vessel's, now.
+    pub fn of(sim: &SimState) -> Gathered {
+        let v = sim.ship();
+        let p = {
+            let (anchor, r, _) = v.state_at(&sim.world, sim.clock);
+            sim::forces::ambient_pressure(&sim.world, &sim.world.snapshot(sim.clock), anchor, r)
+        };
+        let (chute_parts, chute_words) = content::chutes(v);
+        Gathered {
+            knowledge: v.knowledge(),
+            thrusts: v.engine_thrusts(sim.controls().throttle, p).unwrap_or_default(),
+            temps: crate::systems_screen::rules::vessel_temperatures(v),
+            chute_parts,
+            chute_words,
+        }
+    }
+
+    /// The cards' inputs for the ship `def` in `state`.
+    pub fn live<'a>(&'a self, def: &'a sim::craft::ship::ShipDef, state: &'a sim::craft::state::ShipState) -> Live<'a> {
+        let chute = (!self.chute_parts.is_empty()).then_some((self.chute_parts.as_slice(), self.chute_words));
+        Live { def, state, knowledge: &self.knowledge, thrusts: &self.thrusts, temps: &self.temps, chute }
+    }
+}
+
 /// How long a dash is hovered before its tooltip names the sensor (s).
 const DASH_HOVER_S: f64 = 2.0;
 /// A card's width (logical px).
@@ -110,16 +146,8 @@ pub fn show(
     if station.open || systems.open || cards.open.is_empty() {
         return Ok(());
     }
-    let knowledge = v.knowledge();
-    let p = {
-        let (anchor, r, _) = v.state_at(&sim.world, sim.clock);
-        sim::forces::ambient_pressure(&sim.world, &sim.world.snapshot(sim.clock), anchor, r)
-    };
-    let thrusts = v.engine_thrusts(sim.controls().throttle, p).unwrap_or_default();
-    let temps = crate::systems_screen::rules::vessel_temperatures(v);
-    let (chute_parts, words) = content::chutes(v);
-    let chute = (!chute_parts.is_empty()).then_some((chute_parts.as_slice(), words));
-    let live = Live { def: &def, state, knowledge: &knowledge, thrusts: &thrusts, temps: &temps, chute };
+    let gathered = Gathered::of(&sim);
+    let live = gathered.live(&def, state);
     let screen = ctx.content_rect();
     let right = screen.max.x - layout::MARGIN - stage_bar::WIDTH - layout::GAP;
     let top = screen.min.y + layout::MARGIN + 40.0;

@@ -12,6 +12,7 @@
 //! a developer's alike (D044, D122): the session's tools ([`session`]: shots,
 //! the camera, time, flights, saves) are every agent's.
 
+pub mod read;
 pub mod session;
 
 use crate::commands::GameCommand;
@@ -51,11 +52,16 @@ pub enum Effect {
 }
 
 /// What the player's interface holds that the agent reads as the player
-/// does (D044): the navigation target and the notifications.
+/// does (D044): the navigation target, the notifications, the menus'
+/// snapshot and the navball's state (the `read` tool's pages), and whether
+/// the tracking station is open.
 #[derive(Clone, Copy, Default)]
 pub struct Seen<'a> {
     pub target: Option<NavTarget>,
     pub toasts: Option<&'a Toasts>,
+    pub flight: Option<&'a crate::interface::menus::FlightData>,
+    pub nav: Option<&'a crate::navball::NavState>,
+    pub station: bool,
 }
 
 /// The rotation input an agent aboard holds on the active vessel, like the
@@ -187,33 +193,9 @@ fn flight_tools() -> Vec<Tool> {
              from now, distance (m), relative speed (m/s).",
             schema(json!({"a": id, "b": id}), &["a", "b"]),
         ),
-        t(
-            "set_controls",
-            "Throttle (0–1), SAS, the attitude hold and the speed reference of a vessel (`id`, default the active \
-             one; each vessel keeps its own, active or not). From anywhere but aboard, the settings reach it after \
-             the signal's light delay (`arrives_in_s`); without a signal they cannot be sent. Prograde and \
-             retrograde follow the speed reference (orbit, surface or target, as on its navball) about its \
-             reference body; a planned burn is flown by the maneuver hold on its own. `rotate` is the pilot's \
-             rotation keys held (body axes, each −1–1: x pitch, y yaw, z roll; [0,0,0] lets go), aboard the active \
-             vessel only: for a short manoeuvre such as a pitch kick, flown from stopped time with `step` (agents \
-             fly by decisions, D044). `rcs` (off, on, translate or rotate only) and `rcs_fine` are the pilot's RCS \
-             mode (R and the RCS menu), aboard the active vessel only.",
-            schema(
-                json!({
-                    "id": id,
-                    "throttle": {"type": "number", "minimum": 0, "maximum": 1},
-                    "sas": {"type": "boolean"},
-                    "hold": {"type": "string", "enum": HOLD_NAMES.map(|(n, _)| n)},
-                    "speed_reference": {"type": "string", "enum": SPEED_NAMES.map(|(n, _)| n)},
-                    "rotate": {"type": "array", "items": {"type": "number", "minimum": -1, "maximum": 1},
-                               "minItems": 3, "maxItems": 3},
-                    "rcs": {"type": "string", "enum": RCS_NAMES.map(|(n, _)| n)},
-                    "rcs_fine": {"type": "boolean"}
-                }),
-                &[],
-            ),
-        ),
+        controls_tool(&id),
         command_tool(&id),
+        read::tool(),
     ]
     .into_iter()
     .chain(interface_tools(&id))
@@ -269,6 +251,41 @@ fn interface_tools(id: &Value) -> Vec<Tool> {
             schema(json!({"after": {"type": "integer", "minimum": 0}}), &[]),
         ),
     ]
+}
+
+/// The `set_controls` tool's definition (`flight_tools`).
+fn controls_tool(id: &Value) -> Tool {
+    let t = |name: &str, description: &str, input_schema: Value| Tool {
+        name: name.into(),
+        description: description.into(),
+        input_schema,
+    };
+    t(
+        "set_controls",
+        "Throttle (0–1), SAS, the attitude hold and the speed reference of a vessel (`id`, default the active \
+             one; each vessel keeps its own, active or not). From anywhere but aboard, the settings reach it after \
+             the signal's light delay (`arrives_in_s`); without a signal they cannot be sent. Prograde and \
+             retrograde follow the speed reference (orbit, surface or target, as on its navball) about its \
+             reference body; a planned burn is flown by the maneuver hold on its own. `rotate` is the pilot's \
+             rotation keys held (body axes, each −1–1: x pitch, y yaw, z roll; [0,0,0] lets go), aboard the active \
+             vessel only: for a short manoeuvre such as a pitch kick, flown from stopped time with `step` (agents \
+             fly by decisions, D044). `rcs` (off, on, translate or rotate only) and `rcs_fine` are the pilot's RCS \
+             mode (R and the RCS menu), aboard the active vessel only.",
+        schema(
+            json!({
+                "id": id,
+                "throttle": {"type": "number", "minimum": 0, "maximum": 1},
+                "sas": {"type": "boolean"},
+                "hold": {"type": "string", "enum": HOLD_NAMES.map(|(n, _)| n)},
+                "speed_reference": {"type": "string", "enum": SPEED_NAMES.map(|(n, _)| n)},
+                "rotate": {"type": "array", "items": {"type": "number", "minimum": -1, "maximum": 1},
+                           "minItems": 3, "maxItems": 3},
+                "rcs": {"type": "string", "enum": RCS_NAMES.map(|(n, _)| n)},
+                "rcs_fine": {"type": "boolean"}
+            }),
+            &[],
+        ),
+    )
 }
 
 /// The `command` tool's definition (`flight_tools`).
@@ -529,6 +546,7 @@ fn run(
             let after = args.get("after").and_then(Value::as_u64).unwrap_or(0);
             (notifications_json(seen.toasts, after), Vec::new())
         }
+        "read" => (read::read(args, sim, &seen)?, Vec::new()),
         _ => return Err(format!("unknown tool {tool}")),
     })
 }
@@ -1001,7 +1019,14 @@ pub struct AgentServer {
     server: Option<(Server, u16, String)>,
     error: Option<String>,
     env: Option<Option<(u16, String)>>,
+    /// Menu reads waiting for the stopped clock's snapshot
+    /// ([`read::fresh`]), with the frames waited.
+    waiting: Vec<(mcp::Call, u32)>,
 }
+
+/// The most frames a `read {menu}` waits for the stopped clock's snapshot
+/// (it is refreshed every 0.1 s of real time).
+const READ_WAIT_FRAMES: u32 = 60;
 
 /// A token for the agent to present (local use; not cryptographic).
 pub fn new_token() -> String {
@@ -1024,7 +1049,7 @@ pub fn serve(
     mut commands: MessageWriter<GameCommand>,
     mut session: ResMut<session::Session>,
     mut held: ResMut<HeldRotation>,
-    (mut nav, toasts): (ResMut<crate::navball::Navball>, Res<Toasts>),
+    (mut nav, toasts, data): (ResMut<crate::navball::Navball>, Res<Toasts>, Res<crate::interface::menus::FlightData>),
 ) {
     // `SUNSCATTER_AGENT=<port>:<token>` turns the server on (demos, tests).
     if state.server.is_none() && state.env.is_none() {
@@ -1054,13 +1079,29 @@ pub fn serve(
             }
         }
     }
-    let Some((server, _, _)) = &state.server else { return };
-    for call in server.poll() {
+    let AgentServer { server, waiting, .. } = &mut *state;
+    let Some((server, _, _)) = server.as_ref() else { return };
+    let mut calls = std::mem::take(waiting);
+    calls.extend(server.poll().into_iter().map(|c| (c, 0)));
+    for (call, frames) in calls {
         if session::handles(&call.tool) {
             session.incoming.push(call);
             continue;
         }
-        let seen = Seen { target: nav.target, toasts: Some(&toasts) };
+        // A menu's page from the stopped clock's snapshot, the same on
+        // every replay.
+        let menu = call.tool == "read" && call.arguments.get("menu").is_some();
+        if menu && frames < READ_WAIT_FRAMES && !read::fresh(sim.paused, data.clock, sim.clock) {
+            waiting.push((call, frames + 1));
+            continue;
+        }
+        let seen = Seen {
+            target: nav.target,
+            toasts: Some(&toasts),
+            flight: Some(&data),
+            nav: nav.now.as_ref(),
+            station: station.open,
+        };
         let (result, effects) = answer_seen(&call.tool, &call.arguments, &sim, &comms, &pred, seen);
         for e in effects {
             match e {
@@ -1366,7 +1407,7 @@ mod tests {
                 (got, want) => panic!("{args}: {got:?}, want {want:?}"),
             }
         }
-        let seen = Seen { target: Some(NavTarget::Body(moon)), toasts: None };
+        let seen = Seen { target: Some(NavTarget::Body(moon)), ..Seen::default() };
         let (ToolResult::Ok(v), _) = answer_seen("get_state", &json!({}), &sim, &comms, &Default::default(), seen)
         else {
             panic!()
@@ -1415,7 +1456,7 @@ mod tests {
         toasts.push(0.0, "Saved", false);
         toasts.push_linked(1.0, "Stage separation", false, Some(Link::Vessel(VesselId(2))));
         toasts.push(2.0, "Nothing to load", true);
-        let seen = Seen { target: None, toasts: Some(&toasts) };
+        let seen = Seen { toasts: Some(&toasts), ..Seen::default() };
         let (ToolResult::Ok(v), e) =
             answer_seen("notifications", &json!({"after": 1}), &sim, &comms, &Default::default(), seen)
         else {
