@@ -220,6 +220,14 @@ pub fn ullage_pressure(def: &sim::craft::ship::TankDef, s: &sim::craft::state::T
     sim::fluids::pressure(s.ullage_moles, volume, s.ullage_k)
 }
 
+/// What `name` names on the craft: a part by its id, else a component by
+/// its id (a battery, a bottle, a computer are components: MCP's
+/// `shoot {part}` selects either, as a click on the screen does).
+pub fn named(def: &ShipDef, name: &str) -> Option<Selection> {
+    let component = || def.components.iter().position(|c| c.id == name).map(Selection::Component);
+    def.part_named(name).map(Selection::Part).or_else(component)
+}
+
 /// What bottle `j` holds (kg) as the craft knows it (finding 48; one rule
 /// for the systems screen's bottle and the RCS menu's feeds): through its
 /// pressure transducer, the gas law at the bottle's temperature giving the

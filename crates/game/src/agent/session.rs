@@ -145,7 +145,7 @@ pub fn tools(dev: bool) -> Vec<Tool> {
              `width`/`height` size the image of a headless game (SUNSCATTER_OFFSCREEN=1); `ui_scale` scales the \
              interface for this shot (0.2 shrinks it to specks: a shot of the scene); `menus` are the flight view's \
              menus open for the shot (the others closed; the RCS menu shows while RCS is on); the systems screen opens on `layer` with `part` (a \
-             craft-file id) isolated, the thermal layer's cut-away at `cut` (0 none, 1 all); `help` shows the keys and every way in, `saves` the \
+             craft-file id of a part, isolated, or of a component, selected), the thermal layer's cut-away at `cut` (0 none, 1 all); `help` shows the keys and every way in, `saves` the \
              Saves window; `cards` opens those parts' cards \
              (craft-file ids) by the staging bar. Everything is put back after the shot.",
             schema(
@@ -1066,17 +1066,25 @@ fn show(spec: &ShotSpec, sim: &SimState, s: &mut Screens) -> Result<(), String> 
     match &spec.screen {
         Screen::Flight => {}
         Screen::Systems { layer, part, cut } => {
+            use crate::systems_screen::inspect::{named, Selection};
             let def = sim.ship().ship_def();
-            let part = match part {
+            let sel = match part {
                 None => None,
                 Some(p) => Some(
                     def.as_ref()
-                        .and_then(|d| d.part_named(p))
-                        .ok_or_else(|| format!("the active vessel has no part `{p}`"))?,
+                        .and_then(|d| named(d, p))
+                        .ok_or_else(|| format!("the active vessel has no part or component `{p}`"))?,
                 ),
             };
             s.systems.close();
-            s.systems.open_at(*layer, part);
+            match sel {
+                Some(Selection::Component(_)) => {
+                    s.systems.open_at(*layer, None);
+                    s.systems.select(sel);
+                }
+                Some(Selection::Part(id)) => s.systems.open_at(*layer, Some(id)),
+                None => s.systems.open_at(*layer, None),
+            }
             if let Some(c) = cut {
                 s.systems.cut = *c;
             }

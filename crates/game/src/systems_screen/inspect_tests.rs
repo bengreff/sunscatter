@@ -112,6 +112,23 @@ fn components_show_their_equipment_and_switches() {
     assert!(commands(def, &state, Selection::Part(999)).is_empty());
 }
 
+/// A name selects a part by its id, else a component (MCP's `shoot
+/// {part}`: the battery and bottle inspectors had no way in).
+#[test]
+fn a_name_selects_a_part_or_a_component() {
+    let craft = rocket();
+    let def = craft.ship.as_deref().unwrap();
+    let bottle = def.components.iter().position(|c| c.id == "bottle").unwrap();
+    let table = [
+        ("tank", Some(Selection::Part(def.part_named("tank").unwrap()))),
+        ("bottle", Some(Selection::Component(bottle))),
+        ("nothing", None),
+    ];
+    for (name, want) in table {
+        assert_eq!(named(def, name), want, "{name}");
+    }
+}
+
 /// What the craft does not measure is a dash (D106); design data stays.
 #[test]
 fn values_without_a_sensor_read_as_a_dash() {

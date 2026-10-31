@@ -42,7 +42,7 @@ The agent is at a **control location** like you (D067): mission control when the
 
 | Tool | Does |
 |---|---|
-| `shoot` | A screenshot (PNG) once the view has settled, the clock held meanwhile: the flight view or a named screen (`systems` on a `layer` with a `part` selected, `tracking`, `pause`, `settings` on a tab, `saves`, `help`), with `menus` open (the RCS menu while RCS is on), at a `width`/`height` (headless), at an interface scale (`ui_scale`: 0.2 shrinks it to specks). Returns the file's path (default `shots/` under the game's home) |
+| `shoot` | A screenshot (PNG) once the view has settled, the clock held meanwhile: the flight view or a named screen (`systems` on a `layer` with a `part` selected: a part isolated or a component, a battery or a bottle, selected, `tracking`, `pause`, `settings` on a tab, `saves`, `help`), with `menus` open (the RCS menu while RCS is on), at a `width`/`height` (headless), at an interface scale (`ui_scale`: 0.2 shrinks it to specks). Returns the file's path (default `shots/` under the game's home) |
 | `set_camera` | The camera's focus (the active vessel, another vessel or a body), distance, pitch and yaw about the focus's up, or the angle from a body's subsolar point |
 | `pause` | Stop time (the player's `,`) |
 | `step` | Run `seconds` of game time and stop exactly there, at a warp level; answers when the clock has stopped |
