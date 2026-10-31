@@ -53,7 +53,7 @@ Small commits, each passing fmt, clippy and the game's tests you touched (`cargo
 
 ## State
 
-**INTERFACE-9 (2026-10-31), wrapped up at its context cap.** Closed INTERFACE-8's Left 1–5, the parity table's gaps and overs (interface-map.md's parity section now reads "yes" on every row), and found and fixed finding 57. Not done: the `owners.md` rows (LAYERS has the file open) and the walk of every screen (only the new tools were checked live). LAYERS' sim move left the shared tree uncompilable mid-round, so every commit passed fmt, clippy (game) and the touched modules' tests in a private mirror of HEAD plus my files; the pre-push check ran the whole suites.
+**INTERFACE-9 (2026-10-31), wrapped up.** Closed INTERFACE-8's Left 1–5, the parity table's gaps and overs (interface-map.md's parity section now reads "yes" on every row), found and fixed finding 57, and wrote the `owners.md` rows (INTERFACE-8's and mine, in the docs commit after this State's first). Not done: the walk of every screen (only the new tools were checked live). LAYERS' sim move left the shared tree uncompilable mid-round, so every commit passed fmt, clippy (game) and the touched modules' tests in a private mirror of HEAD plus my files; the pre-push check ran the whole suites.
 
 **Landed:**
 - 242881a: the navball cluster's rows as a model: `navball::rules::{readouts, controls}` (`Readouts`, `ControlRows`, `Button`, `hold_short`), gathered by `navball::control_rows`; `draw.rs` only lays them out. Table test of the controls.
@@ -68,10 +68,9 @@ Small commits, each passing fmt, clippy and the game's tests you touched (`cargo
 **Live** (headless, debug off, the Falcon 9 on the pad, HEAD 4bb3520): `read {navball}` ("SAS ON", "CLAMPED", G "1.00 / 7.5 g ▲", Ap "—"), `{menu: orbital}`, `{card: dragon.capsule}` (NTO "—/1587 kg", `measured_by` "a level sensor in the tank: none fitted"), `{layer: structural}` (560 t, centre of mass 29.2 m), `{item: s2.battery#1}`; `edit_program` defined "Nose open" (DEPLOY dragon.nose), pinned: it shows on the action bar; a stage removed on the pad came back with `revert_to_launch`; `translate` with RCS off warned. Shots: `/private/tmp/claude-501/-Users-ben-sunscatter/7c5f130a-69ba-45d3-9965-ca858b31253e/scratchpad/interface9/shots/a_pinned_bar.png` (the agent's function on the action bar), `a_pinned.png`.
 
 **Left, in order:**
-1. `owners.md` rows (LAYERS holds the file): INTERFACE-8's (`Reading`'s `Add` and `Sum`, a sum's precision; `state::Prediction::current` and `session::answer_now`, a run's answer after its stop; `part_card::content::known` and `Live::held`, a card's value unmeasured) and mine: `agent::read` (the pages as data from the screens' models), `agent::program` (the editors for the agent), `agent::HeldKeys` (the agent's held flight keys), `navball::rules::{readouts, controls}` and `navball::control_rows` (the cluster's rows), `part_card::Gathered` (the cards' inputs), `systems_screen::view::facts_of` and `summary::with_inputs` (the screen's inputs), `saves::revert` and `saves::listing`, `hud::body_distance`, `format::DEGREE_DECIMALS` and `ECCENTRICITY_DECIMALS`, `agent::known_time`, `known_digits`, `known_ground` (a number through the craft's knowledge by its menu's rule).
-2. Finding 58: `step` and `run_until` answer with the vessel's `state` as raw truth: `session::Sample::json` through `Known`.
-3. The walk of every screen at HEAD (pad, ascent, separation, orbit, Dragon alone), reading each page through `read` beside its shot.
-4. Small: a menu control's `by` for a ship command says `command {item, do}` without naming the item; `read {menu}` could give it.
+1. Finding 58: `step` and `run_until` answer with the vessel's `state` as raw truth: `session::Sample::json` through `Known`.
+2. The walk of every screen at HEAD (pad, ascent, separation, orbit, Dragon alone), reading each page through `read` beside its shot.
+3. Small: a menu control's `by` for a ship command says `command {item, do}` without naming the item; `read {menu}` could give it.
 
 **Open for the owner (INTERFACE-9):**
 - The agent reads every page as data through `read`, from the model the page draws; a menu read while time is stopped waits for the stopped clock's snapshot (at most 60 frames), so a replay reads the same.
