@@ -164,13 +164,14 @@ fn fluids(x: &Inputs) -> Vec<Group> {
         tanks.opens(Selection::Part(d.part));
         let p = super::inspect::ullage_pressure(d, s);
         let known = k.knows(q(Quantity::TankPressure));
-        let shown = format!("{} / {:.1} bar", k.value(q(Quantity::TankPressure), p, 1e5, 2, "bar"), d.burst / 1e5);
+        let read = k.knowledge.read(q(Quantity::TankPressure), p);
+        let shown = format!("{} / {}", format::pressure(read), format::bar(d.burst));
         pressures.limit(&d.id, shown, known.then_some(p), d.burst).opens(Selection::Part(d.part));
     }
     for (j, (b, s)) in def.bottles.iter().zip(&state.bottles).enumerate() {
         let q = Quantity::BottlePressure(j as u32);
         let p = sim::fluids::pressure(s.moles, b.volume, s.k);
-        let shown = format!("{} / {:.0} bar", k.value(q, p, 1e5, 0, "bar"), b.burst / 1e5);
+        let shown = format!("{} / {}", format::pressure(k.knowledge.read(q, p)), format::bar(b.burst));
         pressures.limit(&format!("{} · {}", b.id, b.gas), shown, k.knows(q).then_some(p), b.burst);
         if let Some(c) = def.components.iter().position(|c| c.id == b.id) {
             pressures.opens(Selection::Component(c));

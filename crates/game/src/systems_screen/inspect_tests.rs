@@ -88,7 +88,7 @@ fn components_show_their_equipment_and_switches() {
     }
     let g = details(def, &state, &facts, Selection::Component(index("bottle")), &Known::default());
     assert_eq!(value(&g, "BOTTLE bottle", "gas"), "nitrogen");
-    assert!(value(&g, "BOTTLE bottle", "pressure").starts_with("300.00 bar"));
+    assert!(value(&g, "BOTTLE bottle", "pressure").starts_with("300 bar / "), "the card's rule (finding 49)");
     // Its contents of its full load, as the RCS menu reads its feed
     // (finding 48: `bottle_contents`), exact in debug mode; through a
     // transducer to 0.41 bar, the gas law's kilograms of that.

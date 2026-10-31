@@ -177,9 +177,8 @@ fn tanks(live: &Live, tanks: &[usize]) -> Section {
     if let Some(&t) = tanks.iter().max_by(|&&a, &&b| ratio(a).total_cmp(&ratio(b))) {
         let (d, s) = (&def.tanks[t], &state.tanks[t]);
         let p = crate::systems_screen::inspect::ullage_pressure(d, s);
-        let rated = d.pressure / 1e5;
         let v = live.value(Quantity::TankPressure(t as u32), p, |r| {
-            format!("{} of {rated:.1} bar", super::content::scaled(r, 1e5, 2, "bar"))
+            format!("{} of {}", format::pressure(Some(r)), format::bar(d.pressure))
         });
         lines.push(against("pressure (highest)", v, p, d.burst));
     }
@@ -197,9 +196,9 @@ fn bottles(live: &Live, b: &[usize]) -> Section {
     if let Some(&j) =
         b.iter().max_by(|&&x, &&y| (p(x) / def.bottles[x].burst).total_cmp(&(p(y) / def.bottles[y].burst)))
     {
-        let rated = def.bottles[j].pressure / 1e5;
+        let rated = def.bottles[j].pressure;
         let v = live.value(Quantity::BottlePressure(j as u32), p(j), |r| {
-            format!("{} of {rated:.0} bar", super::content::scaled(r, 1e5, 0, "bar"))
+            format!("{} of {}", format::pressure(Some(r)), format::bar(rated))
         });
         lines.push(against("pressure (highest)", v, p(j), def.bottles[j].burst));
     }

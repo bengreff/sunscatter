@@ -146,6 +146,41 @@ pub fn metres(r: Reading) -> String {
     format!("{:.*} m", decimals(r.precision, 1.0, 1), r.shown())
 }
 
+/// The unit a pressure is shown in: bar, two decimals at most under 10
+/// bar, one under 100, none above (a tank's ullage, a bottle's gas).
+fn pressure_unit(pa: f64) -> (f64, &'static str, usize) {
+    let bar = pa.abs() / 1e5;
+    (
+        1e5,
+        "bar",
+        if bar < 10.0 {
+            2
+        } else if bar < 100.0 {
+            1
+        } else {
+            0
+        },
+    )
+}
+
+/// A pressure as it is known (one rule: the part card's tanks and bottles,
+/// the systems screen's and its Plumbing summary's).
+pub fn pressure(r: Option<Reading>) -> String {
+    read(r, pressure_unit)
+}
+
+/// A pressure the craft's files give exactly (a rating, a burst), read as
+/// every pressure is.
+pub fn bar(pa: f64) -> String {
+    pressure(Some(Reading { value: pa, precision: 0.0 }))
+}
+
+/// A temperature as it is known, in whole kelvin at most (a tank's liquid
+/// and ullage: the part card's and the systems screen's).
+pub fn kelvin(r: Option<Reading>) -> String {
+    read(r, |_| (1.0, "K", 0))
+}
+
 /// A force as it is known.
 pub fn force(r: Option<Reading>) -> String {
     read(r, force_unit)
@@ -350,6 +385,32 @@ mod tests {
         for (reading, capacity, want) in table {
             assert_eq!(charge(reading, wh(capacity)), want, "{reading:?}");
         }
+    }
+
+    /// A pressure to its precision (finding 49: the card's bottle read
+    /// "300 bar", the screen's "300.4 bar"), its digits by its size; a
+    /// temperature in whole kelvin.
+    #[test]
+    fn pressures_and_temperatures_read_to_their_precision() {
+        let r = |value: f64, precision: f64| Some(Reading { value, precision });
+        let table = [
+            (r(3.4216e5, 0.0), "3.42 bar"),
+            (r(3.4216e5, 700.0), "3.42 bar"),
+            (r(3.4216e5, 1e4), "3.4 bar"),
+            (r(3.004e7, 4.1e4), "300 bar"),
+            (r(3.004e7, 0.0), "300 bar"),
+            (r(4.5e6, 0.0), "45.0 bar"),
+            (None, DASH),
+        ];
+        for (reading, want) in table {
+            assert_eq!(pressure(reading), want, "{reading:?}");
+        }
+        assert_eq!(bar(5.175e7), "518 bar");
+        assert_eq!(bar(5.1e5), "5.10 bar");
+        assert_eq!(
+            (kelvin(r(90.44, 0.0)), kelvin(r(90.44, 1.0)), kelvin(None)),
+            ("90 K".into(), "90 K".into(), DASH.into())
+        );
     }
 
     /// A length to its precision (the centre of mass's height): one

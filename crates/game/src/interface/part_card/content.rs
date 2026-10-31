@@ -138,7 +138,7 @@ pub fn card(live: &Live, part: u32) -> Option<Card> {
     for (label, t) in [("skin", skin), ("interior", interior)] {
         let Some((k, limit)) = t else { continue };
         let value =
-            live.value(Quantity::PartTemperature(part), k, |r| format!("{} / {limit:.0} K", scaled(r, 1.0, 0, "K")));
+            live.value(Quantity::PartTemperature(part), k, |r| format!("{} / {limit:.0} K", format::kelvin(Some(r))));
         own.push(against(label, value, k, limit));
     }
     sections.push(Section { heading: format!("PART {}", info.id), lines: own });
@@ -188,11 +188,11 @@ fn tank(live: &Live, t: usize) -> Section {
     let i = t as u32;
     let cap = d.capacity;
     let level = live.value(Quantity::TankLevel(i), s.liquid, |r| crate::format::amount(Some(r), cap));
-    let rated = d.pressure / 1e5;
     let p = inspect::ullage_pressure(d, s);
-    let pressure =
-        live.value(Quantity::TankPressure(i), p, |r| format!("{} of {rated:.1} bar", scaled(r, 1e5, 2, "bar")));
-    let temperature = live.value(Quantity::TankTemperature(i), s.liquid_k, |r| scaled(r, 1.0, 1, "K"));
+    let pressure = live.value(Quantity::TankPressure(i), p, |r| {
+        format!("{} of {}", format::pressure(Some(r)), format::bar(d.pressure))
+    });
+    let temperature = live.value(Quantity::TankTemperature(i), s.liquid_k, |r| format::kelvin(Some(r)));
     let pressure = against("pressure", pressure, p, d.burst);
     let lines = vec![line("contents", level), pressure, line("temperature", temperature)];
     Section { heading: format!("TANK {} · {}", d.id, d.fluid), lines }
@@ -205,9 +205,8 @@ fn stores(live: &Live, part: u32, inside: &Inside, out: &mut Vec<Section>) {
     for (j, b) in def.bottles.iter().enumerate().filter(|(j, b)| b.part == part && !inside.bottles.contains(j)) {
         let s = &state.bottles[j];
         let p = sim::fluids::pressure(s.moles, b.volume, s.k);
-        let rated = b.pressure / 1e5;
         let v = live.value(Quantity::BottlePressure(j as u32), p, |r| {
-            format!("{} of {rated:.0} bar", scaled(r, 1e5, 0, "bar"))
+            format!("{} of {}", format::pressure(Some(r)), format::bar(b.pressure))
         });
         let lines = vec![against("pressure", v, p, b.burst)];
         out.push(Section { heading: format!("BOTTLE {} · {}", b.id, b.gas), lines });

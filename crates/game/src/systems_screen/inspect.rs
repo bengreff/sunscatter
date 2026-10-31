@@ -17,7 +17,7 @@
 //! (ratings, masses, ranges) as built.
 
 use super::rules::{JointClass, PartFacts};
-use crate::format::{limit_level, Known, Level};
+use crate::format::{bar, limit_level, Known, Level};
 use crate::staging::parts::label;
 use sim::catalog::{Hazard, Life, Ratings};
 use sim::craft::command::ShipCommand;
@@ -149,10 +149,6 @@ fn kg(x: f64) -> String {
 
 fn kelvin(x: f64) -> String {
     format!("{x:.0} K")
-}
-
-fn bar(pa: f64) -> String {
-    format!("{:.2} bar", pa / 1e5)
 }
 
 fn kilonewtons(n: f64) -> String {
@@ -381,16 +377,20 @@ fn tank_group(def: &ShipDef, state: &ShipState, i: usize, k: &Known) -> Group {
         Some(r) => format!("{} ({})", crate::format::amount(read, t.capacity), crate::format::share(r, t.capacity)),
         None => crate::format::amount(read, t.capacity),
     };
-    let warm = k.knows(q(Quantity::TankTemperature));
+    // The pressure and temperatures by the one rule (`format::pressure`,
+    // `format::kelvin`: the card's), the ullage's from the tank's
+    // temperature sensor.
     let p = ullage_pressure(t, s);
     let known_p = k.knows(q(Quantity::TankPressure));
-    let pressure = format!("{} / {}", k.value(q(Quantity::TankPressure), p, 1e5, 2, "bar"), bar(t.burst));
+    let pressure =
+        format!("{} / {}", crate::format::pressure(k.knowledge.read(q(Quantity::TankPressure), p)), bar(t.burst));
+    let kelvin = |x: f64| crate::format::kelvin(k.knowledge.read(q(Quantity::TankTemperature), x));
     g.row("fluid", t.fluid.clone())
         .row("liquid", level)
         .limit("ullage pressure", pressure, known_p.then_some(p), t.burst)
         .row("operating", bar(t.pressure))
-        .row("liquid temperature", k.or_dash(warm, || kelvin(s.liquid_k)))
-        .row("ullage temperature", k.or_dash(warm, || kelvin(s.ullage_k)));
+        .row("liquid temperature", kelvin(s.liquid_k))
+        .row("ullage temperature", kelvin(s.ullage_k));
     g
 }
 
@@ -449,7 +449,7 @@ fn stores(def: &ShipDef, state: &ShipState, id: &str, k: &Known, out: &mut Vec<G
         let s = &state.bottles[j];
         let q = Quantity::BottlePressure(j as u32);
         let p = sim::fluids::pressure(s.moles, b.volume, s.k);
-        let pressure = k.value(q, p, 1e5, 2, "bar");
+        let pressure = crate::format::pressure(k.knowledge.read(q, p));
         // What it holds to its transducer's precision, of its full load
         // (`bottle_contents`, the RCS menu's feeds' rule too).
         let contents = crate::format::amount(bottle_contents(def, state, &k.knowledge, j), def.bottle_gas(b));
