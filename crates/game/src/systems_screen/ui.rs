@@ -73,7 +73,7 @@ pub fn draw(
             };
             left_column(ui, &mut screen, &craft, &x);
         });
-        view_image(ui, &mut screen, regions.view, id, view.radius);
+        view_image(ui, &mut screen, regions.view, id, (view.framed_radius, view.distance_now));
         region(ui, regions.right, |ui| {
             let x = Selected { def, state, facts: &view.facts, known: &known, vessel: vessel.id() };
             selected(ui, &mut screen, &x, &mut out);
@@ -111,11 +111,22 @@ fn top_bar(ui: &mut egui::Ui, screen: &mut SystemsScreen, name: &str, vessel: u6
             }
         }
         ui.add_space(16.0);
-        if ui.button("close (Tab / Esc)").clicked() {
-            screen.open = false;
+        let close =
+            format!("close ({} / Esc)", crate::commands::keys::label(crate::commands::keys::Action::SystemsScreen));
+        if ui.button(close).clicked() {
+            screen.close();
         }
     });
-    ui.label(egui::RichText::new(screen.layer.note()).small().color(theme::DIM));
+    ui.horizontal(|ui| {
+        ui.label(egui::RichText::new(screen.layer.note()).small().color(theme::DIM));
+        if screen.layer == Layer::Thermal {
+            ui.add_space(12.0);
+            ui.label(egui::RichText::new("cut away").small().color(theme::DIM));
+            ui.add(egui::Slider::new(&mut screen.cut, 0.0..=1.0).show_value(false)).on_hover_text(
+                "Cut away the side facing you to see the interior nodes: none at the left, all at the right",
+            );
+        }
+    });
 }
 
 /// The left column: the craft as a whole in the layer shown (the default)
@@ -150,7 +161,8 @@ struct Selected<'a> {
 fn selected(ui: &mut egui::Ui, screen: &mut SystemsScreen, x: &Selected, out: &mut Vec<GameCommand>) {
     let Some(sel) = screen.selected else {
         ui.label(egui::RichText::new("SELECTED").color(theme::DIM));
-        let hint = "Click a part in the view, in the parts list or in a row about one: everything about it shows here.";
+        let hint = "Click a part in the view, in the parts list or in a row about one: it is isolated and framed, \
+                    and everything about it shows here. Esc or its × goes back to this view.";
         ui.label(egui::RichText::new(hint).small().color(theme::DIM));
         return;
     };
@@ -164,7 +176,8 @@ fn selected(ui: &mut egui::Ui, screen: &mut SystemsScreen, x: &Selected, out: &m
         ui.label(egui::RichText::new(title).color(theme::ACCENT));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             let x = ui.add(egui::Button::new(egui::RichText::new("×").color(theme::DIM)).frame(false));
-            clear = x.on_hover_text("Clear the selection").clicked();
+            clear = x.on_hover_text("Back to the layer view as it was (Esc)").clicked();
+            ui.label(egui::RichText::new("isolated · Esc or × goes back").small().color(theme::DIM));
         });
     });
     let commands = inspect::commands(def, x.state, sel);
@@ -221,8 +234,16 @@ fn part_list(
     });
 }
 
-/// The 3D view: drag to orbit, scroll to zoom, click to select.
-fn view_image(ui: &mut egui::Ui, screen: &mut SystemsScreen, rect: egui::Rect, id: egui::TextureId, radius: f32) {
+/// The 3D view: drag to orbit, scroll to zoom (about what is framed:
+/// `framed` its radius and the distance now), click to isolate a part.
+fn view_image(
+    ui: &mut egui::Ui,
+    screen: &mut SystemsScreen,
+    rect: egui::Rect,
+    id: egui::TextureId,
+    framed: (f32, f32),
+) {
+    let (radius, now) = framed;
     let ppp = ui.ctx().pixels_per_point();
     screen.view_px = Some(UVec2::new((rect.width() * ppp) as u32, (rect.height() * ppp) as u32));
     let image = egui::Image::new(egui::load::SizedTexture::new(id, rect.size())).sense(egui::Sense::click_and_drag());
@@ -235,7 +256,7 @@ fn view_image(ui: &mut egui::Ui, screen: &mut SystemsScreen, rect: egui::Rect, i
     if resp.hovered() {
         let scroll = ui.input(|i| i.smooth_scroll_delta.y);
         if scroll != 0.0 {
-            let d = screen.distance.unwrap_or(radius * 2.4);
+            let d = screen.distance.unwrap_or(now);
             screen.distance = Some((d * (1.0 - scroll * 0.002)).clamp(radius * 0.3, radius * 12.0));
         }
     }

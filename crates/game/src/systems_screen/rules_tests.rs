@@ -184,6 +184,65 @@ fn a_click_picks_the_nearest_part_on_the_ray() {
     }
 }
 
+/// While a part is isolated a click picks it first, even behind a ghost;
+/// a click that misses it picks the nearest part (a ghost: isolated next).
+#[test]
+fn an_isolated_part_is_picked_through_its_ghosts() {
+    let square = |z: f32| RenderMesh {
+        positions: vec![[-1.0, -1.0, z], [1.0, -1.0, z], [1.0, 1.0, z], [-1.0, 1.0, z]],
+        normals: vec![[0.0, 0.0, 1.0]; 4],
+        indices: vec![0, 1, 2, 0, 2, 3],
+    };
+    let (near, far) = (square(2.0), square(0.0));
+    let parts = [(&far, Transform::IDENTITY), (&near, Transform::from_xyz(1.5, 0.0, 0.0))];
+    let down = -Vec3::Z;
+    // (ray origin, isolated, picked)
+    let table = [
+        (Vec3::new(1.0, 0.0, 5.0), None, Some(1)),
+        (Vec3::new(1.0, 0.0, 5.0), Some(0), Some(0)),
+        (Vec3::new(2.4, 0.0, 5.0), Some(0), Some(1)),
+        (Vec3::new(3.0, 0.0, 5.0), Some(0), None),
+        (Vec3::new(1.0, 0.0, 5.0), Some(9), Some(1)),
+    ];
+    for (origin, isolated, want) in table {
+        assert_eq!(pick_isolating(origin, down, &parts, isolated), want, "{origin} {isolated:?}");
+    }
+}
+
+/// The framing (table): a sphere fits the narrower way of the view, with
+/// a little room; a wide view is decided by its height, a tall one by its
+/// width; twice the radius, twice the distance.
+#[test]
+fn the_camera_frames_what_it_looks_at_whole() {
+    let half = std::f32::consts::FRAC_PI_8;
+    for (radius, aspect) in [(35.0, 2.6), (35.0, 1.0), (35.0, 0.5), (1.0, 16.0 / 9.0)] {
+        let d = frame(radius, half, aspect);
+        let half_x = (half.tan() * aspect).atan();
+        // The sphere's angular radius from there is inside both half angles.
+        let seen = (radius / d).asin();
+        assert!(seen < half.min(half_x) && seen > 0.9 * half.min(half_x), "{radius} {aspect}: {d}");
+    }
+    assert!((frame(70.0, half, 2.0) / frame(35.0, half, 2.0) - 2.0).abs() < 1e-5);
+    // The old framing (2.4 radii) cut a tall craft's nose in a wide view.
+    assert!(frame(35.0, half, 2.6) > 2.4 * 35.0);
+}
+
+/// The camera's easing: at once nowhere, most of the way within a few
+/// tenths of a second, never past the goal.
+#[test]
+fn the_camera_eases_to_its_framing() {
+    let from = (Vec3::ZERO, 100.0);
+    let to = (Vec3::new(0.0, 10.0, 0.0), 20.0);
+    assert_eq!(ease(from, to, 0.0), from);
+    let mut look = from;
+    for _ in 0..18 {
+        look = ease(look, to, 1.0 / 60.0);
+        assert!(look.1 >= to.1 && look.0.y <= to.0.y);
+    }
+    assert!((look.1 - to.1).abs() < 0.03 * 80.0, "{look:?} after 0.3 s");
+    assert!((ease(from, to, 10.0).1 - 20.0).abs() < 1e-3);
+}
+
 #[test]
 fn the_regions_tile_the_screen_and_keep_the_view_wide() {
     use bevy_egui::egui::{pos2, Rect};

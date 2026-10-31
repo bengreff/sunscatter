@@ -12,9 +12,16 @@
 //!
 //! The left column shows the layer as a whole ([`summary`], by default) or
 //! the parts list, by its switch ([`Left`]). A click on a part (in the
-//! list, the view or a summary's row) selects it, and the right column
+//! list, the view or a summary's row) selects it and isolates it: the
+//! other parts are ghosted, the camera frames it, and the right column
 //! shows everything about it in one layout ([`inspect`]); there are no
-//! pop-ups (owner, 2026-10-28).
+//! pop-ups (owner, 2026-10-28). Esc, or the right column's ×, puts the
+//! layer view back as it was ([`SystemsScreen::back`]: the layer, the
+//! camera, the left column, no selection; owner, 2026-10-31); a second Esc
+//! closes the screen.
+//!
+//! The thermal layer draws the thermal network itself ([`thermal`]): each
+//! skin cell by its own temperature, the interior nodes behind a cut-away.
 //!
 //! Pure rules: [`rules`] (facts, layer colours, tree, camera, pick),
 //! [`summary`] (each layer as a whole), [`inspect`] (everything about a
@@ -26,6 +33,7 @@ pub mod edit;
 pub mod inspect;
 pub mod rules;
 pub mod summary;
+pub mod thermal;
 mod ui;
 pub mod view;
 
@@ -90,6 +98,24 @@ impl Drafts {
     }
 }
 
+/// The orbit camera's pose: yaw and pitch (rad), distance (m; `None`:
+/// framed to what it looks at).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Pose {
+    pub yaw: f32,
+    pub pitch: f32,
+    pub distance: Option<f32>,
+}
+
+/// The layer view as it was before a part was isolated, to put back.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Back {
+    pub layer: Layer,
+    pub pose: Pose,
+    pub left: Left,
+    pub selected: Option<Selection>,
+}
+
 /// The screen's state.
 #[derive(Resource)]
 pub struct SystemsScreen {
@@ -110,6 +136,11 @@ pub struct SystemsScreen {
     /// Opened at a part without a layer: show the part's main layer once
     /// its facts are known ([`SystemsScreen::settle_layer`]).
     pub pick_layer: bool,
+    /// A part is isolated (the selection's): the layer view to put back.
+    pub back: Option<Back>,
+    /// The thermal layer's cut-away: 0 nothing cut, 1 all (the share of
+    /// the depth of what the camera looks at, from its side).
+    pub cut: f32,
 }
 
 impl Default for SystemsScreen {
@@ -127,9 +158,16 @@ impl Default for SystemsScreen {
             drafts: None,
             left: Left::SystemWide,
             pick_layer: false,
+            back: None,
+            cut: DEFAULT_CUT,
         }
     }
 }
+
+/// The thermal layer's cut-away when the screen starts: half the craft
+/// toward the camera cut away, so the interior nodes show with the skin
+/// cells (INTERFACE's default, open for the owner).
+pub const DEFAULT_CUT: f32 = 0.5;
 
 impl SystemsScreen {
     /// Opens the screen, at `layer` and with `part` selected (shown in the
@@ -147,10 +185,54 @@ impl SystemsScreen {
         self.pick_layer = layer.is_none() && part.is_some();
     }
 
-    /// Selects `sel`: highlighted in the view and the list, and shown in
-    /// the right column; `None` clears the selection.
+    /// Selects `sel` and isolates its part (a component's part): the
+    /// first selection keeps the layer view to put back, and the camera
+    /// frames the part. `None` puts the layer view back ([`Self::back`]).
     pub fn select(&mut self, sel: Option<Selection>) {
-        self.selected = sel;
+        let Some(sel) = sel else {
+            self.back();
+            return;
+        };
+        if self.back.is_none() {
+            self.back = Some(Back { layer: self.layer, pose: self.pose(), left: self.left, selected: self.selected });
+        }
+        if self.selected != Some(sel) {
+            self.distance = None;
+        }
+        self.selected = Some(sel);
+    }
+
+    /// Whether a part is isolated.
+    pub fn isolated(&self) -> bool {
+        self.back.is_some()
+    }
+
+    /// The camera's pose now.
+    pub fn pose(&self) -> Pose {
+        Pose { yaw: self.yaw, pitch: self.pitch, distance: self.distance }
+    }
+
+    /// Puts back the layer view an isolation started from: its layer,
+    /// camera, left column and selection (Esc, or the right column's ×).
+    pub fn back(&mut self) {
+        let Some(b) = self.back.take() else {
+            self.selected = None;
+            return;
+        };
+        self.layer = b.layer;
+        (self.yaw, self.pitch, self.distance) = (b.pose.yaw, b.pose.pitch, b.pose.distance);
+        self.left = b.left;
+        self.selected = b.selected;
+        self.pick_layer = false;
+    }
+
+    /// Closes the screen; an isolated part is put back first, so the screen
+    /// opens again on the layer view.
+    pub fn close(&mut self) {
+        if self.isolated() {
+            self.back();
+        }
+        self.open = false;
     }
 
     /// Shows the selected part's main layer once its facts are known, if
@@ -166,6 +248,10 @@ impl SystemsScreen {
         if let Some(f) = facts.iter().find(|f| f.id == id) {
             self.layer = Layer::main(f);
             self.pick_layer = false;
+            // The layer view to go back to is the part's layer too.
+            if let Some(b) = self.back.as_mut() {
+                b.layer = self.layer;
+            }
         }
     }
 }
@@ -190,7 +276,11 @@ impl Plugin for SystemsPlugin {
 /// Tab opens and closes the screen (not while paused or typing).
 pub fn keys(keys: Res<ButtonInput<KeyCode>>, ctx: Res<InputContext>, mut screen: ResMut<SystemsScreen>) {
     if pressed(&keys, Action::SystemsScreen) && ctx.allows(Keys::Menus) && *ctx != InputContext::Paused {
-        screen.open = !screen.open;
+        if screen.open {
+            screen.close();
+        } else {
+            screen.open = true;
+        }
     }
 }
 
@@ -262,5 +352,74 @@ mod tests {
         assert_eq!(screen.selected, Some(Selection::Part(3)));
         screen.select(None);
         assert_eq!(screen.selected, None);
+    }
+
+    /// Isolating a part and going back (table): each step's action, then
+    /// (isolated, layer, yaw, distance, left, selection). The layer view is
+    /// kept from the first isolation and put back whole, whatever changed
+    /// meanwhile; the camera frames each newly isolated part.
+    #[test]
+    fn isolation_goes_back_to_the_layer_view_as_it_was() {
+        #[derive(Clone, Copy, Debug)]
+        enum Do {
+            Select(u32),
+            Component(usize),
+            SetLayer(Layer),
+            Orbit(f32, f32),
+            SetLeft(Left),
+            Back,
+            Clear,
+        }
+        use Do::*;
+        let mut s =
+            SystemsScreen { open: true, layer: Layer::Thermal, yaw: 0.6, distance: Some(80.0), ..Default::default() };
+        let p = |id| Some(Selection::Part(id));
+        type Want = (bool, Layer, f32, Option<f32>, Left, Option<Selection>);
+        let steps: [(Do, Want); 12] = [
+            (Select(4), (true, Layer::Thermal, 0.6, None, Left::SystemWide, p(4))),
+            (Orbit(1.0, 12.0), (true, Layer::Thermal, 1.0, Some(12.0), Left::SystemWide, p(4))),
+            (SetLayer(Layer::Plumbing), (true, Layer::Plumbing, 1.0, Some(12.0), Left::SystemWide, p(4))),
+            (SetLeft(Left::Parts), (true, Layer::Plumbing, 1.0, Some(12.0), Left::Parts, p(4))),
+            // Another part: framed anew, the same layer view kept.
+            (Select(7), (true, Layer::Plumbing, 1.0, None, Left::Parts, p(7))),
+            (Select(7), (true, Layer::Plumbing, 1.0, None, Left::Parts, p(7))),
+            (Component(2), (true, Layer::Plumbing, 1.0, None, Left::Parts, Some(Selection::Component(2)))),
+            (Back, (false, Layer::Thermal, 0.6, Some(80.0), Left::SystemWide, None)),
+            // Nothing isolated: Esc's back changes nothing.
+            (Back, (false, Layer::Thermal, 0.6, Some(80.0), Left::SystemWide, None)),
+            (Select(2), (true, Layer::Thermal, 0.6, None, Left::SystemWide, p(2))),
+            // The right column's ×.
+            (Clear, (false, Layer::Thermal, 0.6, Some(80.0), Left::SystemWide, None)),
+            (Select(3), (true, Layer::Thermal, 0.6, None, Left::SystemWide, p(3))),
+        ];
+        for (i, (step, want)) in steps.into_iter().enumerate() {
+            match step {
+                Select(id) => s.select(p(id)),
+                Component(c) => s.select(Some(Selection::Component(c))),
+                SetLayer(l) => s.layer = l,
+                Orbit(yaw, d) => (s.yaw, s.distance) = (yaw, Some(d)),
+                SetLeft(l) => s.left = l,
+                Back => s.back(),
+                Clear => s.select(None),
+            }
+            assert_eq!((s.isolated(), s.layer, s.yaw, s.distance, s.left, s.selected), want, "step {i}: {step:?}");
+        }
+        // Closing puts the layer view back, so the screen opens on it.
+        s.close();
+        assert_eq!((s.open, s.isolated(), s.selected, s.distance), (false, false, None, Some(80.0)));
+    }
+
+    /// Opened at a part from flight (a card's "more", a menu's link): the
+    /// part isolated on its main layer, and going back stays on that layer.
+    #[test]
+    fn opened_at_a_part_goes_back_to_its_layer() {
+        let mut s = SystemsScreen::default();
+        s.open_at(None, Some(4));
+        assert!(s.isolated());
+        let tank = rules::PartFacts { id: 4, tanks: vec![("LOX".into(), None, 1.0)], ..Default::default() };
+        s.settle_layer(&[tank]);
+        assert_eq!(s.layer, Layer::Plumbing);
+        s.back();
+        assert_eq!((s.layer, s.selected, s.open), (Layer::Plumbing, None, true));
     }
 }

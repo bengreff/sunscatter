@@ -414,6 +414,38 @@ pub fn orbit_pose(target: Vec3, yaw: f32, pitch: f32, distance: f32) -> Transfor
     Transform::from_translation(target + dir * distance).looking_at(target, Vec3::Y)
 }
 
+/// The distance at which a sphere of `radius` fits the view whatever the
+/// camera's angle: `half_fov` the vertical half field of view (rad),
+/// `aspect` the view's width over its height; the narrower way decides,
+/// with a little room around it.
+pub fn frame(radius: f32, half_fov: f32, aspect: f32) -> f32 {
+    let half_x = (half_fov.tan() * aspect.max(1e-3)).atan();
+    radius.max(1e-3) * 1.08 / half_fov.min(half_x).sin()
+}
+
+/// The camera's look (target, distance) moved toward `to` over `dt`
+/// seconds: most of the way within a few tenths of a second, never past it.
+pub fn ease(from: (Vec3, f32), to: (Vec3, f32), dt: f32) -> (Vec3, f32) {
+    let k = 1.0 - (-dt.max(0.0) / EASE_S).exp();
+    (from.0 + (to.0 - from.0) * k, from.1 + (to.1 - from.1) * k)
+}
+
+/// The time constant of the camera's easing (s).
+pub const EASE_S: f32 = 0.08;
+
+/// The part a click picks while part `isolated` (an index into `parts`)
+/// is isolated: it first, if the ray hits it, even through a ghost in
+/// front; else the nearest part hit ([`pick`]).
+pub fn pick_isolating(
+    origin: Vec3,
+    dir: Vec3,
+    parts: &[(&RenderMesh, Transform)],
+    isolated: Option<usize>,
+) -> Option<usize> {
+    let own = isolated.filter(|&k| parts.get(k).is_some_and(|p| pick(origin, dir, std::slice::from_ref(p)).is_some()));
+    own.or_else(|| pick(origin, dir, parts))
+}
+
 /// The rotation from the craft's axes (+Z the nose) to the view's (Bevy
 /// axes, +Y up).
 pub fn craft_to_view() -> Quat {

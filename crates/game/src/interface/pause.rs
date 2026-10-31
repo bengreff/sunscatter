@@ -176,7 +176,7 @@ pub fn keys(
         body_menu: ui.menu.is_some(),
         planner: planner.open,
         systems: systems.open,
-        isolated: false,
+        isolated: systems.isolated(),
         station: station.open,
     };
     match on_escape(open, &menu) {
@@ -185,8 +185,8 @@ pub fn keys(
         EscAction::CloseSaves => saves.open = false,
         EscAction::CloseBodyMenu => ui.menu = None,
         EscAction::ClosePlanner => planner.open = false,
-        EscAction::SystemsBack => systems.select(None),
-        EscAction::CloseSystems => systems.open = false,
+        EscAction::SystemsBack => systems.back(),
+        EscAction::CloseSystems => systems.close(),
         EscAction::CloseStation => station.open = false,
         EscAction::Pause => *menu = PauseMenu { open: true, page: Page::Main },
         EscAction::BackToMenu => menu.page = Page::Main,

@@ -140,7 +140,7 @@ pub fn tools(dev: bool) -> Vec<Tool> {
              `width`/`height` size the image of a headless game (SUNSCATTER_OFFSCREEN=1); `ui_scale` scales the \
              interface for this shot (0.2 shrinks it to specks: a shot of the scene); `menus` are the flight view's \
              menus open for the shot (the others closed); the systems screen opens on `layer` with `part` (a \
-             craft-file id) selected; `help` shows the keys and every way in; `cards` opens those parts' cards \
+             craft-file id) isolated, the thermal layer's cut-away at `cut` (0 none, 1 all); `help` shows the keys and every way in; `cards` opens those parts' cards \
              (craft-file ids) by the staging bar. Everything is put back after the shot.",
             schema(
                 json!({
@@ -154,6 +154,7 @@ pub fn tools(dev: bool) -> Vec<Tool> {
                     "menus": {"type": "array", "items": {"type": "string", "enum": names(&MENU_NAMES)}},
                     "settings_tab": {"type": "string", "enum": names(&TAB_NAMES)},
                     "cards": {"type": "array", "items": {"type": "string"}},
+                    "cut": {"type": "number", "minimum": 0, "maximum": 1},
                     "settle_s": num("Real seconds to wait at most for the terrain (default 15)"),
                 }),
                 &[],
@@ -332,7 +333,12 @@ pub struct ShotSpec {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Screen {
     Flight,
-    Systems { layer: Option<Layer>, part: Option<String> },
+    /// `cut`: the thermal layer's cut-away (0 none, 1 all).
+    Systems {
+        layer: Option<Layer>,
+        part: Option<String>,
+        cut: Option<f32>,
+    },
     Tracking,
     Pause,
     Settings(SettingsTab),
@@ -355,7 +361,11 @@ impl ShotSpec {
         let layer = s("layer").map(|l| by_name(&LAYER_NAMES, l, "layer")).transpose()?;
         let screen = match s("screen").unwrap_or(if layer.is_some() { "systems" } else { "flight" }) {
             "flight" => Screen::Flight,
-            "systems" => Screen::Systems { layer, part: s("part").map(str::to_string) },
+            "systems" => Screen::Systems {
+                layer,
+                part: s("part").map(str::to_string),
+                cut: args.get("cut").and_then(Value::as_f64).map(|c| c.clamp(0.0, 1.0) as f32),
+            },
             "tracking" => Screen::Tracking,
             "pause" => Screen::Pause,
             "help" => Screen::Help,
@@ -941,13 +951,16 @@ fn show(spec: &ShotSpec, sim: &SimState, s: &mut Screens) -> Result<(), String> 
         let (vessel, def) = (sim.ship().id(), sim.ship().ship_def());
         s.cards.open.clear();
         for c in cards {
-            let part = def.as_ref().and_then(|d| d.part_named(c)).ok_or_else(|| format!("the active vessel has no part `{c}`"))?;
+            let part = def
+                .as_ref()
+                .and_then(|d| d.part_named(c))
+                .ok_or_else(|| format!("the active vessel has no part `{c}`"))?;
             s.cards.open(vessel, part, crate::interface::part_card::From::Bar);
         }
     }
     match &spec.screen {
         Screen::Flight => {}
-        Screen::Systems { layer, part } => {
+        Screen::Systems { layer, part, cut } => {
             let def = sim.ship().ship_def();
             let part = match part {
                 None => None,
@@ -957,8 +970,11 @@ fn show(spec: &ShotSpec, sim: &SimState, s: &mut Screens) -> Result<(), String> 
                         .ok_or_else(|| format!("the active vessel has no part `{p}`"))?,
                 ),
             };
-            s.systems.selected = None;
+            s.systems.close();
             s.systems.open_at(*layer, part);
+            if let Some(c) = cut {
+                s.systems.cut = *c;
+            }
         }
         Screen::Tracking => s.station.open = true,
         Screen::Pause => s.menu.open = true,
@@ -1007,7 +1023,9 @@ fn shot(
         Some((_, settled)) => {
             let r = &s.restore;
             screens.iface.menus = r.menus.clone();
-            screens.systems.open = r.systems;
+            if !r.systems {
+                screens.systems.close();
+            }
             screens.station.open = r.station;
             screens.menu.open = r.pause_menu;
             (screens.settings.open, screens.settings.tab) = r.settings;
@@ -1189,8 +1207,13 @@ mod tests {
             (Screen::Flight, None, None, "shot")
         );
         let spec = ShotSpec::parse(&json!({"layer": "plumbing", "part": "s1.tank", "name": "max q!"})).unwrap();
-        assert_eq!(spec.screen, Screen::Systems { layer: Some(Layer::Plumbing), part: Some("s1.tank".into()) });
+        assert_eq!(
+            spec.screen,
+            Screen::Systems { layer: Some(Layer::Plumbing), part: Some("s1.tank".into()), cut: None }
+        );
         assert_eq!(spec.name, "max_q_", "a file name");
+        let spec = ShotSpec::parse(&json!({"layer": "thermal", "cut": 2.0})).unwrap();
+        assert_eq!(spec.screen, Screen::Systems { layer: Some(Layer::Thermal), part: None, cut: Some(1.0) });
         let spec = ShotSpec::parse(&json!({"menus": ["Orbital", "landing"], "width": 3024, "height": 1964})).unwrap();
         assert_eq!(spec.menus, Some(vec![MenuId::Orbital, MenuId::Landing]));
         assert_eq!(spec.size, Some((3024, 1964)));
