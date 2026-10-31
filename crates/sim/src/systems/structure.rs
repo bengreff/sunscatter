@@ -464,7 +464,7 @@ pub fn part_masses(def: &ShipDef, state: &ShipState, b: &Bodies) -> Vec<MassProp
             items[k].push(MassProps { mass: kg, com: bd.pos, inertia: DMat3::ZERO });
         }
     }
-    let ground = |id: u32| def.parts.iter().any(|p| p.part == id && p.ground);
+    let ground = |id: u32| def.part_index(id).is_some_and(|i| def.parts[i].ground);
     (items.iter().zip(b.ids))
         .map(|(list, &id)| {
             let m = MassProps::sum(list);
@@ -561,7 +561,7 @@ pub fn ultimate_scale(ratio_at: impl Fn(f64) -> f64, max: f64) -> Option<f64> {
 /// materials at their temperatures (1 when a material is unknown).
 fn joint_factor(def: &ShipDef, j: &JointDef, kelvin: impl Fn(u32) -> Option<f64>) -> f64 {
     let side = |id: u32| -> f64 {
-        let Some(p) = def.parts.iter().find(|p| p.part == id) else { return 1.0 };
+        let Some(p) = def.part_index(id).map(|i| &def.parts[i]) else { return 1.0 };
         match (crate::materials::materials().get(&p.material), kelvin(id)) {
             (Ok(m), Some(k)) => strength_factor(m, k),
             _ => 1.0,
@@ -603,7 +603,7 @@ pub fn step(def: &ShipDef, state: &mut ShipState, b: &Bodies, m: &Motion, at: Ep
     let parents: Vec<Option<usize>> = b.parents.iter().map(|p| p.map(|p| p as usize)).collect();
     let loads = subtree_loads(&parents, &mass, b.pushes, &motion);
     let index = |id: u32| b.ids.iter().position(|&x| x == id);
-    let ground = |id: u32| def.parts.iter().any(|p| p.part == id && p.ground);
+    let ground = |id: u32| def.part_index(id).is_some_and(|i| def.parts[i].ground);
     let mut effects = Vec::new();
     for (j, d) in def.joints.iter().enumerate() {
         let (Some(c), Some(_)) = (index(d.child), index(d.parent)) else { continue };
@@ -630,7 +630,7 @@ pub fn step(def: &ShipDef, state: &mut ShipState, b: &Bodies, m: &Motion, at: Ep
         if let Some(run) = state.joints.get_mut(j) {
             (run.force, run.moment, run.ratio, run.to_ultimate) = (force, moment, r, to_ultimate);
         }
-        if let Some(p) = state.parts.iter_mut().find(|p| p.part == d.child) {
+        if let Some(p) = def.part_index(d.child).map(|i| &mut state.parts[i]) {
             p.history.peak_load = p.history.peak_load.max(r);
         }
         if r >= 1.0 && !debug {

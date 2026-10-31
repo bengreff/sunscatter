@@ -298,9 +298,9 @@ fn seed_for(launch: Epoch, owner: &str, mode: &str, per_start: f64, fails: bool)
 fn restart_mode(v: &Vessel) -> (String, f64) {
     let def = v.ship_def().expect("a craft of parts");
     let modes = sim::systems::failure::modes(&def);
-    let (owner, _, m) = modes.iter().find(|(_, _, m)| m.mode == "restart").expect("the MVac's restart mode");
+    let (owner, _, _, m) = modes.iter().find(|(_, _, _, m)| m.mode == "restart").expect("the MVac's restart mode");
     let sim::catalog::Hazard::PerStart(p) = m.hazard else { panic!("per start") };
-    (owner.to_string(), p)
+    (def.owner_id(*owner).to_string(), p)
 }
 
 /// The MVac's ignitions left, if the vessel has it.

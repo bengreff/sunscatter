@@ -187,9 +187,9 @@ pub fn knowledge(def: &ShipDef, state: &ShipState, debug: bool) -> Knowledge {
     }
     use super::flight::{read_by_computer, works};
     let mut k = Knowledge::default();
-    let intact = |part: u32| state.parts.iter().find(|p| p.part == part).is_none_or(|p| p.integrity > 0.0);
+    let intact = |part: u32| def.part_index(part).map(|i| &state.parts[i]).is_none_or(|p| p.integrity > 0.0);
     for s in &def.sensors {
-        if !(works(def, state, &s.id, s.part) && read_by_computer(def, state, &s.id)) {
+        if !(works(def, state, s.owner) && read_by_computer(def, state, s.owner)) {
             continue;
         }
         let (q, acc) = (s.item.quantity.as_str(), s.item.accuracy);
@@ -227,9 +227,8 @@ pub fn knowledge(def: &ShipDef, state: &ShipState, debug: bool) -> Knowledge {
     // Each engine's own controller (falcon9.md §5.2), while it works and a
     // computer reads it (F3: a lost controller or a dead stage computer
     // leaves its engine's thrust unknown).
-    let reported = |e: &crate::craft::ship::EngineDef| {
-        works(def, state, &e.owner, e.part) && read_by_computer(def, state, &e.owner)
-    };
+    let reported =
+        |e: &crate::craft::ship::EngineDef| works(def, state, e.owner) && read_by_computer(def, state, e.owner);
     for (i, e) in def.engines.iter().enumerate().filter(|(_, e)| reported(e)) {
         k.learn(Quantity::EngineThrust(i as u32), 0.01 * e.data.thrust_vac);
     }
@@ -317,7 +316,8 @@ mod tests {
         let mut state = ShipState::initial(&def);
         for id in ["s1.gps#1", "s1.gps#2", "s2.gps#1", "s2.gps#2", "dragon.gps#1", "dragon.gps#2"] {
             let part = def.sensors.iter().find(|s| s.id == id).unwrap().part;
-            state.lost.push(crate::craft::state::Lost { part, owner: id.into(), why: "test".into() });
+            let owner = def.owner_named(id).unwrap();
+            state.lost.push(crate::craft::state::Lost { part, owner, why: "test".into() });
         }
         let k = knowledge(&def, &state, false);
         assert!(!k.knows(Quantity::Position) && k.knows(Quantity::Attitude));

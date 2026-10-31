@@ -214,10 +214,7 @@ pub fn step(def: &ShipDef, state: &mut ShipState, accel: Option<DVec3>, outside:
     let part = cabin.part;
     let life = def.life_support.iter().find(|l| l.part == part);
     let volume = life.map_or(9.3, |l| l.item.cabin_volume);
-    let working = life.filter(|l| {
-        let out = |list: &[crate::craft::state::Lost]| list.iter().any(|x| x.owner == l.id);
-        !out(&state.lost) && !out(&state.unpowered)
-    });
+    let working = life.filter(|l| !state.out(l.owner));
     let was_fresh = cabin.co2 < 1_000.0;
     let c = state.cabin.as_mut().expect("checked");
     air(c, volume, crew, working.map(|l| &l.item), outside, dt);

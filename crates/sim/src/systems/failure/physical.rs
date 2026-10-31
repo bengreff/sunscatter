@@ -13,7 +13,7 @@ use glam::DVec3;
 /// A part's thermal rating: its rated (service) temperature, its
 /// destruction temperature (its own, else its material's), its hold.
 pub fn thermal_rating(def: &ShipDef, part: u32) -> Option<ThermalRating> {
-    let p = def.parts.iter().find(|p| p.part == part)?;
+    let p = def.part_index(part).map(|i| &def.parts[i])?;
     let material = crate::materials::materials().get(&p.material).ok();
     let destruction_k = p.ratings.destruction_k.or(material.map(|m| m.destruction_k))?;
     let rated_k = p.ratings.rated_k.or(material.map(|m| m.service_k))?;
@@ -31,7 +31,7 @@ pub fn thermal(def: &ShipDef, state: &mut ShipState, b: &Bodies, dt: f64) -> Vec
     let mut out = Vec::new();
     for (k, &id) in b.ids.iter().enumerate() {
         let Some(&t) = b.hottest.get(k) else { continue };
-        let Some(s) = state.parts.iter_mut().find(|p| p.part == id) else { continue };
+        let Some(s) = def.part_index(id).map(|i| &mut state.parts[i]) else { continue };
         s.history.peak_k = s.history.peak_k.max(t);
         if s.integrity <= 0.0 {
             continue;
@@ -63,9 +63,9 @@ pub fn vibration(def: &ShipDef, state: &mut ShipState, b: &Bodies, dt: f64) -> V
     let g = damage::environment(&parents, &own, &sources);
     let mut out = Vec::new();
     for (k, &id) in b.ids.iter().enumerate() {
-        let Some(p) = def.parts.iter().find(|p| p.part == id) else { continue };
+        let Some(p) = def.part_index(id).map(|i| &def.parts[i]) else { continue };
         let (Some(qual), Some(qual_s)) = (p.ratings.vibration_grms, p.ratings.vibration_s) else { continue };
-        let Some(s) = state.parts.iter_mut().find(|s| s.part == id) else { continue };
+        let Some(s) = def.part_index(id).map(|i| &mut state.parts[i]) else { continue };
         let before = s.vibration_damage;
         s.vibration_damage += damage::miner(g[k], qual, qual_s, dt);
         if before < 1.0 && s.vibration_damage >= 1.0 {
@@ -163,7 +163,7 @@ pub fn bursts(def: &ShipDef, state: &mut ShipState, ambient: f64, at: Epoch) -> 
             if destroyed.iter().any(|d| d.0 == t.part) {
                 continue;
             }
-            let rating = def.parts.iter().find(|p| p.part == t.part).and_then(|p| p.ratings.burst_pressure);
+            let rating = def.part_index(t.part).map(|i| &def.parts[i]).and_then(|p| p.ratings.burst_pressure);
             let Some(rating) = rating.or((t.burst > 0.0).then_some(t.burst)) else { continue };
             // Inside a tank the blast travels in its own gas and liquid.
             let medium = ambient.max(tank_pressure(def, state, i));

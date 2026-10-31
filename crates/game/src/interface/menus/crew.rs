@@ -71,7 +71,7 @@ pub fn gather(v: &Vessel) -> Option<CrewData> {
     }
     let cabin = state.cabin.as_ref();
     let life = cabin.and_then(|c| def.life_support.iter().find(|l| l.part == c.part));
-    let out = life.and_then(|l| state.lost.iter().chain(&state.unpowered).find(|x| x.owner == l.id));
+    let out = life.and_then(|l| state.lost.iter().chain(&state.unpowered).find(|x| x.owner == l.owner));
     let life_support = match (life, out) {
         (None, _) => LifeSupport::None,
         (Some(_), None) => LifeSupport::Working,

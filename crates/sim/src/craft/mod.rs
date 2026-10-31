@@ -18,6 +18,7 @@ pub mod engine;
 #[cfg(test)]
 mod falcon9_tests;
 pub mod file;
+pub mod handle;
 mod layers;
 pub mod mass;
 pub mod mesh;

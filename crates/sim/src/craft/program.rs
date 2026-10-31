@@ -134,7 +134,7 @@ pub fn can_start(def: &ShipDef, state: &ShipState, i: usize) -> bool {
     let (d, e) = (&def.engines[i], &state.engines[i]);
     e.status != EngineStatus::Failed
         && command::can_ignite(d.data.igniter, e.ignitions, state.clamped)
-        && command::reachable(def, state, &d.owner)
+        && command::reachable(def, state, d.owner)
         && propulsion::fed(def, state, i)
 }
 
@@ -239,9 +239,9 @@ mod tests {
         let flying = def.subset(&def.parts.iter().filter(|p| !p.ground).map(|p| p.part).collect::<Vec<_>>());
         // Cargo Dragon: no SuperDracos.
         let mut cargo = def.clone();
-        cargo.engines.retain(|e| !e.owner.starts_with("dragon.superdraco"));
+        cargo.engines.retain(|e| !def.owner_id(e.owner).starts_with("dragon.superdraco"));
         let superdracos = |d: &ShipDef| -> Vec<usize> {
-            (0..d.engines.len()).filter(|&i| d.engines[i].owner.starts_with("dragon.superdraco")).collect()
+            (0..d.engines.len()).filter(|&i| d.owner_id(d.engines[i].owner).starts_with("dragon.superdraco")).collect()
         };
         let failed = |d: &ShipDef, s: &mut ShipState| {
             superdracos(d).into_iter().for_each(|i| s.engines[i].status = EngineStatus::Failed)
@@ -252,7 +252,7 @@ mod tests {
         };
         let unpowered = |d: &ShipDef, s: &mut ShipState| {
             for i in superdracos(d) {
-                let (part, owner) = (d.engines[i].part, d.engines[i].owner.clone());
+                let (part, owner) = (d.engines[i].part, d.engines[i].owner);
                 s.unpowered.push(crate::craft::state::Lost { part, owner, why: "bus dead".into() });
             }
         };

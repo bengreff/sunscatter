@@ -23,7 +23,7 @@ pub fn travel(angle: f64, target: f64, rate: f64, dt: f64) -> f64 {
 /// its drive) or without power: it stays where it is.
 pub fn stuck(def: &ShipDef, state: &ShipState, i: usize) -> bool {
     let m = &def.mechanisms[i];
-    state.lost.iter().any(|l| l.part == m.part || l.owner == m.id) || state.out(&m.id)
+    state.lost.iter().any(|l| l.part == m.part || l.owner == m.owner) || state.out(m.owner)
 }
 
 /// Moves every mechanism for `dt` seconds (a lost one stays).
@@ -85,7 +85,7 @@ mod tests {
         let (two, three) = (fin("s1.gridfin#2"), fin("s1.gridfin#3"));
         let lost = crate::craft::state::Lost {
             part: def.mechanisms[two].part,
-            owner: "s1.gridfin#2".into(),
+            owner: def.mechanisms[two].owner,
             why: "pump".into(),
         };
         state.lost.push(lost);

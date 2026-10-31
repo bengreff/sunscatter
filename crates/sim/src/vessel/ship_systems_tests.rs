@@ -560,9 +560,13 @@ fn a_failure_fires_the_same_in_frames_and_in_one_jump() {
     let w = world();
     for (threshold, airborne) in [(1e-6, false), (3e-6, true)] {
         let mut v = falcon9(&w);
+        let def = v.ship_def().unwrap();
         let s = v.ship.as_mut().unwrap();
-        let fate =
-            s.fates.iter_mut().find(|f| f.owner == "s1.merlin.3" && f.mode == "in-flight shutdown").expect("its fate");
+        let named = |f: &&mut crate::craft::state::Fate| {
+            def.owner_id(f.owner) == "s1.merlin.3"
+                && def.failures_of(f.owner)[f.mode as usize].mode == "in-flight shutdown"
+        };
+        let fate = s.fates.iter_mut().find(named).expect("its fate");
         fate.threshold = threshold;
         v.order_at(t0().add_seconds(0.5), OrderKind::Stage).unwrap();
         v.order_at(t0().add_seconds(0.5), OrderKind::Stage).unwrap();

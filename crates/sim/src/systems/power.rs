@@ -13,7 +13,7 @@
 //! shortfall. Numbers are placeholders until parts carry them.
 
 use super::Env;
-use crate::craft::ship::ShipDef;
+use crate::craft::ship::{Owner, ShipDef};
 use crate::craft::state::ShipState;
 use crate::time::Epoch;
 use glam::DVec3;
@@ -115,12 +115,12 @@ pub struct BusRun {
 /// What a load is to a bus's shedding: the vehicle's functions first
 /// (computers, sensors, valves, thrusters, life support), the rest shed
 /// before them.
-fn essential(def: &ShipDef, id: &str) -> bool {
-    def.computers.iter().any(|x| x.id == id)
-        || def.sensors.iter().any(|x| x.id == id)
-        || def.valves.iter().any(|x| x.id == id)
-        || def.thrusters.iter().any(|x| x.id == id)
-        || def.life_support.iter().any(|x| x.id == id)
+fn essential(def: &ShipDef, o: Owner) -> bool {
+    def.computers.iter().any(|x| x.owner == o)
+        || def.sensors.iter().any(|x| x.owner == o)
+        || def.valves.iter().any(|x| x.owner == o)
+        || def.thrusters.iter().any(|x| x.owner == o)
+        || def.life_support.iter().any(|x| x.owner == o)
 }
 
 /// A battery's open-circuit voltage at its state of charge (V; E: a
@@ -136,7 +136,7 @@ pub fn solar_output(def: &ShipDef, sun: DVec3) -> Vec<f64> {
     let flux = sun.length();
     (def.solars.iter())
         .map(|s| {
-            let Some(c) = def.components.iter().find(|c| c.id == s.id) else { return 0.0 };
+            let Some(c) = def.component_of(s.owner) else { return 0.0 };
             let out = DVec3::new(c.pose.pos.x, c.pose.pos.y, 0.0).normalize_or(DVec3::Z);
             let cos = if flux > 0.0 { (-out).dot(sun / flux).max(0.0) } else { 0.0 };
             s.item.area * s.item.efficiency * flux * cos
@@ -164,16 +164,19 @@ pub fn step_ship(def: &ShipDef, state: &mut ShipState, sun: DVec3, dt: f64, at: 
     let solar = solar_output(def, sun);
     let ground = state.clamped;
     let mut buses = Vec::new();
-    let mut unpowered: Vec<(u32, String)> = Vec::new();
+    let mut unpowered: Vec<(u32, Owner)> = Vec::new();
     for bus in &def.buses {
-        let on = |id: &str| bus.members.iter().any(|m| m.0 == id);
-        let lost = |id: &str| state.lost.iter().any(|l| l.owner == id);
+        let on = |o: Owner| bus.members.iter().any(|m| m.0 == o);
+        let lost = |o: Owner| state.lost.iter().any(|l| l.owner == o);
         let mut loads: Vec<(usize, f64, bool)> = (def.components.iter().enumerate())
-            .filter(|(c, d)| on(&d.id) && d.power > 0.0 && state.power[*c].on && !lost(&d.id))
-            .map(|(c, d)| (c, d.power, essential(def, &d.id)))
+            .filter(|(c, d)| {
+                let o = Owner::Component(d.n);
+                on(o) && d.power > 0.0 && state.power[*c].on && !lost(o)
+            })
+            .map(|(c, d)| (c, d.power, essential(def, Owner::Component(d.n))))
             .collect();
-        let sun_w: f64 = (def.solars.iter().zip(&solar)).filter(|(s, _)| on(&s.id)).map(|(_, w)| w).sum();
-        let cells: Vec<usize> = (0..def.batteries.len()).filter(|&b| on(&def.batteries[b].id)).collect();
+        let sun_w: f64 = (def.solars.iter().zip(&solar)).filter(|(s, _)| on(s.owner)).map(|(_, w)| w).sum();
+        let cells: Vec<usize> = (0..def.batteries.len()).filter(|&b| on(def.batteries[b].owner)).collect();
         let nominal = bus.voltage.max(1.0);
         let demand: f64 = loads.iter().map(|l| l.1).sum();
         if ground {
@@ -197,7 +200,7 @@ pub fn step_ship(def: &ShipDef, state: &mut ShipState, sun: DVec3, dt: f64, at: 
         let mut need = demand - sun_w;
         while need > available + 1e-9 && !loads.is_empty() {
             let (c, w, _) = loads.remove(0);
-            unpowered.push((def.components[c].part, def.components[c].id.clone()));
+            unpowered.push((def.components[c].part, Owner::Component(def.components[c].n)));
             need -= w;
         }
         let load: f64 = loads.iter().map(|l| l.1).sum();
@@ -221,7 +224,7 @@ pub fn step_ship(def: &ShipDef, state: &mut ShipState, sun: DVec3, dt: f64, at: 
                 let heat = i * i * cap.internal_resistance;
                 let s = &mut state.batteries[b];
                 s.charge = (s.charge - (share + heat) * dt).max(0.0);
-                let mass = def.components.iter().find(|c| c.id == def.batteries[b].id).map_or(10.0, |c| c.mass);
+                let mass = def.component_of(def.batteries[b].owner).map_or(10.0, |c| c.mass);
                 s.k += (heat - (s.k - CABIN_K) * mass * BATTERY_C / BATTERY_TAU) * dt / (mass * BATTERY_C);
                 volts = volts.max(v - i * cap.internal_resistance);
             }
@@ -243,15 +246,14 @@ pub fn step_ship(def: &ShipDef, state: &mut ShipState, sun: DVec3, dt: f64, at: 
         buses.push(BusRun { name: bus.name.clone(), volts, load, solar: sun_w, ground: false });
     }
     // Tell the player what lost or regained power.
-    let before: Vec<String> = state.unpowered.iter().map(|u| u.owner.clone()).collect();
-    for (part, id) in &unpowered {
-        if !before.contains(id) {
-            state.event(at, format!("{id}: no power (its bus is short; shed)"), true);
+    let before: Vec<Owner> = state.unpowered.iter().map(|u| u.owner).collect();
+    for (_, o) in &unpowered {
+        if !before.contains(o) {
+            state.event(at, format!("{}: no power (its bus is short; shed)", def.owner_id(*o)), true);
         }
-        let _ = part;
     }
-    for id in before.iter().filter(|id| !unpowered.iter().any(|u| &u.1 == *id)) {
-        state.event(at, format!("{id}: powered again"), false);
+    for o in before.iter().filter(|o| !unpowered.iter().any(|u| u.1 == **o)) {
+        state.event(at, format!("{}: powered again", def.owner_id(*o)), false);
     }
     state.unpowered = (unpowered.into_iter())
         .map(|(part, owner)| crate::craft::state::Lost { part, owner, why: "no power".into() })
@@ -319,7 +321,10 @@ mod tests {
 
         fn load_of(def: &ShipDef, name: &str) -> f64 {
             let b = def.buses.iter().find(|b| b.name == name).unwrap();
-            (def.components.iter()).filter(|c| b.members.iter().any(|m| m.0 == c.id)).map(|c| c.power).sum()
+            (def.components.iter())
+                .filter(|c| b.members.iter().any(|m| m.0 == Owner::Component(c.n)))
+                .map(|c| c.power)
+                .sum()
         }
 
         /// On the pad the umbilical feeds every bus at its nominal voltage
@@ -402,7 +407,7 @@ mod tests {
                 }
             }
             step_ship(&def, &mut s, DVec3::ZERO, 60.0, t0());
-            let shed = |s: &ShipState, id: &str| s.unpowered.iter().any(|u| u.owner == id);
+            let shed = |s: &ShipState, id: &str| s.unpowered.iter().any(|u| def.owner_id(u.owner) == id);
             assert!(shed(&s, "dragon.eclss") && shed(&s, "dragon.computer") && shed(&s, "dragon.docking"));
             assert!(!shed(&s, "s1.computer"), "the first stage's own batteries");
             assert_eq!(bus(&s, "dragon.bus").load, 0.0, "nothing powered");

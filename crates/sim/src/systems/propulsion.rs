@@ -136,7 +136,7 @@ pub fn light(def: &ShipDef, state: &mut ShipState, i: usize) {
     let run = &mut state.engines[i];
     run.reason = None;
     run.settling = None;
-    if let Some(p) = state.parts.iter_mut().find(|p| p.part == d.part) {
+    if let Some(p) = def.part_index(d.part).map(|i| &mut state.parts[i]) {
         p.history.starts += 1;
     }
 }
@@ -450,7 +450,7 @@ fn step_engine(def: &ShipDef, state: &mut ShipState, i: usize, env: &Env) {
     e.status = next;
     state.engines[i].level = level;
     if matches!(next, EngineStatus::Running | EngineStatus::Starting) {
-        if let Some(p) = state.parts.iter_mut().find(|p| p.part == d.part) {
+        if let Some(p) = def.part_index(d.part).map(|i| &mut state.parts[i]) {
             p.history.run_time += env.dt;
         }
     }

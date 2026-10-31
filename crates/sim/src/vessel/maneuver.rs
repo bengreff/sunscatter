@@ -295,7 +295,7 @@ impl Vessel {
             let cx = command::Context { at, sequence: false };
             let mut effects = Vec::new();
             for i in ignite {
-                let owner = def.engines[i as usize].owner.clone();
+                let owner = def.owner_id(def.engines[i as usize].owner).to_string();
                 effects.extend(command::apply(&def, state, &ShipCommand::Ignite(owner), cx).unwrap_or_default());
             }
             self.after_command(world, &effects);

@@ -54,7 +54,7 @@ pub fn gather(v: &Vessel) -> Option<PowerData> {
         buses: state.buses.clone(),
         bus_names: def.buses.iter().map(|b| b.name.clone()).collect(),
         batteries,
-        unpowered: state.unpowered.iter().map(|l| (l.owner.clone(), l.why.clone())).collect(),
+        unpowered: state.unpowered.iter().map(|l| (def.owner_id(l.owner).to_string(), l.why.clone())).collect(),
     })
 }
 

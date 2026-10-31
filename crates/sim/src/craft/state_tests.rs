@@ -4,6 +4,7 @@
 //! (the program, the vessel's as a whole, a copy in each), and merging the
 //! pieces gives it back bit for bit.
 
+use super::handle::Owner;
 use super::ship::ShipDef;
 use super::state::{Event, Fate, JointState, Lost, Order, OrderKind, ShipState, EVENTS_KEPT};
 use crate::systems::crew::{CrewRun, Injury};
@@ -67,7 +68,7 @@ fn every_field_set(def: &ShipDef) -> ShipState {
     (cabin.o2, cabin.co2, cabin.k) = (20_000.0, 400.0, 297.0);
     // A keyed list in part order.
     s.fates = (def.parts.iter().step_by(7))
-        .map(|p| Fate { part: p.part, owner: p.id.clone(), mode: "wear".into(), threshold: 1.5, hazard: 0.25, seen: 3 })
+        .map(|p| Fate { part: p.part, owner: Owner::Part(p.part), mode: 0, threshold: 1.5, hazard: 0.25, seen: 3 })
         .collect();
     s.clamped = true;
     s.sequence = 1;
@@ -92,7 +93,7 @@ fn every_field_set(def: &ShipDef) -> ShipState {
     (s.launch, s.stepped) = (Some(t0), Some(t0.add_seconds(60.0)));
     s.events = (0..3).map(|k| Event { at: t0.add_seconds(k as f64), text: format!("{k}"), alarm: k == 1 }).collect();
     s.pressure_regulated = true;
-    let lost = |p: &super::ship::PartInfo| Lost { part: p.part, owner: p.id.clone(), why: "test".into() };
+    let lost = |p: &super::ship::PartInfo| Lost { part: p.part, owner: Owner::Part(p.part), why: "test".into() };
     s.lost = def.parts.iter().step_by(11).map(lost).collect();
     s.unpowered = def.parts.iter().skip(3).step_by(13).map(lost).collect();
     s.buses = (def.buses.iter().enumerate())

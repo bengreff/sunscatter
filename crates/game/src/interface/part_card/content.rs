@@ -228,7 +228,7 @@ fn stores(live: &Live, part: u32, inside: &Inside, out: &mut Vec<Section>) {
         });
     }
     for (j, t) in def.thrusters.iter().enumerate().filter(|(j, t)| t.part == part && !inside.thrusters.contains(j)) {
-        let lost = state.out(&t.id);
+        let lost = state.out(t.owner);
         let on = state.thrusters.get(j).is_some_and(|s| s.enabled);
         let words = if lost {
             "LOST (failed or no power)"

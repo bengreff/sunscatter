@@ -204,9 +204,10 @@ pub struct CabinState {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Fate {
     pub part: u32,
-    /// The owner's id and the mode's name.
-    pub owner: String,
-    pub mode: String,
+    /// The mode's owner, and its index in the owner's modes
+    /// (`ShipDef::failures_of`).
+    pub owner: super::handle::Owner,
+    pub mode: u32,
     pub threshold: f64,
     pub hazard: f64,
     /// Its owner's starts or cycles counted so far (`sim::systems::failure`).
@@ -368,8 +369,8 @@ pub struct Event {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Lost {
     pub part: u32,
-    /// The part's or component's id.
-    pub owner: String,
+    /// The part or component whose function it is.
+    pub owner: super::handle::Owner,
     pub why: String,
 }
 
@@ -528,7 +529,7 @@ impl ShipState {
 
     /// Whether `owner`'s function is out: lost to a failure, or without
     /// power (`systems::power`).
-    pub fn out(&self, owner: &str) -> bool {
+    pub fn out(&self, owner: super::handle::Owner) -> bool {
         self.lost.iter().chain(&self.unpowered).any(|l| l.owner == owner)
     }
 

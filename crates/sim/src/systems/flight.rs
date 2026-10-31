@@ -37,42 +37,45 @@
 //! carries them (its health in [`Health::computers`]).
 
 use super::data::{Knowledge, Quantity};
-use crate::craft::ship::ShipDef;
+use crate::craft::ship::{Owner, ShipDef};
 use crate::craft::state::{EngineStatus, ShipState};
 use crate::frame::NodeId;
 use crate::vessel::{Attitude, Controls, HoldMode};
 use glam::DVec3;
 
-/// Whether component (or part function) `id` on `part` works: its part
-/// intact, its function neither lost (a failure) nor without power, and
-/// switched on.
-pub fn works(def: &ShipDef, state: &ShipState, id: &str, part: u32) -> bool {
-    let intact = state.parts.iter().find(|p| p.part == part).is_none_or(|p| p.integrity > 0.0);
-    let switched = || {
-        let i = def.components.iter().position(|c| c.id == id);
-        i.is_none_or(|i| state.power.get(i).is_none_or(|s| s.on))
+/// Whether the function of `owner` (a component, or a part's own) works:
+/// its part intact, its function neither lost (a failure) nor without
+/// power, and (a component) switched on.
+pub fn works(def: &ShipDef, state: &ShipState, owner: Owner) -> bool {
+    let part = def.owner_part(owner).and_then(|p| def.part_index(p));
+    let intact = part.is_none_or(|i| state.parts.get(i).is_none_or(|p| p.integrity > 0.0));
+    let switched = match owner {
+        Owner::Component(n) => def.component_index(n).is_none_or(|i| state.power.get(i).is_none_or(|s| s.on)),
+        Owner::Part(_) => true,
     };
-    intact && !state.out(id) && switched()
+    intact && !state.out(owner) && switched
 }
 
-/// Whether a working computer is linked to `id`: `None` when no data link
-/// names it.
-fn computer_for(def: &ShipDef, state: &ShipState, id: &str) -> Option<bool> {
-    let mut links = def.links.iter().filter(|l| l.to.iter().any(|(to, _)| to == id)).peekable();
+/// Whether a working computer is linked to `owner`: `None` when no data
+/// link names it.
+fn computer_for(def: &ShipDef, state: &ShipState, owner: Owner) -> Option<bool> {
+    let mut links = def.links.iter().filter(|l| l.to.iter().any(|(to, _)| *to == owner)).peekable();
     links.peek()?;
-    Some(links.any(|l| works(def, state, &l.from.0, l.from.1)))
+    Some(links.any(|l| works(def, state, l.from.0)))
 }
 
-/// Whether sensor `id`'s data reach a working computer (D106): a link from
-/// one, or a craft without data links (its data paths are not modelled).
-pub fn read_by_computer(def: &ShipDef, state: &ShipState, id: &str) -> bool {
-    def.links.is_empty() || computer_for(def, state, id) == Some(true)
+/// Whether sensor `owner`'s data reach a working computer (D106): a link
+/// from one, or a craft without data links (its data paths are not
+/// modelled).
+pub fn read_by_computer(def: &ShipDef, state: &ShipState, owner: Owner) -> bool {
+    def.links.is_empty() || computer_for(def, state, owner) == Some(true)
 }
 
-/// Whether actuator `id` can be commanded through the data links: a working
-/// computer linked to it, or none linked at all (commanded directly).
-pub fn commanded(def: &ShipDef, state: &ShipState, id: &str) -> bool {
-    computer_for(def, state, id) != Some(false)
+/// Whether actuator `owner` can be commanded through the data links: a
+/// working computer linked to it, or none linked at all (commanded
+/// directly).
+pub fn commanded(def: &ShipDef, state: &ShipState, owner: Owner) -> bool {
+    computer_for(def, state, owner) != Some(false)
 }
 
 /// An engine's own controller.
@@ -110,9 +113,9 @@ impl Health {
 
 /// The computers' health for the vessel of `def` in `state`.
 pub fn health(def: &ShipDef, state: &ShipState) -> Health {
-    let computers = def.computers.iter().map(|c| works(def, state, &c.id, c.part)).collect();
+    let computers = def.computers.iter().map(|c| works(def, state, c.owner)).collect();
     let controllers = (def.engines.iter())
-        .map(|e| Controller { works: works(def, state, &e.owner, e.part), commanded: commanded(def, state, &e.owner) })
+        .map(|e| Controller { works: works(def, state, e.owner), commanded: commanded(def, state, e.owner) })
         .collect();
     Health { computers, ideal: def.computers.is_empty() && def.links.is_empty(), controllers }
 }

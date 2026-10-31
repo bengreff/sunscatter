@@ -63,8 +63,9 @@ impl Vessel {
     /// §6.3; a new game's, set on each vessel it creates): its fates are
     /// drawn again from it. Nothing for a craft of one part.
     pub fn seed_fates(&mut self, seed: u64) {
+        let Some(def) = self.ship_def() else { return };
         if let Some(state) = self.ship.as_mut() {
-            crate::systems::failure::reseed(state, seed);
+            crate::systems::failure::reseed(&def, state, seed);
         }
     }
 

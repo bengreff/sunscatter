@@ -24,7 +24,7 @@ fn merlins(craft: &Craft, thrust: f64) -> Vec<Push> {
     let def = craft.ship.as_ref().unwrap();
     let index = |id: u32| craft.parts.iter().position(|p| p.id == id).unwrap();
     (def.engines.iter())
-        .filter(|e| e.owner.starts_with("s1.merlin"))
+        .filter(|e| def.owner_id(e.owner).starts_with("s1.merlin"))
         .map(|e| Push { part: index(e.part), force: e.data.dir * thrust, at: e.data.pos, torque: DVec3::ZERO })
         .collect()
 }

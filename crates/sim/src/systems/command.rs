@@ -15,7 +15,7 @@
 use crate::catalog::Igniter;
 use crate::craft::command::{matches, SequenceEdit, ShipCommand, Stage};
 use crate::craft::program;
-use crate::craft::ship::ShipDef;
+use crate::craft::ship::{Owner, ShipDef};
 use crate::craft::state::OrderKind;
 use crate::craft::state::{Effect, EngineStatus, ShipState};
 use crate::time::Epoch;
@@ -38,7 +38,7 @@ pub fn can_ignite(igniter: Igniter, ignitions: u32, ground: bool) -> bool {
 /// Whether an engine (or other actuator) `owner` can be commanded: its own
 /// function in (not lost, with power), and if computers are linked to it,
 /// one of them working (`systems::flight::commanded`).
-pub fn reachable(def: &ShipDef, state: &ShipState, owner: &str) -> bool {
+pub fn reachable(def: &ShipDef, state: &ShipState, owner: Owner) -> bool {
     !state.out(owner) && super::flight::commanded(def, state, owner)
 }
 
@@ -58,7 +58,7 @@ pub fn apply(def: &ShipDef, state: &mut ShipState, command: &ShipCommand, cx: Co
                 if state.engines[i].status != EngineStatus::Off {
                     continue;
                 }
-                if !reachable(def, state, &d.owner) {
+                if !reachable(def, state, d.owner) {
                     state.event(cx.at, format!("{}: no working controller or computer: no start", d.id), true);
                     continue;
                 }
@@ -131,7 +131,7 @@ pub fn apply(def: &ShipDef, state: &mut ShipState, command: &ShipCommand, cx: Co
                 // modes count them, `systems::failure`).
                 if now.target != before {
                     let part = def.mechanisms[i].part;
-                    if let Some(p) = state.parts.iter_mut().find(|p| p.part == part) {
+                    if let Some(p) = def.part_index(part).map(|i| &mut state.parts[i]) {
                         p.history.cycles += 1;
                     }
                 }
@@ -337,7 +337,8 @@ mod tests {
         let mut state = ShipState::initial(&def);
         state.clamped = false;
         let part = def.computers.iter().find(|c| c.id == "s2.computer").unwrap().part;
-        state.unpowered.push(Lost { part, owner: "s2.computer".into(), why: "bus dead".into() });
+        let owner = def.owner_named("s2.computer").unwrap();
+        state.unpowered.push(Lost { part, owner, why: "bus dead".into() });
         apply(&def, &mut state, &ShipCommand::Ignite("s2".into()), cx).unwrap();
         assert_eq!(state.engines[mvac].status, EngineStatus::Off);
         assert!(state.events.last().unwrap().text.contains("no working controller"));

@@ -312,7 +312,7 @@ pub fn facts(
                 tanks,
                 plumbing,
                 source: def.batteries.iter().any(|b| on(b.part)),
-                bus: def.buses.iter().any(|b| b.members.iter().any(|m| m.1 == id && ids.contains(&m.0.as_str()))),
+                bus: def.buses.iter().any(|b| b.members.iter().any(|m| m.1 == id && ids.contains(&def.owner_id(m.0)))),
                 load,
                 computers: def.computers.iter().filter(|c| on(c.part)).count(),
                 sensors: def.sensors.iter().filter(|s| on(s.part)).count(),
@@ -438,12 +438,12 @@ pub fn networks(layer: Layer, def: &ShipDef, at: &dyn Fn(&str, u32) -> Vec3) -> 
         }
         Layer::Electrical => (def.buses.iter())
             .flat_map(|b| {
-                let first = b.members.first().map(|m| at(&m.0, m.1));
-                b.members.iter().skip(1).filter_map(move |m| Some((first?, at(&m.0, m.1))))
+                let first = b.members.first().map(|m| at(def.owner_id(m.0), m.1));
+                b.members.iter().skip(1).filter_map(move |m| Some((first?, at(def.owner_id(m.0), m.1))))
             })
             .collect(),
         Layer::Data => (def.links.iter())
-            .flat_map(|l| l.to.iter().map(move |m| (at(&l.from.0, l.from.1), at(&m.0, m.1))))
+            .flat_map(|l| l.to.iter().map(move |m| (at(def.owner_id(l.from.0), l.from.1), at(def.owner_id(m.0), m.1))))
             .collect(),
         _ => Vec::new(),
     }

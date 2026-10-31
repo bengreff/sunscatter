@@ -15,6 +15,7 @@
 use super::assembly::{JointKind, Loading};
 use super::command::Stage;
 use super::file::{Shape, Tank};
+pub use super::handle::Owner;
 use super::place::Pose;
 use crate::catalog::{
     AeroSurface, Battery, Computer, EngineData, FailureMode, LifeSupport, Mechanism, Nozzle, Propellant, Ratings,
@@ -29,6 +30,8 @@ use std::collections::BTreeMap;
 pub struct Owned<T> {
     pub id: String,
     pub part: u32,
+    /// What provides it (its part, or one of its components).
+    pub owner: Owner,
     pub item: T,
 }
 
@@ -59,6 +62,9 @@ pub struct PartInfo {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ComponentDef {
     pub id: String,
+    /// Its number in the design (as `Part::id` is a part's): every piece of
+    /// a split keeps it (`Owner::Component`).
+    pub n: u32,
     pub entry: String,
     pub part: u32,
     pub pose: Pose,
@@ -112,8 +118,8 @@ pub struct BottleDef {
 pub struct EngineDef {
     /// The engine part's id, or `<pod>/<n>`.
     pub id: String,
-    /// The part or component it belongs to (what selectors name).
-    pub owner: String,
+    /// The part or component it belongs to (selectors name its id).
+    pub owner: Owner,
     pub part: u32,
     /// Its gimbal point and thrust direction in the craft's axes.
     pub data: EngineData,
@@ -136,6 +142,7 @@ pub enum Feed {
 pub struct ThrusterDef {
     pub id: String,
     pub part: u32,
+    pub owner: Owner,
     pub thrust: f64,
     pub isp: f64,
     pub propellant: Propellant,
@@ -179,19 +186,19 @@ pub struct LineDef {
     pub parts: (u32, u32),
 }
 
-/// An electrical bus and its members (id, part).
+/// An electrical bus and its members (owner, part).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct BusDef {
     pub name: String,
     pub voltage: f64,
-    pub members: Vec<(String, u32)>,
+    pub members: Vec<(Owner, u32)>,
 }
 
-/// A data link from a computer to sensors and actuators (id, part).
+/// A data link from a computer to sensors and actuators (owner, part).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct LinkDef {
-    pub from: (String, u32),
-    pub to: Vec<(String, u32)>,
+    pub from: (Owner, u32),
+    pub to: Vec<(Owner, u32)>,
 }
 
 /// The static definition of a craft of parts.
@@ -331,7 +338,7 @@ impl ShipDef {
             None => vec![selector],
         };
         (0..self.engines.len())
-            .filter(|&i| selectors.iter().any(|s| super::command::matches(s, &self.engines[i].owner)))
+            .filter(|&i| selectors.iter().any(|s| super::command::matches(s, self.owner_id(self.engines[i].owner))))
             .collect()
     }
 

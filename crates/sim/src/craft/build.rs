@@ -16,7 +16,7 @@ use super::assembly::{copies, nth, AssemblyFile, Loading};
 use super::file::{CraftFile, GeometryFile, Tank};
 use super::parts::{aggregate, CraftDef, Part, PartPower};
 use super::place::{self, Frame, Pose};
-use super::ship::{BottleDef, ComponentDef, EngineDef, Owned, PartInfo, ShipDef, TankDef};
+use super::ship::{BottleDef, ComponentDef, EngineDef, Owned, Owner, PartInfo, ShipDef, TankDef};
 use crate::catalog::{Built, Catalog, Ctx, Function, Kind};
 use crate::math;
 use glam::DVec3;
@@ -330,12 +330,13 @@ fn describe(parts: &[Placed], components: &[PlacedComponent], ship: &mut ShipDef
             ratings: p.built.ratings,
             failures: p.built.failures.clone(),
         });
-        functions(&p.id, &p.id, i as u32, &p.pose, &g.functions, true, ship);
+        functions(&p.id, Owner::Part(i as u32), i as u32, &p.pose, &g.functions, true, ship);
     }
-    for c in components {
+    for (n, c) in components.iter().enumerate() {
         let g = &c.built.generated;
         ship.components.push(ComponentDef {
             id: c.id.clone(),
+            n: n as u32,
             entry: c.entry.clone(),
             part: c.part,
             pose: c.pose,
@@ -345,16 +346,16 @@ fn describe(parts: &[Placed], components: &[PlacedComponent], ship: &mut ShipDef
             ratings: c.built.ratings,
             failures: c.built.failures.clone(),
         });
-        functions(&c.id, &c.id, c.part, &c.pose, &g.functions, false, ship);
+        functions(&c.id, Owner::Component(n as u32), c.part, &c.pose, &g.functions, false, ship);
     }
 }
 
 /// One owner's functions, moved into the craft's axes.
-fn functions(id: &str, owner: &str, part: u32, pose: &Pose, fs: &[Function], main: bool, ship: &mut ShipDef) {
+fn functions(id: &str, owner: Owner, part: u32, pose: &Pose, fs: &[Function], main: bool, ship: &mut ShipDef) {
     let engines = fs.iter().filter(|f| matches!(f, Function::Engine(_))).count();
     let mut n = 0;
-    fn owned<T>(id: &str, part: u32, item: T) -> Owned<T> {
-        Owned { id: id.to_string(), part, item }
+    fn owned<T>(id: &str, part: u32, owner: Owner, item: T) -> Owned<T> {
+        Owned { id: id.to_string(), part, owner, item }
     }
     for f in fs {
         match f {
@@ -362,14 +363,7 @@ fn functions(id: &str, owner: &str, part: u32, pose: &Pose, fs: &[Function], mai
                 n += 1;
                 let data = crate::catalog::EngineData { pos: pose.point(d.pos), dir: pose.dir(d.dir), ..d.clone() };
                 let eid = if engines > 1 { format!("{id}/{n}") } else { id.to_string() };
-                ship.engines.push(EngineDef {
-                    id: eid,
-                    owner: owner.into(),
-                    part,
-                    data,
-                    feeds: [vec![], vec![]],
-                    main,
-                });
+                ship.engines.push(EngineDef { id: eid, owner, part, data, feeds: [vec![], vec![]], main });
             }
             Function::Thrusters(t) => {
                 let nozzles =
@@ -377,6 +371,7 @@ fn functions(id: &str, owner: &str, part: u32, pose: &Pose, fs: &[Function], mai
                 ship.thrusters.push(super::ship::ThrusterDef {
                     id: id.into(),
                     part,
+                    owner,
                     thrust: t.thrust,
                     isp: t.isp,
                     propellant: t.propellant.clone(),
@@ -392,11 +387,12 @@ fn functions(id: &str, owner: &str, part: u32, pose: &Pose, fs: &[Function], mai
                     foot: m.foot.map(|f| pose.point(f)),
                     ..*m
                 };
-                ship.mechanisms.push(owned(id, part, m));
+                ship.mechanisms.push(owned(id, part, owner, m));
             }
             Function::AeroSurface(s) => ship.surfaces.push(owned(
                 id,
                 part,
+                owner,
                 crate::catalog::AeroSurface { pos: pose.point(s.pos), axis: pose.dir(s.axis), ..*s },
             )),
             Function::Bottle(b) => ship.bottles.push(BottleDef {
@@ -409,13 +405,13 @@ fn functions(id: &str, owner: &str, part: u32, pose: &Pose, fs: &[Function], mai
                 temperature_k: b.temperature_k,
                 pos: pose.pos,
             }),
-            Function::Valve(v) => ship.valves.push(owned(id, part, *v)),
-            Function::Battery(b) => ship.batteries.push(owned(id, part, *b)),
-            Function::Sensor(s) => ship.sensors.push(owned(id, part, s.clone())),
-            Function::Computer(c) => ship.computers.push(owned(id, part, *c)),
-            Function::Seat(n) => ship.seats.push(owned(id, part, *n)),
-            Function::Solar(s) => ship.solars.push(owned(id, part, *s)),
-            Function::LifeSupport(l) => ship.life_support.push(owned(id, part, *l)),
+            Function::Valve(v) => ship.valves.push(owned(id, part, owner, *v)),
+            Function::Battery(b) => ship.batteries.push(owned(id, part, owner, *b)),
+            Function::Sensor(s) => ship.sensors.push(owned(id, part, owner, s.clone())),
+            Function::Computer(c) => ship.computers.push(owned(id, part, owner, *c)),
+            Function::Seat(n) => ship.seats.push(owned(id, part, owner, *n)),
+            Function::Solar(s) => ship.solars.push(owned(id, part, owner, *s)),
+            Function::LifeSupport(l) => ship.life_support.push(owned(id, part, owner, *l)),
             Function::Chute(_) | Function::Docking(..) | Function::Control | Function::Pad => {}
         }
     }

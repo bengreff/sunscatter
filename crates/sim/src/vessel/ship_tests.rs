@@ -207,7 +207,7 @@ fn the_falcon_9_stands_on_the_pad_and_lifts_off() {
     let merlins = |x: &Vessel| -> Vec<u32> {
         let def = x.ship_def().unwrap();
         (def.engines.iter().zip(&x.ship().unwrap().engines))
-            .filter(|(d, _)| d.owner.starts_with("s1.merlin"))
+            .filter(|(d, _)| def.owner_id(d.owner).starts_with("s1.merlin"))
             .map(|(_, e)| e.ignitions)
             .collect()
     };
@@ -429,7 +429,7 @@ fn the_throttle_shuts_the_merlins_down_and_again_relights_them() {
     let merlins = |x: &Vessel| -> Vec<EngineStatus> {
         let def = x.ship_def().unwrap();
         (def.engines.iter().zip(&x.ship().unwrap().engines))
-            .filter(|(d, _)| d.owner.starts_with("s1.merlin"))
+            .filter(|(d, _)| def.owner_id(d.owner).starts_with("s1.merlin"))
             .map(|(_, e)| e.status)
             .collect()
     };

@@ -62,7 +62,7 @@ pub struct Icon {
 /// the canopies' look now).
 pub fn icons(def: &ShipDef, state: &ShipState, c: &ShipCommand, chute: (&[u32], Look)) -> Vec<Icon> {
     let icon = |kind, look, part, id: &str| Icon { kind, look, part, id: id.to_string() };
-    let lost = |id: &str| state.out(id);
+    let lost = |o: sim::craft::ship::Owner| state.out(o);
     match c {
         ShipCommand::Ignite(s) | ShipCommand::Shutdown(s) | ShipCommand::Throttle(s, _) | ShipCommand::Select(s) => {
             let kind = if matches!(c, ShipCommand::Ignite(_) | ShipCommand::Shutdown(_)) {
@@ -83,7 +83,7 @@ pub fn icons(def: &ShipDef, state: &ShipState, c: &ShipCommand, chute: (&[u32], 
             .filter(|(_, v)| matches(s, &v.id))
             .map(|(i, v)| {
                 let st = &state.valves[i];
-                let look = if st.stuck || lost(&v.id) {
+                let look = if st.stuck || lost(v.owner) {
                     Look::Failed
                 } else if st.open {
                     Look::Running
@@ -104,7 +104,7 @@ pub fn icons(def: &ShipDef, state: &ShipState, c: &ShipCommand, chute: (&[u32], 
                     _ => Kind::Servo,
                 };
                 let st = &state.mechanisms[i];
-                let look = if lost(&m.id) {
+                let look = if lost(m.owner) {
                     Look::Failed
                 } else if (st.angle - st.target).abs() > 0.5 {
                     Look::Armed
@@ -128,7 +128,7 @@ pub fn icons(def: &ShipDef, state: &ShipState, c: &ShipCommand, chute: (&[u32], 
         ShipCommand::Rcs(s, _) => (def.thrusters.iter().enumerate())
             .filter(|(_, t)| matches(s, &t.id))
             .map(|(i, t)| {
-                let look = match (lost(&t.id), state.thrusters[i].enabled) {
+                let look = match (lost(t.owner), state.thrusters[i].enabled) {
                     (true, _) => Look::Failed,
                     (false, true) => Look::Running,
                     (false, false) => Look::Idle,
@@ -140,7 +140,7 @@ pub fn icons(def: &ShipDef, state: &ShipState, c: &ShipCommand, chute: (&[u32], 
             .filter(|(_, comp)| matches(s, &comp.id))
             .map(|(i, comp)| {
                 let on = state.power.get(i).is_some_and(|p| p.on);
-                let look = match (lost(&comp.id) && on, on) {
+                let look = match (lost(sim::craft::ship::Owner::Component(comp.n)) && on, on) {
                     (true, _) => Look::Failed,
                     (false, true) => Look::Running,
                     (false, false) => Look::Idle,
@@ -173,7 +173,7 @@ pub fn engine_look(def: &ShipDef, state: &ShipState, i: usize) -> Look {
     match e.status {
         EngineStatus::Failed => Look::Failed,
         EngineStatus::Starting | EngineStatus::Running | EngineStatus::ShuttingDown => Look::Running,
-        EngineStatus::Off if state.out(&d.owner) => Look::Failed,
+        EngineStatus::Off if state.out(d.owner) => Look::Failed,
         EngineStatus::Off if settling => Look::Armed,
         EngineStatus::Off if !fed || !can_ignite(d.data.igniter, e.ignitions, state.clamped) => Look::Spent,
         EngineStatus::Off => Look::Idle,

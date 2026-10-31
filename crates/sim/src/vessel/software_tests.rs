@@ -58,7 +58,7 @@ fn lose(v: &mut Vessel, select: impl Fn(&str) -> bool) {
     let def = v.ship_def().unwrap();
     let state = v.ship.as_mut().unwrap();
     for s in def.sensors.iter().filter(|s| select(&s.id)) {
-        state.lost.push(Lost { part: s.part, owner: s.id.clone(), why: "test".into() });
+        state.lost.push(Lost { part: s.part, owner: s.owner, why: "test".into() });
     }
 }
 
@@ -132,7 +132,7 @@ fn a_stage_computer_unpowered_safes_its_engines() {
     let t = v.time.add_seconds(0.1);
     fly(&mut v, &w, t, &full());
     let s = v.ship().unwrap();
-    assert!(s.unpowered.iter().any(|l| l.owner == "s1.computer"), "the bus is dead");
+    assert!(s.unpowered.iter().any(|l| def.owner_id(l.owner) == "s1.computer"), "the bus is dead");
     for (d, e) in def.engines.iter().zip(&s.engines).filter(|(d, _)| d.id.starts_with("s1.merlin")) {
         assert!(matches!(e.status, EngineStatus::ShuttingDown | EngineStatus::Off), "{}: {:?}", d.id, e.status);
     }
@@ -155,8 +155,8 @@ fn a_lost_controller_on_the_pad_aborts_the_launch() {
         v.next_stage(&w).unwrap();
         v.advance(&w, t0().add_seconds(1.0), &full(), usize::MAX);
         let def = v.ship_def().unwrap();
-        let e5 = def.engines.iter().find(|e| e.owner == "s1.merlin.5").unwrap();
-        let lost = Lost { part: e5.part, owner: e5.owner.clone(), why: "controller lost".into() };
+        let e5 = def.engines.iter().find(|e| def.owner_id(e.owner) == "s1.merlin.5").unwrap();
+        let lost = Lost { part: e5.part, owner: e5.owner, why: "controller lost".into() };
         v.ship.as_mut().unwrap().lost.push(lost);
         v.advance(&w, t0().add_seconds(3.0), &full(), usize::MAX);
         let abort = v.ship_events().iter().find(|e| e.text.starts_with("Pad abort"));

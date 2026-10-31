@@ -33,7 +33,7 @@ pub fn catalogue(def: &ShipDef) -> Vec<ShipCommand> {
             out.push(c);
         }
     };
-    let engines = def.groups.keys().cloned().chain(def.engines.iter().map(|e| e.owner.clone()));
+    let engines = def.groups.keys().cloned().chain(def.engines.iter().map(|e| def.owner_id(e.owner).to_string()));
     for s in engines {
         push(ShipCommand::Ignite(s.clone()));
         push(ShipCommand::Shutdown(s.clone()));

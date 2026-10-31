@@ -30,8 +30,8 @@ pub mod damage;
 pub mod fates;
 pub mod physical;
 
-use crate::catalog::{FailureMode, Hazard, Outcome, Ratings};
-use crate::craft::ship::ShipDef;
+use crate::catalog::{FailureMode, Hazard, Outcome};
+use crate::craft::ship::{Owner, ShipDef};
 use crate::craft::state::{Effect, EngineStatus, Fate, PartFailure, ShipState};
 use crate::systems::ship::TickEnv;
 use crate::time::Epoch;
@@ -64,9 +64,11 @@ pub fn step(def: &ShipDef, state: &mut ShipState, env: &TickEnv) -> Vec<Effect> 
     freeze_lost(def, state);
     let mut effects = Vec::new();
     for (part, why) in destroyed {
-        let Some(s) = state.parts.iter_mut().find(|p| p.part == part && p.integrity > 0.0) else { continue };
+        let Some(s) = def.part_index(part).map(|i| &mut state.parts[i]).filter(|s| s.integrity > 0.0) else {
+            continue;
+        };
         s.integrity = 0.0;
-        let name = def.parts.iter().find(|p| p.part == part).map_or("a part", |p| p.id.as_str());
+        let name = def.owner_id(Owner::Part(part));
         state.event(env.at, format!("{name}: destroyed ({})", why.describe()), true);
         effects.push(Effect::Destroy(part, why));
     }
@@ -77,7 +79,7 @@ pub fn step(def: &ShipDef, state: &mut ShipState, env: &TickEnv) -> Vec<Effect> 
 /// controller stops it), a mechanism's part loses its function; another
 /// part carries the damage (its hazards doubled; no outcome is known).
 fn fatigue(def: &ShipDef, state: &mut ShipState, part: u32, at: Epoch) {
-    let Some(p) = def.parts.iter().find(|p| p.part == part) else { return };
+    let Some(p) = def.part_index(part).map(|i| &def.parts[i]) else { return };
     let engines: Vec<usize> = (0..def.engines.len()).filter(|&i| def.engines[i].part == part).collect();
     if !engines.is_empty() {
         for i in engines {
@@ -89,7 +91,7 @@ fn fatigue(def: &ShipDef, state: &mut ShipState, part: u32, at: Epoch) {
             }
         }
     } else if def.mechanisms.iter().any(|m| m.part == part) {
-        lose(state, part, &p.id, "vibration fatigue", at);
+        lose(def, state, part, Owner::Part(part), "vibration fatigue", at);
     } else {
         state.event(at, format!("{}: vibration damage at its qualification", p.id), true);
     }
@@ -98,18 +100,30 @@ fn fatigue(def: &ShipDef, state: &mut ShipState, part: u32, at: Epoch) {
 /// A lost mechanism stays where it is (its actuator is gone).
 fn freeze_lost(def: &ShipDef, state: &mut ShipState) {
     for (m, s) in def.mechanisms.iter().zip(state.mechanisms.iter_mut()) {
-        if state.lost.iter().any(|l| l.part == m.part || l.owner == m.id) {
+        if state.lost.iter().any(|l| l.part == m.part || l.owner == m.owner) {
             s.target = s.angle;
         }
     }
 }
 
-/// The statistical modes of a ship (owner id, its part, the mode), parts
-/// first then components, in the definition's order.
-pub fn modes(def: &ShipDef) -> Vec<(&str, u32, &FailureMode)> {
-    let parts = def.parts.iter().flat_map(|p| p.failures.iter().map(move |m| (p.id.as_str(), p.part, m)));
-    let components = def.components.iter().flat_map(|c| c.failures.iter().map(move |m| (c.id.as_str(), c.part, m)));
-    parts.chain(components).collect()
+/// The statistical modes of a ship (owner, its part, the mode's index in
+/// its owner's modes, the mode), parts first then components, in the
+/// definition's order.
+pub fn modes(def: &ShipDef) -> Vec<(Owner, u32, u32, &FailureMode)> {
+    let mut out = Vec::new();
+    for p in &def.parts {
+        out.extend(p.failures.iter().enumerate().map(|(k, m)| (Owner::Part(p.part), p.part, k as u32, m)));
+    }
+    for c in &def.components {
+        out.extend(c.failures.iter().enumerate().map(|(k, m)| (Owner::Component(c.n), c.part, k as u32, m)));
+    }
+    out
+}
+
+/// How many statistical modes a ship has (one fate each once drawn).
+fn mode_count(def: &ShipDef) -> usize {
+    def.parts.iter().map(|p| p.failures.len()).sum::<usize>()
+        + def.components.iter().map(|c| c.failures.len()).sum::<usize>()
 }
 
 /// Draws the fates the ship lacks (each mode once, from the save's `seed`
@@ -117,11 +131,15 @@ pub fn modes(def: &ShipDef) -> Vec<(&str, u32, &FailureMode)> {
 /// parts, so nothing is drawn twice), each counting its owner's starts and
 /// cycles from now (a reused part's earlier ones are its history's).
 pub fn draw_fates(def: &ShipDef, state: &mut ShipState, seed: u64, launch: Epoch) {
-    for (owner, part, m) in modes(def) {
-        if !state.fates.iter().any(|f| f.owner == owner && f.mode == m.mode) {
-            let threshold = fates::threshold(seed, launch, owner, &m.mode);
+    // Fates come one per mode, and a split or a merge keeps them with
+    // their parts: as many as the modes is every one drawn.
+    if state.fates.len() == mode_count(def) {
+        return;
+    }
+    for (owner, part, mode, m) in modes(def) {
+        if !state.fates.iter().any(|f| f.owner == owner && f.mode == mode) {
+            let threshold = fates::threshold(seed, launch, def.owner_id(owner), &m.mode);
             let seen = counter(def, state, owner, part, m.hazard);
-            let (owner, mode) = (owner.to_string(), m.mode.clone());
             state.fates.push(Fate { part, owner, mode, threshold, hazard: 0.0, seen });
         }
     }
@@ -131,21 +149,22 @@ pub fn draw_fates(def: &ShipDef, state: &mut ShipState, seed: u64, launch: Epoch
 /// vessel just created, D105 §6.3): each threshold from the seed, the
 /// launch epoch, its owner and mode; the hazards and counters stay. The
 /// seed is kept in the ship state, so a split's pieces carry it.
-pub fn reseed(state: &mut ShipState, seed: u64) {
+pub fn reseed(def: &ShipDef, state: &mut ShipState, seed: u64) {
     state.seed = seed;
     let Some(launch) = state.launch else { return };
     for f in &mut state.fates {
-        f.threshold = fates::threshold(seed, launch, &f.owner, &f.mode);
+        let Some(m) = def.failures_of(f.owner).get(f.mode as usize) else { continue };
+        f.threshold = fates::threshold(seed, launch, def.owner_id(f.owner), &m.mode);
     }
 }
 
 /// An owner's event counter for a hazard: its part's engine starts, a
 /// valve's cycles, else its part's cycles.
-fn counter(def: &ShipDef, state: &ShipState, owner: &str, part: u32, hazard: Hazard) -> u32 {
-    let history = state.parts.iter().find(|p| p.part == part).map(|p| &p.history);
+fn counter(def: &ShipDef, state: &ShipState, owner: Owner, part: u32, hazard: Hazard) -> u32 {
+    let history = def.part_index(part).map(|i| &state.parts[i].history);
     match hazard {
         Hazard::PerStart(_) => history.map_or(0, |h| h.starts),
-        Hazard::PerCycle(_) => match def.valves.iter().position(|v| v.id == owner) {
+        Hazard::PerCycle(_) => match def.valves.iter().position(|v| v.owner == owner) {
             Some(v) => state.valves[v].cycles,
             None => history.map_or(0, |h| h.cycles),
         },
@@ -153,20 +172,16 @@ fn counter(def: &ShipDef, state: &ShipState, owner: &str, part: u32, hazard: Haz
     }
 }
 
-/// The ratings, damage and history of an owner (a part, or a component's
-/// host part's history).
-fn owner_ratings<'a>(def: &'a ShipDef, owner: &str) -> Option<&'a Ratings> {
-    (def.parts.iter().find(|p| p.id == owner).map(|p| &p.ratings))
-        .or_else(|| def.components.iter().find(|c| c.id == owner).map(|c| &c.ratings))
-}
-
 /// What an owner did over a tick: seconds operating, and its event counter
 /// (starts of a part's engines, cycles of a valve or of a part).
-fn exposure(def: &ShipDef, state: &ShipState, owner: &str, part: u32, hazard: Hazard, dt: f64) -> (f64, u32) {
+fn exposure(def: &ShipDef, state: &ShipState, owner: Owner, part: u32, hazard: Hazard, dt: f64) -> (f64, u32) {
     let engines: Vec<usize> = (0..def.engines.len()).filter(|&i| def.engines[i].owner == owner).collect();
     let running =
         engines.iter().any(|&i| matches!(state.engines[i].status, EngineStatus::Starting | EngineStatus::Running));
-    let powered = (def.components.iter().zip(&state.power)).any(|(c, s)| c.id == owner && s.on);
+    let powered = match owner {
+        Owner::Component(n) => def.component_index(n).is_some_and(|i| state.power[i].on),
+        Owner::Part(_) => false,
+    };
     let on = if engines.is_empty() { powered } else { running };
     (if on { dt } else { 0.0 }, counter(def, state, owner, part, hazard))
 }
@@ -176,20 +191,19 @@ fn exposure(def: &ShipDef, state: &ShipState, owner: &str, part: u32, hazard: Ha
 /// returns the modes that failed now (indices into `state.fates`).
 pub fn accumulate(def: &ShipDef, state: &mut ShipState, dt: f64) -> Vec<usize> {
     let mut failed = Vec::new();
-    let all = modes(def);
     for k in 0..state.fates.len() {
         let f = &state.fates[k];
         if f.hazard >= f.threshold {
             continue;
         }
-        let Some(&(owner, part, mode)) = all.iter().find(|(o, _, m)| *o == f.owner && m.mode == f.mode) else {
-            continue;
-        };
+        let (owner, part) = (f.owner, f.part);
+        let Some(mode) = def.failures_of(owner).get(f.mode as usize) else { continue };
         let (on, count) = exposure(def, state, owner, part, mode.hazard, dt);
         let events = count.saturating_sub(f.seen);
-        let damage = state.parts.iter().find(|p| p.part == part).map_or(0.0, |p| p.thermal_damage + p.vibration_damage);
-        let history = state.parts.iter().find(|p| p.part == part).map(|p| p.history.clone()).unwrap_or_default();
-        let mult = owner_ratings(def, owner).map_or(1.0, |r| fates::multiplier(r, &history, damage));
+        let p = def.part_index(part).map(|i| &state.parts[i]);
+        let damage = p.map_or(0.0, |p| p.thermal_damage + p.vibration_damage);
+        let history = p.map(|p| p.history.clone()).unwrap_or_default();
+        let mult = def.ratings_of(owner).map_or(1.0, |r| fates::multiplier(r, &history, damage));
         let (starts, cycles) = match mode.hazard {
             Hazard::PerStart(_) => (events, 0),
             Hazard::PerCycle(_) => (0, events),
@@ -217,10 +231,10 @@ pub enum Consequence {
 /// The outcome of the mode of fate `k` (see the module).
 pub fn outcome(def: &ShipDef, state: &mut ShipState, k: usize, at: Epoch) -> Consequence {
     let f = state.fates[k].clone();
-    let Some(&(owner, part, mode)) = modes(def).iter().find(|(o, _, m)| *o == f.owner && m.mode == f.mode) else {
-        return Consequence::None;
-    };
-    let engines: Vec<usize> = (0..def.engines.len()).filter(|&i| def.engines[i].owner == owner).collect();
+    let Some(mode) = def.failures_of(f.owner).get(f.mode as usize) else { return Consequence::None };
+    let (who, part) = (f.owner, f.part);
+    let owner = def.owner_id(who);
+    let engines: Vec<usize> = (0..def.engines.len()).filter(|&i| def.engines[i].owner == who).collect();
     let why = format!("{} ({})", mode.mode, describe(mode.outcome));
     match mode.outcome {
         Outcome::BenignShutdown => {
@@ -245,14 +259,14 @@ pub fn outcome(def: &ShipDef, state: &mut ShipState, k: usize, at: Epoch) -> Con
             return Consequence::Destroyed(part, PartFailure::Uncontained);
         }
         Outcome::StuckOpen | Outcome::StuckClosed => {
-            if let Some(v) = def.valves.iter().position(|v| v.id == owner) {
+            if let Some(v) = def.valves.iter().position(|v| v.owner == who) {
                 let s = &mut state.valves[v];
                 (s.stuck, s.open) = (true, mode.outcome == Outcome::StuckOpen);
             }
             state.event(at, format!("{owner}: {why}"), true);
         }
         Outcome::CellLoss => {
-            if let Some(b) = def.batteries.iter().position(|b| b.id == owner) {
+            if let Some(b) = def.batteries.iter().position(|b| b.owner == who) {
                 // A module of four lost (E: the batteries' modules are not data).
                 state.batteries[b].charge *= 0.75;
             }
@@ -263,17 +277,17 @@ pub fn outcome(def: &ShipDef, state: &mut ShipState, k: usize, at: Epoch) -> Con
             return Consequence::Destroyed(part, PartFailure::Burst { pa: 0.0 });
         }
         Outcome::GimbalStuck | Outcome::Leak | Outcome::Lost | Outcome::Snap => {
-            lose(state, part, owner, &why, at);
+            lose(def, state, part, who, &why, at);
         }
     }
     Consequence::None
 }
 
 /// Records `owner`'s function as lost (once) and tells the player.
-pub fn lose(state: &mut ShipState, part: u32, owner: &str, why: &str, at: Epoch) {
+pub fn lose(def: &ShipDef, state: &mut ShipState, part: u32, owner: Owner, why: &str, at: Epoch) {
     if !state.lost.iter().any(|l| l.owner == owner) {
-        state.lost.push(crate::craft::state::Lost { part, owner: owner.into(), why: why.into() });
-        state.event(at, format!("{owner}: lost: {why}"), true);
+        state.lost.push(crate::craft::state::Lost { part, owner, why: why.into() });
+        state.event(at, format!("{}: lost: {why}", def.owner_id(owner)), true);
     }
 }
 

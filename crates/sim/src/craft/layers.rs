@@ -8,20 +8,34 @@
 use super::assembly::{expand, port_ref, AssemblyFile, JointKind};
 use super::build::{Placed, PlacedComponent};
 use super::command::{matches, ShipCommand};
+use super::handle::Owner as Handle;
 use super::ship::{BusDef, Feed, JointDef, LineDef, LinkDef, ShipDef};
 use crate::catalog::{Port, PortKind, Propellant};
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
-/// A part's or component's id, its part and its ports.
+/// A part's or component's id, its handle, its part and its ports.
 struct Owner<'a> {
     id: &'a str,
+    who: Handle,
     part: u32,
     ports: &'a [Port],
 }
 
+/// The parts, then the components, numbered as `build::describe` numbers
+/// them (`Part::id`, `ComponentDef::n`).
 fn owners<'a>(parts: &'a [Placed], components: &'a [PlacedComponent]) -> Vec<Owner<'a>> {
-    let p = parts.iter().enumerate().map(|(i, p)| Owner { id: &p.id, part: i as u32, ports: &p.built.generated.ports });
-    let c = components.iter().map(|c| Owner { id: &c.id, part: c.part, ports: &c.built.generated.ports });
+    let p = (parts.iter().enumerate()).map(|(i, p)| Owner {
+        id: &p.id,
+        who: Handle::Part(i as u32),
+        part: i as u32,
+        ports: &p.built.generated.ports,
+    });
+    let c = (components.iter().enumerate()).map(|(n, c)| Owner {
+        id: &c.id,
+        who: Handle::Component(n as u32),
+        part: c.part,
+        ports: &c.built.generated.ports,
+    });
     p.chain(c).collect()
 }
 
@@ -103,7 +117,7 @@ pub(super) fn connect(
     ship.groups = file.groups.clone();
     for (name, selectors) in &file.groups {
         for s in selectors {
-            if !ship.engines.iter().any(|e| matches(s, &e.owner)) {
+            if !ship.engines.iter().any(|e| matches(s, ship.owner_id(e.owner))) {
                 errors.push(format!("group {name:?}: {s:?} names no engine"));
             }
         }
@@ -147,8 +161,9 @@ fn tanks_feeding(ship: &ShipDef, edges: &BTreeMap<String, Vec<String>>, inlet: &
 fn feeds(ship: &mut ShipDef, edges: &BTreeMap<String, Vec<String>>, errors: &mut Vec<String>) {
     for i in 0..ship.engines.len() {
         let e = &ship.engines[i];
-        let ox = tanks_feeding(ship, edges, &format!("{}:ox_in", e.owner), &e.data.oxidizer);
-        let fuel = tanks_feeding(ship, edges, &format!("{}:fuel_in", e.owner), &e.data.fuel);
+        let owner = ship.owner_id(e.owner);
+        let ox = tanks_feeding(ship, edges, &format!("{owner}:ox_in"), &e.data.oxidizer);
+        let fuel = tanks_feeding(ship, edges, &format!("{owner}:fuel_in"), &e.data.fuel);
         if ox.is_empty() || fuel.is_empty() {
             errors.push(format!("engine {:?}: no feed of {} and {} reaches it", e.id, e.data.oxidizer, e.data.fuel));
         }
@@ -240,11 +255,10 @@ fn joints(file: &AssemblyFile, parts: &[Placed], ship: &mut ShipDef, errors: &mu
 }
 
 /// The owners `selectors` name (with `#*`), each with its part.
-fn members(selectors: &[String], owners: &[Owner], what: &str, errors: &mut Vec<String>) -> Vec<(String, u32)> {
+fn members(selectors: &[String], owners: &[Owner], what: &str, errors: &mut Vec<String>) -> Vec<(Handle, u32)> {
     let mut out = Vec::new();
     for s in selectors {
-        let found: Vec<(String, u32)> =
-            owners.iter().filter(|o| matches(s, o.id)).map(|o| (o.id.to_string(), o.part)).collect();
+        let found: Vec<(Handle, u32)> = owners.iter().filter(|o| matches(s, o.id)).map(|o| (o.who, o.part)).collect();
         if found.is_empty() {
             errors.push(format!("{what}: {s:?} names nothing in the craft"));
         }

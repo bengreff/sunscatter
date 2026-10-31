@@ -262,7 +262,7 @@ fn part_groups(def: &ShipDef, state: &ShipState, id: u32, f: Option<&PartFacts>,
         }
     }
     out.push(g);
-    for (i, e) in def.engines.iter().enumerate().filter(|(_, e)| e.owner == info.id) {
+    for (i, e) in def.engines.iter().enumerate().filter(|(_, e)| def.owner_id(e.owner) == info.id) {
         out.push(engine_group(state, i, e, k));
     }
     for (i, _) in def.tanks.iter().enumerate().filter(|(_, t)| t.id.split(':').next() == Some(info.id.as_str())) {
@@ -428,7 +428,7 @@ fn stores(def: &ShipDef, state: &ShipState, id: &str, k: &Known, out: &mut Vec<G
             .row("voltage", format!("{:.0} V", b.item.voltage))
             .row("temperature", k.or_dash(k.knowledge.perfect, || kelvin(s.k)));
         // The bus it feeds, as `systems::power` runs it.
-        for bus in def.buses.iter().filter(|bus| bus.members.iter().any(|m| m.0 == b.id)) {
+        for bus in def.buses.iter().filter(|bus| bus.members.iter().any(|m| m.0 == b.owner)) {
             if let Some(run) = state.buses.iter().find(|r| r.name == bus.name) {
                 g.row("bus", format!("{} · {:.1} V · {:.0} W", run.name, run.volts, run.load));
             }
@@ -471,7 +471,7 @@ fn component_groups(def: &ShipDef, state: &ShipState, i: usize, k: &Known, out: 
             .row("enabled", if on { "yes" } else { "no" });
         out.push(g);
     }
-    for (j, e) in def.engines.iter().enumerate().filter(|(_, e)| e.owner == c.id) {
+    for (j, e) in def.engines.iter().enumerate().filter(|(_, e)| def.owner_id(e.owner) == c.id) {
         out.push(engine_group(state, j, e, k));
     }
     for s in def.sensors.iter().filter(|s| mine(&s.id)) {
@@ -484,8 +484,9 @@ fn component_groups(def: &ShipDef, state: &ShipState, i: usize, k: &Known, out: 
     for computer in def.computers.iter().filter(|x| mine(&x.id)) {
         let mut g = Group::new(format!("COMPUTER {}", computer.id));
         g.row("channels", computer.item.channels.to_string());
-        let links: Vec<&str> =
-            (def.links.iter().filter(|l| l.from.0 == c.id)).flat_map(|l| l.to.iter().map(|m| m.0.as_str())).collect();
+        let links: Vec<&str> = (def.links.iter().filter(|l| def.owner_id(l.from.0) == c.id))
+            .flat_map(|l| l.to.iter().map(|m| def.owner_id(m.0)))
+            .collect();
         g.row("commands", if links.is_empty() { "—".to_string() } else { links.join(", ") });
         out.push(g);
     }
@@ -523,7 +524,7 @@ pub fn commands(def: &ShipDef, state: &ShipState, sel: Selection) -> Vec<(String
             None => return Vec::new(),
         },
     };
-    let engines: Vec<usize> = (0..def.engines.len()).filter(|&i| def.engines[i].owner == id).collect();
+    let engines: Vec<usize> = (0..def.engines.len()).filter(|&i| def.owner_id(def.engines[i].owner) == id).collect();
     if !engines.is_empty() {
         let on = |s: EngineStatus| matches!(s, EngineStatus::Starting | EngineStatus::Running);
         let running = engines.iter().any(|&i| state.engines.get(i).is_some_and(|e| on(e.status)));

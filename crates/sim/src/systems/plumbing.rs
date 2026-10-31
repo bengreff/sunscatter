@@ -467,7 +467,7 @@ fn heated_inside(def: &ShipDef, t: &TankDef) -> bool {
 /// Solar absorptivity and emissivity of tank `t`'s wall: its part's finish,
 /// else its material (0.3 and 0.1 when neither is known).
 fn optics(def: &ShipDef, t: &TankDef) -> (f64, f64) {
-    let part = def.parts.iter().find(|p| p.part == t.part);
+    let part = def.part_index(t.part).map(|i| &def.parts[i]);
     let mats = crate::materials::materials();
     let finish = part.and_then(|p| p.finish.as_deref()).and_then(|f| mats.finish(f).ok());
     let bare = part.and_then(|p| mats.get(&p.material).ok());

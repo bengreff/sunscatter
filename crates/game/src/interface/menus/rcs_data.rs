@@ -25,7 +25,7 @@ pub fn gather(v: &Vessel, mode: RcsMode) -> RcsData {
             Supply::Tanks([o, f]) => tanks.extend(o.iter().chain(f).copied()),
         }
         let fed = v.debug() || sim::systems::ship::block_fed(&t.feed, state);
-        let block = if state.out(&t.id) {
+        let block = if state.out(t.owner) {
             BlockState::Out
         } else if !fed {
             BlockState::Dry

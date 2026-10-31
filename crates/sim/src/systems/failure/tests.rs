@@ -38,8 +38,11 @@ fn engine(def: &ShipDef, id: &str) -> usize {
     def.engines.iter().position(|e| e.id == id).unwrap()
 }
 
-fn fate(state: &ShipState, owner: &str, mode: &str) -> usize {
-    state.fates.iter().position(|f| f.owner == owner && f.mode == mode).unwrap()
+fn fate(def: &ShipDef, state: &ShipState, owner: &str, mode: &str) -> usize {
+    let named = |f: &&crate::craft::state::Fate| {
+        def.owner_id(f.owner) == owner && def.failures_of(f.owner)[f.mode as usize].mode == mode
+    };
+    state.fates.iter().position(|f| named(&f)).unwrap()
 }
 
 fn launched(def: &ShipDef) -> ShipState {
@@ -80,8 +83,8 @@ fn a_seed_redraws_the_fates() {
     let mut a = launched(&def);
     a.fates[0].hazard = 0.25;
     let mut b = a.clone();
-    reseed(&mut a, 42);
-    reseed(&mut b, 42);
+    reseed(&def, &mut a, 42);
+    reseed(&def, &mut b, 42);
     assert_eq!(a, b);
     assert_eq!((a.seed, a.fates[0].hazard), (42, 0.25));
     let mut fresh = ShipState::initial(&def);
@@ -108,7 +111,7 @@ fn the_same_inputs_give_the_same_hazards() {
         for _ in 0..500 {
             step(&def, &mut s, &env(0.02, false));
         }
-        s.fates[fate(&s, "s1.merlin.3", "in-flight shutdown")].hazard
+        s.fates[fate(&def, &s, "s1.merlin.3", "in-flight shutdown")].hazard
     };
     let h = run(false);
     assert_eq!(h.to_bits(), run(false).to_bits());
@@ -124,7 +127,7 @@ fn each_outcome() {
     let mut s = launched(&def);
     let e3 = engine(&def, "s1.merlin.3");
     s.engines[e3].status = EngineStatus::Running;
-    let k = fate(&s, "s1.merlin.3", "in-flight shutdown");
+    let k = fate(&def, &s, "s1.merlin.3", "in-flight shutdown");
     s.fates[k].threshold = 1e-12;
     assert!(step(&def, &mut s, &env(0.02, false)).is_empty());
     assert_eq!(s.engines[e3].status, EngineStatus::Failed);
@@ -134,7 +137,7 @@ fn each_outcome() {
     s.engines[e5].status = EngineStatus::Starting;
     let part = def.engines[e5].part;
     s.parts.iter_mut().find(|p| p.part == part).unwrap().history.starts += 1;
-    let k = fate(&s, "s1.merlin.5", "ignition");
+    let k = fate(&def, &s, "s1.merlin.5", "ignition");
     s.fates[k].threshold = 1e-12;
     step(&def, &mut s, &env(0.02, false));
     assert_eq!(s.engines[e5].status, EngineStatus::Off);
@@ -144,7 +147,7 @@ fn each_outcome() {
     s.engines[mvac].status = EngineStatus::Starting;
     let part = def.engines[mvac].part;
     s.parts.iter_mut().find(|p| p.part == part).unwrap().history.starts += 1;
-    let k = fate(&s, "s2.mvac", "restart");
+    let k = fate(&def, &s, "s2.mvac", "restart");
     s.fates[k].threshold = 1e-12;
     let effects = step(&def, &mut s, &env(0.02, false));
     assert_eq!(effects, vec![Effect::Destroy(part, PartFailure::Uncontained)]);
@@ -154,11 +157,11 @@ fn each_outcome() {
     let fin = def.parts.iter().find(|p| p.id == "s1.gridfin#2").unwrap().part;
     let m = def.mechanisms.iter().position(|m| m.part == fin).unwrap();
     s.parts.iter_mut().find(|p| p.part == fin).unwrap().history.cycles += 1;
-    let k = fate(&s, "s1.gridfin#2", "hydraulic pump stall");
+    let k = fate(&def, &s, "s1.gridfin#2", "hydraulic pump stall");
     s.fates[k].threshold = 1e-12;
     s.mechanisms[m].target = def.mechanisms[m].item.deployed_deg;
     step(&def, &mut s, &env(0.02, false));
-    assert!(s.lost.iter().any(|l| l.owner == "s1.gridfin#2"));
+    assert!(s.lost.iter().any(|l| def.owner_id(l.owner) == "s1.gridfin#2"));
     assert_eq!(s.mechanisms[m].target, s.mechanisms[m].angle, "frozen");
     // The others' fates are untouched.
     assert!(s.fates.iter().filter(|f| f.hazard >= f.threshold).count() == 4);

@@ -358,7 +358,7 @@ impl<'a> Walk<'a> {
                     let ready = e.status == EngineStatus::Off
                         && !self.gone.contains(&d.part)
                         && can_ignite(d.data.igniter, e.ignitions, self.s.clamped)
-                        && reachable(def, &self.s, &d.owner);
+                        && reachable(def, &self.s, d.owner);
                     if ready {
                         let e = &mut self.s.engines[i];
                         if !self.s.clamped && e.ignitions != u32::MAX && e.ignitions > 0 {

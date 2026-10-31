@@ -251,7 +251,7 @@ fn data(x: &Inputs) -> Vec<Group> {
     let (def, k) = (x.def, x.known);
     let mut computers = Group::new("COMPUTERS");
     for c in &def.computers {
-        let commands: usize = def.links.iter().filter(|l| l.from.0 == c.id).map(|l| l.to.len()).sum();
+        let commands: usize = def.links.iter().filter(|l| def.owner_id(l.from.0) == c.id).map(|l| l.to.len()).sum();
         computers.row(&c.id, format!("{} channels · commands {commands}", c.item.channels));
         if let Some(i) = def.components.iter().position(|x| x.id == c.id) {
             computers.opens(Selection::Component(i));
@@ -308,7 +308,7 @@ fn health(x: &Inputs) -> Vec<Group> {
     }
     let mut lost = Group::new(format!("LOST · {}", x.state.lost.len()));
     for l in &x.state.lost {
-        lost.row(&l.owner, format!("{} ({})", l.why, name(x.def, l.part))).level(Level::Over);
+        lost.row(x.def.owner_id(l.owner), format!("{} ({})", l.why, name(x.def, l.part))).level(Level::Over);
     }
     vec![g, lost]
 }

@@ -166,13 +166,9 @@ fn the_falcon_9s_health_and_view() {
     let k = knowledge(&def, &fresh, false);
     assert!(attitude_reference(&k) && navigation(&k));
     let lose = |state: &mut ShipState, id: &str, unpowered: bool| {
-        let part = (def.sensors.iter().map(|s| (&s.id, s.part)))
-            .chain(def.computers.iter().map(|c| (&c.id, c.part)))
-            .chain(def.engines.iter().map(|e| (&e.owner, e.part)))
-            .find(|(i, _)| *i == id)
-            .unwrap()
-            .1;
-        let l = Lost { part, owner: id.into(), why: "test".into() };
+        let owner = def.owner_named(id).unwrap();
+        let part = def.owner_part(owner).unwrap();
+        let l = Lost { part, owner, why: "test".into() };
         if unpowered {
             state.unpowered.push(l)
         } else {
@@ -206,7 +202,7 @@ fn the_falcon_9s_health_and_view() {
     lose(&mut state, "s1.merlin.5", false);
     let k = knowledge(&def, &state, false);
     let readings = engine_readings(&def, &state, &k);
-    let e5 = def.engines.iter().position(|e| e.owner == "s1.merlin.5").unwrap();
+    let e5 = def.engines.iter().position(|e| def.owner_id(e.owner) == "s1.merlin.5").unwrap();
     assert!(readings[e5].is_none() && readings.iter().filter(|r| r.is_some()).count() == def.engines.len() - 1);
     assert!(engine_readings(&def, &state, &knowledge(&def, &state, true)).iter().all(Option::is_some), "debug");
 }
@@ -231,7 +227,8 @@ fn the_estimates_read_what_the_computers_receive() {
         }
     }
     let part = def.computers.iter().find(|c| c.id == "s1.computer").unwrap().part;
-    state.unpowered.push(Lost { part, owner: "s1.computer".into(), why: "test".into() });
+    let owner = def.owner_named("s1.computer").unwrap();
+    state.unpowered.push(Lost { part, owner, why: "test".into() });
     for debug in [false, true] {
         let k = knowledge(def, &state, debug);
         let e = estimate(def, &state, &Inputs { hull: &hull, knowledge: &k, throttle: 1.0, p: 0.0, g: Some(9.81) });

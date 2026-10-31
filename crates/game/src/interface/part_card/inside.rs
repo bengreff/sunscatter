@@ -29,7 +29,7 @@ impl Inside {
         let inside = |p: u32, owner: &str| p == part && owner != own;
         let pick = |n: usize, f: &dyn Fn(usize) -> bool| (0..n).filter(|&i| f(i)).collect::<Vec<usize>>();
         Inside {
-            engines: pick(def.engines.len(), &|i| inside(def.engines[i].part, &def.engines[i].owner)),
+            engines: pick(def.engines.len(), &|i| inside(def.engines[i].part, def.owner_id(def.engines[i].owner))),
             tanks: pick(def.tanks.len(), &|i| {
                 let t = &def.tanks[i];
                 inside(t.part, t.id.split(':').next().unwrap_or(&t.id))
@@ -102,7 +102,7 @@ pub fn sections(live: &Live, inside: &Inside) -> Vec<Section> {
     if !inside.thrusters.is_empty() {
         let t = &inside.thrusters;
         let words = t.iter().map(|&j| {
-            if state.out(&def.thrusters[j].id) {
+            if state.out(def.thrusters[j].owner) {
                 "LOST"
             } else if state.thrusters.get(j).is_some_and(|s| s.enabled) {
                 "enabled"
