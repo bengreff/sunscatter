@@ -53,7 +53,7 @@ Spikes at 1,000× (many vessels' lattice points in one frame) are cut by the dea
 
 ### 5. The long run
 
-`examples/long_run` flies 50 craft (10 limbo: four 0.5 N ion spirals, three held prograde in thin air at 450–500 km, three tumblers at 20,000 km under radiation pressure; 40 quiet: 15 stress craft of 300 parts, 20 test craft, four on eccentric orbits, one on the pad; stress craft from the craft registry, `stress-300`, so they reload) for simulated years in 1,000,000× frames on 7 threads, as the game does, then saves the fleet to RON, reads it back, and flies both on.
+`examples/long_run` flies 50 craft (10 limbo: four held prograde at 900–1,050 km, three held prograde in thin air at 450–500 km, three tumblers at 20,000 km under radiation pressure; 40 quiet: 15 stress craft of 300 parts, 20 small rockets of parts (`craft::small`), four on eccentric orbits, one on the pad; stress craft from the craft registry, `stress-300`, so they reload) for simulated years in 1,000,000× frames on 7 threads, as the game does, then saves the fleet to RON, reads it back, and flies both on.
 
 ### 6. The coast integration (COAST)
 
@@ -90,7 +90,7 @@ Invariance:
 | Test craft, 300 km (`bench_integrator` `BENCH_FLEET=1`) | 3.72 → 0.70 ms | 2.5 / 2.0 ms |
 | 300-part stress craft, 300 km | 3.44 → 0.80 ms | 17.4 / 17.8 ms |
 | Limbo, thin air at 250 km, held prograde (`bench_limbo`) | 3.57 → 0.75 ms | 2.0 ms |
-| Limbo, 0.5 N ion spiral | 2.51 → 0.51 ms | 1.0 ms |
+| Limbo, 0.5 N ion spiral (measured on the deleted test craft; `bench_limbo` now holds these four prograde: low thrust on rails went with the made-up craft until D029 returns it) | 2.51 → 0.51 ms | 1.0 ms |
 | Limbo, tumbler at 20,000 km | 0.53 → 0.10 ms | 0.45 ms |
 
 **The 50-craft fleet** (`fleet_frames`, 7 threads, machine quiet). The "before" build is the HEAD of 11:30 UTC with f6ec8bc and fd22069 reverted:
