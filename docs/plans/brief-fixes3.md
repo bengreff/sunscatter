@@ -19,7 +19,8 @@ Each item gets a table test (rule 8) and fixes the model or the default, never t
 6. **SAS and the holds on coasts through the ship software:** they still hold on the truth on rails. They read `Knowledge` and the computers' health there too, as in live ticks.
 7. **D034's routing:** commands to an uncrewed vessel leave only from the nearest mission control and travel the relay network. A crewed vessel nearby never commands a probe (today it does: the command leaves from wherever the player is).
 8. **D123's switch for random failures:** statistical failures off until both flights fly end to end, then on. It is per save, set at a new flight and by MCP's `new_flight`, and it stays off by default for now. The physical triggers stay on.
-9. **Small items from the hand-off**, each only if it is quick:
+9. **The pilot's throttle under a program** (PLANNER-4): a throttle cut (X) during a planned burn does nothing if the pilot's throttle was already 0 when the program woke. Default: the program moves the pilot's throttle as it flies, so X disagrees and takes over (D126's takeover rule); record it under Open for the owner.
+10. **Small items from the hand-off**, each only if it is quick:
    - the render scale flips between 0.8 and 1.0 every half second in a headless game;
    - `tools/gpu_trace.py` still launches the deleted plunge demo.
 

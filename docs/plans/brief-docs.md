@@ -52,6 +52,12 @@ Also remove the 700-line file cap. Follow [agent-rules.md](agent-rules.md). Your
 8. **DOCS-2: ship-systems.md split** (ae6bf93) into `technical/{ship-commands, plumbing, engines, mechanisms, knowledge, flight-software, joint-loads, failure-modes, power, life-support}.md`, each pointing at its system; stale lines fixed (the agent reads Knowledge, SAS on coasts is FIXES3, D043).
 9. **DOCS-2: specs out of the archive, first two** (a068d59): `technical/comms.md` (realism-1 §4b–§4c, checked against the code) and `technical/proper-time.md` (§4a, with TDB's L_B; motion-model.md's formula corrected).
 
+### DOCS-3 (2026-10-31)
+
+You continue DOCS-2's Left below. Your name is DOCS-3; you build nothing and need no target dir. Running alongside: ONEKIND-7 (deleting the test craft and the made-up path; **the test-craft mentions in the docs are its, so skip Left 3**) and INTERFACE-3 (the game's interface; `interface-map.md`, `systems-screen.md` and `flight-menus.md` are its). Since DOCS-2: PLANNER wrote `technical/planner.md` (the burn planner's spec is done: skip it in Left 1); MISSION's guide is in `testing.md` (Left 4 is done). Work only in docs, commit through a private index, and push.
+
+Order: Left 1 (except the planner), Left 2, Left 5 (the README's images: shots from a headless game through MCP, `testing.md`; one game at a time under the lock), Left 6 (try `ssh backhouse`; if it does not connect in a minute, skip it and say so). Then archive the finished briefs: `brief-planner.md`, `brief-audit.md`, `brief-research.md` and `brief-mission.md` go to `docs/archive/briefs/`, with every link to them updated (`grep -rn` the docs). Do that last: the running agents' briefs link to them, so update those links in the same commit.
+
 ### Left, in order (for the lead or a fresh agent)
 
 1. **The remaining specs in archived plans**, into technical docs, each checked against the code:
