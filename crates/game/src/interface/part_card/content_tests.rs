@@ -161,12 +161,21 @@ fn a_dash_names_the_sensor_that_would_measure_it() {
         ),
         (Quantity::TankLevel(dragon), "a level sensor in the tank: none fitted"),
         (Quantity::EngineThrust(0), "the engine's own controller (lost with its part)"),
-        (Quantity::CabinO2, "a cabin air sensor (none modelled yet)"),
-        (Quantity::Velocity, "a sensor the craft does not carry"),
+        (Quantity::CabinO2, "dragon.cabin-air (not working: switched off, failed, unpowered or not linked)"),
+        (Quantity::CabinCo2, "dragon.cabin-air (not working: switched off, failed, unpowered or not linked)"),
+        (Quantity::JointLoad(0), "a sensor the craft does not carry"),
     ];
     for (q, want) in table {
         assert_eq!(sensor_for(&def, q), want, "{q:?}");
     }
+    // A vehicle-wide quantity by the classes that measure it (the
+    // knowledge's own `data::provides`): the velocity by a GNSS receiver.
+    let gps = &def.sensors.iter().find(|s| s.item.quantity == "position").unwrap().id;
+    assert!(sensor_for(&def, Quantity::Velocity).starts_with(&format!("{gps} (not working")));
+    // A craft without the cabin's monitor: the kind none is fitted of.
+    let mut bare = def.clone();
+    bare.sensors.retain(|s| s.item.quantity != "cabin");
+    assert_eq!(sensor_for(&bare, Quantity::CabinPressure), "a cabin air monitor: none fitted");
 }
 
 #[test]

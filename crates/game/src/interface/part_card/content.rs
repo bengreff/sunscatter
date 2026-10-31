@@ -365,12 +365,28 @@ pub fn sensor_for(def: &ShipDef, q: Quantity) -> String {
         }
         Quantity::EngineThrust(_) => return "the engine's own controller (lost with its part)".into(),
         Quantity::BatteryCharge(_) => return "the battery's management electronics (lost with its part)".into(),
-        Quantity::CabinPressure | Quantity::CabinO2 | Quantity::CabinCo2 => {
-            return "a cabin air sensor (none modelled yet)".into()
-        }
-        _ => return "a sensor the craft does not carry".into(),
+        _ => return vehicle_wide(def, q),
     };
     let found = def.sensors.iter().find(|s| s.item.quantity == kind && Some(s.part) == part);
+    not_working(found, words)
+}
+
+/// [`sensor_for`] a vehicle-wide quantity: a sensor of a class that
+/// measures it (`sim::systems::data::provides`, the knowledge's own rule),
+/// anywhere aboard.
+fn vehicle_wide(def: &ShipDef, q: Quantity) -> String {
+    let words = match q {
+        Quantity::CabinPressure | Quantity::CabinO2 | Quantity::CabinCo2 => "a cabin air monitor",
+        Quantity::Position | Quantity::Velocity => "a GNSS receiver",
+        Quantity::Attitude | Quantity::AngularRate | Quantity::Acceleration => "an inertial measurement unit",
+        _ => return "a sensor the craft does not carry".into(),
+    };
+    let measures = |kind: &str| sim::systems::data::provides(kind, 1.0).iter().any(|(x, _)| *x == q);
+    not_working(def.sensors.iter().find(|s| measures(&s.item.quantity)), words)
+}
+
+/// The sensor fitted that is not working, else the kind none is fitted of.
+fn not_working(found: Option<&sim::craft::ship::Owned<sim::catalog::Sensor>>, words: &str) -> String {
     match found {
         Some(s) => format!("{} (not working: switched off, failed, unpowered or not linked)", s.id),
         None => format!("{words}: none fitted"),
