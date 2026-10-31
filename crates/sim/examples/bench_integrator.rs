@@ -77,7 +77,7 @@ fn cases(w: &World) -> Vec<Case> {
     let (r, v) = el(RE + 250_000.0, 0.001, 0.9, earth.gm);
     out.push(Case { name: "leo", seg: coast(w, t0, earth.node, r, v), span: 86_400.0 });
     // The limbo drag craft of `bench_limbo` (held prograde at 250 km).
-    let mut s = Vessel::coasting(w, VesselId(1), t0, earth.node, r, v, sim::craft::test_craft());
+    let mut s = Vessel::coasting(w, VesselId(1), t0, earth.node, r, v, sim::craft::small::rocket_ref());
     let c = Controls { sas: true, hold: HoldMode::Prograde, ..Controls::default() };
     s.advance(w, t0.add_seconds(900.0), &c, usize::MAX);
     out.push(Case { name: "leo_perturbed", seg: perturbed_from(w, &s), span: 86_400.0 });
@@ -241,7 +241,7 @@ fn fleet_craft(w: &World) {
     let (r, v) = el.to_state(earth.gm);
     let big = (*sim::craft::stress::craft(300)).clone();
     let frame = 1e6 / 60.0;
-    for (name, craft) in [("test craft", sim::craft::test_craft()), ("300-part craft", &big)] {
+    for (name, craft) in [("small rocket", sim::craft::small::rocket_ref()), ("300-part craft", &big)] {
         let mut s = Vessel::coasting(w, VesselId(1), t0, earth.node, r, v, craft);
         let c = Controls::default();
         s.advance(w, t0.add_seconds(30.0 * 86_400.0), &c, usize::MAX);

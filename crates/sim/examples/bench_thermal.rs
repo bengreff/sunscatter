@@ -14,7 +14,9 @@
 //! Then (unless `solve`) whole coast lattice points of a vessel in LEO
 //! (`Vessel::advance`, integrated ahead): tumbling and held prograde.
 use glam::DVec3;
-use sim::craft::{stress, test_craft, CraftDesign};
+use sim::craft::design::Aboard;
+use sim::craft::state::ShipState;
+use sim::craft::{small, stress, Craft, CraftDesign};
 use sim::ephem::Ephemeris;
 use sim::kepler::Elements;
 use sim::thermal::{cell_heat_flow, ThermalState, COAST_CONVERGED, CONVERGED, DEFAULT_SWEEPS, STEFAN_BOLTZMANN};
@@ -139,10 +141,14 @@ fn lattice(w: &World, craft: &sim::craft::Craft, runs: usize) -> [f64; 4] {
     [one(true, 1.0), one(true, day), one(false, 1.0), one(false, day)]
 }
 
-fn run(name: &str, design: std::sync::Arc<CraftDesign>, propellant: f64, runs: usize) {
+fn run(name: &str, craft: &Craft, runs: usize) {
+    let design = craft.design().clone();
     let m = design.nodes();
     let mut capacity = vec![0.0; m];
-    design.node_capacity(&sim::craft::design::Aboard::Fill(propellant), &mut capacity);
+    // Its tanks and bottles as loaded, each where it sits.
+    let def = craft.ship.as_ref().expect("a craft of parts");
+    let held = sim::systems::plumbing::held(def, &ShipState::initial(def));
+    design.node_capacity(&Aboard::Tanks(held), &mut capacity);
     let case = Case { design, capacity, node_heat: vec![0.0; m] };
     let (n, unknowns) = (case.design.cells.len(), case.design.cells.len() + m);
     let sun = DVec3::new(1361.0, 0.0, 0.0);
@@ -225,15 +231,14 @@ fn main() {
     let w = world();
     for p in parts {
         if p == 0 {
-            let c = test_craft();
-            run("test craft", c.design().clone(), c.spec.propellant.capacity, runs);
+            let c = small::rocket_ref();
+            run("small rocket", c, runs);
             if with_lattice {
                 show_lattice(&w, c, runs);
             }
         } else {
             let s = stress::craft(p);
-            let cap = s.spec.propellant.capacity;
-            run(&format!("stress {p}"), s.design().clone(), cap, runs);
+            run(&format!("stress {p}"), &s, runs);
             if with_lattice {
                 show_lattice(&w, &s, runs);
             }

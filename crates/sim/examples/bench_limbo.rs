@@ -1,7 +1,7 @@
 //! Cost of ten limbo craft (`docs/technical/limbo.md`, D081) in the game's
 //! frame loop (release): perturbed coasts under thin-air drag (low orbits,
-//! held prograde), low thrust (0.5 N ion burns spiralling out), radiation
-//! pressure (a tumbling craft high up), each with its systems lattice and
+//! held prograde), the same higher up, radiation pressure (a tumbling craft
+//! high up), each with its systems lattice and
 //! thermal lattice, advanced as `crates/game/src/state.rs` does: every
 //! vessel to the clock plus dt·warp with the game's budget, the clock held
 //! at the slowest, then look-ahead for one vessel per frame.
@@ -10,9 +10,7 @@ use glam::DVec3;
 use sim::ephem::Ephemeris;
 use sim::kepler::Elements;
 use sim::sol;
-use sim::vessel::{
-    Attitude, BurnEnd, BurnLaw, Controls, DirectionLaw, FlightPlan, HoldMode, PlannedBurn, Vessel, VesselId,
-};
+use sim::vessel::{Attitude, Controls, HoldMode, Vessel, VesselId};
 use sim::world::World;
 use std::sync::Arc;
 use std::time::Instant;
@@ -22,16 +20,18 @@ const RE: f64 = 6_378_137.0;
 const COAST_STEPS_PER_FRAME: usize = 1_200;
 const LOOKAHEAD_STEPS_PER_FRAME: usize = 1_500;
 const LOOKAHEAD: f64 = 6_000.0;
-/// Simulated time before measuring (s): holds settled, burns under way,
+/// Simulated time before measuring (s): holds settled,
 /// temperatures settled (30 days).
 const WARM: f64 = 30.0 * 86_400.0;
 
-/// Ten craft: four decaying in low orbit, four spiralling out on 0.5 N, two
-/// tumbling high up under sunlight.
+/// Ten small rockets (`craft::small`): four decaying in low orbit, four
+/// held prograde at 900-1,050 km, two tumbling high up under sunlight. (The
+/// four used to spiral out on 0.5 N ion burns: the open-loop burn law on
+/// rails went with the made-up craft, D121; low thrust returns with D029.)
 fn fleet(w: &World) -> Vec<(Vessel, Controls)> {
     let earth = w.find("Earth").unwrap();
     let t0 = sol::sol_epoch().add_seconds(86_400.0);
-    let craft = sim::craft::test_craft();
+    let craft = sim::craft::small::rocket_ref();
     let mut out = Vec::new();
     for k in 0..10 {
         let (h, e) = match k {
@@ -42,19 +42,8 @@ fn fleet(w: &World) -> Vec<(Vessel, Controls)> {
         let el = Elements { a: RE + h, e, i: 0.2 * k as f64, raan: 0.5 * k as f64, argp: 0.0, mean_anomaly: k as f64 };
         let (r, v) = el.to_state(earth.gm);
         let mut s = Vessel::coasting(w, VesselId(k as u64 + 1), t0, earth.node, r, v, craft);
-        s.systems.power.spec.tracking = k % 2 == 0;
-        s.systems.consumables.boil_off = 1e-5;
         let controls = match k {
-            0..=3 => Controls { sas: true, hold: HoldMode::Prograde, ..Controls::default() },
-            4..=7 => {
-                s.set_propellant(w, 2_000.0);
-                let law =
-                    BurnLaw::from_isp(0.5, 3_000.0, DirectionLaw::Tracking { reference: earth.node, axes: DVec3::X });
-                let burn =
-                    PlannedBurn { t_start: t0.add_seconds(600.0), law, end: BurnEnd::Duration(365.0 * 86_400.0) };
-                s.set_plan(w, FlightPlan { burns: vec![burn] }).unwrap();
-                Controls { sas: true, hold: HoldMode::Prograde, ..Controls::default() }
-            }
+            0..=7 => Controls { sas: true, hold: HoldMode::Prograde, ..Controls::default() },
             _ => {
                 s.set_attitude(Attitude { q: s.attitude.q, omega: DVec3::new(0.01, 0.003, 0.02) });
                 Controls::default()
@@ -71,7 +60,7 @@ fn game(w: &World, warp: f64, frames: usize) {
     let mut clock = ships[0].0.time;
     let start = clock;
     for (s, c) in &mut ships {
-        // Settle onto the holds, reach the burns and let the temperatures
+        // Settle onto the holds and let the temperatures
         // settle (a fresh craft starts at a uniform 290 K) first.
         s.advance(w, clock.add_seconds(WARM), c, usize::MAX);
         s.extend_coast(w, clock.add_seconds(WARM + LOOKAHEAD), usize::MAX);
@@ -126,7 +115,7 @@ fn breakdown(w: &World) {
     let only = std::env::var("BENCH_LIMBO_ONLY").ok().and_then(|s| s.parse::<usize>().ok());
     let kinds = match only {
         Some(k) => vec![(k, "chosen")],
-        None => vec![(0, "drag"), (4, "low thrust"), (8, "light")],
+        None => vec![(0, "drag"), (4, "held high"), (8, "light")],
     };
     for (i, kind) in kinds {
         let (mut s, c) = fleet(w).swap_remove(i);

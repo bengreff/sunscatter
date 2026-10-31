@@ -6,7 +6,7 @@
 //! larger ones.
 use glam::DVec3;
 use sim::aero::{aero_forces, bake, BakeOptions, Flow};
-use sim::craft::test_craft;
+use sim::craft::small;
 use sim::thermal::heating::SUTTON_GRAVES_EARTH;
 use sim::thermal::{cell_heat_flow, FlowHeat, ThermalState};
 use std::time::Instant;
@@ -16,7 +16,7 @@ fn main() {
     if args.first().map(String::as_str) == Some("cells") {
         let mut sizes = vec![50, 300];
         sizes.extend(args.iter().skip(1).filter_map(|a| a.parse::<usize>().ok()));
-        per_cell("test craft", &test_craft().surface, &test_craft().cells);
+        per_cell("small rocket", &small::rocket_ref().surface, &small::rocket_ref().cells);
         let one = sim::craft::stress::craft(1);
         per_cell("stress craft, 1 part", &one.surface, &one.cells);
         for n in sizes {
@@ -25,8 +25,8 @@ fn main() {
         }
         return;
     }
-    let c = test_craft();
-    println!("test craft: {} triangles, {} cells", c.surface.triangles.len(), c.cells.cells.len());
+    let c = small::rocket_ref();
+    println!("small rocket: {} triangles, {} cells", c.surface.triangles.len(), c.cells.cells.len());
     for level in [3, 4] {
         let opts = BakeOptions { level, ..BakeOptions::default() };
         let clock = Instant::now();
@@ -146,7 +146,7 @@ fn vessel_ticks() {
     let re = 6_378_137.0;
     let g = 1.5f64.to_radians();
     let (r, v) = (DVec3::new(re + 100_000.0, 0.0, 0.0), DVec3::new(-g.sin(), g.cos(), 0.0) * 7_600.0);
-    let mut ship = Vessel::coasting(&w, VesselId(1), t0, earth.node, r, v, test_craft());
+    let mut ship = Vessel::coasting(&w, VesselId(1), t0, earth.node, r, v, small::rocket_ref());
     ship.set_debug(&w, true);
     let controls = Controls { sas: true, ..Default::default() };
     let secs = 60.0;
@@ -158,7 +158,7 @@ fn vessel_ticks() {
     // craft and a 300-part stress craft (`… bench_aero ticks`).
     if std::env::args().any(|a| a == "ticks") {
         let stress = sim::craft::stress::craft(300);
-        for (name, craft) in [("test craft", test_craft()), ("stress craft, 300 parts", &*stress)] {
+        for (name, craft) in [("small rocket", small::rocket_ref()), ("stress craft, 300 parts", &*stress)] {
             let r = DVec3::new(re + 12_000.0, 0.0, 0.0);
             let v =
                 sim::body::earth().rotation.omega(t0).raw().cross(r) + DVec3::new(0.3, 1.0, 0.0).normalize() * 354.0;
@@ -173,7 +173,7 @@ fn vessel_ticks() {
         }
     }
     let (r, v) = (DVec3::new(re + 400_000.0, 0.0, 0.0), DVec3::new(0.0, (earth.gm / (re + 400_000.0)).sqrt(), 0.0));
-    let mut ship = Vessel::coasting(&w, VesselId(1), t0, earth.node, r, v, test_craft());
+    let mut ship = Vessel::coasting(&w, VesselId(1), t0, earth.node, r, v, small::rocket_ref());
     ship.set_attitude(Attitude { q: sim::vessel::quat_z_to(DVec3::X), omega: DVec3::new(0.01, 0.02, 0.0) });
     let secs = 86_400.0;
     let clock = Instant::now();

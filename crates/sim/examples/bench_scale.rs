@@ -13,7 +13,7 @@ use sim::aero::{aero_forces, bake, BakeOptions, Flow};
 use sim::craft::design::{mean_drag_area, CraftDesign};
 use sim::craft::stress;
 use sim::craft::volume::VolumeGrid;
-use sim::craft::{cells, mesh, test_craft, CellOptions, Craft, Resolution};
+use sim::craft::{cells, mesh, small, CellOptions, Craft, Resolution};
 use sim::ephem::Ephemeris;
 use sim::kepler::Elements;
 use sim::sol;
@@ -428,12 +428,14 @@ fn print_rows(rows: &[Row]) {
 /// A fleet of `size` (1, 10 or 50): vessels and their controls. Limbo
 /// stand-ins (10 when size ≥ 10): tumbling with SAS off (torque-free);
 /// half 300-part craft, two on lunar transfers. Quiet craft hold attitude
-/// with SAS on (the game's passive controls): test craft and 300-part craft
-/// in LEO, four on lunar transfers, one test craft on the pad. Vessel 0
+/// with SAS on (the game's passive controls): small rockets and 300-part
+/// craft in LEO, four on lunar transfers, one small rocket on its legs on
+/// the pad. Vessel 0
 /// (300 parts, LEO) is active. `high`: 20,000 km circular orbits instead of
 /// the lunar transfers (nothing re-enters while a fleet settles).
 fn fleet(w: &World, size: usize, big: &Craft, high: bool) -> (Vec<Vessel>, Vec<Controls>) {
-    let small = test_craft();
+    let standing = small::legs_out();
+    let small = small::rocket_ref();
     let (mut ships, mut controls) = (Vec::new(), Vec::new());
     for k in 0..size {
         let limbo = size >= 10 && k < 10;
@@ -451,7 +453,7 @@ fn fleet(w: &World, size: usize, big: &Craft, high: bool) -> (Vec<Vessel>, Vec<C
         let mut v = match k {
             8 | 9 if limbo => far(craft),
             45..=48 => far([small, big][k % 2]),
-            49 => Vessel::landed_at(w, VesselId(id), "Earth", PAD.0, PAD.1, t0(), small),
+            49 => Vessel::landed_at(w, VesselId(id), "Earth", PAD.0, PAD.1, t0(), &standing),
             _ => leo(craft),
         };
         if limbo {

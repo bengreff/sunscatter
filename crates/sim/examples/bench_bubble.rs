@@ -8,7 +8,8 @@
 //! the bubble's ticks while the two touch (joint substeps with contact),
 //! and one call of the pair's contact forces at the touching pose.
 use glam::DVec3;
-use sim::craft::{registry, stress, test_craft};
+use sim::craft::command::ShipCommand;
+use sim::craft::{registry, small, stress};
 use sim::ephem::Ephemeris;
 use sim::kepler::Elements;
 use sim::proximity::{self, Body};
@@ -108,8 +109,13 @@ fn main() {
     );
     // Baseline: one stress craft live alone (held by a bubble flag through
     // the bubble pass with a leader far away is the same tick).
-    let leader = |at: DVec3| Vessel::coasting(&w, VesselId(3), t0, earth.node, at, v, test_craft());
-    let ctl = |i: usize| Controls { sas: true, throttle: if i == 2 { 0.1 } else { 0.0 }, ..Default::default() };
+    // The leader: the small rocket on one engine at its least throttle.
+    let leader = |at: DVec3| {
+        let mut l = Vessel::coasting(&w, VesselId(3), t0, earth.node, at, v, small::rocket_ref());
+        l.command(&w, &ShipCommand::Ignite("engine#1".into())).expect("the rocket's first engine");
+        l
+    };
+    let ctl = |i: usize| Controls { sas: true, throttle: if i == 2 { 0.4 } else { 0.0 }, ..Default::default() };
     let tick_times = |fleet: &mut Vec<Vessel>, touching: &dyn Fn(&[Vessel]) -> bool| {
         let (mut on, mut off) = (Vec::new(), Vec::new());
         let start = fleet[0].time;

@@ -8,13 +8,15 @@
 //! to RON and read back equals the original, and both flown on agree bit
 //! for bit.
 //!
-//! The fleet: 10 limbo craft (four 0.5 N ion spirals from 700-850 km, three
-//! held prograde at 450-500 km decaying in thin air, three tumbling at
-//! 20,000 km under radiation pressure) and 40 quiet ones holding attitude
-//! (15 stress craft of 300 parts at 600-1,300 km, 20 test craft at
-//! 600-2,500 km, four on eccentric orbits from 2,000 to 60,000 km, one on the pad).
-//! Stress craft come from the craft registry (`stress-300`), so the save
-//! reloads them.
+//! The fleet: 10 limbo craft (four held prograde at 700-850 km, three at
+//! 450-500 km decaying in thin air, three tumbling at 20,000 km under
+//! radiation pressure) and 40 quiet ones holding attitude (15 stress craft
+//! of 300 parts at 600-1,300 km, 20 small rockets at 600-2,500 km, four on
+//! eccentric orbits from 2,000 to 60,000 km, one on its legs on the pad).
+//! The four at 700-850 km used to spiral out on 0.5 N ion burns: the
+//! open-loop burn law on rails went with the made-up craft (D121); low
+//! thrust returns with D029. Every craft comes from the craft registry
+//! (`stress-300`, `small-rocket`), so the save reloads them.
 //!
 //! `cargo run -p sim --release --example long_run [years=2] [threads=7] [save_days=10]`
 use glam::DVec3;
@@ -24,10 +26,7 @@ use sim::kepler::Elements;
 use sim::save::SaveGame;
 use sim::sol;
 use sim::time::Epoch;
-use sim::vessel::{
-    Attitude, BurnEnd, BurnLaw, Controls, DirectionLaw, FlightPlan, HoldMode, Phase, PlannedBurn, Vessel, VesselId,
-    VesselIds,
-};
+use sim::vessel::{Attitude, Controls, HoldMode, Phase, Vessel, VesselId, VesselIds};
 use sim::world::World;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
@@ -45,7 +44,8 @@ fn world() -> World {
 fn fleet(w: &World, t0: Epoch) -> (Vec<Vessel>, Vec<Controls>, VesselIds) {
     let earth = w.find("Earth").unwrap();
     let big = registry::craft_of(&CraftId("stress-300".into()));
-    let small = registry::craft_of(&CraftId(sim::craft::TEST_CRAFT.into()));
+    let small = sim::craft::small::rocket();
+    let standing = sim::craft::small::legs_out();
     let mut ids = VesselIds::default();
     let held = Controls { sas: true, hold: HoldMode::Prograde, ..Controls::default() };
     let still = Controls { sas: true, ..Controls::default() };
@@ -66,7 +66,7 @@ fn fleet(w: &World, t0: Epoch) -> (Vec<Vessel>, Vec<Controls>, VesselIds) {
         };
         let id = ids.allocate();
         if k == 49 {
-            ships.push(Vessel::landed_at(w, id, "Earth", 28.6082, -80.66, t0, craft));
+            ships.push(Vessel::landed_at(w, id, "Earth", 28.6082, -80.66, t0, &standing));
             controls.push(still);
             continue;
         }
@@ -95,18 +95,8 @@ fn fleet(w: &World, t0: Epoch) -> (Vec<Vessel>, Vec<Controls>, VesselIds) {
         };
         let (r, v) = el.to_state(earth.gm);
         let mut s = Vessel::coasting(w, id, t0, earth.node, r, v, craft);
-        s.systems.power.spec.tracking = k % 2 == 0;
-        s.systems.consumables.boil_off = 1e-6;
         let c = match k {
-            0..=3 => {
-                s.set_propellant(w, 2_000.0);
-                let law =
-                    BurnLaw::from_isp(0.5, 3_000.0, DirectionLaw::Tracking { reference: earth.node, axes: DVec3::X });
-                let burn = PlannedBurn { t_start: t0.add_seconds(600.0), law, end: BurnEnd::Duration(365.0 * DAY) };
-                s.set_plan(w, FlightPlan { burns: vec![burn] }).unwrap();
-                held
-            }
-            4..=6 => held,
+            0..=6 => held,
             7..=9 => {
                 s.set_attitude(Attitude { q: s.attitude.q, omega: DVec3::new(0.01, 0.003, 0.02) });
                 Controls::default()

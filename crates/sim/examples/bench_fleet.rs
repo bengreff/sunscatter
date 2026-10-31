@@ -31,7 +31,7 @@ fn fleet(w: &World) -> Vec<Vessel> {
             let el =
                 Elements { a, e: 0.001, i: 0.1 * k as f64, raan: 0.5 * k as f64, argp: 0.0, mean_anomaly: k as f64 };
             let (r, v) = el.to_state(earth.gm);
-            Vessel::coasting(w, VesselId(k as u64 + 1), t0, earth.node, r, v, sim::craft::test_craft())
+            Vessel::coasting(w, VesselId(k as u64 + 1), t0, earth.node, r, v, sim::craft::small::rocket_ref())
         })
         .collect()
 }
