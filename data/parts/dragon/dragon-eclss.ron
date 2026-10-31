@@ -1,7 +1,18 @@
 // Catalog entry (D101; sim::catalog). Numbers from docs/vehicles/falcon9.md
 // (DATA): P published, E estimate, D derived, U unknown (proposed value).
+// §5.5's RESEARCH rows: CO₂ by LiOH at η·Q·c (four crew settle near 0.2 kPa),
+// ~60 kg of LiOH for four crew over 10 days, free flight ~10 days (E).
 (
     id: "dragon-eclss", name: "Crew Dragon life support", era: 2019, provisional: true,
     generator: Component(envelope: Box(1.0, 0.8, 0.6), power: 600.0,
-        equipment: LifeSupport(co2_removal: 4.0, o2_supply: 3.4, cabin_volume: 9.3, mass: 300.0)),   // P 9.3 m³, E mass
+        equipment: LifeSupport(
+            o2_supply: 3.4,             // kg/day, the feed's most: four crew use 3.28 (BVAD) E
+            cabin_volume: 9.3,          // P
+            o2_stored: 36.0,            // kg E: four crew for 10 days (32.8) and a cabin's O₂ again (2.6)
+            n2_stored: 17.0,            // kg E: the cabin's N₂ twice (8.4 each)
+            scrubber_flow: 0.015,       // m³/s E (RESEARCH)
+            scrubber_efficiency: 0.9,   // single pass E (RESEARCH)
+            sorbent: 60.0,              // kg of LiOH D (RESEARCH: four crew, 10 days)
+            sorbent_capacity: 0.69,     // kg CO₂ per kg: 0.919 in theory (D), 75 % used (E)
+            mass: 300.0)),              // E
 )

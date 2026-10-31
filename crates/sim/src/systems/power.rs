@@ -10,6 +10,7 @@
 //! surplus up to its capacity and covers the deficit down to empty, each
 //! to its maximum power, losing I²R in its resistance and warming.
 
+use crate::catalog::Priority;
 use crate::craft::ship::{Owner, ShipDef};
 use crate::craft::state::ShipState;
 use crate::time::Epoch;
@@ -48,17 +49,6 @@ pub struct BusRun {
     pub ground: bool,
 }
 
-/// What a load is to a bus's shedding: the vehicle's functions first
-/// (computers, sensors, valves, thrusters, life support), the rest shed
-/// before them.
-fn essential(def: &ShipDef, o: Owner) -> bool {
-    def.computers.iter().any(|x| x.owner == o)
-        || def.sensors.iter().any(|x| x.owner == o)
-        || def.valves.iter().any(|x| x.owner == o)
-        || def.thrusters.iter().any(|x| x.owner == o)
-        || def.life_support.iter().any(|x| x.owner == o)
-}
-
 /// A battery's open-circuit voltage at its state of charge (V; E: a
 /// lithium cell's 3.0–4.2 V over its charge, as a share of the nominal).
 pub fn open_circuit(nominal: f64, soc: f64) -> f64 {
@@ -92,8 +82,9 @@ const CABIN_K: f64 = 293.15;
 /// power) against its sources — the pad's umbilical while the clamps hold
 /// it, its solar cells in `sun` (W/m², body axes), then its batteries
 /// (each to its maximum power, losing I²R in its resistance and warming).
-/// A bus short of power sheds its loads, the non-essential first, then the
-/// largest; a shed or lost-power load's function stops
+/// A bus short of power sheds its loads by their priority (each
+/// component's parameter, D125: the lowest first), the largest first
+/// within one; a shed or lost-power load's function stops
 /// (`ShipState::unpowered`) until power returns. Surplus charges the
 /// batteries. Events tell the player when a load loses or regains power.
 pub fn step_ship(def: &ShipDef, state: &mut ShipState, sun: DVec3, dt: f64, at: Epoch) {
@@ -104,12 +95,12 @@ pub fn step_ship(def: &ShipDef, state: &mut ShipState, sun: DVec3, dt: f64, at: 
     for bus in &def.buses {
         let on = |o: Owner| bus.members.iter().any(|m| m.0 == o);
         let lost = |o: Owner| state.lost.iter().any(|l| l.owner == o);
-        let mut loads: Vec<(usize, f64, bool)> = (def.components.iter().enumerate())
+        let mut loads: Vec<(usize, f64, Priority)> = (def.components.iter().enumerate())
             .filter(|(c, d)| {
                 let o = Owner::Component(d.n);
                 on(o) && d.power > 0.0 && state.power[*c].on && !lost(o)
             })
-            .map(|(c, d)| (c, d.power, essential(def, Owner::Component(d.n))))
+            .map(|(c, d)| (c, d.power, d.priority))
             .collect();
         let sun_w: f64 = (def.solars.iter().zip(&solar)).filter(|(s, _)| on(s.owner)).map(|(_, w)| w).sum();
         let cells: Vec<usize> = (0..def.batteries.len()).filter(|&b| on(def.batteries[b].owner)).collect();
@@ -131,7 +122,8 @@ pub fn step_ship(def: &ShipDef, state: &mut ShipState, sun: DVec3, dt: f64, at: 
             cap.max_power.min(state.batteries[b].charge / dt.max(1e-9)).max(0.0)
         };
         let available: f64 = cells.iter().map(|&b| can(state, b)).sum();
-        // Shed until the loads fit: the non-essential first, then the largest.
+        // Shed until the loads fit: by priority, the lowest first, then the
+        // largest.
         loads.sort_by(|a, b| a.2.cmp(&b.2).then(b.1.total_cmp(&a.1)).then(a.0.cmp(&b.0)));
         let mut need = demand - sun_w;
         while need > available + 1e-9 && !loads.is_empty() {
@@ -373,6 +365,56 @@ mod tests {
             assert!(shed(&s, "dragon.docking"));
             assert!(!shed(&s, "dragon.eclss") && !shed(&s, "dragon.computer"));
             assert!(s.events.iter().any(|e| e.text.starts_with("dragon.eclss: powered again")));
+        }
+
+        /// The shedding by the loads' priorities (D125: each component's
+        /// parameter, its equipment's by default: Dragon's computer and
+        /// life support critical, its thrusters and sensors essential, its
+        /// docking system and SuperDraco pods not; 130, 169.5 and 900 W):
+        /// Dragon's batteries flat and its cells short by so many watts,
+        /// the lowest priority goes first, the largest first within one
+        /// (ties in the design's order). (case, the docking system made
+        /// critical, the shortfall W, what is shed.)
+        #[test]
+        fn a_short_bus_sheds_by_priority_then_size() {
+            let pods = ["dragon.superdraco#1", "dragon.superdraco#2", "dragon.superdraco#3", "dragon.superdraco#4"];
+            let rest: Vec<&str> = [&["dragon.docking"][..], &pods].concat();
+            let table: [(&str, bool, f64, Vec<&str>); 6] = [
+                ("the largest of the lowest", false, 30.0, vec!["dragon.docking"]),
+                ("then the next", false, 60.0, vec!["dragon.docking", pods[0]]),
+                ("the lowest, then the largest essential", false, 150.0, [&rest[..], &["dragon.imu#1"]].concat()),
+                ("all but the computer", false, 350.0, vec!["*", "-dragon.computer"]),
+                ("everything", false, 1_100.0, vec!["*"]),
+                ("the docking system critical: the pods go", true, 30.0, vec![pods[0], pods[1]]),
+            ];
+            for (case, docking_critical, short, want) in table {
+                let mut def = falcon9().as_ref().clone();
+                if docking_critical {
+                    def.components.iter_mut().find(|c| c.id == "dragon.docking").unwrap().priority = Priority::Critical;
+                }
+                let mut s = ShipState::initial(&def);
+                s.clamped = false;
+                for (b, d) in s.batteries.iter_mut().zip(&def.batteries) {
+                    if d.id.starts_with("dragon.") {
+                        b.charge = 0.0;
+                    }
+                }
+                let flux = (load_of(&def, "dragon.bus") - short) / (8.9 * 0.3);
+                step_ship(&def, &mut s, DVec3::new(-flux, 0.0, 0.0), 60.0, t0());
+                let mut shed: Vec<&str> = s.unpowered.iter().map(|u| def.owner_id(u.owner)).collect();
+                shed.retain(|id| id.starts_with("dragon."));
+                shed.sort();
+                let on_bus = |c: &&crate::craft::ship::ComponentDef| c.id.starts_with("dragon.") && c.power > 0.0;
+                let mut want: Vec<&str> = match want.first() {
+                    Some(&"*") => (def.components.iter().filter(on_bus))
+                        .map(|c| c.id.as_str())
+                        .filter(|id| !want.iter().any(|w| w.strip_prefix('-') == Some(*id)))
+                        .collect(),
+                    _ => want,
+                };
+                want.sort();
+                assert_eq!(shed, want, "{case}");
+            }
         }
     }
 }

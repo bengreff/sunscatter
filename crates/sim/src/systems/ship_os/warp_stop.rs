@@ -21,6 +21,7 @@
 //! sourced (software-layers.md §8, point 2).
 
 use super::program::Slot;
+use crate::catalog::Priority;
 use crate::craft::handle::Owner;
 use crate::craft::ship::ShipDef;
 use crate::craft::state::ShipState;
@@ -54,7 +55,8 @@ pub enum Risk {
     PartLost(u32),
     /// No flight computer working (D121's controllability).
     Uncontrollable,
-    /// An essential load shed (a computer, the life support).
+    /// A critical load shed (its priority on its bus, D125: a computer, the
+    /// life support).
     Shed(Owner),
 }
 
@@ -110,7 +112,7 @@ pub struct Facts {
     pub destroyed: Vec<u32>,
     /// A flight computer works (or the craft has none modelled).
     pub computing: bool,
-    /// The essential loads shed.
+    /// The critical loads shed (`catalog::Priority::Critical`).
     pub shed: Vec<Owner>,
 }
 
@@ -118,8 +120,7 @@ impl Facts {
     /// The facts of `state` on `def`, the cabin's air as `k` knows it.
     pub fn of(def: &ShipDef, state: &ShipState, k: &Knowledge, supply_left: Option<f64>) -> Facts {
         let read = |q| k.read(q, crate::systems::data::truth(state, q)?).map(|r| r.value);
-        let essential =
-            |o: Owner| def.computers.iter().any(|c| c.owner == o) || def.life_support.iter().any(|l| l.owner == o);
+        let critical = |o: Owner| def.component_of(o).is_some_and(|c| c.priority == Priority::Critical);
         Facts {
             crew: crate::systems::crew::crew_of(def),
             co2: read(Quantity::CabinCo2),
@@ -129,7 +130,7 @@ impl Facts {
             support_out: !def.life_support.is_empty() && def.life_support.iter().all(|l| state.out(l.owner)),
             destroyed: state.parts.iter().filter(|p| p.integrity <= 0.0).map(|p| p.part).collect(),
             computing: super::health(def, state).computing(),
-            shed: state.unpowered.iter().map(|l| l.owner).filter(|&o| essential(o)).collect(),
+            shed: state.unpowered.iter().map(|l| l.owner).filter(|&o| critical(o)).collect(),
         }
     }
 }

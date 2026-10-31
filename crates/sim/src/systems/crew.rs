@@ -5,11 +5,25 @@
 //!   water vapour (`CabinState`) from the gases' moles by the ideal-gas law
 //!   at its temperature. Each crew member breathes per NASA's BVAD
 //!   (nominal: 0.82 kg O₂ in, 1.04 kg CO₂ and 1.9 kg of water vapour out per
-//!   day) and gives ~100 W of heat. The life support, while it has power and
-//!   its function, removes CO₂ and water up to its rates, feeds O₂ up to its
-//!   rate to hold 21.3 kPa and N₂ to hold the total at 101.3 kPa, and holds
-//!   the temperature at 295 K (18–27 °C, crew-selectable); without it the
-//!   air goes stale and the temperature drifts to the capsule's.
+//!   day) and gives ~100 W of heat.
+//! * **The life support** (layer 1, D128: its own loops, from its own
+//!   stocks; falcon9.md §5.5), while it has power and its function:
+//!   - its scrubber's fan pushes the air through a sorbent bed that takes
+//!     a share η of the CO₂ in it each pass, so it removes η·Q·c (Q the
+//!     flow, c the CO₂'s concentration) and the cabin settles where that
+//!     equals the crew's output (four crew in Dragon: ~0.2 kPa). The step
+//!     is in closed form (exact at any length, so the lattice and live
+//!     ticks agree), up to what the bed can still take: each kg of
+//!     sorbent takes its capacity of CO₂ (LiOH: 0.919 kg in theory, ~0.69
+//!     at 75 % use), then it is spent and the CO₂ climbs;
+//!   - it removes the water, feeds O₂ from its store up to its rate to hold
+//!     21.3 kPa and N₂ from its store to hold the total at 101.3 kPa, and
+//!     holds the temperature at 295 K (18–27 °C, crew-selectable).
+//!   - its stocks' time to empty at the crew's use is [`supply_left`]
+//!     (the warp stop's, D128).
+//!
+//!   Without it the air goes stale and the temperature drifts to the
+//!   capsule's.
 //! * **Acceleration limits** (NASA-STD-3001 Vol. 2, falcon9.md §6.6):
 //!   sustained (over 0.5 s) acceleration of the cabin by axis against the
 //!   limit for how long it has been held (log-linear between the table's
@@ -22,7 +36,7 @@
 //! On the lattice too (coasting: the cabin's air; no acceleration then).
 
 use crate::craft::ship::ShipDef;
-use crate::craft::state::{CabinState, ShipState};
+use crate::craft::state::{CabinState, LifeSupportState, ShipState};
 use crate::fluids::R_GAS;
 use crate::time::Epoch;
 use glam::DVec3;
@@ -38,6 +52,7 @@ pub const H2O_MADE: f64 = 1.9 / 86_400.0;
 pub const CREW_HEAT: f64 = 100.0;
 /// Molar masses (kg/mol).
 const M_O2: f64 = 0.031_998;
+const M_N2: f64 = 0.028_013;
 const M_CO2: f64 = 0.044_01;
 const M_H2O: f64 = 0.018_015;
 /// What the life support holds (Pa, K): sea-level air, 21 % O₂, ~1 kPa of
@@ -169,39 +184,82 @@ fn moles(c: &CabinState, volume: f64) -> [f64; 4] {
 }
 
 /// One step of `dt` seconds of the cabin's air with `crew` aboard, its life
-/// support working or not (`working`), the capsule's temperature `outside`
-/// (K): see the module.
+/// support working (`life`: its parameters and its stocks, drawn down) or
+/// not, the capsule's temperature `outside` (K): see the module.
 pub fn air(
     c: &mut CabinState,
     volume: f64,
     crew: u32,
-    life: Option<&crate::catalog::LifeSupport>,
+    life: Option<(&crate::catalog::LifeSupport, &mut LifeSupportState)>,
     outside: f64,
     dt: f64,
 ) {
     let people = f64::from(crew);
     let [mut o2, mut n2, mut co2, mut h2o] = moles(c, volume);
     o2 = (o2 - people * O2_USE * dt / M_O2).max(0.0);
-    co2 += people * CO2_MADE * dt / M_CO2;
+    let made = people * CO2_MADE / M_CO2; // mol/s
     h2o += people * H2O_MADE * dt / M_H2O;
     let heat_capacity = 1_005.0 * 1.2 * volume + 50_000.0; // air and the cabin's furnishings (E)
     match life {
-        Some(l) => {
+        Some((l, stock)) => {
             let to_moles = |p: f64| p * volume / (R_GAS * c.k);
-            co2 = (co2 - l.co2_removal / 86_400.0 * dt / M_CO2).max(0.0);
+            co2 = scrub(co2, made, l, stock, volume, dt);
             h2o = h2o.min(to_moles(H2O_SET)).max(h2o - 2.0 * people * H2O_MADE * dt / M_H2O);
-            let o2_add = (to_moles(O2_SET) - o2).clamp(0.0, l.o2_supply / 86_400.0 * dt / M_O2);
+            let feed = l.o2_supply / 86_400.0 * dt / M_O2;
+            let o2_add = (to_moles(O2_SET) - o2).clamp(0.0, feed).min(stock.o2 / M_O2);
             o2 += o2_add;
+            stock.o2 = (stock.o2 - o2_add * M_O2).max(0.0);
             let total = o2 + n2 + co2 + h2o;
-            n2 += (to_moles(TOTAL_SET) - total).max(0.0);
+            let n2_add = (to_moles(TOTAL_SET) - total).max(0.0).min(stock.n2 / M_N2);
+            n2 += n2_add;
+            stock.n2 = (stock.n2 - n2_add * M_N2).max(0.0);
             c.k += (CABIN_SET_K - c.k) * (dt / 60.0).min(1.0);
         }
         None => {
+            co2 += made * dt;
             c.k += (people * CREW_HEAT * dt) / heat_capacity + (outside - c.k) * (dt / CABIN_TAU).min(1.0);
         }
     }
     let p = |n: f64| n * R_GAS * c.k / volume;
     (c.o2, c.n2, c.co2, c.h2o) = (p(o2), p(n2), p(co2), p(h2o));
+}
+
+/// The cabin's CO₂ (mol) after `dt` of the crew making `made` (mol/s) and
+/// the scrubber removing η·Q·c: dn/dt = made − k·n with k = η·Q/V, in
+/// closed form, n_eq + (n − n_eq)·e^(−k·dt); what it removed is no more
+/// than its bed can still take, and spends the sorbent.
+fn scrub(
+    co2: f64,
+    made: f64,
+    l: &crate::catalog::LifeSupport,
+    stock: &mut LifeSupportState,
+    volume: f64,
+    dt: f64,
+) -> f64 {
+    let k = l.scrubber_efficiency * l.scrubber_flow / volume;
+    let without = co2 + made * dt;
+    let after = if k > 0.0 { made / k + (co2 - made / k) * crate::math::exp(-k * dt) } else { without };
+    let can = (stock.sorbent * l.sorbent_capacity / M_CO2).max(0.0);
+    let removed = (without - after).clamp(0.0, can);
+    if removed > 0.0 {
+        stock.sorbent = (stock.sorbent - removed * M_CO2 / l.sorbent_capacity).max(0.0);
+    }
+    without - removed
+}
+
+/// The life support's shortest time to empty (s) at its crew's use (BVAD's
+/// nominal rates, as the crew's consumables are planned): its bed's CO₂
+/// left to take and its O₂ store (N₂ only makes up the total, which
+/// nothing leaks yet). `None` without crew or a life support serving the
+/// cabin. Its own report (layer 1), read by the warp stop.
+pub fn supply_left(def: &ShipDef, state: &ShipState) -> Option<f64> {
+    let people = f64::from(crew_of(def));
+    let cabin = state.cabin.as_ref().filter(|_| people > 0.0)?;
+    let i = def.life_support.iter().position(|l| l.part == cabin.part)?;
+    let (l, stock) = (&def.life_support[i].item, state.life_support.get(i)?);
+    let sorbent = stock.sorbent * l.sorbent_capacity / (people * CO2_MADE);
+    let o2 = stock.o2 / (people * O2_USE);
+    Some(sorbent.min(o2))
 }
 
 /// One live tick (or lattice step) of the crew (see the module): the
@@ -212,15 +270,31 @@ pub fn step(def: &ShipDef, state: &mut ShipState, accel: Option<DVec3>, outside:
     let crew = crew_of(def);
     let Some(cabin) = state.cabin.as_ref() else { return };
     let part = cabin.part;
-    let life = def.life_support.iter().find(|l| l.part == part);
-    let volume = life.map_or(9.3, |l| l.item.cabin_volume);
-    let working = life.filter(|l| !state.out(l.owner));
+    let unit = def.life_support.iter().position(|l| l.part == part).filter(|&i| i < state.life_support.len());
+    let volume = unit.map_or(9.3, |i| def.life_support[i].item.cabin_volume);
+    let working = unit.filter(|&i| !state.out(def.life_support[i].owner));
     let was_fresh = cabin.co2 < 1_000.0;
-    let c = state.cabin.as_mut().expect("checked");
-    air(c, volume, crew, working.map(|l| &l.item), outside, dt);
-    if was_fresh && c.co2 >= 1_000.0 {
-        let text = format!("cabin CO₂ at {:.1} kPa: the life support is not removing it", c.co2 / 1e3);
+    let had = working.map(|i| state.life_support[i].clone());
+    let ShipState { cabin, life_support, .. } = state;
+    let c = cabin.as_mut().expect("checked");
+    let life = working.map(|i| (&def.life_support[i].item, &mut life_support[i]));
+    air(c, volume, crew, life, outside, dt);
+    let co2 = c.co2;
+    if was_fresh && co2 >= 1_000.0 {
+        let text = format!("cabin CO₂ at {:.1} kPa: the life support is not removing it", co2 / 1e3);
         state.event(at, text, true);
+    }
+    if let (Some(i), Some(had)) = (working, had) {
+        let now = &state.life_support[i];
+        let spent = [
+            (had.sorbent > 0.0 && now.sorbent <= 0.0, "its CO₂ sorbent is spent"),
+            (had.o2 > 0.0 && now.o2 <= 0.0, "its O₂ is used up"),
+            (had.n2 > 0.0 && now.n2 <= 0.0, "its N₂ is used up"),
+        ];
+        let id = def.owner_id(def.life_support[i].owner).to_string();
+        for (_, what) in spent.into_iter().filter(|x| x.0) {
+            state.event(at, format!("{id}: {what}"), true);
+        }
     }
     let Some(a) = accel.filter(|_| crew > 0) else { return };
     let run = &mut state.crew;
@@ -357,17 +431,33 @@ mod tests {
         assert_eq!(crew_axes(DVec3::new(3.0, 4.0, -20.0)), [0.0, 20.0, 5.0]);
     }
 
+    /// Dragon's life support (`dragon-eclss.ron`) and its stocks, full.
+    fn dragon_unit() -> (crate::catalog::LifeSupport, LifeSupportState) {
+        let l = crate::catalog::LifeSupport {
+            o2_supply: 3.4,
+            cabin_volume: 9.3,
+            o2_stored: 36.0,
+            n2_stored: 17.0,
+            scrubber_flow: 0.015,
+            scrubber_efficiency: 0.9,
+            sorbent: 60.0,
+            sorbent_capacity: 0.69,
+        };
+        (l, LifeSupportState { part: 0, o2: l.o2_stored, n2: l.n2_stored, sorbent: l.sorbent })
+    }
+
     /// Four crew in Dragon's 9.3 m³ for six hours without life support:
     /// O₂ down by 0.82 kg, CO₂ up by 1.04 kg (BVAD), to ~7 kPa of CO₂;
-    /// with it working, the air stays as set.
+    /// with it working, the air stays as set, its O₂ store down by what the
+    /// crew used and its sorbent by the CO₂ it took.
     #[test]
     fn four_crew_for_six_hours() {
         let mut stale = fresh();
         let mut kept = fresh();
-        let life = crate::catalog::LifeSupport { co2_removal: 4.0, o2_supply: 3.4, cabin_volume: 9.3 };
+        let (life, mut stock) = dragon_unit();
         for _ in 0..360 {
             air(&mut stale, 9.3, 4, None, 295.0, 60.0);
-            air(&mut kept, 9.3, 4, Some(&life), 295.0, 60.0);
+            air(&mut kept, 9.3, 4, Some((&life, &mut stock)), 295.0, 60.0);
         }
         let kg = |p: f64, m: f64, k: f64| p * 9.3 / (R_GAS * k) * m;
         let co2 = kg(stale.co2, M_CO2, stale.k) - kg(50.0, M_CO2, 295.0);
@@ -375,11 +465,84 @@ mod tests {
         let o2 = kg(21_200.0, M_O2, 295.0) - kg(stale.o2, M_O2, stale.k);
         assert!((o2 - 0.82).abs() < 1e-9, "{o2}");
         assert!(stale.co2 > 6_000.0, "{}", stale.co2);
-        // (The data's removal, 4.0 kg/day, is a little under four crew's
-        // 4.16: CO₂ creeps up, still under NASA's 3 mmHg, 400 Pa.)
         assert!(kept.co2 < 400.0 && (kept.o2 - O2_SET).abs() < 300.0, "{kept:?}");
         let total = kept.o2 + kept.n2 + kept.co2 + kept.h2o;
         assert!((total - TOTAL_SET).abs() < 500.0 && (kept.k - CABIN_SET_K).abs() < 1e-6, "{total}");
+        // The O₂ the crew breathed (0.82 kg) and the cabin's 100 Pa to 21.3 kPa.
+        let fed = life.o2_stored - stock.o2;
+        assert!((fed - 0.82 - kg(100.0, M_O2, 295.0)).abs() < 0.01, "{fed}");
+        let took = (life.sorbent - stock.sorbent) * life.sorbent_capacity;
+        let held = kg(kept.co2, M_CO2, 295.0) - kg(50.0, M_CO2, 295.0);
+        assert!((took + held - 1.04).abs() < 1e-6, "{took} + {held}");
+    }
+
+    /// RESEARCH's law (falcon9.md §5.5): with Q 15 L/s at η 0.9, four crew's
+    /// CO₂ settles where removal equals their 4.16 kg/day, ~0.2 kPa
+    /// (made·R·T/(η·Q) = 198.8 Pa); and the step is in closed form: an hour
+    /// as one step, as 60 lattice steps and as 50 Hz ticks gives the same
+    /// CO₂ (to rounding).
+    #[test]
+    fn four_crew_settle_near_two_hundred_pascals() {
+        let (life, stock) = dragon_unit();
+        let mut c = fresh();
+        let mut s = stock.clone();
+        for _ in 0..(2 * 1_440) {
+            air(&mut c, 9.3, 4, Some((&life, &mut s)), 295.0, 60.0);
+        }
+        let want = 4.0 * CO2_MADE / M_CO2 * R_GAS * 295.0 / (0.9 * 0.015);
+        assert!((want - 198.8).abs() < 0.1, "{want}");
+        assert!((c.co2 - want).abs() < 0.01, "{} vs {want}", c.co2);
+        let hour = |dt: f64, n: u32| {
+            let (mut c, mut s) = (fresh(), stock.clone());
+            for _ in 0..n {
+                air(&mut c, 9.3, 4, Some((&life, &mut s)), 295.0, dt);
+            }
+            (c.co2, s.sorbent)
+        };
+        let (one, sixty, ticks) = (hour(3_600.0, 1), hour(60.0, 60), hour(0.02, 180_000));
+        for (co2, sorbent) in [sixty, ticks] {
+            assert!((co2 - one.0).abs() < 1e-6 && (sorbent - one.1).abs() < 1e-9, "{co2} {sorbent} vs {one:?}");
+        }
+    }
+
+    /// Dragon's 60 kg of LiOH take 41.4 kg of CO₂: four crew's 4.16 kg/day
+    /// for 9.95 days ([`supply_left`] from the start), its O₂ 36 kg for
+    /// 10.98; then the sorbent is spent, an alarm, and the CO₂ passes 1 kPa
+    /// within hours. Without crew nothing runs out.
+    #[test]
+    fn dragons_sorbent_lasts_ten_days_for_four() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/craft/falcon9-crew");
+        let def = crate::craft::load_definition(&path).unwrap().ship.unwrap();
+        let mut s = ShipState::initial(&def);
+        assert_eq!(crew_of(&def), 4);
+        let day = 86_400.0;
+        let left = supply_left(&def, &s).expect("a crewed cabin");
+        let want = 60.0 * 0.69 / (4.0 * 1.04) * day;
+        assert!((left - want).abs() < 1.0 && (left / day - 9.95).abs() < 0.01, "{} days", left / day);
+        let t0 = Epoch::new(845_000_000, 0.0);
+        let mut spent_at = None;
+        let mut over_at = None;
+        for k in 0..(11 * 1_440) {
+            let at = t0.add_seconds(60.0 * f64::from(k + 1));
+            step(&def, &mut s, None, 293.0, 60.0, at);
+            let co2 = s.cabin.as_ref().unwrap().co2;
+            if spent_at.is_none() && s.life_support[0].sorbent <= 0.0 {
+                spent_at = Some(at.seconds_since(t0));
+            }
+            if over_at.is_none() && co2 >= 1_000.0 {
+                over_at = Some(at.seconds_since(t0));
+            }
+        }
+        let (spent, over) = (spent_at.expect("spent"), over_at.expect("over 1 kPa"));
+        println!("sorbent spent at {:.3} days, CO₂ over 1 kPa {:.2} h later", spent / day, (over - spent) / 3_600.0);
+        assert!((spent - want).abs() < 3_600.0, "{} days", spent / day);
+        assert!(over > spent && over - spent < 6.0 * 3_600.0);
+        assert!(s.events.iter().any(|e| e.alarm && e.text.ends_with("its CO₂ sorbent is spent")));
+        let o2 = s.life_support[0].o2;
+        assert!((o2 - (36.0 - 11.0 * 3.28)).abs() < 0.2, "{o2} kg of O₂ left");
+        let mut empty = def.as_ref().clone();
+        empty.seats.clear();
+        assert_eq!(supply_left(&empty, &ShipState::initial(&empty)), None);
     }
 
     /// Over its limit an exposure hurts the crew once (an alarm and the

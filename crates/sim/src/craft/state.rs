@@ -207,6 +207,16 @@ pub struct CabinState {
     pub k: f64,
 }
 
+/// A life support's stocks left (kg), one per unit (`ShipDef::life_support`,
+/// `systems::crew`): its stored O₂ and N₂, and its bed's unspent sorbent.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct LifeSupportState {
+    pub part: u32,
+    pub o2: f64,
+    pub n2: f64,
+    pub sorbent: f64,
+}
+
 /// A statistical failure mode's fate (D105 §6.3): the threshold E drawn
 /// once and the hazard accumulated.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -286,6 +296,9 @@ pub struct ShipState {
     // The cabin and its crew.
     #[serde(default)]
     pub cabin: Option<CabinState>,
+    /// One per life support: its stocks (`systems::crew`).
+    #[serde(default)]
+    pub life_support: Vec<LifeSupportState>,
     /// The crew's exposure to acceleration and their injuries
     /// (`systems::crew`).
     #[serde(default)]
@@ -512,6 +525,14 @@ impl ShipState {
                 h2o: 1_000.0,
                 k: 295.0,
             }),
+            life_support: (def.life_support.iter())
+                .map(|l| LifeSupportState {
+                    part: l.part,
+                    o2: l.item.o2_stored,
+                    n2: l.item.n2_stored,
+                    sorbent: l.item.sorbent,
+                })
+                .collect(),
             fates: Vec::new(),
             clamped: def.joints.iter().any(|j| j.kind == super::assembly::JointKind::HoldDown),
             sequence: 0,
@@ -556,6 +577,7 @@ impl ShipState {
             ("mechanisms", ids(&self.mechanisms, |x| x.part), ids(&def.mechanisms, |x| x.part)),
             ("parts", ids(&self.parts, |x| x.part), ids(&def.parts, |x| x.part)),
             ("power switches", ids(&self.power, |x| x.part), ids(&def.components, |x| x.part)),
+            ("life supports", ids(&self.life_support, |x| x.part), ids(&def.life_support, |x| x.part)),
         ];
         if let Some(e) = lists.iter().find_map(|(kind, s, d)| by_part(kind, s, d)) {
             return Some(e);

@@ -224,6 +224,7 @@ fn components_against_hand_calculations() {
             performance: 2.5e5,
         },
         power: 0.0,
+        priority: None,
         control: false,
         specific_heat: 900.0,
         max_k: 400.0,
@@ -242,6 +243,7 @@ fn components_against_hand_calculations() {
             max_power: 2000.0,
         },
         power: 0.0,
+        priority: None,
         control: false,
         specific_heat: 900.0,
         max_k: 330.0,
@@ -294,4 +296,29 @@ fn entries_parse_from_ron() {
     assert_eq!(b.ratings.reliability, Some(9.0));
     assert_eq!(b.ratings.rated_k, Some(420.0), "from the material");
     assert!(Entry::parse(&text.replace("length: 2.0", "length: 2.0, colour: 1.0")).is_err());
+}
+
+/// A component's priority on its bus (D125): its equipment's unless its
+/// entry names one. (equipment, the entry's, the component's.)
+#[test]
+fn a_components_priority_is_its_equipments_unless_named() {
+    let docking = r#"Docking(standard: "IDSS", diameter: 1.2, mass: 300.0)"#;
+    let computer = "Computer(channels: 3, mass: 20.0)";
+    let sensor = r#"Sensor(quantity: "attitude", accuracy: 0.01, rate_hz: 50.0, mass: 5.0)"#;
+    let table = [
+        (docking, "", Priority::NonEssential),
+        (docking, "priority: Some(Critical),", Priority::Critical),
+        (computer, "", Priority::Critical),
+        (sensor, "", Priority::Essential),
+        (sensor, "priority: Some(NonEssential),", Priority::NonEssential),
+    ];
+    for (equipment, named, want) in table {
+        let text = format!(
+            r#"(id: "t", name: "t", era: 2020, provisional: true,
+                generator: Component(envelope: Sphere(0.2), power: 10.0, {named} equipment: {equipment}))"#
+        );
+        let e = Entry::parse(&text).unwrap();
+        let b = e.build(&ctx(), &BTreeMap::new()).unwrap();
+        assert_eq!(b.generated.priority, want, "{equipment} {named}");
+    }
 }

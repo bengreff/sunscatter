@@ -66,6 +66,9 @@ fn every_field_set(def: &ShipDef) -> ShipState {
     }
     let cabin = s.cabin.as_mut().expect("Dragon's cabin");
     (cabin.o2, cabin.co2, cabin.k) = (20_000.0, 400.0, 297.0);
+    for (i, x) in s.life_support.iter_mut().enumerate() {
+        (x.o2, x.n2, x.sorbent) = (v(i, 30.0), v(i, 15.0), v(i, 50.0));
+    }
     // A keyed list in part order, on parts with a failure mode (a fate's
     // mode is its owner's: `ShipState::misfit`).
     s.fates = (def.parts.iter().filter(|p| !p.failures.is_empty()).step_by(2))
@@ -137,6 +140,7 @@ fn assert_every_field_set(s: &ShipState, at_load: &ShipState) {
         unpowered,
         buses,
         cabin,
+        life_support,
         crew,
         fates,
         lost,
@@ -168,6 +172,7 @@ fn assert_every_field_set(s: &ShipState, at_load: &ShipState) {
         (parts != &l.parts, "parts"),
         (power != &l.power, "power"),
         (cabin != &l.cabin, "cabin"),
+        (life_support != &l.life_support, "life_support"),
         (fates != &l.fates, "fates"),
         (clamped != &false, "clamped"),
         (sequence != &l.sequence, "sequence"),
@@ -228,6 +233,7 @@ fn a_split_puts_each_item_in_exactly_one_piece() {
                 x.parts.len(),
                 x.power.len(),
                 x.cabin.iter().count(),
+                x.life_support.len(),
                 x.fates.len(),
                 x.fins.len(),
                 x.lost.len(),

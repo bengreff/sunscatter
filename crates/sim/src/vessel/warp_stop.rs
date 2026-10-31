@@ -29,7 +29,7 @@ pub(super) fn watch(
 ) -> bool {
     let (Some(def), Some(state)) = ship else { return false };
     let k = crate::systems::data::knowledge(def, state, debug);
-    let facts = Facts::of(def, state, &k, None);
+    let facts = Facts::of(def, state, &k, crate::systems::crew::supply_left(def, state));
     let now = warp_stop::risks(&facts);
     let new = warp_stop::new_risks(&software.watch.seen, &now);
     software.watch.seen = now;

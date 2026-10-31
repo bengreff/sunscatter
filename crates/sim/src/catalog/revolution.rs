@@ -132,6 +132,7 @@ impl RevolutionParams {
                 }))
                 .collect(),
             power: 0.0,
+            priority: Default::default(),
             specific_heat: self.wall.specific_heat(m)?,
             max_k: self.wall.service_k(m)?,
         })

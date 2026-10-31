@@ -5,9 +5,10 @@
 //! tests (`state_tests`) check the rules.
 //!
 //! * **An item of a part** (a tank, bottle, engine, thruster, valve,
-//!   battery, mechanism, part, component's switch, fate) goes with its part,
-//!   in order. The lists stay aligned by index with their [`ShipDef`]'s:
-//!   the systems step them in lockstep with the definition, and
+//!   battery, mechanism, part, component's switch, life support's stocks,
+//!   fate) goes with its part, in order. The lists stay aligned by index
+//!   with their [`ShipDef`]'s: the systems step them in lockstep with the
+//!   definition, and
 //!   [`ShipDef::subset`] keeps the same order, so the merge puts each entry
 //!   back where the whole definition has its part.
 //! * **A joint** goes with its two parts; a joint the split cuts goes with
@@ -112,6 +113,7 @@ impl ShipState {
             unpowered,
             buses,
             cabin,
+            life_support,
             crew,
             fates,
             lost,
@@ -156,6 +158,7 @@ impl ShipState {
             unpowered: by(unpowered, |l| l.part, kept),
             buses: buses.iter().filter(|r| piece.buses.iter().any(|b| b.name == r.name)).cloned().collect(),
             cabin: cabin.clone().filter(|c| kept.contains(&c.part)),
+            life_support: by(life_support, |x| x.part, kept),
             crew: if has_cabin { crew.clone() } else { Default::default() },
             fates: by(fates, |x| x.part, kept),
             lost: by(lost, |l| l.part, kept),
@@ -214,6 +217,7 @@ impl ShipState {
             unpowered,
             buses,
             cabin,
+            life_support,
             crew,
             fates,
             lost,
@@ -271,6 +275,7 @@ impl ShipState {
         let drop = log.len().saturating_sub(EVENTS_KEPT);
         log.drain(..drop);
         let b_has_cabin = !b_def.seats.is_empty() && a_def.seats.is_empty();
+        let units = w.life_support.iter().map(|x| x.part);
         Ok(ShipState {
             tanks: zip_merge(w.tanks.iter().map(|x| x.part), &in_a, tanks, &b.tanks, "tanks")?,
             bottles: zip_merge(w.bottles.iter().map(|x| x.part), &in_a, bottles, &b.bottles, "bottles")?,
@@ -293,6 +298,7 @@ impl ShipState {
                 .filter_map(|x| buses.iter().chain(&b.buses).find(|r| r.name == x.name).cloned())
                 .collect(),
             cabin: cabin.clone().or_else(|| b.cabin.clone()),
+            life_support: zip_merge(units, &in_a, life_support, &b.life_support, "life supports")?,
             crew: if b_has_cabin { b.crew.clone() } else { crew.clone() },
             fates: keyed(fates, &b.fates, |f| f.part),
             lost: keyed(lost, &b.lost, |l| l.part),

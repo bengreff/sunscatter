@@ -285,6 +285,7 @@ impl TankParams {
             ports,
             functions: Vec::new(),
             power: 0.0,
+            priority: Default::default(),
             specific_heat: m.specific_heat,
             max_k: m.service_k,
         })
@@ -337,6 +338,7 @@ impl ShellParams {
             ports: Vec::new(),
             functions: Vec::new(),
             power: 0.0,
+            priority: Default::default(),
             specific_heat: self.wall.specific_heat(ctx.materials)?,
             max_k: self.wall.service_k(ctx.materials)?,
         })
@@ -422,6 +424,7 @@ impl ThrustParams {
             ports: Vec::new(),
             functions: Vec::new(),
             power: 0.0,
+            priority: Default::default(),
             specific_heat: self.wall.specific_heat(ctx.materials)?,
             max_k: self.wall.service_k(ctx.materials)?,
         })
@@ -489,6 +492,7 @@ impl PadParams {
             ports: Vec::new(),
             functions: vec![super::output::Function::Pad],
             power: 0.0,
+            priority: Default::default(),
             specific_heat: m.specific_heat,
             max_k: m.service_k,
         })

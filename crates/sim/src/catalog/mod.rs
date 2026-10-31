@@ -38,8 +38,8 @@ pub use component::{ComponentParams, Envelope, Equipment};
 pub use engine::{EngineParams, Performance};
 pub use output::{
     Actuator, AeroSurface, Battery, Bottle, Computer, Cycle, EngineData, Function, Generated, Igniter, Kind,
-    LifeSupport, Mechanism, MountKind, MountPoint, Nozzle, Port, PortKind, Propellant, Sensor, Solar, TankSpec,
-    Thrusters, Valve, ValveKind,
+    LifeSupport, Mechanism, MountKind, MountPoint, Nozzle, Port, PortKind, Priority, Propellant, Sensor, Solar,
+    TankSpec, Thrusters, Valve, ValveKind,
 };
 pub use revolution::{Hinge, RevolutionParams, StackSpec};
 pub use structure::{Dome, PadParams, RadialSet, ShellParams, TankParams, ThrustParams, KNOCKDOWN};

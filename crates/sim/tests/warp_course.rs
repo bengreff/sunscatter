@@ -401,10 +401,9 @@ fn the_upper_stage_and_dragon_fly_the_same_course_at_every_warp() {
     assert_eq!(Some(after), before.map(|n| n - 1), "the MVac restarted once");
 }
 
-/// Notifications off (D128, software-layers.md §5): the course's two
-/// risks (the stage's computer shed at +12.7 h, Dragon's cabin CO₂ after a
-/// day) stop nothing, on the vessel or the piece it split off, and the
-/// flight is the same bits as one pass.
+/// Notifications off (D128, software-layers.md §5): the course's risk (the
+/// stage's computer shed at +12.7 h, on the piece split off) stops
+/// nothing, and the flight is the same bits as one pass.
 #[test]
 fn with_notifications_off_nothing_stops_warp() {
     let w = world();
@@ -434,6 +433,142 @@ fn an_uncontained_restart_fails_the_same_at_every_warp() {
     let g = same_course(seed, 86_400.0, 3_100.0, &[1e4, 1e5]);
     let failed = events(&g).iter().any(|e| e.contains("uncontained failure"));
     assert!(failed, "the restart failed: {:#?}", events(&g));
+}
+
+// ---------------------------------------------------------------------
+// The bare minimum (D128, software-layers.md §3): layer 1 alone, no ship
+// software running (no SAS, no program), the craft set up and left.
+// ---------------------------------------------------------------------
+
+/// Crew Dragon as Demo-1 flew it, its seats empty: the craft's definition
+/// with no crew, registered for the test.
+fn uncrewed_dragon() -> CraftId {
+    let base = CraftId("dragon-uncrewed".into());
+    let mut def = sim::craft::load_definition(&sim::craft::default_craft_dir().join("falcon9-crew")).unwrap();
+    def.parts.iter_mut().for_each(|p| p.crew = 0);
+    def.spec.crew = 0;
+    let ship = Arc::make_mut(def.ship.as_mut().expect("a craft of parts"));
+    ship.seats.iter_mut().for_each(|s| s.item = 0);
+    sim::craft::registry::register(&base, def);
+    CraftId("dragon-uncrewed#0-7".into())
+}
+
+/// Dragon alone (`#0-7`: capsule, nose, heat shield, trunk and fins) in the
+/// upper stage's 400 km orbit, set up (software-layers.md §3): not
+/// rotating, its trunk's cells (body +X) on the Sun, or `ahead` 45° of it
+/// along the ecliptic (the way the Sun moves, so the cells see it at 45° or
+/// better for three months).
+fn dragon_alone(w: &World, craft: &CraftId, ahead: bool) -> (Vessel, VesselIds) {
+    let earth = w.find("Earth").unwrap();
+    let sun = w.find("Sun").unwrap();
+    let el = Elements { a: 6_778_137.0, e: 0.0005, i: 0.9, raan: 1.0, argp: 0.5, mean_anomaly: 0.0 };
+    let (r, v) = el.to_state(earth.gm);
+    let mut d = Vessel::coasting(w, VesselId(1), t0(), earth.node, r, v, &craft_of(craft));
+    let k = w.snapshot(t0()).relative(sun.node, earth.node);
+    let to_sun = k.r.normalize();
+    let along = (k.v - to_sun * k.v.dot(to_sun)).normalize();
+    let aim = if ahead { (to_sun + along).normalize() } else { to_sun };
+    d.set_attitude(sim::vessel::Attitude {
+        q: glam::DQuat::from_rotation_arc(glam::DVec3::X, aim),
+        omega: glam::DVec3::ZERO,
+    });
+    assert!(matches!(d.phase, Phase::Coasting { .. }));
+    let mut ids = VesselIds::default();
+    ids.allocate();
+    (d, ids)
+}
+
+/// Whether the vessel coasts torque-free (no SAS: layer 1 holds no
+/// attitude, software-layers.md §3).
+fn free(v: &Vessel) -> bool {
+    v.segment().and_then(|s| s.limbo()).is_some_and(|l| l.pointing.rule() == sim::vessel::pointing::Rule::Free)
+}
+
+/// Dragon's batteries' charge as a share of their capacity, and the loads
+/// without power.
+fn dragon_power(v: &Vessel) -> (f64, usize) {
+    let (def, s) = (v.ship_def().unwrap(), v.ship().unwrap());
+    let (charge, capacity) =
+        (def.batteries.iter().zip(&s.batteries)).fold((0.0, 0.0), |(c, k), (d, b)| (c + b.charge, k + d.item.capacity));
+    (charge / capacity, s.unpowered.len())
+}
+
+/// An uncrewed Dragon on layer 1 alone coasts three months with nothing
+/// stopping warp (D128: "enough to coast for months if everything is set
+/// up"): its life support switched off (nobody aboard), its cells keep its
+/// batteries charged through every eclipse, nothing is shed, and the
+/// flight is the same bits in one pass, at 10⁵× and over a window at 1×.
+#[test]
+fn an_uncrewed_dragon_coasts_three_months_on_layer_1_with_nothing_stopping_warp() {
+    let w = world();
+    let (mut v, ids) = dragon_alone(&w, &uncrewed_dragon(), true);
+    let off = OrderKind::Command(ShipCommand::Power("dragon.eclss".into(), false));
+    v.order_at(t0().add_seconds(0.5), off).unwrap();
+    let start = Game::new(vec![v], vec![Controls::default()], ids);
+    let end_1x = t0().add_seconds(600.0);
+    let (mut at_1x, mut short) = (start.clone(), start.clone());
+    at_1x.fly(&w, 1.0, end_1x);
+    short.one_pass(&w, end_1x);
+    assert_same_course(&w, &mut at_1x, &mut short, "1×");
+    let end = t0().add_seconds(90.0 * 86_400.0);
+    let mut reference = start.clone();
+    reference.one_pass(&w, end);
+    let mut framed = start.clone();
+    framed.fly(&w, 1e5, end);
+    assert_same_course(&w, &mut framed, &mut reference, "10⁵×");
+    for e in events(&reference) {
+        println!("{e}");
+    }
+    let stops: Vec<_> = [&at_1x, &framed, &reference].iter().flat_map(|g| g.stops.clone()).collect();
+    assert!(stops.is_empty(), "{stops:?}");
+    let (charge, shed) = dragon_power(&framed.fleet[0]);
+    println!("after 90 days: the batteries at {:.1} %, {shed} loads shed", 100.0 * charge);
+    assert!(charge > 0.5 && shed == 0, "{charge} {shed}");
+    assert!(free(&framed.fleet[0]), "torque-free");
+}
+
+/// Crew Dragon on layer 1 alone, four aboard: its life support holds the
+/// cabin's air (CO₂ near 0.2 kPa by RESEARCH's η·Q·c) until its LiOH runs
+/// low, and warp stops when the stock has a day left (crew at risk, the
+/// built-in line, ~9 days in: 60 kg take 41.4 kg of CO₂, four crew make
+/// 4.16 kg a day), then again as the CO₂ climbs past its limit once the
+/// sorbent is spent: at the same epochs in one pass, at 10⁵×, and at 1×
+/// over a window across the first.
+#[test]
+fn crew_dragon_on_layer_1_stops_warp_as_its_consumables_run_low() {
+    let w = world();
+    let (v, ids) = dragon_alone(&w, &CraftId("falcon9-crew#0-7".into()), false);
+    let start = Game::new(vec![v], vec![Controls::default()], ids);
+    let day = 86_400.0;
+    let end = t0().add_seconds(10.5 * day);
+    let mut reference = start.clone();
+    reference.one_pass(&w, end);
+    let mut framed = start.clone();
+    framed.fly(&w, 1e5, end);
+    assert_same_course(&w, &mut framed, &mut reference, "10⁵×");
+    for s in &framed.stops {
+        println!("warp stop at +{:.3} days: {}", s.1.seconds_since(t0()) / day, s.2);
+    }
+    let (id, at, why) = framed.stops.first().cloned().expect("a warp stop");
+    assert!(why.contains("runs out within a day"), "{why}");
+    let days = at.seconds_since(t0()) / day;
+    assert!((days - 8.95).abs() < 0.1, "{days} days");
+    assert!(framed.stops.iter().skip(1).any(|s| s.2.contains("CO₂ over its limit")), "{:?}", framed.stops);
+    let co2 = |g: &Game| g.fleet[0].ship().unwrap().cabin.as_ref().unwrap().co2;
+    let mut early = start.clone();
+    early.one_pass(&w, t0().add_seconds(day));
+    assert!((co2(&early) - 198.8).abs() < 2.0, "{} Pa a day in", co2(&early));
+    // At 1×, ten minutes across the stop's epoch.
+    let mut before = start.clone();
+    before.one_pass(&w, at.add_seconds(-300.0));
+    assert!(before.stops.is_empty(), "{:?}", before.stops);
+    let (mut at_1x, mut short) = (before.clone(), before.clone());
+    let after = at.add_seconds(300.0);
+    at_1x.fly(&w, 1.0, after);
+    short.one_pass(&w, after);
+    assert_same_course(&w, &mut at_1x, &mut short, "1× across the stop");
+    assert_eq!(at_1x.stops, vec![(id, at, why)], "1×: the stop at the same epoch");
+    assert!(free(&framed.fleet[0]), "torque-free");
 }
 
 // ---------------------------------------------------------------------

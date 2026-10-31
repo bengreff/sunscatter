@@ -341,6 +341,7 @@ fn describe(parts: &[Placed], components: &[PlacedComponent], ship: &mut ShipDef
             mass: g.mass,
             envelope: g.envelope.expect("a component has an envelope"),
             power: g.power,
+            priority: g.priority,
             ratings: c.built.ratings,
             failures: c.built.failures.clone(),
         });

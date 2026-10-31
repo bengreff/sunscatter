@@ -33,9 +33,9 @@ Neither: the physics (what happens), the native boundary (sensors to `Knowledge`
 | Relief valves | a tank above its MEOP vents; at saturation it boils off | `plumbing::relieve`; the coast law in closed form | stays; MEOP a parameter | |
 | Regulators | the ullage held at its setpoint while the bottle can | `plumbing::fast` (`pressure_regulated`); the coast law's top-up | stays; setpoint a parameter | |
 | Valves | open, closed, stuck | `ShipState::apply` (`Open`, `Close`); failure outcomes | stays (a mechanism commanded from outside) | |
-| **Power shedding** | a short bus drops its least essential loads, then the largest | `power::step_ship`; `essential()` by component kind (`power.rs:118`) | stays in `power` as the bus's protection; each load's priority a parameter of the bus or the component (D125), not a list of kinds | layer 1 needs it to coast |
+| **Power shedding** | a short bus drops its lowest-priority loads, then the largest | `power::step_ship` | **built:** each component's `priority` (D125: a catalog parameter, its equipment's by default, `catalog::Equipment::priority`), read by the bus (`a_short_bus_sheds_by_priority_then_size`) and the warp stop (a `Critical` load shed) | layer 1 needs it to coast |
 | Battery charging | the umbilical or the solar cells charge the batteries | `power::step_ship` | stays | |
-| **Life support's regulation** | CO₂ and water removed up to their rates; O₂ fed to 21.3 kPa; N₂ to 101.3 kPa total; 295 K | `crew::air` | stays as the unit's loops; setpoints parameters of the life-support entry | |
+| **Life support's regulation** | CO₂ removed by its bed at η·Q·c, water removed; O₂ fed to 21.3 kPa and N₂ to 101.3 kPa total from its stores; 295 K | `crew::air` | **built:** the unit's loops on its own stocks (`ShipState::life_support`), the CO₂ law in closed form; its time to empty `crew::supply_left` | setpoints still constants |
 | Actuators | a mechanism moves to its target at its rate | `mechanisms::step` | stays | |
 | Parachute reefing | reefing-line cutters on timers from line stretch; filling; strength | `chute::step` after arming | stays | the main's opening height is layer 2 (below) |
 | Hold-down clamps | let go when commanded; torn out at their capacity | `ship_tick::advance_held` | stays (the pad's own, and physics) | |
@@ -82,19 +82,15 @@ D128: with layer 1 alone a ship "should be enough to coast for months if everyth
 - **Attitude:** none. Without layer 2 the craft rotates freely (torque-free, `vessel::pointing::Free`), and its sunlight is what that rotation gives.
 - **Comms:** the receiver takes commands as they arrive (the player or the agent, with light delay).
 
-**Today it does not hold for a month.** In `warp_course.rs`'s two days:
-- The S2 alone sheds every load at +12.7 h: no solar cells, and its batteries drained.
-- Dragon's cabin CO₂ passes 1 kPa after about a day: its life support's 4.0 kg/day of removal (`dragon-eclss.ron`) is below four crew's 4.16 kg/day (BVAD). O₂ has a rate but no tank to run out of.
-- Thermal control (heaters, radiators, the cabin's loop) is not modelled, so a cold soak is not either.
+**Proven** (LAYERS-4, `tests/warp_course.rs`, no SAS and no program running, the craft set up and left; each the same bits in one pass, at 10⁵× and at 1× over a window):
+- `an_uncrewed_dragon_coasts_three_months_on_layer_1_with_nothing_stopping_warp`: Crew Dragon flown uncrewed (as Demo-1), its life support switched off, not rotating with its trunk's cells 45° ahead of the Sun: 90 days torque-free, its batteries full at the end, nothing shed, no warp stop.
+- `crew_dragon_on_layer_1_stops_warp_as_its_consumables_run_low`: four aboard, the cells on the Sun: the cabin's CO₂ settles at 198.8 Pa (RESEARCH's η·Q·c), the 60 kg of LiOH last 9.95 days, and warp stops at **+8.959 days** with a day of stock left (crew at risk, the built-in line), then at +9.991 days as the CO₂ passes 1 kPa once the sorbent is spent.
 
-So the bare minimum needs, in data and model:
-- each consumable a stock (O₂, N₂, LiOH or its regenerable equivalent);
-- removal rates matching the crew;
-- the loads' priorities as parameters.
+What made it hold: each consumable a stock (O₂, N₂, the bed's LiOH), the CO₂ removal a law of the state (η·Q·c) in place of a fixed cap below the crew's output, and the loads' priorities as parameters. Not modelled: thermal control (heaters, radiators, the cabin's loop), so a cold soak is not either; the S2 alone still sheds every load at +12.7 h (no cells), as it should.
 
 ## 4. The warp-stop line
 
-*Built* (LAYERS-3): `ship_os::warp_stop` (`Facts`, `risks` with its table test `the_risks_table`, `bare_minimum`, `Line`, `decide`), the vessel's check at each lattice step of its systems (`vessel::warp_stop::watch`: in the coast's lattice loop, on the ground, and at a live tick that crosses a lattice epoch), a frame's advance held at the stop's epoch until the game takes it (`Vessel::take_warp_stop`; the coast stops as at its budget, so the bits are the same: `warp_course.rs` gives the same stops at 100×, 10⁴× and 10⁵× and the same fleet as one pass), and the game dropping the warp there with a toast (`game::fleet::take_warp_stops`, `SimState::step`, `interface::events::toast_warp_stops`). The risks are read from the parts' own state and the cabin's air through `Knowledge`; not yet read: the cabin's temperature (no sensor quantity), the acceleration limits (the crew's injuries are logged), a consumable's time to empty (step 6: stocks), the receiver (no receiver part in the data).
+*Built* (LAYERS-3): `ship_os::warp_stop` (`Facts`, `risks` with its table test `the_risks_table`, `bare_minimum`, `Line`, `decide`), the vessel's check at each lattice step of its systems (`vessel::warp_stop::watch`: in the coast's lattice loop, on the ground, and at a live tick that crosses a lattice epoch), a frame's advance held at the stop's epoch until the game takes it (`Vessel::take_warp_stop`; the coast stops as at its budget, so the bits are the same: `warp_course.rs` gives the same stops at 100×, 10⁴× and 10⁵× and the same fleet as one pass), and the game dropping the warp there with a toast (`game::fleet::take_warp_stops`, `SimState::step`, `interface::events::toast_warp_stops`). The risks are read from the parts' own state and the cabin's air through `Knowledge`, and the life support's own time to empty (`crew::supply_left`, step 6); not yet read: the cabin's temperature (no sensor quantity), the acceleration limits (the crew's injuries are logged), the receiver (no receiver part in the data).
 
 **Built in, on layer 1** (D128): a failure that puts the crew or the vessel at risk stops warp at its own epoch, with the craft's state at that epoch. Anything else is logged (`ShipState::event`, its `alarm` flag as today).
 
@@ -106,7 +102,7 @@ So the bare minimum needs, in data and model:
 | Crew: their support lost | the life support lost (failed or unpowered) with crew aboard |
 | Vessel lost | a part destroyed, a breakup or burst, an uncontained failure (`Effect::Destroy`, `PartFailure`) |
 | Vessel uncontrollable | the last working computer lost, or the receiver unpowered (D121's controllability check) |
-| Power | an essential load shed (a computer, the life support, the receiver) |
+| Power | a critical load shed (its `priority`, D125: a computer, the life support, the receiver) |
 
 Not a stop: a benign engine shutdown on a coast, a stuck valve, a cell lost, a sensor lost, venting, a non-essential load shed.
 
@@ -166,7 +162,7 @@ sim::systems::
 4. *Built.* The chutes' arming and main height into `ship_os::chutes`, from the altitude in `Knowledge` (Dragon's barometric altimeter and cabin air monitor added, E).
 5. *Built (LAYERS-2).* The program API, `ship_os::program`: `Context` in (the `View`, `Health`, the definition, and `Context::read` for the ship-state quantities `Knowledge` knows, `systems::data::truth`), `Commands` out (the maneuver program's, moved here, plus ship commands and a wake epoch), saved state (`Installed` in `ship_os::Software`, saved with the vessel). The schedule (`Schedule`: a period from its own epoch, or a wake epoch): `Vessel::programs_stop` joins `order_stop`, so each due epoch stops the continuous advance as an order does; due programs run where orders are applied (`vessel::programs`; live ticks at the first tick at or after). D126's switch per program (`Slot`: by itself, one run per press, off; a switch or press restarts a period from now, `Installed::resume`), and the maneuver program's own (`Software::maneuver`). The first scheduled program: the load manager `ship_os::power_guard`. Test: `tests/ship_programs.rs` (the same switch epochs and battery bits at 1× and 10⁵×). Left: `systems::maneuver` still lives outside `ship_os` (the move waits for `game::commands` to be free); the agent's and the systems screen's switches (game).
 6. *Built (LAYERS-3).* `ship_os::warp_stop`: the built-in rule (§4) as a pure function with a table test, the program's replacement, and `notify` per craft; the game's warp stop at the stop's epoch (a lattice epoch; SAVE_VERSION 18). Left: `run_until` ending on a stop (MCP), the bubble's joint tick (`vessel::bubble`) does not check.
-7. The power priorities as parameters; the life support's stocks; the bare-minimum test: Dragon coasting a month on layer 1 alone, set up, with nothing stopping warp. Today it fails on CO₂ within a day.
+7. *Built (LAYERS-4).* The power priorities as parameters (`catalog::Priority`, each component's; the bus and the warp stop read it); the life support's stocks (`ShipState::life_support`: O₂, N₂, LiOH) and RESEARCH's CO₂ law η·Q·c in closed form, its time to empty `crew::supply_left` as the warp stop's `Facts::supply_left` (SAVE_VERSION 21); the two bare-minimum tests in `warp_course.rs` (§3).
 
 ## 8. Open
 

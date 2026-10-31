@@ -71,8 +71,10 @@ pub struct ComponentDef {
     pub mass: f64,
     /// Its envelope in its own frame (centred).
     pub envelope: Shape,
-    /// Electrical draw when on (W).
+    /// Electrical draw when on (W), and what it is to its bus's shedding
+    /// (D125: a parameter, `systems::power`).
     pub power: f64,
+    pub priority: crate::catalog::Priority,
     pub ratings: Ratings,
     pub failures: Vec<FailureMode>,
 }

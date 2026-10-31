@@ -501,7 +501,7 @@ The countdown itself is abstracted as a time and funds sink (D104); the sim star
 | Cabin | **9.3 m³** pressurised; sea-level air (101.3 kPa, 21 % O₂) | P (volume [S11]) / E (pressure) | |
 | Cabin temperature | 18–27 °C (65–80 °F), crew-selectable | P | [S12] |
 | Leak tolerance | lands safely with a 6.35 mm equivalent orifice | P | [S7] |
-| O₂ and N₂ storage | COPVs in the service section | E | |
+| O₂ and N₂ storage | COPVs in the service section; the game's stores **36 kg of O₂** (four crew for 10 days, 32.8 kg, and the cabin's O₂ again, 2.6) and **17 kg of N₂** (the cabin's N₂ twice, 8.4 each) | E | sized from the ~10-day design endurance below (`dragon-eclss.ron`) |
 | CO₂ removal | lithium hydroxide canisters (E); keep ppCO₂ below NASA's limits | E | |
 | Crew consumption | O₂ **0.82 kg** per person-day; CO₂ produced **1.04 kg**; water vapour ~**1.9 kg** (respiration and perspiration) | E | NASA BVAD (Baseline Values and Assumptions Document, NASA/TP-2015-218570): nominal values |
 | Suits | SpaceX IVA pressure suits, umbilicals for air, power and data at the seats; protect the crew in a cabin depressurisation | P | [S7] |

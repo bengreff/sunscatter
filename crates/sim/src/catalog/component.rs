@@ -11,8 +11,8 @@
 
 use super::engine::{self, EngineParams};
 use super::output::{
-    Battery, Bottle, Computer, Function, Generated, Kind, LifeSupport, Nozzle, Port, PortKind, Propellant, Sensor,
-    Solar, TankSpec, Thrusters, Valve, ValveKind,
+    Battery, Bottle, Computer, Function, Generated, Kind, LifeSupport, Nozzle, Port, PortKind, Priority, Propellant,
+    Sensor, Solar, TankSpec, Thrusters, Valve, ValveKind,
 };
 use super::{assign, Ctx, Published};
 use crate::craft::Shape;
@@ -120,10 +120,16 @@ pub enum Equipment {
         nozzles: Vec<Nozzle>,
         housing: f64,
     },
+    /// A cabin's life support (`catalog::LifeSupport`, its fields).
     LifeSupport {
-        co2_removal: f64,
         o2_supply: f64,
         cabin_volume: f64,
+        o2_stored: f64,
+        n2_stored: f64,
+        scrubber_flow: f64,
+        scrubber_efficiency: f64,
+        sorbent: f64,
+        sorbent_capacity: f64,
         mass: f64,
     },
     /// A parachute system's packs and mortars.
@@ -156,6 +162,10 @@ pub struct ComponentParams {
     /// Electrical draw when on (W).
     #[serde(default)]
     pub power: f64,
+    /// Its priority on its bus (D125; `None`: its equipment's,
+    /// [`Equipment::priority`]).
+    #[serde(default)]
+    pub priority: Option<Priority>,
     /// Makes the craft commandable (a flight computer, D083).
     #[serde(default)]
     pub control: bool,
@@ -171,6 +181,19 @@ fn specific_heat() -> f64 {
 
 fn max_k() -> f64 {
     400.0
+}
+
+impl Equipment {
+    /// Its priority on its bus where its entry names none (D125's default,
+    /// software-layers.md §2): what keeps the vessel controllable and its
+    /// crew alive last, its working functions before them, the rest first.
+    pub fn priority(&self) -> Priority {
+        match self {
+            Equipment::Computer { .. } | Equipment::LifeSupport { .. } => Priority::Critical,
+            Equipment::Sensor { .. } | Equipment::Valve { .. } | Equipment::Thrusters { .. } => Priority::Essential,
+            _ => Priority::NonEssential,
+        }
+    }
 }
 
 impl super::Settable for ComponentParams {
@@ -233,6 +256,7 @@ impl ComponentParams {
             ports: Vec::new(),
             functions: Vec::new(),
             power: self.power,
+            priority: self.priority.unwrap_or(self.equipment.priority()),
             specific_heat: self.specific_heat,
             max_k: self.max_k,
         };
@@ -263,9 +287,28 @@ impl ComponentParams {
                 derived.push(estimate("seat", *mass));
                 functions.push(Function::Seat(*crew));
             }
-            Equipment::LifeSupport { co2_removal, o2_supply, cabin_volume, mass } => {
+            Equipment::LifeSupport {
+                o2_supply,
+                cabin_volume,
+                o2_stored,
+                n2_stored,
+                scrubber_flow,
+                scrubber_efficiency,
+                sorbent,
+                sorbent_capacity,
+                mass,
+            } => {
                 derived.push(estimate("life support", *mass));
-                let ls = LifeSupport { co2_removal: *co2_removal, o2_supply: *o2_supply, cabin_volume: *cabin_volume };
+                let ls = LifeSupport {
+                    o2_supply: *o2_supply,
+                    cabin_volume: *cabin_volume,
+                    o2_stored: *o2_stored,
+                    n2_stored: *n2_stored,
+                    scrubber_flow: *scrubber_flow,
+                    scrubber_efficiency: *scrubber_efficiency,
+                    sorbent: *sorbent,
+                    sorbent_capacity: *sorbent_capacity,
+                };
                 functions.push(Function::LifeSupport(ls));
             }
             Equipment::Chute { spec, mass } => {

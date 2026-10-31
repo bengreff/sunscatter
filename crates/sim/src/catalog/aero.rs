@@ -41,6 +41,7 @@ fn part(primitives: Vec<crate::craft::Primitive>, mounts: Vec<MountPoint>, deriv
         ports: Vec::new(),
         functions: Vec::new(),
         power: 0.0,
+        priority: Default::default(),
         specific_heat: 900.0,
         max_k: 400.0,
     }

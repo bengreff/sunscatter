@@ -309,14 +309,39 @@ pub struct Solar {
     pub efficiency: f64,
 }
 
-/// A cabin's life support (placeholder rates per day).
+/// A cabin's life support (`systems::crew`; falcon9.md §5.5): its stocks
+/// and the laws of its loops.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct LifeSupport {
-    /// kg/day.
-    pub co2_removal: f64,
+    /// The O₂ feed's most (kg/day).
     pub o2_supply: f64,
     /// Pressurised volume it serves (m³).
     pub cabin_volume: f64,
+    /// Gas stored (kg): O₂ for the crew and N₂ to hold the total pressure.
+    pub o2_stored: f64,
+    pub n2_stored: f64,
+    /// The CO₂ scrubber: its fan's flow through the bed (m³/s) and the share
+    /// of the CO₂ in it the bed takes in one pass (removal = η·Q·c).
+    pub scrubber_flow: f64,
+    pub scrubber_efficiency: f64,
+    /// The bed's sorbent (kg; LiOH) and the CO₂ each kg of it takes
+    /// before it is spent (kg/kg).
+    pub sorbent: f64,
+    pub sorbent_capacity: f64,
+}
+
+/// What a load is to its bus's protection (D125; `systems::power`): a
+/// short bus sheds the lowest first, the largest first within one.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+pub enum Priority {
+    /// Shed first.
+    #[default]
+    NonEssential,
+    /// The vessel's working functions (sensors, valves, thrusters).
+    Essential,
+    /// Shed last: losing it puts the crew or the vessel at risk (a flight
+    /// computer, the life support), so its shedding stops warp (D128).
+    Critical,
 }
 
 /// What a part or component does, beyond being mass and shape.
@@ -370,8 +395,9 @@ pub struct Generated {
     pub tanks: Vec<TankSpec>,
     pub ports: Vec<Port>,
     pub functions: Vec<Function>,
-    /// Electrical draw when on (W).
+    /// Electrical draw when on (W) and its priority on its bus.
     pub power: f64,
+    pub priority: Priority,
     /// Specific heat of its interior (J/(kg·K)) and the limit of its
     /// interior nodes (K).
     pub specific_heat: f64,

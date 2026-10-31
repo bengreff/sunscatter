@@ -262,6 +262,7 @@ impl EngineParams {
             ports: vec![port("ox_in", &self.oxidizer), port("fuel_in", &self.fuel)],
             functions: vec![Function::Engine(data)],
             power: 0.0,
+            priority: Default::default(),
             specific_heat: nozzle_material.specific_heat,
             max_k: nozzle_material.service_k,
         })
