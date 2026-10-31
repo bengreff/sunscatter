@@ -30,6 +30,23 @@ pub fn error(id: Value, code: i64, message: &str) -> Value {
     json!({"jsonrpc": "2.0", "id": id, "error": {"code": code, "message": message}})
 }
 
+/// Why a call's arguments do not fit its tool's schema: not an object, or
+/// naming an argument the schema does not list (with the ones it does).
+/// None when they fit. A misspelt name was ignored without a word (an
+/// agent's `distance` for `set_camera`'s `distance_m`, 2026-10-31).
+/// Missing required arguments are each tool's to explain.
+pub fn unknown_arguments(schema: &Value, args: &Value) -> Option<String> {
+    let Some(args) = args.as_object() else { return Some("the arguments must be an object".into()) };
+    let known = schema.get("properties").and_then(Value::as_object)?;
+    let unknown: Vec<String> = args.keys().filter(|k| !known.contains_key(*k)).map(|k| format!("`{k}`")).collect();
+    if unknown.is_empty() {
+        return None;
+    }
+    let takes: Vec<&str> = known.keys().map(String::as_str).collect();
+    let takes = if takes.is_empty() { "no arguments".to_string() } else { takes.join(", ") };
+    Some(format!("unknown argument {} (this tool takes: {takes})", unknown.join(", ")))
+}
+
 fn result(id: Value, result: Value) -> Value {
     json!({"jsonrpc": "2.0", "id": id, "result": result})
 }
@@ -74,11 +91,15 @@ pub fn handle(message: Value, tools: &[Tool], mut call: impl FnMut(&str, Value) 
             let Some(name) = params.get("name").and_then(Value::as_str) else {
                 return Some(error(id, INVALID_PARAMS, "missing tool name"));
             };
-            if !tools.iter().any(|t| t.name == name) {
+            let Some(tool) = tools.iter().find(|t| t.name == name) else {
                 return Some(error(id, INVALID_PARAMS, &format!("unknown tool {name}")));
-            }
+            };
             let args = params.get("arguments").cloned().unwrap_or_else(|| json!({}));
-            match call(name, args) {
+            let answer = match unknown_arguments(&tool.input_schema, &args) {
+                Some(e) => ToolResult::Err(e),
+                None => call(name, args),
+            };
+            match answer {
                 ToolResult::Ok(v) => result(
                     id,
                     json!({"content": [{"type": "text", "text": v.to_string()}], "structuredContent": v, "isError": false}),
@@ -129,6 +150,34 @@ mod tests {
         assert_eq!(r["result"]["isError"], false);
         let m = json!({"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"get_state"}});
         let r = handle(m, &tools(), |_, _| ToolResult::Err("no signal".into())).unwrap();
+        assert_eq!(r["result"]["isError"], true);
+    }
+
+    #[test]
+    fn arguments_the_schema_does_not_name_are_refused() {
+        let schema = json!({"type": "object", "properties": {"distance_m": {}, "pitch_deg": {}}, "required": []});
+        let none = json!({"type": "object", "properties": {}});
+        // (schema, arguments, refused, words in the answer)
+        let cases = [
+            (&schema, json!({}), false, vec![]),
+            (&schema, json!({"distance_m": 40, "pitch_deg": -15}), false, vec![]),
+            (&schema, json!({"distance": 40}), true, vec!["`distance`", "distance_m, pitch_deg"]),
+            (&schema, json!({"distance": 40, "yaw": 1}), true, vec!["`distance`, `yaw`"]),
+            (&schema, json!([40]), true, vec!["object"]),
+            (&none, json!({"x": 1}), true, vec!["no arguments"]),
+            (&json!({"type": "object"}), json!({"x": 1}), false, vec![]), // a schema listing no properties
+        ];
+        for (schema, args, refused, words) in cases {
+            let got = unknown_arguments(schema, &args);
+            assert_eq!(got.is_some(), refused, "{args}: {got:?}");
+            for w in words {
+                assert!(got.as_deref().unwrap_or("").contains(w), "{args}: {got:?} lacks {w}");
+            }
+        }
+        // Through the protocol: a tool error the agent reads, the tool not called.
+        let tools = vec![Tool { name: "set_camera".into(), description: "d".into(), input_schema: schema.clone() }];
+        let m = json!({"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"set_camera","arguments":{"distance":40}}});
+        let r = handle(m, &tools, no_call).unwrap();
         assert_eq!(r["result"]["isError"], true);
     }
 
