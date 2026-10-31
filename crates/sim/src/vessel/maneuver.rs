@@ -115,9 +115,15 @@ impl Vessel {
             return Err(PlanError::InThePast);
         }
         self.nodes = nodes;
-        if self.program.as_ref().is_none_or(|p| !p.step.flying()) {
-            if let Some(p) = self.schedule_node(started) {
-                self.program = Some(p);
+        // A program flying, or waiting on a node that did not change (nor
+        // any before it), is kept as it was scheduled; else the next node's
+        // is scheduled now. A waiting one whose node went is dropped (an
+        // ended one stays, for the log, while no node follows).
+        let keep = self.program.as_ref().is_some_and(|p| p.step.flying() || (p.step == Step::Wait && same > p.node));
+        if !keep {
+            let next = self.schedule_node(started);
+            if next.is_some() || self.program.as_ref().is_some_and(|p| p.step == Step::Wait) {
+                self.program = next;
             }
         }
         Ok(())
