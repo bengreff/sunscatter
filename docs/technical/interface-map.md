@@ -1,6 +1,6 @@
 # The map of the interface
 
-Every piece of information and every control the player has, with every way to reach it: a key, a click path, an MCP tool. Made by INTERFACE (2026-10-31, [brief-interface.md](../plans/brief-interface.md)) from the code and from shots of the Falcon 9 flown headless through MCP (the pad set; the ascent and orbit set in the brief's State); walked again in orbit by INTERFACE-2 (findings 13–20), INTERFACE-3 (findings 21–26), INTERFACE-4 (findings 27–31) and INTERFACE-5 (findings 32–43: the pad, ascent, orbit, after separation, every layer, the map, tracking, pause, help) INTERFACE-6 (findings 44–48: the quantities shown by two rules) INTERFACE-7 (findings 47–49 fixed; the walk at HEAD) and INTERFACE-8 (findings 55–56; the parity of the player and the agent, below). Decisions D080, D106, D107, D111, D112, D120, D123 (the interface exception), D126. Kept current with the interface: a change to a way in changes its row here. The help overlay (`?`) is generated from the same tables as the input (`interface::access`, `commands::keys`), so the keys in it cannot drift; this page adds the findings.
+Every piece of information and every control the player has, with every way to reach it: a key, a click path, an MCP tool. Made by INTERFACE (2026-10-31, [brief-interface.md](../plans/brief-interface.md)) from the code and from shots of the Falcon 9 flown headless through MCP (the pad set; the ascent and orbit set in the brief's State); walked again in orbit by INTERFACE-2 (findings 13–20), INTERFACE-3 (findings 21–26), INTERFACE-4 (findings 27–31) and INTERFACE-5 (findings 32–43: the pad, ascent, orbit, after separation, every layer, the map, tracking, pause, help) INTERFACE-6 (findings 44–48: the quantities shown by two rules) INTERFACE-7 (findings 47–49 fixed; the walk at HEAD), INTERFACE-8 (findings 55–56; the parity of the player and the agent, below), INTERFACE-9 and -10 (findings 57–67) and INTERFACE-11 (findings 67–70: D126's switches). Decisions D080, D106, D107, D111, D112, D120, D123 (the interface exception), D126. Kept current with the interface: a change to a way in changes its row here. The help overlay (`?`) is generated from the same tables as the input (`interface::access`, `commands::keys`), so the keys in it cannot drift; this page adds the findings.
 
 **Status:** the map is complete for the flight view, its menus and cards, the systems screen, the tracking station, pause, settings, saves and help. The findings marked *fixed* are done; the rest are listed under "Open" below.
 
@@ -13,6 +13,7 @@ Every piece of information and every control the player has, with every way to r
 | RCS menu | R (turns RCS on) | navball's RCS button | — (the mode: `set_controls {rcs, rcs_fine}`) | R, the button, its × (turns RCS off) |
 | Part card | — | a part on the ship; a part icon on the staging bar | `shoot {cards}` | its ×, a second click on its part |
 | Systems screen | Tab | action bar SYSTEMS; a menu's "The systems screen: LAYER" link; a part card's "more ›"; a notification's link | `shoot {screen: systems, layer, part}` | Tab, Esc, its close button |
+| The ship computer's programs (D126's switches) | — | the systems screen's PROGRAMS tab (bottom); the Maneuver menu's link "The systems screen: PROGRAMS" | `read {programs: true}`, `shoot {screen: systems, tab: programs}` | Tab, Esc (the screen) |
 | The systems screen's isolated part | — | a part in the view, in PARTS, or a row about one | `shoot {screen: systems, part}` (a component's id selects the component) | Esc or its panel's × (back to the layer view as it was) |
 | Tracking station | M | pause → Tracking station | `go_to_mission_control`, `shoot {screen: tracking}` | M, Esc, Back to flight |
 | Pause menu | Esc | — | `shoot {screen: pause}` | Esc, Resume |
@@ -46,6 +47,7 @@ Every piece of information and every control the player has, with every way to r
 | Buses, batteries, what has no power | Power (5) | key or bar |
 | The link home, a probe's delay | Comms (6) | key or bar |
 | RCS authority, thruster blocks, feeds | RCS menu | R or the navball's RCS button |
+| Each program on the ship computer: its switch (AUTO, ON PRESS, OFF), what it is doing now, what it does, its press | the systems screen's PROGRAMS; the planned burns' in Maneuver (3), the parachutes' in Landing ▸ PARACHUTE | Tab and the tab, or the menu |
 | Messages (saves, events, commands' replies) with links to a vessel or the systems screen | notifications, bottom left | when one comes |
 
 ## The controls
@@ -60,12 +62,13 @@ Every piece of information and every control the player has, with every way to r
 | A stage's edits (move, delete, a command's move, run again) | — | staging bar drags, ×, AGAIN | `edit_stages` (the bar's rules; the rows from `get_vessel`'s `stages.sequence`) |
 | Functions (abort, grid fins, legs…) | — (no craft-specific keys, D111) | action bar; the systems screen's run buttons | `command {function}` |
 | A part's commands (ignite, valve, deploy, separate…) | — | part card; systems screen right column | `command {item, do}` (`command {}` lists them) |
-| Parachutes | P | the card's ARM PARACHUTES | `command {item, do: "ARM PARACHUTES"}` |
+| Parachutes (arm; a second press calls the mains, D126) | P | the card's ARM PARACHUTES; Landing ▸ PARACHUTE's press; the PROGRAMS tab | `press {program: "chutes"}`; `command {item, do: "ARM PARACHUTES"}` |
+| A program's switch and press (the planned burns, the parachutes, an installed one) | — | the PROGRAMS tab; Maneuver's PROGRAM; Landing ▸ PARACHUTE's DEPLOY | `set_switch`, `press` (one rule, `systems_screen::programs`) |
 | Warp | `.` `,` `/` | the time panel's arrows | `set_warp`, `step`, `run_until`, `pause` |
 | Vessels | `[` `]` | a notification's link; tracking station Switch to | `switch_vessel` |
 | Target | — | Orbital → TARGET pick list | `set_target` (the same choices); `get_state` reads it |
 | Camera | drag, scroll, F, `` ` `` | double-click a body → Focus | `set_camera` |
-| Stage sequence, functions, pins | — | systems screen editors | — |
+| Stage sequence, functions, pins | — | systems screen editors | `edit_program` |
 | Saves | Cmd+S, Cmd+L | pause → Saves | `save_game`, `load_game` |
 
 ## Findings
@@ -147,7 +150,10 @@ Hidden, missing a way in, reached two ways that disagree, closed differently. *F
 64. **Dragon alone had an empty action bar**: its functions Parachutes and Nosecone are not pinned in `falcon9-crew`'s craft file (Launch abort, pinned, is not offered off the stack). *Fixed* (INTERFACE-10): both pinned in `data/craft/falcon9-crew/craft.ron` and in the playtest save's Dragon (`./run play`).
 65. **MCP: `get_vessel` (and `get_trajectory`, `set_plan`) required `id`** where `stage`, `command` and `set_controls` default to the active vessel. *Fixed* (INTERFACE-10): `agent::vessel_or_active`, one rule for every tool that takes a vessel.
 66. **MCP: `get_vessel`'s attitude read raw digits** (`heading_deg` 9.340000000000003, `pitch_deg` 89.99999999999999). *Fixed* (INTERFACE-10): the angles to the Landing menu's decimals (`format::ATTITUDE_DECIMALS`, one owner for both), the body axes' components through the attitude's precision.
-67. **MCP: numbers carry binary noise from their rounding** (`speed_ms` 2000.8000000000002): `Reading::shown` multiplies by its step. Cosmetic. *Open*: round through the step's inverse in `sim::systems::data` (LAYERS-2 held the file this round).
+67. **MCP: numbers carry binary noise from their rounding** (`speed_ms` 2000.8000000000002): `Reading::shown` multiplies by its step. Cosmetic. *Fixed* (INTERFACE-11, 1ef7972): below 1 it divides by the decade's inverse, an exact power of ten (`sim::systems::data`; display only).
+68. **D126's switches had no way in** (LAYERS-2's program API, 5187deb: every automatic sequence has a switch and a press; neither the player nor the agent could set or press one). *Fixed* (INTERFACE-11, 5a76649): `systems_screen::programs` (each program's switch, what it is doing, what it does, its press or why not), the systems screen's PROGRAMS tab, the Maneuver menu's PROGRAM and link, Landing ▸ PARACHUTE's DEPLOY, MCP `set_switch`, `press`, `read {programs}`; one rule for all (`programs::set_switch`, `press`).
+69. **A second P did not open the mains** where they wait for a press (no altitude reading, or the deploy switched off): P set the pilot's latch, which only arms, while the action bar's Parachutes and the card's ARM PARACHUTES called the mains (D126: the manual deploy runs the same function). *Fixed* (INTERFACE-11, f123803): P is the parachutes' press by the programs' rule.
+70. **The part card's cabin rows named "a cabin air sensor (none modelled yet)"** after Dragon got its cabin air monitor (f2806ca). *Fixed* (INTERFACE-11, 38cc650): `part_card::content::sensor_for` finds a vehicle-wide quantity's sensor by the classes that measure it (`sim::systems::data::provides`): "dragon.cabin-air (not working: …)", or "a cabin air monitor: none fitted".
 
 Seen by INTERFACE-8 at HEAD (shots in `scratchpad/interface8/shots/`): "LOX 286/286 t" on the pad's bar (`a_pad.png`, finding 51), the batteries' sums on the cards (`a_pad_cards.png`), "Vessel 1 separated: a new vessel · Vessel 2 ›" (`g_sep.png`, finding 54), and the booster just after the switch: "predicting the impact…" and "PARACHUTE · no parachutes aboard" (`g_booster_switch.png`, findings 52–53).
 
@@ -176,6 +182,7 @@ D044 and D128's layer 3: the agent reaches the ship computer, calls its function
 | Orbital: elements, target, closest approach, ship clock | 1 | `read {menu: orbital}`; `get_vessel`, `closest_approaches`, `get_state` | yes |
 | Landing: impact, braking, reentry, the parts nearest their limits, parachute, attitude | 2 | `read {menu: landing}`; `get_landing_prediction` | yes |
 | Maneuver: the planned burns | 3 | `read {menu: maneuver}`; `set_plan` | yes |
+| The ship computer's programs: each one's switch, what it is doing, its press (D126) | the systems screen's PROGRAMS; Maneuver's PROGRAM, Landing ▸ PARACHUTE's DEPLOY; P | `read {programs: true}` (the tab's rows, each control's call); `set_switch`, `press` (the tab's rule) | yes (INTERFACE-11) |
 | Crew: crew, cabin air, life support, injuries | 4 | `read {menu: crew}` | yes |
 | Power: buses, batteries, what has no power | 5 | `read {menu: power}` | yes |
 | Comms: the link home, delay | 6 | `get_state`, `get_vessel` `signal` | yes |
