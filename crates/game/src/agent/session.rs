@@ -49,8 +49,19 @@ pub fn developer() -> bool {
 }
 
 /// Every agent's session tools, and the developer's.
-const SESSION: [&str; 9] =
-    ["shoot", "set_camera", "pause", "step", "run_until", "new_flight", "save_game", "load_game", "set_debug"];
+const SESSION: [&str; 11] = [
+    "shoot",
+    "set_camera",
+    "pause",
+    "step",
+    "run_until",
+    "new_flight",
+    "save_game",
+    "load_game",
+    "list_saves",
+    "revert_to_launch",
+    "set_debug",
+];
 const DEVELOPER: [&str; 3] = ["bench", "profile", "spawn_vessels"];
 /// The most vessels one `spawn_vessels` call adds.
 const SPAWN_MAX: u64 = 50;
@@ -215,6 +226,19 @@ pub fn tools(dev: bool) -> Vec<Tool> {
             "Load the save `name` (from the save list, e.g. quicksave): time warp back to 1×, and time stopped \
              if it was stopped (`pause` first to replay from the save exactly).",
             schema(json!({"name": {"type": "string"}}), &["name"]),
+        ),
+        t(
+            "list_saves",
+            "The save list as the pause menu's Saves window shows it (newest first, with the time saved), and \
+             whether the active vessel has a launch save to revert to (`launch_save`).",
+            schema(json!({}), &[]),
+        ),
+        t(
+            "revert_to_launch",
+            "The pause menu's Revert to launch (D114): the whole game back to when the active vessel (or the vessel \
+             it split from) was put on the pad, from its launch save; without one, a new craft of its kind on the \
+             pad. Everything since is lost. Time warp back to 1×, and time stopped if it was stopped.",
+            schema(json!({}), &[]),
         ),
         t(
             "set_debug",
@@ -1001,6 +1025,20 @@ fn start(
                     })
                     .map_err(|e| format!("{}: {e}", path.display()))
             };
+            done(call, r)
+        }
+        "list_saves" => done(call, Ok(crate::saves::listing(sim, &out.persist.dirs.saves))),
+        "revert_to_launch" => {
+            let r = crate::saves::revert(sim, &out.persist.dirs.saves).map(|c| {
+                let from =
+                    if matches!(c, GameCommand::Restore(_)) { "its launch save" } else { "a new craft on the pad" };
+                game.write(c);
+                // Stopped time stays stopped, as `load_game`.
+                if sim.paused {
+                    game.write(GameCommand::PauseTime);
+                }
+                json!({"reverted": from, "time_stopped": sim.paused})
+            });
             done(call, r)
         }
         "set_debug" => match args.get("on").and_then(Value::as_bool) {

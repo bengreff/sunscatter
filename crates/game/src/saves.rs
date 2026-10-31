@@ -139,6 +139,31 @@ pub fn launch_of(sim: &SimState, saves: &Path) -> Option<PathBuf> {
     path.is_file().then_some(path)
 }
 
+/// What "Revert to launch" does for the active vessel (D114): the game as
+/// its launch save holds it (`GameCommand::Restore`), or, without one (a
+/// vessel spawned in orbit, from an older save), a new craft of its kind on
+/// the pad (`GameCommand::Reset`); an error when the save cannot be read.
+/// One rule for the pause menu and the agent's `revert_to_launch`.
+pub fn revert(sim: &SimState, saves: &Path) -> Result<GameCommand, String> {
+    match launch_of(sim, saves) {
+        Some(path) => {
+            read(sim, &path).map(|s| GameCommand::Restore(Box::new(s))).map_err(|e| format!("Revert failed: {e}"))
+        }
+        None => Ok(GameCommand::Reset),
+    }
+}
+
+/// The save list as the Saves window shows it (newest first, the time it
+/// was saved), and whether the active vessel can revert to its launch
+/// save: the agent's `list_saves`.
+pub fn listing(sim: &SimState, saves: &Path) -> serde_json::Value {
+    let list: Vec<serde_json::Value> = list_saves(saves)
+        .iter()
+        .map(|e| serde_json::json!({"name": e.name, "saved": e.modified.map(fmt_time)}))
+        .collect();
+    serde_json::json!({"saves": list, "quicksave": QUICKSAVE, "launch_save": launch_of(sim, saves).is_some()})
+}
+
 /// Writes the launch save of a vessel just placed on the pad (D114), before
 /// it flies: the whole game, on the flight screen.
 pub fn write_launch(sim: &SimState, saves: &Path) -> Result<PathBuf, SaveError> {
@@ -431,8 +456,28 @@ mod tests {
         assert!(sim.launch_pending && sim.ship().launch == Some(sim.ship().id()));
         assert_eq!(launch_of(&sim, &dir), None, "a new flight is a new launch");
         let save = read(&sim, &path).unwrap();
-        assert_eq!((save.vessels, save.screen), (at_launch, Screen::Flight));
+        assert_eq!((save.vessels, save.screen), (at_launch.clone(), Screen::Flight));
+        // A revert: a new flight has no launch save yet, so a new craft of
+        // its kind; the first flight's, its launch save.
+        assert_eq!(revert(&sim, &dir), Ok(GameCommand::Reset));
+        assert_eq!(listing(&sim, &dir)["launch_save"], false);
+        let mut first = SimState::new();
+        first.seed = sim.seed;
+        assert!(matches!(revert(&first, &dir), Ok(GameCommand::Restore(s)) if s.vessels == at_launch));
+        assert_eq!(listing(&first, &dir)["launch_save"], true);
+        std::fs::write(&path, "not a save").unwrap();
+        assert!(revert(&first, &dir).is_err_and(|e| e.starts_with("Revert failed")));
+        // The list: newest first, with the time saved; no launches.
+        save_quick(&first, &dir);
+        let l = listing(&first, &dir);
+        assert_eq!(l["saves"][0]["name"], QUICKSAVE);
+        assert!(l["saves"][0]["saved"].as_str().is_some_and(|t| t.ends_with("UTC")));
+        assert_eq!(l["saves"].as_array().map(Vec::len), Some(1));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    fn save_quick(sim: &SimState, dir: &Path) {
+        save(sim, Screen::Flight, &save_path(dir, QUICKSAVE)).unwrap();
     }
 
     #[test]

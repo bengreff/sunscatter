@@ -311,14 +311,11 @@ pub fn draw(
                         "This vessel has no launch save (it never sat on the pad\nin this game). Put a new one of its kind on the pad?"
                     };
                     if confirm(ui, &mut menu, text, "Revert") {
-                        match launch.map(|path| crate::saves::read(&sim, &path)) {
-                            Some(Ok(save)) => {
-                                commands.write(GameCommand::Restore(Box::new(save)));
+                        match crate::saves::revert(&sim, &persist.dirs.saves) {
+                            Ok(c) => {
+                                commands.write(c);
                             }
-                            Some(Err(e)) => toasts.push(time.elapsed_secs_f64(), format!("Revert failed: {e}"), true),
-                            None => {
-                                commands.write(GameCommand::Reset);
-                            }
+                            Err(e) => toasts.push(time.elapsed_secs_f64(), e, true),
                         }
                         menu.open = false;
                     }
