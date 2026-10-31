@@ -208,7 +208,8 @@ pub fn window(ctx: &egui::Context, toasts: &mut Toasts, how: Shown, now: f64, ac
                     Shown::Open => toasts.history().collect(),
                     _ => toasts.newest_fresh(now).into_iter().collect(),
                 };
-                egui::ScrollArea::vertical().max_height(LIST_HEIGHT).stick_to_bottom(true).show(ui, |ui| {
+                let scroll = egui::ScrollArea::vertical().max_height(LIST_HEIGHT).auto_shrink([false, true]);
+                scroll.stick_to_bottom(true).show(ui, |ui| {
                     for t in list {
                         if let Some(link) = line(ui, t, now, active) {
                             clicked = Some(link);

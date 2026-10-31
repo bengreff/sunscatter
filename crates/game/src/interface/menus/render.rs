@@ -75,14 +75,19 @@ fn body(ui: &mut egui::Ui, menu: MenuId, sections: &[Section], input: &mut MenuI
     }
 }
 
-/// A full-width section heading: a rule and the title, dim.
+/// A full-width section heading: a rule and the title, dim, wrapped onto
+/// a second line rather than cut where it is wider than the menu (a long
+/// body's name, or the menu's scroll bar taking its room).
 fn heading(ui: &mut egui::Ui, title: &str) {
     ui.add_space(3.0);
-    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), HEADER_PX), Sense::hover());
+    let width = ui.available_width();
+    let font = egui::FontId::monospace(11.0);
+    let galley = ui.painter().layout(title.to_string(), font, theme::DIM, width);
+    let (rect, _) = ui.allocate_exact_size(vec2(width, HEADER_PX.max(galley.size().y + 4.0)), Sense::hover());
     let painter = ui.painter();
     painter.line_segment([rect.left_top(), rect.right_top()], Stroke::new(1.0, theme::BORDER));
-    let font = egui::FontId::monospace(11.0);
-    painter.text(pos2(rect.left(), rect.center().y + 1.0), Align2::LEFT_CENTER, title, font, theme::DIM);
+    let top = rect.center().y + 1.0 - galley.size().y / 2.0;
+    painter.galley(pos2(rect.left(), top), galley, theme::DIM);
 }
 
 fn items(ui: &mut egui::Ui, menu: MenuId, s: &Section, input: &mut MenuInput) {

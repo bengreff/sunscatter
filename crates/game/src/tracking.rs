@@ -351,7 +351,8 @@ pub fn draw(
                 actions.push(Action::Close);
             }
             ui.separator();
-            egui::ScrollArea::vertical().max_height(ui.available_height() * 0.62).show(ui, |ui| {
+            let scroll = egui::ScrollArea::vertical().auto_shrink([false, true]);
+            scroll.max_height(ui.available_height() * 0.62).show(ui, |ui| {
                 for g in ["In flight", "Landed", "Debris"] {
                     let members: Vec<VesselId> =
                         sim.fleet.iter().filter(|v| group(&v.phase) == g).map(|v| v.id()).collect();

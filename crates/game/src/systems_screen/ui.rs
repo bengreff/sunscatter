@@ -353,16 +353,15 @@ fn editors(
     let mut run: Option<Vec<sim::craft::command::ShipCommand>> = None;
     let view = sim::craft::program::view(def, list);
     let shown: Vec<usize> = view.iter().map(|v| v.index).collect();
-    egui::ScrollArea::vertical().id_salt("systems_editor").max_height((ui.available_height() - 30.0).max(40.0)).show(
-        ui,
-        |ui| {
-            for v in &view {
-                let offered = sim::craft::program::offered(def, state, &list[v.index]);
-                let at = Entry { shown: &shown, actions: &v.actions, function: functions, locked, offered };
-                entry(ui, v.index, &list[v.index], &at, &catalogue, &mut edits, &mut run);
-            }
-        },
-    );
+    // The full width: its scroll bar at the panel's edge, not the rows'.
+    let scroll = egui::ScrollArea::vertical().id_salt("systems_editor").auto_shrink([false, true]);
+    scroll.max_height((ui.available_height() - 30.0).max(40.0)).show(ui, |ui| {
+        for v in &view {
+            let offered = sim::craft::program::offered(def, state, &list[v.index]);
+            let at = Entry { shown: &shown, actions: &v.actions, function: functions, locked, offered };
+            entry(ui, v.index, &list[v.index], &at, &catalogue, &mut edits, &mut run);
+        }
+    });
     ui.horizontal(|ui| {
         if ui.button(if functions { "+ function" } else { "+ stage" }).clicked() {
             edits.push(Edit::Add(if functions { "New function".into() } else { "New stage".into() }));

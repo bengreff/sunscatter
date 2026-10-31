@@ -127,7 +127,8 @@ pub fn settings_ui(ui: &mut egui::Ui, s: &mut OrbitSettings, bodies: &[(NodeId, 
     }
     ui.add_enabled_ui(on, |ui| {
         ui.checkbox(&mut s.only_current_system, "Only orbits in the current system");
-        egui::ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
+        // The full width: its scroll bar at the window's edge, not the names'.
+        egui::ScrollArea::vertical().max_height(220.0).auto_shrink([false, true]).show(ui, |ui| {
             for (_, name) in bodies {
                 let mut shown = !s.hidden_bodies.contains(name);
                 if ui.checkbox(&mut shown, name.as_str()).changed() {
