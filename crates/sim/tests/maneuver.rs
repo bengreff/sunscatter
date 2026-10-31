@@ -197,3 +197,46 @@ fn the_second_stage_turns_on_the_gas_it_can_afford_settles_and_flies_the_node() 
     assert!(dv < 0.5 && dr < 100.0, "{dr} m, {dv} m/s");
     assert!(off < 1.0, "{off} m/s from the prediction");
 }
+
+#[test]
+fn a_separation_mid_burn_ends_the_burn_and_keeps_the_later_nodes() {
+    use sim::craft::command::ShipCommand;
+    let w = world();
+    let earth = w.find("Earth").unwrap();
+    let mut s = upper_stage(&w);
+    // Its MVac already pointing about prograde: a short turn.
+    let axis = s.ship_def().unwrap().engines.iter().find(|e| e.main).unwrap().data.dir.normalize();
+    let (_, _, v) = s.state(&w);
+    s.attitude.q = glam::DQuat::from_rotation_arc(axis, v.normalize());
+    let first = Node { t: t0().add_seconds(120.0), dv: DVec3::new(100.0, 0.0, 0.0), reference: earth.node };
+    let second = Node { t: t0().add_seconds(3_600.0), dv: DVec3::new(5.0, 0.0, 0.0), reference: earth.node };
+    s.set_nodes(vec![first, second]).unwrap();
+    let controls = Controls::default();
+    // Three seconds into the burn, Dragon separates.
+    let mut lit = None;
+    while lit.is_none_or(|t: sim::time::Epoch| s.time.seconds_since(t) < 3.0) {
+        let t = s.time.add_seconds(0.25);
+        s.advance(&w, t, &controls, usize::MAX);
+        let p = s.program().unwrap();
+        assert!(p.node == 0 && !p.step.ended(), "{:?}", p.step);
+        if lit.is_none() && p.lit_seen {
+            lit = Some(s.time);
+        }
+    }
+    assert_eq!(s.program().unwrap().step, Step::Burn);
+    s.command(&w, &ShipCommand::Separate("dragon separation".into())).unwrap();
+    let plan = s.plan_breakup().unwrap();
+    let mut ids = sim::vessel::VesselIds::default();
+    ids.allocate();
+    let pieces = s.split(&w, &plan, &plan.crafts(), &mut ids);
+    let events: Vec<_> = s.ship_events().iter().map(|e| (e.text.clone(), e.alarm)).collect();
+    println!("{:?}; events {events:?}", s.program());
+    // Dragon keeps the vessel and the plan; the burn in flight, set for the
+    // whole craft's engines, ended with it, and the pilot is told.
+    assert!(events.contains(&("burn 1: ended by the separation".to_string(), true)), "{events:?}");
+    assert_eq!(s.nodes(), &[first, second]);
+    assert!(s.program().is_none_or(|p| p.node == 1 && p.step == Step::Wait), "{:?}", s.program());
+    // The stage leaves with no plan.
+    assert_eq!(pieces.len(), 1);
+    assert!(pieces[0].nodes().is_empty() && pieces[0].program().is_none());
+}

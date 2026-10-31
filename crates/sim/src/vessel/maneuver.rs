@@ -166,6 +166,12 @@ impl Vessel {
     /// its engines' indices were the whole's).
     pub(super) fn reschedule(&mut self, old: Option<&Program>) {
         let next = old.map_or(0, |p| if p.step == Step::Wait { p.node } else { p.node + 1 });
+        if let Some(p) = old.filter(|p| p.step.flying()) {
+            let (at, text) = (self.time, format!("burn {}: ended by the separation", p.node + 1));
+            if let Some(state) = self.ship.as_mut() {
+                state.runtime.event(at, text, true);
+            }
+        }
         self.program = self.schedule_node(next);
     }
 
