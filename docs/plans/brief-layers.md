@@ -70,6 +70,25 @@ Small commits, one purpose each; `cargo test -p sim` and the game's touched test
 
 - **Older saves crash the game** since f2806ca added Dragon's cabin air monitor and barometric altimeter as components: loading a `falcon9-crew` save from before it (the playtest save `docs/plans/playtest-2026-10-01-orbit.ron`, `./run play`, included) panics at the first power step, `crates/sim/src/systems/power.rs:110` index out of bounds (the save's 39 power entries, 41 components). A save whose ship state does not fit its craft should be refused at load (or SAVE_VERSION bumped, D063), and the playtest save flown again (testing.md).
 
+### LAYERS-2 (2026-10-31), wrapped up at its context cap
+
+**Landed** (each passed fmt, clippy, the whole sim suite with `warp_course`, and the game's check):
+- f2806ca: Crew Dragon's **cabin air monitor and barometric altimeter** (finding 19; E parts `cabin-air-monitor`, `barometric-altimeter`): the `cabin` class (total, O₂ to ±100 Pa, CO₂ ±10 Pa) and the `barometric` class (the altitude while the air outside is above 1 kPa, `data::BAROMETRIC_FLOOR`, from `ShipState::ambient`: the last live tick's static pressure, 0 on a coast).
+- c369b60 **step 3b, the chutes**: `ship_os::chutes` (`arm_now`, `main_now`, `press`, `predicted_cd_area`); `chute::step` opens the main on the computer's word (`drogue_done` stays layer 1's). Without an altitude reading the main waits for a second press. `ShipCommand::ArmChutes` is a press in `after_command`, so an order arms too (before, only the game's `controls.chute` did). D126's `Switch` (Auto arms below `ChuteSpec::drogue_height` while the navigation solution descends; Dragon 5.5 km, P) is saved in `ship_os::Software`; the default is Press (no bits changed where the altitude is known).
+- 215f0ea **the save fix** (the coordinator's urgent item): f2806ca added two components, so older falcon9-crew saves panicked at the first power step: `ShipState::fits` was never called at load. `SaveGame::from_ron` now refuses such a save as a format error (`tests/save_load.rs`), `fits` checks the fins too, **SAVE_VERSION 17**. Rule from the coordinator: any change to a craft's data that changes what its state holds bumps SAVE_VERSION in the same commit.
+- 5187deb **step 4, the program API** (`ship_os::program`: `Context` with `read` through `data::truth`, `Commands` moved from `maneuver`, `Schedule`, `Slot`, `Installed`, `Software::{maneuver, programs}`), the vessel side `vessel::programs` (`programs_stop` in `order_stop`, `run_programs` inside `apply_orders`, `install`, `set_switch`, `press`; a switch or press restarts a period from now, `Installed::resume`), the first scheduled program `ship_os::power_guard`. `tests/ship_programs.rs`: the same switch epochs and battery bits at 1× and 10⁵×, the switch, the maneuver's switch.
+
+**Left, in order:**
+1. **Re-fly the playtest save** (the coordinator's item 3): SAVE_VERSION 17 refuses `docs/plans/playtest-2026-10-01-orbit.ron`. Fly it again by testing.md's procedure (STATE-4's flight: Dragon alone in orbit), write it over that file, and check `./run play` loads it and flies on past a power step. HANDOFF's "SAVE_VERSION 16" line then says 17.
+2. **The maneuver move:** `git mv` `systems::maneuver{,_tests}` into `ship_os/` and update the paths (sim, tests, `game::{commands, planner, fleet_tests, interface::menus::{data, maneuver}, trajectory::{apsides, predict_tests}}`, docs). It waited because INTERFACE-10 had `game/commands.rs` open.
+3. **Step 5, the warp stop**, then **step 6** as the brief says. The cabin's sensors exist now (finding 19 done). For step 5 the program API is ready: a `warp_stop` program is a `Builtin` variant reading the step's events; `notify` goes with the helm's controls.
+4. Not built in the chutes (entry-ablation.md §3.2): the drogue's wait above its design q, the mains' cut on water, the chute part's own baroswitch. The game and the agent cannot set a switch or press yet (the sim's `Vessel::set_switch`, `press` are ready); `game::interface::part_card::content` still says "a cabin air sensor (none modelled yet)".
+
+**Open for the owner (LAYERS-2):**
+- **The chutes' switch defaults to Press** (today's behaviour: the player arms). Real Crew Dragon arms itself; setting Dragon to Auto changes every entry flown without arming. Proposed: Auto for Dragon when the entry flight comes.
+- **A second press calls the main** (D126: the manual deploy runs the same function), at any height once the drogue lets it.
+- **A due program without a working computer misses its epoch** rather than waiting.
+
 ### From the lead (2026-10-31)
 
 - INTERFACE-2's finding 19: Crew Dragon has no cabin sensors in its data (`data/parts/dragon*`). The bare minimum's crew-at-risk line reads the cabin through `Knowledge` (D106), so give the cabin its real sensors (CO₂, O₂, pressure, temperature; sourced or E) before the warp-stop test.
