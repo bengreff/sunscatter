@@ -122,3 +122,25 @@ fn values_without_a_sensor_read_as_a_dash() {
     let g = details(def, &state, &facts, Selection::Part(def.part_named("tank").unwrap()), &Known::from(k));
     assert!(value(&g, "TANK tank:ox", "ullage pressure").starts_with("3.0 bar / "));
 }
+
+/// Ignitions left, one rule for the screen and the card: a hypergolic
+/// engine is unlimited on the pad too; a limited one's count stands, the
+/// pad's supply said while clamped; a group by its range.
+#[test]
+fn ignitions_left_reads_one_way() {
+    let max = u32::MAX;
+    let table: [(&[u32], bool, &str); 9] = [
+        (&[3], false, "3"),
+        (&[3], true, "3 (the pad lights it)"),
+        (&[0], false, "0"),
+        (&[max], false, "unlimited (hypergolic)"),
+        (&[max], true, "unlimited (hypergolic)"),
+        (&[1, 1, 1], false, "1 each"),
+        (&[1, 1, 1], true, "1 each (the pad lights them)"),
+        (&[1, 3], false, "1–3"),
+        (&[2, max], true, "2 to unlimited (the pad lights them)"),
+    ];
+    for (left, clamped, want) in table {
+        assert_eq!(ignitions_left(left, clamped), want, "{left:?} {clamped}");
+    }
+}

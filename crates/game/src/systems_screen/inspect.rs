@@ -373,12 +373,33 @@ fn tank_group(def: &ShipDef, state: &ShipState, i: usize, k: &Known) -> Group {
     g
 }
 
+/// Ignitions left, in words, for engines with `left` each (one rule: the
+/// systems screen's engine, the part card's engine and engine groups): a
+/// hypergolic engine's starts are unlimited (`u32::MAX`), the pad or not;
+/// while the craft is clamped a start uses the pad's supply, not one of its
+/// own (`ShipState::apply`, Falcon 9's TEA-TEB on the pad), said after the
+/// count.
+pub fn ignitions_left(left: &[u32], clamped: bool) -> String {
+    let (lo, hi) = (left.iter().min().copied().unwrap_or(0), left.iter().max().copied().unwrap_or(0));
+    let each = if left.len() > 1 { " each" } else { "" };
+    let count = match (lo, hi) {
+        (u32::MAX, _) => return "unlimited (hypergolic)".to_string(),
+        (lo, hi) if lo == hi => format!("{lo}{each}"),
+        (lo, u32::MAX) => format!("{lo} to unlimited"),
+        (lo, hi) => format!("{lo}–{hi}"),
+    };
+    match (clamped, left.len()) {
+        (false, _) => count,
+        (true, 1) => format!("{count} (the pad lights it)"),
+        (true, _) => format!("{count} (the pad lights them)"),
+    }
+}
+
 fn engine_group(state: &ShipState, i: usize, e: &sim::craft::ship::EngineDef, k: &Known) -> Group {
     let mut g = Group::new(format!("ENGINE {}", e.id));
     let d = &e.data;
     if let Some(s) = state.engines.get(i) {
-        let ignitions =
-            if s.ignitions == u32::MAX { "unlimited (hypergolic)".to_string() } else { s.ignitions.to_string() };
+        let ignitions = ignitions_left(&[s.ignitions], state.clamped);
         let level = state.engines.get(i).map_or(0.0, |r| r.level);
         let chamber =
             k.or_dash(k.knows(Quantity::EngineThrust(i as u32)), || format!("{:.0} % / 100 %", level * 100.0));

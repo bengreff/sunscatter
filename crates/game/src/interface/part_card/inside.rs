@@ -147,14 +147,7 @@ fn engines(live: &Live, e: &[usize]) -> Section {
     let rated: f64 = e.iter().map(|&i| def.engines[i].data.thrust_vac).sum();
     let rated = format::force(Some(Reading { value: rated, precision: 0.0 }));
     let left: Vec<u32> = e.iter().map(|&i| state.engines[i].ignitions).collect();
-    let (lo, hi) = (left.iter().min().copied().unwrap_or(0), left.iter().max().copied().unwrap_or(0));
-    let ignitions = match (state.clamped, lo, hi) {
-        (true, ..) => "the pad's supply".to_string(),
-        (_, u32::MAX, _) => "unlimited".to_string(),
-        (_, lo, hi) if lo == hi => format!("{lo} each"),
-        (_, lo, u32::MAX) => format!("{lo} to unlimited"),
-        (_, lo, hi) => format!("{lo}–{hi}"),
-    };
+    let ignitions = crate::systems_screen::inspect::ignitions_left(&left, state.clamped);
     let lines = vec![
         shown("state", counts(e.iter().map(|&i| super::content::engine_words(live, i)))),
         line("thrust", value(live, thrust, |r| format!("{} of {rated} vac", format::force(Some(r))))),

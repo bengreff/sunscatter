@@ -155,11 +155,7 @@ fn engine(live: &Live, i: usize) -> Section {
     let rated = format::force(Some(sim::systems::Reading { value: d.data.thrust_vac, precision: 0.0 }));
     let q = Quantity::EngineThrust(i as u32);
     let level = run.map_or(0.0, |r| r.level);
-    let ignitions = match (s.ignitions, live.state.clamped) {
-        (_, true) => "the pad's supply".to_string(),
-        (u32::MAX, _) => "unlimited".to_string(),
-        (n, _) => n.to_string(),
-    };
+    let ignitions = inspect::ignitions_left(&[s.ignitions], live.state.clamped);
     let mut lines = vec![
         shown("state", state),
         line("thrust", live.value(q, thrust, |r| format!("{} of {rated} vac", format::force(Some(r))))),
