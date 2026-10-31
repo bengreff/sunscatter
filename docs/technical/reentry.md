@@ -36,4 +36,4 @@ Blackout is `sim::comms::blacked_out(f, nₑ)`: f_p = 8.98·√nₑ ≥ f.
 
 1. The toggle: `persist::VisualSettings { reentry_glow }` beside `exhaust` (off by default, D109), Settings ▸ Visuals, a `look::Parts` row for the benchmark.
 2. The glow: a thin emissive shell over the windward cells offset by Δ, radiance from the layer's radiation L ≈ q̇_r/π where Tauber–Sutton applies and the gas's emission at T₂ elsewhere, hue from T₂ (blackbody), faded by the continuum share; the skin's own glow from each cell's temperature (blackbody, emissivity). Rules as pure functions with table tests; the radiance-to-display calibration against the cited peak fluxes with its own test (research §2.7, §5 q3).
-3. A notification when blackout starts and ends; a reentry view in the demo (toggle on and off).
+3. A notification when blackout starts and ends; a mission test's shots of an entry with the toggle on and off (`./run headless`, [testing.md](testing.md)).

@@ -2,7 +2,7 @@
 
 As built for craft of parts in `sim::systems::maneuver` (the program, layer 2 of D128), `sim::vessel::maneuver` (the vessel side), `game::planner` (the window) and `game::trajectory::predict` (the line past a node). Decisions: D126 (planned burns closed-loop, nodes only, settling on the craft's own thrusters, the takeover rule), D128, D129 (burns fly live; the same course of events at every warp), D075, D011. Built by PLANNER-1 to PLANNER-4 (2026-10-30/31), from the old spec in [realism-1.md](../archive/plans/realism-1.md) §6a. The system: [motion](../systems/motion.md).
 
-**Status: playable** on main engines. The sim flies nodes on the small rocket and the Falcon 9's second stage under tests; the game plans, draws and lists them, MCP `set_plan` sets them, and a mission test flew two on the Falcon 9's second stage in the headless game (below). The planner window itself has not been used on screen since it moved to nodes. The made-up craft's open-loop burns (`sim::vessel::burn`) go with that craft (ONEKIND).
+**Status: playable** on main engines. The sim flies nodes on the small rocket and the Falcon 9's second stage under tests; the game plans, draws and lists them, MCP `set_plan` sets them, and a mission test flew two on the Falcon 9's second stage in the headless game (below). The planner window itself has not been used on screen since it moved to nodes. The made-up craft's open-loop burns are deleted (6741e5e); `sim::vessel::burn` keeps the direction laws a node uses (`node_direction`).
 
 ## A node
 

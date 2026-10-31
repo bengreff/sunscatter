@@ -1,6 +1,6 @@
 # Feature: scale performance (D081)
 
-**Status:** *playable* in the sim and the game's frame loop, measured headless (the game window and the offscreen demo were not run by this workstream: see [Verify](#verify-in-the-offscreen-demo)). Built 2026-10-26 (overnight run, PERF workstream; the coast integration, §6, COAST; the coast thermal lattice, §7, THERMAL), from BENCH's [scale baseline](../archive/research/scale-baseline-2026-10-26.md). Decisions: D081 (50 craft of ~300 parts to 1,000,000×; live physics for 1–3, limbo for 10+), D028 (60 fps on the M2 Pro), D022, D025, D026, D029, D062; rules 2 and 4.
+**Status:** *playable* in the sim and the game's frame loop, measured headless in the sim's benchmarks (the game was not run by this workstream; the check in the headless game: [Verify](#verify-in-the-headless-game)). Built 2026-10-26 (overnight run, PERF workstream; the coast integration, §6, COAST; the coast thermal lattice, §7, THERMAL), from BENCH's [scale baseline](../archive/research/scale-baseline-2026-10-26.md). Decisions: D081 (50 craft of ~300 parts to 1,000,000×; live physics for 1–3, limbo for 10+), D028 (60 fps on the M2 Pro), D022, D025, D026, D029, D062; rules 2 and 4.
 
 The owner (2026-10-26): "maximally stable with dozens of crafts flying each with hundreds of parts", "up to 1 million timewarp".
 

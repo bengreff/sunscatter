@@ -2,7 +2,7 @@
 
 As built in `sim::vessel::hold` (the rule), `sim::vessel::attitude` (the controller) and `sim::vessel::attitude::limits` (a craft of parts' limits); the game's navball shows and sets them. Decisions: D075 (hold modes), D056 (the automatic reference body), D126 (the maneuver hold follows the next node), rule 1. From the old spec in [playtest-1.md](../archive/plans/playtest-1.md) B. The system: [avionics](../systems/avionics.md) (SAS is flight software); the frames a hold is followed in on rails: [limbo.md](limbo.md).
 
-**Status: playable.** Every mode is flown under tests on craft of parts, live and on rails, and the navball's buttons and MCP `set_controls` set them. Planned burns are flown by the maneuver program ([planner.md](planner.md)), which commands the maneuver hold like a pilot. The made-up craft's open-loop burns, which this module once flew on the tick lattice (`vessel::flown`), go with that craft (ONEKIND).
+**Status: playable.** Every mode is flown under tests on craft of parts, live and on rails, and the navball's buttons and MCP `set_controls` set them. Planned burns are flown by the maneuver program ([planner.md](planner.md)), which commands the maneuver hold like a pilot. The made-up craft's open-loop burns, which were flown on the tick lattice (`vessel::flown`), are deleted (6741e5e).
 
 ## The modes
 
