@@ -58,12 +58,14 @@ pub fn draw(
         let Some((def, state)) = ship.as_ref() else { return };
         region(ui, regions.left, |ui| {
             let power = crate::interface::menus::power::gather(vessel);
+            let hull = sim::systems::estimate::hull(&vessel.craft.design().parts);
             let x = super::summary::Inputs {
                 def,
                 state,
                 facts: &view.facts,
                 known: &known,
-                mass: (vessel.mass_props().mass, vessel.craft.mass.dry_mass, vessel.contact_height()),
+                aboard: sim::systems::estimate::aboard(def, state, &hull, &known.knowledge),
+                com: vessel.contact_height(),
                 power: power.as_ref(),
                 accel: crate::navball::felt(&sim, vessel, sim.clock),
             };

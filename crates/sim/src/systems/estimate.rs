@@ -163,6 +163,34 @@ pub fn lit(def: &ShipDef, state: &ShipState, inp: &Inputs, engines: &[u32]) -> O
     Some(finish(def, inp, &main, others.iter().map(Option::as_ref)))
 }
 
+/// What is aboard a vessel now: its mass, the pad's mount not counted.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Aboard {
+    /// Its mass (kg) to the precision the sensors give.
+    pub mass: Reading,
+    /// Its dry mass (kg): the parts aboard and their components.
+    pub dry: f64,
+}
+
+/// What is aboard now (see [`Aboard`]): the estimate's own sum, the mass a
+/// burn going now starts from (`Burn::mass`), with its precision the
+/// largest change with every tank at the low and at the high end of what
+/// `knowledge` knows of it (an unmeasured one empty and full). One rule for
+/// every readout of the mass now: the staging bar's burn, the systems
+/// screen's (interface-map finding 41: the screen dashed the whole when a
+/// tank was unmeasured, the bar gave it to its precision).
+pub fn aboard(def: &ShipDef, state: &ShipState, hull: &[Hull], knowledge: &Knowledge) -> Aboard {
+    let inp = Inputs { hull, knowledge, throttle: 0.0, p: 0.0, g: None };
+    let at = |levels: &[f64]| Walk::new(def, state, &inp, levels).mass();
+    let truth: Vec<f64> = state.tanks.iter().map(|t| t.liquid).collect();
+    let value = at(&truth);
+    let spread = |high: bool| (at(&bound(def, state, knowledge, high)) - value).abs();
+    let precision = if knowledge.perfect { 0.0 } else { spread(false).max(spread(true)) };
+    let w = Walk::new(def, state, &inp, &truth);
+    let dry = hull.iter().filter(|h| !w.gone.contains(&h.part)).map(|h| h.dry).sum();
+    Aboard { mass: Reading { value, precision }, dry }
+}
+
 /// Every tank at the low (or high) end of what is known of it: an
 /// unmeasured one empty (or full).
 fn bound(def: &ShipDef, state: &ShipState, k: &Knowledge, high: bool) -> Vec<f64> {

@@ -1,7 +1,8 @@
 use super::*;
 use crate::test_rocket::rocket;
 use glam::DVec3;
-use sim::systems::Knowledge;
+use sim::systems::estimate::Aboard;
+use sim::systems::{Knowledge, Reading};
 
 fn facts_of(def: &ShipDef, state: &ShipState, known: &Knowledge) -> Vec<PartFacts> {
     let craft = rocket();
@@ -28,12 +29,13 @@ fn each_layer_summarises_the_craft() {
         state: &state,
         facts: &facts,
         known: &known,
-        mass: (12_345.0, 4_000.0, 2.5),
+        aboard: Aboard { mass: Reading { value: 12_345.0, precision: 0.0 }, dry: 4_000.0 },
+        com: 2.5,
         power: None,
         accel: DVec3::ZERO,
     };
     let s = summary(Layer::Structural, &x);
-    assert_eq!(group(&s, "STRUCTURE").value("mass"), Some("12.35 t"));
+    assert_eq!(group(&s, "STRUCTURE").value("mass"), Some("12.3 t"));
     assert_eq!(group(&s, "STRUCTURE").value("g-limit"), Some("none: not accelerating"));
     // The g-load is the one given (the navball's), not the state's last
     // live tick's: 2 g along the nose, the crew's limit.
@@ -77,9 +79,13 @@ fn each_layer_summarises_the_craft() {
     // Blind: dashes and counts.
     let blind = Known::from(Knowledge::default());
     let facts = facts_of(def, &state, &Knowledge::default());
-    let x = Inputs { known: &blind, facts: &facts, ..x };
+    // The mass to its precision (every tank from empty to full: the
+    // staging bar's rule, finding 41), the centre of mass a dash.
+    let wide = Aboard { mass: Reading { value: 12_345.0, precision: 6_000.0 }, ..x.aboard };
+    let x = Inputs { known: &blind, facts: &facts, aboard: wide, ..x };
     let s = summary(Layer::Structural, &x);
-    assert_eq!(group(&s, "STRUCTURE").value("mass"), Some(DASH));
+    assert_eq!(group(&s, "STRUCTURE").value("mass"), Some("12 t"));
+    assert_eq!(group(&s, "STRUCTURE").value("centre of mass"), Some(DASH));
     assert_eq!(group(&s, "STRUCTURE").value("g-limit"), Some(DASH));
     let joints = group(&s, "JOINTS");
     // The joints the craft gives a capacity are not measured; the rest (the
@@ -121,7 +127,8 @@ fn the_hottest_and_the_worn_lead() {
         state: &state,
         facts: &facts,
         known: &known,
-        mass: (0.0, 0.0, 0.0),
+        aboard: Aboard { mass: Reading { value: 0.0, precision: 0.0 }, dry: 0.0 },
+        com: 0.0,
         power: None,
         accel: DVec3::ZERO,
     };

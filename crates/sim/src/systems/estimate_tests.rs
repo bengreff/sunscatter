@@ -207,3 +207,32 @@ fn pieces_are_the_groups_joints_hold_together() {
         assert_eq!(got, want, "{parts:?} {joined:?}");
     }
 }
+
+/// The mass aboard now is the burn's own start mass, the pad's mount left
+/// out, and widens by every unmeasured tank (Dragon's) as the burns do.
+#[test]
+fn the_mass_aboard_is_the_burns_own() {
+    let (def, mut state, hull) = falcon9();
+    // On the pad: the vessel less its launch mount, exactly known in debug.
+    let perfect = Knowledge::perfect();
+    let a = aboard(&def, &state, &hull, &perfect);
+    let mount: Vec<u32> = def.parts.iter().filter(|p| p.ground).map(|p| p.part).collect();
+    assert!(!mount.is_empty(), "the Falcon 9 stands on its launch mount");
+    let flying: f64 = hull.iter().filter(|h| !mount.contains(&h.part)).map(|h| h.dry).sum();
+    assert!(close(a.dry, flying, 1e-12), "{} vs {flying}", a.dry);
+    let consumables = state.consumables(&def);
+    assert!(close(a.mass.value, flying + consumables, 1e-12), "{:?}", a.mass);
+    assert_eq!(a.mass.precision, 0.0);
+    // Burning: the burn now starts from it, to the same precision.
+    state.next_stage(&def).unwrap();
+    let k = data::knowledge(&def, &state, false);
+    let e = estimate(&def, &state, &inputs(&hull, &k, 0.0));
+    let now = e.now.as_ref().expect("the first stage burns");
+    let a = aboard(&def, &state, &hull, &k);
+    assert_eq!(now.mass, a.mass);
+    // Dragon's tanks have no level sensor: anywhere from empty to full.
+    let unmeasured: f64 =
+        (0..def.tanks.len()).filter(|&t| !k.knows(Quantity::TankLevel(t as u32))).map(|t| def.tanks[t].capacity).sum();
+    assert!(unmeasured > 0.0 && a.mass.precision >= unmeasured * 0.5, "{:?} vs {unmeasured}", a.mass);
+    assert!(a.mass.precision < 0.02 * a.mass.value, "{:?}", a.mass);
+}

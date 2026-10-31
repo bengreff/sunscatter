@@ -3,7 +3,9 @@
 //! against a limit coloured by `format::limit_level`; a row about a part
 //! selects it).
 //!
-//! * **Structure**: the mass and centre of mass now, the g-limit and what
+//! * **Structure**: the mass now (`sim::systems::estimate::aboard`, the
+//!   staging bar's rule: to the precision the tank sensors give) and the
+//!   centre of mass, the g-limit and what
 //!   sets it (`sim::systems::g_limit`), the joints nearest their ultimate.
 //! * **Thermal**: the parts nearest their temperature limits.
 //! * **Plumbing**: each tank's contents, the tanks' and bottles' pressures
@@ -18,7 +20,7 @@
 
 use super::inspect::{Group, Selection};
 use super::rules::{Layer, PartFacts};
-use crate::format::{limit_level, Known, Level, DASH};
+use crate::format::{self, limit_level, Known, Level, DASH};
 use crate::interface::menus::{power, Item, Tone};
 use sim::craft::ship::ShipDef;
 use sim::craft::state::ShipState;
@@ -30,9 +32,11 @@ pub struct Inputs<'a> {
     pub state: &'a ShipState,
     pub facts: &'a [PartFacts],
     pub known: &'a Known,
-    /// The mass now and dry (kg), the centre of mass's height above the
-    /// base (m).
-    pub mass: (f64, f64, f64),
+    /// What is aboard now: its mass to its precision, its dry mass
+    /// (`sim::systems::estimate::aboard`, the staging bar's own).
+    pub aboard: sim::systems::estimate::Aboard,
+    /// The centre of mass's height above the base (m).
+    pub com: f64,
     /// The electrical system (`menus::power::gather`).
     pub power: Option<&'a power::PowerData>,
     /// The proper acceleration the craft feels now, body axes: the
@@ -66,6 +70,12 @@ fn tonnes(kg: f64) -> String {
     }
 }
 
+/// A mass the craft's files give exactly (its dry mass), read as every mass
+/// is (`format::mass`).
+fn exact(kg: f64) -> String {
+    format::mass(Some(sim::systems::Reading { value: kg, precision: 0.0 }))
+}
+
 fn name(def: &ShipDef, part: u32) -> String {
     def.parts.iter().find(|p| p.part == part).map_or_else(|| format!("part {part}"), |p| p.id.clone())
 }
@@ -76,8 +86,8 @@ fn craft(x: &Inputs) -> Group {
     let ground = x.facts.iter().filter(|f| f.ground).count();
     g.row("parts", format!("{} (and {ground} of the pad's)", x.facts.len() - ground))
         .row("components", x.def.components.len().to_string())
-        .row("mass", x.known.or_dash(x.known.propellant, || tonnes(x.mass.0)))
-        .row("dry mass", tonnes(x.mass.1));
+        .row("mass", format::mass(Some(x.aboard.mass)))
+        .row("dry mass", exact(x.aboard.dry));
     g
 }
 
@@ -86,9 +96,9 @@ fn craft(x: &Inputs) -> Group {
 fn structure(x: &Inputs) -> Vec<Group> {
     let (def, state, k) = (x.def, x.state, x.known);
     let mut g = Group::new("STRUCTURE");
-    g.row("mass", k.or_dash(k.propellant, || tonnes(x.mass.0)))
-        .row("dry mass", tonnes(x.mass.1))
-        .row("centre of mass", k.or_dash(k.propellant, || format!("{:.1} m above the base", x.mass.2)));
+    g.row("mass", format::mass(Some(x.aboard.mass)))
+        .row("dry mass", exact(x.aboard.dry))
+        .row("centre of mass", k.or_dash(k.propellant, || format!("{:.1} m above the base", x.com)));
     let g0 = crate::navball::rules::G0;
     let now = x.accel.length() / g0;
     use sim::systems::g_limit::{g_limit, ACCELERATING};
