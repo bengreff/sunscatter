@@ -53,4 +53,38 @@ Small commits, each passing fmt, clippy and the game's tests you touched (`cargo
 
 ## State
 
-(Update as you go: the map, commits with hashes, shots for the lead, what is left in order, Open for the owner.)
+**INTERFACE-1 (2026-10-31), wrapped up at its context cap.**
+
+**Landed:**
+- def10d2: MCP `shoot` opens the help overlay (`screen: help`) and part cards (`cards`).
+- 1183eb1: the staging bar's part cards stack in columns (`place::stack`), so none is pushed over another.
+- 723ceec: the cleanup, from the map. The keys' labels come from the bindings (`keys::label`, Cmd on a Mac, Ctrl+Alt elsewhere). The help is generated from the bindings, the held keys, `MenuId`, Esc's levels and the ways-in table (`interface::access::WAYS`), and has a `?` on the menu bar. Esc backs out one level everywhere (`pause::on_escape`, `ESC_ORDER`: it now closes the tracking station and a body's menu instead of pausing over them). One Saves button. PAUSED sits under the menu bar. Settings no longer lists the menus. The tracking station's F7 label is gone.
+- 85bb56e: the systems screen. The thermal layer draws the thermal network: each skin cell by its own temperature with the cells' grid, and the interior nodes as cubes behind a longitudinal cut-away (a slider, half by default). The meshes come from the sim's own surface, cells and volume grid, and read one texel per cell and node. A click isolates a part: the rest are ghosted and the camera eases to frame it. Esc or × puts the layer view back as it was. The framing fits the view both ways (it cut the nose before). `shoot` takes `cut`.
+- the docs commit after them: `interface-map.md` (new), `systems-screen.md`, `flight-menus.md`, `systems/game.md`, `owners.md` rows, this State.
+
+**The map:** [interface-map.md](../technical/interface-map.md): every screen, piece of information and control with its key, click path and MCP tool, and 12 findings (9 fixed).
+
+**Shots for the lead** (scratchpad `/private/tmp/claude-501/-Users-ben-sunscatter/7c5f130a-69ba-45d3-9965-ca858b31253e/scratchpad/interface/`):
+- before: `shots/pad_sys_thermal.png` (whole parts by their hottest), `shots/pad_sys_selected_before.png` (the MVac hidden inside the interstage), `shots/pad_cards.png` (overlapping cards), `shots/pad_pause.png` (PAUSED over the bar).
+- after: `shots2/c_t_craft_cut0.png` and `shots2/c_t_craft_cut50.png` (the thermal mesh: skin cells, then the nodes behind the cut), `shots3/c_pad_merlin_isolated.png` and `shots3/pad_restored.png` (isolated, then the layer view put back), `shots3/c_pad_mvac_thermal.png` (the MVac's nodes: it has no skin cells inside the interstage), `shots3/c_asc2_thermal_truth.png` and `shots3/c_asc2_merlin_truth.png` (ascent, T+109 s, debug), `shots3/pad_help.png`, `shots3/c_pause.png`, `shots3/pad_tracking.png`, `shots3/pad_cards.png`.
+
+**Found while flying (not the interface):**
+- The worked example's ascent (`testing.md`) no longer reaches orbit. After the same pitch kick (86.2°), the surface-prograde hold turned the stack flat: pitch 9° at 19.9 km at T+109 s, and it fell back to 1.8 km diving by T+232 s. `run_until {max_q}` never reported max-Q (it stopped on its 90 s bound twice).
+- With debug mode on, the propellant never drains, so the stack keeps its full mass and the gravity turn collapses: fly with debug off, and turn it on only for paused shots.
+- The Merlins' bells read 342 K / 1330 K after 112 s of burning (regeneratively cooled, so plausible); the MVac's radiatively cooled extension was not reached.
+- On the pad, the sunlit and shaded sides do not differ after 30 minutes (the air holds the skin).
+
+**Left, in order:**
+1. The thermal mesh in orbit (a sunlit side against a shaded one) and the MVac's bell burning: needs a flight that reaches orbit (see above), or a save of one.
+2. An MCP `command` tool in `game::agent` (a function by name, a part's command, RCS's mode): the map's finding 10. `agent.rs` is PLANNER-3's until its `set_plan` lands.
+3. Finding 11: a joint's allowable line load and axial capacity read 0 where the craft gives none (a dash, D106).
+4. Finding 12: the Settings window opens over the action and staging bars.
+5. The rules' `SELECTED` tint is no longer used (a selection is an isolated part); remove it with its tests.
+6. ONEKIND-4: the systems screen's tests here use `test_rocket`, not the test craft.
+
+**Open for the owner:**
+- The thermal layer's cut-away is longitudinal (the plane holds the craft's long axis and faces the camera) and cuts half the craft by default, so the interior nodes show at once. A part with no skin cells of its own (an engine inside its interstage) shows its nodes uncut.
+- Colours under D106: a part a temperature sensor measures is coloured, the rest a neutral grey grid; debug mode colours everything. Each cell and node is coloured against its own limit (the existing ramp), so 290 K and 340 K look alike on a 1330 K bell.
+- Selecting a part always isolates it (the view, PARTS, a summary row, a card's "more ›", a menu's link). A click on nothing changes nothing; a click on a ghost isolates that part, keeping the first layer view to go back to. Closing the screen puts the layer view back.
+- The menu bar gained a `?` (the help), the only new thing on the flight view (D080).
+- Esc closes the tracking station rather than pausing over it.
