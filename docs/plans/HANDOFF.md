@@ -2,17 +2,18 @@
 
 A SessionStart hook loads this file automatically after `/clear` or at startup. It is kept current by `/handoff`.
 
-*Updated 2026-10-30 (night). Running: PLANNER-2, ONEKIND-3, RESEARCH (all three slots). PLANNER-1 and AUDIT done. The owner asked for next steps 1–3 done; answers in [interview-2026-10-30-roadmap.md](../archive/interviews/interview-2026-10-30-roadmap.md) (D120, D126 revised; D128, D129 new; D063, D121 extended).*
+*Updated 2026-10-30 (night). Running: PLANNER-3, INTERFACE, RESEARCH (all three slots); ONEKIND-4 next. The owner asked for next steps 1–3 done; answers in [interview-2026-10-30-roadmap.md](../archive/interviews/interview-2026-10-30-roadmap.md) (D120, D126 revised; D128, D129 new; D063, D121 extended).*
 
 ## Your first job
 
-1. Take the three agents' reports as they arrive (each through a message: commits, what is left, questions; their briefs hold their State):
-   - **PLANNER-2** ([brief-planner.md](brief-planner.md), its State): PLANNER-1 landed `kepler::propagate`, `sim::systems::maneuver` (the layer-2 burn program) and `Vessel::set_nodes` (bce4379, c7c2de4, 0a382b6). PLANNER-2 does the rest in order: accuracy, vessel tests, moving the planned-burn tests onto nodes (this unblocks ONEKIND-3), MCP `set_plan` and the Falcon 9 mission test, takeover hand-over, docs.
-   - **RESEARCH** ([brief-research.md](brief-research.md)): docs only. Designs for phase 4: `technical/landing-guidance.md` (convex guidance and a deterministic fixed-iteration solver), `entry-ablation.md`, `water-landing.md`, and the data gaps in `falcon9.md` (Dragon's CO₂ removal, helium bottles, the booster's landing-zone return).
-   - **ONEKIND-3** ([brief-onekind.md](brief-onekind.md), its ONEKIND-3 section): the unblocked tests and the stress craft first; then it waits for PLANNER before deleting the made-up path.
-   - **AUDIT: done** (14c2a4d, 17ec7aa, 08a34c8): `tests/warp_course.rs` (two days of S2 + Dragon give the same bits at 1×–10⁵×; D1–D3 reproduced as `#[ignore]`d tests that ADVANCE un-ignores), `technical/warp-invariance.md`, `technical/software-layers.md` (design), drafts `brief-advance.md` and `brief-layers.md`. Its findings went to the owner; its open points are in its brief (to archive).
-2. When PLANNER lands, tell ONEKIND-3 to go on (Left 3, 4). When AUDIT reports, give the owner its ranked difficulties (they asked), then start the wave (next steps, item 3) one agent at a time as slots free.
-3. ONEKIND-2, MISSION-2 and DOCS-2 are done (their briefs: ONEKIND's State; `brief-mission.md` and `brief-docs.md` to archive when convenient; DOCS-2's Left is still open).
+The owner, 2026-10-31: "Work all night on this please", with at least one agent on the interface (INTERFACE). The lead's context may go as high as needed tonight. The cap stays at 3 agents plus the lead.
+
+1. **Running:**
+   - **PLANNER-3** ([brief-planner.md](brief-planner.md), "For PLANNER-3"): the game's planner on nodes, then `predict_tests`, `landing::model`, the second stage's slew cap, MCP `set_plan` and the Falcon 9 mission test.
+   - **INTERFACE** ([brief-interface.md](brief-interface.md)): the map of the interface and its cleanup; the systems screen's thermal mesh and part isolation (D123's freeze lifted for the interface).
+   - **RESEARCH** ([brief-research.md](brief-research.md)): docs only, the flights' designs.
+2. **Next:** when a slot frees, **ONEKIND-4** ([brief-onekind.md](brief-onekind.md), its section). Then, once PLANNER and ONEKIND have landed, the wave one agent at a time: STATE, LAYERS, FIXES3, ADVANCE (from `brief-advance.md`), PERF (first: the coast's tank law at 5,000 parts), DEBRIS. Successor agents continue from a brief's State when one wraps up at ~300k.
+3. **Done tonight:** AUDIT (14c2a4d, 17ec7aa, 08a34c8); PLANNER-1 (bce4379, c7c2de4, 0a382b6); PLANNER-2 (bb43d53, 8de24aa, 835f839); ONEKIND-3 (1721504, be83b64; the stress craft's numbers in `scale-performance.md`). ONEKIND-2, MISSION-2 and DOCS-2 before them (`brief-mission.md`, `brief-docs.md` and `brief-audit.md` to archive when convenient; DOCS-2's Left is still open).
 
 ## State
 

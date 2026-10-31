@@ -20,6 +20,19 @@ The owner's answers tonight ([interview-2026-10-30-roadmap.md](../archive/interv
 - **Small item:** replace `GameCommand::SpawnTestShips` with a developer MCP tool that spawns n craft of parts, for the 11-vessel performance check (the hand-off's small items).
 - The small rocket's numbers (E) stand unless the owner says otherwise.
 
+## ONEKIND-4 (2026-10-31)
+
+You continue from ONEKIND-3's State. Your name is ONEKIND-4; your target dir is `target/agents/onekind4`: start warm with `mv target/agents/onekind3 target/agents/onekind4`. Running now:
+- **PLANNER-3** ([brief-planner.md](brief-planner.md)) moves the game's planner, `predict_tests` and `landing::model` onto nodes, and MCP's `set_plan` (`game::agent`). It says in its State when nothing needs the open-loop burn law any more.
+- **INTERFACE** ([brief-interface.md](brief-interface.md)) works in `game::systems_screen` and `game::interface`. Before you edit a game test file there, check `git status` for its uncommitted changes; if it has some, do other work first.
+
+The order:
+1. ONEKIND-3's Left 1, what remains: the sim unit tests, the examples that name the test craft, `GameCommand::SpawnTestShips` replaced by a developer MCP tool that spawns n craft of parts, then the game tests.
+2. Left 3 and 4 once PLANNER-3's State says the open-loop law is no longer needed: delete the made-up path, the test craft, the placeholder parts (`tests/parts.rs` moves to the stress craft of catalog parts or `craft::small`), D074's fin tests unless a finned craft of parts keeps them; then the decisions and their citations.
+3. The playtest save, as ONEKIND-3's section says (Dragon alone in orbit).
+
+Make your own doc changes (owners.md, the parts and vessel technical docs, the systems docs' test-craft mentions); there is no DOCS agent now.
+
 ## The work, in order
 
 1. **Inventory** the made-up path in this brief's State: every place that tells the two kinds of craft apart (~270 references). Search for the scalar `Vessel::propellant` and `set_propellant`, `systems::Consumables`, `Aboard::Fill`, D078's ideal couples (`rcs_authority` for the test craft), the test craft's single-part pipeline, `design_of`'s ids, `SUNSCATTER_CRAFT=test-craft`, `data/craft/test-craft`, and the tests that fly the test craft.
