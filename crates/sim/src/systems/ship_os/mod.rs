@@ -34,6 +34,9 @@
 //! - The parachutes' deploy ([`chutes`]): arming, on the press or by
 //!   itself below its height, and the main's opening by the altitude
 //!   reading (D126's switch, [`Switch`]).
+//! - The program API ([`program`]): programs at fixed epochs on what the
+//!   computer knows, D126's switch each; the first scheduled one is the
+//!   load manager ([`power_guard`]).
 //! - What the landing prediction needs ([`can_predict`]); the stage
 //!   estimates read the same `Knowledge` (`systems::estimate`).
 //!
@@ -48,6 +51,8 @@
 
 pub mod chutes;
 pub mod commit;
+pub mod power_guard;
+pub mod program;
 pub mod sas;
 pub mod sequence;
 pub mod ullage;
@@ -76,11 +81,24 @@ pub enum Switch {
 
 /// The ship computer's software on a vessel and its saved state (D128
 /// layer 2; saved with the vessel, copied to each piece of a split).
-#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Software {
     /// The parachutes' deploy.
     #[serde(default)]
     pub chutes: chutes::Chutes,
+    /// The maneuver program's switch (D126: by itself by default; its
+    /// state is the vessel's `program`).
+    #[serde(default = "program::Slot::auto")]
+    pub maneuver: program::Slot,
+    /// The scheduled programs, in the order they run at a shared epoch.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub programs: Vec<program::Installed>,
+}
+
+impl Default for Software {
+    fn default() -> Self {
+        Software { chutes: Default::default(), maneuver: program::Slot::auto(), programs: Vec::new() }
+    }
 }
 
 /// The computers' health: the flight software's second input.

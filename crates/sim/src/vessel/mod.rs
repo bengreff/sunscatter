@@ -47,6 +47,7 @@ mod helm;
 mod hold;
 mod id;
 mod live;
+mod programs;
 use live::{attitude_mode, Checked};
 mod maneuver;
 pub use maneuver::NodePrediction;

@@ -134,35 +134,9 @@ pub struct Program {
     pub throttle: Option<f64>,
 }
 
-/// What the program commands this tick: what a player would set.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct Commands {
-    /// SAS on with the maneuver hold along this (inertial, unit).
-    pub hold: Option<DVec3>,
-    pub throttle: Option<f64>,
-    /// Translation in body axes.
-    pub translate: Option<DVec3>,
-    /// Engines to ignite now.
-    pub ignite: Vec<u32>,
-}
-
-impl Commands {
-    /// The pilot's controls with these laid over them.
-    pub fn over(&self, pilot: &Controls) -> Controls {
-        let mut c = *pilot;
-        if self.hold.is_some() {
-            c.sas = true;
-            c.hold = HoldMode::Maneuver;
-        }
-        if let Some(t) = self.throttle {
-            c.throttle = t;
-        }
-        if let Some(t) = self.translate {
-            c.translate = t;
-        }
-        c
-    }
-}
+/// What the program commands this tick: the program API's (D128,
+/// `ship_os::program`).
+pub use super::ship_os::program::Commands;
 
 /// What the program reads at a tick.
 #[derive(Clone, Copy, Debug)]
@@ -385,7 +359,13 @@ fn commands(x: &Inputs, p: &mut Program) -> Commands {
                 p.step = Step::Burn;
                 p.first = p.dir;
                 p.ignited = Some(x.t);
-                return Commands { hold, throttle: Some(1.0), translate: push, ignite: p.engines.clone() };
+                return Commands {
+                    hold,
+                    throttle: Some(1.0),
+                    translate: push,
+                    ignite: p.engines.clone(),
+                    ..Commands::default()
+                };
             }
             Commands { hold, throttle: Some(0.0), translate: push, ..Commands::default() }
         }

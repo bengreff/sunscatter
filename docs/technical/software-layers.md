@@ -133,7 +133,9 @@ sim::systems::
     abort     the procedure and, automated, its decision (D120)
     chutes    arming and the main's height from Knowledge (D126; built)
     ullage    the settling push before a start
-    maneuver  PLANNER's program
+    maneuver  PLANNER's program (its Commands are the API's; its switch built)
+    program   the API: Context, Commands, Schedule, Slot, Installed (built)
+    power_guard the load manager, the first scheduled program (built)
     warp_stop the built-in bare-minimum rule (§4) and a program's replacement
 ```
 
@@ -160,7 +162,7 @@ sim::systems::
 2. *Built.* The ullage push out of `propulsion` into `ship_os::ullage`, with the engine's own start rule left in `propulsion` (open point 1: the wait goes with the push). The wait's state stays each engine's `settling` (saved; the game reads it), and it still reads the true liquid position (FIXES3: the level sensors, a timed burn without them).
 3. *Built.* The sequence, functions and interlocks out of `systems::command` into `ship_os::sequence`; `command::apply` stays the native boundary.
 4. *Built.* The chutes' arming and main height into `ship_os::chutes`, from the altitude in `Knowledge` (Dragon's barometric altimeter and cabin air monitor added, E).
-5. The schedule: programs at fixed epochs that stop the advance like orders (with ADVANCE's arrivals-as-orders, [warp-invariance.md](warp-invariance.md) §7, point 4).
+5. *Built (LAYERS-2).* The program API, `ship_os::program`: `Context` in (the `View`, `Health`, the definition, and `Context::read` for the ship-state quantities `Knowledge` knows, `systems::data::truth`), `Commands` out (the maneuver program's, moved here, plus ship commands and a wake epoch), saved state (`Installed` in `ship_os::Software`, saved with the vessel). The schedule (`Schedule`: a period from its own epoch, or a wake epoch): `Vessel::programs_stop` joins `order_stop`, so each due epoch stops the continuous advance as an order does; due programs run where orders are applied (`vessel::programs`; live ticks at the first tick at or after). D126's switch per program (`Slot`: by itself, one run per press, off; a switch or press restarts a period from now, `Installed::resume`), and the maneuver program's own (`Software::maneuver`). The first scheduled program: the load manager `ship_os::power_guard`. Test: `tests/ship_programs.rs` (the same switch epochs and battery bits at 1× and 10⁵×). Left: `systems::maneuver` still lives outside `ship_os` (the move waits for `game::commands` to be free); the agent's and the systems screen's switches (game).
 6. `ship_os::warp_stop`: the built-in rule (§4) as a pure function with a table test, the program's replacement, and `notify` per craft; the game's warp stop at the stop's epoch.
 7. The power priorities as parameters; the life support's stocks; the bare-minimum test: Dragon coasting a month on layer 1 alone, set up, with nothing stopping warp. Today it fails on CO₂ within a day.
 

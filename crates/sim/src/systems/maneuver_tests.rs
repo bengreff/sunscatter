@@ -362,7 +362,13 @@ fn the_controls_flown_are_the_program_s_while_it_flies() {
 #[test]
 fn commands_lay_over_the_pilot_s_controls() {
     let pilot = Controls { throttle: 0.2, sas: false, chute: true, ..Controls::default() };
-    let c = Commands { hold: Some(DVec3::X), throttle: Some(1.0), translate: Some(DVec3::Z), ignite: vec![0] };
+    let c = Commands {
+        hold: Some(DVec3::X),
+        throttle: Some(1.0),
+        translate: Some(DVec3::Z),
+        ignite: vec![0],
+        ..Default::default()
+    };
     let flown = c.over(&pilot);
     assert_eq!((flown.throttle, flown.sas, flown.hold, flown.translate), (1.0, true, HoldMode::Maneuver, DVec3::Z));
     assert!(flown.chute, "what it does not command stays the pilot's");

@@ -122,16 +122,23 @@ impl Vessel {
             Phase::Powered { .. } => false,
         };
         let order = continuous.then(|| self.ship.as_ref()?.next_order()).flatten();
-        // A planned burn's program wakes at its epoch the same way.
+        // A planned burn's program wakes at its epoch the same way, and each
+        // scheduled program runs at its own (D129).
         let wake = continuous.then(|| self.program_stop()).flatten();
-        match (order, wake) {
-            (Some(o), Some(w)) => Some(if w < o { w } else { o }),
-            (o, w) => o.or(w),
+        let programs = continuous.then(|| self.programs_stop()).flatten();
+        [order, wake, programs].into_iter().flatten().reduce(|a, b| if b < a { b } else { a })
+    }
+
+    /// Applies every order due at the vessel's time (see the module), then
+    /// runs every program due (`programs`).
+    pub(super) fn apply_orders(&mut self, world: &World) {
+        self.apply_due_orders(world);
+        if self.breakup.is_none() {
+            self.run_programs(world);
         }
     }
 
-    /// Applies every order due at the vessel's time (see the module).
-    pub(super) fn apply_orders(&mut self, world: &World) {
+    fn apply_due_orders(&mut self, world: &World) {
         let at = self.time;
         let Some(state) = self.ship.as_ref() else { return };
         if state.next_order().is_none_or(|e| e > at) {

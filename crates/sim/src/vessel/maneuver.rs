@@ -191,7 +191,11 @@ impl Vessel {
     }
 
     /// The epoch the next program wakes, while it waits.
+    /// Its switch (D126) may hold it: off, or on a press not yet given.
     pub(super) fn program_stop(&self) -> Option<Epoch> {
+        if !self.software.maneuver.may_run() {
+            return None;
+        }
         self.program.as_ref().filter(|p| p.step == Step::Wait).map(|p| p.wake)
     }
 
@@ -220,6 +224,9 @@ impl Vessel {
     /// Wakes the waiting program when its epoch has come, with the pilot's
     /// `controls` as its baseline.
     pub(super) fn wake_program(&mut self, world: &World, controls: &super::Controls) {
+        if !self.software.maneuver.may_run() {
+            return;
+        }
         let Some(p) = self.program.as_ref().filter(|p| p.step == Step::Wait && p.wake <= self.time) else { return };
         let Some(node) = self.nodes.get(p.node).copied() else { return };
         let Some((def, state)) = self.ship_parts() else { return };
@@ -229,6 +236,8 @@ impl Vessel {
         let mut p = self.program.take().expect("checked");
         p.wake_up(&node, rel, mu, to_node, controls);
         self.program = Some(p);
+        // A press runs one burn.
+        self.software.maneuver.pressed = false;
         self.program_log();
     }
 

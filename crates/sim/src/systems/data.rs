@@ -213,6 +213,24 @@ pub fn provides(quantity: &str, accuracy: f64) -> Vec<(Quantity, f64)> {
     }
 }
 
+/// The true value of a quantity of the ship state, which a known
+/// quantity's reading shows (D106: the truth at its precision): a tank's
+/// liquid (kg), a battery's charge (J), the cabin's total, O₂ and CO₂
+/// pressures (Pa). `None` for the vessel's motion (position, velocity,
+/// altitude, attitude, rates, acceleration: the vessel's, not the ship
+/// state's) and for what is not modelled as one number here yet.
+pub fn truth(state: &ShipState, q: Quantity) -> Option<f64> {
+    let cabin = state.cabin.as_ref();
+    match q {
+        Quantity::TankLevel(i) => state.tanks.get(i as usize).map(|t| t.liquid),
+        Quantity::BatteryCharge(i) => state.batteries.get(i as usize).map(|b| b.charge),
+        Quantity::CabinPressure => cabin.map(|c| c.o2 + c.n2 + c.co2 + c.h2o),
+        Quantity::CabinO2 => cabin.map(|c| c.o2),
+        Quantity::CabinCo2 => cabin.map(|c| c.co2),
+        _ => None,
+    }
+}
+
 /// What the vessel of `def` in `state` knows now (see the module).
 pub fn knowledge(def: &ShipDef, state: &ShipState, debug: bool) -> Knowledge {
     if debug {
