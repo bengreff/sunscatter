@@ -295,8 +295,37 @@ pub struct Session {
 enum Job {
     Shot(Shot),
     Run(Run),
-    Bench { call: Call, path: Option<PathBuf>, held: bool },
+    Bench { call: Call, path: Option<PathBuf> },
     Profile(Profile),
+}
+
+/// What a job in flight is (for the clock's hold, [`clock_held`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum JobKind {
+    Shot,
+    Run,
+    Bench,
+    Profile,
+}
+
+impl Job {
+    fn kind(&self) -> JobKind {
+        match self {
+            Job::Shot(_) => JobKind::Shot,
+            Job::Run(_) => JobKind::Run,
+            Job::Bench { .. } => JobKind::Bench,
+            Job::Profile(_) => JobKind::Profile,
+        }
+    }
+}
+
+/// Whether the clock is held: while any shot settles or the benchmark
+/// measures, so overlapping ones release it only when the last ends. (Each
+/// used to save the hold and put it back when done, so a shot begun under
+/// the benchmark put the benchmark's hold back after it had ended: time
+/// stood still while `get_state` said it ran.)
+fn clock_held(jobs: impl IntoIterator<Item = JobKind>) -> bool {
+    jobs.into_iter().any(|k| matches!(k, JobKind::Shot | JobKind::Bench))
 }
 
 struct Shot {
@@ -320,7 +349,6 @@ struct Restore {
     help: bool,
     cards: Vec<crate::interface::part_card::Open>,
     ui_scale: Option<f32>,
-    held: bool,
 }
 
 struct Run {
@@ -763,13 +791,12 @@ pub fn run(
     let jobs = std::mem::take(&mut session.jobs);
     for job in jobs {
         let kept = match job {
-            Job::Shot(s) => shot(s, dt, &mut commands, &mut pause, &mut screens, &mut out),
+            Job::Shot(s) => shot(s, dt, &mut commands, &mut screens, &mut out),
             Job::Run(r) => run_job(r, dt, &mut sim, &mut stop),
-            Job::Bench { call, path, held } => {
+            Job::Bench { call, path } => {
                 if measures.bench.running() {
-                    Some(Job::Bench { call, path, held })
+                    Some(Job::Bench { call, path })
                 } else {
-                    pause.0 = held;
                     let b = &measures.bench;
                     let md = crate::bench::markdown(b);
                     let written = path.as_ref().map(|p| std::fs::write(p, &md).map_err(|e| e.to_string()));
@@ -788,6 +815,7 @@ pub fn run(
         };
         session.jobs.extend(kept);
     }
+    pause.0 = clock_held(session.jobs.iter().map(Job::kind));
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -849,7 +877,6 @@ fn start(
                     help: screens.help.open,
                     cards: screens.cards.open.clone(),
                     ui_scale: out.offscreen.ui_scale,
-                    held: pause.0,
                 };
                 if let Err(e) = show(&spec, sim, screens) {
                     return done(call, Err(e));
@@ -944,10 +971,9 @@ fn start(
                 .map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect())
                 .unwrap_or_default();
             let path = args.get("path").and_then(Value::as_str).map(PathBuf::from);
-            let held = pause.0;
             pause.0 = true;
             measures.bench.start(&label, &only);
-            Started::Job(Job::Bench { call, path, held })
+            Started::Job(Job::Bench { call, path })
         }
         "profile" => {
             let seconds = args.get("seconds").and_then(Value::as_f64).unwrap_or(5.0).clamp(1.0, 60.0);
@@ -1041,14 +1067,7 @@ fn show(spec: &ShotSpec, sim: &SimState, s: &mut Screens) -> Result<(), String> 
 }
 
 /// A shot's frames: settle, take, put back and answer.
-fn shot(
-    mut s: Shot,
-    dt: f64,
-    commands: &mut Commands,
-    pause: &mut SimPause,
-    screens: &mut Screens,
-    out: &mut Output,
-) -> Option<Job> {
+fn shot(mut s: Shot, dt: f64, commands: &mut Commands, screens: &mut Screens, out: &mut Output) -> Option<Job> {
     s.timer += dt;
     match &s.taken {
         None => {
@@ -1086,7 +1105,6 @@ fn shot(
             screens.help.open = r.help;
             screens.cards.open = r.cards.clone();
             out.offscreen.ui_scale = r.ui_scale;
-            pause.0 = r.held;
             let size = out.offscreen.image.as_ref().map(|_| out.offscreen.size);
             s.call.reply(ToolResult::Ok(json!({"path": s.path, "settled": settled, "size": size})));
             None
@@ -1240,6 +1258,28 @@ mod tests {
         for (text, want) in cases {
             assert_eq!(parse_epoch(text).map(|e| e.seconds_since(start)), want, "{text}");
         }
+    }
+
+    #[test]
+    fn the_clock_is_held_while_any_shot_or_benchmark_is_in_flight() {
+        use JobKind::{Bench, Profile, Run, Shot};
+        // (jobs in flight, held)
+        let cases: [(&[JobKind], bool); 6] = [
+            (&[], false),
+            (&[Run], false),
+            (&[Profile, Run], false),
+            (&[Shot], true),
+            (&[Bench], true),
+            (&[Run, Bench, Shot], true),
+        ];
+        for (jobs, want) in cases {
+            assert_eq!(clock_held(jobs.iter().copied()), want, "{jobs:?}");
+        }
+        // A shot taken while the benchmark runs, outliving it (the clock
+        // stood still after both ended): held until the last ends.
+        let frames: [&[JobKind]; 4] = [&[Bench], &[Bench, Shot], &[Shot], &[]];
+        let held: Vec<bool> = frames.iter().map(|jobs| clock_held(jobs.iter().copied())).collect();
+        assert_eq!(held, [true, true, true, false]);
     }
 
     #[test]
