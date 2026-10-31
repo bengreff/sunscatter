@@ -10,6 +10,8 @@
 //! trip: equatorial orbits take `raan = 0`; circular orbits take `argp = 0`.
 
 pub mod lambert;
+mod propagate;
+pub use propagate::propagate;
 
 use crate::math::{self, TAU};
 use glam::DVec3;
