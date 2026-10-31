@@ -1400,8 +1400,10 @@ fn set_camera(args: &Value, sim: &SimState, rig: &mut CameraRig) -> Result<Value
         Focus::Vessel(id) => json!({"vessel": id.0}),
         Focus::Body(b) => json!(sim.world.eph.node(b).name),
     };
-    Ok(json!({"focus": focus, "distance_m": rig.distance, "pitch_deg": rig.pitch.to_degrees(),
-              "yaw_deg": rig.yaw.to_degrees()}))
+    // The camera's angles back in degrees to a millionth (30, not
+    // 29.999999999999996 through the radians it keeps).
+    let deg = |a: f64| super::digits(a.to_degrees(), 6);
+    Ok(json!({"focus": focus, "distance_m": rig.distance, "pitch_deg": deg(rig.pitch), "yaw_deg": deg(rig.yaw)}))
 }
 
 #[cfg(test)]
