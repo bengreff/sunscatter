@@ -179,9 +179,15 @@ fn feed_hold(mut sim: ResMut<SimState>, nav: Res<Navball>) {
 }
 
 /// Proper (non-gravitational) acceleration of `vessel` at its state
-/// (`anchor`, `r`, `v`) at `t`: thrust and drag, or the ground's push when
-/// landed. Its length over g0 is the g-load.
-pub fn proper_accel(world: &World, t: Epoch, vessel: &Vessel, throttle: f64) -> DVec3 {
+/// (`anchor`, `r`, `v`) at `t`, inertial axes: what its last live tick felt
+/// while it flies live (thrust and the full aerodynamics: the tick's change
+/// of velocity less gravity, `sim::vessel::ship_tick`), its drag as its
+/// coast integrates it, or the ground's push when landed. Its length over
+/// g0 is the g-load: the G row's, and the systems screen's (one owner).
+/// (Under thrust it was the coast's drag on the live state: the hull's drag
+/// area averaged over every direction, a rocket's broadside included, so
+/// at max-Q the Falcon 9 read 0.42 g for 2.03 g.)
+pub fn proper_accel(world: &World, t: Epoch, vessel: &Vessel) -> DVec3 {
     let (anchor, r, v) = vessel.state_at(world, t);
     let snap = world.snapshot(t);
     let active = ActiveSources::select(world, &snap, anchor, r);
@@ -196,10 +202,7 @@ pub fn proper_accel(world: &World, t: Epoch, vessel: &Vessel, throttle: f64) -> 
                 .map_or(DVec3::ZERO, |p| p.rotation.omega(t).raw());
             omega.cross(omega.cross(r)) - gravity
         }
-        Phase::Powered { .. } => {
-            let thrust = vessel.thrust_accel(world, throttle);
-            ctx(Some(vessel.drag()), thrust).accel_with(&snap, r, v) - gravity
-        }
+        Phase::Powered { .. } => vessel.ship().map_or(DVec3::ZERO, |s| vessel.attitude.q * s.runtime.accel),
         Phase::Coasting { .. } => ctx(Some(vessel.drag()), DVec3::ZERO).accel_with(&snap, r, v) - gravity,
     }
 }
@@ -291,12 +294,18 @@ pub fn nav_state(sim: &SimState, tracked: &Tracked, aps: &Apsides, nav: &mut Nav
     })
 }
 
+/// The proper acceleration `vessel` feels at `t`, body axes
+/// ([`proper_accel`]).
+pub fn felt(sim: &SimState, vessel: &Vessel, t: Epoch) -> DVec3 {
+    vessel.attitude.q.inverse() * proper_accel(&sim.world, t, vessel)
+}
+
 /// The G row of `vessel` (the active one): its proper acceleration in
 /// body axes and, for a craft of parts, its g-limit.
 fn g_readout(sim: &SimState, vessel: &Vessel, t: Epoch) -> g_meter::GReadout {
-    let a = vessel.attitude.q.inverse() * proper_accel(&sim.world, t, vessel, sim.controls().throttle);
+    let a = felt(sim, vessel, t);
     let def = vessel.ship_def();
-    let limit = def.as_ref().zip(vessel.ship()).and_then(|(d, s)| sim::systems::g_limit::g_limit(d, s));
+    let limit = def.as_ref().zip(vessel.ship()).and_then(|(d, s)| sim::systems::g_limit::g_limit(d, s, a));
     g_meter::readout(a, limit, |j| def.as_ref().and_then(|d| d.joints.get(j)).map(|j| j.name.clone()))
 }
 
@@ -348,6 +357,7 @@ impl Navball {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use glam::DQuat;
     use sim::kepler::Elements;
     use sim::vessel::VesselId;
     use std::sync::Arc;
@@ -363,14 +373,14 @@ mod tests {
         let w = world();
         let t = sim::sol::sol_epoch();
         let pad = Vessel::landed_at(&w, VesselId(1), "Earth", 28.6, -80.6, t, &sim::craft::small::legs_out());
-        let g = proper_accel(&w, t, &pad, 0.0).length() / rules::G0;
+        let g = proper_accel(&w, t, &pad).length() / rules::G0;
         assert!((g - 1.0).abs() < 0.01, "pad {g}");
 
         let earth = w.find("Earth").expect("Earth").clone();
         let el = Elements { a: 6_778_137.0, e: 0.001, i: 0.9, raan: 0.3, argp: 0.0, mean_anomaly: 1.0 };
         let (r, v) = el.to_state(earth.gm);
         let leo = Vessel::coasting(&w, VesselId(1), t, earth.node, r, v, sim::craft::small::rocket_ref());
-        let g = proper_accel(&w, t, &leo, 0.0).length() / rules::G0;
+        let g = proper_accel(&w, t, &leo).length() / rules::G0;
         assert!(g < 1e-6, "coasting in vacuum {g}");
 
         // Its engines lit and run up (a 1 s start) at full throttle.
@@ -384,7 +394,44 @@ mod tests {
             usize::MAX,
         );
         let expected = sim::landing::Thrust::of_vessel(&burn).0.vac / burn.mass() / rules::G0;
-        let g = proper_accel(&w, burn.time, &burn, 1.0).length() / rules::G0;
-        assert!((g - expected).abs() < 1e-6, "full thrust {g} vs {expected}");
+        let g = proper_accel(&w, burn.time, &burn).length() / rules::G0;
+        assert!((g - expected).abs() < 1e-3 * expected, "full thrust {g} vs {expected}");
+    }
+
+    /// Under thrust in the air, the G row is what the trajectory felt: its
+    /// change of velocity over a tick less gravity (the full aerodynamics),
+    /// not the coast's drag area averaged over every direction.
+    #[test]
+    fn g_load_under_thrust_in_the_air_is_what_the_trajectory_felt() {
+        let w = world();
+        let t = sim::sol::sol_epoch();
+        let earth = w.find("Earth").expect("Earth").clone();
+        // 10 km up, climbing at 400 m/s, nose along the flight.
+        let up = DVec3::new(0.6, 0.8, 0.0);
+        let (r, v) = (up * 6_388_137.0, up * 400.0);
+        let mut burn = Vessel::coasting(&w, VesselId(1), t, earth.node, r, v, sim::craft::small::rocket_ref());
+        burn.phase = Phase::Powered { anchor: earth.node, r, v };
+        burn.attitude.q = DQuat::from_rotation_arc(DVec3::Z, up);
+        burn.next_stage(&w).expect("the ignition");
+        let full = sim::vessel::Controls { throttle: 1.0, ..Default::default() };
+        burn.advance(&w, t.add_seconds(2.0), &full, usize::MAX);
+        let (a0, r0, v0) = burn.state(&w);
+        let t0 = burn.time;
+        burn.advance(&w, t0.add_seconds(sim::vessel::TICK), &full, usize::MAX);
+        let (_, _, v1) = burn.state(&w);
+        let felt = (v1 - v0) / burn.time.seconds_since(t0) - gravity_of(&w, t0, a0, r0);
+        let g = proper_accel(&w, burn.time, &burn);
+        assert!((g - felt).length() < 0.01 * rules::G0, "G row {g} against the trajectory's {felt}");
+        assert!(g.length() > 1.5 * rules::G0, "thrusting: {g}");
+    }
+
+    fn gravity_of(w: &World, t: Epoch, anchor: NodeId, r: DVec3) -> DVec3 {
+        let snap = w.snapshot(t);
+        let active = ActiveSources::select(w, &snap, anchor, r);
+        ForceContext { world: w, anchor, active: &active, drag: None, thrust: DVec3::ZERO }.accel_with(
+            &snap,
+            r,
+            DVec3::ZERO,
+        )
     }
 }

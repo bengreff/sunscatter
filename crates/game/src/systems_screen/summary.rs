@@ -35,6 +35,9 @@ pub struct Inputs<'a> {
     pub mass: (f64, f64, f64),
     /// The electrical system (`menus::power::gather`).
     pub power: Option<&'a power::PowerData>,
+    /// The proper acceleration the craft feels now, body axes: the
+    /// navball's G (`navball::felt`, one owner).
+    pub accel: glam::DVec3,
 }
 
 /// How many joints or parts a "nearest their limits" list shows.
@@ -87,18 +90,22 @@ fn structure(x: &Inputs) -> Vec<Group> {
         .row("dry mass", tonnes(x.mass.1))
         .row("centre of mass", k.or_dash(k.propellant, || format!("{:.1} m above the base", x.mass.2)));
     let g0 = crate::navball::rules::G0;
-    let now = state.runtime.accel.length() / g0;
-    match sim::systems::g_limit::g_limit(def, state) {
-        Some(l) if k.knows(Quantity::Acceleration) => {
+    let now = x.accel.length() / g0;
+    use sim::systems::g_limit::{g_limit, ACCELERATING};
+    match g_limit(def, state, x.accel) {
+        _ if !k.knows(Quantity::Acceleration) => {
+            g.row("g-limit", DASH);
+        }
+        Some(l) => {
             let by = crate::navball::g_meter::limiter(l.by, |j| def.joints.get(j).map(|j| j.name.clone()));
             g.limit("g-limit", format!("{now:.1} g / {:.1} g", l.accel / g0), Some(now), l.accel / g0)
                 .row("set by", by);
         }
-        Some(_) => {
-            g.row("g-limit", DASH);
+        None if x.accel.length() < ACCELERATING => {
+            g.row("g-limit", "none: not accelerating");
         }
         None => {
-            g.row("g-limit", "none: not accelerating");
+            g.row("g-limit", "none within 100 g");
         }
     }
     let mut joints = Group::new("JOINTS NEAREST THEIR ULTIMATE");

@@ -1,5 +1,6 @@
 use super::*;
 use crate::test_rocket::rocket;
+use glam::DVec3;
 use sim::systems::Knowledge;
 
 fn facts_of(def: &ShipDef, state: &ShipState, known: &Knowledge) -> Vec<PartFacts> {
@@ -22,9 +23,25 @@ fn each_layer_summarises_the_craft() {
     let all = Knowledge::perfect();
     let facts = facts_of(def, &state, &all);
     let known = Known::from(all);
-    let x = Inputs { def, state: &state, facts: &facts, known: &known, mass: (12_345.0, 4_000.0, 2.5), power: None };
+    let x = Inputs {
+        def,
+        state: &state,
+        facts: &facts,
+        known: &known,
+        mass: (12_345.0, 4_000.0, 2.5),
+        power: None,
+        accel: DVec3::ZERO,
+    };
     let s = summary(Layer::Structural, &x);
     assert_eq!(group(&s, "STRUCTURE").value("mass"), Some("12.35 t"));
+    assert_eq!(group(&s, "STRUCTURE").value("g-limit"), Some("none: not accelerating"));
+    // The g-load is the one given (the navball's), not the state's last
+    // live tick's: 2 g along the nose, the crew's limit.
+    let thrusting = Inputs { accel: DVec3::Z * 2.0 * crate::navball::rules::G0, ..x };
+    let s2 = summary(Layer::Structural, &thrusting);
+    let row = group(&s2, "STRUCTURE").value("g-limit").unwrap_or_default().to_string();
+    assert!(row.starts_with("2.0 g / "), "{row}");
+    assert!(group(&s2, "STRUCTURE").value("set by").is_some_and(|b| b.starts_with("crew")), "{s2:#?}");
     assert_eq!(group(&s, "STRUCTURE").value("dry mass"), Some("4000 kg"));
     assert_eq!(group(&s, "STRUCTURE").value("centre of mass"), Some("2.5 m above the base"));
     // Unloaded on the pad's state: every rated joint at 0 %, linked to its
@@ -54,6 +71,7 @@ fn each_layer_summarises_the_craft() {
     let x = Inputs { known: &blind, facts: &facts, ..x };
     let s = summary(Layer::Structural, &x);
     assert_eq!(group(&s, "STRUCTURE").value("mass"), Some(DASH));
+    assert_eq!(group(&s, "STRUCTURE").value("g-limit"), Some(DASH));
     let joints = group(&s, "JOINTS");
     // The joints the craft gives a capacity are not measured; the rest (the
     // legs, hung by their hinges) have nothing to measure against.
@@ -89,7 +107,15 @@ fn the_hottest_and_the_worn_lead() {
         part(4, "blind", None, 0.0),
     ];
     let known = Known::default();
-    let x = Inputs { def, state: &state, facts: &facts, known: &known, mass: (0.0, 0.0, 0.0), power: None };
+    let x = Inputs {
+        def,
+        state: &state,
+        facts: &facts,
+        known: &known,
+        mass: (0.0, 0.0, 0.0),
+        power: None,
+        accel: DVec3::ZERO,
+    };
     let t = summary(Layer::Thermal, &x);
     let g = group(&t, "NEAREST");
     // (label, value, level)

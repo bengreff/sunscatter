@@ -17,7 +17,12 @@
 //! from them meant nothing (the Falcon 9's upper stage after separation,
 //! turning on its thrusters at 0.00 g, showed a limit of 1.3 g).
 //!
-//! Pure: reads the ship state the live ticks left (`Runtime::accel`).
+//! Pure: the acceleration now is the caller's, the proper acceleration
+//! the craft feels (the game's G row, `game::navball::proper_accel`: the
+//! last live tick's while it flies live, the ground's push where it stands,
+//! its drag on a coast), and the joints' scales are the last live tick's.
+//! (It read the last live tick's acceleration from the state, which a
+//! coast kept: in orbit the limit said 4.4 g / 7.5 g, the navball 0.00 g.)
 
 use super::crew;
 use crate::craft::ship::ShipDef;
@@ -44,11 +49,10 @@ pub struct GLimit {
     pub by: Limiter,
 }
 
-/// The limit of the craft of `def` in `state` (see the module): `None`
-/// when it accelerates less than [`ACCELERATING`], or nothing it has
-/// limits it within 100 g.
-pub fn g_limit(def: &ShipDef, state: &ShipState) -> Option<GLimit> {
-    let a = state.runtime.accel;
+/// The limit of the craft of `def` in `state` accelerating at `a` (its
+/// proper acceleration now, body axes; see the module): `None` when that is
+/// less than [`ACCELERATING`], or nothing it has limits it within 100 g.
+pub fn g_limit(def: &ShipDef, state: &ShipState, a: glam::DVec3) -> Option<GLimit> {
     let mag = a.length();
     if mag < ACCELERATING {
         return None;
@@ -83,39 +87,44 @@ mod tests {
     fn the_lowest_limit_and_what_sets_it() {
         let def = falcon9();
         let mut s = ShipState::initial(&def);
+        let mut a = DVec3::ZERO;
         assert!(def.joints.len() >= 3 && crew::crew_of(&def) > 0 && s.cabin.is_some());
-        assert_eq!(g_limit(&def, &s), None, "at rest: no acceleration");
+        assert_eq!(g_limit(&def, &s, a), None, "at rest: no acceleration");
+        // A coast after a burn: the joints' scales are the burn's last
+        // tick's, but the craft accelerates no more.
+        s.joints[1].to_ultimate = Some(2.0);
+        assert_eq!(g_limit(&def, &s, a), None, "coasting after a burn");
         // Coasting, a joint loaded by a couple: no limit under 0.01 g.
         s.joints[1].to_ultimate = Some(3000.0);
-        s.runtime.accel = DVec3::Z * 0.004;
-        assert_eq!(g_limit(&def, &s), None, "coasting");
-        s.runtime.accel = DVec3::Z * ACCELERATING;
+        a = DVec3::Z * 0.004;
+        assert_eq!(g_limit(&def, &s, a), None, "coasting");
+        a = DVec3::Z * ACCELERATING;
         s.joints[1].to_ultimate = Some(300.0);
-        assert_eq!(g_limit(&def, &s).map(|l| l.by), Some(Limiter::Joint(1)), "at 0.01 g");
+        assert_eq!(g_limit(&def, &s, a).map(|l| l.by), Some(Limiter::Joint(1)), "at 0.01 g");
         s.joints[1].to_ultimate = None;
-        s.runtime.accel = DVec3::Z * 9.80665;
+        a = DVec3::Z * 9.80665;
         // Only the crew: eyeballs in, sustained.
-        let l = g_limit(&def, &s).expect("crewed");
+        let l = g_limit(&def, &s, a).expect("crewed");
         assert_eq!(l.by, Limiter::Crew(0));
         assert!((l.accel - 73.5).abs() < 1e-9, "{l:?}");
         // Joint 1 at 5× the load now (5 g), joint 2 at 3×.
         s.joints[1].to_ultimate = Some(5.0);
         s.joints[2].to_ultimate = Some(3.0);
-        let l = g_limit(&def, &s).expect("joints");
+        let l = g_limit(&def, &s, a).expect("joints");
         assert_eq!(l.by, Limiter::Joint(2));
         assert!((l.accel - 3.0 * 9.80665).abs() < 1e-9);
         // Joint 2 broken: joint 1 sets it; at 10× it is the crew again.
         s.joints[2].intact = false;
-        assert_eq!(g_limit(&def, &s).map(|l| l.by), Some(Limiter::Joint(1)));
+        assert_eq!(g_limit(&def, &s, a).map(|l| l.by), Some(Limiter::Joint(1)));
         s.joints[1].to_ultimate = Some(10.0);
-        assert_eq!(g_limit(&def, &s).map(|l| l.by), Some(Limiter::Crew(0)));
+        assert_eq!(g_limit(&def, &s, a).map(|l| l.by), Some(Limiter::Crew(0)));
         // Sideways: the crew's sideways limit.
-        s.runtime.accel = DVec3::X * 9.80665;
-        assert_eq!(g_limit(&def, &s).map(|l| l.by), Some(Limiter::Crew(2)));
+        a = DVec3::X * 9.80665;
+        assert_eq!(g_limit(&def, &s, a).map(|l| l.by), Some(Limiter::Crew(2)));
         // Uncrewed (no cabin): only the joints.
         s.cabin = None;
-        assert_eq!(g_limit(&def, &s).map(|l| l.by), Some(Limiter::Joint(1)));
+        assert_eq!(g_limit(&def, &s, a).map(|l| l.by), Some(Limiter::Joint(1)));
         s.joints[1].to_ultimate = None;
-        assert_eq!(g_limit(&def, &s), None);
+        assert_eq!(g_limit(&def, &s, a), None);
     }
 }

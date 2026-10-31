@@ -70,6 +70,7 @@ pub fn draw(
                 known: &known,
                 mass: (vessel.mass_props().mass, vessel.craft.mass.dry_mass, vessel.contact_height()),
                 power: power.as_ref(),
+                accel: crate::navball::felt(&sim, vessel, sim.clock),
             };
             left_column(ui, &mut screen, &craft, &x);
         });

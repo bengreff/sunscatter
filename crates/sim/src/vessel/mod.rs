@@ -82,7 +82,7 @@ pub use split::{Breakup, SplitPlan};
 pub use trajectory::Trajectory;
 
 use crate::craft::CraftParams;
-use crate::forces::{ambient_pressure, DragModel};
+use crate::forces::DragModel;
 use crate::frame::{BodyFixed, NodeId, Vec3};
 use crate::time::Epoch;
 use crate::world::World;
@@ -391,14 +391,6 @@ impl Vessel {
     /// engines' next step).
     pub fn engine_running(&self) -> bool {
         self.ship_engines_on().unwrap_or(false)
-    }
-
-    /// Thrust acceleration (inertial axes, m/s²) the engine would give at
-    /// `throttle` now, along the nose (display: the navball).
-    pub fn thrust_accel(&self, world: &World, throttle: f64) -> DVec3 {
-        let (anchor, r, _) = self.state(world);
-        let p = ambient_pressure(world, &world.snapshot(self.time), anchor, r);
-        self.ship_thrust(throttle, p).map_or(DVec3::ZERO, |t| self.attitude.q * t.dir * (t.thrust / self.mass()))
     }
 
     /// Landed and crashed vessels rotate rigidly with their body.
