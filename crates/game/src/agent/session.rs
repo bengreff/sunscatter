@@ -328,6 +328,27 @@ fn clock_held(jobs: impl IntoIterator<Item = JobKind>) -> bool {
     jobs.into_iter().any(|k| matches!(k, JobKind::Shot | JobKind::Bench))
 }
 
+/// How many of the waiting calls (their tools, in the order they came)
+/// start this frame: all of them, up to a shot that would overlap another
+/// shot in flight. The screens are one state: two shots at once showed each
+/// other's screens, and the second saved the first's open screens and put
+/// them back after the first had restored the player's. The calls behind a
+/// waiting shot wait with it, so they still run in the order sent.
+fn starting<'a>(tools: impl IntoIterator<Item = &'a str>, shot_in_flight: bool) -> usize {
+    let mut shooting = shot_in_flight;
+    let mut n = 0;
+    for tool in tools {
+        if tool == "shoot" {
+            if shooting {
+                break;
+            }
+            shooting = true;
+        }
+        n += 1;
+    }
+    n
+}
+
 struct Shot {
     call: Call,
     path: PathBuf,
@@ -768,7 +789,10 @@ pub fn run(
 ) {
     let dt = measures.real.delta_secs_f64();
     let session = &mut *session;
-    for call in std::mem::take(&mut session.incoming) {
+    let in_flight = session.jobs.iter().any(|j| j.kind() == JobKind::Shot);
+    let now = starting(session.incoming.iter().map(|c| c.tool.as_str()), in_flight);
+    let waiting = session.incoming.split_off(now);
+    for call in std::mem::replace(&mut session.incoming, waiting) {
         let n = session.shots + 1;
         let started =
             start(call, n, &mut sim, &mut rig, &mut pause, &mut stop, &mut screens, &mut measures, &mut out, &mut game);
@@ -815,7 +839,9 @@ pub fn run(
         };
         session.jobs.extend(kept);
     }
-    pause.0 = clock_held(session.jobs.iter().map(Job::kind));
+    // A shot waiting for the one before keeps the clock held between them.
+    let shot_waiting = session.incoming.iter().any(|c| c.tool == "shoot").then_some(JobKind::Shot);
+    pause.0 = clock_held(session.jobs.iter().map(Job::kind).chain(shot_waiting));
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -1280,6 +1306,29 @@ mod tests {
         let frames: [&[JobKind]; 4] = [&[Bench], &[Bench, Shot], &[Shot], &[]];
         let held: Vec<bool> = frames.iter().map(|jobs| clock_held(jobs.iter().copied())).collect();
         assert_eq!(held, [true, true, true, false]);
+    }
+
+    #[test]
+    fn a_shot_waits_for_the_shot_in_flight_and_the_calls_behind_it_wait_too() {
+        // (waiting calls, a shot in flight, how many start this frame)
+        let cases: [(&[&str], bool, usize); 8] = [
+            (&[], false, 0),
+            (&[], true, 0),
+            (&["shoot"], false, 1),
+            (&["shoot"], true, 0),
+            (&["get_state", "set_camera"], true, 2),
+            (&["shoot", "shoot"], false, 1),
+            (&["set_camera", "shoot", "get_state", "shoot", "pause"], false, 3),
+            (&["get_state", "shoot", "pause"], true, 1),
+        ];
+        for (tools, in_flight, want) in cases {
+            assert_eq!(starting(tools.iter().copied(), in_flight), want, "{tools:?} {in_flight}");
+        }
+        // Two shots sent together are taken one after the other, each
+        // putting back what it found: the second starts once the first ends.
+        let frames = [(&["shoot", "shoot"][..], false), (&["shoot"][..], true), (&["shoot"][..], false)];
+        let started: Vec<usize> = frames.iter().map(|(t, f)| starting(t.iter().copied(), *f)).collect();
+        assert_eq!(started, [1, 0, 1]);
     }
 
     #[test]
