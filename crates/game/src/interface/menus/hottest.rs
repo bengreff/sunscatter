@@ -1,65 +1,57 @@
-//! The parts nearest their temperature limits (Landing ▸ Thermal): per
-//! part, the skin cell nearest its own limit; for a craft of parts each
-//! part by its craft-file id (the design's `cell_part`), for the test craft
-//! each of its geometry's primitives by name.
+//! The parts nearest their temperature limits (Landing ▸ Thermal), by the
+//! systems screen's rule (`systems_screen::rules::nearest_limits`, one
+//! owner; interface-map.md finding 13): each part by its skin cell or
+//! interior node nearest its own limit, where the craft measures its
+//! temperature (D106; every part in debug mode). The parts nothing measures
+//! are counted, never ranked by the truth. A craft of parts names each part
+//! by its craft-file id.
+
+use crate::systems_screen::rules;
 
 /// How much nearer its limit (share of it) a part must be to take a listed
 /// one's place, or to pass it (`interface::steady::top`): on the pad every
 /// part sits near the same share and the list would change every refresh.
 pub const MARGIN: f64 = 0.02;
 
+/// The parts nearest their limits, nearest first: (name, K, limit K); and
+/// how many parts no sensor measures.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Hottest {
+    pub parts: Vec<(String, f64, f64)>,
+    pub unmeasured: usize,
+}
+
 /// The `n` parts nearest their limits, given those listed before
 /// (`listed`, by name): nearest first, but a listed part stays and keeps
 /// its place until another is nearer by [`MARGIN`] (nothing flickers).
-pub fn listed(ship: &sim::vessel::Vessel, listed: &[String], n: usize) -> Vec<(String, f64, f64)> {
+pub fn listed(ship: &sim::vessel::Vessel, listed: &[String], n: usize) -> Hottest {
     let all = parts(ship, usize::MAX);
-    let scores: Vec<(String, f64)> = all.iter().map(|(name, t, limit)| (name.clone(), t / limit)).collect();
+    let scores: Vec<(String, f64)> = all.parts.iter().map(|(name, t, limit)| (name.clone(), t / limit)).collect();
     let keep = crate::interface::steady::top(listed, &scores, n, MARGIN);
-    keep.iter().filter_map(|k| all.iter().find(|p| p.0 == *k).cloned()).collect()
+    let parts = keep.iter().filter_map(|k| all.parts.iter().find(|p| p.0 == *k).cloned()).collect();
+    Hottest { parts, ..all }
 }
 
-/// The `n` parts nearest their limits, nearest first: (name, K, limit K).
-pub fn parts(ship: &sim::vessel::Vessel, n: usize) -> Vec<(String, f64, f64)> {
+/// The `n` measured parts nearest their limits, nearest first, and how
+/// many are not measured; the launch mount (ground parts) is not the
+/// vehicle's. Nothing for a craft without parts.
+pub fn parts(ship: &sim::vessel::Vessel, n: usize) -> Hottest {
+    use sim::systems::Quantity;
+    let Some(def) = ship.ship_def() else { return Hottest::default() };
+    let known = ship.knowledge();
     let design = ship.craft.design();
-    let skin = &ship.thermal().state.skin;
-    let def = ship.ship_def();
-    // A craft of parts: by part; the test craft: by primitive, named in its file.
-    let (owner, names): (Vec<usize>, Vec<String>) = match &def {
-        Some(def) => (
-            design.cell_part.iter().map(|&k| k as usize).collect(),
-            (design.parts.iter())
-                .map(|p| def.parts.iter().find(|i| i.part == p.id).map_or_else(|| p.name.clone(), |i| i.id.clone()))
-                .collect(),
-        ),
-        None => {
-            let names = if ship.craft.id.0 == sim::craft::TEST_CRAFT {
-                sim::craft::test_craft().geometry.primitives.iter().map(|p| p.name.clone()).collect()
-            } else {
-                Vec::new()
-            };
-            (design.cells.iter().map(|c| c.primitive as usize).collect(), names)
+    let temps = rules::vessel_temperatures(ship);
+    let named = (design.parts.iter().zip(temps)).filter_map(|(p, (id, (skin, interior)))| {
+        let info = def.parts.iter().find(|i| i.part == p.id);
+        if info.is_some_and(|i| i.ground) {
+            return None;
         }
-    };
-    let mut best: Vec<Option<(f64, f64)>> = Vec::new();
-    for (i, &p) in owner.iter().enumerate() {
-        let (Some(&t), Some(&limit)) = (skin.get(i), design.skin_max.get(i)) else { continue };
-        if best.len() <= p {
-            best.resize(p + 1, None);
-        }
-        if best[p].is_none_or(|(bt, bl)| t / limit > bt / bl) {
-            best[p] = Some((t, limit));
-        }
-    }
-    let mut out: Vec<(String, f64, f64)> = (best.into_iter().enumerate())
-        .filter_map(|(p, b)| {
-            let (t, limit) = b?;
-            Some((names.get(p).cloned().unwrap_or_else(|| format!("part {}", p + 1)), t, limit))
-        })
-        .collect();
-    // Ties by name (a stable order).
-    out.sort_by(|a, b| (b.1 / b.2).total_cmp(&(a.1 / a.2)).then_with(|| a.0.cmp(&b.0)));
-    out.truncate(n);
-    out
+        let name = info.map_or_else(|| p.name.clone(), |i| i.id.clone());
+        let measured = known.knows(Quantity::PartTemperature(id));
+        Some((name, rules::nearer(skin, interior).filter(|_| measured)))
+    });
+    let (hot, unmeasured) = rules::nearest_limits(named, n);
+    Hottest { parts: hot.into_iter().map(|(name, (t, limit))| (name, t, limit)).collect(), unmeasured }
 }
 
 /// Part `part`'s (`Part::id`) skin cell nearest its own limit: (K, limit K).
@@ -77,19 +69,25 @@ pub fn skin_of(ship: &sim::vessel::Vessel, part: u32) -> Option<(f64, f64)> {
 mod tests {
     use super::*;
 
-    /// A craft of parts names its hottest parts by their craft-file ids.
+    /// The measured parts by their craft-file ids, nearest their limits;
+    /// without sensors none is ranked (D106) and all are counted; debug mode
+    /// measures every part.
     #[test]
-    fn a_craft_of_parts_lists_its_parts_by_id() {
+    fn only_the_measured_parts_are_ranked_and_the_rest_counted() {
         let rocket = crate::test_rocket::rocket();
-        let sim = crate::state::SimState::with_craft(&rocket);
-        let hot = parts(sim.ship(), 4);
-        assert_eq!(hot.len(), 4);
+        let mut sim = crate::state::SimState::with_craft(&rocket);
         let def = sim.ship().ship_def().unwrap();
-        assert!(hot.iter().all(|(name, t, limit)| def.part_named(name).is_some() && t < limit), "{hot:?}");
-        // The test craft by its primitives' names.
-        let test = crate::state::SimState::new();
-        let names: Vec<String> = parts(test.ship(), 2).into_iter().map(|p| p.0).collect();
-        assert!(names.iter().all(|n| !n.starts_with("part ")), "{names:?}");
+        let vehicle = def.parts.iter().filter(|p| !p.ground).count();
+        let blind = parts(sim.ship(), 4);
+        assert_eq!((blind.parts.len(), blind.unmeasured), (0, vehicle), "no temperature sensor: {blind:?}");
+        let world = sim.world.clone();
+        let active = sim.active;
+        sim.fleet[active].set_debug(&world, true);
+        let hot = parts(sim.ship(), 4);
+        assert_eq!((hot.parts.len(), hot.unmeasured), (4.min(vehicle), 0));
+        assert!(hot.parts.iter().all(|(name, t, limit)| def.part_named(name).is_some() && t < limit), "{hot:?}");
+        let shares: Vec<f64> = hot.parts.iter().map(|p| p.1 / p.2).collect();
+        assert!(shares.windows(2).all(|w| w[0] >= w[1]), "nearest first: {shares:?}");
     }
 
     /// The launch mount's mass is not the vehicle's.

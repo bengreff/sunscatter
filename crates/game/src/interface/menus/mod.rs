@@ -13,7 +13,7 @@
 mod comms;
 pub mod crew;
 pub mod data;
-mod hottest;
+pub mod hottest;
 mod landing;
 mod maneuver;
 mod orbital;

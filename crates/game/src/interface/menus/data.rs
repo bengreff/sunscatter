@@ -212,16 +212,15 @@ pub struct CraftData {
     pub thrust_vac: f64,
     pub isp_vac: f64,
     pub isp_sl: f64,
-    /// The skin cell nearest its own limit, and the hottest interior node,
-    /// with their limits (K).
+    /// The skin cell nearest its own limit, with its limit (K).
     pub skin: (f64, f64),
-    pub interior: (f64, f64),
     /// The shock layer at the nose this tick (D109), and the highest
     /// stagnation flux so far (W/m²).
     pub shock: Option<sim::vessel::ShockLayer>,
     pub peak_heating: f64,
-    /// The parts nearest their limits: name, temperature, limit (K).
-    pub hottest: Vec<(String, f64, f64)>,
+    /// The measured parts nearest their limits, and how many no sensor
+    /// measures (`hottest`, the systems screen's rule).
+    pub hottest: super::hottest::Hottest,
     /// Ship clock minus the origin's clock, the time shown (s, D012, D088).
     pub clock_offset: f64,
 }
@@ -507,7 +506,7 @@ fn landing(s: &Sources) -> FlightData {
 /// Nothing flickers (`interface::steady`): the hottest parts change only
 /// past a margin over those listed before.
 pub fn steady(d: &mut FlightData, before: &FlightData, sim: &SimState) {
-    let listed: Vec<String> = before.craft.hottest.iter().map(|h| h.0.clone()).collect();
+    let listed: Vec<String> = before.craft.hottest.parts.iter().map(|h| h.0.clone()).collect();
     d.craft.hottest = super::hottest::listed(sim.ship(), &listed, HOTTEST);
 }
 
@@ -544,7 +543,6 @@ fn craft(sim: &SimState, body: sim::frame::NodeId) -> CraftData {
         let d = (r - sim.world.snapshot(sim.clock).relative_r(b.node, anchor)).length();
         b.gm / (d * d)
     });
-    let (node, _) = ship.max_node_temperature();
     CraftData {
         shock: ship.thermal().shock,
         peak_heating: ship.thermal().peak_heating,
@@ -558,7 +556,6 @@ fn craft(sim: &SimState, body: sim::frame::NodeId) -> CraftData {
         isp_vac: engine.isp_vac,
         isp_sl: engine.isp_sl,
         skin: ship.skin_nearest_limit(),
-        interior: (node, ship.craft.thermal.internal_max_k),
         hottest: super::hottest::listed(ship, &[], HOTTEST),
         clock_offset: sim.ship_clock_offset(sim.active),
     }
@@ -632,9 +629,9 @@ mod tests {
         assert!(d.craft.dv_vac > 1000.0 && d.craft.twr_vac.is_some_and(|t| t > 1.0));
         assert!(!d.chute.commanded && d.chute.design_q > 1000.0);
         assert_eq!(d.stages.len(), 2);
-        assert!(!d.craft.hottest.is_empty() && d.craft.hottest.len() <= HOTTEST);
-        let names: Vec<_> = d.craft.hottest.iter().map(|h| h.0.as_str()).collect();
-        assert!(names.iter().all(|n| !n.starts_with("part ")), "named parts: {names:?}");
+        // No temperature sensor on the small rocket: every part counted,
+        // none ranked by the truth (D106).
+        assert!(d.craft.hottest.parts.is_empty() && d.craft.hottest.unmeasured > 0, "{:?}", d.craft.hottest);
         assert_eq!(d.target.choices.first().map(|c| c.0.as_str()), Some("none"));
         assert!(d.target.choices.iter().any(|c| c.0 == "Moon"));
         assert_eq!(d.diagnostics.vessels, 1);

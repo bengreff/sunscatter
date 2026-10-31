@@ -159,17 +159,17 @@ pub fn opening(q: Option<f64>, design_q: f64) -> Opening {
     }
 }
 
-/// The parts nearest their limits, and the interior (the old Utilities
-/// menu's).
+/// The measured parts nearest their limits (each by its skin cell or
+/// interior node nearest its own), and how many nothing measures: the
+/// systems screen's rule (`menus::hottest`, interface-map.md finding 13).
 fn thermal(d: &FlightData) -> Section {
     let mut s = Section::new("thermal", "THERMAL");
-    let k = &d.known;
-    for (name, t, limit) in &d.craft.hottest {
-        s.toned(name.to_uppercase(), k.or_dash(k.temperatures, || temperature(*t, *limit)), heat_tone(*t, *limit));
+    let h = &d.craft.hottest;
+    for (name, t, limit) in &h.parts {
+        s.toned(name.to_uppercase(), temperature(*t, *limit), heat_tone(*t, *limit));
     }
-    if !s.items.is_empty() {
-        let (node, limit) = d.craft.interior;
-        s.toned("INTERIOR", k.or_dash(k.temperatures, || temperature(node, limit)), heat_tone(node, limit));
+    if h.unmeasured > 0 {
+        s.toned("NOT MEASURED", format!("{} parts", h.unmeasured), Tone::Dim);
     }
     s
 }
@@ -402,17 +402,27 @@ mod tests {
         );
     }
 
-    /// The hottest parts against their limits (amber near one), then the
-    /// interior; nothing without parts.
+    /// The measured parts against their limits (amber near one), then how
+    /// many nothing measures; nothing without parts.
     #[test]
-    fn thermal_lists_the_hottest_parts() {
+    fn thermal_lists_the_measured_parts_and_counts_the_rest() {
+        use super::super::hottest::Hottest;
         let mut d = FlightData::default();
         assert!(thermal(&d).items.is_empty());
-        d.craft.hottest = vec![("engine bell".into(), 1_500.0, 1_640.0), ("body".into(), 310.0, 1_100.0)];
-        d.craft.interior = (295.0, 400.0);
-        let t = thermal(&d);
-        assert_eq!(t.rows()[0], ("ENGINE BELL", "1500 K / 1640 K !"));
-        assert_eq!(t.tone("ENGINE BELL"), Some(Tone::Warn));
-        assert_eq!(t.value("INTERIOR"), Some("295 K / 400 K"));
+        let parts: Vec<(String, f64, f64)> =
+            vec![("engine bell".into(), 1_500.0, 1_640.0), ("body".into(), 310.0, 1_100.0)];
+        // (how many of `parts` listed, not measured, rows)
+        type Rows = &'static [(&'static str, &'static str)];
+        let table: [(usize, usize, Rows); 3] = [
+            (2, 0, &[("ENGINE BELL", "1500 K / 1640 K !"), ("BODY", "310 K / 1100 K")]),
+            (2, 3, &[("ENGINE BELL", "1500 K / 1640 K !"), ("BODY", "310 K / 1100 K"), ("NOT MEASURED", "3 parts")]),
+            (0, 12, &[("NOT MEASURED", "12 parts")]),
+        ];
+        for (n, unmeasured, rows) in table {
+            d.craft.hottest = Hottest { parts: parts[..n].to_vec(), unmeasured };
+            let t = thermal(&d);
+            assert_eq!(t.rows(), rows, "{unmeasured}");
+        }
+        assert_eq!(thermal(&d).tone("NOT MEASURED"), Some(Tone::Dim));
     }
 }
