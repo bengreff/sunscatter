@@ -212,7 +212,9 @@ fn main_page(ui: &mut egui::Ui, debug: bool, overlay: bool) -> Option<Choice> {
     ui.add_space(10.0);
     button(ui, "Resume", Choice::Resume);
     button(ui, "Settings", Choice::Settings);
-    button(ui, &format!("Saves  {}", keys::label(keys::Action::QuickSave)), Choice::Saves);
+    // Its keys quicksave and quickload without opening it: the window
+    // names them (`saves::quick_keys`), the button does not.
+    button(ui, "Saves", Choice::Saves);
     button(ui, "New flight…", Choice::Page(Page::NewFlight));
     button(ui, "Revert to launch…", Choice::Page(Page::ConfirmRevert));
     button(ui, if debug { "Debug mode: ON" } else { "Debug mode: off" }, Choice::Debug);

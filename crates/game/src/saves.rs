@@ -212,6 +212,14 @@ pub fn after_load(pred: &mut Prediction, tracked: &mut Tracked, rig: &mut Camera
     }
 }
 
+/// The quick keys, which work without the Saves window (its line about
+/// them; the pause menu's button named only the first, as if it opened
+/// the window).
+pub fn quick_keys() -> String {
+    use crate::commands::keys::{label, Action};
+    format!("{} quicksaves, {} loads the quicksave", label(Action::QuickSave), label(Action::QuickLoad))
+}
+
 /// UTC `YYYY-MM-DD HH:MM` of a file time.
 pub fn fmt_time(t: SystemTime) -> String {
     let secs = t.duration_since(SystemTime::UNIX_EPOCH).map_or(0, |d| d.as_secs());
@@ -308,9 +316,9 @@ pub fn draw(
             });
             w.label(egui::RichText::new(dir.display().to_string()).weak().small());
             w.separator();
+            w.label(egui::RichText::new(quick_keys()).small());
             if ui.list.is_empty() {
-                let quick = crate::commands::keys::label(crate::commands::keys::Action::QuickSave);
-                w.label(format!("No saves yet ({quick} quicksaves)."));
+                w.label("No saves yet.");
             }
             egui::ScrollArea::vertical().max_height(room).show(w, |w| {
                 egui::Grid::new("saves").striped(true).show(w, |w| {
@@ -359,6 +367,16 @@ pub fn draw(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The Saves window names both quick keys from the key table.
+    #[test]
+    fn the_saves_window_names_the_quick_keys() {
+        use crate::commands::keys::{label, Action};
+        let line = quick_keys();
+        for a in [Action::QuickSave, Action::QuickLoad] {
+            assert!(!label(a).is_empty() && line.contains(&label(a)), "{line}");
+        }
+    }
 
     #[test]
     fn default_names_are_the_game_time_and_unique() {
