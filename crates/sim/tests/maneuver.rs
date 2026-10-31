@@ -236,6 +236,10 @@ fn a_separation_mid_burn_ends_the_burn_and_keeps_the_later_nodes() {
     assert!(events.contains(&("burn 1: ended by the separation".to_string(), true)), "{events:?}");
     assert_eq!(s.nodes(), &[first, second]);
     assert!(s.program().is_none_or(|p| p.node == 1 && p.step == Step::Wait), "{:?}", s.program());
+    // Dragon has no main engine (its Dracos are thruster blocks): the
+    // planner says the later node cannot be flown.
+    let later = s.node_prediction(&w, 1).unwrap();
+    assert!(later.warnings.iter().any(|w| w.contains("no main engine")), "{:?}", later.warnings);
     // The stage leaves with no plan.
     assert_eq!(pieces.len(), 1);
     assert!(pieces[0].nodes().is_empty() && pieces[0].program().is_none());

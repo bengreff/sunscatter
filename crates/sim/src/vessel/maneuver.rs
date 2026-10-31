@@ -375,6 +375,9 @@ impl Vessel {
             |b| if b.isp > 0.0 { b.mass.value * crate::math::exp(-dv / (b.isp * super::G0)) } else { b.mass.value },
         );
         let mut warnings = Vec::new();
+        if program.engines.is_empty() {
+            warnings.push("no main engine to burn it: the node cannot be flown".into());
+        }
         let axis = program.engines.iter().map(|&e| def.engines[e as usize].data.dir.normalize()).sum::<DVec3>();
         if axis.length() > 0.0 && !crate::systems::rcs::can_push(def, state, axis.normalize()) {
             warnings.push("no thrusters push along the engines: the propellant cannot be settled".into());
