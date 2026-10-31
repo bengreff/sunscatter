@@ -4,7 +4,7 @@
 //! owner of those decisions; icons, orbit lines, Ap/Pe markers, hover and
 //! picking in `map`, `trajectory`, `hud` and the tracking station follow
 //! it. Pure functions, tested by tables. Spec:
-//! docs/archive/plans/map-view-lighting-controls.md §2.
+//! docs/technical/map-view.md.
 
 use glam::Vec2;
 use sim::frame::NodeId;

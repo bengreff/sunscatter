@@ -245,7 +245,7 @@ It lists tracked vessels (and later asteroids), lets you focus and switch to a v
 - Its icon, hover ring and name, and Ap/Pe markers are shown only while it is in map view. There is no global map mode and no map-view key.
 - Its orbit line is shown while it is in map view and its orbit is seen from outside: a radius of at most the focus distance, with hysteresis to 1.5 times. From inside, an orbit wraps around the camera and crosses the sky as a straight line (the owner, 2026-10-26: the planets' and dwarf planets' orbits seen from the pad, "too many appear too early"). The active vessel's own line is exempt: it starts under the camera.
 - On hover and on a double-click, the heaviest object under the cursor wins (a planet over its moons).
-- Details: [map-view-lighting-controls.md](archive/plans/map-view-lighting-controls.md).
+- Details: [technical/map-view.md](technical/map-view.md).
 
 **D055: Lighting is physical and per body, at a fixed exposure.** *Decided, 2026-09-26; exposure revised the same day.*
 - Stars have a luminosity in data. Each lit object receives flux L/(4πd²) from every nearby star at *its own* position, plus light reflected by nearby bodies (albedo, phase angle) and eclipses.
