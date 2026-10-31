@@ -9,6 +9,18 @@ Eight known gaps, plus the hand-off's small items. Each is small, but most route
 
 ## The work, in order
 
+**First, REVIEW's findings** ([review-2026-10-31.md](../technical/review-2026-10-31.md), ranked; #1 went to LAYERS-2):
+
+- **#2, `Vessel.ship` is always `Some`:** make it not optional. Its `None` arms (`vessel/ship.rs:149, 250, 462`, `ship_os/mod.rs:118`, `attitude.rs:295`, `split.rs:322`) still do the made-up path's work: perfect knowledge, no actuators, an infinite turn cap. A save without the `ship` key falls into them and skips the fit check.
+- **#3, the made-up engine as the thermal model's input** (`craft/build.rs:540`, `parts.rs:219`, `design.rs:101`): the thermal engine node comes from the catalog engines' own mounts. Delete `craft::engine::Engine`, `EngineFile`'s use as a combined spec, and `exhaust::of_engine` (no callers).
+- **#4, the estimate repeats the engine rule** (`systems/estimate.rs:474–510`); its copy spends an ignition on a hypergolic engine where `propulsion::light` does not. It is one owner with item 4 below.
+- **Layer 2 reads the truth:** the ullage wait and the maneuver program's mass and thrust-push inputs. Read them through `Knowledge` (D106, D128).
+- **D125:** the fixed barometric altimeter floor and the 10 kg default battery mass become parameters.
+- The ~30 comments that still describe the test craft.
+
+Then the original list:
+
+
 Each item gets a table test (rule 8) and fixes the model or the default, never the symptom (the owner's rule).
 
 1. **The function runner through `program::offered`.** MCP's and a script's route by name still runs an abort the piece does not offer. Refuse it with `NoEscape::describe` in the event log. The manual abort itself fires whenever an escape system can (D120, simplified): "if a LES system exists for this purpose, the player can fire it at any time, and it always runs the same."

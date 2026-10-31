@@ -54,3 +54,4 @@ Small commits, one purpose each. `cargo test -p sim` and `-p game`'s touched tes
 ### From the lead (2026-10-31)
 
 - INTERFACE-2's finding 18: a part's peak interior temperature may not update during a warp-6 coast. A record kept per part (peaks, run time, damage) must come out the same at every warp (D129).
+- REVIEW (`docs/technical/review-2026-10-31.md`): orders and scheduled programs do not run during a bubble's joint contact tick (`bubble.rs:498`). They must run at their own epochs there too (D129).

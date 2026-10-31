@@ -10,6 +10,9 @@ D121: "a ~5,000-part craft flown live at 1× and 60 fps on the M2 Pro, and D081'
 
 ## The work, in order
 
+REVIEW (`docs/technical/review-2026-10-31.md`): `knowledge()` is rebuilt several times per tick, and sensor classes are matched as strings. Build it once per tick, with typed classes.
+
+
 STATE-2's profile of the 1,000-part live tick (2026-10-31): the thermal network 62 %, the volume grid 7 %, aero 4 %, the ship systems about 3 %. So step 3 (thermal at its own rate, `ThermalNetwork::step_to`) is the live tick's lever; take it right after step 1.
 
 
