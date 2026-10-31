@@ -99,12 +99,21 @@ impl Reading {
         (-order).clamp(0.0, MAX_DECIMALS as f64) as usize
     }
 
-    /// The value rounded to the precision's decade (what is shown).
+    /// The value rounded to the precision's decade (what is shown): the
+    /// double nearest the decimal shown, so a reader of the number (the
+    /// agent's JSON) gets 2000.8, not 2000.8000000000002. Below 1 it
+    /// divides by the decade's inverse, an exact power of ten (a step of
+    /// 0.1 is not exact; interface-map finding 67).
     pub fn shown(&self) -> f64 {
         if self.precision.is_nan() || self.precision <= 0.0 {
             return self.value;
         }
-        let step = crate::math::pow(10.0, crate::math::log10(self.precision).floor());
+        let order = crate::math::log10(self.precision).floor();
+        if order < 0.0 {
+            let inverse = crate::math::pow(10.0, -order);
+            return (self.value * inverse).round() / inverse;
+        }
+        let step = crate::math::pow(10.0, order);
         (self.value / step).round() * step
     }
 
@@ -310,6 +319,13 @@ mod tests {
             assert_eq!(r.decimals(), decimals, "{value} ± {precision}");
             assert!((r.shown() - shown).abs() < 1e-9 * shown.abs().max(1.0), "{value} ± {precision}: {}", r.shown());
             assert_eq!(r.text("m"), text);
+        }
+        // The shown value is the double nearest its decimal, exactly
+        // (finding 67: 2000.8000000000002 reached the agent).
+        let exact =
+            [(2_000.812, 0.1, 2_000.8), (0.293, 0.01, 0.29), (7.000_51, 0.001, 7.001), (1.234_5e-4, 1e-6, 1.23e-4)];
+        for (value, precision, shown) in exact {
+            assert_eq!(Reading { value, precision }.shown(), shown, "{value} ± {precision}");
         }
     }
 
