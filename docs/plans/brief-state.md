@@ -92,3 +92,7 @@ Read the ratios, not the last digit (other agents were building). The handles' g
 **Open for the owner (STATE-2):**
 - `Part::id` stays a plain `u32`, not a `PartId` newtype: it is already the handle (the design index a split's pieces keep, found by `part_index`); a newtype would touch about 290 `.part` sites in sim and game for type safety alone, in the wave where LAYERS moves the files next. The owners became typed because they were strings.
 - The handles are for correctness and D121, not speed: the ship systems are about 3 % of a 1,000-part live tick (above).
+
+### INTERFACE-6 in sim (2026-10-31)
+
+INTERFACE-6 (game crate, [brief-interface.md](brief-interface.md)) adds one function to `sim::systems::estimate` for interface-map finding 41: `estimate::aboard`, the mass aboard now with the precision the tank sensors give (the estimate's own walk and bounds), so the systems screen and the staging bar read one rule. An added function and its test in `estimate_tests.rs`; nothing else in sim changes. STATE's 3b (`estimate`'s joints and `release_engines`) is untouched by it.
