@@ -64,6 +64,15 @@ fn each_layer_summarises_the_craft() {
     assert_eq!(group(&p, "FLOWS").value("engines"), Some("none burning"));
     let d = summary(Layer::Data, &x);
     assert_eq!(group(&d, "WHAT THE CRAFT MEASURES").value(""), Some("debug mode: everything"));
+    let n = facts.len();
+    assert_eq!(group(&d, "WHAT THE CRAFT MEASURES").value("part temperatures"), Some(format!("{n} of {n}").as_str()));
+    // The pad's parts are not the craft's (the thermal and health layers
+    // count the same parts).
+    let mut on_pad = facts.clone();
+    on_pad[0].ground = true;
+    let d = summary(Layer::Data, &Inputs { facts: &on_pad, ..x });
+    let want = format!("{} of {}", n - 1, n - 1);
+    assert_eq!(group(&d, "WHAT THE CRAFT MEASURES").value("part temperatures"), Some(want.as_str()));
     assert!(group(&d, "COMPUTERS").rows[0].open.is_some(), "a computer opens its component");
     // Blind: dashes and counts.
     let blind = Known::from(Knowledge::default());

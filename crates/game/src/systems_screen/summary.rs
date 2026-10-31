@@ -269,6 +269,7 @@ fn data(x: &Inputs) -> Vec<Group> {
         sensors.row(kind, n.to_string());
     }
     let mut known = Group::new("WHAT THE CRAFT MEASURES");
+    let craft = x.facts.iter().filter(|f| !f.ground);
     let count = |n: usize, q: &dyn Fn(u32) -> Quantity| (0..n as u32).filter(|&i| k.knows(q(i))).count();
     let rows: [(&str, usize, usize); 6] = [
         ("tank levels", count(def.tanks.len(), &Quantity::TankLevel), def.tanks.len()),
@@ -276,10 +277,12 @@ fn data(x: &Inputs) -> Vec<Group> {
         ("bottle pressures", count(def.bottles.len(), &Quantity::BottlePressure), def.bottles.len()),
         ("battery charges", count(def.batteries.len(), &Quantity::BatteryCharge), def.batteries.len()),
         ("joint loads", count(def.joints.len(), &Quantity::JointLoad), def.joints.len()),
+        // The craft's own parts, as the thermal and health layers count
+        // them (not the pad's).
         (
             "part temperatures",
-            def.parts.iter().filter(|p| k.knows(Quantity::PartTemperature(p.part))).count(),
-            def.parts.len(),
+            craft.clone().filter(|f| k.knows(Quantity::PartTemperature(f.id))).count(),
+            craft.count(),
         ),
     ];
     for (label, n, of) in rows.into_iter().filter(|r| r.2 > 0) {
