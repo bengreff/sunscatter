@@ -83,6 +83,8 @@ impl Plugin for PartCardPlugin {
 const DASH_HOVER_S: f64 = 2.0;
 /// A card's width (logical px).
 pub const CARD_WIDTH: f32 = 250.0;
+/// A card's height before it has been drawn once (logical px).
+const CARD_GUESS: f32 = 300.0;
 
 /// Draws the active vessel's cards and their lines; sends their commands.
 #[allow(clippy::too_many_arguments)]
@@ -121,22 +123,25 @@ pub fn show(
     let live = Live { def: &def, state, knowledge: &knowledge, thrusts: &thrusts, kelvin: &kelvin, chute };
     let screen = ctx.content_rect();
     let right = screen.max.x - layout::MARGIN - stage_bar::WIDTH - layout::GAP;
-    let mut top = screen.min.y + layout::MARGIN + 40.0;
+    let top = screen.min.y + layout::MARGIN + 40.0;
+    // The staging bar's cards in columns, each as tall as it was drawn last.
+    let id_of = |serial: u64| egui::Id::new(("part_card", serial));
+    let heights: Vec<f32> = (cards.open.iter().filter(|c| c.from == From::Bar))
+        .map(|c| ctx.memory(|m| m.area_rect(id_of(c.serial))).map_or(CARD_GUESS, |r| r.height()))
+        .collect();
+    let mut corners = place::stack(&heights, top, screen.max.y - layout::MARGIN, right, CARD_WIDTH, layout::GAP).into_iter();
     let mut closed = Vec::new();
     let mut lines: Vec<(egui::Rect, egui::Pos2)> = Vec::new();
     for k in 0..cards.open.len() {
         let open = cards.open[k].clone();
         let Some(card) = content::card(&live, open.part) else { continue };
-        let area = egui::Area::new(egui::Id::new(("part_card", open.serial)));
+        let area = egui::Area::new(id_of(open.serial));
         let area = match open.from {
-            From::Bar => area.fixed_pos(egui::pos2(right - CARD_WIDTH, top)).movable(false),
+            From::Bar => area.fixed_pos(corners.next().unwrap_or(egui::pos2(right - CARD_WIDTH, top))).movable(false),
             From::Ship(at) => area.default_pos(place::beside(at, screen, CARD_WIDTH)).movable(true),
         };
         let shown = area.show(ctx, |ui| draw(ui, &card, &mut cards.open[k]));
         let rect = shown.response.rect;
-        if open.from == From::Bar {
-            top = rect.max.y + layout::GAP;
-        }
         match shown.inner {
             Some(Click::Close) => closed.push(open.serial),
             Some(Click::Run(c)) => {

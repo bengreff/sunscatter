@@ -24,6 +24,24 @@ pub fn beside(at: egui::Pos2, screen: egui::Rect, width: f32) -> egui::Pos2 {
     egui::pos2(x.max(screen.min.x + layout::MARGIN), y)
 }
 
+/// Where the cards opened from the staging bar go (their top-left
+/// corners): stacked down from `top`, each as tall as `heights` says (last
+/// frame's), `gap` apart, their right edge at `right`; a card that would
+/// pass `bottom` starts a new column to the left, so none is pushed back
+/// over another.
+pub fn stack(heights: &[f32], top: f32, bottom: f32, right: f32, width: f32, gap: f32) -> Vec<egui::Pos2> {
+    let (mut x, mut y) = (right - width, top);
+    let mut out = Vec::with_capacity(heights.len());
+    for &h in heights {
+        if y > top && y + h > bottom {
+            (x, y) = (x - width - gap, top);
+        }
+        out.push(egui::pos2(x, y));
+        y += h + gap;
+    }
+    out
+}
+
 /// The active vessel's parts as drawn: (part id, mesh, transform in the
 /// body axes: a mechanism's hinge at its angle now).
 fn placed(v: &sim::vessel::Vessel, models: &mut ShipModels) -> Vec<(u32, Arc<RenderMesh>, Transform)> {
@@ -148,6 +166,24 @@ mod tests {
         ];
         for (at, want) in table {
             assert_eq!(beside(at, screen, w), want, "{at:?}");
+        }
+    }
+
+    /// Cards from the staging bar (table): stacked down, a new column to
+    /// the left when the next would pass the bottom (a card taller than the
+    /// whole column still starts at the top).
+    #[test]
+    fn bar_cards_stack_in_columns_without_overlapping() {
+        let p = egui::pos2;
+        // (heights) → corners; top 50, bottom 900, right 1400, width 250, gap 6
+        let table: [(&[f32], Vec<egui::Pos2>); 4] = [
+            (&[], vec![]),
+            (&[300.0, 200.0], vec![p(1150.0, 50.0), p(1150.0, 356.0)]),
+            (&[300.0, 300.0, 470.0], vec![p(1150.0, 50.0), p(1150.0, 356.0), p(894.0, 50.0)]),
+            (&[1000.0, 100.0], vec![p(1150.0, 50.0), p(894.0, 50.0)]),
+        ];
+        for (heights, want) in table {
+            assert_eq!(stack(heights, 50.0, 900.0, 1400.0, 250.0, 6.0), want, "{heights:?}");
         }
     }
 
