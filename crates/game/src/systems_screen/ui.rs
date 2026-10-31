@@ -464,7 +464,14 @@ fn settings(
                     field.map(|v| super::programs::Input::Number(v / 100.0))
                 }
                 Value::Seconds(s) => {
-                    number(ui, id, *s, (tick, 1.0e7), (1.0, " s", 2)).map(super::programs::Input::Number)
+                    let min = if p.key == super::programs::PERIOD { tick } else { 0.0 };
+                    number(ui, id, *s, (min, 1.0e7), (1.0, " s", 2)).map(super::programs::Input::Number)
+                }
+                Value::Angle(a) => {
+                    number(ui, id, a.to_degrees(), (0.01, 90.0), (0.05, "°", 2)).map(super::programs::Input::Number)
+                }
+                Value::Rate(w) => {
+                    number(ui, id, w.to_degrees(), (0.01, 90.0), (0.05, "°/s", 2)).map(super::programs::Input::Number)
                 }
                 Value::Loads { chosen, offered } => loads(ui, id, chosen, offered),
             };
@@ -490,7 +497,8 @@ fn settings(
 
 /// A number setting's field: the player's draft while the edit goes on
 /// (egui's memory, so a drag is not reset by the vessel's value each
-/// frame), and the value once the edit ends, if it changed.
+/// frame), and the value once the edit ends, if it changed by more than
+/// the field shows (a field left as it was sends nothing).
 fn number(
     ui: &mut egui::Ui,
     id: egui::Id,
@@ -507,7 +515,8 @@ fn number(
         None
     } else {
         ui.data_mut(|d| d.remove::<f64>(id));
-        (ended && v != shown).then_some(v)
+        let shows = 0.5 * 10f64.powi(-(decimals as i32));
+        (ended && (v - shown).abs() > shows).then_some(v)
     }
 }
 

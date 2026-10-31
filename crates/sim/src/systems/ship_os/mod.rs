@@ -91,6 +91,9 @@ pub struct Software {
     /// state is the vessel's `program`).
     #[serde(default = "program::Slot::auto")]
     pub maneuver: program::Slot,
+    /// The maneuver program's settings (D126's config menu).
+    #[serde(default, skip_serializing_if = "crate::systems::maneuver::Settings::is_default")]
+    pub maneuver_settings: crate::systems::maneuver::Settings,
     /// The scheduled programs, in the order they run at a shared epoch.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub programs: Vec<program::Installed>,
@@ -108,6 +111,7 @@ impl Default for Software {
         Software {
             chutes: Default::default(),
             maneuver: program::Slot::auto(),
+            maneuver_settings: Default::default(),
             programs: Vec::new(),
             warp_stop: None,
             watch: Default::default(),

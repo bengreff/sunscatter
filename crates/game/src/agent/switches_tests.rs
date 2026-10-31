@@ -125,7 +125,7 @@ fn a_programs_settings_go_by_the_tabs_rule() {
         (json!({"program": "chutes", "settings": {"main_height_m": -1}}), "a height above the ground is 0 m or more"),
         (json!({"program": "chutes", "settings": {"main_height_m": "high"}}), "`main_height_m` is a number"),
         (json!({"program": "chutes", "settings": {"loads": ["x"]}}), "Parachutes has no setting `loads`"),
-        (json!({"program": "maneuver", "settings": {"period_s": 9}}), "Planned burns has no settings"),
+        (json!({"program": "maneuver", "settings": {"period_s": 9}}), "Planned burns has no setting `period_s`"),
         (json!({"program": "chutes"}), "`settings` maps"),
         (json!({"program": "warp", "settings": {}}), "no program `warp` aboard"),
     ];

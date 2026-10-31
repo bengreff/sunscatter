@@ -53,7 +53,7 @@ fn aligned_table() {
     let cases = [(0.0, 0.0, true), (0.03, 0.0, true), (0.04, 0.0, false), (0.0, 0.008, true), (0.0, 0.02, false)];
     for (angle, rate, want) in cases {
         let att = Attitude { q: DQuat::from_rotation_y(angle), omega: DVec3::new(rate, 0.0, 0.0) };
-        assert_eq!(aligned(&att, DVec3::Z, DVec3::Z), want, "{angle} rad, {rate} rad/s");
+        assert_eq!(aligned(&att, DVec3::Z, DVec3::Z, &Settings::default()), want, "{angle} rad, {rate} rad/s");
     }
 }
 
@@ -110,7 +110,7 @@ fn steers_table() {
         (Step::TailOff, 100.0, 8.0, false),
     ];
     for (step, go, accel, want) in cases {
-        assert_eq!(steers(step, go, accel), want, "{step:?} {go} {accel}");
+        assert_eq!(steers(step, go, accel, STEER_HOLD), want, "{step:?} {go} {accel}");
     }
 }
 
@@ -185,14 +185,14 @@ fn schedule_table() {
     ];
     for (dv, f, mdot, m0, start, turn, lead) in cases {
         let n = node(1_000.0, DVec3::X * dv);
-        let (wake, ignite) = schedule(&n, (f, mdot, m0), start, turn);
+        let (wake, ignite) = schedule(&n, (f, mdot, m0), start, turn, SETTLE_LEAD);
         assert!((n.t.seconds_since(ignite) - lead).abs() < 1e-9, "{dv}: {}", n.t.seconds_since(ignite));
         assert!((ignite.seconds_since(wake) - (turn + SETTLE_LEAD)).abs() < 1e-9);
     }
     // With flow: half the Δv by the rocket equation, less than half the time.
     let (f, mdot) = (1e5, isp_flow(1e5, 320.0));
     let n = node(1_000.0, DVec3::X * 1_000.0);
-    let (_, ignite) = schedule(&n, (f, mdot, 1e4), 0.0, 0.0);
+    let (_, ignite) = schedule(&n, (f, mdot, 1e4), 0.0, 0.0, SETTLE_LEAD);
     let half = n.t.seconds_since(ignite);
     let full = 1e4 / mdot * (1.0 - crate::math::exp(-1_000.0 * mdot / f));
     let back = f / mdot * crate::math::ln(1e4 / (1e4 - mdot * half));
@@ -217,6 +217,7 @@ fn inputs<'a>(at: f64, view: &'a View, n: &'a Node, settled: Option<bool>) -> In
         tail_impulse: 1e3,
         level_min: 0.4,
         dt: 0.02,
+        settings: Settings::default(),
     }
 }
 
@@ -373,4 +374,43 @@ fn commands_lay_over_the_pilot_s_controls() {
     assert_eq!((flown.throttle, flown.sas, flown.hold, flown.translate), (1.0, true, HoldMode::Maneuver, DVec3::Z));
     assert!(flown.chute, "what it does not command stays the pilot's");
     assert_eq!(Commands::default().over(&pilot), pilot);
+}
+
+/// The settings (D126's config menu): today's constants by default; each
+/// by its rule, refused outside it, a call's all or none; they act where
+/// the constants did (the schedule's lead, the alignment).
+#[test]
+fn the_settings_by_their_rule() {
+    use crate::systems::ship_os::program::Setting;
+    let d = Settings::default();
+    assert_eq!((d.align, d.settle_lead, d.settle_wait, d.steer_hold), (ALIGN, SETTLE_LEAD, SETTLE_WAIT, STEER_HOLD));
+    assert!(d.is_default());
+    // (setting, accepted)
+    let cases = [
+        (Setting::Align(0.05), true),
+        (Setting::Align(std::f64::consts::FRAC_PI_2), true),
+        (Setting::Align(0.0), false),
+        (Setting::Align(2.0), false),
+        (Setting::AlignRate(0.02), true),
+        (Setting::AlignRate(0.0), false),
+        (Setting::SettleLead(0.0), true),
+        (Setting::SettleWait(-1.0), false),
+        (Setting::SteerHold(f64::NAN), false),
+        (Setting::MainHeight(100.0), false),
+    ];
+    for (k, (setting, ok)) in cases.into_iter().enumerate() {
+        let mut s = d;
+        assert_eq!(s.set(&setting).is_ok(), ok, "case {k}");
+        assert_eq!(s.is_default(), !ok, "case {k}");
+    }
+    let mut s = d;
+    assert!(s.configure(&[Setting::SettleLead(5.0), Setting::Align(0.0)]).is_err());
+    assert_eq!(s, d, "all or none");
+    s.configure(&[Setting::SettleLead(5.0), Setting::Align(0.2)]).unwrap();
+    let n = Node { t: t(1000.0), dv: DVec3::new(10.0, 0.0, 0.0), reference: NodeId(3) };
+    let (wake, ignite) = schedule(&n, (1e5, 30.0, 1e4), 0.0, 40.0, s.settle_lead);
+    assert!((ignite.seconds_since(wake) - 45.0).abs() < 1e-9, "the lead is the setting's");
+    // 0.1 rad off the axis: aligned within 0.2 rad, not within 2°.
+    let att = Attitude { q: DQuat::from_rotation_y(0.1), omega: DVec3::ZERO };
+    assert!(aligned(&att, DVec3::Z, DVec3::Z, &s) && !aligned(&att, DVec3::Z, DVec3::Z, &d));
 }

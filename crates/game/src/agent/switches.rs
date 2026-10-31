@@ -47,7 +47,11 @@ pub fn tools(id: &Value) -> [Tool; 3] {
             parachutes' `arm_height_m` (the drogues arm below it, m above the ground) and `main_height_m` (the \
             mains open below it); a load manager's `loads` (a list of component ids that draw power), `off_below` \
             and `on_at` (shares of the charge it reads, 0 to 1: its loads off below the one, on again at the \
-            other) and `period_s`. Checked as the computer will check them and applied all or none; refused with \
+            other) and `period_s`; the planned burns' `align_deg` and `align_rate_deg_s` (the turn counts as \
+            done within that angle of the burn direction, turning slower than that), `settle_s` (how long they \
+            settle without a level sensor, and the lead before ignition), `settle_wait_s` (how long past the \
+            ignition epoch they wait for settled propellant) and `steer_hold_s` (the burn's last seconds that \
+            hold the steering's direction). Checked as the computer will check them and applied all or none; refused with \
             why. Sent like any command (`arrives_in_s`)."
             .into(),
         input_schema: json!({"type": "object", "properties": {"id": id, "program": program,
@@ -126,6 +130,8 @@ fn value_json(v: &programs::Value) -> (Value, &'static str) {
         V::Height(h) => (json!(h), "m above the ground"),
         V::Share(x) => (json!(x), "share of the charge, 0 to 1"),
         V::Seconds(s) => (json!(s), "s"),
+        V::Angle(a) => (json!(super::digits(a.to_degrees(), 3)), "°"),
+        V::Rate(w) => (json!(super::digits(w.to_degrees(), 3)), "°/s"),
         V::Loads { chosen, .. } => (json!(chosen), "component ids"),
     }
 }

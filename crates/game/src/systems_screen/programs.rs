@@ -73,6 +73,11 @@ pub const LOADS: &str = "loads";
 pub const OFF_BELOW: &str = "off_below";
 pub const ON_AT: &str = "on_at";
 pub const PERIOD: &str = "period_s";
+pub const ALIGN: &str = "align_deg";
+pub const ALIGN_RATE: &str = "align_rate_deg_s";
+pub const SETTLE: &str = "settle_s";
+pub const SETTLE_WAIT: &str = "settle_wait_s";
+pub const STEER_HOLD: &str = "steer_hold_s";
 
 /// One setting in a program's config menu, as the player reads it: the
 /// program's saved state.
@@ -94,6 +99,10 @@ pub enum Value {
     Share(f64),
     /// A length of time (s).
     Seconds(f64),
+    /// An angle (rad; read and set in degrees).
+    Angle(f64),
+    /// A turn rate (rad/s; read and set in degrees a second).
+    Rate(f64),
     /// The components it switches, and those it could (the ones that draw
     /// power, `power_guard::switchable`).
     Loads { chosen: Vec<String>, offered: Vec<String> },
@@ -107,6 +116,8 @@ impl Value {
             Value::Height(None) => "none set".into(),
             Value::Share(x) => format!("{:.0} %", x * 100.0),
             Value::Seconds(s) => duration(*s),
+            Value::Angle(a) => format!("{:.1}°", a.to_degrees()),
+            Value::Rate(w) => format!("{:.2}°/s", w.to_degrees()),
             Value::Loads { chosen, .. } if chosen.is_empty() => "none".into(),
             Value::Loads { chosen, .. } => chosen.join(", "),
         }
@@ -133,6 +144,11 @@ fn setting(key: &str, input: &Input) -> Result<Setting, String> {
         OFF_BELOW => Setting::Low(number()?),
         ON_AT => Setting::High(number()?),
         PERIOD => Setting::Period(number()?),
+        ALIGN => Setting::Align(number()?.to_radians()),
+        ALIGN_RATE => Setting::AlignRate(number()?.to_radians()),
+        SETTLE => Setting::SettleLead(number()?),
+        SETTLE_WAIT => Setting::SettleWait(number()?),
+        STEER_HOLD => Setting::SteerHold(number()?),
         LOADS => match input {
             Input::List(l) => Setting::Loads(l.clone()),
             Input::Number(_) => return Err("`loads` is a list of component ids".into()),
@@ -234,7 +250,9 @@ impl Inputs {
 /// Every program aboard, in the order the screen lists them: the planned
 /// burns, the parachutes, then the installed ones.
 pub fn rows(x: &Inputs) -> Vec<Row> {
-    let mut out = vec![maneuver(x.software.maneuver, x.burn)];
+    let mut burns = maneuver(x.software.maneuver, x.burn);
+    burns.settings = burn_settings(&x.software.maneuver_settings);
+    let mut out = vec![burns];
     out.extend(x.chutes.as_ref().map(parachutes));
     out.extend(x.software.programs.iter().map(|p| installed(p, x.now, x.computing, &x.switchable)));
     out
@@ -290,6 +308,17 @@ fn maneuver(slot: Slot, burn: Option<Burn>) -> Row {
         press,
         settings: Vec::new(),
     }
+}
+
+/// The planned burns' settings (`maneuver::Settings`).
+fn burn_settings(s: &sim::systems::maneuver::Settings) -> Vec<Param> {
+    vec![
+        Param { key: ALIGN, label: "ALIGNED WITHIN", value: Value::Angle(s.align) },
+        Param { key: ALIGN_RATE, label: "TURNING UNDER", value: Value::Rate(s.align_rate) },
+        Param { key: SETTLE, label: "SETTLES FOR", value: Value::Seconds(s.settle_lead) },
+        Param { key: SETTLE_WAIT, label: "IGNITES ANYWAY AFTER", value: Value::Seconds(s.settle_wait) },
+        Param { key: STEER_HOLD, label: "HOLDS ITS AIM FOR THE LAST", value: Value::Seconds(s.steer_hold) },
+    ]
 }
 
 /// What the maneuver program is doing, in the menus' words (the ship's log

@@ -32,8 +32,13 @@
 //! stops on its own ends it *short*; the pilot's conflicting input
 //! ([`conflicts`]) ends it *manual*.
 //!
+//! **The settings** ([`Settings`], D126's config menu, saved with the
+//! vessel's software): the alignment, the settling lead and wait and the
+//! final steering hold, today's constants by default.
+//!
 //! Numbers marked (E) are estimates awaiting the owner.
 
+use super::ship_os::program::Setting;
 use super::ship_os::View;
 use crate::craft::state::EngineStatus;
 use crate::frame::NodeId;
@@ -59,6 +64,78 @@ pub const SETTLE_WAIT: f64 = 60.0;
 /// errors across it swing its direction faster than any turn could follow:
 /// a gimballed stage chasing it ends the burn spinning.
 pub const STEER_HOLD: f64 = 2.0;
+
+/// The program's settings (D126: "the autopilot is a switch with a config
+/// menu"): the constants above until the pilot sets them.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Settings {
+    /// The thrust axis within this of the burn direction counts as aligned
+    /// (rad; [`ALIGN`]) ...
+    pub align: f64,
+    /// ... turning slower than this (rad/s; [`ALIGN_RATE`]).
+    pub align_rate: f64,
+    /// How long it settles without a level sensor, and the schedule's lead
+    /// for it (s; [`SETTLE_LEAD`]).
+    pub settle_lead: f64,
+    /// Past the ignition epoch it ignites even unsettled after this (s;
+    /// [`SETTLE_WAIT`]).
+    pub settle_wait: f64,
+    /// In a burn's last seconds the steering holds its direction (s;
+    /// [`STEER_HOLD`]).
+    pub steer_hold: f64,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Settings {
+            align: ALIGN,
+            align_rate: ALIGN_RATE,
+            settle_lead: SETTLE_LEAD,
+            settle_wait: SETTLE_WAIT,
+            steer_hold: STEER_HOLD,
+        }
+    }
+}
+
+impl Settings {
+    /// Whether they are the defaults (a save leaves them out).
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+
+    /// Sets one (D126's config menu): the alignment (more than 0, at most a
+    /// right angle), its turn rate (more than 0), or a time (0 s or more).
+    pub fn set(&mut self, s: &Setting) -> Result<(), String> {
+        let time = |t: f64| {
+            if t.is_finite() && t >= 0.0 {
+                Ok(t)
+            } else {
+                Err(format!("a time is 0 s or more, not {t}"))
+            }
+        };
+        match *s {
+            Setting::Align(a) if a > 0.0 && a <= std::f64::consts::FRAC_PI_2 => self.align = a,
+            Setting::Align(a) => return Err(format!("an alignment is more than 0° and at most 90°, not {a} rad")),
+            Setting::AlignRate(w) if w.is_finite() && w > 0.0 => self.align_rate = w,
+            Setting::AlignRate(w) => return Err(format!("a turn rate is more than 0, not {w} rad/s")),
+            Setting::SettleLead(t) => self.settle_lead = time(t)?,
+            Setting::SettleWait(t) => self.settle_wait = time(t)?,
+            Setting::SteerHold(t) => self.steer_hold = time(t)?,
+            ref other => return Err(format!("the planned burns have no {}", other.name())),
+        }
+        Ok(())
+    }
+
+    /// Sets `settings` in order ([`Self::set`]), all or none.
+    pub fn configure(&mut self, settings: &[Setting]) -> Result<(), String> {
+        let mut next = *self;
+        for s in settings {
+            next.set(s)?;
+        }
+        *self = next;
+        Ok(())
+    }
+}
 
 /// A planned burn as the player sets it (D126): Δv along prograde, normal
 /// and radial-out (`dv.x`, `y`, `z`, m/s) at epoch `t`, relative to body
@@ -164,6 +241,8 @@ pub struct Inputs<'a> {
     pub level_min: f64,
     /// The tick (s).
     pub dt: f64,
+    /// Its settings (the vessel's software).
+    pub settings: Settings,
 }
 
 /// The target at the node: `rel` (relative to the reference, at `dt`
@@ -182,11 +261,12 @@ pub fn v_go(target: (DVec3, DVec3), rel: (DVec3, DVec3), mu: f64, dt: f64) -> Op
     Some(target.1 - v)
 }
 
-/// Whether body axis `axis` points along `dir` within [`ALIGN`], turning
-/// slower than [`ALIGN_RATE`].
-pub fn aligned(att: &Attitude, axis: DVec3, dir: DVec3) -> bool {
+/// Whether body axis `axis` points along `dir` within the settings'
+/// alignment, turning slower than their rate ([`ALIGN`], [`ALIGN_RATE`] by
+/// default).
+pub fn aligned(att: &Attitude, axis: DVec3, dir: DVec3, s: &Settings) -> bool {
     let along = (att.q * axis).normalize().dot(dir.normalize()).clamp(-1.0, 1.0);
-    along >= crate::math::cos(ALIGN) && att.omega.length() <= ALIGN_RATE
+    along >= crate::math::cos(s.align) && att.omega.length() <= s.align_rate
 }
 
 /// Whether v_go has turned against the burn's first direction: overshot.
@@ -269,8 +349,8 @@ pub fn handover(baseline: &Controls, now: &Controls, c: &Commands) -> Controls {
 /// (N) and flow `mdot` (kg/s) from mass `m0`, engines starting in
 /// `start` (s), and a turn taking `turn` (s): ignition so half the Δv is
 /// given before the node, and the wake before it by the turn and the
-/// settling lead. Returns (wake, ignition).
-pub fn schedule(node: &Node, (thrust, mdot, m0): (f64, f64, f64), start: f64, turn: f64) -> (Epoch, Epoch) {
+/// settling lead `lead` (s; the settings'). Returns (wake, ignition).
+pub fn schedule(node: &Node, (thrust, mdot, m0): (f64, f64, f64), start: f64, turn: f64, lead: f64) -> (Epoch, Epoch) {
     let half = 0.5 * node.dv.length();
     let t_half = if !(thrust > 0.0 && m0 > 0.0) {
         0.0
@@ -280,17 +360,18 @@ pub fn schedule(node: &Node, (thrust, mdot, m0): (f64, f64, f64), start: f64, tu
         half * m0 / thrust
     };
     let ignite = node.t.add_seconds(-(t_half + 0.5 * start));
-    (ignite.add_seconds(-(turn + SETTLE_LEAD)), ignite)
+    (ignite.add_seconds(-(turn + lead)), ignite)
 }
 
 /// Whether the burn direction follows v_go this tick (|v_go| `go`, m/s,
 /// at an acceleration `accel`, m/s², from the stage estimate): through the
 /// turn and the settling, and in the burn until the time to go falls under
-/// [`STEER_HOLD`]; never in the tail-off.
-pub fn steers(step: Step, go: f64, accel: f64) -> bool {
+/// `hold` (s; the settings', [`STEER_HOLD`] by default); never in the
+/// tail-off.
+pub fn steers(step: Step, go: f64, accel: f64, hold: f64) -> bool {
     match step {
         Step::TailOff => false,
-        Step::Burn => go > STEER_HOLD * accel.max(0.0),
+        Step::Burn => go > hold * accel.max(0.0),
         _ => true,
     }
 }
@@ -336,26 +417,27 @@ fn commands(x: &Inputs, p: &mut Program) -> Commands {
     }
     let go = x.rel.zip(p.target).and_then(|(rel, target)| v_go(target, rel, x.mu, to_node));
     let accel = if x.mass > 0.0 { x.thrust / x.mass } else { 0.0 };
-    if let Some(g) = go.filter(|g| g.length() > 0.0 && steers(p.step, g.length(), accel)) {
+    let set = &x.settings;
+    if let Some(g) = go.filter(|g| g.length() > 0.0 && steers(p.step, g.length(), accel, set.steer_hold)) {
         p.dir = Some(g.normalize());
     }
     let hold = p.dir;
     let since = |e: Option<Epoch>| e.map_or(0.0, |e| x.t.seconds_since(e));
     match p.step {
         Step::Turn => {
-            let ready = x.view.attitude.zip(hold).is_some_and(|(a, d)| aligned(&a, x.axis, d));
+            let ready = x.view.attitude.zip(hold).is_some_and(|(a, d)| aligned(&a, x.axis, d, set));
             let ignition = x.t.seconds_since(p.ignite);
-            if (ready && ignition >= -SETTLE_LEAD) || ignition >= 0.0 {
+            if (ready && ignition >= -set.settle_lead) || ignition >= 0.0 {
                 p.step = Step::Settle;
                 p.settle_from = Some(x.t);
             }
             Commands { hold, throttle: Some(0.0), ..Commands::default() }
         }
         Step::Settle => {
-            let settled = x.settled.unwrap_or(since(p.settle_from) >= SETTLE_LEAD);
+            let settled = x.settled.unwrap_or(since(p.settle_from) >= set.settle_lead);
             let ignition = x.t.seconds_since(p.ignite);
             let push = x.can_settle.then_some(x.axis);
-            if (settled && ignition >= 0.0) || ignition >= SETTLE_WAIT {
+            if (settled && ignition >= 0.0) || ignition >= set.settle_wait {
                 p.step = Step::Burn;
                 p.first = p.dir;
                 p.ignited = Some(x.t);

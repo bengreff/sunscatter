@@ -176,6 +176,18 @@ pub enum Setting {
     High(f64),
     /// A program on a period: its length (s; [`Installed::configure`]).
     Period(f64),
+    /// The planned burns (`maneuver::Settings::set`): the thrust axis
+    /// within this of the burn direction counts as aligned (rad) ...
+    Align(f64),
+    /// ... turning slower than this (rad/s).
+    AlignRate(f64),
+    /// How long they settle without a level sensor (s).
+    SettleLead(f64),
+    /// How long past the ignition epoch they wait for settled propellant
+    /// (s).
+    SettleWait(f64),
+    /// The burn's last seconds that hold the steering's direction (s).
+    SteerHold(f64),
 }
 
 impl Setting {
@@ -188,6 +200,11 @@ impl Setting {
             Setting::Low(_) => "off line",
             Setting::High(_) => "on line",
             Setting::Period(_) => "period",
+            Setting::Align(_) => "alignment",
+            Setting::AlignRate(_) => "turn rate",
+            Setting::SettleLead(_) => "settling time",
+            Setting::SettleWait(_) => "wait to ignite",
+            Setting::SteerHold(_) => "steering hold",
         }
     }
 }
@@ -195,7 +212,8 @@ impl Setting {
 /// Sets the settings of program `name` on `software` (the names of
 /// `Vessel::set_switch`) at `now`, all or none, each by its owner's rule:
 /// the parachutes' deploy (`chutes`: `chutes::configure`, by the craft's
-/// `spec`) or an installed program by its name ([`Installed::configure`],
+/// `spec`), the planned burns (`maneuver::Settings::configure`) or an
+/// installed program by its name ([`Installed::configure`],
 /// a load manager's loads from `offered`). The vessel's setter and the
 /// game's check before it sends one.
 pub fn configure(
@@ -207,7 +225,7 @@ pub fn configure(
 ) -> Result<(), String> {
     match name {
         "chutes" => super::chutes::configure(&mut software.chutes, spec, settings),
-        "maneuver" => Err("the planned burns have no settings".into()),
+        "maneuver" => software.maneuver_settings.configure(settings),
         _ => {
             let p =
                 software.programs.iter_mut().find(|p| p.name == name).ok_or_else(|| format!("no program {name}"))?;

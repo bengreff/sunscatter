@@ -223,7 +223,17 @@ fn each_programs_settings() {
     assert_eq!(r.settings[0].value, Value::Loads { chosen: vec!["a".into(), "b".into()], offered: offered.to_vec() });
     let woken = Installed { schedule: Schedule::At(t0()), ..p };
     assert_eq!(installed(&woken, t0(), true, &offered).settings.len(), 3, "a wake epoch has no period");
-    assert!(maneuver(slot(Switch::Auto, false), None).settings.is_empty());
+    let burns = burn_settings(&Default::default());
+    assert_eq!(
+        burns.iter().map(|p| (p.key, p.label, p.value.text())).collect::<Vec<_>>(),
+        [
+            (ALIGN, "ALIGNED WITHIN", "2.0°".to_string()),
+            (ALIGN_RATE, "TURNING UNDER", "0.52°/s".into()),
+            (SETTLE, "SETTLES FOR", duration(20.0)),
+            (SETTLE_WAIT, "IGNITES ANYWAY AFTER", duration(60.0)),
+            (STEER_HOLD, "HOLDS ITS AIM FOR THE LAST", duration(2.0)),
+        ]
+    );
 }
 
 /// One edit of a setting: its key and value.
@@ -259,7 +269,10 @@ fn one_rule_for_the_settings() {
         ("chutes", vec![c(OFF_BELOW, n(0.3))], Err("Parachutes has no setting `off_below` (it has arm_height_m, main_height_m)")),
         ("chutes", vec![c(MAIN_HEIGHT, list(&[]))], Err("`main_height_m` is a number")),
         ("chutes", vec![], Err("Parachutes: no setting given (it has arm_height_m, main_height_m)")),
-        ("maneuver", vec![c(PERIOD, n(1.0))], Err("Planned burns has no settings")),
+        ("maneuver", vec![c(PERIOD, n(1.0))], Err("Planned burns has no setting `period_s` (it has align_deg, align_rate_deg_s, settle_s, settle_wait_s, steer_hold_s)")),
+        ("maneuver", vec![c(ALIGN, n(3.0)), c(SETTLE, n(10.0))], Ok(vec![Setting::Align(3f64.to_radians()), Setting::SettleLead(10.0)])),
+        ("maneuver", vec![c(ALIGN, n(0.0))], Err("Planned burns: an alignment is more than 0° and at most 90°, not 0 rad")),
+        ("maneuver", vec![c(STEER_HOLD, n(-1.0))], Err("Planned burns: a time is 0 s or more, not -1")),
         ("power", vec![c(OFF_BELOW, n(0.5)), c(ON_AT, n(0.9))], Ok(vec![Setting::Low(0.5), Setting::High(0.9)])),
         ("power", vec![c(OFF_BELOW, n(0.9))], Err("Load manager: the on line (80 %) is below the off line (90 %): it would switch at every run")),
         ("power", vec![c(PERIOD, n(600.0))], Ok(vec![Setting::Period(600.0)])),

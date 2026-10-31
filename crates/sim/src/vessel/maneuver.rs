@@ -102,7 +102,8 @@ impl Vessel {
             let torque = DVec3::new(a.rotate.x * i.x_axis.x, a.rotate.y * i.y_axis.y, a.rotate.z * i.z_axis.z);
             super::hold::turn_lead_capped(&i, torque, self.gas_turn_cap())
         });
-        let (wake, ignite) = maneuver::schedule(node, (thrust, mdot, mass), start, turn);
+        let lead = self.software.maneuver_settings.settle_lead;
+        let (wake, ignite) = maneuver::schedule(node, (thrust, mdot, mass), start, turn, lead);
         let wake = if wake < self.time { self.time } else { wake };
         Some(Program::new(i, (wake, ignite), engines))
     }
@@ -284,6 +285,7 @@ impl Vessel {
             tail_impulse,
             level_min,
             dt: super::TICK,
+            settings: self.software.maneuver_settings,
         };
         let before = p.step;
         let cmds = maneuver::step(&x, &mut p);

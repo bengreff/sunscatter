@@ -31,7 +31,7 @@ use std::fmt;
 use std::path::Path;
 
 /// Version of the save format. Loading any other version is an error.
-pub const SAVE_VERSION: u32 = 19;
+pub const SAVE_VERSION: u32 = 20;
 
 /// Which ephemeris a save was made against. Vessel states are only
 /// meaningful (and only reproducible) with the same body motions.
