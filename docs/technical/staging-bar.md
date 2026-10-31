@@ -1,6 +1,6 @@
 # The staging bar and part cards (D111)
 
-**Status:** *playable*, built 2026-10-27 by BAR (not yet seen on screen: the pad demo's shots will show it). From the owner's request and answers 9–20 ([interview](../archive/interviews/interview-2026-10-27-flight-ui.md)); decisions D106, D108, D111. Replaces the Staging menu (key G).
+**Status:** *playable*, built 2026-10-27 by BAR; on screen in every mission test's shots (the Falcon 9 on the pad: DOCS-3's README image, 2026-10-30). From the owner's request and answers 9–20 ([interview](../archive/interviews/interview-2026-10-27-flight-ui.md)); decisions D106, D108, D111. Replaces the Staging menu (key G).
 
 ## The bar
 

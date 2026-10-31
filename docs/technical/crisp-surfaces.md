@@ -2,7 +2,7 @@
 
 Since 2026-10-26 the Minimal tier is the one look and there are no graphics settings (D073); the tiers, toggles and presets named below no longer exist.
 
-**Status:** built 2026-10-25, not yet seen on screen (design the same day). From the owner's feedback ([record](../archive/interviews/interview-2026-10-25.md)); decision D073 (revised). What was built and the choices made: [Build notes](#build-notes-2026-10-25).
+**Status:** *playable*: built 2026-10-25 (design the same day), and seen on screen in DOCS-3's shots from the headless game (2026-10-30, the README's images): Earth's coasts, land zones and ice from 30,000 km, and the pad's ground reading as land with no step at the horizon. The other acceptance views below are not yet taken. From the owner's feedback ([record](../archive/interviews/interview-2026-10-25.md)); decision D073 (revised). What was built and the choices made: [Build notes](#build-notes-2026-10-25).
 
 **Goal:** from any distance, a planet's surface is sharp and recognisable: water is water, land is land, ice is ice, a desert is a desert. Nothing is ever a magnified photograph. The sky is the physical one from Bevy's scattering model, and from orbit the ground stays clear under a thin blue haze.
 
@@ -68,7 +68,7 @@ All of this is in `terrain.wgsl`, always drawn (the benchmark can turn it off: `
 - game: the zone pick from 4 indices and weights, including the runner-up and its margin (table); the coast step at 0.5 (table); the octave count from the footprint (table); palette packing; every shipped `visual.ron` with zones parses; every index in the shipped `zones.png` is below the list length + 1.
 - Budget: Minimal at 1600×900 on the reference Mac: terrain fragment cost ≤ +0.3 ms, GPU memory ≤ +60 MB (two 4096 maps per body).
 
-## Acceptance (screenshots from the demo, Minimal)
+## Acceptance (screenshots from the headless game, `shoot`)
 
 - Orbit at ~300 km, looking at the horizon as in the owner's screenshot: oceans, coasts, land zones and ice are clearly visible, sharp, with haze only towards the limb.
 - Orbit, nadir: coastline crisp at full window resolution.
@@ -116,5 +116,5 @@ Commits cfaf932 (bake), d83cbb3 (shader), f47a1e3 (sky). Choices where the desig
 - **Ambient (2026-10-25).** The daylight sky stand-in (up to 4000 cd/m² of Bevy's global ambient, every tier without the sky light) lit every body's terrain while the camera was low in a sunlit atmosphere, including the Moon seen from the pad. Each body now takes only its share: the body whose air the camera is in gets it, others starlight only (`sky::ambient_share`, be309a3). Ships still take the global ambient.
 - **GPU memory** (Earth): zone map 8.4 MB, far texture 44.7 MB with mips, water mask at 4096 instead of 2048 +8.4 MB: ~61 MB. Moon ~53 MB. About the budget per body, twice it for both.
 - **Known limits.** Zone edges are bilinear contours of a one-hot field: smooth curves with a slight bead where a third zone has a single texel along an edge; a smoother kernel (a B-spline over 4×4 texels) would round them further at ~4× the gathers. The texture coordinates are f32, good to ~2–5 m on Earth, so a coastline seen from under ~100 m shows small steps.
-- **Checked so far:** the bake's previews; a CPU re-implementation of the near path over the baked data (Florida, the Nile delta, Hudson Bay: crisp, recognisable coasts and zones); the shader parses, validates and compiles to MSL with naga 29 (main and prepass variants). Not yet seen in the game, and not yet measured.
+- **Checked so far:** the bake's previews; a CPU re-implementation of the near path over the baked data (Florida, the Nile delta, Hudson Bay: crisp, recognisable coasts and zones); the shader parses, validates and compiles to MSL with naga 29 (main and prepass variants). Seen in the game since (the Status above); not yet measured.
 
