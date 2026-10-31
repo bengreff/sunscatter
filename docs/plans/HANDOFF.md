@@ -2,18 +2,18 @@
 
 A SessionStart hook loads this file automatically after `/clear` or at startup. It is kept current by `/handoff`.
 
-*Updated 2026-10-30 (night). Running: ONEKIND-7, INTERFACE-3, DOCS-3 (all three slots). PLANNER finished. The owner asked for next steps 1–3 done; answers in [interview-2026-10-30-roadmap.md](../archive/interviews/interview-2026-10-30-roadmap.md) (D120, D126 revised; D128, D129 new; D063, D121 extended).*
+*Updated 2026-10-30 (night). Running: ONEKIND-7, INTERFACE-4. PLANNER, DOCS-3 and INTERFACE-3 finished. The owner asked for next steps 1–3 done; answers in [interview-2026-10-30-roadmap.md](../archive/interviews/interview-2026-10-30-roadmap.md) (D120, D126 revised; D128, D129 new; D063, D121 extended).*
 
 ## Your first job
 
 The owner, 2026-10-31: "Work all night on this please", with at least one agent on the interface (INTERFACE). The lead's context may go as high as needed tonight. The cap stays at 3 agents plus the lead.
 
 1. **Running:**
-   - **ONEKIND-7** ([brief-onekind.md](brief-onekind.md), ONEKIND-6's State): the deletion's steps (b) (a patch ready), (c) and (d), the seven decisions, the Dragon playtest save, the docs' test-craft mentions. **The wave waits on it.** ONEKIND-6 landed step (a), 2a5420e.
-   - **INTERFACE-3** ([brief-interface.md](brief-interface.md), INTERFACE-2's Left): shots at HEAD, finding 13 (D106 in the Landing menu and `hottest`), MCP reach (target, staging bar, notifications), the navball's holds during a program and `get_vessel`'s apsides while thrusting (from PLANNER-4), then more of the owner's cleanup.
-   - **DOCS-3** ([brief-docs.md](brief-docs.md), its section): the archived specs into technical docs, stale status lines, the README's images, Windows on backhouse, then the finished briefs archived.
+   - **ONEKIND-7** ([brief-onekind.md](brief-onekind.md), ONEKIND-6's State): step (b) landed (6741e5e: planned burns are nodes only); steps (c) and (d), the seven decisions, the Dragon playtest save, the docs' test-craft mentions. **The wave waits on it.**
+   - **INTERFACE-4** ([brief-interface.md](brief-interface.md), INTERFACE-3's Left): `get_vessel`'s apsides under thrust (after ONEKIND-7's agent.rs), shots of INTERFACE-3's fixes, a red translucent cone left at the second stage's forward end after Dragon separates (DOCS-3's shot), `tools/gpu_trace.py`, then more of the owner's cleanup.
+   - The third slot is left empty on purpose: every wave item collides with ONEKIND-7's files, and a lighter machine speeds it.
 2. **Next:** once PLANNER and ONEKIND have landed, the wave one agent at a time, each brief written and reviewed: STATE ([brief-state.md](brief-state.md)), LAYERS ([brief-layers.md](brief-layers.md)), FIXES3 ([brief-fixes3.md](brief-fixes3.md)), ADVANCE ([brief-advance.md](brief-advance.md)), PERF ([brief-perf.md](brief-perf.md); first the coast's tank law at 5,000 parts), DEBRIS ([brief-debris.md](brief-debris.md)). INTERFACE can run beside them (game only). Successor agents continue from a brief's State when one wraps up at ~300k.
-3. **Done tonight:** PLANNER, finished (PLANNER-4: 178e814 turns limited by the gas left, a2a9d55, 1eb6715, 431155d, 2dfd940, 1422b99 `technical/planner.md`; the Falcon 9 mission test raised the orbit with two nodes from warp 6: 412.1 × 343.2 km against 413.2 × 343.5 predicted, shots checked by the lead; its Left: Dracos' burns go with the Dragon flight, the pilot's throttle to FIXES3, two game items to INTERFACE-3); ONEKIND-5 (051f52b, b055104, 84e9b41); PLANNER-3 (8b5e8e9: the game's planner, MCP `set_plan` and the landing prediction on nodes); ONEKIND-4 (716e2fd, 4ee9212: sim unit tests and examples on the small rocket); INTERFACE-1 (def10d2, 1183eb1, 723ceec, 85bb56e, f7aff55); RESEARCH (26f4639, 4dd65f9); AUDIT (14c2a4d, 17ec7aa, 08a34c8); PLANNER-1 (bce4379, c7c2de4, 0a382b6); PLANNER-2 (bb43d53, 8de24aa, 835f839); ONEKIND-3 (1721504, be83b64; the stress craft's numbers in `scale-performance.md`). ONEKIND-2, MISSION-2 and DOCS-2 before them (`brief-mission.md` and `brief-audit.md` are archived in `archive/briefs/`, with PLANNER's and RESEARCH's; `brief-docs.md` goes when DOCS-3's Left is done).
+3. **Done tonight:** DOCS-3 (5e1bdd6, 75be157: six technical docs from the archived specs; c31ecaf, 0aa89de: status lines; d651286: the README's images from the headless game; 9815184: the finished briefs archived); INTERFACE-3 (12d7faa, a3a4336, 8936e94, 50a08d5, 4d4153e, b246f9d: one rule for part temperatures, D106 in the Landing menu, MCP `set_target`, `edit_stages`, `notifications`, the navball during a program); PLANNER, finished (PLANNER-4: 178e814 turns limited by the gas left, a2a9d55, 1eb6715, 431155d, 2dfd940, 1422b99 `technical/planner.md`; the Falcon 9 mission test raised the orbit with two nodes from warp 6: 412.1 × 343.2 km against 413.2 × 343.5 predicted, shots checked by the lead; its Left: Dracos' burns go with the Dragon flight, the pilot's throttle to FIXES3, two game items to INTERFACE-3); ONEKIND-5 (051f52b, b055104, 84e9b41); PLANNER-3 (8b5e8e9: the game's planner, MCP `set_plan` and the landing prediction on nodes); ONEKIND-4 (716e2fd, 4ee9212: sim unit tests and examples on the small rocket); INTERFACE-1 (def10d2, 1183eb1, 723ceec, 85bb56e, f7aff55); RESEARCH (26f4639, 4dd65f9); AUDIT (14c2a4d, 17ec7aa, 08a34c8); PLANNER-1 (bce4379, c7c2de4, 0a382b6); PLANNER-2 (bb43d53, 8de24aa, 835f839); ONEKIND-3 (1721504, be83b64; the stress craft's numbers in `scale-performance.md`). ONEKIND-2, MISSION-2 and DOCS-2 before them (`brief-mission.md` and `brief-audit.md` are archived in `archive/briefs/`, with PLANNER's and RESEARCH's; `brief-docs.md` goes when DOCS-3's Left is done).
 
 ## State
 
@@ -69,16 +69,17 @@ The owner, 2026-10-31: "Work all night on this please", with at least one agent 
 
 ## Open for the owner
 
-These are agents' defaults, in each brief's "Open for the owner":
-- Dragon's 19.0 MPa MEOP (U);
-- the coast law's hourly refresh;
-- the thermosphere film (140–150 km);
-- in roll, the liquid turns with its tank;
-- the staging defaults (ROUNDTRIP);
-- the pad-abort cases (QUICKFIX);
-- the takeover rule's reading (D126: a sequence switches to manual only for conflicting input; PLANNER defines "conflicting").
-
-Older: `falcon9.md`'s U/E data, Dragon's CO₂ removal, the Moon's field degree, the 1,000-year ephemeris, backhouse's certificate (Windows not checked since 2026-10-26), CRUCIBLE's exit states.
+Defaults the agents took tonight (2026-10-30/31), each in its brief's "Open for the owner" (the archived briefs are in `docs/archive/briefs/`). The ones that matter most first:
+- **Planned burns** (PLANNER, `archive/briefs/brief-planner.md`):
+  - should a running burn move the pilot's throttle as it flies, so X takes over? (FIXES3's default: yes);
+  - what counts as "conflicting" input for D126's takeover: a different throttle, any rotation input, SAS off, another hold, translation against the settling;
+  - estimates: aligned within 2° and 0.5°/s; 20 s of settling without a level sensor; ignite 60 s late regardless; the turn spends at most ~10–14 % of the gas left; steering held for the last 2 s; a node's time is the burn's middle; the hand-over is the program's throttle with SAS on stability.
+- **Warp** (AUDIT, `archive/briefs/brief-audit.md`): rotation input held at rails warp refuses rails warp (default); a hold on another craft gets the model fix (default); the warp-stop thresholds are E.
+- **The flights' designs** (RESEARCH, `archive/briefs/brief-research.md`): the predictor as a ship-OS call; interior point now, PIPG later; TACOT standing in for PICA-X; a baroswitch backup in the chute part; terrain below sea level counted as ocean; CO₂ removal by LiOH at η·Q·c in place of the fixed cap; Dragon's free-flight endurance ~10 days (E).
+- **One kind of craft** (ONEKIND, `brief-onekind.md`): the stress craft's shape (a core with rings of boosters, or station-like?); the small rocket's solar cells and other test numbers (E); low thrust on rails and the ion spirals gone until D029's warp while thrusting; faster, lower flows in the parts load tests; spawning ships is a developer MCP tool, not a pause-menu button.
+- **The interface** (INTERFACE, `brief-interface.md`): the thermal cut-away is lengthwise and halves the craft by default; each cell is coloured against its own limit; every selection isolates its part; the help window is opaque and scroll bars show on cut lists (the only look changes, D123); Settings and Saves take the centre; MCP `command` lists only what can run now; `edit_stages` names stages by the program's index; whether the pause menu and settings need their own spec (DOCS-3).
+- **Older:** Dragon's 19.0 MPa MEOP (U); the coast law's hourly refresh; the thermosphere film (140–150 km); in roll the liquid turns with its tank; the staging defaults (ROUNDTRIP); the pad-abort cases (QUICKFIX); `falcon9.md`'s U/E data; the Moon's field degree; the 1,000-year ephemeris; CRUCIBLE's exit states.
+- **Windows:** backhouse did not answer on port 22 (DOCS-3, 2026-10-31); not checked since 2026-10-26.
 
 ## Gotchas
 
