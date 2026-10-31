@@ -51,4 +51,22 @@ Small commits, each with its tests passing (`cargo test -p sim`, the game's test
 - **Prediction (planner):** `Vessel::node_prediction` (one owner): the target state at the node from the stored coast, ignition and duration from the same estimate, warnings (no thrusters push along the thrust axis: cannot settle; not enough Δv; too soon for the turn). The game draws the coast from that state as a prediction; the stored trajectory is what was flown.
 - **Low-thrust burns on rails** (`limbo.md`) are the made-up path's open-loop law: they go with it (ONEKIND-3), and come back with D029.
 
-(Update as you land: commits with hashes, tests moved and any not kept, what is left in order, Open for the owner.)
+### State (PLANNER-1, wrapped up at ~300k tokens, 2026-10-30)
+
+**Landed:** bce4379 `kepler::propagate` (universal variables, table tests); c7c2de4 `systems::maneuver` (the program's rules and step, 9 table tests: v_go, alignment, cutoff with tail-off, takeover, schedule, the step sequence, short ends) and `estimate::lit`; 40a91ad this design.
+
+**Landed with the vessel side (0a382b6):** `vessel/maneuver.rs` (`Vessel::set_nodes`, `nodes`, `program`, `node_prediction`, the schedule, the wake at its own epoch beside `order_stop`, `tick_controls` in all three tick loops, the ship log), `flight::feeds_read`, `FlightPlan::next_direction` (the maneuver hold points at the next node on rails too), and `tests/maneuver.rs`: a 40 m/s prograde node on the small rocket flies turn, ignition, burn and cutoff ("on target, 0.27 m/s left"), coasts after, ends 0.93 m/s and 33 m from the program's target at the node, and 60 fps frames give the same bits as one jump (D129). Nodes live on the vessel (`Vessel.nodes`), not in `FlightPlan`: a new `FlightPlan` field breaks every struct literal of it, ONEKIND-3's files included. When the made-up path goes, the nodes become the plan.
+
+**Found:** the small rocket's thruster blocks cannot push along its engines (`rcs::can_push`): the planner warns that it cannot settle, and it ignites after the settling lead regardless.
+
+**Left, in order:**
+1. Accuracy: 0.93 m/s left against the program's 0.27 m/s at cutoff (the test allows 1.5): match the tail-off's Δv (engine `shutdown_impulse` against what the tail-off gives) and the tick's quantisation (throttle down for the last seconds, or cut at the predicted sub-tick).
+2. Table tests at the vessel: the wake at its own epoch under rails warp (a frame of 10⁵× stops at the wake, like an order), takeover mid-burn (a throttle change: manual, the next node kept), a split mid-burn ends the program, save and load mid-burn bit-identical, the planner's warnings.
+3. Move `planned_burns`' 11 tests onto `set_nodes` on the small rocket or the Falcon 9 second stage (each keeping what it checks; the trajectory-segment ones become: the coast is untouched by nodes, chunked = single pass of the coast up to the wake); `hold_modes`' maneuver holds (the hold reads `next_direction` with the nodes); the game's planner (`plan_from` sends nodes to a craft of parts: a `GameCommand::SetNodes`), `trajectory/predict_tests` (the predicted path after a node from `node_prediction`), `landing::model`.
+4. MCP `set_plan` takes nodes for a craft of parts (`agent.rs`); the mission test (Falcon 9 to orbit, then a node on the second stage), with shots.
+5. The game hands the program's last throttle and hold to the pilot's controls when it switches to manual (now the pilot's own controls fly from that tick: a rotation nudge mid-burn closes the throttle if the pilot's is at 0).
+6. Docs: `technical/planner.md`, the status lines (motion, propulsion, avionics: *skeleton* for planned burns of parts), `owners.md` rows (`systems::maneuver`, `kepler::propagate`, `Vessel::node_prediction`), `mcp.md`, `testing.md`.
+
+**The made-up path's open-loop law** is still needed by `planned_burns`, `hold_modes`, the game's planner and `limbo` until item 3 lands. Low-thrust burns on rails go with it (design above).
+
+**Open for the owner** (defaults taken, E): aligned within 2° and 0.5°/s before settling; 20 s of settling without a level sensor and as the schedule's lead; ignition 60 s past its epoch regardless of settling; the cutoff at |v_go| ≤ tail-off Δv + half a tick (no throttle-down for the last metres per second); "conflicting input" read as: a throttle change other than the program's, any rotation input, SAS off, another hold, translation against the settle (D126); a split mid-burn ends it.
