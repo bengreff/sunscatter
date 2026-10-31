@@ -127,8 +127,17 @@ pub fn rows(x: &Inputs) -> Vec<Row> {
 fn maneuver(slot: Slot, burn: Option<Burn>) -> Row {
     let (now, tone, press) = match burn {
         None => ("no burn planned".to_string(), Tone::Dim, Err("no burn planned".to_string())),
-        Some(b) if b.step != Step::Wait => {
+        Some(b) if b.step.flying() => {
             (format!("burn {}: {}", b.number, step_label(b.step)), Tone::Good, Err("it is flying a burn".into()))
+        }
+        // Ended, until the next node is scheduled: how it ended.
+        Some(b) if b.step != Step::Wait => {
+            let tone = match b.step {
+                Step::Done => Tone::Good,
+                Step::Short => Tone::Warn,
+                _ => Tone::Normal,
+            };
+            (format!("burn {}: {}", b.number, step_label(b.step)), tone, Err("no burn waiting".into()))
         }
         Some(b) => {
             let n = b.number;

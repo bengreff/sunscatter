@@ -32,6 +32,8 @@ fn the_planned_burns_by_switch_and_step() {
         (Switch::Off, false, burn(Step::Wait, 90.0), "off: burn 1 is not flown (wakes in 1m 30s); fly it by hand", Tone::Dim, false),
         (Switch::Auto, false, burn(Step::Settle, -3.0), "burn 1: settling the propellant", Tone::Good, false),
         (Switch::Press, false, burn(Step::Burn, -9.0), "burn 1: burning", Tone::Good, false),
+        (Switch::Press, false, burn(Step::Done, -99.0), "burn 1: on target", Tone::Good, false),
+        (Switch::Auto, false, burn(Step::Short, -99.0), "burn 1: ended short", Tone::Warn, false),
     ];
     for (switch, pressed, b, now, tone, offered) in table {
         let r = maneuver(slot(switch, pressed), b);
@@ -40,6 +42,8 @@ fn the_planned_burns_by_switch_and_step() {
         assert_eq!(r.press.is_ok(), offered, "{switch:?} {pressed} {b:?}: {:?}", r.press);
     }
     assert_eq!(maneuver(slot(Switch::Press, false), burn(Step::Wait, 9.0)).press, Ok("fly burn 1".into()));
+    // Ended: nothing waits for a press (it said "it is flying a burn").
+    assert_eq!(maneuver(slot(Switch::Press, false), burn(Step::Done, -9.0)).press, Err("no burn waiting".into()));
 }
 
 /// Crew Dragon's parachutes (drogues armed below 5.5 km, mains at 1.8 km).
