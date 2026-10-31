@@ -161,6 +161,8 @@ impl Vessel {
             if self.breakup.is_some() {
                 return (self.time, budget.spent);
             }
+            // A planned burn's program wakes at its own epoch (D129).
+            self.wake_program(world, controls);
             let step = match self.order_stop() {
                 Some(e) if e < target => e,
                 _ => target,
@@ -255,7 +257,7 @@ impl Vessel {
             return true;
         };
         let inertia_now = self.mass_props().inertia;
-        let fly = Rails { world, trajectory, plan: &self.plan, craft: &self.craft, controls, inertia_now };
+        let fly = Rails::new(world, trajectory, (&self.plan, &self.nodes), &self.craft, controls, inertia_now);
         let rule = fly.rule_at(self.time, state.0);
         if !self.repoint && current.is_known() && current.rule().same_regime(&rule) {
             return false;
@@ -313,7 +315,7 @@ impl Vessel {
         let segment_inertia = |e: Epoch| model.at(trajectory.mass_at(e).unwrap_or(mass_now) - dry).inertia;
         let held = parts(self.ship.as_ref()).map(|p| p.inertia);
         let inertia_now = held.unwrap_or_else(|| model.at(self.propellant).inertia);
-        let fly = Rails { world, trajectory, plan: &self.plan, craft: &self.craft, controls, inertia_now };
+        let fly = Rails::new(world, trajectory, (&self.plan, &self.nodes), &self.craft, controls, inertia_now);
         let stop_settled;
         (reach, stop_settled) = fly.regime_stops(self.time, reach);
         let design = self.craft.design().clone();
@@ -345,7 +347,7 @@ impl Vessel {
             let propellant_at = |e: Epoch| now.map_or_else(|| segment_propellant(e), |p| p.mass - dry);
             let inertia_at = |e: Epoch| now.map_or_else(|| segment_inertia(e), |p| p.inertia);
             let inertia_now = now.map_or(inertia_now, |p| p.inertia);
-            let fly = Rails { world, trajectory, plan: &self.plan, craft: &self.craft, controls, inertia_now };
+            let fly = Rails::new(world, trajectory, (&self.plan, &self.nodes), &self.craft, controls, inertia_now);
             if e_systems.is_some() {
                 settled = fly.attitude(&mut self.attitude, &mut self.control, (t, e), &inertia_at, stop_settled);
                 if settled.is_some() {
@@ -391,7 +393,7 @@ impl Vessel {
             let now = parts(self.ship.as_ref());
             let inertia_at = |e: Epoch| now.map_or_else(|| segment_inertia(e), |p| p.inertia);
             let inertia_now = now.map_or(inertia_now, |p| p.inertia);
-            let fly = Rails { world, trajectory, plan: &self.plan, craft: &self.craft, controls, inertia_now };
+            let fly = Rails::new(world, trajectory, (&self.plan, &self.nodes), &self.craft, controls, inertia_now);
             if let Some(s) = fly.attitude(&mut self.attitude, &mut self.control, (t, reach), &inertia_at, stop_settled)
             {
                 reach = if s > self.time { s } else { self.time };
@@ -483,9 +485,24 @@ struct Rails<'a> {
     world: &'a World,
     trajectory: &'a Trajectory,
     plan: &'a FlightPlan,
+    /// A craft of parts' nodes (the maneuver hold points along the next).
+    nodes: &'a [crate::systems::maneuver::Node],
     craft: &'a CraftParams,
     controls: &'a Controls,
     inertia_now: DMat3,
+}
+
+impl<'a> Rails<'a> {
+    fn new(
+        world: &'a World,
+        trajectory: &'a Trajectory,
+        (plan, nodes): (&'a FlightPlan, &'a [crate::systems::maneuver::Node]),
+        craft: &'a CraftParams,
+        controls: &'a Controls,
+        inertia_now: DMat3,
+    ) -> Self {
+        Rails { world, trajectory, plan, nodes, craft, controls, inertia_now }
+    }
 }
 
 impl Rails<'_> {
@@ -548,10 +565,11 @@ impl Rails<'_> {
         }
     }
 
-    /// The law of the next planned burn after the segment containing `epoch`.
-    fn next_burn(&self, epoch: Epoch) -> Option<&DirectionLaw> {
+    /// The law of the next planned burn (or node) after the segment
+    /// containing `epoch`.
+    fn next_burn(&self, epoch: Epoch) -> Option<DirectionLaw> {
         let seg = self.trajectory.segment_at(epoch)?;
-        self.plan.burns.get(self.plan.next_from(seg.plan_index, epoch)).map(|b| &b.law.direction)
+        self.plan.next_direction(self.nodes, seg.plan_index, epoch)
     }
 
     /// The attitude regime the controls ask for at `epoch` ([`pointing::wanted`]).
@@ -563,7 +581,7 @@ impl Rails<'_> {
             let (anchor, r) = self.trajectory.eval(epoch).map_or((anchor, DVec3::ZERO), |s| (s.0, s.1));
             super::hold::hold_reference(self.world, &self.world.snapshot(epoch), anchor, r)
         };
-        pointing::wanted(&eff, self.next_burn(epoch), auto, self.craft.engine.mount_dir)
+        pointing::wanted(&eff, self.next_burn(epoch).as_ref(), auto, self.craft.engine.mount_dir)
     }
 
     /// Whether the attitude stays as it is over `(t, e)` (no rotation, no
@@ -586,7 +604,7 @@ impl Rails<'_> {
         }
         let snap = LazySnapshot::new(self.world, epoch);
         let maneuver = (turning || controls.hold == HoldMode::Maneuver)
-            .then(|| maneuver_direction(self.plan, seg.plan_index, &snap, state))
+            .then(|| maneuver_direction(self.plan, self.nodes, seg.plan_index, &snap, state))
             .flatten();
         let axis = self.craft.engine.mount_dir;
         match (turning, maneuver) {

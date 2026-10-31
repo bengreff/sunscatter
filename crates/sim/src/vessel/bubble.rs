@@ -383,6 +383,7 @@ impl Vessel {
             return;
         }
         let design = self.craft.design().clone();
+        let controls = &self.tick_controls(world, controls);
         let Some(start) = self.begin_tick(world, controls, &design, (dt, t)) else { return };
         if let Some(end) = self.fly_tick(world, &start) {
             self.finish_tick(world, start, end, controls);
@@ -504,10 +505,14 @@ fn together(
 ) -> bool {
     let designs: Vec<_> = idx.iter().map(|&i| fleet[i].craft.design().clone()).collect();
     let mut starts: Vec<TickStart> = Vec::with_capacity(idx.len());
+    let mut flown: Vec<Controls> = Vec::with_capacity(idx.len());
     for (k, &i) in idx.iter().enumerate() {
-        // A member is held live: it always starts a tick.
-        let Some(s) = fleet[i].begin_tick(world, &controls(i), &designs[k], (TICK, next)) else { return false };
+        // A member is held live: it always starts a tick (a planned burn's
+        // program flies first, `maneuver`).
+        let c = fleet[i].tick_controls(world, &controls(i));
+        let Some(s) = fleet[i].begin_tick(world, &c, &designs[k], (TICK, next)) else { return false };
         starts.push(s);
+        flown.push(c);
     }
     let n = idx.len();
     let mut touched = vec![false; n];
@@ -617,8 +622,7 @@ fn together(
         for (part, speed) in worst {
             v.collided(part, speed);
         }
-        let c = controls(i);
-        v.finish_tick(world, start, end, &c);
+        v.finish_tick(world, start, end, &flown[k]);
         v.bubble.since_contact = after_tick(v.bubble.since_contact, touched[k]);
     }
     true

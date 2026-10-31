@@ -368,6 +368,8 @@ impl Vessel {
             }
             let design = self.craft.design().clone();
             let until = self.time.add_seconds(TICK);
+            // A planned burn's program flies first (`maneuver`).
+            let controls = &self.tick_controls(world, controls);
             let Some(start) = self.begin_tick(world, controls, &design, (TICK, until)) else {
                 self.start_coast(world);
                 return;

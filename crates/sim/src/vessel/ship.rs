@@ -144,7 +144,7 @@ impl Vessel {
     /// Whether a craft of parts needs live ticks with `controls`: its
     /// systems busy, or the pilot translating on its thrusters.
     pub(super) fn ship_wants_ticks(&self, controls: &super::Controls) -> bool {
-        self.ship_needs_ticks() || (self.ship.is_some() && controls.translate != DVec3::ZERO)
+        self.ship_needs_ticks() || (self.ship.is_some() && controls.translate != DVec3::ZERO) || self.program_flying()
     }
 
     /// Each engine's thrust (N, aligned with the ship definition's engines)

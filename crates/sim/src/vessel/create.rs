@@ -48,6 +48,8 @@ impl Vessel {
             clear_of: Vec::new(),
             helm: Default::default(),
             launch: None,
+            nodes: Vec::new(),
+            program: None,
         };
         vessel.init_ship();
         vessel

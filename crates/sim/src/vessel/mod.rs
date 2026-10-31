@@ -51,6 +51,8 @@ mod hold;
 mod id;
 mod live;
 use live::{attitude_mode, Checked};
+mod maneuver;
+pub use maneuver::NodePrediction;
 mod mass;
 pub(crate) use mass::ship_props;
 pub mod limbo;
@@ -275,6 +277,13 @@ pub struct Vessel {
     /// save by it. `None`: never on the pad (spawned in orbit).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub launch: Option<VesselId>,
+    /// A craft of parts' planned burns (D126): nodes, in order, kept after
+    /// they are flown, and the maneuver program of the next one
+    /// (`systems::maneuver`; [`maneuver`]).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    nodes: Vec<crate::systems::maneuver::Node>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    program: Option<crate::systems::maneuver::Program>,
 }
 
 /// Rotation matrix taking body-fixed axes of `body` to inertial axes at `t`.
@@ -424,7 +433,8 @@ impl Vessel {
     /// Replaces the flight plan. Burns that have started (or been skipped)
     /// cannot change, nor can a changed burn ignite before the vessel's
     /// time. Trajectory segments before the first changed burn are kept bit
-    /// for bit; the rest is rebuilt.
+    /// for bit; the rest is rebuilt. A craft of parts flies nodes instead
+    /// ([`Vessel::set_nodes`]).
     pub fn set_plan(&mut self, world: &World, plan: FlightPlan) -> Result<(), PlanError> {
         if !plan.is_sorted() {
             return Err(PlanError::NotSorted);

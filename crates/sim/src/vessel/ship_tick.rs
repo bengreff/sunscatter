@@ -121,7 +121,13 @@ impl Vessel {
             Phase::Landed { .. } => !(self.clamped() && self.ship_needs_ticks()),
             Phase::Powered { .. } => false,
         };
-        continuous.then(|| self.ship.as_ref()?.runtime.next_order()).flatten()
+        let order = continuous.then(|| self.ship.as_ref()?.runtime.next_order()).flatten();
+        // A planned burn's program wakes at its epoch the same way.
+        let wake = continuous.then(|| self.program_stop()).flatten();
+        match (order, wake) {
+            (Some(o), Some(w)) => Some(if w < o { w } else { o }),
+            (o, w) => o.or(w),
+        }
     }
 
     /// Applies every order due at the vessel's time (see the module).

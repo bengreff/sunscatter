@@ -310,6 +310,8 @@ impl Vessel {
             clear_of,
             helm,
             launch,
+            nodes,   // the vessel's, as its plan
+            program, // ended: its engines were the whole's; the kept piece's next node is scheduled anew
         } = self;
         let own = id.is_none();
         let design = craft.design();
@@ -361,8 +363,13 @@ impl Vessel {
             clear_of: clear_of.clone(),
             helm: if own { helm.clone() } else { helm.for_piece() },
             launch: *launch,
+            nodes: if own { nodes.clone() } else { Vec::new() },
+            program: None,
         };
         piece.sync_engine();
+        if own {
+            piece.reschedule(program.as_ref());
+        }
         piece
     }
 }

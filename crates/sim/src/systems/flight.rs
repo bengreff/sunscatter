@@ -304,6 +304,17 @@ pub fn safing(health: &Health, lit: &[bool]) -> Vec<usize> {
         .collect()
 }
 
+/// Whether every feed tank of `engines` holds its liquid over its outlet,
+/// as the level sensors read it (`propulsion::feeds_settled` where every
+/// one of those tanks' levels is known); `None` when one is not read.
+pub fn feeds_read(def: &ShipDef, state: &ShipState, k: &Knowledge, engines: &[u32]) -> Option<bool> {
+    let mut tanks = engines.iter().filter_map(|&i| def.engines.get(i as usize)).flat_map(|e| e.feeds.concat());
+    if !tanks.all(|t| k.knows(Quantity::TankLevel(t))) {
+        return None;
+    }
+    Some(engines.iter().all(|&i| super::propulsion::feeds_settled(def, state, i as usize)))
+}
+
 /// Whether the landing prediction can run: a navigation solution, and the
 /// attitude too when it assumes the current attitude held (`inertial`).
 pub fn can_predict(k: &Knowledge, inertial: bool) -> bool {

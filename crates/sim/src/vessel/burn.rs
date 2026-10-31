@@ -185,7 +185,8 @@ impl PlannedBurn {
 
 /// A vessel's planned burns, in order of ignition (saved with the vessel).
 /// Burns stay in the list after they are flown; the trajectory remembers how
-/// many it has started.
+/// many it has started. A craft of parts flies **nodes** instead, closed-loop
+/// and live (D126, D129; `systems::maneuver`, `Vessel::set_nodes`).
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct FlightPlan {
     pub burns: Vec<PlannedBurn>,
@@ -200,9 +201,12 @@ pub enum PlanError {
     Started,
     /// A changed burn ignites before the vessel's current time.
     InThePast,
-    /// A craft of catalog parts flies planned burns once its systems run
-    /// on rails (each engine's feed, transients and failures: RUNTIME).
+    /// A craft of catalog parts flies nodes (`Vessel::set_nodes`), not
+    /// open-loop burns.
     PartsUnsupported,
+    /// Nodes are flown by a craft of parts' maneuver program; the made-up
+    /// craft flies open-loop burns.
+    NodesNeedParts,
 }
 
 impl FlightPlan {
@@ -218,6 +222,22 @@ impl FlightPlan {
         } else {
             same
         }
+    }
+
+    /// The direction law of the next burn from index `from` igniting at or
+    /// after `t`, else of the next of `nodes` at or after `t` (its Δv's
+    /// axes): what the maneuver hold points along before a burn.
+    pub fn next_direction(
+        &self,
+        nodes: &[crate::systems::maneuver::Node],
+        from: usize,
+        t: Epoch,
+    ) -> Option<DirectionLaw> {
+        if let Some(b) = self.burns.get(self.next_from(from, t)) {
+            return Some(b.law.direction);
+        }
+        let n = nodes.iter().find(|n| n.t >= t)?;
+        Some(DirectionLaw::Tracking { reference: n.reference, axes: n.dv })
     }
 
     /// The first burn at or after index `from` that ignites at or after `t`

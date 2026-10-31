@@ -314,12 +314,13 @@ pub fn hold_inputs(
 /// at or after `t`) for a vessel at `(r, v)` relative to `anchor`.
 pub fn maneuver_direction(
     plan: &FlightPlan,
+    nodes: &[crate::systems::maneuver::Node],
     from: usize,
     snap: &LazySnapshot,
     (anchor, r, v): (NodeId, DVec3, DVec3),
 ) -> Option<DVec3> {
-    let burn = plan.burns.get(plan.next_from(from, snap.t))?;
-    Some(burn.law.direction.direction_from(|node| snap.get().relative(node, anchor), anchor, r, v))
+    let law = plan.next_direction(nodes, from, snap.t)?;
+    Some(law.direction_from(|node| snap.get().relative(node, anchor), anchor, r, v))
 }
 
 /// What the controller aims at during a tick.
@@ -414,7 +415,9 @@ impl super::Vessel {
             return Aim::Stability;
         }
         let snap = LazySnapshot::of(world, snap);
-        let maneuver = (controls.hold == HoldMode::Maneuver).then(|| maneuver_direction(&self.plan, 0, &snap, state));
+        // A flying maneuver program's direction, else the plan's next burn or node.
+        let maneuver = (controls.hold == HoldMode::Maneuver)
+            .then(|| self.program_direction().or_else(|| maneuver_direction(&self.plan, &self.nodes, 0, &snap, state)));
         let inputs = hold_inputs(world, &snap, state, controls, maneuver.flatten());
         aim(controls, &inputs, self.craft.engine.mount_dir)
     }
