@@ -15,6 +15,14 @@ use bevy_egui::input::EguiWantsInput;
 use sim::craft::RenderMesh;
 use std::sync::Arc;
 
+/// Whether a card's row puts its value on a line of its own under its
+/// label: when the label (`label` wide), a gap and the value (`value` wide)
+/// do not fit the row's `width` (a long reading ran over its label, e.g.
+/// the capsule's "pressure (highest)", interface-map.md finding 15).
+pub fn value_below(label: f32, value: f32, width: f32) -> bool {
+    label + layout::GAP + value > width
+}
+
 /// Where a card opened by a click at `at` goes (egui points): beside the
 /// click, right of it unless that runs into the staging bar, and on screen.
 pub fn beside(at: egui::Pos2, screen: egui::Rect, width: f32) -> egui::Pos2 {
@@ -151,6 +159,16 @@ pub fn anchors(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A row's value below its label when the two do not fit (table:
+    /// label, value, row width).
+    #[test]
+    fn a_long_value_goes_below_its_label() {
+        let table = [(60.0, 80.0, 230.0, false), (120.0, 102.0, 230.0, false), (120.0, 110.0, 230.0, true)];
+        for (label, value, width, below) in table {
+            assert_eq!(value_below(label, value, width), below, "{label} {value} {width}");
+        }
+    }
 
     #[test]
     fn a_card_opens_beside_the_click_and_on_screen() {

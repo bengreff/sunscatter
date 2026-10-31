@@ -117,8 +117,7 @@ pub fn show(
     };
     let thrusts = v.engine_thrusts(sim.controls().throttle, p).unwrap_or_default();
     let kelvin = v.part_kelvin();
-    let chute_parts: Vec<u32> = v.craft.design().parts.iter().filter(|p| p.chute).map(|p| p.id).collect();
-    let words = content::chute_words(stage_bar::icons::chute_look(&v.chute));
+    let (chute_parts, words) = content::chutes(v);
     let chute = (!chute_parts.is_empty()).then_some((chute_parts.as_slice(), words));
     let live = Live { def: &def, state, knowledge: &knowledge, thrusts: &thrusts, kelvin: &kelvin, chute };
     let screen = ctx.content_rect();
@@ -230,36 +229,61 @@ fn draw(ui: &mut egui::Ui, card: &Card, open: &mut Open) -> Option<Click> {
     click
 }
 
-/// A label and its value; an unknown value is a dash whose tooltip, after
-/// [`DASH_HOVER_S`] of hovering, names the sensor that would measure it.
+/// A label and its value ([`value_widget`]); a value that does not fit
+/// beside its label goes right-aligned on the line below it
+/// (`place::value_below`).
 fn line(ui: &mut egui::Ui, label: &str, value: &Value, level: crate::format::Level) {
+    let label = egui::RichText::new(label).small().color(theme::DIM);
+    let shown = |text: &str| egui::RichText::new(text).small().monospace().color(theme::level_colour(level));
+    let width = |t: egui::RichText, ui: &egui::Ui| {
+        egui::WidgetText::from(t)
+            .into_galley(ui, Some(egui::TextWrapMode::Extend), f32::INFINITY, egui::TextStyle::Body)
+            .size()
+            .x
+    };
+    let below = match value {
+        Value::Shown(text) => {
+            place::value_below(width(label.clone(), ui), width(shown(text), ui), ui.available_width())
+        }
+        Value::Unknown(_) => false,
+    };
     ui.horizontal(|ui| {
-        ui.label(egui::RichText::new(label).small().color(theme::DIM));
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| match value {
-            Value::Shown(text) => {
-                ui.label(egui::RichText::new(text).small().monospace().color(theme::level_colour(level)));
-            }
-            Value::Unknown(sensor) => {
-                let dash = ui.add(
-                    egui::Label::new(egui::RichText::new(crate::format::DASH).small()).sense(egui::Sense::hover()),
-                );
-                let now = ui.ctx().input(|i| i.time);
-                let key = dash.id.with("hover_since");
-                let since = ui.data_mut(|d| {
-                    if dash.hovered() {
-                        *d.get_temp_mut_or(key, now)
-                    } else {
-                        d.remove::<f64>(key);
-                        now
-                    }
-                });
-                if dash.hovered() && now - since >= DASH_HOVER_S {
-                    dash.show_tooltip_text(format!("Measured by {sensor}"));
-                } else if dash.hovered() {
-                    ui.ctx().request_repaint_after_secs((DASH_HOVER_S - (now - since)) as f32);
+        ui.label(label);
+        if !below {
+            value_widget(ui, value, level);
+        }
+    });
+    if below {
+        ui.horizontal(|ui| value_widget(ui, value, level));
+    }
+}
+
+/// A row's value, right-aligned: a reading, or a dash whose tooltip, after
+/// [`DASH_HOVER_S`] of hovering, names the sensor that would measure it.
+fn value_widget(ui: &mut egui::Ui, value: &Value, level: crate::format::Level) {
+    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| match value {
+        Value::Shown(text) => {
+            ui.label(egui::RichText::new(text).small().monospace().color(theme::level_colour(level)));
+        }
+        Value::Unknown(sensor) => {
+            let dash =
+                ui.add(egui::Label::new(egui::RichText::new(crate::format::DASH).small()).sense(egui::Sense::hover()));
+            let now = ui.ctx().input(|i| i.time);
+            let key = dash.id.with("hover_since");
+            let since = ui.data_mut(|d| {
+                if dash.hovered() {
+                    *d.get_temp_mut_or(key, now)
+                } else {
+                    d.remove::<f64>(key);
+                    now
                 }
+            });
+            if dash.hovered() && now - since >= DASH_HOVER_S {
+                dash.show_tooltip_text(format!("Measured by {sensor}"));
+            } else if dash.hovered() {
+                ui.ctx().request_repaint_after_secs((DASH_HOVER_S - (now - since)) as f32);
             }
-        });
+        }
     });
 }
 

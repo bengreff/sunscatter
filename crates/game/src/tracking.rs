@@ -16,7 +16,7 @@ use crate::camera::{self, CameraRig, Focus};
 use crate::commands::keys::{self, pressed};
 use crate::commands::{GameCommand, InputContext, Keys};
 use crate::format::{distance as fmt_dist, duration as fmt_duration};
-use crate::state::{Prediction, SimState, WARP_LEVELS};
+use crate::state::{Prediction, SimState};
 use crate::trajectory::apsides::Apsides;
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
@@ -344,7 +344,8 @@ pub fn draw(
             ui.label(egui::RichText::new("TRACKING STATION").size(18.0).color(accent));
             ui.label(egui::RichText::new(format!("at {} (mission control)", comms.location_name())).small().color(dim));
             let (y, mo, d, h, mi, _) = sim.site_time().to_calendar();
-            ui.monospace(format!("{y}-{mo:02}-{d:02} {h:02}:{mi:02} TT   warp {}x", WARP_LEVELS[sim.warp]));
+            let time = crate::hud::time_words(sim.paused, sim.effective_warp());
+            ui.monospace(format!("{y}-{mo:02}-{d:02} {h:02}:{mi:02} TT   {time}"));
             let back = format!("Back to flight ({} / Esc)", keys::label(keys::Action::TrackingStation));
             if ui.button(back).clicked() {
                 actions.push(Action::Close);

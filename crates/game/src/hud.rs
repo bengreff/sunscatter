@@ -125,6 +125,18 @@ pub fn warp_status(
     (effective, rails, limit)
 }
 
+/// Time's state in words, as the time panel and the tracking station say
+/// it: stopped, else the warp in effect (`level`, an index into
+/// `WARP_LEVELS`). The tracking station said the requested warp while time
+/// was stopped (interface-map.md finding 14).
+pub fn time_words(paused: bool, level: usize) -> String {
+    if paused {
+        "TIME STOPPED".into()
+    } else {
+        format!("warp {}", warp_label(WARP_LEVELS[level.min(WARP_LEVELS.len() - 1)]))
+    }
+}
+
 fn warp_label(x: f64) -> String {
     if x >= 1e3 {
         format!("{:.0}kx", x / 1e3)
@@ -219,10 +231,10 @@ pub fn draw(
         };
         ui_.horizontal(|ui_| {
             if sim.paused {
-                let stopped = egui::RichText::new("TIME STOPPED").monospace().strong().color(theme::WARN);
+                let stopped = egui::RichText::new(time_words(true, level)).monospace().strong().color(theme::WARN);
                 ui_.label(stopped).on_hover_text("`.` (or any warp) runs it again at 1x");
             } else {
-                ui_.monospace(format!("warp {} ({kind})", warp_label(WARP_LEVELS[level])));
+                ui_.monospace(format!("{} ({kind})", time_words(false, level)));
             }
             if !why.is_empty() {
                 ui_.label(egui::RichText::new(why).monospace().small().color(theme::WARN));
@@ -384,6 +396,17 @@ pub fn state_line(sim: &SimState) -> (String, bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Time's state in words (table): stopped whatever the warp, else the
+    /// warp in effect.
+    #[test]
+    fn time_words_table() {
+        let at = |x: f64| WARP_LEVELS.iter().position(|&w| w == x).unwrap();
+        let table = [(true, at(1000.0), "TIME STOPPED"), (false, 0, "warp 1x"), (false, at(1000.0), "warp 1kx")];
+        for (paused, level, want) in table {
+            assert_eq!(time_words(paused, level), want, "{paused} {level}");
+        }
+    }
 
     #[test]
     fn the_state_line_is_powered_only_with_the_engine_running() {
