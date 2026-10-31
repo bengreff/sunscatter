@@ -1,14 +1,14 @@
 use super::heating::{SUTTON_GRAVES_EARTH, SUTTON_GRAVES_MARS};
 use super::*;
 use crate::aero::{bake, AeroBake, BakeOptions};
-use crate::craft::test_craft;
+use crate::craft::small::rocket_ref;
 use crate::math;
 use glam::DVec3;
 use std::sync::OnceLock;
 
 fn craft_bake() -> &'static AeroBake {
     static B: OnceLock<AeroBake> = OnceLock::new();
-    B.get_or_init(|| bake(&test_craft().surface, &test_craft().cells, &BakeOptions::default()))
+    B.get_or_init(|| bake(&rocket_ref().surface, &rocket_ref().cells, &BakeOptions::default()))
 }
 
 /// One interior node of 4e6 J/K, 2 W/(m²·K) to every cell.
@@ -59,7 +59,7 @@ fn wavy_start(n: usize) -> ThermalState {
 
 #[test]
 fn conduction_conserves_energy() {
-    let cells = &test_craft().cells.cells;
+    let cells = &rocket_ref().cells.cells;
     let mut net = one_node(cells);
     net.radiation.fill(0.0);
     let zero = vec![0.0; cells.len()];
@@ -99,7 +99,7 @@ fn sutton_graves_matches_published_points() {
 
 #[test]
 fn large_steps_are_stable() {
-    let cells = &test_craft().cells.cells;
+    let cells = &rocket_ref().cells.cells;
     let net = one_node(cells);
     let b = craft_bake();
     let mut heat = vec![0.0; cells.len()];
@@ -115,9 +115,10 @@ fn large_steps_are_stable() {
     cell_heat_flow(b, cells, None, DVec3::new(-1361.0, 0.0, 0.0), &mut scratch, &mut sun);
     heat.iter_mut().zip(&sun).for_each(|(h, s)| *h += s);
     // Upper bound: every cell at its own radiative equilibrium under the
-    // largest flux any cell receives.
+    // largest flux any cell receives, at the least emissivity of any.
     let peak = heat.iter().zip(cells).map(|(h, c)| h / c.area).fold(0.0, f64::max);
-    let bound = math::sqrt_pos(math::sqrt_pos(peak / (0.8 * STEFAN_BOLTZMANN)));
+    let emissivity = cells.iter().map(|c| c.emissivity).fold(f64::MAX, f64::min);
+    let bound = math::sqrt_pos(math::sqrt_pos(peak / (emissivity * STEFAN_BOLTZMANN)));
     // Same end state (steady) from 20 ms and 600 s steps; bounded and
     // positive throughout the big steps.
     let mut fine = ThermalState::uniform(cells.len(), 1, 290.0);
@@ -147,7 +148,7 @@ fn large_steps_are_stable() {
 
 #[test]
 fn sunlight_is_absorbed_on_the_lit_silhouette() {
-    let cells = &test_craft().cells.cells;
+    let cells = &rocket_ref().cells.cells;
     let b = craft_bake();
     let mut heat = vec![0.0; cells.len()];
     let mut scratch = vec![0.0; cells.len()];
@@ -155,7 +156,11 @@ fn sunlight_is_absorbed_on_the_lit_silhouette() {
     let s = 1361.0;
     cell_heat_flow(b, cells, None, DVec3::new(0.0, 0.0, -s), &mut scratch, &mut heat);
     let total: f64 = heat.iter().sum();
-    let want = 0.8 * s * b.sums_at(-DVec3::Z).area;
+    // One skin faces the light (the capsule's: it hides the stack behind
+    // it), absorbing at its emissivity (a grey skin).
+    let lit: Vec<f64> = (cells.iter().zip(&heat)).filter(|(_, &h)| h > 0.0).map(|(c, _)| c.emissivity).collect();
+    assert!(lit.iter().all(|&e| e == lit[0]), "{lit:?}");
+    let want = lit[0] * s * b.sums_at(-DVec3::Z).area;
     assert!((total / want - 1.0).abs() < 0.01, "{total} vs {want}");
     for (i, c) in cells.iter().enumerate() {
         if c.normal.z < 0.0 {
@@ -186,7 +191,7 @@ fn overheat_reports_the_cell_furthest_over_its_limit_then_the_interior() {
 
 #[test]
 fn the_blocks_cover_every_link_once_and_solve_children_first() {
-    let net = &test_craft().design().network;
+    let net = &rocket_ref().design().network;
     let b = &net.blocks;
     let total = net.cells() + net.nodes();
     let mut seen = vec![false; total];
@@ -215,12 +220,12 @@ fn the_blocks_cover_every_link_once_and_solve_children_first() {
 
 #[test]
 fn coast_steps_converge_in_few_sweeps_where_chains_of_rings_used_to_crawl() {
-    // The test craft's legs and struts are chains of thin rings coupled
+    // The small rocket's legs and struts are chains of thin rings coupled
     // ~50 times more strongly to each other than to anything else: point
     // Gauss–Seidel took 97 sweeps for a 600 s step from 290 K in sunlight
     // (23 over-relaxed); the blocks solve each chain exactly.
     let (net, cap) = with_nodes();
-    let cells = &test_craft().cells.cells;
+    let cells = &rocket_ref().cells.cells;
     let mut heat = vec![0.0; cells.len()];
     let mut scratch = vec![0.0; cells.len()];
     cell_heat_flow(craft_bake(), cells, None, DVec3::new(1361.0, 0.0, 0.0), &mut scratch, &mut heat);
@@ -245,7 +250,7 @@ fn coast_steps_converge_in_few_sweeps_where_chains_of_rings_used_to_crawl() {
 
 #[test]
 fn live_ticks_converge_in_a_few_sweeps() {
-    let cells = &test_craft().cells.cells;
+    let cells = &rocket_ref().cells.cells;
     let net = one_node(cells);
     let mut s = wavy_start(cells.len());
     let heat: Vec<f64> = cells.iter().map(|c| 2.0e4 * c.area).collect();
@@ -255,12 +260,14 @@ fn live_ticks_converge_in_a_few_sweeps() {
     }
 }
 
-/// The test craft's network over its interior volume nodes, and the nodes'
+/// The small rocket's network over its interior volume nodes, and the nodes'
 /// capacities with a full tank.
 fn with_nodes() -> (&'static ThermalNetwork, Vec<f64>) {
-    let d = test_craft().design();
+    let d = rocket_ref().design();
     let mut cap = vec![0.0; d.nodes()];
-    d.node_capacity(&crate::craft::design::Aboard::Fill(test_craft().spec.propellant.capacity), &mut cap);
+    let def = rocket_ref().ship.as_deref().unwrap();
+    let held = crate::systems::plumbing::held(def, &crate::craft::state::ShipState::initial(def));
+    d.node_capacity(&crate::craft::design::Aboard::Tanks(held), &mut cap);
     (&d.network, cap)
 }
 
@@ -303,8 +310,8 @@ fn a_heated_node_settles_at_the_analytic_temperature() {
 #[test]
 fn the_node_network_is_stable_at_large_steps_and_fast_at_ticks() {
     let (net, cap) = with_nodes();
-    let d = test_craft().design();
-    let cells = &test_craft().cells.cells;
+    let d = rocket_ref().design();
+    let cells = &rocket_ref().cells.cells;
     let mut heat = vec![0.0; cells.len()];
     let mut scratch = vec![0.0; cells.len()];
     cell_heat_flow(craft_bake(), cells, None, DVec3::new(-1361.0, 0.0, 0.0), &mut scratch, &mut heat);

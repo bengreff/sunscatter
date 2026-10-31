@@ -32,8 +32,20 @@ const DAY: f64 = 86_400.0;
 const COAST_STEPS_PER_FRAME: usize = 1_200;
 const LOOKAHEAD_STEPS_PER_FRAME: usize = 1_500;
 
-/// The test craft coasting on `el` (Earth) with `propellant` kg.
-fn ship(w: &World, el: Elements, propellant: f64) -> Vessel {
+/// The small rocket of parts (`sim::craft::small`) coasting on `el`
+/// (Earth), every tank at `fill`.
+fn ship(w: &World, el: Elements, fill: f64) -> Vessel {
+    let earth = w.find("Earth").unwrap();
+    let (r, v) = el.to_state(earth.gm);
+    let mut s = Vessel::coasting(w, VesselId(1), t0(), earth.node, r, v, &sim::craft::small::rocket());
+    s.set_fill(w, fill);
+    assert!(matches!(s.phase, Phase::Coasting { .. }));
+    s
+}
+
+/// The test craft coasting on `el` with `propellant` kg: its planned
+/// low-thrust burns wait for planned burns on craft of parts (D126).
+fn test_ship(w: &World, el: Elements, propellant: f64) -> Vessel {
     let earth = w.find("Earth").unwrap();
     let (r, v) = el.to_state(earth.gm);
     let mut s = Vessel::coasting(w, VesselId(1), t0(), earth.node, r, v, sim::craft::test_craft());
@@ -104,7 +116,7 @@ fn ion_burn(w: &World, at: Epoch, thrust: f64, days: f64) -> PlannedBurn {
 #[test]
 fn a_month_of_low_thrust_is_the_same_at_every_warp() {
     let w = world();
-    let mut s = ship(&w, circular(700_000.0, 0.9), 2_000.0);
+    let mut s = test_ship(&w, circular(700_000.0, 0.9), 2_000.0);
     let burn = ion_burn(&w, t0().add_seconds(600.0), 0.5, 30.0);
     s.set_plan(&w, FlightPlan { burns: vec![burn] }).unwrap();
     let controls = sas(HoldMode::Prograde);
@@ -133,24 +145,15 @@ fn a_month_of_low_thrust_is_the_same_at_every_warp() {
     println!("a month of 0.5 N: {drained:.3} kg of propellant");
 }
 
-/// The test craft with systems that do something in low orbit: a
-/// body-fixed panel and loads that drain the battery in eclipse, and
-/// propellant boiling off.
-fn with_systems(mut s: Vessel) -> Vessel {
-    s.systems.power.spec.tracking = false;
-    s.systems.power.spec.load = 2_000.0;
-    s.systems.power.spec.capacity = 1.0e7;
-    s.systems.power.charge = 1.0e7;
-    s.systems.consumables.boil_off = 1e-4;
-    s
-}
-
 #[test]
 fn a_year_of_drag_decay_and_systems_is_the_same_at_every_warp() {
     let w = world();
-    // 300 km: the test craft (20 t, end on) loses tens of km in a year;
-    // its battery cycles with every eclipse and its propellant boils off.
-    let s = with_systems(ship(&w, circular(300_000.0, 0.9), 16_000.0));
+    // 350 km: the small rocket full (~14 t, held prograde, end on) loses
+    // tens of km in a year (lower, boiling off its LOX, it would reach the
+    // live boundary within the year). Its systems run on their lattice: its
+    // body-mounted cells charge its battery when the Sun is on their side
+    // and it carries the loads in eclipse; its LOX boils off.
+    let s = ship(&w, circular(350_000.0, 0.9), 1.0);
     let controls = sas(HoldMode::Prograde);
     same_at_every_warp(&w, &s, 60.0, &[1.0 / 60.0], &controls);
     same_at_every_warp(&w, &s, 2.0 * DAY, &[1_000.0 / 60.0], &controls);
@@ -158,28 +161,24 @@ fn a_year_of_drag_decay_and_systems_is_the_same_at_every_warp() {
     let earth = w.find("Earth").unwrap();
     let (_, r, v) = year.state(&w);
     let a = Elements::from_state(r, v, earth.gm).a;
-    let p = &year.systems.power;
+    let (charge, boiled) = (year.ship().unwrap().batteries[0].charge, s.propellant() - year.propellant());
     println!(
-        "a year at 300 km: semi-major axis {:.1} km lower; battery {:.2} MJ, shortfall {:.1} MJ; {:.0} kg boiled off",
-        (RE + 300_000.0 - a) / 1e3,
-        p.charge / 1e6,
-        p.shortfall / 1e6,
-        year.systems.consumables.boiled
+        "a year at 350 km: semi-major axis {:.1} km lower; battery {:.2} MJ; {boiled:.0} kg boiled off",
+        (RE + 350_000.0 - a) / 1e3,
+        charge / 1e6,
     );
-    assert!(a < RE + 300_000.0 - 5_000.0, "{a}");
-    // Every lattice point of the year was stepped; boil-off drained the
-    // propellant at its rate (as a mass flow of every segment).
+    assert!(a < RE + 350_000.0 - 5_000.0, "{a}");
+    // Every lattice point of the year was stepped; the LOX boiled off
+    // (the tanks' own law, D119) and the cells kept the battery up.
     assert_eq!(year.systems.epoch, Some(year.time));
-    let boiled = 1e-4 * 365.0 * DAY;
-    assert!((year.systems.consumables.boiled - boiled).abs() < 1e-6 * boiled);
-    assert!((16_000.0 - year.propellant() - boiled).abs() < 1e-6 * boiled, "{}", year.propellant());
-    assert!(p.shortfall > 0.0, "the loads outran the battery in some eclipses");
+    assert!(boiled > 10.0, "{boiled} kg");
+    assert!(charge > 0.0, "{charge} J");
 }
 
 #[test]
 fn systems_continue_bit_for_bit_after_a_save_between_lattice_points() {
     let w = world();
-    let mut s = with_systems(ship(&w, circular(400_000.0, 0.9), 16_000.0));
+    let mut s = ship(&w, circular(400_000.0, 0.9), 0.5);
     let controls = sas(HoldMode::Stability);
     let mid = t0().add_seconds(5_000.0 + 12.345);
     fly(&w, &mut s, mid, 1.0 / 60.0 * 600.0, &controls);
@@ -201,7 +200,7 @@ fn a_year_of_radiation_pressure_is_the_same_at_every_warp() {
     // 20,000 km: no air; light, eclipses twice a year. Stability hold and
     // torque-free tumbling.
     let el = Elements { a: RE + 20_000_000.0, e: 0.01, i: 0.9, raan: 1.0, argp: 0.5, mean_anomaly: 0.0 };
-    let s = ship(&w, el, 1_000.0);
+    let s = ship(&w, el, 0.05);
     for controls in [sas(HoldMode::Stability), Controls::default()] {
         let mut spun = s.clone();
         spun.set_attitude(sim::vessel::Attitude { q: spun.attitude.q, omega: DVec3::new(0.01, 0.002, 0.03) });
@@ -214,7 +213,7 @@ fn a_year_of_radiation_pressure_is_the_same_at_every_warp() {
 #[test]
 fn a_low_thrust_burn_continues_bit_for_bit_after_save_and_load() {
     let w = world();
-    let mut s = ship(&w, circular(700_000.0, 0.9), 2_000.0);
+    let mut s = test_ship(&w, circular(700_000.0, 0.9), 2_000.0);
     let burn = ion_burn(&w, t0().add_seconds(600.0), 0.5, 10.0);
     s.set_plan(&w, FlightPlan { burns: vec![burn] }).unwrap();
     let controls = sas(HoldMode::Prograde);

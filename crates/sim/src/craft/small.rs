@@ -13,9 +13,12 @@
 //! * [`rocket`] (`small-rocket`): the same with parachutes in the capsule
 //!   ([`CHUTES`]: two Apollo drogues and four Apollo mains, D079), four
 //!   thruster blocks instead of two (torque about every axis), an IMU
-//!   and a GPS receiver (the flight software's attitude and orbit, F3): the
-//!   stand-in of the deleted test craft (D121). [`legs_out`]: with its
+//!   and a GPS receiver (the flight software's attitude and orbit, F3),
+//!   and body-mounted solar cells on its bus: the stand-in of the deleted
+//!   test craft (D121). [`legs_out`]: with its
 //!   legs deployed.
+//!
+//! * [`PLATE`] (`small-plate`): a flat plate alone.
 //!
 //! The ids resolve in [`super::registry`], so a vessel of a small craft
 //! (and every piece of one) reloads from a save.
@@ -83,6 +86,14 @@ pub const ENTRIES: &[&str] = &[
     r#"(id: "t-gps", name: "Test GPS receiver", era: 2020,
         generator: Component(envelope: Box(0.15, 0.15, 0.08), power: 10.0,
             equipment: Sensor(quantity: "position", accuracy: 3.0, rate_hz: 10.0, mass: 2.0)))"#,
+    // Body-mounted cells (as Dragon's trunk's): 2 m² at 28 %, 3 kg/m² (E).
+    r#"(id: "t-nose", name: "Test nose cone", era: 2020,
+        generator: Revolution(profile: [(0.0, 1.0), (2.0, 0.15)], wall: Solid(material: "al-6061", thickness: 0.002),
+            inner_mass: 0.0, control: false))"#,
+    r#"(id: "t-plate", name: "Test plate (10 m square, 2 cm)", era: 2020,
+        generator: Fin(root_chord: 10.0, tip_chord: 10.0, span: 10.0, wall: Solid(material: "al-6061", thickness: 0.02)))"#,
+    r#"(id: "t-solar", name: "Test solar cells", era: 2020,
+        generator: Component(envelope: Box(0.05, 0.4, 0.4), equipment: Solar(area: 2.0, efficiency: 0.28, mass: 6.0)))"#,
 ];
 
 /// The small rocket without parachutes (the build's fixture).
@@ -129,6 +140,20 @@ pub const ROCKET: &str = r#"(
     contact: (foot: (stiffness: 1.0e5, damping: 1.0e4, stroke: 0.3, friction: 0.8),
               hull: (stiffness: 1.0e6, damping: 1.0e5, friction: 0.5), stick_speed: 0.05),
     antenna: (gain_dbi: 3.0, power_w: 5.0),
+)"#;
+
+/// A flat plate 10 m × 10 m × 2 cm of aluminium, its faces ±Y (a fin of
+/// one chord), alone: radiation pressure's textbook shape.
+pub const PLATE: &str = r#"(
+    name: "Test plate", crew: 0,
+    parts: [(id: "plate", entry: "t-plate")],
+    aero: (cd0: 0.4),
+    thermal: (skin_max_k: 800.0, internal_max_k: 400.0, node_size: 0.5, interior_specific_heat: 900.0,
+              propellant_specific_heat: 2000.0, interior_conductivity: 5.0, internal_coupling: 2.0),
+    impact: (max_speed: 8.0),
+    contact: (foot: (stiffness: 1.0e5, damping: 1.0e4, stroke: 0.3, friction: 0.8),
+              hull: (stiffness: 1.0e6, damping: 1.0e5, friction: 0.5), stick_speed: 0.05),
+    antenna: (gain_dbi: 0.0, power_w: 0.0),
 )"#;
 
 /// The parachutes of [`rocket`]: Apollo's two drogues and four mains
@@ -179,8 +204,14 @@ pub fn file(name: &str) -> Option<AssemblyFile> {
                 f.electrical[0].members.push(s.into());
                 f.data[0].to.push(s.into());
             }
+            // Body-mounted cells between two thruster blocks, facing out at
+            // 45°: in sunlight they outrun its ~90 W of loads, in eclipse
+            // the battery carries them (a long coast keeps its computer).
+            f.components.push(place("solar", "t-solar", DVec3::new(0.45, 0.45, 0.3)));
+            f.electrical[0].members.push("solar".into());
             Some(f)
         }
+        "plate" => Some(parse(PLATE)),
         _ => None,
     }
 }
@@ -201,6 +232,13 @@ pub fn id(name: &str) -> CraftId {
 /// process.
 pub fn rocket() -> Arc<Craft> {
     craft_of(&id("rocket"))
+}
+
+/// [`rocket`] for the life of the process: for tests that keep borrows of
+/// its tables (its cells, bake or network).
+pub fn rocket_ref() -> &'static Craft {
+    static ROCKET: OnceLock<Arc<Craft>> = OnceLock::new();
+    ROCKET.get_or_init(rocket)
 }
 
 /// The small rocket with its four legs out (`small-rocket@7-10`, a
@@ -230,5 +268,6 @@ mod tests {
         let piece = CraftId::piece("small-rocket", &[0]);
         assert_eq!(craft_of(&piece).parts.len(), 1);
         assert!(definition("small-none").is_none() && definition("rocket").is_none());
+        assert_eq!(craft_of(&id("plate")).parts.len(), 1);
     }
 }

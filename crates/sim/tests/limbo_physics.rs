@@ -5,7 +5,7 @@
 //! to live flight, and anchor invariance of a perturbed coast (rule 1).
 
 use glam::{DQuat, DVec3};
-use sim::craft::{CraftId, DesignSlot};
+use sim::craft::DesignSlot;
 use sim::ephem::Ephemeris;
 use sim::forces::Optics;
 use sim::kepler::Elements;
@@ -36,7 +36,18 @@ fn sas(hold: HoldMode) -> Controls {
     Controls { sas: true, hold, ..Controls::default() }
 }
 
-/// The test craft coasting on `el` about Earth with `propellant` kg.
+/// The small rocket of parts (`sim::craft::small`) coasting on `el` about
+/// Earth, every tank at `fill`.
+fn rocket(w: &World, el: Elements, fill: f64) -> Vessel {
+    let earth = w.find("Earth").unwrap();
+    let (r, v) = el.to_state(earth.gm);
+    let mut s = Vessel::coasting(w, VesselId(1), t0(), earth.node, r, v, &sim::craft::small::rocket());
+    s.set_fill(w, fill);
+    s
+}
+
+/// The test craft coasting on `el` about Earth with `propellant` kg: its
+/// made-up boil-off and planned burns go with the made-up path (D121).
 fn ship(w: &World, el: Elements, propellant: f64) -> Vessel {
     let earth = w.find("Earth").unwrap();
     let (r, v) = el.to_state(earth.gm);
@@ -67,7 +78,8 @@ fn drag_decay_matches_king_hele_and_an_iss_like_ballistic_number() {
     let earth = w.find("Earth").unwrap();
     let p = earth.physical.as_ref().unwrap();
     let atm = p.atmosphere.as_ref().unwrap();
-    let design = sim::craft::test_craft().design();
+    let craft = sim::craft::small::rocket();
+    let design = craft.design();
     // Broadside: equatorial orbit, the nose on the orbit normal (inertial
     // +Z), held still. The air then sweeps round the body's long axis:
     // free molecular (Kn ≫ 10 at 400 km), C_D·A = 2·A averaged over it.
@@ -80,15 +92,19 @@ fn drag_decay_matches_king_hele_and_an_iss_like_ballistic_number() {
         / 360.0;
     // An ISS-like ballistic number m/(C_D·A) = 86.5 kg/m² (Oleson &
     // Benson, NASA/TM-2002-211313: 469,687 kg, 2,300 m², C_D 2.35).
-    let mass = 86.5 * cda;
-    let dry = sim::craft::test_craft().spec.dry_mass;
+    // The small rocket empty, its RP-1 making up the rest (no LOX to boil
+    // off); at least its empty mass.
+    let iss = 86.5;
     // Circular at 400 km over the equator, J2's pull included (else the
     // orbit dips ~20 km and the mean density is 20 % higher).
     let r0 = RE + 400_000.0;
     let v0 = (earth.gm / r0 * (1.0 + 1.5 * p.j2 * (RE / r0).powi(2))).sqrt();
     let (r, v) = (DVec3::new(r0, 0.0, 0.0), DVec3::new(0.0, v0, 0.0));
-    let mut s = Vessel::coasting(&w, VesselId(1), t0(), earth.node, r, v, sim::craft::test_craft());
-    s.set_propellant(&w, mass - dry);
+    let mut s = Vessel::coasting(&w, VesselId(1), t0(), earth.node, r, v, &craft);
+    s.set_fill(&w, 0.0);
+    let fuel = (s.ship_def().unwrap().tanks.iter()).position(|t| t.id.ends_with(":fuel")).unwrap();
+    s.set_tank(&w, fuel, (iss * cda - s.mass()).max(0.0));
+    let mass = s.mass();
     s.set_attitude(Attitude { q: DQuat::IDENTITY, omega: DVec3::ZERO });
     let controls = sas(HoldMode::Stability);
     let period = 2.0 * std::f64::consts::PI * r0 / v0;
@@ -138,7 +154,8 @@ fn drag_decay_matches_king_hele_and_an_iss_like_ballistic_number() {
     let f = (1.0 - p.rotation.w_rate * a / v).powi(2);
     let king_hele = f * rho * (earth.gm * a).sqrt() * cda / mass;
     println!(
-        "broadside C_D·A {cda:.1} m², {mass:.0} kg: decay {:.1} m/day, King-Hele {:.1} m/day, {:.2} km/month",
+        "broadside C_D·A {cda:.1} m², {mass:.0} kg ({:.1} kg/m²): decay {:.1} m/day, King-Hele {:.1} m/day, {:.2} km/month",
+        mass / cda,
         measured * DAY,
         king_hele * DAY,
         measured * 30.0 * DAY / 1e3
@@ -147,23 +164,19 @@ fn drag_decay_matches_king_hele_and_an_iss_like_ballistic_number() {
     // The station's observed decay is about 2 km a month in typical
     // conditions (up to ~100 m a day near solar maximum; NASA SpaceMath
     // "ISS - Orbit Altitude Changes": 1.5–4 km a month at solar minimum,
-    // 2009). US76 above 86 km is a mean-activity atmosphere.
-    let per_month = measured * 30.0 * DAY;
+    // 2009). US76 above 86 km is a mean-activity atmosphere. The decay
+    // goes as C_D·A/m: scaled to the station's ballistic number.
+    let per_month = measured * 30.0 * DAY * (mass / cda) / iss;
     assert!((1_500.0..6_000.0).contains(&per_month), "{per_month} m/month");
 }
 
-/// A flat plate 10 m × 10 m × 2 cm (its faces ±Z), on the test craft's
-/// numbers.
-fn plate() -> sim::craft::Craft {
-    let dir = sim::craft::default_craft_dir().join(sim::craft::TEST_CRAFT);
-    let craft = std::fs::read_to_string(dir.join("craft.ron")).unwrap();
-    let geometry = "(
-        skin: (areal_mass: 8.1, specific_heat: 900.0, emissivity: 0.8, conductivity: 150.0, thickness: 0.003),
-        tank: (base: (0.0, 0.0, -0.005), axis: (0.0, 0.0, 0.01), radius: 1.0),
-        primitives: [(name: \"plate\", shape: Box(center: (0.0, 0.0, 0.0), half: (5.0, 5.0, 0.01)))],
-    )";
-    sim::craft::parse_craft(CraftId("plate".into()), &craft, geometry, std::path::Path::new("plate")).unwrap()
+/// A flat plate 10 m × 10 m × 2 cm, its faces ±Y (`craft::small::PLATE`).
+fn plate() -> std::sync::Arc<sim::craft::Craft> {
+    sim::craft::craft_of(&sim::craft::small::id("plate"))
 }
+
+/// Turns body +Z onto body +Y: the plate's lit face's normal.
+const Z_TO_Y: DQuat = DQuat::from_xyzw(std::f64::consts::FRAC_1_SQRT_2, 0.0, 0.0, std::f64::consts::FRAC_1_SQRT_2);
 
 #[test]
 fn radiation_pressure_on_a_flat_plate_is_the_analytic_value() {
@@ -200,9 +213,9 @@ fn radiation_pressure_on_a_flat_plate_is_the_analytic_value() {
         [(0.0, 0.0, 0.0), (0.0, 0.6, 0.2), (60.0, 0.0, 0.0), (60.0, 1.0, 0.0), (45.0, 0.3, 0.3)]
     {
         let theta = f64::to_radians(theta_deg);
-        // Body +Z (the lit face's normal) turned θ away from the Sun.
+        // Body +Y (the lit face's normal) turned θ away from the Sun.
         let n_out = (-s * theta.cos() + s.any_orthonormal_vector() * theta.sin()).normalize();
-        let q = sim::vessel::quat_z_to(n_out);
+        let q = sim::vessel::quat_z_to(n_out) * Z_TO_Y;
         let a = srp(q, Optics { specular: eps, diffuse: delta }, r);
         let c = theta.cos();
         let expected = (s * (1.0 - eps) - n_out * (2.0 * (eps * c + delta / 3.0))) * (pressure * area * c / mass);
@@ -211,9 +224,9 @@ fn radiation_pressure_on_a_flat_plate_is_the_analytic_value() {
     }
     // In Earth's shadow: nothing.
     assert_eq!(srp(DQuat::IDENTITY, Optics::default(), s * (RE + 2_000_000.0)), DVec3::ZERO);
-    // The limbo model forms the same for the test craft (its own table),
+    // The limbo model forms the same for the small rocket (its own table),
     // held still in sunlight beyond the air.
-    let craft = sim::craft::test_craft();
+    let craft = sim::craft::small::rocket();
     let q = DQuat::from_xyzw(0.3, -0.2, 0.1, 0.9).normalize();
     let l = Limbo::new(
         craft.id.clone(),
@@ -265,7 +278,7 @@ fn a_decaying_orbit_hands_over_to_live_flight_at_the_boundary() {
     let earth = w.find("Earth").unwrap();
     let p = earth.physical.as_ref().unwrap();
     let el = Elements { a: RE + 165_000.0, e: 0.0, i: 0.5, raan: 1.0, argp: 0.0, mean_anomaly: 0.0 };
-    let mut s = ship(&w, el, 16_000.0);
+    let mut s = rocket(&w, el, 1.0);
     s.set_debug(&w, true);
     let controls = sas(HoldMode::Prograde);
     // Coasting, decaying, in frames of 1,000,000×.
@@ -294,7 +307,8 @@ fn a_decaying_orbit_hands_over_to_live_flight_at_the_boundary() {
     assert!(s.time < t, "advance stops where the coast goes live");
     // The coast's drag there (free molecular, bridged, at the held
     // attitude): its specific power, to compare with the live descent's.
-    let table = &sim::craft::test_craft().design().surfaces;
+    let craft = sim::craft::small::rocket();
+    let table = &craft.design().surfaces;
     let speed = air.wind.length();
     let flow = s.attitude.q.inverse() * (air.wind / speed);
     let bridge = sim::aero::bridge(air.mean_free_path / table.length);
@@ -335,7 +349,7 @@ fn a_perturbed_coast_does_not_depend_on_its_anchor() {
     let emb = w.eph.find("EMB").unwrap();
     let el = Elements { a: RE + 300_000.0, e: 0.001, i: 0.9, raan: 1.0, argp: 0.5, mean_anomaly: 0.0 };
     let (r, v) = el.to_state(earth.gm);
-    let craft = sim::craft::test_craft();
+    let craft = sim::craft::small::rocket();
     let snap = w.snapshot(t0());
     let att = Attitude { q: sim::vessel::quat_z_to(v.normalize()), omega: DVec3::ZERO };
     let law = DirectionLaw::Tracking { reference: earth.node, axes: DVec3::X };
@@ -401,7 +415,7 @@ fn thin_air_heats_a_coasting_craft_at_the_free_molecular_rate() {
     let att = Attitude { q: sim::vessel::quat_z_to(v.normalize()), omega: DVec3::ZERO };
     let law = DirectionLaw::Tracking { reference: earth.node, axes: DVec3::X };
     let pointing = pointing::on_law(&law, &att, DVec3::Z, &w, &snap, (earth.node, r, v));
-    let length = sim::craft::test_craft().design().bake.length;
+    let length = sim::craft::small::rocket().design().bake.length;
     let air = sim::vessel::coast_air(&w, t0(), (earth.node, r, v), Some(&pointing), &att, length);
     let mean = air.iter().map(|a| a.1).sum::<f64>() / air.len() as f64;
     let rho = p.atmosphere.as_ref().unwrap().profile(200_000.0, earth.gm / (RE * RE)).rho;

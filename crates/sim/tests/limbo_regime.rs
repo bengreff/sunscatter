@@ -114,7 +114,7 @@ fn the_automatic_reference_changes_at_the_same_epoch_at_every_frame_rate() {
     for (hold, speed) in holds {
         let controls = Controls { sas: true, hold, speed, ..Controls::default() };
         let what = format!("{hold:?} {speed:?}");
-        let mut s = Vessel::coasting(&w, VesselId(1), t0(), earth.node, r, v, sim::craft::test_craft());
+        let mut s = Vessel::coasting(&w, VesselId(1), t0(), earth.node, r, v, &sim::craft::small::rocket());
         assert!(matches!(s.phase, Phase::Coasting { .. }));
         // Settled in Earth's frame first.
         fly(&w, &mut s, t0().add_seconds(600.0), 100.0 / 60.0, &controls);
@@ -159,7 +159,7 @@ fn the_automatic_reference_does_not_follow_the_anchor() {
     let r = DVec3::new(1.59e9, 1.0e7, 0.0);
     let v = DVec3::new(3_000.0, 300.0, 0.0);
     let controls = Controls { sas: true, hold: HoldMode::Prograde, ..Controls::default() };
-    let mut s = Vessel::coasting(&w, VesselId(1), t0(), earth.node, r, v, sim::craft::test_craft());
+    let mut s = Vessel::coasting(&w, VesselId(1), t0(), earth.node, r, v, &sim::craft::small::rocket());
     fly(&w, &mut s, t0().add_seconds(600.0), 100.0 / 60.0, &controls);
     let end = s.time.add_seconds(40_000.0);
     let mut jump = s.clone();

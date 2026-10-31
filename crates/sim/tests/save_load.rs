@@ -64,7 +64,7 @@ fn fly(w: &World, v: &mut Vessel, from: Epoch, end: Epoch, dt: f64, controls: &C
 fn coasting_vessel_continues_bit_identically_after_load() {
     let w = world();
     let (earth, r, v) = leo(&w);
-    let mut ship = Vessel::coasting(&w, VesselId(1), t0(), earth, r, v, sim::craft::test_craft());
+    let mut ship = Vessel::coasting(&w, VesselId(1), t0(), earth, r, v, &sim::craft::small::rocket());
     let controls = Controls { sas: true, ..Default::default() };
     let mid = t0().add_seconds(1_234.567);
     fly(&w, &mut ship, t0(), mid, 0.25, &controls);
@@ -104,12 +104,17 @@ fn chunked_extension_across_a_save_equals_single_pass() {
 #[test]
 fn landed_vessel_lifts_off_identically_after_load() {
     let w = world();
-    let pad = Vessel::landed_at(&w, VesselId(1), "Earth", 28.6082, -80.6041, t0(), sim::craft::test_craft());
+    let rocket = sim::craft::small::rocket();
+    let pad = Vessel::landed_at(&w, VesselId(1), "Earth", 28.6082, -80.6041, t0(), &rocket);
     let idle = Controls { sas: true, ..Default::default() };
     let mut a = pad.clone();
     let wait = t0().add_seconds(100.0);
     fly(&w, &mut a, t0(), wait, 1.0, &idle);
     let mut b = through_save(&w, wait, std::slice::from_ref(&a)).remove(0);
+    // Its engines start through the sequence, on both alike.
+    for v in [&mut a, &mut b] {
+        assert_eq!(v.next_stage(&w).unwrap().0, "Ignition");
+    }
     let burn = Controls { throttle: 1.0, sas: true, ..Default::default() };
     let end = wait.add_seconds(30.0);
     fly(&w, &mut a, wait, end, 1.0 / 60.0, &burn);
@@ -121,7 +126,8 @@ fn landed_vessel_lifts_off_identically_after_load() {
 #[test]
 fn powered_flight_continues_identically_after_load() {
     let w = world();
-    let mut a = Vessel::landed_at(&w, VesselId(1), "Earth", 28.6082, -80.6041, t0(), sim::craft::test_craft());
+    let mut a = Vessel::landed_at(&w, VesselId(1), "Earth", 28.6082, -80.6041, t0(), &sim::craft::small::rocket());
+    assert_eq!(a.next_stage(&w).unwrap().0, "Ignition");
     // Roll input (about the thrust axis: the craft does not tip over).
     let burn = Controls { throttle: 1.0, sas: true, rotate: DVec3::new(0.0, 0.0, 0.3), ..Default::default() };
     // A clock that is not a whole number of ticks: the vessel trails it.
@@ -134,7 +140,7 @@ fn powered_flight_continues_identically_after_load() {
     fly(&w, &mut a, mid, end, 1.0 / 60.0, &burn);
     fly(&w, &mut b, mid, end, 1.0 / 60.0, &burn);
     assert_eq!(a, b);
-    // Then cut the engine and coast: the new segment matches too.
+    // Then cut the engines (below their least throttle) and coast: the new segment matches too.
     let coast = Controls::default();
     let later = end.add_seconds(500.0);
     fly(&w, &mut a, end, later, 1.0, &coast);
@@ -147,8 +153,9 @@ fn save_files_round_trip_and_check_the_ephemeris() {
     let w = world();
     let (earth, r, v) = leo(&w);
     let mut ids = VesselIds::default();
-    let ship = Vessel::coasting(&w, ids.allocate(), t0(), earth, r, v, sim::craft::test_craft());
-    let pad = Vessel::landed_at(&w, ids.allocate(), "Moon", 0.67, 23.47, t0(), sim::craft::test_craft());
+    let rocket = sim::craft::small::rocket();
+    let ship = Vessel::coasting(&w, ids.allocate(), t0(), earth, r, v, &rocket);
+    let pad = Vessel::landed_at(&w, ids.allocate(), "Moon", 0.67, 23.47, t0(), &rocket);
     let fleet = [ship, pad];
     let save = SaveGame::capture(&w, t0(), &fleet, ids, 1);
     let dir = std::env::temp_dir().join(format!("sunscatter-save-{}", std::process::id()));
@@ -176,9 +183,9 @@ fn every_vessels_controls_and_settings_in_flight_round_trip() {
     let w = world();
     let (earth, r, v) = leo(&w);
     let mut ids = VesselIds::default();
-    let craft = sim::craft::test_craft();
+    let craft = sim::craft::small::rocket();
     let mut fleet: Vec<Vessel> = (0..3)
-        .map(|k| Vessel::coasting(&w, ids.allocate(), t0(), earth, r + DVec3::Z * (1e4 * k as f64), v, craft))
+        .map(|k| Vessel::coasting(&w, ids.allocate(), t0(), earth, r + DVec3::Z * (1e4 * k as f64), v, &craft))
         .collect();
     fleet[2].set_crew(0);
     *fleet[0].controls_mut() = Controls { throttle: 0.25, hold: HoldMode::Prograde, ..Controls::idle() };
@@ -204,7 +211,8 @@ fn every_vessels_controls_and_settings_in_flight_round_trip() {
 #[test]
 fn saves_with_duplicate_or_unissued_vessel_ids_are_rejected() {
     let w = world();
-    let pad = |id| Vessel::landed_at(&w, id, "Moon", 0.67, 23.47, t0(), sim::craft::test_craft());
+    let rocket = sim::craft::small::rocket();
+    let pad = |id| Vessel::landed_at(&w, id, "Moon", 0.67, 23.47, t0(), &rocket);
     let load = |fleet: &[Vessel], ids| SaveGame::from_ron(&SaveGame::capture(&w, t0(), fleet, ids, 0).to_ron());
     assert!(load(&[pad(VesselId(1)), pad(VesselId(2))], ids_up_to(2)).is_ok());
     let dup = load(&[pad(VesselId(1)), pad(VesselId(1))], ids_up_to(2));
@@ -214,7 +222,8 @@ fn saves_with_duplicate_or_unissued_vessel_ids_are_rejected() {
 }
 
 /// The directed playtest's save (docs/archive/plans/playtest-2026-10-01.md) loads,
-/// carries the current test craft, and its vessel coasts on.
+/// carries the current test craft, and its vessel coasts on. It goes with
+/// the test craft (D121): the playtest save is then a Falcon 9 flight's.
 #[test]
 fn the_playtest_save_loads_with_the_current_test_craft() {
     let w = world();
