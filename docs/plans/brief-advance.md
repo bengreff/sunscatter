@@ -1,6 +1,6 @@
 # Brief: ADVANCE, one advance law per subsystem and the same course at every warp (draft, 2026-10-30)
 
-**Draft by AUDIT; the lead reviews it and names the agents running alongside.**
+**Drafted by AUDIT; reviewed by the lead 2026-10-31.** You run after LAYERS, alone in the sim.
 
 Two owner decisions:
 - **D121:** "one advance law per subsystem". Each subsystem advances over any interval, exact or coarse-grained, chunked = single pass. Live ticks, the systems lattice and coasts only choose the interval.
@@ -8,7 +8,7 @@ Two owner decisions:
 
 AUDIT mapped the code and proved what holds in [warp-invariance.md](../technical/warp-invariance.md). Two days of the Falcon 9's second stage with Dragon (a restart, a separation, a failure, the lattices) give the same bits as one pass at 100×, 10⁴× and 10⁵×, and at 1× over the first 3,100 s (`crates/sim/tests/warp_course.rs`). It found six divergences (D1–D6) and the model gaps that ADVANCE closes.
 
-Follow [agent-rules.md](agent-rules.md). Your name is ADVANCE and your target dir is `target/agents/advance`: start warm with `mv target/agents/audit target/agents/advance`. You run after LAYERS ([brief-layers.md](brief-layers.md)); its `ship_os::warp_stop` is what step 4 makes exact.
+Follow [agent-rules.md](agent-rules.md). Your name is ADVANCE and your target dir is `target/agents/advance`: start warm from the newest sim target the lead names. You run after LAYERS ([brief-layers.md](brief-layers.md)); its `ship_os::warp_stop` is what step 4 makes exact.
 
 ## Read first
 

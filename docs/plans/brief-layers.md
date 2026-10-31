@@ -1,6 +1,6 @@
 # Brief: LAYERS, the three layers of ship software (draft, 2026-10-30)
 
-**Draft by AUDIT; the lead reviews it and names the agents running alongside.**
+**Drafted by AUDIT; reviewed by the lead 2026-10-31.** You run after STATE ([brief-state.md](brief-state.md)), alone in the sim; INTERFACE may still be at work in the game's interface.
 
 D128 (owner, [interview-2026-10-30-roadmap.md](../archive/interviews/interview-2026-10-30-roadmap.md)):
 - **Layer 1:** "Each part should have built in, fundamental logic … synonomous with how the part actually works". With it alone a ship "should be enough to coast for months if everything is set up".
@@ -35,7 +35,11 @@ Follow [agent-rules.md](agent-rules.md). Your name is LAYERS and your target dir
    - A program's replacement for it, with the built-in rule back when that program's computer is lost.
    - `notify` per craft with the vessel's controls (saved; MCP sets it).
    - The game drops the warp and holds the clock at the stop's epoch: a lattice epoch until ADVANCE makes the laws give exact ones.
-6. **The bare minimum, proven.** The priorities of power shedding become parameters (D125); the life support gets stocks (O₂, N₂, CO₂ removal) and rates for its crew. Then a test flies Crew Dragon set up and coasting a month on layer 1 alone, with nothing stopping warp, at 1× (a window) and 10⁵× (`warp_course.rs`'s harness). Today it fails within a day: its life support removes 4.0 kg of CO₂ a day (`dragon-eclss.ron`) against four crew's 4.16. Source the numbers (falcon9.md) or mark them E.
+6. **The bare minimum, proven.** The priorities of power shedding become parameters (D125); the life support gets stocks (O₂, N₂, CO₂ removal) and rates for its crew. Then two tests, at 1× (a window) and 10⁵× (`warp_course.rs`'s harness):
+   - an uncrewed craft set up for it (power positive, tanks sealed) coasts months on layer 1 alone, with nothing stopping warp;
+   - Crew Dragon coasts on layer 1 alone until its consumables run low, and the warp stops at that epoch: crew at risk, the built-in line.
+
+   Use RESEARCH's rows in `falcon9.md` §5.5: CO₂ removal by LiOH at a rate η·Q·c in place of the fixed 4.0 kg/day cap, so four crew settle near 0.2 kPa; about 60 kg of LiOH for four crew over 10 days; free-flight endurance about 10 days (E; Polaris Dawn flew about 5). Today the cap fails within a day. Mark anything unsourced E.
 
 Small commits, one purpose each; `cargo test -p sim` and the game's touched tests at every commit; `warp_course` stays green (the moves change no bits unless a step says so). Docs in the same round:
 - software-layers.md's status words, item by item;
