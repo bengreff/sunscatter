@@ -53,6 +53,30 @@ Small commits, each passing fmt, clippy and the game's tests you touched (`cargo
 
 ## State
 
+**INTERFACE-8 (2026-10-31), wrapped up at its context cap.** Did INTERFACE-7's Left 1–3 and the first half of item 2 (the parity table); the gaps it lists are not closed yet, and the walk (item 3) is not done. Every commit passed fmt, clippy (game; sim too for 09e51e1) and the touched modules' tests (sim data and estimate 12, the card 14, agent, state and trajectory 71); the pre-push check the whole suites. STATE-4 runs beside (it landed 2ddecb8, SAVE_VERSION 16, and has `owners.md` and `brief-state.md` open).
+
+**Landed:**
+- 09e51e1: a sum's precision by one rule, `impl Add` and `Sum` for `sim::systems::Reading` (the precisions add, the estimate's worst case; noted in brief-state.md), read by the card's group totals (`part_card::inside::total`) and the estimate's fuel bars. The second stage's two batteries read "2800/4000 Wh (70 %)" (1 %), not to half a per cent.
+- f7f3d2e: finding 56, the card's unmeasured store by its rule ("—/793 kg", the sensor on hover): `Value::Unknown { text, sensor }`, `content::known`, `Live::held`.
+- c103d5f: finding 55, the predicted path losing its apsides mid-insertion: it was a path from before the stop (0.7 s old under 40 m/s² is ~100 km of periapsis), its age hanging on real-time scheduling. `step` and `run_until` answer once the path is the active vessel's from the stopped clock (`state::Prediction::{from, current}`, `session::answer_now`, ≤ 5 real s; table tests). Live: `prediction_age_s` 0.02 s after each `step` under thrust (was up to 0.8 s); a step costs ~0.7 s of real time.
+- the docs commit after them: interface-map findings 55–56 and **the parity table** ("Parity between the player and the agent": every piece of information and control, its way in, MCP's, and the gaps and overs), mcp.md, the plan's row, this State.
+
+**Shots** (`/private/tmp/claude-501/-Users-ben-sunscatter/7c5f130a-69ba-45d3-9965-ca858b31253e/scratchpad/interface8/shots/`): `a_pad.png` ("LOX 286/286 t", finding 51), `a_pad_cards.png` (the batteries' sums; Dragon's NTO and MMH still a bare dash, before f7f3d2e), `g_sep.png` ("Vessel 1 separated: a new vessel · Vessel 2 ›", finding 54), `g_booster_switch.png` ("predicting the impact…", "no parachutes aboard", findings 52–53). Saves (format 16) in the scratchpad's `home/saves`: `x-t60`, `x-s2` (second stage burning), `x-orbit` (196 × 644 km), `x-orbit2` (186 × 207 km, 1 s rounds near burnout: `insert3.py`).
+
+**Left, in order** (the designs are in interface-map.md's parity section):
+1. A `read` tool for what the player reads on a page, from the models the screens draw: `{menu}` (`MenuId::sections(&FlightData)`), `{card}` (`part_card::content::card`), `{layer}` and `{layer, item}` (`summary::summary`, `inspect::details`; build their inputs by one helper shared with `systems_screen/ui.rs` and `view.rs`), `{navball}` (move the readouts' and controls' texts out of `navball/draw.rs` into `navball::rules` rows first). Table tests; mcp.md.
+2. `set_controls {translate}` (the agent's held keys for rotation and translation: `agent::HeldRotation`, `commands::keys::read_controls`; body axes +X right, +Y down, +Z the nose).
+3. An `edit_program` tool over `systems_screen::edit::{allowed, apply, catalogue}` (define stages and functions, rename, their commands, pin), sent as `SetStages` / `SetFunctions`.
+4. The overs (D106): `get_landing_prediction`'s and `get_vessel`'s orbit numbers and `get_trajectory`'s points through `known_value` (`Reading::shown`); `closest_approaches` limited to what the Orbital menu shows (the active vessel and its target, with signal).
+5. Small: the saves' list, revert to launch (`saves::launch_of`), a body's distance.
+6. The brief's item 3: walk the screens again.
+7. `owners.md` rows (STATE-4 holds the file): `Reading`'s `Add` and `Sum` (a sum's precision, `sim::systems::data`); `state::Prediction::current` and `session::answer_now` (a run's answer after its stop); `part_card::content::known` and `Live::held` (a card's value unmeasured).
+
+**Open for the owner (INTERFACE-8):**
+- A sum's precision is its terms' added (the worst case, as the estimate's bounds), so a group of four batteries each to ±25 Wh reads to ±100 Wh: "10.0/10.0 kWh (100 %)" rather than a share to a tenth (this replaces INTERFACE-7's "half a per cent" note).
+- `step` and `run_until` wait (up to 5 real seconds) for the predicted path from their stop before answering, so an agent's reading after a stop is deterministic; `pause` does not wait.
+- The settings (orbits, controls, interface, visuals) are the player's preferences, not the flight, so MCP does not reach them; the agent reads and flies what the player reads and flies.
+
 **INTERFACE-7 (2026-10-31).** Did INTERFACE-6's Left 1–4: findings 47 and 48, the centre of mass, and the walk of every screen at HEAD (findings 49–53 in [interface-map.md](../technical/interface-map.md), found and fixed). Every commit passed fmt, clippy (game; sim too for 5cdf7df) and the game's touched modules' tests (137); 5cdf7df the estimate tests, with the whole sim suite left to the pre-push check (the machine at load 19). STATE-3 committed its open files mid-round; STATE-4 now runs beside.
 
 **Landed:**

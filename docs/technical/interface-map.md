@@ -1,6 +1,6 @@
 # The map of the interface
 
-Every piece of information and every control the player has, with every way to reach it: a key, a click path, an MCP tool. Made by INTERFACE (2026-10-31, [brief-interface.md](../plans/brief-interface.md)) from the code and from shots of the Falcon 9 flown headless through MCP (the pad set; the ascent and orbit set in the brief's State); walked again in orbit by INTERFACE-2 (findings 13–20), INTERFACE-3 (findings 21–26), INTERFACE-4 (findings 27–31) and INTERFACE-5 (findings 32–43: the pad, ascent, orbit, after separation, every layer, the map, tracking, pause, help) INTERFACE-6 (findings 44–48: the quantities shown by two rules) and INTERFACE-7 (findings 47–49 fixed; the walk at HEAD). Decisions D080, D106, D107, D111, D112, D120, D123 (the interface exception), D126. Kept current with the interface: a change to a way in changes its row here. The help overlay (`?`) is generated from the same tables as the input (`interface::access`, `commands::keys`), so the keys in it cannot drift; this page adds the findings.
+Every piece of information and every control the player has, with every way to reach it: a key, a click path, an MCP tool. Made by INTERFACE (2026-10-31, [brief-interface.md](../plans/brief-interface.md)) from the code and from shots of the Falcon 9 flown headless through MCP (the pad set; the ascent and orbit set in the brief's State); walked again in orbit by INTERFACE-2 (findings 13–20), INTERFACE-3 (findings 21–26), INTERFACE-4 (findings 27–31) and INTERFACE-5 (findings 32–43: the pad, ascent, orbit, after separation, every layer, the map, tracking, pause, help) INTERFACE-6 (findings 44–48: the quantities shown by two rules) INTERFACE-7 (findings 47–49 fixed; the walk at HEAD) and INTERFACE-8 (findings 55–56; the parity of the player and the agent, below). Decisions D080, D106, D107, D111, D112, D120, D123 (the interface exception), D126. Kept current with the interface: a change to a way in changes its row here. The help overlay (`?`) is generated from the same tables as the input (`interface::access`, `commands::keys`), so the keys in it cannot drift; this page adds the findings.
 
 **Status:** the map is complete for the flight view, its menus and cards, the systems screen, the tracking station, pause, settings, saves and help. The findings marked *fixed* are done; the rest are listed under "Open" below.
 
@@ -135,9 +135,66 @@ Hidden, missing a way in, reached two ways that disagree, closed differently. *F
 
 54. **A vessel's name read two ways:** "Vessel #1 separated: a new vessel" beside its link "Vessel 11", the systems screen's bar "Vessel #1", a deleted piece "Debris #3", where the tracking list and the links say "Vessel 1": `VesselId`'s `Display` (the logs' "#1") was used for the player's text. *Fixed* (INTERFACE-7): one name, `tracking::vessel_name`, for every place.
 
+55. **MCP: mid-insertion `get_vessel` read no apsides and an impact in 58 min** while the two-body orbit was 160 × 216 km (INTERFACE-7's insertion could not see its periapsis). The predicted path was from a moment before the stop: it is recomputed a few times a second of real time, and under the second stage's 40 m/s² near burnout a path 0.7 s old is ~30 m/s slow, its periapsis ~100 km lower, so it reentered. Its age hung on real-time scheduling, so a replay from a save read differently too. *Fixed* (INTERFACE-8): `step` and `run_until`, once they stop the clock, answer when the path is the active vessel's from the stopped clock (`state::Prediction::current`, `session::answer_now`, at most 5 real seconds); after a `step` under thrust `prediction_age_s` reads 0.02 s (one live tick), not up to 0.8 s.
+56. **The part card's unmeasured store read a bare dash** (Dragon's NTO and MMH) where the systems screen and the RCS menu give `format::amount`'s "—/793 kg". *Fixed* (INTERFACE-8): the card's `Value::Unknown` carries its rule's text with the sensor on hover (`content::known`, `Live::held`) for tanks and batteries, own and grouped. With it, a group's sum takes `Reading`'s one rule for a sum (the precisions add, as the estimate's bounds: `sim::systems::data`), so the second stage's two batteries read "4000/4000 Wh (100 %)", not to half a per cent.
+
+Seen by INTERFACE-8 at HEAD (shots in `scratchpad/interface8/shots/`): "LOX 286/286 t" on the pad's bar (`a_pad.png`, finding 51), the batteries' sums on the cards (`a_pad_cards.png`), "Vessel 1 separated: a new vessel · Vessel 2 ›" (`g_sep.png`, finding 54), and the booster just after the switch: "predicting the impact…" and "PARACHUTE · no parachutes aboard" (`g_booster_switch.png`, findings 52–53).
+
 Seen by INTERFACE-7 at HEAD (shots in `scratchpad/interface7/shots/`): the pad (`a_*.png`: every layer, the battery and bottle inspectors, the cards, the Power and RCS menus, help, pause, settings' four tabs, saves, tracking), T+60 s (`b_*.png`: the screen's mass "401 t" equal to the bar's, the Landing menu's G-LOAD equal to the navball's), after the stage separation (`g_sep_*.png`, the booster `g_booster*.png`), orbit after SECO (`c_*.png`: the Orbital menu's apsides equal to the navball's, Power, Crew, Comms, six layers, tracking) and Dragon alone (`h_dragon*.png`: 14 t, no abort offered, D120). Not for the interface: Dragon's RCS translates only BACK with all five blocks on (`h_dragon.png`: RIGHT/LEFT/UP/DOWN/FORWARD "none"), for the thruster model or the craft's data; the booster deleted as debris "dead, uncontrollable" while it has batteries (STATE-4's `powered()`).
 
 Earlier walks found fine: the pad's cards placed by the bar, the help, the pause menu, the tracking station, the menus at the pad and in orbit, the systems screen's seven layers, Dragon alone after separation, the map.
+
+## Parity between the player and the agent
+
+D044 and D128's layer 3: the agent reaches the ship computer, calls its functions, takes shots and uses the controls itself; D106: it sees no more than the player. Each row is what the player has, its way in, and MCP's (INTERFACE-8, from this map and `game::agent`). **Yes**: the same, from the same rule. **Gap**: the player has it and MCP does not (a `shoot` of it is an image, not the data). **Over**: MCP shows more than the player sees.
+
+| The player has | Player's way | MCP | Parity |
+|---|---|---|---|
+| The clock (TT, the site), warp, time stopped | time panel | `get_state` | yes |
+| Frame rate | time panel | `profile` (developer flag) | the player's diagnostic |
+| Speed in the navball's frame (ORBIT / SURFACE / TARGET) | navball | `get_vessel` velocity about the body; `get_landing_prediction` surface speeds | **gap**: no speed in the frame shown, no target speed |
+| Altitude above the datum or the terrain | navball (ALT SEA / TER) | `get_vessel` above the ellipsoid; radar altitude in `get_landing_prediction` | **gap**: not the datum the navball reads |
+| Ap and Pe with their times | navball, map | `get_vessel` `orbit.apsides` | yes (**over**: raw digits, below) |
+| G-load and its limit | navball's G | — | **gap** |
+| SAS, the hold, RCS, throttle, flight state (CLAMPED, POWERED…) | navball | `set_controls` sets them; `status` in `get_state` | **gap**: nothing reads the controls back |
+| Stages: propellant, burnout, Δv, the active stage's figures | staging bar | `get_vessel` `stages.sequence` | yes |
+| The functions offered | action bar | `command {}` | yes |
+| A part's card | click a part or its icon | `command {item}` lists its commands; `shoot {cards}` | **gap**: its rows |
+| The systems screen's layer summaries (mass, joints, temperatures, tanks, power, data, health) | Tab, a link | `shoot {screen: systems, layer}` | **gap**: its rows |
+| An item's inspector (a part, a battery, a bottle) | the screen's click | `shoot {screen: systems, part}` | **gap**: its rows |
+| Orbital: elements, target, closest approach, ship clock | 1 | `get_vessel` (i, e, period), `closest_approaches`, `get_state` (the ship clock's offset) | partial: no target distance, the menu's rows |
+| Landing: impact, braking, reentry, the parts nearest their limits, parachute, attitude | 2 | `get_landing_prediction` (impact, braking, surface) | **gap**: reentry, thermal, parachute rows |
+| Maneuver: the planned burns | 3 | `set_plan`'s reply | **gap**: reading the plan without changing it |
+| Crew: crew, cabin air, life support, injuries | 4 | — | **gap** |
+| Power: buses, batteries, what has no power | 5 | — | **gap** |
+| Comms: the link home, delay | 6 | `get_state`, `get_vessel` `signal` | yes |
+| RCS: authority, blocks, feeds | R | `command` (the blocks' commands) | **gap**: authority, feeds |
+| Notifications | bottom left | `notifications` | yes |
+| The vessels, their status | tracking station (M) | `get_state` | yes |
+| A body's distance | double-click a body | `list_bodies` (no distance) | small gap |
+| The saves | pause → Saves | `save_game`, `load_game` by name | **gap**: the list |
+| The keys and every way in | help (`?`) | `tools/list` | the agent's own |
+| Throttle, SAS, the hold, speed reference; rotation | keys, navball | `set_controls` | yes |
+| Translation (I K, J L, H N) | keys | — | **gap** |
+| RCS on, mode, fine; a block | R, the RCS menu | `set_controls {rcs, rcs_fine}`; `command` | yes |
+| Next stage; the bar's edits | Space; drags, ×, AGAIN | `stage`; `edit_stages` | yes |
+| Define stages and functions, rename, their commands, pin, save to the vessel | systems screen editors | — | **gap** |
+| Functions; a part's commands; parachutes | action bar, card, screen; P | `command` | yes |
+| Warp, stop time | `.` `,` `/`, the time panel | `set_warp`, `pause`, `step`, `run_until` | yes |
+| Switch vessel; mission control | `[` `]`, a link, tracking | `switch_vessel`, `go_to_mission_control` | yes |
+| Target | Orbital → TARGET | `set_target` | yes |
+| Camera | drag, scroll, F, a body's Focus | `set_camera` | yes |
+| Save, load; new flight | Cmd+S / Cmd+L, Saves; pause | `save_game`, `load_game`; `new_flight` | yes |
+| Revert to launch | pause → Revert | — | **gap** |
+| Debug mode; performance overlay | pause | `set_debug`; `profile` | yes |
+| Settings (orbits, controls, interface, visuals) | pause → Settings | — | the player's preferences, not the flight (Open for the owner) |
+
+**Over (D106):**
+- `closest_approaches` reads any two vessels' stored trajectories, the truth, with no signal or sensor check, where the player sees only the active vessel's approach to its target (Orbital).
+- `get_landing_prediction` gives the impact, the braking burn and the surface speeds as raw floats, the surface speeds ungated by the velocity's sensor; the Landing menu shows them to the readings' precision.
+- `get_vessel`'s orbit numbers (the apsides, `now_two_body`, inclination, eccentricity, period) and `get_trajectory`'s points are gated on the orbit being known but not rounded to the position's precision, as `known_value` rounds the position itself.
+
+**How to close them (the next agent):** one `read` tool for what the player reads on a page, from the same models the screens draw, so it cannot drift and keeps D106 by construction: `{menu}` → `MenuId::sections(&FlightData)` (the snapshot is a resource refreshed every 0.1 s; refused in the tracking station and RCS while off, as `shoot`); `{card}` → `part_card::content::card` with `Live` built as `part_card/mod.rs` does; `{layer}` → `systems_screen::summary::summary` (its `Inputs` as `systems_screen/ui.rs` builds them, the facts by `rules::facts` as `view.rs`); `{layer, item}` → `inspect::details`; `{navball}` → the cluster's readouts and control captions, first moved out of `navball/draw.rs` into `navball::rules` as rows both read. `set_controls {translate}` through the agent's held keys (`agent::HeldRotation` → rotation and translation; `commands::keys::read_controls`). An `edit_program` tool over `systems_screen::edit::{allowed, apply, catalogue}`, sent as `SetStages` / `SetFunctions`. The saves' list and revert to launch (`saves::launch_of`). The overs through `known_value` (`Reading::shown`), `closest_approaches` limited to what the Orbital menu shows.
 
 ## Not mapped
 
