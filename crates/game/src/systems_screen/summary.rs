@@ -102,11 +102,19 @@ fn name(def: &ShipDef, part: u32) -> String {
     def.parts.iter().find(|p| p.part == part).map_or_else(|| format!("part {part}"), |p| p.id.clone())
 }
 
+/// The craft's parts of `all` drawn, `ground` of them the pad's (said only
+/// while there are any: "12 (and 0 of the pad's)" read in orbit).
+pub fn parts_count(all: usize, ground: usize) -> String {
+    match ground {
+        0 => all.to_string(),
+        n => format!("{} (and {n} of the pad's)", all - n),
+    }
+}
+
 /// The craft: its parts and components, its mass.
 fn craft(x: &Inputs) -> Group {
     let mut g = Group::new("CRAFT");
-    let ground = x.facts.iter().filter(|f| f.ground).count();
-    g.row("parts", format!("{} (and {ground} of the pad's)", x.facts.len() - ground))
+    g.row("parts", parts_count(x.facts.len(), x.facts.iter().filter(|f| f.ground).count()))
         .row("components", x.def.components.len().to_string())
         .row("mass", format::mass(Some(x.aboard.mass)))
         .row("dry mass", exact(x.aboard.dry));

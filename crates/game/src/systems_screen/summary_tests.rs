@@ -225,3 +225,12 @@ fn the_lost_read_by_their_owners_ids() {
     let unpowered: Vec<String> = state.unpowered.iter().map(|l| def.owner_id(l.owner).to_string()).collect();
     assert_eq!(unpowered, std::slice::from_ref(&computer.id));
 }
+
+/// The pad's parts are said only while there are any.
+#[test]
+fn the_pads_parts_are_counted_only_on_the_pad() {
+    // (parts drawn, the pad's, the row)
+    for (all, ground, want) in [(33, 1, "32 (and 1 of the pad's)"), (12, 0, "12")] {
+        assert_eq!(parts_count(all, ground), want);
+    }
+}
