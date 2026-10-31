@@ -227,8 +227,10 @@
         (name: "Booster: engines off", key: "0", pinned: true, actions: [Shutdown("s1")]),
         (name: "Grid fins", key: "G", pinned: true, actions: [Deploy("s1.gridfin#*")]),
         (name: "Landing legs", key: "L", pinned: true, actions: [Deploy("s1.leg#*")]),
-        (name: "Parachutes", key: "C", actions: [ArmChutes]),
-        (name: "Nosecone", key: "N", actions: [Deploy("dragon.nose")]),
+        // Pinned: Dragon alone (after its separation) had an empty action
+        // bar, its own controls only in the systems screen (finding 64).
+        (name: "Parachutes", key: "C", pinned: true, actions: [ArmChutes]),
+        (name: "Nosecone", key: "N", pinned: true, actions: [Deploy("dragon.nose")]),
         // Thrust termination first (the AFSS shuts the Merlins down, stage
         // 2's pyrovalve the MVac; falcon9.md §5.1), then Dragon leaves. An
         // abort: offered only while it would save the crew (D120: a crew
