@@ -53,6 +53,35 @@ Small commits, each passing fmt, clippy and the game's tests you touched (`cargo
 
 ## State
 
+**INTERFACE-2 (2026-10-31), wrapped up at its context cap.** Continued INTERFACE-1's "Left" (below).
+
+**Landed:**
+- 0d43d75: a joint the craft gives no capacity (the MVac's mount, the heat shield's, a leg) reads dashes for its allowable, axial capacity and load, not 0 (`sim::systems::structure::rated`, one owner for the runtime and the screen; the summary counts them under "no capacity"); the condition's peak row says "peak interior"; the unused `SELECTED` tint removed. Finding 11, Left 3 and 5.
+- ffc6b0a: Settings and Saves open centred under the menu bar and stop above the navball cluster (`layout::page_place`), the pause menu stepping aside meanwhile (`pause::menu_shown`); the help's window is solid (`theme::SOLID`), so the navball's numbers no longer show through it; Saves' empty-list hint takes its key from the key table, and its list scrolls. Findings 12, 16, 17.
+- a77f74c: the MCP `command` tool (a function by name; an item's command by its label; `command {}` and `command {item}` list them), from the part card's list (`part_card::content::part_commands`, now the one list) and the systems screen's (`inspect::commands`); `set_controls` takes `rcs` and `rcs_fine`. Finding 10.
+- 25f0bc4: the tracking station says TIME STOPPED, not the requested warp (`hud::time_words`, one owner with the time panel); a card's value that does not fit beside its label goes below it (`part_card::place::value_below`). Findings 14, 15.
+- the docs commit after them: `interface-map.md` (findings 10–12 fixed, new findings 13–20), `mcp.md`, `owners.md` rows, this State, the plan's row.
+
+**The flight (debug off, testing.md exactly):** max-Q at T+66 s, 34.6 kPa at 12.1 km; MECO at T+138 s, 65.3 km, pitch 32°: the worked example's numbers to the digit (the earlier fall-back was debug mode's undrained propellant). Insertion by a script of the doc's step 9 (`insert.py` in the scratchpad: the pitch that brings the vertical speed to zero at 200 km, 1 s pulses about up × heading): throttle cut at Pe 188 km, then 192 × 343 km at 28.7° after SECO (finding 20). A replay from the second-stage save matched round for round. Saves `ascent-t60`, `s2-ignition`, `orbit` in the scratchpad's `home/saves` (the build of 769b85d).
+
+**Shots for the lead** (scratchpad `/private/tmp/claude-501/-Users-ben-sunscatter/7c5f130a-69ba-45d3-9965-ca858b31253e/scratchpad/interface2/shots/`):
+- the thermal mesh in orbit: `orbit_truth_dragon.trunk.png` (the trunk isolated, debug: its sunlit side green against the shaded side's teal), `orbit_thermal_truth.png` (the craft, debug, no cut), `orbit_thermal_sensors.png` (what the sensors give: the measured tanks coloured, the rest the neutral grid, the nodes behind the half cut);
+- the MVac's bell burning: `s2burn_mvac_truth.png` (T+~330 s, debug: the radiatively cooled extension 1918 K of 2620 K, the regeneratively cooled throat blue; the right panel still shows finding 11's zeros, fixed since); `meco_thermal.png` (sensors, at MECO);
+- before the fixes: `orbit_settings_orbits.png` (12), `orbit_help.png` (16), `orbit_cards.png` (15), `orbit_tracking.png` (14), `orbit_menus2.png` (13, Landing ▸ Thermal all dashes).
+
+**Not yet seen on screen:** the fixes since 0d43d75 are tested (table tests, the game's whole suite, clippy) but not shot. The next agent should shoot them at HEAD: Settings and Saves in their place, the help over the navball, the tracking station paused, the capsule's card in orbit, the MVac's joint dashes, and a live `command {}` and `command {function: "Launch abort"}` refusal or run on the Falcon 9.
+
+**Left, in order:**
+1. The shots above.
+2. Finding 13: Landing ▸ Thermal by the systems screen's rule (the measured parts nearest their limits, the rest counted; `menus::hottest` picks by the truth today). It needs `menus/data.rs` (PLANNER-4's hunk) and `hottest.rs` without its test-craft branch (ONEKIND-5).
+3. MCP's last gaps: the target (Orbital → TARGET), the staging bar's edits, reading the notifications.
+4. For other owners: finding 19 (the Crew Dragon has no cabin sensors), finding 20 (thrust after `throttle: 0` on the MVac, its 64 % floor), finding 18's note (a part's peak interior not kept through a warp-6 coast).
+
+**Open for the owner (INTERFACE-2):**
+- The help's window is opaque; every other panel stays translucent (the look is frozen, D123; this is the one change, for reading).
+- Settings and Saves take the centre and the pause menu steps aside while one is open (Esc or × brings it back), rather than sitting beside it.
+- `command` takes the labels the player sees (any case) and lists only what an item can do now (IGNITE when it is off, SHUT DOWN when it runs).
+
 **INTERFACE-1 (2026-10-31), wrapped up at its context cap.**
 
 **Landed:**
