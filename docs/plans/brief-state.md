@@ -74,3 +74,21 @@ Read the ratios, not the last digit (other agents were building). The handles' g
 **Open for the owner (STATE-1):**
 - A craft of one part now takes the parts' path everywhere: its interior is judged by its time at temperature (`systems::failure`), not at once at its service limit, and when its one part is destroyed it flies on as a wreck by the split (it was destroyed whole). The only difference is the interior rule, which now matches every other craft.
 - The crew count of a built craft is the file's (`file.crew`), as before; a piece's is its parts' seats.
+
+### STATE-2 (2026-10-31)
+
+**Landed** (each passed fmt, clippy, the whole sim suite and the game's check and touched modules' tests):
+- 3fc9a0a **2d**: the rest of `Runtime` into `ShipState`, by subsystem; `systems/runtime.rs` deleted; its partition and merge rules in `craft::partition`'s one destructuring; the coverage test lists every field. STATE-1's `step2d.py` plus `scratchpad/state2/step2d_hand.py` (the by-hand fixes). Docs naming `Runtime` updated (owners.md, ship.md, crew.md, power.md, life-support.md, engines.md, failure-modes.md, ship-commands.md, software-layers.md); `ship-model.md` §5's heading "Runtime" means the run-time models and stays.
+- 1689247 **3a**, typed owner handles: `craft::handle` (`Owner::{Part(Part::id), Component(ComponentDef::n)}`, `n` the component's number in the design, kept by a split's pieces; `part_index`, `component_index` binary searches; `owner_id`, `owner_part`, `ratings_of`, `failures_of`, `component_of`; `owner_named` the one resolution from a string). Items carry their owner (`Owned`, `EngineDef`, `ThrusterDef`, buses' and links' members); `Lost` (lost, unpowered) and `Fate` hold handles (a fate: owner plus its mode's index in its owner's modes; the thresholds still hash the id and mode name, so the draws are unchanged); `draw_fates` does nothing once there is a fate per mode. 14 per-tick searches of a part's state are `part_index`. Linear searches by id in sim (STATE-1's pattern, tests excluded): **107 → 81**; per tick, the id strings left are `plumbing::heated_inside` and `estimate`'s joints by name. The game names owners only through `owner_id`.
+
+**Cost.** A profile of the baseline's live tick at 1,000 parts (`bench_scale profile=live,1000`, `sample`, 9,179 samples): `ThermalNetwork::step_to` 62 %, `VolumeGrid::with_parts` 7 %, aero 4 %, the ship systems (`systems::ship::tick`) **about 3 %**. So the handles cannot move the live tick much; the lever at scale is the thermal network (PERF). Before and after: `docs/technical/scale-performance.md` ("One state per vessel").
+
+**Left, in order** (scratchpad `…/scratchpad/state2/`):
+1. **3b**, the rest of the handles: `TankDef` and `BottleDef` take their `owner` so `plumbing::heated_inside` compares handles; `estimate`'s joints by name and `release_engines` as typed indices (or a `JointId`/`EngineId` newtype over the index, renumbered at a split as `renumber` does); the command selectors (`matches` loops in `ShipState::apply`, `systems::command::apply`) run once per command, at the edge: leave them.
+2. **Step 4 (F8)** as STATE-1's plan says (`ShipState::apply` refuses engine and mechanism commands; `next_stage` and `craft::engine::ship_thrust` deleted; table tests).
+3. **Step 5**: saves without static data, a load-then-run test; then the playtest save (Dragon alone in orbit) and `./run play` pointed at it.
+4. **Step 6**: the save's doc; `ship-model.md` §5 on the one state.
+
+**Open for the owner (STATE-2):**
+- `Part::id` stays a plain `u32`, not a `PartId` newtype: it is already the handle (the design index a split's pieces keep, found by `part_index`); a newtype would touch about 290 `.part` sites in sim and game for type safety alone, in the wave where LAYERS moves the files next. The owners became typed because they were strings.
+- The handles are for correctness and D121, not speed: the ship systems are about 3 % of a 1,000-part live tick (above).

@@ -196,6 +196,20 @@ At 1,000,000× the frame now stays under the 60 fps budget and the warp falls to
 | A coast step | 0.98 ms | 3.2 ms | **did not finish**: over 40 min, stopped |
 | 10⁶ s holding attitude | 7.0 s | 37 s | — |
 
+**One state per vessel** (STATE, 2026-10-31: `ShipState` and `Runtime` merged, the owners typed handles; `bench_scale craft parts=300,1000 runs=1`, release, one run each, the two builds back to back; before = bcc3cc7, after = 1689247; load 15–18 for the before's 300 parts, 6–13 for the rest):
+
+| | 300 before | 300 after | 1,000 before | 1,000 after |
+|---|---|---|---|---|
+| Live tick: entry | 16.5 ms | 17.1 ms | 90.6 ms | 87.7 ms |
+| Ascent M 1.2 | 18.3 ms | 13.0 ms | 76.0 ms | 76.0 ms |
+| Vacuum burn | 16.2 ms | 17.1 ms | 69.6 ms | 70.3 ms |
+| Pad (contact) | 26.4 ms | 13.3 ms | 75.5 ms | 94.6 ms |
+| Coast step | 0.97 ms | 0.51 ms | 3.0 ms | 3.8 ms |
+| Lattice 600 s, first / tenth | 6.5 / 10.6 ms | 6.8 / 5.1 ms | 36.4 / 28.1 ms | 42.7 / 28.6 ms |
+| 10⁶ s holding attitude | 8.8 s | 5.6 s | 32.5 s | 32.7 s |
+
+No change beyond the noise (the 300-part before ran under twice the load; STATE-1's earlier before at load 8–12: 16.6 and 90.4 ms on entry). A profile of the live tick at 1,000 parts (`profile=live,1000` under `sample`, 9,179 samples) says why: `ThermalNetwork::step_to` takes 62 %, `VolumeGrid::with_parts` 7 %, aero 4 %, and the ship systems (`systems::ship::tick`) about 3 %. The handles are for correctness (D121); the live tick's lever at scale is the thermal network.
+
 `bench_coast`: 32 µs a step. At 5,000 parts the coast's time goes into the tank law (`coast_law::TankLaw::temperature`), evaluated for each of ~6,500 tank compartments at every sample: the first scale cost to fix (PERF). D121's target is a 5,000-part craft at 60 fps live (16.7 ms a frame): a live tick is 17 ms at 300 parts today.
 
 ## Choices and what was not built
