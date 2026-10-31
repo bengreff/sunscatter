@@ -53,6 +53,32 @@ Small commits, each passing fmt, clippy and the game's tests you touched (`cargo
 
 ## State
 
+**INTERFACE-12 (2026-10-31), wrapped up at its context cap.** Did the lead's items 1 and 2 and most of 3: D126's config menu made editable (the sim's setters at their owners, noted in brief-layers.md first, ed5af00), findings 72 and 76's second half, and the walk from the playtest save (findings 77–81). LAYERS-3, then LAYERS-4 ran beside; LAYERS-4's open sim work stopped the shared tree compiling late in the round, so the last commits passed fmt, clippy and their tests in a private mirror of HEAD plus my files (`scratchpad/interface12/mirror`); every push passed the pre-push check's whole suites.
+
+**Landed:**
+- e5a2a6d: **the config menu** (finding 77): the settings are the programs' saved state: `ship_os::chutes::Chutes` holds the pilot's arming and main heights (`chutes::arm_height`, `main_height`: the craft's `ChuteSpec` until set; `set`, `configure`), `PowerGuard::set`/`check` (loads from `power_guard::switchable`, the lines), `Installed::configure` (the period), one `ship_os::program::{Setting, configure}` for `Vessel::configure` and the game's check; `game::systems_screen::programs`' `Param`, `Value`, `settings_of`, `configure` (MCP's keys), `GameCommand::Configure`; the PROGRAMS tab's fields (sent when an edit ends; loads by × and a pick list; a refusal beside the row); MCP `configure_program`, `read {programs}`' settings. SAVE_VERSION 19.
+- 50ee2f3: the planned burns' settings (`maneuver::Settings`: ALIGN, ALIGN_RATE, SETTLE_LEAD, SETTLE_WAIT, STEER_HOLD as saved settings, E defaults; `Software::maneuver_settings`), SAVE_VERSION 20; 565d749: a waiting burn rescheduled by them (`Vessel::reschedule_waiting`).
+- a208e18: the playtest save flown again at 20 with `tools/playtest_flight.py` (199 × 645 km), checked (150 s at 1×, an hour at warp 6).
+- c4184a5: finding 76's second half (`agent::seconds`, INTERFACE-11's script). 8d36999: finding 72 (`menus::held_items`: a note goes when lines replace it).
+- c12e680: finding 78, the craft's warp stops (notifications ON / OFF) heading the PROGRAMS tab, a warp-stop program's row, `read {programs}`' `notify`. 247dc9b: findings 79, 80 (`programs::Field`, one shown form; a program's settings as rows in Landing ▸ PARACHUTE and Maneuver). e3314fe: finding 81 (the Maneuver menu's unknown duration and the planner's warnings).
+- 571a5ce and the docs commit after this State: mcp.md, systems-screen.md, flight-menus.md, interface-map.md (findings 72, 76–81, the walk), avionics.md, owners.md (two rows), testing.md and the hand-off's version line.
+
+**Shots for the lead** (`/private/tmp/claude-501/-Users-ben-sunscatter/7c5f130a-69ba-45d3-9965-ca858b31253e/scratchpad/interface12/shots/`): `a_play_programs.png` (the PROGRAMS tab on the playtest save: warp stops, the planned burns' and the parachutes' config menus; its fields read "2.01°", "60 s" against the old texts, finding 79, fixed after). Not shot: 247dc9b's and e3314fe's rows on screen (tested; the game binary predated them).
+
+**Left, in order:**
+1. `owners.md` rows (LAYERS-4 held the file): `programs::{warp_stops, set_notify, Field}` in the programs row; `Vessel::reschedule_waiting` (vessel/maneuver.rs) in the maneuver program's row; `menus::held_items` in the menus' steady row.
+2. The walk from a fresh ascent (the brief's item 3's second half): the pad's PROGRAMS tab and Landing ▸ PARACHUTE with its heights, the ascent past max-Q, a planned burn on the second stage (its settings live), shots of 247dc9b and e3314fe.
+3. A warp-stop program's `Line` (its kinds) as settings: no craft installs one yet; its setter would be `warp_stop::Program::set` (LAYERS' file).
+4. INTERFACE-11's Left 4 stands (a switch, press or setting from afar applies at the frame its light arrives, not at an order's epoch).
+
+**Open for the owner (INTERFACE-12):**
+- **The config menu sits under each program in the PROGRAMS tab**, its values the program's saved state; a field is sent when its edit ends (like a switch, no "save" button), a value the computer would refuse is refused at once with why. The menus show a program's settings as rows; the tab edits them.
+- **The parachutes' heights** are the craft's until the pilot sets them, with no order forced between them (mains set above the arming height open once the drogues let them).
+- **The power guard's "priorities"** are read as its two lines and its list of loads; layer 1's bus-shedding order (essential first) is LAYERS' step 6's craft parameter, not a program's setting. No craft installs a load manager yet, so its menu shows only where one is installed.
+- **The maneuver program's tunables** (alignment 2°, 0.5°/s, settling 20 s, ignite anyway after 60 s, steering hold 2 s; E) are its settings; a change reschedules a burn still waiting.
+- **Notifications per craft** sit at the head of the PROGRAMS tab ("Warp stops ON / OFF"), applied at once as the game's setting.
+- MCP reads and sets angles in degrees and the power lines as shares 0–1 (the tab shows %).
+
 **INTERFACE-11 (2026-10-31), wrapped up.** Did the lead's items 1–4: D126's switch in the game and MCP, Dragon's cabin sensor on the card, finding 67 and INTERFACE-10's small tidy-ups, and the walk of the ascent, separation and orbit at HEAD from fresh saves with `read` beside each shot (findings 68–76). LAYERS-3 ran beside (the fit check, the playtest save, then the warp stop and `notify`, with `agent.rs`, `commands.rs`, `fleet.rs`, `state.rs`, `action_bar.rs`, `events.rs`, `mcp.md` and `owners.md` open at the end). Every commit passed fmt, clippy (game) and the game's whole suite (521); 1ef7972 the sim's touched test; the pre-push check the whole suites.
 
 **Landed:**
