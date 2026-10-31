@@ -53,6 +53,29 @@ Small commits, each passing fmt, clippy and the game's tests you touched (`cargo
 
 ## State
 
+**INTERFACE-6 (2026-10-31), wrapped up at its context cap.** Did INTERFACE-5's Left 1–3 and the hunt for quantities shown by two rules (findings 41–48 in [interface-map.md](../technical/interface-map.md)); the walk of every screen (Left 4) is not done. Every commit passed fmt, clippy (game; sim too for 7a88c87) and the game's touched modules' tests; 7a88c87 also the whole sim suite. STATE-3 runs beside: it has sim files open (`estimate.rs` among them) and `stage_bar/icons.rs`, `staging/parts.rs`.
+
+**Landed:**
+- c18b1a5: ONEKIND-7's (d2) second half: `scene/ships.rs`' plain model, the test craft's colours and the flame of no engine; the RCS menu's `authority` is the craft's own (`Authority`, "no thruster blocks" without any); `FlightData::parts` gone (every page links into the systems screen); the systems screen's one-part message; stale comments.
+- 6e805fd: finding 42, ignitions left one rule (`systems_screen::inspect::ignitions_left`) for the screen and the card's two places: "unlimited (hypergolic)" on the pad too.
+- fadf710: finding 43, `map_view::label_at`: an apsis label in the first corner clear of every icon.
+- 0126067: brief-state.md notes the sim addition.
+- 7a88c87: finding 41, `sim::systems::estimate::aboard` (the mass now to the sensors' precision and the dry mass, the pad's mount left out; a burn's start mass is it, tested equal), read by the systems screen's summaries.
+- 0a280e2: finding 44, a tank's contents through one `format::amount` (moved from the staging bar's rows) in the inspector and the Plumbing summary too.
+- 3d68e5a: finding 45, LOCAL TWR to the mass's precision (`menus::data::local_twr`, `stage_bar::aboard_of`), both TWRs through `format::ratio`; MCP's surface TWR the same.
+- 3ca95de: finding 46, the menus' unused lumped Δv/TWR/mass and `hud::{vehicle_mass, delta_v, twr}` deleted.
+- 81ec890: the lead's check after the typed handles: a table test holds the systems screen's LOST group and the unpowered list to the owners' ids (they read right).
+- the docs commit after them: interface-map 41–48, systems-screen.md, flight-menus.md, owners.md, the plan's row, this State.
+
+**Left, in order:**
+1. Findings 47 (a battery's charge, four renderings: `format::amount`'s rule in Wh with the share for the Power menu, the card's battery and group, the inspector) and 48 (a bottle's and an RCS feed's contents to the precision the pressure gives, through `format::amount`; `RcsData`'s `Feed { kg, known }` becomes a reading).
+2. The centre of mass (Structural) is a dash while a tank is unmeasured and counts the pad's mount on the pad: give it a precision from the same bounds (a sim function beside `estimate::aboard`, the mount left out).
+3. The walk of every screen at HEAD (pad, ascent, orbit, after separation, the systems screen, the map, tracking, pause, settings, help), shots in the scratchpad: the systems screen's mass rows at T+60 s ("391 t"), Landing ▸ BRAKING's LOCAL TWR during a descent, the map's Pe label just past periapsis, the card's "ignitions left" on the pad (Dracos "unlimited (hypergolic)", Merlins "N (the pad lights it)").
+
+**Open for the owner (INTERFACE-6):**
+- The craft's mass now reads to the precision the tank sensors give (each of Dragon's unmeasured tanks anywhere from empty to full: "391 t", not a dash), as the staging bar did; the pad's launch mount is not counted in the craft's mass or dry mass.
+- A hypergolic engine's ignitions read "unlimited (hypergolic)" on the pad too; a limited engine's count stands, with "(the pad lights it)" while clamped (the pad's supply lights every engine's start then, `ShipState::apply`).
+
 **INTERFACE-5 (2026-10-31), wrapped up at its context cap.** Did INTERFACE-4's Left 1–4 in the brief's order of value: walked every screen again at HEAD (findings 32–43 in [interface-map.md](../technical/interface-map.md)), fixed what disagreed, then the first half of ONEKIND-7's (d2). Every commit passed fmt, clippy (sim and game) and the game's whole suite (485; 480 after 5d87517 deleted the test craft's tests); the g-load commit also the whole sim suite.
 
 **Landed:**
