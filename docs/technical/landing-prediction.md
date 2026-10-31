@@ -1,6 +1,6 @@
 # The landing prediction
 
-As built in `sim::landing` (`mod.rs`: the starts, the impact, the braking solution, the air path; `model.rs`: the dynamics and the integration loop) and `game::landing` (the background task and the impact marker). Decisions: D089 (the orbit line through air), D074 (a stable craft weathervanes), D064 (debug mode), D080 (the marker only with its menu). From the old specs in [playtest-1.md](../archive/plans/playtest-1.md) C and [realism-1.md](../archive/plans/realism-1.md) §6b. The system: [motion](../systems/motion.md). Its designed successor, the predictor of descents with a burn plan that the booster's landing program steers by: [landing-guidance.md](landing-guidance.md) (design).
+As built in `sim::landing` (`mod.rs`: the starts, the impact, the braking solution, the air path; `model.rs`: the dynamics and the integration loop) and `game::landing` (the background task and the impact marker). Decisions: D089 (the orbit line through air), D064 (debug mode), D080 (the marker only with its menu). From the old specs in [playtest-1.md](../archive/plans/playtest-1.md) C and [realism-1.md](../archive/plans/realism-1.md) §6b. The system: [motion](../systems/motion.md). Its designed successor, the predictor of descents with a burn plan that the booster's landing program steers by: [landing-guidance.md](landing-guidance.md) (design).
 
 **Status: playable.** Under tests on the made-up craft and on the small rocket of parts; the game's Landing/Reentry menu, the impact marker and MCP `get_landing_prediction` read it. No mission test has landed a craft of parts with it yet.
 
@@ -14,7 +14,7 @@ As built in `sim::landing` (`mod.rs`: the starts, the impact, the braking soluti
 
 **The engines** are lumped (`Thrust::of_vessel`): a craft of parts' stage estimate of the engines its throttle runs (those selected, else all main engines; `estimate::lit`, the staging bar's walk), at full throttle in vacuum and at sea level, along their mean axis, with the highest minimum throttle. Its mass and centre of mass are the ship's at the start; the centre is held. The propellant burnable is the estimate's to burnout, or infinite when no level sensor measures it (the prediction then holds the mass). In debug mode the propellant never runs out.
 
-**The assumed attitude** (`AssumedAttitude`), chosen by the game from the controls (`landing::assumed_attitude`, a table test): SAS off, nose into the relative wind (`SurfacePrograde`: a stable craft left to itself, D074); a surface retrograde or prograde hold, that direction; any other hold, the current attitude held inertially (exact for stability, a fair guess for the rest). Straight up at rest.
+**The assumed attitude** (`AssumedAttitude`), chosen by the game from the controls (`landing::assumed_attitude`, a table test): SAS off, nose into the relative wind (`SurfacePrograde`: a stable craft left to itself); a surface retrograde or prograde hold, that direction; any other hold, the current attitude held inertially (exact for stability, a fair guess for the rest). Straight up at rest.
 
 **What the software knows:** a prediction needs the flight software's navigation solution, and for an inertial attitude its attitude knowledge (`flight::can_predict`, F3). Landed and crashed vessels have none.
 

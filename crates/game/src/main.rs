@@ -255,7 +255,7 @@ fn interface_plugins() -> (
 /// choice whose files exist.
 fn startup_craft() -> String {
     let available: Vec<&str> = state::craft_choices(state::craft_exists).iter().map(|c| c.0).collect();
-    state::startup_craft(std::env::var("SUNSCATTER_CRAFT").ok().as_deref(), &available, false)
+    state::startup_craft(std::env::var("SUNSCATTER_CRAFT").ok().as_deref(), &available)
 }
 
 /// The game's resources and messages (before the saved settings replace
@@ -266,7 +266,7 @@ struct GameState {
 
 impl Plugin for GameState {
     fn build(&self, app: &mut App) {
-        app.insert_resource(state::SimState::with_craft(&state::craft_or_test(&self.craft)))
+        app.insert_resource(state::SimState::with_craft(&state::craft_or_fallback(&self.craft)))
             .init_resource::<state::Prediction>()
             .init_resource::<landing::LandingPrediction>()
             .init_resource::<landing::ImpactMarker>()

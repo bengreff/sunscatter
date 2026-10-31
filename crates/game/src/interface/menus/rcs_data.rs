@@ -116,7 +116,7 @@ mod tests {
         if !crate::state::craft_exists("falcon9-crew") {
             return;
         }
-        let sim = crate::state::SimState::with_craft(&crate::state::craft_or_test("falcon9-crew"));
+        let sim = crate::state::SimState::with_craft(&crate::state::craft_or_fallback("falcon9-crew"));
         let r = gather(sim.ship(), RcsMode::default());
         let off: Vec<_> = r.blocks.iter().filter(|b| !b.on).map(|b| b.id.as_str()).collect();
         assert!(off.iter().any(|id| id.starts_with("s1.coldgas")), "{off:?}");

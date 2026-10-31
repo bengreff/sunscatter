@@ -115,23 +115,21 @@ fn a_craft_held_in_a_bubble_names_its_leader() {
 
 #[test]
 fn the_startup_craft_is_the_wanted_one_else_the_first_available() {
-    let both = ["falcon9-crew", "test-craft"];
-    // (wanted, available, demo, expected)
-    let cases: [(Option<&str>, &[&str], bool, &str); 6] = [
-        (None, &both, false, "falcon9-crew"),
-        (None, &both, true, "test-craft"),
-        (Some("test-craft"), &both, false, "test-craft"),
-        (Some("falcon9-crew"), &both, true, "falcon9-crew"),
-        (Some("no-such-craft"), &both, false, "falcon9-crew"),
-        (None, &[], false, "test-craft"),
+    let both = ["falcon9-crew", "other"];
+    // (wanted, available, expected)
+    let cases: [(Option<&str>, &[&str], &str); 5] = [
+        (None, &both, "falcon9-crew"),
+        (Some("other"), &both, "other"),
+        (Some("no-such-craft"), &both, "falcon9-crew"),
+        (Some("other"), &[], FALLBACK_CRAFT),
+        (None, &[], FALLBACK_CRAFT),
     ];
-    for (wanted, available, demo, want) in cases {
-        assert_eq!(startup_craft(wanted, available, demo), want, "{wanted:?} {available:?} {demo}");
+    for (wanted, available, want) in cases {
+        assert_eq!(startup_craft(wanted, available), want, "{wanted:?} {available:?}");
     }
-    let only_test = craft_choices(|id| id == "test-craft");
-    assert_eq!(only_test, [("test-craft", "Test craft (debug)")]);
-    assert_eq!(craft_choices(|_| true).len(), CRAFT_CHOICES.len(), "the Falcon 9 first");
-    assert!(craft_exists("test-craft") && !craft_exists("no-such-craft"));
+    assert_eq!(craft_choices(|id| id == "falcon9-crew"), [("falcon9-crew", "Falcon 9 Block 5 · Crew Dragon")]);
+    assert_eq!(craft_choices(|_| true).len(), CRAFT_CHOICES.len());
+    assert!(craft_exists("falcon9-crew") && !craft_exists("no-such-craft"));
 }
 
 /// A new flight puts a new vessel of the chosen craft on the pad, fuelled at
@@ -153,8 +151,8 @@ fn a_new_flight_and_a_reset_bring_the_chosen_craft_to_the_pad() {
     sim.reset();
     assert_eq!((sim.ship().craft.id.clone(), sim.fleet.len()), (rocket.id.clone(), 1));
     assert!(sim.ship().id() != before);
-    // A craft that does not build gives the test craft.
-    assert_eq!(craft_or_test("no-such-craft").id.0, "test-craft");
+    // A craft that does not build gives the small rocket of parts.
+    assert_eq!(craft_or_fallback("no-such-craft").id.0, FALLBACK_CRAFT);
 }
 
 /// Held on the pad with its engines lit (at their minimum with the throttle
@@ -162,7 +160,7 @@ fn a_new_flight_and_a_reset_bring_the_chosen_craft_to_the_pad() {
 /// rails warp is refused, for it and while another vessel is active.
 #[test]
 fn a_craft_held_live_on_the_pad_refuses_rails_warp() {
-    let mut sim = SimState::with_craft(&craft_or_test("falcon9-crew"));
+    let mut sim = SimState::with_craft(&craft_or_fallback("falcon9-crew"));
     let (a, f9) = (sim.active, sim.ship().id());
     assert!(sim.ship().clamped(), "the Falcon 9 starts on the pad's clamps");
     assert_eq!(sim.rails_block(), None, "on the pad, nothing lit: allowed");
@@ -184,7 +182,7 @@ fn a_craft_held_live_on_the_pad_refuses_rails_warp() {
     sim.active = sim.fleet.len() - 1;
     assert_eq!(sim.rails_block(), Some(RailsBlock::OtherHeld(f9)));
     // A craft of parts on the pad with nothing lit is not held live.
-    let idle = SimState::with_craft(&craft_or_test("falcon9-crew"));
+    let idle = SimState::with_craft(&craft_or_fallback("falcon9-crew"));
     assert!(idle.ship().clamped() && !held_live(idle.ship()));
 }
 
@@ -198,7 +196,7 @@ fn thrust_not_the_throttle_refuses_rails_warp() {
     let w = small.world.clone();
     let mut burning = small.ship().clone();
     burning.next_stage(&w).expect("the ignition");
-    let f9 = SimState::with_craft(&craft_or_test("falcon9-crew"));
+    let f9 = SimState::with_craft(&craft_or_fallback("falcon9-crew"));
     let mut lit = f9.ship().clone();
     lit.next_stage(&w).expect("the ignition");
     let open = Controls { throttle: 1.0, ..Controls::default() };

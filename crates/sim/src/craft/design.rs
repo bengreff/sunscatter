@@ -317,11 +317,8 @@ impl std::fmt::Debug for DesignSlot {
 }
 
 /// The design of craft `id` ([`super::registry`]: a craft file, a stress
-/// craft, a piece of one), built once per process (the test craft's is
-/// [`super::test_craft`]'s). Panics if `id` cannot be resolved.
+/// craft, a piece of one), built once per process. Panics if `id` cannot be
+/// resolved.
 pub fn design_of(id: &CraftId) -> Arc<CraftDesign> {
-    if id.0 == super::TEST_CRAFT {
-        return super::test_craft().design().clone();
-    }
     super::registry::craft_of(id).design().clone()
 }

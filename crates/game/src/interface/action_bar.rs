@@ -144,7 +144,7 @@ mod tests {
         let c = run(&sim, e[0].index).unwrap();
         assert_eq!(c, GameCommand::Function { vessel: sim.ship().id(), name: "Legs".into() });
         assert!(run(&sim, 99).is_none());
-        let f9 = SimState::with_craft(&crate::state::craft_or_test("falcon9-crew"));
+        let f9 = SimState::with_craft(&crate::state::craft_or_fallback("falcon9-crew"));
         let def = f9.ship().ship_def().unwrap();
         let piece = |keep: &dyn Fn(&str) -> bool| {
             def.subset(&def.parts.iter().filter(|p| keep(&p.id)).map(|p| p.part).collect::<Vec<_>>())

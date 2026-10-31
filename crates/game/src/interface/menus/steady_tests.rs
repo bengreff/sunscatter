@@ -6,7 +6,7 @@
 use super::data::{gather, steady, Sources};
 use super::{Item, MenuId, Steady};
 use crate::comms::Comms;
-use crate::state::{craft_exists, craft_or_test, SimState};
+use crate::state::{craft_exists, craft_or_fallback, SimState};
 use std::collections::HashMap;
 
 /// Every section's id and its lines' labels (a note as "note").
@@ -25,7 +25,7 @@ fn on_the_pad_no_menu_line_comes_and_goes() {
         return;
     }
     bevy::tasks::ComputeTaskPool::get_or_init(bevy::tasks::TaskPool::default);
-    let mut sim = SimState::with_craft(&craft_or_test("falcon9-crew"));
+    let mut sim = SimState::with_craft(&craft_or_fallback("falcon9-crew"));
     let mut comms = Comms::load();
     let (pred, aps, rv, tracked) = Default::default();
     let mut data = super::FlightData::default();

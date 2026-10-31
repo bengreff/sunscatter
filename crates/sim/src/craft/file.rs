@@ -1,6 +1,6 @@
-//! Craft files: `data/craft/<craft>/craft.ron` and `geometry.ron`
-//! (realism-1 §3a). The structs mirror the files; [`validate_craft`] and
-//! [`validate_geometry`] reject values the simulation cannot use.
+//! A craft's spec and geometry, as the build of a craft of parts makes
+//! them (`craft::build`, realism-1 §3a). [`validate_shapes`] rejects shapes
+//! the simulation cannot use.
 
 use glam::DVec3;
 use serde::{Deserialize, Serialize};
@@ -224,6 +224,18 @@ pub struct Skin {
     pub coupling: Option<f64>,
 }
 
+/// The skin of a craft whose primitives give none: 3 mm of aluminium alloy
+/// (2,700 kg/m³, 900 J/(kg·K), 150 W/(m·K)), painted (ε 0.8).
+pub const DEFAULT_SKIN: Skin = Skin {
+    areal_mass: 8.1,
+    specific_heat: 900.0,
+    emissivity: 0.8,
+    conductivity: 150.0,
+    thickness: 0.003,
+    max_k: None,
+    coupling: None,
+};
+
 /// The propellant region: a cylinder from `base` along `axis` (its length is
 /// the tank height).
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -286,34 +298,6 @@ pub enum Shape {
     },
 }
 
-fn validate_chute(c: &crate::chute::ChuteSpec) -> Result<(), String> {
-    finite_vec("chute.mount", c.mount)?;
-    positive("chute.main_height", c.main_height)?;
-    for (name, canopy) in c.drogue.iter().map(|d| ("chute.drogue", d)).chain([("chute.main", &c.main)]) {
-        for (what, x) in [
-            ("cd_area", canopy.cd_area),
-            ("diameter", canopy.diameter),
-            ("fill_constant", canopy.fill_constant),
-            ("deploy_max_q", canopy.deploy_max_q),
-            ("max_load", canopy.max_load),
-        ] {
-            positive(&format!("{name}.{what}"), x)?;
-        }
-        let first = canopy.reefing.first().map_or(1.0, |r| r.cd_fraction);
-        if canopy.deploy_max_q * canopy.cd_area * first > canopy.max_load {
-            return Err(format!("{name}: opening at deploy_max_q would exceed max_load"));
-        }
-        let mut last = 0.0;
-        for r in &canopy.reefing {
-            if !(r.cd_fraction > 0.0 && r.cd_fraction < 1.0 && r.until.is_finite() && r.until > last) {
-                return Err(format!("{name}.reefing needs fractions in (0, 1) and rising times, got {r:?}"));
-            }
-            last = r.until;
-        }
-    }
-    Ok(())
-}
-
 fn positive(what: &str, x: f64) -> Result<(), String> {
     if x.is_finite() && x > 0.0 {
         Ok(())
@@ -337,82 +321,6 @@ fn nonzero_vec(what: &str, v: DVec3) -> Result<(), String> {
     } else {
         Err(format!("{what} must not be zero"))
     }
-}
-
-/// Checks `craft.ron`'s values.
-pub fn validate_craft(c: &CraftFile) -> Result<(), String> {
-    positive("dry_mass", c.dry_mass)?;
-    positive("propellant.capacity", c.propellant.capacity)?;
-    let p = c.propellant.mass;
-    if !(p.is_finite() && (0.0..=c.propellant.capacity).contains(&p)) {
-        return Err(format!("propellant.mass must be in [0, capacity], got {p}"));
-    }
-    let e = &c.engine;
-    positive("engine.thrust_vac", e.thrust_vac)?;
-    positive("engine.isp_vac", e.isp_vac)?;
-    positive("engine.isp_sl", e.isp_sl)?;
-    if e.isp_sl > e.isp_vac {
-        return Err(format!("engine.isp_sl ({}) must not exceed isp_vac ({})", e.isp_sl, e.isp_vac));
-    }
-    if !(e.min_throttle > 0.0 && e.min_throttle <= 1.0) {
-        return Err(format!("engine.min_throttle must be in (0, 1], got {}", e.min_throttle));
-    }
-    if !(e.gimbal_deg.is_finite() && (0.0..=30.0).contains(&e.gimbal_deg)) {
-        return Err(format!("engine.gimbal_deg must be in [0, 30], got {}", e.gimbal_deg));
-    }
-    finite_vec("engine.mount.pos", e.mount.pos)?;
-    nonzero_vec("engine.mount.dir", e.mount.dir)?;
-    let r = &c.attitude_control.rcs;
-    if !(r.thrust.is_finite() && r.thrust >= 0.0 && r.isp.is_finite() && r.isp > 0.0) {
-        return Err(format!("attitude_control.rcs needs thrust >= 0 and isp > 0, got {} N, {} s", r.thrust, r.isp));
-    }
-    if !(r.fore_z.is_finite() && r.aft_z.is_finite() && r.fore_z > r.aft_z && r.radius.is_finite() && r.radius >= 0.0) {
-        return Err(format!(
-            "attitude_control.rcs needs fore_z > aft_z and radius >= 0, got {}, {}, {}",
-            r.fore_z, r.aft_z, r.radius
-        ));
-    }
-    validate_chute(&c.chute)?;
-    positive("thermal.skin_max_k", c.thermal.skin_max_k)?;
-    positive("thermal.internal_max_k", c.thermal.internal_max_k)?;
-    let t = &c.thermal;
-    positive("thermal.node_size", t.node_size)?;
-    positive("thermal.interior_specific_heat", t.interior_specific_heat)?;
-    positive("thermal.propellant_specific_heat", t.propellant_specific_heat)?;
-    for (what, x) in [("interior_conductivity", t.interior_conductivity), ("internal_coupling", t.internal_coupling)] {
-        if !(x.is_finite() && x >= 0.0) {
-            return Err(format!("thermal.{what} must be non-negative, got {x}"));
-        }
-    }
-    if !(e.nozzle_heat_fraction.is_finite() && (0.0..1.0).contains(&e.nozzle_heat_fraction)) {
-        return Err(format!("engine.nozzle_heat_fraction must be in [0, 1), got {}", e.nozzle_heat_fraction));
-    }
-    positive("aero.cd0", c.aero.cd0)?;
-    if !(c.aero.roughness.is_finite() && c.aero.roughness >= 0.0) {
-        return Err(format!("aero.roughness must be non-negative, got {}", c.aero.roughness));
-    }
-    positive("impact.max_speed", c.impact.max_speed)?;
-    for (what, sp) in [("contact.foot", &c.contact.foot), ("contact.hull", &c.contact.hull)] {
-        positive(&format!("{what}.stiffness"), sp.stiffness)?;
-        if !(sp.damping.is_finite() && sp.damping >= 0.0) {
-            return Err(format!("{what}.damping must be non-negative, got {}", sp.damping));
-        }
-        if !(sp.friction.is_finite() && sp.friction >= 0.0) {
-            return Err(format!("{what}.friction must be non-negative, got {}", sp.friction));
-        }
-    }
-    positive("contact.foot.stroke", c.contact.foot.stroke)?;
-    if c.contact.hull.stroke != 0.0 {
-        return Err(format!("contact.hull.stroke must be zero, got {}", c.contact.hull.stroke));
-    }
-    positive("contact.stick_speed", c.contact.stick_speed)?;
-    if !c.antenna.gain_dbi.is_finite() {
-        return Err("antenna.gain_dbi must be finite".into());
-    }
-    if !(c.antenna.power_w.is_finite() && c.antenna.power_w >= 0.0) {
-        return Err(format!("antenna.power_w must be non-negative, got {}", c.antenna.power_w));
-    }
-    Ok(())
 }
 
 fn validate_skin(what: &str, s: &Skin) -> Result<(), String> {
@@ -467,16 +375,6 @@ fn validate_shape(what: &str, s: &Shape) -> Result<(), String> {
             nonzero_vec(&format!("{what}: to − from"), to - from)?;
             positive(&format!("{what}.radius"), radius)?;
         }
-    }
-    Ok(())
-}
-
-/// Checks `geometry.ron`'s values (a craft file: one part, at most one
-/// nozzle).
-pub fn validate_geometry(g: &GeometryFile) -> Result<(), String> {
-    validate_shapes(g)?;
-    if g.primitives.iter().filter(|p| p.nozzle).count() > 1 {
-        return Err("at most one primitive may be the nozzle".into());
     }
     Ok(())
 }

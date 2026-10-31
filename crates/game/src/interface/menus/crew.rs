@@ -198,7 +198,7 @@ mod tests {
         if !crate::state::craft_exists("falcon9-crew") {
             return;
         }
-        let sim = crate::state::SimState::with_craft(&crate::state::craft_or_test("falcon9-crew"));
+        let sim = crate::state::SimState::with_craft(&crate::state::craft_or_fallback("falcon9-crew"));
         let c = gather(sim.ship()).expect("crewed");
         assert_eq!(c.crew, 4);
         let cabin = c.cabin.expect("a cabin");

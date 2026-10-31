@@ -78,8 +78,6 @@ pub fn definition(id: &CraftId) -> Result<CraftDef, String> {
         def?
     } else if let Some(def) = super::small::definition(base) {
         def?
-    } else if base == super::TEST_CRAFT {
-        super::test_craft().def()
     } else {
         super::load_definition(&super::default_craft_dir().join(base)).map_err(|e| e.to_string())?
     };
@@ -102,24 +100,14 @@ pub fn definition(id: &CraftId) -> Result<CraftDef, String> {
     }
 }
 
-/// How the cells of craft `id` (definition `def`) are built: a craft file
-/// the default (as [`super::parse_craft`]), anything made of parts (a
-/// stress craft, a piece, a registered craft) by area and part count
-/// ([`CellOptions::for_parts`]).
-pub fn cell_options(id: &CraftId, def: &CraftDef) -> CellOptions {
-    let file = id.parts().is_none()
-        && def.ship.is_none()
-        && !id.0.starts_with("stress-")
-        && !registered().lock().expect("craft registry").contains_key(&id.0);
-    if file {
-        CellOptions::default()
-    } else {
-        CellOptions::for_parts(def.parts.len())
-    }
+/// How the cells of craft `id` (definition `def`) are built: by area and
+/// part count ([`CellOptions::for_parts`]).
+pub fn cell_options(_id: &CraftId, def: &CraftDef) -> CellOptions {
+    CellOptions::for_parts(def.parts.len())
 }
 
-/// The craft `id` names, built once per process (the test craft is
-/// [`super::test_craft`]'s). Panics if it cannot be resolved.
+/// The craft `id` names, built once per process. Panics if it cannot be
+/// resolved.
 pub fn craft_of(id: &CraftId) -> Arc<Craft> {
     static CRAFT: OnceLock<Mutex<BTreeMap<String, Arc<Craft>>>> = OnceLock::new();
     let cache = CRAFT.get_or_init(Default::default);
@@ -127,15 +115,9 @@ pub fn craft_of(id: &CraftId) -> Arc<Craft> {
         return c.clone();
     }
     // Built outside the lock: other ids may build meanwhile.
-    let built = if id.0 == super::TEST_CRAFT {
-        let c = super::test_craft();
-        c.design();
-        c.clone()
-    } else {
-        let def = definition(id).unwrap_or_else(|e| panic!("{e}"));
-        let opts = cell_options(id, &def);
-        Craft::from_def(id.clone(), def, &Resolution::default(), &opts)
-    };
+    let def = definition(id).unwrap_or_else(|e| panic!("{e}"));
+    let opts = cell_options(id, &def);
+    let built = Craft::from_def(id.clone(), def, &Resolution::default(), &opts);
     cache.lock().expect("craft cache").entry(id.0.clone()).or_insert_with(|| Arc::new(built)).clone()
 }
 

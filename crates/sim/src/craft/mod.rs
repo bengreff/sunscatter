@@ -46,13 +46,9 @@ pub use volume::{VolumeGrid, VolumeNode};
 
 use crate::body::DataError;
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
 
-/// File names inside a craft directory.
+/// The file inside a craft directory.
 pub const CRAFT_FILE: &str = "craft.ron";
-pub const GEOMETRY_FILE: &str = "geometry.ron";
-/// The craft every vessel is for now (D060).
-pub const TEST_CRAFT: &str = "test-craft";
 
 /// Which craft a vessel is: a directory name under `data/craft`, a stress
 /// craft or a piece of a craft ([`registry`]).
@@ -85,12 +81,6 @@ pub struct Craft {
 }
 
 impl Craft {
-    /// Derives the surface, render mesh and cells from the files, as one
-    /// part for the whole ship.
-    pub fn build(id: CraftId, spec: CraftFile, geometry: GeometryFile, res: &Resolution, opts: &CellOptions) -> Self {
-        Self::from_def(id, CraftDef::whole(spec, geometry), res, opts)
-    }
-
     /// Derives the surface, render mesh, cells and mass model of a craft of
     /// parts. Each part's dry mass is a shell over its own primitives'
     /// surface, so a part's mass properties do not depend on what it is
@@ -225,33 +215,9 @@ impl CraftParams {
     }
 }
 
-/// Parses and validates a craft from the two files' text. `dir` labels errors.
-pub fn parse_craft(id: CraftId, craft_text: &str, geometry_text: &str, dir: &Path) -> Result<Craft, DataError> {
-    let err = |file: &str, message: String| DataError { path: dir.join(file), message };
-    let spec: CraftFile = ron::from_str(craft_text).map_err(|e| err(CRAFT_FILE, e.to_string()))?;
-    file::validate_craft(&spec).map_err(|m| err(CRAFT_FILE, m))?;
-    let geometry: GeometryFile = ron::from_str(geometry_text).map_err(|e| err(GEOMETRY_FILE, e.to_string()))?;
-    file::validate_geometry(&geometry).map_err(|m| err(GEOMETRY_FILE, m))?;
-    Ok(Craft::build(id, spec, geometry, &Resolution::default(), &CellOptions::default()))
-}
-
-/// Loads `<dir>/craft.ron` and `<dir>/geometry.ron`; the id is the directory name.
-pub fn load_craft(dir: &Path) -> Result<Craft, DataError> {
-    let read = |file: &str| {
-        let path = dir.join(file);
-        std::fs::read_to_string(&path).map_err(|e| DataError { path, message: e.to_string() })
-    };
-    let id = CraftId(dir.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default());
-    parse_craft(id, &read(CRAFT_FILE)?, &read(GEOMETRY_FILE)?, dir)
-}
-
-/// The definition in `dir`: a single-part craft file (`craft.ron` with
-/// `geometry.ron`, [`load_craft`]) or a craft of catalog parts (`craft.ron`
-/// alone: [`assembly`], built from [`crate::catalog::catalog`]).
+/// The definition of the craft of catalog parts in `dir` (`craft.ron`:
+/// [`assembly`], built from [`crate::catalog::catalog`]).
 pub fn load_definition(dir: &Path) -> Result<CraftDef, DataError> {
-    if dir.join(GEOMETRY_FILE).exists() {
-        return Ok(load_craft(dir)?.def());
-    }
     load_assembly(dir).map(|a| a.def)
 }
 
@@ -267,11 +233,4 @@ pub fn load_assembly(dir: &Path) -> Result<build::Assembly, DataError> {
 /// `data/craft` of this source tree (development builds and tests).
 pub fn default_craft_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/craft")
-}
-
-/// The test craft from [`default_craft_dir`], loaded once per process.
-/// Panics if its files are missing or invalid.
-pub fn test_craft() -> &'static Craft {
-    static CRAFT: OnceLock<Craft> = OnceLock::new();
-    CRAFT.get_or_init(|| load_craft(&default_craft_dir().join(TEST_CRAFT)).unwrap_or_else(|e| panic!("{e}")))
 }

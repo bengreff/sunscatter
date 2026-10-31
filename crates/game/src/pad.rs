@@ -104,7 +104,7 @@ mod tests {
     #[test]
     fn the_falcon_9_after_a_pad_abort() {
         let mut sim = SimState::new();
-        sim.new_flight(&crate::state::craft_or_test("falcon9-crew"));
+        sim.new_flight(&crate::state::craft_or_fallback("falcon9-crew"));
         let (start, w) = (sim.clock, sim.world.clone());
         let full = sim::vessel::Controls { throttle: 1.0, sas: true, ..Default::default() };
         let closed = sim::vessel::Controls { throttle: 0.0, ..full };

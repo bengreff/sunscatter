@@ -2,7 +2,7 @@
 
 > Status: **playable** for the aerodynamics, skin heating and the interior volume nodes with engine heat (wired into flight, `sim::vessel::aerothermal`); coolant loops, radiators and heat pipes are later. Decisions: D061 (cells of the model), D062 (rails floor), D064 (debug mode), D065 (skin per cell, clean destruction), D066 (rigid-body contact). Tests are the final specification.
 
-A ship in flight is one 3D model (the test craft's `geometry.ron` for now). Its surface is split into **cells** (`sim::craft`, adaptive to the geometry, ≤ 512 by default). Aerodynamic pressure and friction, heating and cooling all act on those cells; the sums give the force and torque on the rigid body (§3d of the plan) and each cell's skin temperature.
+A ship in flight is one 3D model (its parts' union surface). Its surface is split into **cells** (`sim::craft`, adaptive to the geometry, ≤ 512 by default). Aerodynamic pressure and friction, heating and cooling all act on those cells; the sums give the force and torque on the rigid body (§3d of the plan) and each cell's skin temperature.
 
 ## Prior work, and what we take
 
@@ -25,7 +25,7 @@ A ship in flight is one 3D model (the test craft's `geometry.ron` for now). Its 
 
 ## Data
 
-Per craft (`craft.ron`, the test craft for now):
+Per craft (its `craft.ron`):
 - per cell (built at load): centroid, outward normal, area, skin areal mass, specific heat, emissivity, neighbours with conductance, contact flag;
 - `aero: (cd0)`: the subsonic pressure (form and base) drag coefficient on the projected area (0.8, a blunt body); skin friction is added from the geometry;
 - `thermal: (skin_max_k, internal_max_k, node_size, interior_specific_heat, propellant_specific_heat, interior_conductivity, internal_coupling)`: the skin limit and the limit of every interior node; the interior grid's cube edge (1 m); the specific heats of the dry interior (the dry mass less the skin, spread by volume: 900 J/(kg·K)) and of the propellant (2,000); the interior's effective conductivity between nodes (5 W/(m·K)); the conductance from each cell to the node beneath it per unit of the cell's area (2 W/(m²·K));

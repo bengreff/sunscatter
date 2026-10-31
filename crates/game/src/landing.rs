@@ -41,7 +41,7 @@ pub struct Landing {
 /// will do (a surface prograde/retrograde hold follows the surface
 /// velocity; any other hold keeps the current attitude, which is exact for
 /// stability and a fair guess for the rest), and with SAS off a stable
-/// craft weathervanes nose into the wind (D074).
+/// craft weathervanes nose into the wind.
 pub fn assumed_attitude(c: &Controls, q: DQuat) -> AssumedAttitude {
     match (c.sas, c.hold, c.speed) {
         (false, _, _) => AssumedAttitude::SurfacePrograde,

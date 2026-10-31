@@ -30,11 +30,13 @@ pub const MAX_PHYSICS_WARP: usize = 3;
 pub const PAD_LAT: f64 = 28.6082;
 pub const PAD_LON: f64 = -80.66;
 
-/// The craft a new flight can start with (D100: the Falcon 9 Crew; D064:
-/// the test craft as the debug craft): a directory under `data/craft` and
-/// its name in the new-flight menu.
-pub const CRAFT_CHOICES: [(&str, &str); 2] =
-    [("falcon9-crew", "Falcon 9 Block 5 · Crew Dragon"), (sim::craft::TEST_CRAFT, "Test craft (debug)")];
+/// The craft a new flight can start with (D100: the Falcon 9 Crew): a
+/// directory under `data/craft` and its name in the new-flight menu.
+pub const CRAFT_CHOICES: [(&str, &str); 1] = [("falcon9-crew", "Falcon 9 Block 5 · Crew Dragon")];
+
+/// The craft flown when the wanted one does not build or none exists: the
+/// small rocket of parts built in code (`sim::craft::small`).
+pub const FALLBACK_CRAFT: &str = "small-rocket";
 
 /// The choices whose craft files exist (`exists`: a directory under
 /// `data/craft` holds a `craft.ron`), in menu order.
@@ -48,26 +50,20 @@ pub fn craft_exists(id: &str) -> bool {
 }
 
 /// The craft a game starts with: `wanted` (`SUNSCATTER_CRAFT`) when it is
-/// one that exists; else the test craft in the demo (its script flies the
-/// test craft) and the first available choice in play (the Falcon 9 once
-/// its files exist), else the test craft.
-pub fn startup_craft(wanted: Option<&str>, available: &[&str], demo: bool) -> String {
-    match wanted.filter(|w| available.contains(w)) {
-        Some(w) => w.to_string(),
-        None if demo => sim::craft::TEST_CRAFT.to_string(),
-        None => available.first().map_or(sim::craft::TEST_CRAFT, |c| c).to_string(),
-    }
+/// one that exists, else the first available choice (the Falcon 9), else
+/// [`FALLBACK_CRAFT`].
+pub fn startup_craft(wanted: Option<&str>, available: &[&str]) -> String {
+    let first = available.first().copied();
+    wanted.filter(|w| available.contains(w)).or(first).unwrap_or(FALLBACK_CRAFT).to_string()
 }
 
-/// The craft `id` names, or the test craft (with the reason logged) when it
-/// does not build: a broken craft file never stops the game.
-pub fn craft_or_test(id: &str) -> Arc<Craft> {
+/// The craft `id` names, or [`FALLBACK_CRAFT`] (with the reason logged)
+/// when it does not build: a broken craft file never stops the game.
+pub fn craft_or_fallback(id: &str) -> Arc<Craft> {
     let id = CraftId(id.to_string());
-    if id.0 != sim::craft::TEST_CRAFT {
-        if let Err(e) = sim::craft::registry::definition(&id) {
-            error!("craft {:?} does not build, flying the test craft: {e}", id.0);
-            return craft_of(&CraftId(sim::craft::TEST_CRAFT.into()));
-        }
+    if let Err(e) = sim::craft::registry::definition(&id) {
+        error!("craft {:?} does not build, flying {FALLBACK_CRAFT}: {e}", id.0);
+        return craft_of(&CraftId(FALLBACK_CRAFT.into()));
     }
     craft_of(&id)
 }
@@ -325,7 +321,7 @@ impl SimState {
     /// own kind (a piece's base craft).
     pub fn reset(&mut self) {
         let base = self.ship().craft.id.base().to_string();
-        self.new_flight(&craft_or_test(&base));
+        self.new_flight(&craft_or_fallback(&base));
     }
 
     /// Replaces the active vessel with a new one of `craft` on the pad

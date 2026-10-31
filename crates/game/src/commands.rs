@@ -226,7 +226,7 @@ pub fn apply(
                 rig.focus = Focus::Ship;
             }
             GameCommand::NewFlight(craft) => {
-                sim.new_flight(&crate::state::craft_or_test(craft));
+                sim.new_flight(&crate::state::craft_or_fallback(craft));
                 rig.focus = Focus::Ship;
             }
             GameCommand::Ship { vessel, .. }

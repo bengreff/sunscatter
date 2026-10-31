@@ -12,14 +12,11 @@
 //! authority, crew) are computed from its parts; cells and interior nodes
 //! are tagged with the part they belong to ([`super::CraftDesign`]).
 //!
-//! A craft file without parts is **one part** for the whole ship
-//! ([`CraftDef::whole`]): the test craft (D060) builds, flies and saves
-//! exactly as before. A piece of a craft ([`CraftDef::subset`]) keeps its
+//! A piece of a craft ([`CraftDef::subset`]) keeps its
 //! parts' body axes, so a piece's geometry, mass and attitude are those it
 //! had inside the craft.
 
 use super::file::{CraftFile, EngineFile, GeometryFile, Mount, RcsFile, Tank};
-use crate::systems::PowerSpec;
 use glam::DVec3;
 use serde::{Deserialize, Serialize};
 
@@ -98,38 +95,7 @@ pub struct CraftDef {
     pub ship: Option<std::sync::Arc<super::ship::ShipDef>>,
 }
 
-/// The placeholder power of a craft file's one part: the default power
-/// system's panel in full sunlight, its load and battery.
-fn whole_power() -> PartPower {
-    let s = PowerSpec::default();
-    PartPower { produced: s.efficiency * s.panel_area * 1_361.0, consumed: s.load, battery: s.capacity }
-}
-
 impl CraftDef {
-    /// A craft file as one part for the whole ship (D060): all primitives,
-    /// the file's dry mass, tank, engine, thrusters and parachutes; crewed
-    /// or not, it can be commanded; no load limit.
-    pub fn whole(spec: CraftFile, geometry: GeometryFile) -> Self {
-        let part = Part {
-            id: 0,
-            name: spec.name.clone(),
-            primitives: (0..geometry.primitives.len() as u32).collect(),
-            parent: None,
-            dry_mass: spec.dry_mass,
-            tank: Some(PartTank { capacity: spec.propellant.capacity, region: geometry.tank }),
-            engine: Some(spec.engine),
-            rcs: Some(spec.attitude_control.rcs),
-            chute: true,
-            interior_specific_heat: None,
-            node_max_k: None,
-            power: whole_power(),
-            control: true,
-            crew: spec.crew,
-            max_load: f64::INFINITY,
-        };
-        CraftDef { spec, geometry, parts: vec![part], ship: None }
-    }
-
     /// The part owning each primitive.
     pub fn primitive_part(&self) -> Vec<u32> {
         let mut owner = vec![u32::MAX; self.geometry.primitives.len()];

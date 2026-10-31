@@ -571,7 +571,7 @@ fn assemble(
     });
     let first_skin = primitives.first().and_then(|p| p.skin);
     let geometry = GeometryFile {
-        skin: first_skin.unwrap_or(super::test_craft().geometry.skin),
+        skin: first_skin.unwrap_or(super::file::DEFAULT_SKIN),
         tank: ship.tanks.first().map_or(Tank { base: DVec3::ZERO, axis: DVec3::Z, radius: 1.0 }, |t| t.region),
         primitives,
     };
@@ -584,7 +584,7 @@ fn assemble(
         attitude_control: AttitudeControlFile {
             rcs: RcsFile { thrust: 0.0, isp: 1.0, fore_z: 1.0, aft_z: 0.0, radius: 0.0 },
         },
-        chute: chute.unwrap_or_else(|| super::test_craft().spec.chute.clone()),
+        chute: chute.unwrap_or_else(crate::chute::ChuteSpec::none),
         aero: file.aero,
         thermal: file.thermal,
         impact: file.impact,

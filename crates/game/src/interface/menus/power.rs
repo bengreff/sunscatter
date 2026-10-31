@@ -155,7 +155,7 @@ mod tests {
         if !crate::state::craft_exists("falcon9-crew") {
             return;
         }
-        let sim = crate::state::SimState::with_craft(&crate::state::craft_or_test("falcon9-crew"));
+        let sim = crate::state::SimState::with_craft(&crate::state::craft_or_fallback("falcon9-crew"));
         let p = gather(sim.ship()).expect("electrical");
         assert!(!p.batteries.is_empty(), "{p:?}");
         assert!(p.batteries.iter().all(|b| b.capacity > 0.0 && b.charge > 0.0), "{p:?}");

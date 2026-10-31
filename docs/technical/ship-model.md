@@ -79,7 +79,6 @@ The numbers above illustrate the format; [falcon9.md](../vehicles/falcon9.md) ho
 - **Patterns** (radial, linear, explicit list) place copies with ids `name#k`.
 - **Joints** default from the mount pair's kinds (an integral weld inside a stage, a bolted flange between parts, the declared separation systems); a joint has a capacity (§5.6).
 - **Shapes from a modelling tool** (D102): a part's shape may be a glTF (`.glb`) mesh exported from Blender, with mounting points as named empties and part data in custom properties; the physics uses the same mesh (cells, contact, heat). Procedural primitives and surfaces of revolution (the capsule) cover the Falcon 9 tonight; the importer follows.
-- The old single-part `craft.ron` (the test craft) still loads as one part (`CraftDef::whole`), so the debug craft stays.
 
 ## 4. Build pipeline (`sim::craft`)
 

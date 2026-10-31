@@ -99,7 +99,7 @@ mod tests {
         let test = crate::state::SimState::new();
         assert_eq!(crate::hud::vehicle_mass(test.ship()), test.ship().mass());
         if crate::state::craft_exists("falcon9-crew") {
-            let f9 = crate::state::SimState::with_craft(&crate::state::craft_or_test("falcon9-crew"));
+            let f9 = crate::state::SimState::with_craft(&crate::state::craft_or_fallback("falcon9-crew"));
             let def = f9.ship().ship_def().unwrap();
             let mount: f64 = def.parts.iter().filter(|p| p.ground).map(|p| p.mass).sum();
             assert!(mount > 0.0);

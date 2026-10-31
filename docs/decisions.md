@@ -269,8 +269,8 @@ Deterministic fractal detail shaped by the local slope and roughness of the real
 
 **D060: The next theme is ultra realism, with ships as abstracted blobs.** *Decided, 2026-09-26.*
 - Every feature: the data model first, then the user interface.
-- Before parts (D100), a **test craft** stood in, and it stays as the debug craft: one placeholder part for the whole ship with one state, fuel, thrust and Isp (temperatures per cell, D065); shaped like a ship (a 3D model), fixed landing gear allowed as geometry; crewed, minimal simple resources, no life support, no staging (D064).
-- Order: visual fixes (D058), a foundation pass (the high-severity code-review items), the test craft's data model, relativity and light, aero/heating/hitbox (D061), then the UI (burn planner, powered Moon landing, rendezvous), then the MCP server (D063).
+- Before parts (D100), a test craft of one placeholder part stood in; it is deleted, and every craft is built from parts (D121).
+- Order: visual fixes (D058), a foundation pass (the high-severity code-review items), the craft's data model, relativity and light, aero/heating/hitbox (D061), then the UI (burn planner, powered Moon landing, rendezvous), then the MCP server (D063).
 
 **D061: Aerodynamics, heating and collision act on cells of the ship's 3D model.** *Direction, 2026-09-26.*
 - Medium to high fidelity, still efficient, somewhat more complex than KSP. Nothing per part: in flight a ship is a 3D model, and aero forces, heating and the hitbox are computed on cells of that model.
@@ -285,14 +285,13 @@ The altitude is data per body, chosen by rule: the top of the atmosphere, or on 
 - Saves need not stay compatible across versions yet.
 - A save holds no static data: body data and part behaviour come from the game's files. A ship's trajectory and its thermal state stay in the save, whichever is easiest (owner, 2026-10-30: "Don't make things harder than you need to"; [interview-2026-10-30-roadmap.md](archive/interviews/interview-2026-10-30-roadmap.md)).
 
-**D064: The test craft is a debug craft with a realistic engine, and debug mode is one switch.** *Decided, 2026-09-26.*
-- The engine is realistic but abstracted: thrust, Isp (vacuum and sea level) and mass flow as numbers, no engine simulation and no elaborate plume graphics.
-- **Debug mode** turns on, together: infinite propellant, no overheating, infinite impact tolerance, unbreakable parachutes (D079). Otherwise the craft is destroyed at its limits.
-- No heat shield. Owner, 2026-10-01: a nose-first reentry from LEO overheating the craft is the accepted result (surviving it is piloting); a heat shield comes later as a real part once parts exist (D060); limits are never loosened to make a craft survive.
+**D064: Debug mode is one switch.** *Decided, 2026-09-26; trimmed to debug mode 2026-10-30 (D121).*
+- **Debug mode** turns on, together: infinite propellant, no overheating, infinite impact tolerance, unbreakable parachutes (D079). Otherwise a craft is destroyed at its limits. It changes no rule of the craft's systems: a dead flight computer still counts (D123).
+- Owner, 2026-10-01: a reentry overheating a craft without a heat shield is the accepted result (surviving it is piloting); limits are never loosened to make a craft survive.
 
 **D065: Heat is a network of surface cells and interior volume nodes, independent of parts.** *Decided, 2026-09-26; revised the same evening (owner).*
 - **Skin cells:** the surface split into cells as small as they can be without significant performance drops, adaptive to the geometry. They take heat from the flow and sunlight, radiate, and conduct to neighbours.
-- **Volume nodes:** a coarse 3D grid over the craft's interior (≈1 m for the test craft, adaptive for big craft), each with the heat capacity of the mass inside it, conducting to neighbours and to the skin cells above it. This replaces the single internal temperature.
+- **Volume nodes:** a coarse 3D grid over the craft's interior (≈1 m for a small craft, adaptive for big craft), each with the heat capacity of the mass inside it, conducting to neighbours and to the skin cells above it. This replaces the single internal temperature.
 - **Heat sources go into the nodes that contain them:** engine losses into the chamber and mount nodes, reactor waste heat (thermal minus electrical) into the reactor's nodes, electronics and crew their power draw.
 - **Heat transport systems are explicit links:** coolant loops carry ṁ·c_p·ΔT between the nodes they pass (only while pumped, costing power); radiators are high-emissivity skin cells on a loop; heat pipes are high-conductance links within their working range.
 - **Parts, later, own the nodes and cells inside their shape** (a big part spans many nodes), with limits per node; joints are links with contact resistance; heat-dependent subsystems read their node's temperature.
@@ -327,9 +326,6 @@ No render-scale setting: the 3D scene renders at the window's physical pixels (o
 - One look for everyone, no graphics settings (2026-10-26: "delete all graphics settings, there should just be one graphics setting … that is so well optimized it doesn't matter"), apart from D109's toggles for heavy, non-vital visuals (exhaust, reentry glow, clouds). The tiers and their code are deleted. All visuals are data-driven for any body. What each part of the look costs is measured (the benchmark turns parts off, never the player).
 - The look runs full screen at the display's frame rate on the reference Mac, at full resolution (D072).
 
-**D074: The test craft is a finned rocket, stable nose-first.** *Decided, 2026-09-28 (owner).*
-Its shape makes it aerodynamically stable nose-first at every Mach number, on ascent and on entry. It is still a debug craft (D064): flown with debug mode on, so reaching orbit, heating and the parachute's landing speed are not design problems; a real staged rocket comes with the parts model.
-
 **D075: Attitude hold has five modes, and planned burns are flown by the attitude.** *Decided, 2026-09-28 (owner).*
 - Modes: **stability** (kill rotation, hold the attitude), **prograde**, **retrograde**, **target**, **maneuver**. Prograde and retrograde follow the navball's speed reference (orbital, surface or target), stated on screen.
 - Thrust is always along the craft's actual attitude. A planned burn is flown by the maneuver hold: the craft turns with its own attitude control and the burn's thrust follows the attitude, live and in the predicted plan alike.
@@ -340,15 +336,15 @@ A marker is placed wherever the predicted trajectory (through planned burns) rea
 **D077: Engine heat leaves with the exhaust and by radiation from the nozzle; the interior warms only through the mount.** *Default taken 2026-09-30 (owner unavailable; reversible).*
 The chamber's wall heat returns to the flow (regenerative cooling) and is not a heat source. The radiatively cooled nozzle extension absorbs a share of the jet power sized so it runs near 1400 K (coated niobium), radiates it away, and conducts to the craft only through its mount (~1 W/K). Each skin material has its own temperature limit. Numbers and sources in [technical/aero-thermal.md](technical/aero-thermal.md). Replaces the earlier 2e-4 of the jet power into the mount's node, which drove the interior to 1100–1500 K on long burns.
 
-**D078: Attitude control is only what real actuators give: RCS couples and the engine's gimbal.** *Default taken 2026-09-30 (owner unavailable; reversible).*
-A craft declares its reaction-control thrusters (thrust, Isp, fore and aft ring stations, quad radius); SAS and the pilot get the pure couples they make (pitch and yaw `2·F·Δz`, roll `8·F·r`) plus the gimbal while the engine runs, and nothing else: no abstract torque, no reaction wheels (none big enough fly on craft this size), no special case on the ground. The thrusters burn the main propellant in live flight (their share of full command times their flow); with none left (outside debug mode) only the gimbal turns the craft. The test craft carries Apollo SM-class 445 N thrusters: 8.0 kN·m pitch and yaw, 3.7 kN·m roll (was 40/40/20 kN·m). On rails (coasts, planned burns) the torque limit holds but RCS propellant is not yet counted. Owner, 2026-10-01: SAS balancing the craft on two feet on a 20° lunar slope (3 kN·m of the 8 available) is kept: real actuators, real result; the pilot can turn SAS off.
+**D078: Attitude control is only what real actuators give: RCS thrusters and the engines' gimbals.** *Default taken 2026-09-30 (owner unavailable; reversible).*
+A craft's reaction-control thrusters are placed components (D104); SAS and the pilot get the torques they make about the centre of mass, plus the gimbals while the engines run, and nothing else: no abstract torque, no reaction wheels (none big enough fly on craft this size), no special case on the ground. The thrusters burn their own feeds; with nothing left (outside debug mode) only the gimbals turn the craft. Turns on rails are limited by the same thrusters' authority. Owner, 2026-10-01: SAS balancing a craft on two feet on a 20° lunar slope is kept: real actuators, real result; the pilot can turn SAS off.
 
 **D079: Parachutes open in a sourced sequence and an overload tears them; nothing refuses the command.** *Default taken 2026-09-30 (Director, owner unavailable; reversible).*
 - **Sequence** (`sim::chute`): **P** arms it. The drogue opens at once; the main opens below `main_height` above the ground once the drogue is out of its reefing, and the drogue is cut away. This is the Apollo, Orion and Soyuz order (Apollo: drogues at 24,000 ft, mains at ~11,000 ft; NASA TN D-7437).
 - **Reefing and filling:** each canopy opens through timed reefed stages (Apollo's mains 6.8 % of full Cd·A for 6 s, then 25.7 % to 10 s; its drogues 57 % for 10 s), and its mouth grows at V/n (Knacke's t_f = n·D/V). The fill constants n (7 ringsail, 10 ribbon) are from memory, not checked.
 - **Overload fails physically:** a canopy whose drag exceeds its breaking load tears and is lost. A command above `deploy_max_q` is not refused, because no real system refuses one: the pilot fires the mortar, and the canopy holds or not. Real canopies hold somewhat above their design load (Apollo's mains passed ultimate tests at 1.39× the design limit, TN D-7437; a CPAS main took 40,000 lb above its limit undamaged, NTRS 20110011562; CPAS is certified at 110 % q for 3 s, NTRS 20190026520) and fail beyond it (an Apollo gore split at 20,000 to 23,000 lb while disreefing). So the breaking load is the design limit × 1.39, and `deploy_max_q` is the design opening q, shown on the HUD.
 - **Simplified, known:** the load is q·Cd·A as the canopy fills, without the added-mass overshoot (Knacke's Cx). A cluster shares it evenly (Apollo's lead canopy took ~1.9× the mean).
-- The test craft carries two Apollo drogues (5.5 kPa design q) and four Apollo mains (3.27 kPa), sized for its 5 t landing mass. At a full 20 t the mains tear. Owner, 2026-10-01: keep it, it is what the physics gives (like not reaching orbit without debug mode). A propellant dump is a fine real feature for later.
+- The small test rocket of parts (`craft::small`, its `t-chutes`) carries two Apollo drogues (5.5 kPa design q) and four Apollo mains (3.27 kPa), sized for a 5 t landing mass; full, its mains tear. Owner, 2026-10-01: keep it, it is what the physics gives. A propellant dump is a fine real feature for later.
 
 **D080: The flight view is the navball plus task menus in fixed docks.** *Decided, 2026-10-25 (owner). Replaces D057.*
 - "Designated, elegant locations for menus; completely cut unnecessary information." Always on screen: time and warp, the navball cluster, and a menu bar. Nothing else unless the player opens it.
@@ -408,7 +404,7 @@ The owner's interview: [interview-2026-10-26-parts.md](archive/interviews/interv
 **D100: Ships are parts, components and layers; the first vehicle is Falcon 9 Block 5 with Crew Dragon.** *Decided, 2026-10-26 (owner). Details D018, D033.*
 - A **part** is a physical object with a shape, a place and mounting points (a tank, an engine, a grid fin, the capsule). A **component** is equipment inside a part's volume, with mass, volume, power and heat but no outer shape (a helium bottle, a battery, a flight computer, a sensor, a valve, a seat). A **layer** is a network, not placed as a part: structure (joints), plumbing, electrical, data, thermal, mechanisms.
 - The first vehicle is the Falcon 9 Block 5 with Crew Dragon, every part and component adjustable and interchangeable. The goal is a whole Crew mission (launch, booster landing, ISS docking, entry, splashdown); the first step is the complete Falcon 9 in the part system, its controls and systems at the proper realism, flyable by the owner.
-- The test craft stays as the debug craft (a craft of one part).
+- Every craft is built from parts (D121); the test craft of one part is deleted.
 
 **D101: Every part comes from a generator; real hardware is a catalog entry; properties are derived and published numbers override them.** *Decided, 2026-10-26 (owner).*
 - A generator turns parameters into a part or component (shape, mounts, mass, tanks, ports, functions, ratings, failure modes). A catalog entry is a generator, its parameters, its published numbers (each with a source), ratings, era and cost. The catalog holds a large variety of real systems and later goes beyond them; players make their own parts (their own parameter sets now, their own generators later).
@@ -426,7 +422,7 @@ The owner's interview: [interview-2026-10-26-parts.md](archive/interviews/interv
 **D104: Internal systems run as behaviour, abstracted but not too far.** *Decided, 2026-10-26 (owner).*
 - **Plumbing:** a lumped network: tank and pressurant pressures, propellant temperature and density, boil-off, line losses, pump inlet pressure (cavitation), settled or floating propellant (ullage), slosh.
 - **Engines from published data before the engine designer** (D020): start sequence with limited ignitions and a transient, the steady map (thrust, Isp, mixture ratio against throttle, inlet conditions and ambient pressure), throttle limits, shutdown, gimbal, heat. No flow inside the engine at runtime: what happens there fails statistically.
-- **RCS** thrusters are placed components whose torques come from the geometry (for craft of parts; the test craft keeps D078's couples).
+- **RCS** thrusters are placed components whose torques come from the geometry.
 - **Power** flows in watts over buses (voltage derived): batteries with charge, temperature and internal resistance, solar cells per skin cell, loads with priorities and shedding.
 - **Crew and life support:** the cabin's air, consumables, suits, the crew's acceleration and landing-load limits; radiation dose later.
 - **Ground:** the launch pad and its hold-down clamps are in scope; the countdown later, abstracted as a time and funds sink. Nothing else on the ground ("no cars driving around the launch site").
@@ -540,7 +536,7 @@ The player flies everything by hand for now (including a booster landing). Scrip
 
 **D121: The ship model scales to a 5,000-part craft flown live and 50 craft of 300 parts at 10⁶×, through one kind of craft, one state and one advance law per subsystem.** *Decided, 2026-10-30 (owner; [interview-2026-10-30.md](archive/interviews/interview-2026-10-30.md)). Refines D081 and D119.*
 - **Scale:** a ~5,000-part craft flown live at 1× and 60 fps on the M2 Pro, and D081's fleet of 50 craft of ~300 parts at every warp up to 10⁶×. Live physics has no cap on the number of craft (owner: "No cap"). The game's side counts too, but by judgement: "I don't want to steer you towards chasing some target of 5000 cubes arbitrarily rendered … we don't even know what those crafts will look like" (owner, 2026-10-30, [interview-2026-10-30-roadmap.md](archive/interviews/interview-2026-10-30-roadmap.md)).
-- **One kind of craft.** The test craft and the made-up path (one placeholder part with a fuel number) are deleted: every craft is built from parts (D100), and benchmarks and tests use craft of parts. D074 goes with the test craft's code, and D064 keeps only debug mode.
+- **One kind of craft.** The test craft and the made-up path (one placeholder part with a fuel number) are deleted: every craft is built from parts (D100), and benchmarks and tests use craft of parts. D074 (the finned test craft) is superseded and deleted with it, and D064 keeps only debug mode.
 - **One state per vessel.** `ShipState` and `Runtime` merge into one, grouped by subsystem, split and merged by construction (F1). Ids are strings only at the edges (files, saves, the interface, MCP) and typed handles inside.
 - **One advance law per subsystem.** Each subsystem advances over any interval, exact or coarse-grained, chunked = single pass. Live ticks, the systems lattice and coasts only choose the interval (this closes the review's F6).
 - **Live costs:**

@@ -115,6 +115,22 @@ pub struct Flow {
     pub height: f64,
 }
 
+impl ChuteSpec {
+    /// No parachutes: a canopy of no area that never opens. A craft without
+    /// chute parts starts with its chutes lost (`vessel::LOST_CHUTE`).
+    pub fn none() -> Self {
+        let main = Canopy {
+            cd_area: 0.0,
+            diameter: 0.0,
+            fill_constant: 1.0,
+            reefing: Vec::new(),
+            deploy_max_q: 0.0,
+            max_load: 0.0,
+        };
+        ChuteSpec { mount: glam::DVec3::ZERO, drogue: None, main, main_height: 0.0 }
+    }
+}
+
 impl Canopy {
     /// The fraction of full Cd·A the canopy may open to `age` seconds
     /// after line stretch.
