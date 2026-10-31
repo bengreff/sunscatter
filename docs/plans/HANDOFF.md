@@ -2,15 +2,16 @@
 
 A SessionStart hook loads this file automatically after `/clear` or at startup. It is kept current by `/handoff`.
 
-*Updated 2026-10-30 (night). No agents are running. ONEKIND-2, DOCS-2 and MISSION-2 have finished.*
+*Updated 2026-10-30 (night). Running: PLANNER, ONEKIND-3, AUDIT (all three slots). The owner asked for next steps 1–3 done; answers in [interview-2026-10-30-roadmap.md](../archive/interviews/interview-2026-10-30-roadmap.md) (D120, D126 revised; D128, D129 new; D063, D121 extended).*
 
 ## Your first job
 
-1. Take the three agents' reports as they arrive. Each reports through a message with its commits, what is left and its questions. Their briefs hold their State.
-   - **ONEKIND-2: done** (09d44b8, 8a29ad3, e57e934, 3d79bff). It moved `frame_live_stop`, `scenario_launch`, `parts`' roughness check, `contact` and `aerothermal` onto `craft::small`. Configured vessels now start deployed, craft on legs no longer spawn in the air, and the small rocket's nozzle heat share is 1.7e-4 (it had run past C-103's melting point). The tests it weakened are in [brief-onekind.md](brief-onekind.md)'s State.
-   - **MISSION-2: done.** It flew the Falcon 9 from the pad to a 189 × 600 km orbit at 28.7° through MCP, headless on the real flight software, and a replay from a save matched to the metre. The lead checked the max-Q and orbit shots. The guide is in `docs/technical/testing.md`, with the helper `tools/mcp.sh`. Every tool has now run in the game. Fixes: 1d33b69, 293d22d, 1df446b, 3a64fef.
-   - **DOCS-2: done** (67bf95d, 5a930dc, ae6bf93, a068d59). The system docs match today's decisions, decided against built; `technical/ship-systems.md` is split into ten files; comms.md and proper-time.md were extracted. Its Left is in [brief-docs.md](brief-docs.md): the other archived specs, stale status lines, the README's images.
-2. Every slot is free (cap: 3 agents plus the lead). Launch **PLANNER** (next steps, item 1) and **ONEKIND-3**'s first half (item 2) in parallel.
+1. Take the three agents' reports as they arrive (each through a message: commits, what is left, questions; their briefs hold their State):
+   - **PLANNER** ([brief-planner.md](brief-planner.md)): closed-loop planned burns for craft of parts, as a layer-2 function (D126, D128); burns live (D129).
+   - **ONEKIND-3** ([brief-onekind.md](brief-onekind.md), its ONEKIND-3 section): the unblocked tests and the stress craft first; then it waits for PLANNER before deleting the made-up path.
+   - **AUDIT** ([brief-audit.md](brief-audit.md)): writes `technical/warp-invariance.md` (D129: where "the same at 10⁵× as at 1×" is hard) and `technical/software-layers.md` (D128), and drafts `brief-advance.md` and `brief-layers.md`. Read-only except new files.
+2. When PLANNER lands, tell ONEKIND-3 to go on (Left 3, 4). When AUDIT reports, give the owner its ranked difficulties (they asked), then start the wave (next steps, item 3) one agent at a time as slots free.
+3. ONEKIND-2, MISSION-2 and DOCS-2 are done (their briefs: ONEKIND's State; `brief-mission.md` and `brief-docs.md` to archive when convenient; DOCS-2's Left is still open).
 
 ## State
 
@@ -23,7 +24,7 @@ A SessionStart hook loads this file automatically after `/clear` or at startup. 
   - QUICKFIX's five fixes;
   - DOCS: the docs reorganised by system (D124), `owners.md` replacing `architecture.md`, no file cap;
   - MISSION: `./run headless`, the testing tools, the demo and tour deleted.
-- **Decisions recorded:** D117–D127, with D027, D034, D043, D044, D081, D114, D115 and D123 revised. The interviews are in `docs/archive/interviews/` (2026-10-29-next, 2026-10-30). v0.2 is complete with both flights plus D121's scale target (`vision.md`).
+- **Decisions recorded:** D117–D129, with D027, D034, D043, D044, D063, D081, D114, D115, D120, D121, D123 and D126 revised. The interviews are in `docs/archive/interviews/` (2026-10-29-next, 2026-10-30). v0.2 is complete with both flights plus D121's scale target (`vision.md`).
 - **Half done:**
   - ONEKIND: `craft::small` (`small-rocket`) exists and about a dozen suites have moved. The test craft and the made-up path are still in the code. The owner confirmed a hard impact breaking a craft of parts apart is intended. The small rocket's numbers are estimates (E) awaiting the owner: 400 N cold-gas blocks, 3e5 N/m and 1.8e4 N·s/m feet with a 0.35 m stroke, and the 1.7e-4 nozzle heat share.
   - MISSION: `step`, `run_until`, `new_flight`, saves, `bench` and `profile` have not been run in the game yet.
@@ -31,30 +32,28 @@ A SessionStart hook loads this file automatically after `/clear` or at startup. 
 
 ## Next steps
 
-1. **PLANNER** (D126): planned burns for craft of parts (`PlanError::PartsUnsupported`). Closed-loop to the target state, as a flight-layer program, with real starts, ullage settling and tail-off. Move the planned-burn tests (`planned_burns`, `hold_modes`' maneuver holds, the game's planner and predictions, `landing::model`) onto parts.
-2. **ONEKIND-3** ([brief-onekind.md](brief-onekind.md), Left):
-   - now: move the remaining tests (`limbo`, `limbo_physics`, `limbo_regime`, `save_load`, the sim unit tests, the bench examples, the game tests), and rebuild `craft::stress` on parts with benchmark numbers at 300, 1,000 and 5,000 parts;
-   - after PLANNER: delete the made-up path and the test craft; fix D074, D064, D060, D078, D079, D100 and D104 and their citations; regenerate the playtest save from a Falcon 9 flight (`save_game` in a headless run) or drop it.
-3. **The next wave, one sim-wide agent at a time** (D121):
-   - **STATE:** merge `ShipState` and `Runtime`; typed handles; the engine rule in one place.
-   - **FIXES3:**
+1. **PLANNER** (running): see its brief.
+2. **ONEKIND-3** (running): Left 1–2 now; Left 3–4 after PLANNER (delete the made-up path and the test craft; D074, D064, D060, D078, D079, D100, D104 and their citations; the playtest save regenerated as Dragon alone in orbit).
+3. **The wave, one sim-wide agent at a time** (D121, D128, D129), in this order:
+   - **STATE:** merge `ShipState` and `Runtime`; typed handles; the engine rule in one place. Saves hold no static data (D063, extended).
+   - **LAYERS** (D128, from AUDIT's `software-layers.md` and `brief-layers.md`): the parts' own logic (layer 1) out of `sim::systems::flight` into the parts; the ship computer (layer 2) as functions; the bare minimum defined; the warp-stop line (crew or vessel at risk) with layer 2 able to replace it; notifications off per craft.
+   - **FIXES3** (on LAYERS' split):
      - the function runner through `program::offered`;
      - the load's vapour in `ShipState::initial`;
      - `estimate::ready` against `program::can_start`;
-     - an abort needs enough escape thrust;
-     - fail-safe shutdown for a lost controller (D123);
+     - fail-safe shutdown for a lost controller, as layer-1 engine logic (D123);
      - SAS and the holds on coasts through the flight layer;
-     - D034's routing: a crewed vessel must not command probes (it still does);
-     - D123's switch to turn random failures off (none exists; every vessel draws its fates).
-   - **ADVANCE:** one advance law per subsystem.
-   - **PERF:** aero once per tick; thermal at its own rate; analytic coast heat; a spatial index for the geometry scans; per-vessel threads with bit-identical cross-machine tests (D127).
+     - D034's routing (a crewed vessel must not command probes);
+     - D123's switch to turn random failures off;
+     - the automatic abort's decision as layer 2 on a thrust-to-weight margin (E), the manual abort firing whenever an escape system can (D120, simplified).
+   - **ADVANCE** (from AUDIT's `warp-invariance.md` and `brief-advance.md`): one advance law per subsystem; the same bits at 1× and 10⁵× for every subsystem and event (D129); events at their own epoch; warp restricted, not models changed.
+   - **PERF:** aero once per tick; thermal at its own rate; analytic coast heat; a spatial index for the geometry scans; per-vessel threads with bit-identical cross-machine tests (D127). The game's side by judgement, not arbitrary cubes (D121, extended).
    - **DEBRIS:** the controllability check; ballistic lumps; designs precomputed at build.
 4. **The two flights, in parallel** (D117, D123, D125, D126), each checked by an MCP mission test (D122):
    - **Crew Dragon:** the trunk joint, entry with 1-D ablation by material, the chutes' real logic as the automatic option, a calm sea, D116's doses, a rigid placeholder station.
    - **The booster:** relight, boostback and entry by predictor–corrector, convex landing guidance written as WASM-ready flight-layer code (D043), a landing zone first.
 5. **Small items:**
-   - in a mission test, orbit insertion becomes a planned burn once PLANNER lands (MISSION-2's default);
-   - the 11-vessel performance check needs a spawn tool once the test craft is gone;
+   - the 11-vessel performance check needs a spawn tool once the test craft is gone (ONEKIND-3 has it);
    - the render scale flips between 0.8 and 1.0 every half second in a headless game;
    - stage 2's RP-1 reads 29.70 t against a 29.66 t capacity on the pad (densified load against nominal density?);
    - `tools/gpu_trace.py` still launches the deleted plunge demo.
@@ -68,7 +67,8 @@ These are agents' defaults, in each brief's "Open for the owner":
 - the thermosphere film (140–150 km);
 - in roll, the liquid turns with its tank;
 - the staging defaults (ROUNDTRIP);
-- the pad-abort cases (QUICKFIX).
+- the pad-abort cases (QUICKFIX);
+- the takeover rule's reading (D126: a sequence switches to manual only for conflicting input; PLANNER defines "conflicting").
 
 Older: `falcon9.md`'s U/E data, Dragon's CO₂ removal, the Moon's field degree, the 1,000-year ephemeris, backhouse's certificate (Windows not checked since 2026-10-26), CRUCIBLE's exit states.
 

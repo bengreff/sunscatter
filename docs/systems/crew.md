@@ -9,7 +9,7 @@ The people aboard: the cabin's air they breathe, the accelerations they can take
 - **Limits are doses** (D116, to build): each crew member carries a dose per hazard that grows by `dt / T(x)`, where `T(x)` is how long level `x` can be survived, and never shrinks. Past a threshold drawn for each crew member (lognormal around 1, σ 0.3, E; seeded like failures, D105) they die; below it they are well. No injuries, no instant deaths. The hazards: acceleration by axis (NASA-STD-3001 Vol. 2's durations × 3, E), radiation (absorbed dose against ~4.5 Gy, E, when radiation enters the model), low O₂ and high CO₂.
 - **The cabin's air** follows the ideal-gas law and NASA's BVAD rates per crew member; the life support, powered and not lost, removes CO₂ and water and holds O₂ and the total pressure.
 - **The g-load limit** shown on the navball is the lower of the structure's and the crew's (D111; see [structure](structure.md)).
-- **An abort is offered** when it would save the crew or the vehicle (D120), with escape thrust enough to get away (D123).
+- **An abort is offered** while an escape system can pull the crew or the vehicle away (D120). The player can fire it at any time, and it always runs the same; under automatic flight, the layer-2 software decides whether to (D128).
 
 ## What exists
 

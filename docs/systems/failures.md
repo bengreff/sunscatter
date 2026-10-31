@@ -22,11 +22,12 @@ How things go wrong: physical triggers from the simulation where it knows, stati
 ## Not built
 
 - D123's switch: random (statistical) failures off until both flights are clean, then on. The physical triggers stay on.
+- D128's warp stop: with only the parts' own logic (layer 1), a failure that puts the crew or the vessel at risk stops warp at its own epoch; a layer-2 program can replace that line. Notifications off per craft: nothing on it stops warp.
 - Hard starts, pyroshock, fragments; components' own vibration; hazards on the rails lattice.
 - Radiation's single-event upsets; how the career learns a design's reliability (D105, open question 1).
 
 ## Owners and decisions
 
 - Owners: [owners.md, Failures](../owners.md#failures).
-- Decisions: D064, D065, D105, D123.
+- Decisions: D064, D065, D105, D123, D128, D129.
 - Technical: [failure-modes.md](../technical/failure-modes.md), [ship-model.md](../technical/ship-model.md) §6.

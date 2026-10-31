@@ -2,7 +2,7 @@
 
 How a craft makes thrust and feeds it: tanks and their pressures, the pressurant bottles, the lines to the engines, the engines' start, steady state and shutdown, the reaction-control thrusters, and the gimbal. It runs on the [ship model](ship.md)'s plumbing layer.
 
-**Status:** plumbing, the engine model, RCS and the gimbal are *playable* in `sim` for the Falcon 9 Crew, with table tests against their sources ([plumbing.md](../technical/plumbing.md), [engines.md](../technical/engines.md)). The exhaust seed (each engine's exit state) is *skeleton*. D123's fail-safe shutdown when an engine's own controller is lost, and an abort that needs enough escape thrust, are next (FIXES3 in the [hand-off](../plans/HANDOFF.md)).
+**Status:** plumbing, the engine model, RCS and the gimbal are *playable* in `sim` for the Falcon 9 Crew, with table tests against their sources ([plumbing.md](../technical/plumbing.md), [engines.md](../technical/engines.md)). The exhaust seed (each engine's exit state) is *skeleton*. D123's fail-safe shutdown when an engine's own controller is lost is next, as the engine's own logic (layer 1, D128; LAYERS and FIXES3 in the [hand-off](../plans/HANDOFF.md)).
 
 ## Laws
 

@@ -205,6 +205,7 @@ Oceans get proper behavior when aerodynamics is implemented.
 - Players can write scripts in any language that compiles to WASM.
 - Scripts run sandboxed and deterministically, with an execution budget per tick that models a ship computer's limited power.
 - Scripts are plain files on disk, driven by a command-line tool, so AI agents can work with them directly.
+- This layer is D128's layer 2. Below it, each part's own logic (layer 1) is native, as part of how the part works.
 
 **D044: The game runs an MCP server for AI agents.** *Decided, 2026-09-25.*
 - It exposes game state, planning tools and script deployment.
@@ -282,6 +283,7 @@ The altitude is data per body, chosen by rule: the top of the atmosphere, or on 
 - The MCP server (state, planning tools, commands) comes first, on a shared command API that WASM scripting (D043) later builds on.
 - In the first realism pass, light-time delay applies to telemetry and ground commands only; the crew flies without delay. Ships get proper time (D012).
 - Saves need not stay compatible across versions yet.
+- A save holds no static data: body data and part behaviour come from the game's files. A ship's trajectory and its thermal state stay in the save, whichever is easiest (owner, 2026-10-30: "Don't make things harder than you need to"; [interview-2026-10-30-roadmap.md](archive/interviews/interview-2026-10-30-roadmap.md)).
 
 **D064: The test craft is a debug craft with a realistic engine, and debug mode is one switch.** *Decided, 2026-09-26.*
 - The engine is realistic but abstracted: thrust, Isp (vacuum and sea level) and mass flow as numbers, no engine simulation and no elaborate plume graphics.
@@ -531,12 +533,13 @@ The player flies everything by hand for now (including a booster landing). Scrip
 - Boil-off, venting and similar slow changes keep running through a coast. Where a closed form exists (a tank's heat leak, its pressure rising to relief, then venting at the heat leak over the latent heat), it is evaluated at any time, not stepped. Elsewhere a coarse-grained law stands in for it.
 - The coast segment's mass for its perturbations (drag, radiation pressure) and the ship state come from the same law, so there is one mass truth (F2). It stays deterministic, warp-invariant and chunked = single pass (rule 4).
 
-**D120: The staging bar's Δv is in vacuum by default; an abort is offered only when it would save the crew or the vehicle.** *Decided, 2026-10-30 (owner).*
+**D120: The staging bar's Δv is in vacuum by default; an abort is offered while an escape system can pull the crew or the vehicle away.** *Decided, 2026-10-30 (owner); the escape check simplified the same night ([interview-2026-10-30-roadmap.md](archive/interviews/interview-2026-10-30-roadmap.md)).*
 - "Delta v should be vacuum by default. NO patchwork fixes." The bar's current-air figure stays a choice and is not the default. It is not patched stage by stage.
 - "Launch abort should only show when there is a valid abort procedure that would actually save the rocket or the crew." For the Falcon 9, that means while Crew Dragon, with its launch escape system (eight SuperDracos), is still attached to a stack it can escape from. Never on the booster after separation, on Dragon alone, or on a craft with no escape system (Cargo Dragon has no SuperDracos). The rule is derived from what the piece holds (crew, escape engines that can start, the joint to separate), not from the function's name.
+- "This does not need to be a complex system. Literally just if a LES system exists for this purpose, the player can fire it at any time, and it always runs the same." No prediction of the escape. When the craft is flown automatically, its layer-2 software (D128) decides whether to abort, for example on a thrust-to-weight margin of the escaping piece (E).
 
 **D121: The ship model scales to a 5,000-part craft flown live and 50 craft of 300 parts at 10⁶×, through one kind of craft, one state and one advance law per subsystem.** *Decided, 2026-10-30 (owner; [interview-2026-10-30.md](archive/interviews/interview-2026-10-30.md)). Refines D081 and D119.*
-- **Scale:** a ~5,000-part craft flown live at 1× and 60 fps on the M2 Pro, and D081's fleet of 50 craft of ~300 parts at every warp up to 10⁶×. Live physics has no cap on the number of craft (owner: "No cap").
+- **Scale:** a ~5,000-part craft flown live at 1× and 60 fps on the M2 Pro, and D081's fleet of 50 craft of ~300 parts at every warp up to 10⁶×. Live physics has no cap on the number of craft (owner: "No cap"). The game's side counts too, but by judgement: "I don't want to steer you towards chasing some target of 5000 cubes arbitrarily rendered … we don't even know what those crafts will look like" (owner, 2026-10-30, [interview-2026-10-30-roadmap.md](archive/interviews/interview-2026-10-30-roadmap.md)).
 - **One kind of craft.** The test craft and the made-up path (one placeholder part with a fuel number) are deleted: every craft is built from parts (D100), and benchmarks and tests use craft of parts. D074 goes with the test craft's code, and D064 keeps only debug mode.
 - **One state per vessel.** `ShipState` and `Runtime` merge into one, grouped by subsystem, split and merged by construction (F1). Ids are strings only at the edges (files, saves, the interface, MCP) and typed handles inside.
 - **One advance law per subsystem.** Each subsystem advances over any interval, exact or coarse-grained, chunked = single pass. Live ticks, the systems lattice and coasts only choose the interval (this closes the review's F6).
@@ -564,7 +567,7 @@ The player flies everything by hand for now (including a booster landing). Scrip
 - **The docking target** is one rigid body, a placeholder. The ISS "will be deorbited soon anyways, it will likely not even be in the game."
 - **Fail-safe engines:** an engine whose flight computers are all lost, or whose own controller is lost, shuts down (E until sourced).
 - **Debug mode** shows the truth, but a dead or unpowered computer is still dead.
-- **Aborts (D120):** an uncrewed Crew Dragon is offered the abort, since it saves the vehicle. The abort needs escape thrust enough to get away, not merely one engine that can start ("would actually save").
+- **Aborts (D120):** an uncrewed Crew Dragon is offered the abort, since it saves the vehicle. Whether its escape thrust is enough is decided by the automatic flight's software, not by the abort's offer (D120, as simplified the same night).
 - **Random failures (D105) are off** until both flights fly end to end cleanly, then on.
 - **Visuals are frozen** until both flights fly end to end; only bugs that mislead the player are fixed. "I don't know if we really need the last plume things."
 
@@ -588,14 +591,38 @@ The player flies everything by hand for now (including a booster landing). Scrip
 **D126: Automation is a switch; manual control is always possible.** *Decided, 2026-10-30 (owner; [interview-2026-10-30.md](archive/interviews/interview-2026-10-30.md)). Refines D115 and D117.*
 - Every automatic sequence can run three ways: by itself, when the player presses for it, or not at all. Examples are the parachutes' deploy on barometric altitude, a planned burn, and the booster's guidance. A manual "deploy" runs the same deploy function as the automatic sequence. The autopilot is a switch with a config menu.
 - **Planned burns** run closed-loop to their target state, with real engine starts, ullage settling and tail-off. They are flight-layer programs. Planned burns for craft of parts come right after ONEKIND.
+  - They are set as nodes (Δv prograde, normal and radial at a time), and close the loop on the orbit the node gives. Orbit targets and rendezvous come with the flights (owner, 2026-10-30, [interview-2026-10-30-roadmap.md](archive/interviews/interview-2026-10-30-roadmap.md)).
+  - An automatic burn settles its propellant with the craft's own thrusters before ignition, as the Falcon 9's second stage does; the player can always do all of it by hand.
+  - They fly live, at physics warp, until D029's warp while thrusting integrates them into the warp systems (D129).
 - **Warp to a point** ramps the warp up and down. It never jumps through time (D022).
 - **Manual control** is always available, with today's simplified aids (automatic engine vectoring), "even if it leads to catastrophic failure (part of the fun of driving your own spacecraft)."
+- **Taking over:** "It should be a full switch ONLY when input disagrees/when it would interfere." Input that agrees with the running sequence, or touches what it does not command, leaves it running; input that conflicts with it switches that sequence fully to manual (owner, 2026-10-30).
 
 **D127: Vessels advance on parallel workers at one fixed live rate, bit-identical across machines.** *Decided, 2026-10-30 (owner; [interview-2026-10-30.md](archive/interviews/interview-2026-10-30.md)).*
 - Each vessel, and each coast, advances on its own worker, and the results are gathered in a fixed order. Craft in contact in the bubble advance together on one worker.
 - Every live craft ticks at one fixed rate. The costly parts step at their own rates inside it (D121).
 - Every simulation result is the same bits on every machine. CI flies the same cases on macOS and Windows and compares hashes.
 - Performance is measured by hand (the scale benchmarks); there is no gate in CI.
+
+**D128: Ship software has three layers: each part's own logic, the ship computer's programs, and the agent outside the game.** *Decided, 2026-10-30 (owner; [interview-2026-10-30-roadmap.md](archive/interviews/interview-2026-10-30-roadmap.md)). Refines D043, D115 and D126.*
+- **Layer 1, the part's own logic.** "Each part should have built in, fundamental logic … synonomous with how the part actually works", such as an engine controller's start sequence and its fail-safe shutdown (D123), or a valve's relief. In the abstraction it runs on the ship's computer, but it belongs to the part: "I don't want "ship computers" mingling until assembling a ship means fighting an integration of procedures."
+  - The bare minimum is well defined: with layer 1 alone a ship "should be enough to coast for months if everything is set up", and can in theory be flown by hand, but hardly ("dig into menus and regulate atmosphere flow and similar").
+- **Layer 2, the ship computer** (D043's ship OS). It "makes pretty much the same inputs the player makes, but with simple hard coded logic, plus some elements that are more automated".
+  - A ship flown by hand usually has parts of layer 2 running in the background. The player can trigger its actions and functions, which run sequences of actions (D126's switch).
+  - Some of it is isolated functions shipped with the craft, such as the booster's landing loop or the maneuver function. Some is a central script that handles the edge cases and calls those functions.
+  - Done well, it flies whole missions start to finish and handles errors as well as the effort put into it. A mission from Earth to Mars without people is possible, but needs reliable parts and still risks failure.
+  - The game ships the baseline software that comes with a craft or a part. Players share layer-2 software as they share craft.
+- **Layer 3, the AI agent outside the game** (D044): it reaches the ship computer directly, as the player can in a "computer" tab, calls functions, takes screenshots and uses the controls.
+- **Stopping warp.** A ship with only layer 1 has a built-in line: a failure that puts the crew or the vessel at risk (the crew's limits will be breached, or the vessel will be lost) stops warp at its own epoch. Anything else is logged. A layer-2 program can replace that line entirely with its own.
+- **Notifications** can be switched off per craft, for fleets on trade routes: then nothing on it stops warp, "if something fails, it fails, the autopilot scripts do the best they can."
+
+**D129: The course of events is the same at every warp; only the player's input changes it.** *Decided, 2026-10-30 (owner; [interview-2026-10-30-roadmap.md](archive/interviews/interview-2026-10-30-roadmap.md)). Refines D029, D081, D119 and D121.*
+- "EXACTLY the same behavior at 100,000 warp as you would get at 1x warp. That is part of determinism." "Deterministic course of events is only broken when the player inputs something."
+- The systems of a craft not being flown are "deterministic, coarse grained or analytic", and "don't change behavior across warp levels". This goal defines how warp is restricted and how systems are simulated under warp:
+  - a craft's model is chosen by its state (thrust, air, contact, a live craft near it), never by the warp;
+  - where a model cannot give the same events at high warp, the warp is restricted, and the model is not changed.
+- Planned burns fly live for now. "Warp while thrusting" (D029) comes later, as a special case integrated into the warp systems under the same law.
+- Failures do not stop warp unless they are critical (D128), and "in general not much should fail during cruise when a ship is not being actively flown". "Generally repeat missions will rarely have a critical failure."
 
 ## Open questions
 
