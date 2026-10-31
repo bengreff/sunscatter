@@ -116,8 +116,7 @@ pub fn feeds_settled(def: &ShipDef, state: &ShipState, i: usize) -> bool {
     def.engines[i].feeds.iter().all(|list| {
         first(list, state, false).is_none_or(|t| {
             let g = super::plumbing::geometry(&def.tanks[t], &state.tanks[t]);
-            let run = state.runtime.tanks.get(t).cloned().unwrap_or_default();
-            super::plumbing::covered(&run, &g, state.tanks[t].liquid)
+            super::plumbing::covered(&state.tanks[t], &g)
         })
     })
 }

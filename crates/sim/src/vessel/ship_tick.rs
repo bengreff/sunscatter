@@ -218,8 +218,8 @@ impl Vessel {
         let body = self.attitude.q.inverse() * dv;
         let Some(state) = self.ship.as_mut() else { return };
         state.runtime.refit(&def);
-        for (t, run) in def.tanks.iter().zip(state.runtime.tanks.iter_mut()) {
-            run.drift_speed -= body.dot(t.region.axis.normalize());
+        for (t, s) in def.tanks.iter().zip(state.tanks.iter_mut()) {
+            s.drift_speed -= body.dot(t.region.axis.normalize());
         }
     }
 

@@ -44,30 +44,31 @@ fn settling_table() {
     let i = tank(&def, "s2.tank:lox");
     let (t, mut s) = (def.tanks[i].clone(), state.tanks[i].clone());
     let g = geometry(&t, &s);
-    let run0 = TankRun::default();
+    // A settled tank (its liquid on its outlet).
+    let run0 = TankState { drift: 0.0, drift_speed: 0.0, ..s.clone() };
     // (acceleration m/s², seconds) → drift (m), covered
     let mut run = run0.clone();
     for _ in 0..150 {
         settle(&mut run, &t, &g, 13.6, 0.02);
     }
-    assert_eq!((run.drift, covered(&run, &g, s.liquid)), (0.0, true));
+    assert_eq!((run.drift, covered(&run, &g)), (0.0, true));
     let mut run = run0.clone();
     for _ in 0..150 {
         settle(&mut run, &t, &g, -0.008, 0.02);
     }
     assert!((run.drift - 0.5 * 0.008 * 9.0).abs() < 1e-3, "{}", run.drift);
-    assert!(covered(&run, &g, s.liquid), "a few centimetres after MECO");
+    assert!(covered(&run, &g), "a few centimetres after MECO");
     // Nearly empty after the burn, then ten minutes of free fall.
     s.liquid = 2_000.0;
     let g = geometry(&t, &s);
-    let mut run = run0.clone();
+    let mut run = TankState { liquid: s.liquid, ..run0.clone() };
     for _ in 0..10 {
         settle(&mut run, &t, &g, 1e-7, 60.0);
     }
-    assert!(!covered(&run, &g, s.liquid), "floating after a coast: {} m", run.drift);
+    assert!(!covered(&run, &g), "floating after a coast: {} m", run.drift);
     let x = run.drift;
     let mut seconds = 0.0;
-    while !covered(&run, &g, s.liquid) {
+    while !covered(&run, &g) {
         settle(&mut run, &t, &g, 0.015, 0.02);
         seconds += 0.02;
     }
@@ -122,7 +123,7 @@ fn the_regulator_holds_the_tanks_through_the_burn() {
         slow(&def, &mut state, &Surroundings { sun: DVec3::ZERO, air_k: None }, dt);
         lowest = lowest.min(pressure(&def.tanks[lox], &state.tanks[lox]));
     }
-    let helium: f64 = [lox, rp1].iter().map(|&i| state.runtime.tanks[i].pressurant_in).sum::<f64>() * 0.0040026;
+    let helium: f64 = [lox, rp1].iter().map(|&i| state.tanks[i].pressurant_in).sum::<f64>() * 0.0040026;
     let left: f64 = (def.bottles.iter().zip(&state.bottles))
         .filter(|(b, _)| b.id.starts_with("s1.helium"))
         .map(|(_, s)| s.moles * 0.0040026)
@@ -156,7 +157,7 @@ fn densified_lox_warms_on_the_pad() {
     // vents a little pressurant at the relief pressure (4 bar).
     let p = pressure(&def.tanks[lox], &state.tanks[lox]);
     assert!(p <= def.tanks[lox].pressure + 1.0, "{p}");
-    assert!(state.runtime.tanks[lox].vented < 5.0, "{} kg", state.runtime.tanks[lox].vented);
+    assert!(state.tanks[lox].vented < 5.0, "{} kg", state.tanks[lox].vented);
 }
 
 /// A liquid at saturation at its relief pressure vents what heats it: Q/L.
@@ -176,7 +177,7 @@ fn at_saturation_the_heat_boils_off() {
     assert!((boiled / expect - 1.0).abs() < 0.02, "{boiled} kg vs Q·t/L {expect} kg");
     // What boiled is vented, to the rounding of the liquid's mass (no other
     // tank vents: Dragon's sit below their relief).
-    let own = state.runtime.tanks[i].vented;
+    let own = state.tanks[i].vented;
     assert!((own - boiled).abs() <= 1e-12 * m0 && vented == own, "{own} kg vented of {vented}, {boiled} boiled");
 }
 

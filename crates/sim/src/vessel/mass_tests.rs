@@ -79,7 +79,7 @@ fn a_booster_flip_on_cold_gas_moves_its_centre_of_mass_by_its_liquid() {
     let b = booster(&w);
     let def = b.ship_def().unwrap();
     let mut state = b.ship().unwrap().clone();
-    for run in &mut state.runtime.tanks {
+    for run in &mut state.tanks {
         (run.drift, run.drift_speed) = (0.0, 0.0);
     }
     let props = |s: &crate::craft::state::ShipState| super::ship_props(&b.craft.mass, &def, s);
@@ -91,7 +91,7 @@ fn a_booster_flip_on_cold_gas_moves_its_centre_of_mass_by_its_liquid() {
         let a = plumbing::accels(&def, &state, com, DVec3::ZERO, omega, DVec3::ZERO);
         for (i, t) in def.tanks.iter().enumerate() {
             let g = plumbing::geometry(t, &state.tanks[i]);
-            plumbing::settle(&mut state.runtime.tanks[i], t, &g, a[i], dt);
+            plumbing::settle(&mut state.tanks[i], t, &g, a[i], dt);
         }
     }
     let after = props(&state);
@@ -101,8 +101,8 @@ fn a_booster_flip_on_cold_gas_moves_its_centre_of_mass_by_its_liquid() {
     assert_eq!(after.mass, before.mass);
     let (lox, rp1) = (0..2).fold((0, 0), |k, i| if def.tanks[i].id == "s1.tank:lox" { (i, k.1) } else { (k.0, i) });
     let g = plumbing::geometry(&def.tanks[lox], &state.tanks[lox]);
-    assert_eq!(state.runtime.tanks[lox].drift, g.length - g.height, "the LOX on its far dome");
-    assert_eq!(state.runtime.tanks[rp1].drift, 0.0, "the RP-1 on its outlet");
+    assert_eq!(state.tanks[lox].drift, g.length - g.height, "the LOX on its far dome");
+    assert_eq!(state.tanks[rp1].drift, 0.0, "the RP-1 on its outlet");
 }
 
 /// A day's coast with boil-off (F2; the review's acceptance): the second
@@ -159,7 +159,7 @@ fn a_days_boil_off_takes_from_each_tank_what_it_vents() {
     let s = v.ship().unwrap();
     assert_eq!(v.propellant().to_bits(), s.consumables(&def).to_bits());
     assert_eq!(v.mass().to_bits(), (v.craft.mass.dry_mass + s.consumables(&def)).to_bits());
-    let vented: Vec<f64> = s.runtime.tanks.iter().map(|t| t.vented).collect();
+    let vented: Vec<f64> = s.tanks.iter().map(|t| t.vented).collect();
     println!("vented by tank {vented:?} kg, the vessel lost {:.3} kg of {m0:.0}", m0 - v.mass());
     assert!(vented[lox] > 1_000.0 && s.tanks[lox].liquid < start.tanks[lox].liquid, "the LOX boils off");
     for (i, t) in def.tanks.iter().enumerate().filter(|&(i, _)| i != lox) {
@@ -207,7 +207,7 @@ fn the_segments_mass_is_the_ships_at_every_lattice_point() {
         let segment = v.trajectory().unwrap().mass_at(e).unwrap();
         assert_eq!(segment.to_bits(), v.mass().to_bits(), "lattice point {k}: {segment} vs {} kg", v.mass());
     }
-    let vented = v.ship().unwrap().runtime.tanks[lox].vented;
+    let vented = v.ship().unwrap().tanks[lox].vented;
     println!("the LOX vented {vented:.1} kg in a day, the vessel lost {:.1} kg", m0 - v.mass());
     assert!(vented > 300.0, "the boil-off runs through the coast");
     assert_eq!(v, one, "point by point and one jump");
@@ -226,7 +226,7 @@ fn the_nodes_hold_each_liquid_where_it_sits() {
     let b = booster(&w);
     let (def, design) = (b.ship_def().unwrap(), b.craft.design().clone());
     let mut state = b.ship().unwrap().clone();
-    for run in &mut state.runtime.tanks {
+    for run in &mut state.tanks {
         run.drift = 0.0;
     }
     let capacity = |s: &crate::craft::state::ShipState| {
@@ -246,7 +246,7 @@ fn the_nodes_hold_each_liquid_where_it_sits() {
     assert!((added(&settled) / (liquids + gases) - 1.0).abs() < 1e-9, "{} vs {}", added(&settled), liquids + gases);
     let lox = def.tanks.iter().position(|t| t.id == "s1.tank:lox").unwrap();
     let g = plumbing::geometry(&def.tanks[lox], &state.tanks[lox]);
-    state.runtime.tanks[lox].drift = g.length - g.height;
+    state.tanks[lox].drift = g.length - g.height;
     let thrown = capacity(&state);
     assert!((added(&thrown) / added(&settled) - 1.0).abs() < 1e-9);
     let middle = (def.tanks[lox].region.base + g.axis * (0.5 * g.length)).z;

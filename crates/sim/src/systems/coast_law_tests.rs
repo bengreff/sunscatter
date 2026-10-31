@@ -103,7 +103,7 @@ fn boiling_at_saturation_agrees_with_the_lattice_and_the_hand() {
     assert!(((m0 - hand) / boiled - 1.0).abs() < 1e-9, "the hand");
     assert!((lattice_boiled / boiled - 1.0).abs() < 1e-3, "the lattice");
     assert_eq!(by_law.tanks[i].liquid_k, t_s);
-    assert_eq!(by_law.runtime.tanks[i].vented, boiled, "the vented ledger");
+    assert_eq!(by_law.tanks[i].vented, boiled, "the vented ledger");
     // Bit for bit: the law's total is the ship state's consumables there.
     assert_eq!(law.total(&def, day).to_bits(), by_law.consumables(&def).to_bits());
 }

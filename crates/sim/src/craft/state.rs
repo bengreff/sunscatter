@@ -26,7 +26,8 @@ use serde::{Deserialize, Serialize};
 /// Room temperature for what is not loaded cold (K).
 const ROOM_K: f64 = 293.15;
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+/// A tank's contents and how its liquid moves (`systems::plumbing`).
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct TankState {
     pub part: u32,
     /// kg and K.
@@ -35,6 +36,17 @@ pub struct TankState {
     /// The ullage's gas (pressurant and vapour), moles and K.
     pub ullage_moles: f64,
     pub ullage_k: f64,
+    /// How far the liquid's bulk has moved away from its outlet along the
+    /// tank's axis (m; 0: settled on the outlet), and its speed (m/s).
+    #[serde(default)]
+    pub drift: f64,
+    #[serde(default)]
+    pub drift_speed: f64,
+    /// Pressurant moles let in and gas vented (kg) so far (the ledgers).
+    #[serde(default)]
+    pub pressurant_in: f64,
+    #[serde(default)]
+    pub vented: f64,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -266,6 +278,7 @@ impl ShipState {
                     liquid_k: t.load.temperature_k,
                     ullage_moles: fluids::moles(t.load.pressure, ullage, t.load.temperature_k),
                     ullage_k: t.load.temperature_k,
+                    ..TankState::default()
                 }
             })
             .collect();

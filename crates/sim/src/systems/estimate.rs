@@ -300,8 +300,9 @@ impl<'a> Walk<'a> {
         s.runtime.engines.resize_with(def.engines.len(), Default::default);
         s.runtime.lost = state.runtime.lost.clone();
         s.runtime.unpowered = state.runtime.unpowered.clone();
+        // Each burn of the walk settles its liquids on their outlets.
         for (t, &kg) in s.tanks.iter_mut().zip(levels) {
-            t.liquid = kg;
+            (t.liquid, t.drift, t.drift_speed) = (kg, 0.0, 0.0);
         }
         let molar = |g: &str| fluids().gas(g).map_or(0.0, |g| g.molar_mass);
         let mut gas: BTreeMap<u32, f64> = BTreeMap::new();

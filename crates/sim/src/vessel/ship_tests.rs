@@ -139,7 +139,12 @@ fn a_separation_partitions_the_ship_and_conserves_momentum() {
     let (capsule, tank) = (v.ship().unwrap(), pieces[0].ship().unwrap());
     assert_eq!((capsule.tanks.len(), tank.tanks.len()), (0, 2));
     assert_eq!((capsule.engines.len(), tank.engines.len()), (0, 4));
-    assert_eq!(tank.tanks, state.tanks);
+    // The split carries each tank's contents; the separation's push sets
+    // the liquid moving in its tank (`ship_tick`), the one change.
+    let pushed = (state.tanks.iter().zip(&tank.tanks))
+        .map(|(s, t)| crate::craft::state::TankState { drift_speed: t.drift_speed, ..s.clone() });
+    assert_eq!(tank.tanks, pushed.collect::<Vec<_>>());
+    assert!(tank.tanks.iter().zip(&state.tanks).all(|(t, s)| t.drift_speed != s.drift_speed), "pushed");
     let vac = |v: &Vessel| crate::landing::Thrust::of_vessel(v).0.vac;
     assert!(vac(&v) == 0.0 && vac(&pieces[0]) == 400.0e3);
     assert!(v.crew() == 1 && pieces[0].crew() == 0);

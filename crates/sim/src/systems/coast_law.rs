@@ -105,8 +105,7 @@ impl CoastLaw {
     /// The law of `state`'s tanks and bottles from now (local time 0), its
     /// first span under `heat` (one per tank).
     pub fn start(def: &ShipDef, state: &ShipState, heat: &[HeatLaw]) -> Self {
-        let run = |i: usize| state.runtime.tanks.get(i).map_or((0.0, 0.0), |r| (r.vented, r.pressurant_in));
-        let ledgers = (0..def.tanks.len()).map(run).collect();
+        let ledgers = state.tanks.iter().map(|t| (t.vented, t.pressurant_in)).collect();
         let span = Span::new(def, 0.0, (state.tanks.clone(), state.bottles.clone(), ledgers), heat);
         CoastLaw { spans: vec![span] }
     }
@@ -155,9 +154,11 @@ impl CoastLaw {
         let span = self.span(t);
         for (i, l) in span.tanks.iter().enumerate() {
             let (s, vented) = l.at(def, i, t - span.t);
-            state.tanks[i] = s;
-            let run = &mut state.runtime.tanks[i];
-            (run.vented, run.pressurant_in) = (vented, l.pressurant_in);
+            // The law gives the contents and the ledgers; where the liquid
+            // floats is the lattice's (`plumbing_coast::float`).
+            let now = &mut state.tanks[i];
+            let (drift, drift_speed) = (now.drift, now.drift_speed);
+            *now = TankState { drift, drift_speed, vented, pressurant_in: l.pressurant_in, ..s };
         }
         state.bottles.clone_from(&span.bottles);
     }

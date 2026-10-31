@@ -28,6 +28,7 @@ fn every_field_set(def: &ShipDef) -> ShipState {
     let mut s = ShipState::initial(def);
     for (i, x) in s.tanks.iter_mut().enumerate() {
         (x.liquid, x.liquid_k, x.ullage_moles, x.ullage_k) = (v(i, 10.0), v(i, 90.0), v(i, 5.0), v(i, 100.0));
+        (x.drift, x.drift_speed, x.pressurant_in, x.vented) = (v(i, 0.1), v(i, 0.2), v(i, 3.0), v(i, 1.0));
     }
     for (i, x) in s.bottles.iter_mut().enumerate() {
         (x.moles, x.k) = (v(i, 7.0), v(i, 80.0));
@@ -74,9 +75,6 @@ fn every_field_set(def: &ShipDef) -> ShipState {
     s.stages[0].pinned = !s.stages[0].pinned;
     s.functions[0].pinned = !s.functions[0].pinned;
     let r = &mut s.runtime;
-    for (i, x) in r.tanks.iter_mut().enumerate() {
-        (x.drift, x.drift_speed, x.pressurant_in, x.vented) = (v(i, 0.1), v(i, 0.2), v(i, 3.0), v(i, 1.0));
-    }
     for (i, x) in r.engines.iter_mut().enumerate() {
         (x.level, x.cutoff, x.reason, x.settling) = (v(i, 0.5), v(i, 0.6), Some(format!("{i}")), Some(v(i, 0.3)));
     }
@@ -159,7 +157,6 @@ fn assert_every_field_set(s: &ShipState, at_load: &ShipState) {
         (functions != &l.functions, "functions"),
     ];
     let Runtime {
-        tanks,
         engines,
         joints,
         severed,
@@ -184,7 +181,6 @@ fn assert_every_field_set(s: &ShipState, at_load: &ShipState) {
     } = runtime;
     let r = &l.runtime;
     let run = [
-        (tanks != &r.tanks, "runtime.tanks"),
         (engines != &r.engines, "runtime.engines"),
         (joints != &r.joints, "runtime.joints"),
         (severed != &r.severed, "runtime.severed"),
@@ -243,7 +239,6 @@ fn a_split_puts_each_item_in_exactly_one_piece() {
                 x.power.len(),
                 x.cabin.iter().count(),
                 x.fates.len(),
-                r.tanks.len(),
                 r.engines.len(),
                 r.joints.len() + r.severed.len(),
                 r.fins.len(),

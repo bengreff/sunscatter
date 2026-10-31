@@ -31,7 +31,6 @@
 //!   Settling after a coast takes √(2L/a): the stage's nitrogen thrusters
 //!   firing aft, as on the real stage.
 
-use super::runtime::TankRun;
 use crate::catalog::Cycle;
 use crate::craft::mass::Slug;
 use crate::craft::ship::{ShipDef, TankDef};
@@ -185,37 +184,37 @@ pub fn cover(g: &Geometry) -> f64 {
 /// Moves a tank's liquid for `dt` under the settling acceleration `a` (see
 /// the module): the slug between the walls above the Bond threshold, the
 /// capillary drift towards the middle below it.
-pub fn settle(run: &mut TankRun, t: &TankDef, g: &Geometry, a: f64, dt: f64) {
+pub fn settle(s: &mut TankState, t: &TankDef, g: &Geometry, a: f64, dt: f64) {
     let free = (g.length - g.height).max(0.0);
     if bond(t, g, a) >= BOND_INERTIAL {
-        run.drift_speed -= a * dt;
-        run.drift += run.drift_speed * dt;
-        if run.drift <= 0.0 {
-            run.drift = 0.0;
-            run.drift_speed = run.drift_speed.max(0.0);
-        } else if run.drift >= free {
-            run.drift = free;
-            run.drift_speed = run.drift_speed.min(0.0);
+        s.drift_speed -= a * dt;
+        s.drift += s.drift_speed * dt;
+        if s.drift <= 0.0 {
+            s.drift = 0.0;
+            s.drift_speed = s.drift_speed.max(0.0);
+        } else if s.drift >= free {
+            s.drift = free;
+            s.drift_speed = s.drift_speed.min(0.0);
         }
     } else {
         let sigma = surface_tension(&t.fluid);
         let tau = math::sqrt_pos(g.density * g.radius * g.radius * g.radius / sigma);
-        run.drift += (0.5 * free - run.drift) * (1.0 - math::exp(-dt / tau));
-        run.drift_speed = 0.0;
+        s.drift += (0.5 * free - s.drift) * (1.0 - math::exp(-dt / tau));
+        s.drift_speed = 0.0;
     }
 }
 
 /// Whether a tank's outlet is covered by its liquid (see the module).
-pub fn covered(run: &TankRun, g: &Geometry, liquid: f64) -> bool {
-    liquid > 0.0 && run.drift <= cover(g)
+pub fn covered(s: &TankState, g: &Geometry) -> bool {
+    s.liquid > 0.0 && s.drift <= cover(g)
 }
 
 /// Where a tank's liquid sits (F2; the mass model, the thermal nodes): the
-/// slug of its height, `run.drift` from the outlet along the tank (within
+/// slug of its height, `s.drift` from the outlet along the tank (within
 /// the walls).
-pub fn slug(t: &TankDef, s: &TankState, run: &TankRun) -> Slug {
+pub fn slug(t: &TankDef, s: &TankState) -> Slug {
     let g = geometry(t, s);
-    let drift = run.drift.clamp(0.0, (g.length - g.height).max(0.0));
+    let drift = s.drift.clamp(0.0, (g.length - g.height).max(0.0));
     Slug { mass: s.liquid, base: t.region.base + g.axis * drift, axis: g.axis, height: g.height, radius: g.radius }
 }
 
@@ -239,9 +238,8 @@ pub fn ullage_centre(t: &TankDef, slug: &Slug) -> DVec3 {
 pub fn held(def: &ShipDef, state: &ShipState) -> Vec<crate::craft::design::Held> {
     use crate::craft::design::Held;
     let f = fluids();
-    let run = |i: usize| state.runtime.tanks.get(i).cloned().unwrap_or_default();
-    let liquids = (def.tanks.iter().zip(&state.tanks).enumerate()).map(|(i, (t, s))| {
-        let slug = slug(t, s, &run(i));
+    let liquids = def.tanks.iter().zip(&state.tanks).map(|(t, s)| {
+        let slug = slug(t, s);
         let from = (slug.base - t.region.base).dot(slug.axis);
         let specific_heat = liquid_of(t).map_or(0.0, |l| l.specific_heat);
         let at = slug.base + slug.axis * (0.5 * slug.height);
@@ -266,9 +264,7 @@ pub fn held(def: &ShipDef, state: &ShipState) -> Vec<crate::craft::design::Held>
 /// what `MassModel::with_slugs` takes.
 pub fn contents(def: &ShipDef, state: &ShipState) -> (Vec<Slug>, Vec<(DVec3, f64)>) {
     let f = fluids();
-    let run = |i: usize| state.runtime.tanks.get(i).cloned().unwrap_or_default();
-    let slugs: Vec<Slug> =
-        (def.tanks.iter().zip(&state.tanks).enumerate()).map(|(i, (t, s))| slug(t, s, &run(i))).collect();
+    let slugs: Vec<Slug> = def.tanks.iter().zip(&state.tanks).map(|(t, s)| slug(t, s)).collect();
     let bottles = (state.bottles.iter().zip(&def.bottles))
         .map(|(s, b)| (b.pos, s.moles * f.gas(&b.gas).map_or(0.0, |g| g.molar_mass)));
     let ullages = (def.tanks.iter().zip(&state.tanks).zip(&slugs)).map(|((t, s), slug)| {
@@ -315,9 +311,8 @@ pub fn feeds(def: &ShipDef, state: &ShipState, a: &[f64]) -> Vec<Feed> {
     (def.tanks.iter().zip(&state.tanks).enumerate())
         .map(|(i, (t, s))| {
             let g = geometry(t, s);
-            let run = state.runtime.tanks.get(i).cloned().unwrap_or_default();
             Feed {
-                covered: covered(&run, &g, s.liquid),
+                covered: covered(s, &g),
                 pressure: pressure(t, s),
                 head: g.density * a[i].max(0.0) * g.height,
                 vapour: liquid_of(t).map_or(0.0, |l| l.vapour_pressure(s.liquid_k)),
@@ -527,7 +522,7 @@ pub fn slow(def: &ShipDef, state: &mut ShipState, env: &Surroundings, dt: f64) -
         }
         let out = relieve(&def.tanks[i], &mut state.tanks[i]);
         keep_physical(&def.tanks[i], &mut state.tanks[i]);
-        state.runtime.tanks[i].vented += out;
+        state.tanks[i].vented += out;
         vented += out;
     }
     // Bottles exchange heat with the liquid they sit in.
@@ -562,10 +557,9 @@ pub fn fast(def: &ShipDef, state: &mut ShipState, before: &[f64], a: &[f64], dt:
             state.tanks[i].ullage_k *= math::pow(v0 / g.ullage, gamma - 1.0);
         }
         let n = pressurise(def, state, i, dt);
-        state.runtime.tanks[i].pressurant_in += n;
-        let s = &state.tanks[i];
-        let g = geometry(t, s);
-        settle(&mut state.runtime.tanks[i], t, &g, a[i], dt);
+        state.tanks[i].pressurant_in += n;
+        let g = geometry(t, &state.tanks[i]);
+        settle(&mut state.tanks[i], t, &g, a[i], dt);
     }
 }
 

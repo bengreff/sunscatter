@@ -530,7 +530,7 @@ fn a_day_on_rails_warms_and_boils_off_the_same_in_any_frames() {
         }
         assert_eq!(frames, v, "saturated {saturated}");
         let s = v.ship().unwrap();
-        let (dk, vented) = (s.tanks[lox].liquid_k - k0, s.runtime.tanks[lox].vented);
+        let (dk, vented) = (s.tanks[lox].liquid_k - k0, s.tanks[lox].vented);
         println!(
             "saturated {saturated}: LOX {k0:.1} K → {:+.2} K, vented {vented:.1} kg, mass {:+.1} kg",
             dk,
@@ -538,7 +538,7 @@ fn a_day_on_rails_warms_and_boils_off_the_same_in_any_frames() {
         );
         if saturated {
             assert!(vented > 1.0 && dk.abs() < 0.5, "boils at its saturation: {vented} kg");
-            let all: f64 = s.runtime.tanks.iter().map(|t| t.vented).sum();
+            let all: f64 = s.tanks.iter().map(|t| t.vented).sum();
             assert!((m0 - v.mass() - all).abs() < 1e-6 * m0, "the vessel loses what its tanks vent: {all} kg");
         } else {
             // It vents only a little pressurant as the warming liquid

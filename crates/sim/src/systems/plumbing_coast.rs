@@ -132,6 +132,6 @@ fn top_up(def: &ShipDef, tanks: &mut [TankState], bottles: &mut [BottleState], i
 pub fn float(def: &ShipDef, state: &mut ShipState, dt: f64) {
     for i in 0..def.tanks.len() {
         let g = geometry(&def.tanks[i], &state.tanks[i]);
-        settle(&mut state.runtime.tanks[i], &def.tanks[i], &g, 0.0, dt);
+        settle(&mut state.tanks[i], &def.tanks[i], &g, 0.0, dt);
     }
 }

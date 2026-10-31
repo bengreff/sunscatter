@@ -518,8 +518,8 @@ mod tests {
         state.sequence = ignition as u32;
         // Floating: the liquids drifted off their outlets in free fall.
         state.runtime.refit(&def);
-        for r in state.runtime.tanks.iter_mut() {
-            r.drift = 100.0;
+        for t in state.tanks.iter_mut() {
+            t.drift = 100.0;
         }
         let (name, _) = next_stage(&def, &mut state, at).unwrap();
         println!("{name}: {:?}", state.runtime.events.last());
