@@ -871,11 +871,12 @@ fn digits(x: f64, decimals: usize) -> f64 {
 }
 
 /// A place on the ground (a latitude or longitude, rad) of a body of
-/// `radius` (m), in degrees to the position's precision along the ground;
-/// known with the orbit, as the Landing menu's AT.
+/// `radius` (m), in degrees to the position's precision along the ground
+/// and at most the Landing menu's AT's decimals (`format::GROUND_DECIMALS`;
+/// it read 15 digits); known with the orbit, as AT.
 fn known_ground(known: &crate::format::Known, angle: f64, radius: f64) -> Option<f64> {
     let r = known.knowledge.read(Quantity::Position, angle * radius).filter(|_| known.orbit())?;
-    Some((r.shown() / radius).to_degrees())
+    Some(digits((r.shown() / radius).to_degrees(), crate::format::GROUND_DECIMALS))
 }
 
 fn known_vec(known: &crate::format::Known, q: Quantity, a: DVec3) -> Value {
@@ -1575,13 +1576,15 @@ mod tests {
             assert_eq!(known_time(k, 12.5), time);
             assert_eq!(known_digits(k, 0.123_456_789, crate::format::ECCENTRICITY_DECIMALS), e);
         }
-        // A place on the ground: to the position's precision along it (to
-        // the 10 m decade of ±25 m: 1e-4° on Earth), the truth in debug mode.
+        // A place on the ground: to the position's precision along it and
+        // the Landing menu's AT's decimals, in debug mode too.
         let r = 6.378e6;
-        let lat = 0.5 + 3.0 / r; // 3 m north of 0.5 rad
-        let shown = known_ground(&fixed, lat, r).unwrap();
-        assert!((shown - 0.5f64.to_degrees()).abs() < 1e-9, "{shown}");
-        assert_eq!(known_ground(&truth, lat, r), Some(lat.to_degrees()));
+        let lat = 0.5 + 3.0 / r; // 3 m north of 0.5 rad (28.64789°)
+        assert_eq!(known_ground(&fixed, lat, r), Some(28.648));
+        assert_eq!(known_ground(&truth, lat, r), Some(28.648));
+        // A position known to ±25 km: its 10 km decade, 0.09° on Earth.
+        let coarse = known(&[(Quantity::Position, 25_000.0), (Quantity::Velocity, 1.0)]);
+        assert_eq!(known_ground(&coarse, lat, r), Some(28.657));
         assert_eq!(known_ground(&position, lat, r), None, "an impact needs the orbit");
         // A distance and a speed through their readings.
         assert_eq!(known_value(&fixed, Quantity::Position, 1234.0), Some(1230.0));

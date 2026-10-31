@@ -41,7 +41,8 @@ fn summary(d: &FlightData) -> Section {
             s.toned("IMPACT IN", k.or_dash(k.orbit(), || fmt_duration(h.in_s)), tone);
             s.row("IMPACT V/S", signed(k, h.v_vertical));
             s.row("IMPACT H. SPEED", k.speed(Velocity, h.v_horizontal));
-            s.row("AT", k.or_dash(k.orbit(), || format!("{:+.3}° {:+.3}°", h.lat, h.lon)));
+            let d = crate::format::GROUND_DECIMALS;
+            s.row("AT", k.or_dash(k.orbit(), || format!("{:+.d$}° {:+.d$}°", h.lat, h.lon)));
         }
         None if d.landed => {
             s.note("on the ground", Tone::Dim);

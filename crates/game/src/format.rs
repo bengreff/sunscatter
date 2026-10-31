@@ -58,6 +58,10 @@ pub const ECCENTRICITY_DECIMALS: usize = 5;
 /// The decimals the attitude's heading, pitch and roll are shown to (deg,
 /// once the attitude is known): the Landing menu and `get_vessel`.
 pub const ATTITUDE_DECIMALS: usize = 1;
+/// The decimals a place on the ground is shown to (latitude and longitude,
+/// deg: about 100 m on Earth), once the orbit is known: the Landing menu's
+/// AT and `get_landing_prediction`.
+pub const GROUND_DECIMALS: usize = 3;
 
 /// Decimals of a value shown in a unit of `scale` SI units when it is known
 /// to `precision` (SI; 0: exactly): down to the precision's decade, at
