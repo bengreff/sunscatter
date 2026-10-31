@@ -1,18 +1,19 @@
-//! Planned burns (review sim 11, realism-1 §6a): a trajectory of coast and
-//! burn segments with mass in the state, flown identically at every warp.
+//! Planned burns of a craft of parts (D126, D129; realism-1 §6a): nodes
+//! flown live by the maneuver program (`sim::systems::maneuver`) on the
+//! small rocket of parts (`craft::small`). Nodes leave the stored trajectory
+//! as it is; the vessel goes live at the program's wake epoch whatever the
+//! warp, and the course is the same bits at every warp.
 
 use glam::DVec3;
-use sim::craft::test_craft;
+use sim::craft::small;
 use sim::ephem::Ephemeris;
 use sim::frame::NodeId;
 use sim::kepler::Elements;
 use sim::save::SaveGame;
 use sim::sol;
+use sim::systems::maneuver::{Node, Step};
 use sim::time::Epoch;
-use sim::vessel::{
-    BurnEnd, BurnLimits, CoastStart, Controls, EndKind, FlightPlan, PlanError, PlannedBurn, SegmentKind, Trajectory,
-    Vessel, VesselId, VesselIds,
-};
+use sim::vessel::{Controls, Phase, PlanError, Vessel, VesselId, VesselIds};
 use sim::world::World;
 use std::sync::Arc;
 
@@ -30,57 +31,113 @@ fn earth(w: &World) -> (NodeId, f64) {
     (e.node, e.gm)
 }
 
-/// A 400 km orbit about Earth (above the atmosphere's effect on a 3 s burn).
-fn leo_ship(w: &World) -> Vessel {
+/// The small rocket in a 400 km orbit about Earth, anchored at `anchor`.
+fn leo_at(w: &World, anchor: NodeId) -> Vessel {
     let (earth, mu) = earth(w);
     let (r, v) = Elements { a: 6_778_137.0, e: 0.0005, i: 0.9, raan: 1.0, argp: 0.5, mean_anomaly: 0.0 }.to_state(mu);
-    Vessel::coasting(w, VesselId(1), t0(), earth, r, v, sim::craft::test_craft())
+    let k = w.eph.relative(earth, anchor, t0());
+    Vessel::coasting(w, VesselId(1), t0(), anchor, r + k.r, v + k.v, &small::rocket())
 }
 
-/// A prograde burn (relative to Earth) of `dv` m/s at `t0 + at` seconds.
-/// A prograde burn by the test craft's engine.
-fn prograde(w: &World, at: f64, dv: f64) -> PlannedBurn {
-    let engine = test_craft().params().engine;
-    PlannedBurn::delta_v_with(t0().add_seconds(at), DVec3::new(dv, 0.0, 0.0), &engine, Some(earth(w).0))
+fn leo_ship(w: &World) -> Vessel {
+    leo_at(w, earth(w).0)
 }
 
-fn plan(burns: &[PlannedBurn]) -> FlightPlan {
-    FlightPlan { burns: burns.to_vec() }
+/// A node of `dv` (prograde, normal, radial-out; m/s) at `t0 + at` s,
+/// relative to Earth.
+fn node(w: &World, at: f64, dv: DVec3) -> Node {
+    Node { t: t0().add_seconds(at), dv, reference: earth(w).0 }
 }
 
-/// State relative to Earth at `t`.
-fn earth_state(w: &World, traj: &Trajectory, t: Epoch) -> (DVec3, DVec3) {
-    let (anchor, r, v) = traj.eval(t).expect("stored");
-    let k = w.eph.relative(anchor, earth(w).0, t);
+fn prograde(w: &World, at: f64, dv: f64) -> Node {
+    node(w, at, DVec3::new(dv, 0.0, 0.0))
+}
+
+/// The vessel's state relative to Earth now.
+fn earth_state(w: &World, ship: &Vessel) -> (DVec3, DVec3) {
+    let (anchor, r, v) = ship.state(w);
+    let k = w.eph.relative(anchor, earth(w).0, ship.time);
     (r + k.r, v + k.v)
 }
 
-#[test]
-fn a_burn_flown_in_frames_equals_one_jump_bit_for_bit() {
-    let w = world();
-    let mut frames = leo_ship(&w);
-    frames.set_plan(&w, plan(&[prograde(&w, 300.0, 100.0), prograde(&w, 500.0, 50.0)])).unwrap();
-    let mut jump = frames.clone();
-    let controls = Controls { sas: true, ..Controls::default() };
-    let end = t0().add_seconds(700.0);
-    let mut t = t0();
+/// Advances at 60 fps from the ship's time to `end`, with look-ahead in odd
+/// chunks.
+fn fly_frames(w: &World, ship: &mut Vessel, end: Epoch, controls: &Controls) {
+    let start = ship.time;
     let mut k = 0u64;
-    while t < end {
+    loop {
         k += 1;
-        t = t0().add_seconds(k as f64 / 60.0).min_epoch(end);
-        frames.advance(&w, t, &controls, usize::MAX);
+        let t = start.add_seconds(k as f64 / 60.0);
+        let t = if t > end { end } else { t };
+        ship.advance(w, t, controls, usize::MAX);
         if k.is_multiple_of(7) {
-            frames.extend_coast(&w, t.add_seconds(900.0), 37); // look-ahead in odd chunks
+            ship.extend_coast(w, t.add_seconds(900.0), 37);
+        }
+        if t == end {
+            return;
         }
     }
+}
+
+fn events(ship: &Vessel) -> Vec<String> {
+    ship.ship_events().iter().map(|e| e.text.clone()).collect()
+}
+
+#[test]
+fn nodes_flown_in_frames_equal_one_jump_bit_for_bit() {
+    let w = world();
+    let mut frames = leo_ship(&w);
+    frames.set_nodes(vec![prograde(&w, 300.0, 60.0), prograde(&w, 900.0, -20.0)]).unwrap();
+    let mut jump = frames.clone();
+    let controls = Controls { sas: true, ..Controls::default() };
+    let end = t0().add_seconds(1_100.0);
+    fly_frames(&w, &mut frames, end, &controls);
     jump.advance(&w, end, &controls, usize::MAX);
     assert_eq!(frames.time, jump.time);
     assert_eq!(frames.state(&w), jump.state(&w));
+    assert_eq!(frames.attitude, jump.attitude);
     assert_eq!(frames.mass(), jump.mass());
+    assert_eq!(frames.program(), jump.program());
     // The look-ahead ran further; compare the stored part both have.
     jump.extend_coast(&w, frames.trajectory().unwrap().computed_until(), usize::MAX);
     assert_eq!(frames.trajectory(), jump.trajectory());
-    assert!(frames.mass() < 20_000.0, "the burns used propellant");
+    let flown: Vec<_> = events(&frames).into_iter().filter(|e| e.contains("on target")).collect();
+    assert_eq!(flown.len(), 2, "{:?}", events(&frames));
+}
+
+#[test]
+fn nodes_leave_the_coast_as_it_is_and_chunked_equals_single_pass() {
+    // The stored trajectory is the coast without the burns (rule 4: what
+    // will be flown until the program wakes); chunked = single pass.
+    let w = world();
+    let plain = leo_ship(&w);
+    let mut planned = plain.clone();
+    planned.set_nodes(vec![prograde(&w, 200.0, 80.0), prograde(&w, 400.0, 40.0)]).unwrap();
+    assert_eq!(planned.trajectory(), plain.trajectory(), "setting nodes leaves the coast");
+    let until = t0().add_seconds(3_000.0);
+    let (mut one, mut chunked) = (plain.clone(), planned.clone());
+    one.extend_coast(&w, until, usize::MAX);
+    for (i, n) in [1usize, 7, 3, 50, 1, 2, 11].iter().cycle().enumerate() {
+        if chunked.trajectory().unwrap().computed_until() >= until {
+            break;
+        }
+        // Alternate step budgets and intermediate targets.
+        let target = t0().add_seconds(40.0 * i as f64);
+        chunked.extend_coast(&w, if i % 2 == 0 { until } else { target }, *n);
+    }
+    let (a, b) = (one.trajectory().unwrap(), chunked.trajectory().unwrap());
+    let upto = a.computed_until().min_epoch(b.computed_until());
+    assert!(upto >= until);
+    assert_eq!(a.eval(upto), b.eval(upto));
+    assert_eq!(a.segments, b.segments);
+    // The vessel stops at the wake, like an order, and flies live from there.
+    let wake = planned.program().unwrap().wake;
+    planned.advance(&w, wake, &Controls::default(), usize::MAX);
+    assert_eq!(planned.time, wake);
+    let mut past = planned.clone();
+    past.advance(&w, wake.add_seconds(1.0), &Controls::default(), usize::MAX);
+    assert!(matches!(past.phase, Phase::Powered { .. }), "live from the wake");
+    assert_eq!(past.program().unwrap().step, Step::Turn);
 }
 
 trait MinEpoch {
@@ -88,7 +145,7 @@ trait MinEpoch {
 }
 impl MinEpoch for Epoch {
     fn min_epoch(self, other: Epoch) -> Epoch {
-        if self.seconds_since(other) > 0.0 {
+        if self > other {
             other
         } else {
             self
@@ -97,154 +154,136 @@ impl MinEpoch for Epoch {
 }
 
 #[test]
-fn chunked_chain_equals_single_pass() {
-    let w = world();
-    let ship = leo_ship(&w);
-    let p = plan(&[prograde(&w, 200.0, 80.0), prograde(&w, 400.0, 40.0)]);
-    let (anchor, r, v) = ship.state(&w);
-    let start = CoastStart {
-        anchor,
-        r,
-        v,
-        drag: Some(ship.drag()),
-        contact_height: 5.0,
-        horizon: 1e9,
-        fixed_anchor: false,
-        proper_time: 0.0,
-    };
-    let until = t0().add_seconds(3_000.0);
-    let mut one = Trajectory::new(&w, t0(), start, ship.mass(), &p, BurnLimits::default());
-    one.extend(&w, &p, until, usize::MAX);
-    let mut chunked = Trajectory::new(&w, t0(), start, ship.mass(), &p, BurnLimits::default());
-    for (i, n) in [1usize, 7, 3, 50, 1, 2, 11].iter().cycle().enumerate() {
-        if chunked.computed_until().seconds_since(until) >= 0.0 {
-            break;
-        }
-        // Alternate step budgets and intermediate targets.
-        let target = t0().add_seconds(40.0 * i as f64);
-        chunked.extend(&w, &p, if i % 2 == 0 { until } else { target }, *n);
-    }
-    assert_eq!(chunked, one);
-    let kinds: Vec<_> = one.segments.iter().map(|s| (s.kind, s.end.map(|e| e.kind))).collect();
-    assert!(matches!(kinds[0], (SegmentKind::Coast, Some(EndKind::BurnStart))));
-    assert!(matches!(kinds[1], (SegmentKind::Burn(_), Some(EndKind::BurnEnd))));
-    assert!(matches!(kinds[2], (SegmentKind::Coast, Some(EndKind::BurnStart))));
-    assert!(matches!(kinds[3], (SegmentKind::Burn(_), Some(EndKind::BurnEnd))));
-    assert!(matches!(kinds[4], (SegmentKind::Coast, None)));
-    // Segments land exactly on the planned ignitions.
-    assert_eq!(one.segments[1].t0, p.burns[0].t_start);
-    assert_eq!(one.segments[3].t0, p.burns[1].t_start);
-}
-
-#[test]
-fn a_prograde_burn_raises_apoapsis_as_the_rocket_equation_predicts() {
+fn a_prograde_node_raises_apoapsis_as_the_rocket_equation_predicts() {
     let w = world();
     let (_, mu) = earth(&w);
     let mut ship = leo_ship(&w);
     let dv = 100.0;
-    let burn = prograde(&w, 600.0, dv);
-    ship.set_plan(&w, plan(&[burn])).unwrap();
+    let n = prograde(&w, 600.0, dv);
+    ship.set_nodes(vec![n]).unwrap();
+    ship.extend_coast(&w, n.t.add_seconds(60.0), usize::MAX);
+    let predicted = ship.node_prediction(&w, 0).unwrap();
+    let before = {
+        let (anchor, r, v) = ship.trajectory().unwrap().eval(n.t).unwrap();
+        let k = w.eph.relative(anchor, earth(&w).0, n.t);
+        Elements::from_state(r + k.r, v + k.v, mu).apoapsis()
+    };
+    let impulsive = Elements::from_state(predicted.after.1, predicted.after.2, mu).apoapsis();
+    // The flown state carried back to the node along its conic (seconds:
+    // J2 moves it by centimetres per second), against the prediction.
+    let at_node = |s: &Vessel| {
+        let (r, v) = earth_state(&w, s);
+        sim::kepler::propagate(r, v, mu, n.t.seconds_since(s.time)).unwrap()
+    };
+    // Just after the burn and its tail-off.
+    let duration = predicted.duration.unwrap();
+    ship.advance(&w, predicted.ignite, &Controls::default(), usize::MAX);
     let m0 = ship.mass();
-    let duration = burn.end.duration(&burn.law, m0).unwrap();
-    let t_end = burn.t_start.add_seconds(duration);
-    ship.extend_coast(&w, t_end.add_seconds(10.0), usize::MAX);
-    let traj = ship.trajectory().unwrap();
-
-    // Impulsive prediction: add Δv along the velocity at ignition.
-    let (r0, v0) = earth_state(&w, traj, burn.t_start);
-    let predicted = Elements::from_state(r0, v0 + v0.normalize() * dv, mu).apoapsis();
-    let before = Elements::from_state(r0, v0, mu).apoapsis();
-    let (r1, v1) = earth_state(&w, traj, t_end);
+    let end = n.t.add_seconds(duration + 5.0);
+    ship.advance(&w, end, &Controls::default(), usize::MAX);
+    assert_eq!(ship.program().unwrap().step, Step::Done, "{:?}", events(&ship));
+    let (r1, v1) = at_node(&ship);
     let flown = Elements::from_state(r1, v1, mu).apoapsis();
-    println!("apoapsis {before:.0} → {flown:.1} m (impulsive {predicted:.1} m), burn {duration:.3} s");
+    let off = (v1 - predicted.after.2).length();
+    println!(
+        "apoapsis {before:.0} → {flown:.1} m (impulsive {impulsive:.1} m), burn {duration:.2} s, {off:.3} m/s off"
+    );
     assert!(flown - before > 300_000.0, "raised by {} m", flown - before);
-    // Finite-burn loss over a 3 s arc is tiny (≪ 0.1%).
-    assert!((flown - predicted).abs() < 200.0, "flown {flown}, predicted {predicted}");
-
-    // Mass after the burn = m0 − ṁ·t, and stays constant in the next coast.
-    let burn_seg = traj.segments.iter().find(|s| matches!(s.kind, SegmentKind::Burn(_))).unwrap();
-    assert_eq!(burn_seg.mass_at(duration), m0 - burn.law.mass_flow * duration);
-    ship.advance(&w, t_end.add_seconds(5.0), &Controls::default(), usize::MAX);
-    assert_eq!(ship.mass(), m0 - burn.law.mass_flow * duration);
+    // Finite-burn and steering losses over a ~3 s arc, and the cutoff:
+    // tenths of a metre per second (~3.6 km of apoapsis per m/s).
+    assert!(off < 0.5, "{off} m/s from the prediction");
+    assert!((flown - impulsive).abs() < 2_000.0, "flown {flown}, predicted {impulsive}");
+    // The rocket equation: the Δv given is the exhaust speed times the log
+    // of the mass ratio (the thrusters' nitrogen held the attitude: a few
+    // kilograms of the ~300 burnt).
     let m1 = ship.mass();
-    let delivered = burn.law.thrust / burn.law.mass_flow * sim::math::ln(m0 / m1);
-    assert!((delivered - dv).abs() < 1e-9, "rocket equation Δv {delivered}");
+    let isp = 320.0 * sim::vessel::G0;
+    let given = isp * sim::math::ln(m0 / m1);
+    println!("{:.1} kg burnt: rocket equation {given:.2} m/s", m0 - m1);
+    assert!((given - dv).abs() < 0.02 * dv, "rocket equation Δv {given}");
+    // The mass stays the same in the coast after.
+    ship.advance(&w, end.add_seconds(300.0), &Controls::default(), usize::MAX);
+    assert_eq!(ship.mass(), m1);
+    assert!(matches!(ship.phase, Phase::Coasting { .. }));
 }
 
 #[test]
-fn editing_the_second_burn_keeps_the_first_burns_samples() {
+fn editing_a_later_node_keeps_the_next_program_and_equals_planning_it_so() {
     let w = world();
-    let b1 = prograde(&w, 300.0, 60.0);
-    let b2 = prograde(&w, 2_000.0, 30.0);
-    let b2_new = PlannedBurn::delta_v_with(
-        t0().add_seconds(2_500.0),
-        DVec3::new(0.0, 20.0, -5.0),
-        &test_craft().params().engine,
-        Some(earth(&w).0),
-    );
-
+    let n1 = prograde(&w, 300.0, 60.0);
+    let n2 = prograde(&w, 2_000.0, 30.0);
+    let n2_new = node(&w, 2_500.0, DVec3::new(0.0, 20.0, -5.0));
     let mut ship = leo_ship(&w);
-    ship.set_plan(&w, plan(&[b1, b2])).unwrap();
+    ship.set_nodes(vec![n1, n2]).unwrap();
     ship.advance(&w, t0().add_seconds(100.0), &Controls::default(), usize::MAX);
-    ship.extend_coast(&w, t0().add_seconds(4_000.0), usize::MAX);
-    let before = ship.trajectory().unwrap().clone();
-
-    ship.set_plan(&w, plan(&[b1, b2_new])).unwrap();
-    let after = ship.trajectory().unwrap();
-    // The coast to the first burn and the burn itself are untouched.
-    assert_eq!(after.segments.len(), 2);
-    assert_eq!(after.segments[..2], before.segments[..2]);
-    assert!(matches!(after.segments[1].kind, SegmentKind::Burn(_)));
-
+    let program = ship.program().unwrap().clone();
+    let coast = ship.trajectory().unwrap().clone();
+    ship.set_nodes(vec![n1, n2_new]).unwrap();
+    // The next node's program and the coast are untouched.
+    assert_eq!(ship.program(), Some(&program));
+    assert_eq!(ship.trajectory(), Some(&coast));
     // The edited plan equals a vessel planned that way from the start.
     let mut fresh = leo_ship(&w);
-    fresh.set_plan(&w, plan(&[b1, b2_new])).unwrap();
+    fresh.set_nodes(vec![n1, n2_new]).unwrap();
     fresh.advance(&w, t0().add_seconds(100.0), &Controls::default(), usize::MAX);
-    let until = t0().add_seconds(4_000.0);
-    ship.extend_coast(&w, until, usize::MAX);
-    fresh.extend_coast(&w, until, usize::MAX);
-    assert_eq!(ship.trajectory(), fresh.trajectory());
-    assert_eq!(ship.trajectory().unwrap().segments[3].t0, b2_new.t_start);
-
-    // Editing the next burn while coasting towards it rebuilds the current
-    // coast from its start: again the same as planning it from the start.
-    let b1_new = prograde(&w, 350.0, 70.0);
-    ship.set_plan(&w, plan(&[b1_new, b2_new])).unwrap();
+    assert_eq!(ship, fresh);
+    // Editing the next node while coasting towards it schedules it anew,
+    // from the stage estimate now (the LOX boiling off since moves it by
+    // microseconds): the same as a vessel given those nodes now, after
+    // both burns.
+    let n1_new = prograde(&w, 350.0, 70.0);
+    ship.set_nodes(vec![n1_new, n2_new]).unwrap();
+    assert_ne!(ship.program(), Some(&program));
     let mut fresh = leo_ship(&w);
-    fresh.set_plan(&w, plan(&[b1_new, b2_new])).unwrap();
     fresh.advance(&w, t0().add_seconds(100.0), &Controls::default(), usize::MAX);
-    ship.extend_coast(&w, until, usize::MAX);
-    fresh.extend_coast(&w, until, usize::MAX);
-    assert_eq!(ship.trajectory(), fresh.trajectory());
+    fresh.set_nodes(vec![n1_new, n2_new]).unwrap();
+    assert_eq!(ship, fresh);
+    // Without nodes no program waits: the vessel coasts past the old wake.
+    let mut none = ship.clone();
+    none.set_nodes(vec![]).unwrap();
+    assert!(none.program().is_none());
+    let past = t0().add_seconds(600.0);
+    assert_eq!(none.advance_frame(&w, past, &Controls::default(), usize::MAX).0, past);
+    assert!(matches!(none.phase, Phase::Coasting { .. }));
+    let end = t0().add_seconds(2_700.0);
+    ship.advance(&w, end, &Controls::default(), usize::MAX);
+    fresh.advance(&w, end, &Controls::default(), usize::MAX);
     assert_eq!(ship.state(&w), fresh.state(&w));
+    assert_eq!(ship, fresh);
+    assert_eq!(ship.program().map(|p| (p.node, p.step)), Some((1, Step::Done)), "{:?}", events(&ship));
 }
 
 #[test]
-fn plan_edits_that_rewrite_the_past_are_rejected() {
+fn node_edits_that_rewrite_the_past_are_rejected() {
     let w = world();
     let mut ship = leo_ship(&w);
-    let b1 = prograde(&w, 300.0, 100.0);
-    assert_eq!(ship.set_plan(&w, plan(&[prograde(&w, 400.0, 1.0), b1])), Err(PlanError::NotSorted));
-    ship.set_plan(&w, plan(&[b1])).unwrap();
-    // Inside the burn (it lasts ~3 s).
-    ship.advance(&w, t0().add_seconds(301.0), &Controls::default(), usize::MAX);
-    assert!(ship.burn().is_some());
-    assert_eq!(ship.set_plan(&w, plan(&[prograde(&w, 300.0, 50.0)])), Err(PlanError::Started));
-    assert_eq!(ship.set_plan(&w, plan(&[b1, prograde(&w, 200.0, 5.0)])), Err(PlanError::NotSorted));
-    assert_eq!(ship.set_plan(&w, plan(&[b1, prograde(&w, 300.5, 5.0)])), Err(PlanError::InThePast));
-    ship.advance(&w, t0().add_seconds(310.0), &Controls::default(), usize::MAX);
-    assert!(ship.burn().is_none());
-    // A later burn can still be added.
-    ship.set_plan(&w, plan(&[b1, prograde(&w, 900.0, 5.0)])).unwrap();
+    let n1 = prograde(&w, 300.0, 100.0);
+    assert_eq!(ship.set_nodes(vec![prograde(&w, 400.0, 1.0), n1]), Err(PlanError::NotSorted));
+    ship.set_nodes(vec![n1]).unwrap();
+    // Inside the burn (~4 s about the node).
+    ship.advance(&w, n1.t, &Controls::default(), usize::MAX);
+    assert_eq!(ship.program().unwrap().step, Step::Burn);
+    assert_eq!(ship.set_nodes(vec![prograde(&w, 300.0, 50.0)]), Err(PlanError::Started));
+    assert_eq!(ship.set_nodes(vec![]), Err(PlanError::Started));
+    assert_eq!(ship.set_nodes(vec![n1, prograde(&w, 200.0, 5.0)]), Err(PlanError::NotSorted));
+    assert_eq!(ship.set_nodes(vec![n1, prograde(&w, 299.5, 5.0)]), Err(PlanError::NotSorted));
+    // A later node can be added while it burns, but not one in the past.
+    ship.advance(&w, n1.t.add_seconds(1.0), &Controls::default(), usize::MAX);
+    assert_eq!(ship.set_nodes(vec![n1, prograde(&w, 300.5, 5.0)]), Err(PlanError::InThePast));
+    ship.set_nodes(vec![n1, prograde(&w, 900.0, 5.0)]).unwrap();
+    assert_eq!(ship.program().unwrap().node, 0, "the burn flies on");
+    ship.advance(&w, n1.t.add_seconds(30.0), &Controls::default(), usize::MAX);
+    assert_eq!(ship.program().map(|p| (p.node, p.step)), Some((1, Step::Wait)));
 }
 
 #[test]
-fn a_burn_saved_mid_way_continues_bit_identically() {
+fn a_node_saved_mid_burn_continues_bit_identically() {
     let w = world();
     let mut ship = leo_ship(&w);
-    ship.set_plan(&w, plan(&[prograde(&w, 300.0, 100.0)])).unwrap();
-    ship.advance(&w, t0().add_seconds(301.5), &Controls::default(), usize::MAX);
-    assert!(ship.burn().is_some());
+    let n = prograde(&w, 300.0, 100.0);
+    ship.set_nodes(vec![n, prograde(&w, 1_500.0, 10.0)]).unwrap();
+    ship.advance(&w, n.t.add_seconds(-0.5), &Controls::default(), usize::MAX);
+    assert_eq!(ship.program().unwrap().step, Step::Burn);
     let mut ids = VesselIds::default();
     ids.allocate();
     let text = SaveGame::capture(&w, ship.time, std::slice::from_ref(&ship), ids, 0).to_ron();
@@ -254,124 +293,186 @@ fn a_burn_saved_mid_way_continues_bit_identically() {
     ship.advance(&w, end, &Controls::default(), usize::MAX);
     loaded.advance(&w, end, &Controls::default(), usize::MAX);
     assert_eq!(loaded, ship);
+    assert_eq!(ship.nodes().len(), 2);
 }
 
-/// Rule 1: the anchor the burn is integrated in does not change it (the
-/// tracking reference, Earth, is reached through the frame tree).
+/// Rule 1: the anchor the vessel is integrated in does not change the burn
+/// (the node's reference, Earth, is reached through the frame tree).
 #[test]
-fn a_burn_does_not_depend_on_the_anchor() {
+fn a_node_does_not_depend_on_the_anchor() {
     let w = world();
     let (earth, _) = earth(&w);
     let moon = w.find("Moon").unwrap().node;
-    let ship = leo_ship(&w);
-    let (_, r, v) = ship.state(&w);
-    let p = plan(&[prograde(&w, 100.0, 100.0)]);
+    let n = prograde(&w, 300.0, 100.0);
+    // The same craft pointing the same way (a new vessel points its nose
+    // away from its anchor: from the Moon, elsewhere).
+    let attitude = leo_at(&w, earth).attitude;
     let run = |anchor: NodeId| {
-        let k = w.eph.relative(earth, anchor, t0());
-        let start = CoastStart {
-            anchor,
-            r: r + k.r,
-            v: v + k.v,
-            drag: None,
-            contact_height: 0.0,
-            horizon: 1e9,
-            fixed_anchor: true,
-            proper_time: 0.0,
-        };
-        let mut traj = Trajectory::new(&w, t0(), start, ship.mass(), &p, BurnLimits::default());
-        let t = t0().add_seconds(400.0);
-        traj.extend(&w, &p, t, usize::MAX);
-        earth_state(&w, &traj, t)
+        let mut ship = leo_at(&w, anchor);
+        ship.attitude = attitude;
+        ship.set_nodes(vec![n]).unwrap();
+        ship.advance(&w, t0().add_seconds(400.0), &Controls::default(), usize::MAX);
+        assert_eq!(ship.program().unwrap().step, Step::Done);
+        let at: Vec<_> = ship.ship_events().iter().map(|e| (e.at.seconds_since(t0()), e.text.clone())).collect();
+        println!("{anchor:?}: {at:?}");
+        earth_state(&w, &ship)
     };
     let (a, b) = (run(earth), run(moon));
     let (dr, dv) = ((a.0 - b.0).length(), (a.1 - b.1).length());
-    println!("Earth- vs Moon-anchored burn: {dr:.4} m, {dv:.2e} m/s");
+    println!("Earth- vs Moon-anchored node: {dr:.4} m, {dv:.2e} m/s");
     assert!(dr < 0.5 && dv < 1e-3, "{dr} m, {dv} m/s");
 }
 
 #[test]
-fn a_burn_that_would_use_all_the_mass_fails_instead_of_dividing_by_zero() {
-    // Without a dry mass (a bare trajectory), a burn longer than the mass
-    // lasts cannot be flown.
-    let w = world();
-    let ship = leo_ship(&w);
-    let mut burn = prograde(&w, 100.0, 10.0);
-    burn.end = BurnEnd::Duration(1e6);
-    let (anchor, r, v) = ship.state(&w);
-    let start = CoastStart {
-        anchor,
-        r,
-        v,
-        drag: None,
-        contact_height: 0.0,
-        horizon: 1e9,
-        fixed_anchor: false,
-        proper_time: 0.0,
-    };
-    let p = plan(&[burn]);
-    let mut traj = Trajectory::new(&w, t0(), start, ship.mass(), &p, BurnLimits::default());
-    traj.extend(&w, &p, t0().add_seconds(500.0), usize::MAX);
-    assert!(traj.finished());
-    assert_eq!(traj.last().end.map(|e| e.kind), Some(EndKind::Failed));
-    assert_eq!(traj.computed_until(), burn.t_start, "the trajectory stops at the failed ignition");
-}
-
-#[test]
-fn a_vessel_burn_stops_at_burnout() {
+fn a_node_beyond_the_propellant_burns_out_ends_short_and_was_warned_of() {
+    // More Δv than the stage has: the planner says so; the engines burn
+    // to depletion (no division by an empty mass), the program ends short
+    // and the craft coasts.
     let w = world();
     let mut ship = leo_ship(&w);
-    let mut burn = prograde(&w, 100.0, 10.0);
-    burn.end = BurnEnd::Duration(1e6);
-    ship.set_plan(&w, plan(&[burn])).unwrap();
-    let burnout = 16_000.0 / burn.law.mass_flow;
-    let after = t0().add_seconds(100.0 + burnout + 60.0);
-    assert_eq!(ship.advance(&w, after, &Controls::default(), usize::MAX), after);
-    assert_eq!(ship.propellant(), 0.0);
-    assert_eq!(ship.mass(), 4_000.0);
-    let traj = ship.trajectory().unwrap();
-    assert!(matches!(traj.current().kind, SegmentKind::Coast), "coasting after burnout");
+    let n = prograde(&w, 600.0, 20_000.0);
+    ship.set_nodes(vec![n]).unwrap();
+    let p = ship.node_prediction(&w, 0).unwrap();
+    // The small rocket reads no tank levels: its Δv is not known, nor
+    // warned of (a stage that reads them is, below).
+    assert_eq!(p.available, None);
+    assert!(p.duration.is_some_and(f64::is_finite));
+    let end = n.t.add_seconds(p.duration.unwrap() + 600.0);
+    let m0 = ship.mass();
+    ship.advance(&w, end, &Controls::default(), usize::MAX);
+    println!("{:?}", events(&ship));
+    let prog = ship.program().unwrap();
+    assert_eq!(prog.step, Step::Short, "{:?}", events(&ship));
+    assert!(events(&ship).iter().any(|e| e.contains("ended short")));
+    assert!(matches!(ship.phase, Phase::Coasting { .. }), "coasting after burnout");
+    assert!(ship.mass() < m0);
+    assert!(ship.mass() > 0.0 && ship.mass().is_finite());
+    // The Falcon 9's second stage reads its tanks' levels (falcon9.md §5.2):
+    // the planner says how much of the node its engine has.
+    let craft = sim::craft::craft_of(&sim::craft::CraftId("falcon9-crew#0-11".into()));
+    let (r, v) = earth_state(&w, &leo_ship(&w));
+    let mut s2 = Vessel::coasting(&w, VesselId(2), t0(), earth(&w).0, r, v, &craft);
+    s2.set_nodes(vec![n]).unwrap();
+    let p = s2.node_prediction(&w, 0).unwrap();
+    println!("second stage: {:?} m/s, {:?}", p.available, p.warnings);
+    assert!(p.available.is_some_and(|a| a > 1_000.0 && a < 20_000.0));
+    assert!(p.warnings.iter().any(|w| w.contains("the engines have")), "{:?}", p.warnings);
 }
 
 #[test]
-fn debug_mode_burns_take_no_propellant() {
+fn debug_mode_nodes_take_no_propellant() {
     let w = world();
     let mut ship = leo_ship(&w);
     ship.set_debug(&w, true);
-    let burn = prograde(&w, 100.0, 200.0);
-    ship.set_plan(&w, plan(&[burn])).unwrap();
-    // 200 m/s at constant mass: t = Δv·m / F.
-    let duration = 200.0 * 20_000.0 / burn.law.thrust;
-    ship.extend_coast(&w, t0().add_seconds(100.0 + duration + 10.0), usize::MAX);
-    let seg = ship.trajectory().unwrap().segments.iter().find(|s| matches!(s.kind, SegmentKind::Burn(_))).unwrap();
-    assert!((seg.horizon() - duration).abs() < 1e-9, "{} vs {duration}", seg.horizon());
-    assert_eq!(seg.mass_at(seg.horizon()), 20_000.0);
-    ship.advance(&w, t0().add_seconds(100.0 + duration + 10.0), &Controls::default(), usize::MAX);
-    assert_eq!(ship.propellant(), 16_000.0);
-    // Turning debug mode off keeps the propellant and restarts the coast.
+    let n = prograde(&w, 300.0, 200.0);
+    ship.set_nodes(vec![n]).unwrap();
+    let ignite = ship.program().unwrap().ignite;
+    ship.advance(&w, ignite.add_seconds(-1.0), &Controls::default(), usize::MAX);
+    let before = ship.propellant();
+    let end = n.t.add_seconds(60.0);
+    ship.advance(&w, end, &Controls::default(), usize::MAX);
+    assert_eq!(ship.program().unwrap().step, Step::Done, "{:?}", events(&ship));
+    // The engines took nothing (the LOX's boil-off goes on: grams).
+    println!("{} kg less", before - ship.propellant());
+    assert!((ship.propellant() - before).abs() < 0.01, "{} kg", before - ship.propellant());
+    // Turning debug mode off keeps the propellant.
+    let kept = ship.propellant();
     ship.set_debug(&w, false);
-    assert!(!ship.debug() && ship.propellant() == 16_000.0);
+    assert!(!ship.debug() && ship.propellant() == kept);
 }
 
 /// A frame target earlier than the vessel's own time (the game's next
 /// frame can ask for less than a vessel that finished first reached) does
-/// nothing: no rewind, and no panic when the vessel's segment starts after
-/// the target (review of 2026-10-26, PERF 1).
+/// nothing: no rewind, and no panic, before the wake, in the turn, mid-burn
+/// and after (review of 2026-10-26, PERF 1).
 #[test]
 fn a_target_before_the_vessel_does_nothing() {
     let w = world();
     let controls = Controls { sas: true, ..Controls::default() };
     let mut ship = leo_ship(&w);
-    ship.set_plan(&w, plan(&[prograde(&w, 2_000.0, 100.0)])).unwrap();
-    for (at, back) in [(1_000.0, 500.0), (1_990.0, 1_000.0), (2_010.0, 1_000.0), (3_000.0, 1_000.0), (3_000.0, 2_005.0)]
-    {
+    let n = prograde(&w, 2_000.0, 100.0);
+    ship.set_nodes(vec![n]).unwrap();
+    let wake = ship.program().unwrap().wake.seconds_since(t0());
+    for (at, back) in [
+        (1_000.0, 500.0),
+        (wake + 10.0, 1_000.0),
+        (1_999.0, wake + 5.0),
+        (2_000.5, 1_999.0),
+        (3_000.0, 1_000.0),
+        (3_000.0, 2_005.0),
+    ] {
         ship.advance(&w, t0().add_seconds(at), &controls, usize::MAX);
         let before = ship.clone();
         let (reached, spent) = ship.advance_frame(&w, t0().add_seconds(back), &controls, usize::MAX);
         assert_eq!((reached, spent), (before.time, 0), "at {at} s, back to {back} s");
-        assert_eq!(ship.time, before.time);
-        assert_eq!(ship.state(&w), before.state(&w));
-        assert_eq!(ship.mass(), before.mass());
-        assert_eq!(ship.trajectory(), before.trajectory());
+        assert_eq!(ship, before);
         assert_eq!(ship.advance(&w, t0().add_seconds(back), &controls, usize::MAX), before.time);
     }
+}
+
+#[test]
+fn a_rails_warp_frame_stops_at_the_wake_and_goes_live_there() {
+    // D129: a frame of 16,667 s (10⁶× at 60 fps) stops where the program
+    // wakes, like an order, and the turn begins at its own epoch.
+    let w = world();
+    let mut ship = leo_ship(&w);
+    let n = prograde(&w, 900.0, 40.0);
+    ship.set_nodes(vec![n]).unwrap();
+    let wake = ship.program().unwrap().wake;
+    let mut one = ship.clone();
+    let (reached, _) = ship.advance_frame(&w, t0().add_seconds(16_667.0), &Controls::default(), usize::MAX);
+    assert_eq!(reached, wake, "the frame stopped at the wake");
+    assert_eq!(ship.program().unwrap().step, Step::Turn, "woken at its epoch");
+    // On from there: the turn started at the wake, and the course is the
+    // vessel's that flew there at 1×.
+    let end = n.t.add_seconds(30.0);
+    ship.advance(&w, end, &Controls::default(), usize::MAX);
+    fly_frames(&w, &mut one, end, &Controls::default());
+    let turn = ship.ship_events().iter().find(|e| e.text.contains("turning to the burn")).unwrap();
+    assert_eq!(turn.at, wake);
+    assert_eq!(ship.program().unwrap().step, Step::Done);
+    assert_eq!(ship.state(&w), one.state(&w));
+    assert_eq!(ship.program(), one.program());
+}
+
+#[test]
+fn a_throttle_change_mid_burn_hands_the_burn_to_the_pilot_and_keeps_the_next_node() {
+    // D126's takeover: the pilot's throttle differs from the program's.
+    let w = world();
+    let mut ship = leo_ship(&w);
+    let n = prograde(&w, 300.0, 100.0);
+    ship.set_nodes(vec![n, prograde(&w, 1_500.0, 10.0)]).unwrap();
+    ship.advance(&w, n.t.add_seconds(-1.0), &Controls::default(), usize::MAX);
+    assert_eq!(ship.program().unwrap().step, Step::Burn);
+    // Input that touches what the program does not command (the chutes'
+    // arming is left out: it would open them) leaves it flying.
+    let other = Controls { speed: sim::vessel::SpeedReference::Surface, ..Controls::default() };
+    ship.advance(&w, n.t.add_seconds(-0.5), &other, usize::MAX);
+    assert_eq!(ship.program().unwrap().step, Step::Burn);
+    // A different throttle: the burn is the pilot's from this tick on.
+    let half = Controls { throttle: 0.5, ..other };
+    ship.advance(&w, n.t, &half, usize::MAX);
+    assert!(events(&ship).iter().any(|e| e.contains("taken over by the pilot")), "{:?}", events(&ship));
+    // The next node's program waits for its own wake.
+    let p = ship.program().unwrap();
+    assert_eq!((p.node, p.step), (1, Step::Wait));
+    // The pilot's throttle flies: the engines run on at half.
+    ship.advance(&w, n.t.add_seconds(2.0), &half, usize::MAX);
+    assert!(matches!(ship.phase, Phase::Powered { .. }));
+}
+
+#[test]
+fn the_planner_warns_of_a_burn_too_soon_for_the_turn() {
+    let w = world();
+    let mut ship = leo_ship(&w);
+    let soon = prograde(&w, 5.0, 10.0);
+    ship.set_nodes(vec![soon]).unwrap();
+    let p = ship.node_prediction(&w, 0).unwrap();
+    assert!(p.warnings.iter().any(|w| w.contains("too soon")), "{:?}", p.warnings);
+    // A node far enough ahead: only the small rocket's settling warning.
+    let mut ship = leo_ship(&w);
+    ship.set_nodes(vec![prograde(&w, 900.0, 10.0)]).unwrap();
+    let p = ship.node_prediction(&w, 0).unwrap();
+    assert_eq!(p.warnings.len(), 1, "{:?}", p.warnings);
+    assert!(p.warnings[0].contains("cannot be settled"));
 }
