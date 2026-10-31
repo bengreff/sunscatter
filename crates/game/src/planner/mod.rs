@@ -263,9 +263,10 @@ pub fn draw(
     let (info, available) = draft_info(&sim.world, vessel, &planner.draft);
     let mut open = planner.open;
     let mut send = false;
-    egui::Window::new(format!("Burn planner: Vessel {} (N)", id.0)).open(&mut open).default_width(380.0).show(
-        ctx,
-        |ui| {
+    egui::Window::new(format!("Burn planner: {} (N)", crate::tracking::vessel_name(id)))
+        .open(&mut open)
+        .default_width(380.0)
+        .show(ctx, |ui| {
             let mut remove = None;
             let mut total = 0.0;
             for ((k, b), info) in planner.draft.iter_mut().enumerate().zip(&info) {
@@ -351,15 +352,18 @@ pub fn draw(
                     planner.draft = draft_from(vessel, now);
                 }
             });
-        },
-    );
+        });
     planner.open = open;
     if send {
         let delay = plan_delay(&comms, id).unwrap_or(0.0);
         let cmd = command_for(vessel, &planner.draft);
         if delay > 0.0 {
             in_flight.send(now, delay, cmd);
-            toasts.push(time.elapsed_secs_f64(), format!("Plan sent to Vessel {} ({})", id.0, fmt_delay(delay)), false);
+            toasts.push(
+                time.elapsed_secs_f64(),
+                format!("Plan sent to {} ({})", crate::tracking::vessel_name(id), fmt_delay(delay)),
+                false,
+            );
         } else {
             commands.write(cmd);
         }

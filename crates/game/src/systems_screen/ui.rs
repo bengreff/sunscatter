@@ -52,7 +52,7 @@ pub fn draw(
         ui.painter().rect_filled(full, 0.0, FILL);
         ui.set_min_size(full.size());
         let name = ship.as_ref().map_or_else(|| craft.spec.name.clone(), |(d, _)| d.name.clone());
-        region(ui, regions.top, |ui| top_bar(ui, &mut screen, &name, vessel.id().0));
+        region(ui, regions.top, |ui| top_bar(ui, &mut screen, &name, vessel.id()));
         // Every craft is built from parts (D100); one without a ship
         // definition has nothing to show but the bar that closes the screen.
         let Some((def, state)) = ship.as_ref() else { return };
@@ -107,10 +107,10 @@ fn region(ui: &mut egui::Ui, rect: egui::Rect, add: impl FnOnce(&mut egui::Ui)) 
     });
 }
 
-fn top_bar(ui: &mut egui::Ui, screen: &mut SystemsScreen, name: &str, vessel: u64) {
+fn top_bar(ui: &mut egui::Ui, screen: &mut SystemsScreen, name: &str, vessel: sim::vessel::VesselId) {
     ui.horizontal(|ui| {
         ui.label(egui::RichText::new("SYSTEMS").size(18.0).color(theme::ACCENT));
-        ui.label(egui::RichText::new(format!("{name} · Vessel #{vessel}")).color(theme::TEXT));
+        ui.label(egui::RichText::new(format!("{name} · {}", crate::tracking::vessel_name(vessel))).color(theme::TEXT));
         ui.add_space(16.0);
         for layer in Layer::ALL {
             if ui.selectable_label(screen.layer == layer, layer.name()).clicked() {

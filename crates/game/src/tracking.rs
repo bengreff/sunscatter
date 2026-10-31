@@ -36,6 +36,14 @@ pub struct Tracked {
     hidden: HashSet<VesselId>,
 }
 
+/// A vessel's name wherever the player reads it ("Vessel 3": the tracking
+/// list, the map, the notifications and their links, the warp limits, the
+/// planner; `VesselId`'s own `#3` is the logs'). One owner: the
+/// notifications said "Vessel #1 separated" beside a "Vessel 11" link.
+pub fn vessel_name(id: VesselId) -> String {
+    format!("Vessel {}", id.0)
+}
+
 impl Tracked {
     /// Forgets everything (after loading a save): all vessels are tracked.
     pub fn reset(&mut self) {
@@ -43,7 +51,7 @@ impl Tracked {
     }
 
     pub fn name(&self, id: VesselId) -> String {
-        format!("Vessel {}", id.0)
+        vessel_name(id)
     }
 
     /// Whether vessel `id` gets a map orbit line.
@@ -110,9 +118,12 @@ pub fn switch_to(sim: &mut SimState, rig: &mut CameraRig, pred: &mut Prediction,
 /// (D112: each vessel keeps its controls) until they are cut.
 pub fn left_lit_notice(left: &sim::vessel::Vessel) -> Option<String> {
     let lit = left.ship().is_some_and(|s| !sim::systems::propulsion::lit(s).is_empty());
-    let (id, throttle) = (left.id().0, left.controls().throttle * 100.0);
+    let (id, throttle) = (left.id(), left.controls().throttle * 100.0);
     lit.then(|| {
-        format!("Vessel {id} left with its engines lit: they burn on at its throttle ({throttle:.0} %) until cut")
+        format!(
+            "{} left with its engines lit: they burn on at its throttle ({throttle:.0} %) until cut",
+            vessel_name(id)
+        )
     })
 }
 
@@ -535,6 +546,7 @@ mod tests {
     /// (review: it kept them at their minimum, unsaid).
     #[test]
     fn leaving_a_craft_with_engines_lit_says_so() {
+        assert_eq!(vessel_name(VesselId(11)), "Vessel 11", "one name everywhere (not the logs' #11)");
         let mut sim = SimState::with_craft(&crate::test_rocket::rocket());
         let a = sim.active;
         assert_eq!(left_lit_notice(sim.ship()), None, "nothing lit");

@@ -223,10 +223,16 @@ pub fn draw(
             Some(WarpLimit::Compute) => format!("  limited: compute, {} achieved", warp_label(sim.achieved_warp)),
             Some(WarpLimit::Floor(f)) => format!("  limited: below {}", crate::format::distance(f)),
             Some(WarpLimit::Live) => "  limited: flying live".to_string(),
-            Some(WarpLimit::OtherLive(id)) => format!("  limited: Vessel {id} is flying live"),
-            Some(WarpLimit::Near(id)) => format!("  limited: near Vessel {id}"),
+            Some(WarpLimit::OtherLive(id)) => {
+                format!("  limited: {} is flying live", crate::tracking::vessel_name(sim::vessel::VesselId(id)))
+            }
+            Some(WarpLimit::Near(id)) => {
+                format!("  limited: near {}", crate::tracking::vessel_name(sim::vessel::VesselId(id)))
+            }
             Some(WarpLimit::Held) => "  limited: held live on the pad (engines lit or release armed)".to_string(),
-            Some(WarpLimit::OtherHeld(id)) => format!("  limited: Vessel {id} held live on the pad"),
+            Some(WarpLimit::OtherHeld(id)) => {
+                format!("  limited: {} held live on the pad", crate::tracking::vessel_name(sim::vessel::VesselId(id)))
+            }
             None => String::new(),
         };
         ui_.horizontal(|ui_| {

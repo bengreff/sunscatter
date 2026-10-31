@@ -89,9 +89,9 @@ pub fn breakup_toast(id: VesselId, plan: &SplitPlan, new: usize, separation: boo
         None
     } else if separation && wrecks == 0 {
         let pieces = if new == 1 { "a new vessel".to_string() } else { format!("{new} new vessels") };
-        Some((format!("Vessel {id} separated: {pieces}"), false))
+        Some((format!("{} separated: {pieces}", tracking::vessel_name(id)), false))
     } else {
-        Some((format!("Vessel {id} broke up: {} pieces ({wrecks} wrecks)", new + 1), true))
+        Some((format!("{} broke up: {} pieces ({wrecks} wrecks)", tracking::vessel_name(id), new + 1), true))
     }
 }
 
@@ -153,7 +153,8 @@ pub fn update(
     for i in sim::vessel::debris::debris(&sim.world, sim.clock, &sim.fleet, sim.active).into_iter().rev() {
         let id = sim.fleet[i].id();
         if tracking::delete_vessel(sim, &mut tracked, &mut rig, id) {
-            toasts.push(now, format!("Debris {id} deleted: dead, uncontrollable, 10 km from any craft"), false);
+            let name = tracking::vessel_name(id);
+            toasts.push(now, format!("{name} deleted as debris: dead, uncontrollable, 10 km from any craft"), false);
         }
     }
 }
@@ -243,9 +244,9 @@ mod tests {
             destroyed: vec![None, None, wreck],
         };
         let toast = |plan: &SplitPlan, new, separation| breakup_toast(VesselId(3), plan, new, separation);
-        assert_eq!(toast(&three, 2, false), Some(("Vessel #3 broke up: 3 pieces (1 wrecks)".into(), true)));
-        assert_eq!(toast(&three, 2, true), Some(("Vessel #3 broke up: 3 pieces (1 wrecks)".into(), true)), "a wreck");
+        assert_eq!(toast(&three, 2, false), Some(("Vessel 3 broke up: 3 pieces (1 wrecks)".into(), true)));
+        assert_eq!(toast(&three, 2, true), Some(("Vessel 3 broke up: 3 pieces (1 wrecks)".into(), true)), "a wreck");
         let two = SplitPlan { pieces: vec![vec![0], vec![1]], ids: vec![id(0), id(1)], destroyed: vec![None, None] };
-        assert_eq!(toast(&two, 1, true), Some(("Vessel #3 separated: a new vessel".into(), false)));
+        assert_eq!(toast(&two, 1, true), Some(("Vessel 3 separated: a new vessel".into(), false)));
     }
 }

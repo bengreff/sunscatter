@@ -249,7 +249,11 @@ pub fn apply(
             GameCommand::SetRcs(mode) => sim.controls_mut().rcs = *mode,
             GameCommand::SetControls { vessel, throttle, sas, hold, speed } => match sim.index_of(*vessel) {
                 Some(i) => apply_controls_with(sim.fleet[i].controls_mut(), (*throttle, *sas, *hold), *speed),
-                None => toasts.push(now, format!("Controls for Vessel {}: no such vessel", vessel.0), true),
+                None => toasts.push(
+                    now,
+                    format!("Controls for {}: no such vessel", crate::tracking::vessel_name(*vessel)),
+                    true,
+                ),
             },
             GameCommand::SetDebug(on) => {
                 let sim = &mut *sim;
@@ -372,7 +376,7 @@ fn place(
     delay: f64,
 ) {
     let Some(i) = sim.index_of(id) else {
-        toasts.push(now, format!("Vessel {}: no such vessel", id.0), true);
+        toasts.push(now, format!("{}: no such vessel", crate::tracking::vessel_name(id)), true);
         return;
     };
     let at = sim.clock.add_seconds(delay);
@@ -407,7 +411,7 @@ fn planned(
     match done {
         Some(Ok(())) => toasts.push_linked(now, "Flight plan accepted", false, to(vessel)),
         Some(Err(e)) => toasts.push_linked(now, format!("Flight plan rejected: {e:?}"), true, to(vessel)),
-        None => toasts.push(now, format!("Plan for Vessel {}: no such vessel", vessel.0), true),
+        None => toasts.push(now, format!("Plan for {}: no such vessel", crate::tracking::vessel_name(vessel)), true),
     }
 }
 
@@ -421,7 +425,7 @@ fn edited(
     match done {
         Some(Ok(())) => toasts.push_linked(now, format!("{what} saved"), false, to(vessel)),
         Some(Err(e)) => toasts.push_linked(now, format!("{what} refused: {}", e.join("; ")), true, to(vessel)),
-        None => toasts.push(now, format!("Vessel {}: no such vessel", vessel.0), true),
+        None => toasts.push(now, format!("{}: no such vessel", crate::tracking::vessel_name(vessel)), true),
     }
 }
 

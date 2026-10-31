@@ -122,7 +122,7 @@ impl Comms {
     pub fn name_of(&self, location: Location) -> String {
         match location {
             Location::Site(i) => self.data.sites[i].name.clone(),
-            Location::Vessel(id) => format!("aboard Vessel {}", id.0),
+            Location::Vessel(id) => format!("aboard {}", crate::tracking::vessel_name(id)),
         }
     }
 }
@@ -202,7 +202,7 @@ pub fn refresh(sim: &SimState, station_open: bool, comms: &mut Comms) {
         // In blackout the plasma sheath reflects the link (D109).
         let antenna = sheath_cut(v, comms.data.link.frequency_hz).is_none().then_some(VESSEL_ANTENNA);
         nodes.push(Node { pos, antenna, ground, min_elevation_deg, wired });
-        names.push(format!("Vessel {}", v.id().0));
+        names.push(crate::tracking::vessel_name(v.id()));
     }
     let occluders: Vec<_> = bodies.iter().map(|b| b.1).collect();
     let graph = Graph::new(&nodes, &occluders, &comms.data.link);

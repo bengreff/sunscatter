@@ -35,7 +35,7 @@ impl Link {
     /// As shown after the message.
     pub fn label(self) -> String {
         match self {
-            Link::Vessel(id) => format!("Vessel {}", id.0),
+            Link::Vessel(id) => crate::tracking::vessel_name(id),
         }
     }
 }
@@ -132,7 +132,7 @@ pub fn go(link: Link, active: VesselId) -> Go {
 pub fn link_text(link: Link, active: VesselId) -> (String, String) {
     let label = format!("{} ›", link.label());
     let hover = match go(link, active) {
-        Go::Switch(id) => format!("Switch to Vessel {}", id.0),
+        Go::Switch(id) => format!("Switch to {}", crate::tracking::vessel_name(id)),
         Go::Systems => "Open the systems screen".to_string(),
     };
     (label, hover)
