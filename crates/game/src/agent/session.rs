@@ -206,8 +206,9 @@ pub fn tools(dev: bool) -> Vec<Tool> {
             "run_until",
             "Run time until the first of the given stops (an epoch, or an event of the vessel as it knows it), then \
              stop it (unless `keep_running`). Answers when it stops, with what stopped it (`reached`: `time`, a \
-             condition's name, `paused`, `timeout`, `vessel_gone`) and the vessel's state then. A condition on \
-             something no working sensor measures is refused. Physics warp is capped while engines run.",
+             condition's name, `paused`, `timeout`, `vessel_gone`) and the vessel's state then, each number as its \
+             sensors read it (null where none measures it; the stops compare these). A condition on something no \
+             working sensor measures is refused. Physics warp is capped while engines run.",
             schema(until, &[]),
         ),
         t(
@@ -631,7 +632,7 @@ impl Until {
         } else if self.feeding_below.is_some() && s.feeding.is_none() {
             Some("the propellant in its feeding tanks (every tank level, and an engine running)")
         } else if self.max_q && s.q.is_none() {
-            Some("its dynamic pressure (position and velocity)")
+            Some("its dynamic pressure (its velocity)")
         } else {
             None
         }
@@ -656,7 +657,8 @@ pub fn parse_epoch(s: &str) -> Option<Epoch> {
         .then(|| Epoch::from_calendar(y, mo, da, h, mi, sec))
 }
 
-/// A vessel's state as it knows it (`None`: no working sensor measures it).
+/// A vessel's state as it knows it (`None`: no working sensor measures it;
+/// [`Sample::read`]).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Sample {
     /// m above the body's ellipsoid.
@@ -675,6 +677,26 @@ pub struct Sample {
 }
 
 impl Sample {
+    /// `truth` (every number the physics gives) as the vessel reads it
+    /// (D106), by the menus' rules, as `get_vessel` gives them: the altitude
+    /// through an altimeter or the position, the apsides through the
+    /// position once the orbit is known, the speed through the velocity,
+    /// the dynamic pressure as the Landing menu shows it; `None` where no
+    /// working sensor measures it, the truth in debug mode. The stops
+    /// compare these, so an answer agrees with what stopped it.
+    pub fn read(truth: Sample, known: &crate::format::Known) -> Sample {
+        use sim::systems::Quantity::{Position, Velocity};
+        let apsis = |x: Option<f64>| x.and_then(|x| super::known_value(known, Position, x)).filter(|_| known.orbit());
+        Sample {
+            altitude: truth.altitude.and_then(|a| super::known_altitude(known, a)),
+            apoapsis: apsis(truth.apoapsis),
+            periapsis: apsis(truth.periapsis),
+            q: truth.q.and_then(|q| crate::interface::menus::landing::dynamic_pressure(known, q)),
+            speed: truth.speed.and_then(|v| super::known_value(known, Velocity, v)),
+            ..truth
+        }
+    }
+
     pub fn json(&self) -> Value {
         let fin = |x: Option<f64>| x.filter(|v| v.is_finite());
         json!({"altitude_m": self.altitude, "apoapsis_m": fin(self.apoapsis), "periapsis_m": self.periapsis,
@@ -714,7 +736,8 @@ pub fn reached(u: &Until, s: &Sample, at_stop: bool, fleet0: usize, q_max: f64) 
 
 /// The share of propellant left in the tanks feeding the starting or
 /// running main engines (the first stage's, until MECO), if the vessel
-/// knows every one of their levels.
+/// knows every one of their levels: their readings' sum over their
+/// capacity, to its precision (a sum's, `Reading`'s `Sum`).
 pub fn feeding_share(v: &sim::vessel::Vessel) -> Option<f64> {
     use sim::craft::state::EngineStatus;
     use sim::systems::Quantity;
@@ -725,17 +748,20 @@ pub fn feeding_share(v: &sim::vessel::Vessel) -> Option<f64> {
     tanks.sort_unstable();
     tanks.dedup();
     let k = v.knowledge();
-    if !tanks.iter().all(|&t| k.knows(Quantity::TankLevel(t as u32))) {
-        return None;
-    }
     let capacity: f64 = tanks.iter().map(|&t| def.tanks[t].capacity).sum();
-    let liquid: f64 = tanks.iter().map(|&t| state.tanks[t].liquid).sum();
-    (capacity > 0.0).then(|| liquid / capacity)
+    let liquid = tanks.iter().map(|&t| k.read(Quantity::TankLevel(t as u32), state.tanks[t].liquid)).sum();
+    share_of(liquid, capacity)
 }
 
-/// The vessel at fleet index `i` as it knows itself now.
+/// A share of `capacity` from the reading of what it holds, to the
+/// reading's precision; `None` unknown or of nothing.
+fn share_of(held: Option<sim::systems::Reading>, capacity: f64) -> Option<f64> {
+    let r = held.filter(|_| capacity > 0.0)?;
+    Some(sim::systems::Reading { value: r.value / capacity, precision: r.precision / capacity }.shown())
+}
+
+/// The vessel at fleet index `i` as it knows itself now ([`Sample::read`]).
 pub fn sample(sim: &SimState, i: usize) -> Sample {
-    use sim::systems::Quantity;
     let v = &sim.fleet[i];
     let known = crate::format::Known::of(v);
     let body = sim.dominant_of(i);
@@ -756,17 +782,17 @@ pub fn sample(sim: &SimState, i: usize) -> Sample {
     };
     let q =
         sim::vessel::air_at(&sim.world, &snap, anchor, r, vel).map_or(0.0, |a| 0.5 * a.rho * a.wind.length_squared());
-    let nav = known.orbit();
-    Sample {
-        altitude: altitude.filter(|_| known.knows(Quantity::Altitude) || known.knows(Quantity::Position)),
-        apoapsis: apo.filter(|_| nav),
-        periapsis: peri.filter(|_| nav),
+    let truth = Sample {
+        altitude,
+        apoapsis: apo,
+        periapsis: peri,
         feeding: feeding_share(v),
-        q: nav.then_some(q),
-        speed: known.knows(Quantity::Velocity).then(|| vrel.length()),
+        q: Some(q),
+        speed: Some(vrel.length()),
         fleet: sim.fleet.len(),
         status: super::status(&v.phase),
-    }
+    };
+    Sample::read(truth, &known)
 }
 
 /// The camera's pitch and yaw about `up` (rad, `camera::basis`) for a
@@ -1571,6 +1597,71 @@ mod tests {
         for (typed, name, want) in [("hiiaka", "Hi'iaka", true), ("TITAN", "Titan", true), ("io", "Ion", false)] {
             assert_eq!(same_name(typed, name), want, "{typed}");
         }
+    }
+
+    #[test]
+    fn a_runs_state_reads_as_the_menus_show_it() {
+        use crate::format::Known;
+        use sim::systems::{Knowledge, Quantity::*};
+        let known = |qs: &[(sim::systems::Quantity, f64)]| {
+            let mut k = Knowledge::default();
+            for (q, p) in qs {
+                k.learn(*q, *p);
+            }
+            Known::from(k)
+        };
+        let truth = Sample {
+            altitude: Some(30.078_471),
+            apoapsis: Some(-4_891.77),
+            periapsis: Some(-6_371_000.4),
+            feeding: Some(0.5),
+            q: Some(1_234.5),
+            speed: Some(408.04),
+            fleet: 2,
+            status: "landed",
+        };
+        let blind = Sample { fleet: 2, status: "landed", ..Sample::default() };
+        // A GNSS fix: the position to ±3 m, its velocity to ±0.1 m/s and
+        // its altitude to ±4.5 m (`systems::provides`).
+        let gnss = known(&[(Position, 3.0), (Velocity, 0.1), (Altitude, 4.5)]);
+        let fixed = Sample {
+            altitude: Some(30.0),
+            apoapsis: Some(-4_892.0),
+            periapsis: Some(-6_371_000.0),
+            q: Some(1_230.0),
+            speed: Some(408.0),
+            ..truth
+        };
+        // (case, what it knows, what it reads)
+        let cases = [
+            ("blind", known(&[]), Sample { feeding: Some(0.5), ..blind }),
+            (
+                "an altimeter alone",
+                known(&[(Altitude, 1.0)]),
+                Sample { altitude: Some(30.0), feeding: Some(0.5), ..blind },
+            ),
+            (
+                "a position without its velocity: no orbit",
+                known(&[(Position, 25.0)]),
+                Sample { altitude: Some(30.0), feeding: Some(0.5), ..blind },
+            ),
+            ("a fix", gnss, fixed),
+            // (the dynamic pressure to the menu's digits, as the orbit's
+            // angles and eccentricity are, `agent::known_digits`)
+            ("debug mode: the truth", Known::from(Knowledge::perfect()), Sample { q: Some(1_230.0), ..truth }),
+        ];
+        for (case, k, want) in cases {
+            assert_eq!(Sample::read(truth, &k), want, "{case}");
+        }
+        // A share of what tanks hold, to the sum's precision: two tanks of
+        // 50 t each read to ±750 kg are ±1.5 % of their 100 t, so to the
+        // per cent.
+        let held = |kg: f64, p: f64| Some(sim::systems::Reading { value: kg, precision: p });
+        let share = share_of(held(43_210.0, 1_500.0), 100_000.0).unwrap();
+        assert!((share - 0.43).abs() < 1e-12, "{share}");
+        assert_eq!(share_of(held(43_210.0, 0.0), 100_000.0), Some(0.4321), "exactly, in debug mode");
+        assert_eq!(share_of(None, 100_000.0), None, "a level unknown");
+        assert_eq!(share_of(held(0.0, 0.0), 0.0), None, "no tanks feed it");
     }
 
     #[test]

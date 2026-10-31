@@ -9,6 +9,13 @@ use crate::format::{distance as fmt_dist, duration as fmt_duration, Known, DASH}
 use crate::hud::temperature;
 use sim::systems::Quantity::{Acceleration, Altitude, Attitude, Position, Velocity};
 
+/// The dynamic pressure as the craft knows it (Pa): with its velocity, to
+/// the 10 Pa this menu shows (kPa to two decimals). One rule for the menu
+/// and the agent's `step` and `run_until` (their max-Q stop and answer).
+pub fn dynamic_pressure(k: &Known, q: f64) -> Option<f64> {
+    k.knows(Velocity).then(|| (q / 10.0).round() * 10.0)
+}
+
 /// A signed speed as the craft knows it (`+12.3 m/s`).
 fn signed(k: &Known, v: f64) -> String {
     let text = k.speed(Velocity, v);
@@ -87,7 +94,8 @@ fn reentry(d: &FlightData) -> Section {
         (Some(air), _) => {
             let k = &d.known;
             let moving = k.knows(Velocity);
-            s.row("DYN. PRESSURE", k.or_dash(moving, || format!("{:.2} kPa", air.q / 1e3)));
+            let q = dynamic_pressure(k, air.q);
+            s.row("DYN. PRESSURE", q.map_or(DASH.into(), |q| format!("{:.2} kPa", q / 1e3)));
             s.row("MACH", k.or_dash(moving, || format!("{:.2}", air.mach)));
             s.row("G-LOAD", k.or_dash(k.knows(Acceleration), || format!("{:.2} g", d.g_load)));
             if let Some((aoa, slip)) = air.aoa_slip {

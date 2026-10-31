@@ -797,8 +797,7 @@ fn get_vessel(
         "id": id.0, "status": status(&v.phase), "about": name(body), "seen_delay_s": signal.delay,
         "debug": v.debug(),
         "position_m": known_vec(&known, Quantity::Position, rel), "velocity_ms": known_vec(&known, Quantity::Velocity, v_rel),
-        "altitude_m": known_value(&known, Quantity::Altitude, altitude)
-            .or_else(|| known_value(&known, Quantity::Position, altitude)),
+        "altitude_m": known_altitude(&known, altitude),
         "orbit": orbit.filter(|_| known.orbit()), "attitude": attitude_json(&known, v.attitude.q, rel, pole),
         "stages": stages_json(sim, i, &known, air)?, "signal": signal_json(Some(signal)),
     });
@@ -827,6 +826,13 @@ fn two_body_apsides(a: f64, e: f64) -> (f64, Option<f64>) {
 /// A value as the vessel knows it: shown to its precision, or null.
 fn known_value(known: &crate::format::Known, q: Quantity, truth: f64) -> Option<f64> {
     known.knowledge.read(q, truth).map(|r| r.shown())
+}
+
+/// An altitude above the ellipsoid (m) as the vessel knows it: through an
+/// altimeter's reading, else the position's (`get_vessel`, and `step`'s
+/// and `run_until`'s stop and answer).
+fn known_altitude(known: &crate::format::Known, altitude: f64) -> Option<f64> {
+    known_value(known, Quantity::Altitude, altitude).or_else(|| known_value(known, Quantity::Position, altitude))
 }
 
 /// A time from the orbit (an apsis's, an impact's, a period, a closest
