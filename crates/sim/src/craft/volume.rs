@@ -57,7 +57,6 @@ pub struct VolumeGrid {
     pub sample_volume: f64,
     /// Per tank: height (m), capacity (kg) and the samples inside it.
     tank_height: Vec<f64>,
-    tank_capacity: Vec<f64>,
     tank_samples: Vec<usize>,
     /// Per tank: the nodes holding its samples and their heights, in node
     /// then sample order ([`Self::propellant`] reads only its own).
@@ -65,13 +64,6 @@ pub struct VolumeGrid {
 }
 
 impl VolumeGrid {
-    /// The grid of cubes of edge `size` over the primitives' solids, with
-    /// one tank (one part).
-    pub fn new(primitives: &[Primitive], bounds: (DVec3, DVec3), tank: &Tank, size: f64) -> Self {
-        let owner = vec![0; primitives.len()];
-        Self::with_parts(primitives, &owner, bounds, &[(*tank, 1.0)], size)
-    }
-
     /// The grid over a craft of parts: `owner` gives each primitive's part,
     /// `tanks` (region, capacity) the tanks (a sample in several is in the
     /// first).
@@ -176,7 +168,6 @@ impl VolumeGrid {
             index,
             sample_volume,
             tank_height: shapes.iter().map(|s| s.1).collect(),
-            tank_capacity: tanks.iter().map(|t| t.1).collect(),
             tank_samples,
             by_tank,
         }
@@ -200,48 +191,6 @@ impl VolumeGrid {
             let d = |i: usize| (self.nodes[i].centre - p).length_squared();
             (0..self.nodes.len()).fold(0, |best, i| if d(i) < d(best) { i } else { best }) as u32
         })
-    }
-
-    /// Propellant per node (kg) for `mass` kg filling the tanks from their
-    /// bases to the level `fill` × height (every tank at the same fill,
-    /// holding its share of `mass` by capacity): each tank sample below
-    /// the level holds an equal share of its tank's (the sample straddling
-    /// it a partial one).
-    pub fn propellant(&self, mass: f64, fill: f64, out: &mut [f64]) {
-        out.fill(0.0);
-        if mass <= 0.0 || self.tank_samples.iter().sum::<usize>() == 0 {
-            return;
-        }
-        if self.tank_height.len() == 1 {
-            self.share(mass, fill, 0, out);
-            return;
-        }
-        let capacity: f64 = self.tank_capacity.iter().sum();
-        for k in (0..self.tank_height.len()).filter(|&k| self.tank_samples[k] > 0) {
-            self.share(mass * self.tank_capacity[k] / capacity, fill, k, out);
-        }
-    }
-
-    /// Adds `mass` in tank `k` filled to `fill`, shared out over its
-    /// samples, into `out` (only the nodes holding them: a craft of many
-    /// tanks costs its samples once, not every node per tank).
-    fn share(&self, mass: f64, fill: f64, k: usize, out: &mut [f64]) {
-        let level = self.tank_height[k] * fill.clamp(0.0, 1.0);
-        let step = self.size / SAMPLES as f64;
-        let weight = |h: f64| ((level - h) / step + 0.5).clamp(0.0, 1.0);
-        let list = &self.by_tank[k];
-        let total: f64 = list.iter().flat_map(|(_, h)| h.iter().copied()).map(weight).sum();
-        if total <= 0.0 {
-            // Below the lowest sample: all in the node holding it.
-            let lowest = (list.iter())
-                .map(|(i, h)| (h.iter().copied().fold(f64::MAX, f64::min), *i))
-                .fold((f64::MAX, 0), |b, x| if x.0 < b.0 { x } else { b });
-            out[lowest.1 as usize] += mass;
-            return;
-        }
-        for (i, h) in list {
-            out[*i as usize] += mass * h.iter().copied().map(weight).sum::<f64>() / total;
-        }
     }
 }
 
@@ -371,8 +320,8 @@ mod tests {
         assert!(g.nodes[far as usize].centre.z > 0.75, "the capsule's end");
     }
 
-    /// Two tanks filled together: each holds its share by capacity, from
-    /// its own base; the samples carry their tank and part.
+    /// Two tanks filled to the same level: each holds its own contents,
+    /// from its own base; the samples carry their tank and part.
     #[test]
     fn two_tanks_fill_together_by_capacity() {
         let prim = |base: DVec3, h: f64| Primitive {
@@ -394,7 +343,10 @@ mod tests {
         }
         let mut out = vec![0.0; g.nodes.len()];
         for fill in [1.0, 0.5, 0.25] {
-            g.propellant(2_000.0 * fill * 2.0, fill, &mut out);
+            out.fill(0.0);
+            for (k, (cap, h)) in [(3_000.0, 4.0), (1_000.0, 2.0)].into_iter().enumerate() {
+                assert!(g.band(k, cap * fill, (0.0, h * fill), &mut out), "tank {k} has samples");
+            }
             let in_tank =
                 |t: u32| -> f64 { g.nodes.iter().zip(&out).filter(|(n, _)| n.parts[0].0 == t).map(|x| x.1).sum() };
             let total = 4_000.0 * fill;

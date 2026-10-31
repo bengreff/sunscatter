@@ -5,28 +5,21 @@
 //! definition will replace.
 //!
 //! A [`Part`] owns primitives of the craft's geometry (each primitive
-//! belongs to exactly one part), its dry mass, a propellant tank, an
-//! engine, attitude-control thrusters, the parachutes, a power placeholder,
-//! a control flag (a crew cabin or probe core) and a load limit. The craft's
-//! aggregates (mass, centre of mass and inertia, the engine, the RCS
-//! authority, crew) are computed from its parts; cells and interior nodes
+//! belongs to exactly one part), its dry mass, its engine's lump (the
+//! thermal network's mount node), the parachutes, a power placeholder, a
+//! control flag (a crew cabin or probe core) and a load limit. Its tanks,
+//! thrusters and the rest of its systems are the ship definition's
+//! ([`super::ship`]). The craft's aggregates (mass, centre of mass and
+//! inertia, crew) are computed from its parts; cells and interior nodes
 //! are tagged with the part they belong to ([`super::CraftDesign`]).
 //!
 //! A piece of a craft ([`CraftDef::subset`]) keeps its
 //! parts' body axes, so a piece's geometry, mass and attitude are those it
 //! had inside the craft.
 
-use super::file::{CraftFile, EngineFile, GeometryFile, Mount, RcsFile, Tank};
+use super::file::{CraftFile, EngineFile, GeometryFile, Mount, Tank};
 use glam::DVec3;
 use serde::{Deserialize, Serialize};
-
-/// A propellant tank: its capacity and the region it fills from its base.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-pub struct PartTank {
-    /// kg.
-    pub capacity: f64,
-    pub region: Tank,
-}
 
 /// Electrical placeholders (D033): panel output in full sunlight at 1 AU,
 /// constant load and battery capacity.
@@ -62,10 +55,9 @@ pub struct Part {
     pub parent: Option<u32>,
     /// kg, spread as a shell over its own primitives' surface.
     pub dry_mass: f64,
-    pub tank: Option<PartTank>,
+    /// Its engines' lump (`combine_engines`): where the thermal network
+    /// puts the nozzle's mount node; the engines are the ship's.
     pub engine: Option<EngineFile>,
-    /// Reaction-control thrusters (attitude authority, D078).
-    pub rcs: Option<RcsFile>,
     /// Carries the craft's parachutes (`CraftFile::chute`).
     pub chute: bool,
     /// Specific heat of its interior (J/(kg·K)); the craft's if `None`.
@@ -107,19 +99,17 @@ impl CraftDef {
         owner
     }
 
-    /// The tanks (region, capacity) in part order; a craft of catalog
-    /// parts: its ship's tanks and bottles ([`super::ship::ShipDef::regions`]).
+    /// The tanks (region, capacity): its ship's tanks and bottles
+    /// ([`super::ship::ShipDef::regions`]).
     pub fn tanks(&self) -> Vec<(Tank, f64)> {
-        match &self.ship {
-            Some(ship) => ship.regions(),
-            None => self.parts.iter().filter_map(|p| p.tank).map(|t| (t.region, t.capacity)).collect(),
-        }
+        self.ship.as_ref().map_or_else(Vec::new, |ship| ship.regions())
     }
 
     /// The piece made of `parts` (indices into this craft's parts, any
     /// order): their primitives (renumbered, in order), parts (in this
-    /// craft's order, attachments to parts outside the piece cut) and the
-    /// craft file's aggregates ([`aggregate`]). Same body axes.
+    /// craft's order, attachments to parts outside the piece cut), the
+    /// ship's piece and the craft file's aggregates ([`aggregate`]). Same
+    /// body axes.
     pub fn subset(&self, parts: &[u32]) -> CraftDef {
         let mut keep: Vec<u32> = parts.to_vec();
         keep.sort_unstable();
@@ -151,12 +141,7 @@ impl CraftDef {
         aggregate(&mut spec, &new_parts);
         let ids: Vec<u32> = new_parts.iter().map(|p| p.id).collect();
         let ship = self.ship.as_ref().map(|s| std::sync::Arc::new(s.subset(&ids)));
-        if let Some(s) = &ship {
-            let crew = spec.crew;
-            super::build::ship_aggregate(&mut spec, s, crew);
-        }
-        let tank = new_parts.iter().find_map(|p| p.tank).map_or(self.geometry.tank, |t| t.region);
-        let geometry = GeometryFile { skin: self.geometry.skin, tank, primitives };
+        let geometry = GeometryFile { skin: self.geometry.skin, primitives };
         CraftDef { spec, geometry, parts: new_parts, ship }
     }
 
@@ -179,9 +164,6 @@ impl CraftDef {
             }
             if !(p.dry_mass.is_finite() && p.dry_mass > 0.0) {
                 return Err(format!("{what}: dry_mass must be positive"));
-            }
-            if p.tank.is_some_and(|t| !(t.capacity.is_finite() && t.capacity > 0.0)) {
-                return Err(format!("{what}: tank capacity must be positive"));
             }
             if p.max_load.is_nan() || p.max_load <= 0.0 {
                 return Err(format!("{what}: max_load must be positive"));
@@ -249,15 +231,10 @@ pub fn has_engine(e: &EngineFile) -> bool {
     e.thrust_vac > 0.0
 }
 
-/// Writes the parts' aggregates into a craft file: dry mass, propellant
-/// (full), the combined engine, crew; the thrusters' authority is the sum
-/// of the parts' couples (`super::CraftParams`), the file's `rcs` stays as
-/// it was.
+/// Writes the parts' aggregates into a craft file: dry mass, the engines'
+/// lump (the thermal network's mount node), the seats.
 pub fn aggregate(spec: &mut CraftFile, parts: &[Part]) {
     spec.dry_mass = parts.iter().map(|p| p.dry_mass).sum();
-    let capacity: f64 = parts.iter().filter_map(|p| p.tank).map(|t| t.capacity).sum();
-    spec.propellant.capacity = capacity;
-    spec.propellant.mass = capacity;
     let engines: Vec<EngineFile> = parts.iter().filter_map(|p| p.engine).collect();
     spec.engine = combine_engines(&engines);
     spec.crew = parts.iter().map(|p| p.crew).sum();

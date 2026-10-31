@@ -13,7 +13,7 @@
 //! their reasons (D101: reported, never silently patched).
 
 use super::assembly::{copies, nth, AssemblyFile, Loading};
-use super::file::{AttitudeControlFile, CraftFile, GeometryFile, PropellantFile, RcsFile, Tank};
+use super::file::{CraftFile, GeometryFile, Tank};
 use super::parts::{aggregate, CraftDef, Part, PartPower};
 use super::place::{self, Frame, Pose};
 use super::ship::{BottleDef, ComponentDef, EngineDef, Owned, PartInfo, ShipDef, TankDef};
@@ -547,9 +547,7 @@ fn assemble(
             primitives: p.primitives.clone(),
             parent: p.parent,
             dry_mass: g.mass + hosted.iter().map(|c| c.built.generated.mass).sum::<f64>(),
-            tank: None,
             engine,
-            rcs: None,
             chute: all().any(|f| matches!(f, Function::Chute(_))),
             interior_specific_heat: Some(g.specific_heat),
             node_max_k: Some(g.max_k),
@@ -570,20 +568,12 @@ fn assemble(
         })
     });
     let first_skin = primitives.first().and_then(|p| p.skin);
-    let geometry = GeometryFile {
-        skin: first_skin.unwrap_or(super::file::DEFAULT_SKIN),
-        tank: ship.tanks.first().map_or(Tank { base: DVec3::ZERO, axis: DVec3::Z, radius: 1.0 }, |t| t.region),
-        primitives,
-    };
+    let geometry = GeometryFile { skin: first_skin.unwrap_or(super::file::DEFAULT_SKIN), primitives };
     let mut spec = CraftFile {
         name: file.name.clone(),
         crew: file.crew,
         dry_mass: 0.0,
-        propellant: PropellantFile { mass: 0.0, capacity: 0.0 },
         engine: super::parts::combine_engines(&[]),
-        attitude_control: AttitudeControlFile {
-            rcs: RcsFile { thrust: 0.0, isp: 1.0, fore_z: 1.0, aft_z: 0.0, radius: 0.0 },
-        },
         chute: chute.unwrap_or_else(crate::chute::ChuteSpec::none),
         aero: file.aero,
         thermal: file.thermal,
@@ -592,17 +582,9 @@ fn assemble(
         antenna: file.antenna,
     };
     aggregate(&mut spec, &out);
-    let ship = Arc::new(ship);
-    ship_aggregate(&mut spec, &ship, file.crew);
-    CraftDef { spec, geometry, parts: out, ship: Some(ship) }
-}
-
-/// The craft file's propellant from a ship's tanks and bottles; its crew
-/// as aboard.
-pub fn ship_aggregate(spec: &mut CraftFile, ship: &ShipDef, crew: u32) {
-    let capacity: f64 = ship.regions().iter().map(|r| r.1).sum();
-    spec.propellant = PropellantFile { mass: ship.loaded().min(capacity), capacity };
-    spec.crew = crew;
+    // The crew aboard, as the file gives it (the parts give the seats).
+    spec.crew = file.crew;
+    CraftDef { spec, geometry, parts: out, ship: Some(Arc::new(ship)) }
 }
 
 /// A pressure-fed engine's injector pressure drop as a share of its

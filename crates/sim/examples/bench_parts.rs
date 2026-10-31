@@ -38,7 +38,7 @@ fn median(runs: usize, mut f: impl FnMut() -> f64) -> f64 {
 /// design times (ms), cells and nodes.
 fn piece(id: &CraftId, runs: usize) -> (f64, f64, usize, usize) {
     let def = definition(id).unwrap();
-    let opts = cell_options(id, &def);
+    let opts = cell_options(&def);
     let mut built: Option<Craft> = None;
     let build = median(runs, || {
         let (c, ms) = timed(|| Craft::from_def(id.clone(), def.clone(), &Resolution::default(), &opts));
@@ -55,7 +55,7 @@ fn piece(id: &CraftId, runs: usize) -> (f64, f64, usize, usize) {
 fn stages(id: &CraftId) {
     use sim::craft::{cells, mesh, MassModel};
     let def = definition(id).unwrap();
-    let opts = cell_options(id, &def);
+    let opts = cell_options(&def);
     let res = Resolution::default();
     let g = &def.geometry;
     let (surface, union) = timed(|| mesh::union_surface(&g.primitives, &res));

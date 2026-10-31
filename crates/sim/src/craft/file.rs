@@ -13,24 +13,15 @@ pub struct CraftFile {
     pub crew: u32,
     /// Everything but the propellant (kg).
     pub dry_mass: f64,
-    pub propellant: PropellantFile,
+    /// The engines' lump (`parts::combine_engines`): the thermal network's
+    /// mount node for a nozzle without an engine part of its own.
     pub engine: EngineFile,
-    pub attitude_control: AttitudeControlFile,
     pub chute: crate::chute::ChuteSpec,
     pub aero: AeroFile,
     pub thermal: ThermalLimits,
     pub impact: ImpactLimits,
     pub contact: ContactFile,
     pub antenna: AntennaFile,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct PropellantFile {
-    /// Loaded at the start (kg).
-    pub mass: f64,
-    /// Tank capacity (kg).
-    pub capacity: f64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -60,50 +51,6 @@ pub struct Mount {
     pub pos: DVec3,
     /// Thrust direction (body axes; normalised on load).
     pub dir: DVec3,
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct AttitudeControlFile {
-    /// Reaction-control thrusters: the only attitude actuator besides the
-    /// engine's gimbal (no reaction wheels: wheels big enough to turn a
-    /// 20 t craft do not fly on such craft).
-    pub rcs: RcsFile,
-}
-
-/// Reaction-control thrusters in two rings (fore and aft) of four quads
-/// around the body axis, at ±X and ±Y (the Shuttle's forward and aft RCS
-/// layout). Attitude uses pure couples only (no net force): pitch and yaw
-/// fire two lateral thrusters in one ring against two in the other, roll
-/// fires the tangential thruster of every quad.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct RcsFile {
-    /// Thrust of one thruster (N).
-    pub thrust: f64,
-    /// Specific impulse (s); the thrusters draw on the main propellant.
-    pub isp: f64,
-    /// Body-axis stations of the fore and aft rings (m).
-    pub fore_z: f64,
-    pub aft_z: f64,
-    /// Distance of the quads from the body axis (m).
-    pub radius: f64,
-}
-
-impl RcsFile {
-    /// Couple per body axis at full command (N·m): pitch and yaw
-    /// `2·F·(fore − aft)`, roll `8·F·r`.
-    pub fn torque(&self) -> DVec3 {
-        let pitch = 2.0 * self.thrust * (self.fore_z - self.aft_z);
-        DVec3::new(pitch, pitch, 8.0 * self.thrust * self.radius)
-    }
-
-    /// Propellant flow per body axis at full command (kg/s): four
-    /// thrusters for pitch or yaw, eight for roll.
-    pub fn flow(&self) -> DVec3 {
-        let one = self.thrust / (self.isp * crate::vessel::G0);
-        DVec3::new(4.0 * one, 4.0 * one, 8.0 * one)
-    }
 }
 
 /// Aerodynamic data the cells cannot give (D061, `sim::aero`).
@@ -195,8 +142,6 @@ pub struct AntennaFile {
 pub struct GeometryFile {
     /// Skin of primitives that do not name their own.
     pub skin: Skin,
-    /// Where the propellant sits.
-    pub tank: Tank,
     pub primitives: Vec<Primitive>,
 }
 
@@ -236,7 +181,7 @@ pub const DEFAULT_SKIN: Skin = Skin {
     coupling: None,
 };
 
-/// The propellant region: a cylinder from `base` along `axis` (its length is
+/// A tank's or bottle's region (`ship::ShipDef::regions`): a cylinder from `base` along `axis` (its length is
 /// the tank height).
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -379,13 +324,10 @@ fn validate_shape(what: &str, s: &Shape) -> Result<(), String> {
     Ok(())
 }
 
-/// Checks a geometry's skin, tank and primitives (a craft of parts checks
+/// Checks a geometry's skin and primitives (a craft of parts checks
 /// its nozzles per part, [`super::CraftDef::validate`]).
 pub fn validate_shapes(g: &GeometryFile) -> Result<(), String> {
     validate_skin("skin", &g.skin)?;
-    finite_vec("tank.base", g.tank.base)?;
-    nonzero_vec("tank.axis", g.tank.axis)?;
-    positive("tank.radius", g.tank.radius)?;
     if g.primitives.is_empty() {
         return Err("primitives must not be empty".into());
     }

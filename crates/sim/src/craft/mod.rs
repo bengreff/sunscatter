@@ -40,7 +40,7 @@ pub use engine::{Engine, EngineOutput};
 pub use file::{AeroFile, ContactFile, CraftFile, GeometryFile, Primitive, Shape, Skin, Spring, Tank, ThermalLimits};
 pub use mass::{MassModel, MassProps};
 pub use mesh::{RenderMesh, Resolution, Surface};
-pub use parts::{CraftDef, Part, PartPower, PartTank};
+pub use parts::{CraftDef, Part, PartPower};
 pub use registry::craft_of;
 pub use volume::{VolumeGrid, VolumeNode};
 
@@ -84,38 +84,26 @@ impl Craft {
     /// Derives the surface, render mesh, cells and mass model of a craft of
     /// parts. Each part's dry mass is a shell over its own primitives'
     /// surface, so a part's mass properties do not depend on what it is
-    /// attached to (a piece that breaks off keeps them); one part is the
-    /// craft's shell over the whole surface with its one tank.
+    /// attached to (a piece that breaks off keeps them), with its ship's
+    /// components on it as solids.
     pub fn from_def(id: CraftId, def: CraftDef, res: &Resolution, opts: &CellOptions) -> Self {
         let CraftDef { spec, geometry, parts, ship } = def;
         let surface = mesh::union_surface(&geometry.primitives, res);
         let cells = cells::build_cells(&surface, &geometry.primitives, &geometry.skin, opts);
         let g = &geometry;
-        let (mass, part_mass) = if let Some(ship) = &ship {
-            // Each part: its own shell, and its components as solids.
-            let part_mass: Vec<MassProps> = (parts.iter())
-                .map(|p| {
-                    let own: Vec<Primitive> = p.primitives.iter().map(|&q| g.primitives[q as usize].clone()).collect();
-                    let hosted: Vec<&ship::ComponentDef> = ship.components.iter().filter(|c| c.part == p.id).collect();
-                    let shell = p.dry_mass - hosted.iter().map(|c| c.mass).sum::<f64>();
-                    let mut items = vec![MassModel::shell(&mesh::union_surface(&own, res), &own, &g.skin, shell)];
-                    items.extend(hosted.iter().map(|c| MassProps::solid(&c.envelope, c.mass, c.pose.rot, c.pose.pos)));
-                    MassProps::sum(&items)
-                })
-                .collect();
-            (MassModel::of_parts(&part_mass), part_mass)
-        } else if parts.len() == 1 {
-            let mass = MassModel::new(&surface, &g.primitives, &g.skin, spec.dry_mass);
-            (mass, vec![mass.dry()])
-        } else {
-            let part_mass: Vec<MassProps> = (parts.iter())
-                .map(|p| {
-                    let own: Vec<Primitive> = p.primitives.iter().map(|&q| g.primitives[q as usize].clone()).collect();
-                    MassModel::shell(&mesh::union_surface(&own, res), &own, &g.skin, p.dry_mass)
-                })
-                .collect();
-            (MassModel::of_parts(&part_mass), part_mass)
-        };
+        // Each part: its own shell, and its components as solids.
+        let components = ship.as_ref().map_or(&[][..], |s| &s.components[..]);
+        let part_mass: Vec<MassProps> = (parts.iter())
+            .map(|p| {
+                let own: Vec<Primitive> = p.primitives.iter().map(|&q| g.primitives[q as usize].clone()).collect();
+                let hosted: Vec<&ship::ComponentDef> = components.iter().filter(|c| c.part == p.id).collect();
+                let shell = p.dry_mass - hosted.iter().map(|c| c.mass).sum::<f64>();
+                let mut items = vec![MassModel::shell(&mesh::union_surface(&own, res), &own, &g.skin, shell)];
+                items.extend(hosted.iter().map(|c| MassProps::solid(&c.envelope, c.mass, c.pose.rot, c.pose.pos)));
+                MassProps::sum(&items)
+            })
+            .collect();
+        let mass = MassModel::of_parts(&part_mass);
         let mesh = surface.render_mesh();
         Craft { id, spec, mesh, surface, cells, geometry, mass, parts, part_mass, ship, design: DesignSlot::default() }
     }

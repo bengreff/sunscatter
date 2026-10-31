@@ -361,8 +361,11 @@ fn craft_row(w: &World, n: usize, runs: usize) -> Row {
         .fold((DVec3::splat(f64::MAX), DVec3::splat(f64::MIN)), |b, p| (b.0.min(*p), b.1.max(*p)));
     let bake_ms = median(runs, || timed(|| bake(&c.surface, &c.cells, &BakeOptions::default())).1);
     let t = &c.spec.thermal;
-    let volume =
-        median(runs, || timed(|| VolumeGrid::new(&c.geometry.primitives, (lo, hi), &c.geometry.tank, t.node_size)).1);
+    let (def, bounds) = (c.def(), (lo, hi));
+    let (owner, tanks) = (def.primitive_part(), def.tanks());
+    let volume = median(runs, || {
+        timed(|| VolumeGrid::with_parts(&c.geometry.primitives, &owner, bounds, &tanks, t.node_size)).1
+    });
     let design_ms = median(runs, || timed(|| CraftDesign::new(c)).1);
     let d = c.design();
     let drag = median(runs, || timed(|| mean_drag_area(&d.bake, d.cd0)).1);

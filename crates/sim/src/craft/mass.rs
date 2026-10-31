@@ -131,19 +131,8 @@ fn inertia_from_second(second: DMat3) -> DMat3 {
 }
 
 impl MassModel {
-    /// The model of a craft: `dry_mass` spread over `surface` by skin areal
-    /// mass.
-    pub fn new(surface: &Surface, primitives: &[Primitive], default_skin: &Skin, dry_mass: f64) -> Self {
-        let (m, first, second) =
-            shell_moments(surface, |p| primitives[p as usize].skin.unwrap_or(*default_skin).areal_mass);
-        let scale = dry_mass / m;
-        let com = first / m;
-        let about_origin = inertia_from_second(second * scale);
-        MassModel { dry_mass, dry_com: com, dry_inertia: about_origin - parallel_axis(dry_mass, com) }
-    }
-
     /// A part's dry mass properties: `dry_mass` spread over its own
-    /// `surface` by skin areal mass (as [`Self::new`]).
+    /// `surface` by skin areal mass.
     pub fn shell(surface: &Surface, primitives: &[Primitive], default_skin: &Skin, dry_mass: f64) -> MassProps {
         let (m, first, second) =
             shell_moments(surface, |p| primitives[p as usize].skin.unwrap_or(*default_skin).areal_mass);

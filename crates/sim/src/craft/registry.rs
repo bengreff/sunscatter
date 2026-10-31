@@ -100,9 +100,9 @@ pub fn definition(id: &CraftId) -> Result<CraftDef, String> {
     }
 }
 
-/// How the cells of craft `id` (definition `def`) are built: by area and
+/// How the cells of a craft of definition `def` are built: by area and
 /// part count ([`CellOptions::for_parts`]).
-pub fn cell_options(_id: &CraftId, def: &CraftDef) -> CellOptions {
+pub fn cell_options(def: &CraftDef) -> CellOptions {
     CellOptions::for_parts(def.parts.len())
 }
 
@@ -116,7 +116,7 @@ pub fn craft_of(id: &CraftId) -> Arc<Craft> {
     }
     // Built outside the lock: other ids may build meanwhile.
     let def = definition(id).unwrap_or_else(|e| panic!("{e}"));
-    let opts = cell_options(id, &def);
+    let opts = cell_options(&def);
     let built = Craft::from_def(id.clone(), def, &Resolution::default(), &opts);
     cache.lock().expect("craft cache").entry(id.0.clone()).or_insert_with(|| Arc::new(built)).clone()
 }
@@ -172,14 +172,14 @@ mod tests {
     fn a_stress_craft_and_its_pieces_rebuild_from_their_ids() {
         let id = super::super::stress::id(12);
         let def = definition(&id).unwrap();
-        let built = Craft::from_def(id.clone(), def.clone(), &Resolution::default(), &cell_options(&id, &def));
+        let built = Craft::from_def(id.clone(), def.clone(), &Resolution::default(), &cell_options(&def));
         let again = craft_of(&built.id);
         assert_eq!(again.as_ref(), &built);
         assert_eq!(**again.design(), **built.design());
         assert!(Arc::ptr_eq(&again, &craft_of(&built.id)), "built once");
         let id = CraftId::piece("stress-12", &[4, 5, 6]);
         let def = built.def().subset(&[4, 5, 6]);
-        let piece = Craft::from_def(id.clone(), def.clone(), &Resolution::default(), &cell_options(&id, &def));
+        let piece = Craft::from_def(id.clone(), def.clone(), &Resolution::default(), &cell_options(&def));
         assert_eq!(**craft_of(&id).design(), **piece.design());
         assert_eq!(*super::super::design_of(&id), **piece.design());
     }

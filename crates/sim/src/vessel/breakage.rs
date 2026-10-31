@@ -15,9 +15,8 @@
 //!   normal force at its contact points (the same spring-dampers as the
 //!   contact).
 //!
-//! A craft of one part (the test craft) keeps the whole-craft rule: over a
-//! temperature limit or hit too fast, the vessel is destroyed and flies on as
-//! a wreck. Debug mode (D064) disables every trigger. A breakup is applied by
+//! A craft whose every part is destroyed flies on as a wreck (the split
+//! keeps the first). Debug mode (D064) disables every trigger. A breakup is applied by
 //! [`Vessel::split`] (the vessel stops at the tick where it happened until
 //! then; `sim::vessel::split`).
 
@@ -31,35 +30,14 @@ use crate::world::World;
 use glam::DVec3;
 
 impl Vessel {
-    /// After a tick: destroyed if a temperature is above its limit (not in
-    /// debug mode, D064).
-    pub(super) fn check_overheat(&mut self) {
-        if self.debug || self.destroyed.is_some() {
-            return;
-        }
-        let (design, t) = (self.craft.design(), &self.craft.thermal);
-        let Some(hot) = crate::thermal::check(&self.thermal.state, &design.skin_max, t.internal_max_k) else {
-            return;
-        };
-        let temperature = match hot {
-            Overheat::Cell(i) => self.thermal.state.skin[i as usize],
-            Overheat::Node(j) => self.thermal.state.nodes[j as usize],
-        };
-        self.destroy(Destruction::Overheat { at: hot, temperature });
-    }
-
     /// After a live tick with the tick's `flow` (body axes, if in air) and
     /// the ground `contact` (anchor, body) of its substeps: the parts over a
-    /// limit break (a one-part craft overheats whole, D065).
+    /// limit break (D065).
     pub(super) fn check_limits(&mut self, world: &World, flow: Option<&Flow>, contact: Option<(NodeId, NodeId)>) {
         if self.debug || self.destroyed.is_some() {
             return;
         }
         let design = self.craft.design().clone();
-        if design.parts.len() <= 1 {
-            self.check_overheat();
-            return;
-        }
         // A breakup already pending this tick (a separation, a new shape)
         // stays, whatever else breaks.
         let pending = self.breakup.is_some();
@@ -81,15 +59,9 @@ impl Vessel {
                 hot(design.cell_part[i], Overheat::Cell(i as u32), t, &mut b);
             }
         }
-        // A craft of parts' interiors are judged by their time at
-        // temperature (`systems::failure`: rated to destruction), not at once
-        // at their service limit.
-        let interiors = if design.ship.is_some() { &[][..] } else { &st.nodes[..] };
-        for (j, (&t, &max)) in interiors.iter().zip(&design.node_max).enumerate() {
-            if t > max {
-                hot(design.node_part[j], Overheat::Node(j as u32), t, &mut b);
-            }
-        }
+        // The interiors are judged by their time at temperature
+        // (`systems::failure`: rated to destruction), not at once at their
+        // service limit.
         // A root part (no parent: the craft's, or a piece's) has nothing to
         // be torn from: it stays.
         let loads = self.part_loads(world, flow, contact);
@@ -106,15 +78,11 @@ impl Vessel {
         }
     }
 
-    /// A contact point closed too fast during a tick (D066): a one-part
-    /// craft is destroyed; otherwise the point's part is, at the tick's end.
+    /// A contact point closed too fast during a tick (D066): the point's
+    /// part is destroyed, at the tick's end.
     pub(super) fn impacted(&mut self, im: contact::Impact) {
         let cause = Destruction::Impact { speed: im.speed, point: im.point };
         let design = self.craft.design().clone();
-        if design.parts.len() <= 1 {
-            self.destroy(cause);
-            return;
-        }
         let part = design.cell_part[self.craft.contacts[im.point as usize].cell as usize];
         let b = self.breakup.get_or_insert_with(|| Breakup {
             epoch: self.time,

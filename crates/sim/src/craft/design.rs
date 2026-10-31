@@ -47,8 +47,6 @@ pub struct CraftDesign {
     pub volume: VolumeGrid,
     /// Heat capacity of each node without propellant (J/K).
     pub dry_capacity: Vec<f64>,
-    /// Tank capacity (kg).
-    pub tank_capacity: f64,
     /// The node at the engine's mount.
     pub engine_node: u32,
     /// The nozzle's cells and each one's share of the engine's wall heat
@@ -94,20 +92,17 @@ impl CraftDesign {
             .fold((glam::DVec3::splat(f64::MAX), glam::DVec3::splat(f64::MIN)), |b, p| (b.0.min(*p), b.1.max(*p)));
         let def = craft.def();
         let owner = def.primitive_part();
-        let volume = match craft.parts.len() {
-            1 => VolumeGrid::new(&craft.geometry.primitives, bounds, &craft.geometry.tank, t.node_size),
-            _ => VolumeGrid::with_parts(&craft.geometry.primitives, &owner, bounds, &def.tanks(), t.node_size),
-        };
+        let volume = VolumeGrid::with_parts(&craft.geometry.primitives, &owner, bounds, &def.tanks(), t.node_size);
         let cells = &craft.cells.cells;
         let cell_part: Vec<u32> = cells.iter().map(|c| owner[c.primitive as usize]).collect();
-        // Each engine part's mount node; the craft's engine (one part: the
-        // file's) for a nozzle without an engine of its own.
+        // Each engine part's mount node; the engines' lump (the file's) for a
+        // nozzle without an engine of its own.
         let mount_node = |m: &super::file::Mount| volume.nearest(m.pos + m.dir.normalize() * (0.25 * t.node_size));
         let engine_node = mount_node(&craft.spec.engine.mount);
         let engines = engines(craft);
         let nozzle_of = |c: &super::Cell| {
             let part = owner[c.primitive as usize] as usize;
-            let own = craft.parts[part].engine.filter(|_| craft.parts.len() > 1);
+            let own = craft.parts[part].engine;
             craft.geometry.primitives[c.primitive as usize]
                 .nozzle
                 .then(|| own.map_or(engine_node, |e| mount_node(&e.mount)))
@@ -151,7 +146,6 @@ impl CraftDesign {
             network,
             volume,
             dry_capacity,
-            tank_capacity: craft.spec.propellant.capacity,
             engine_node,
             nozzle_cells,
             skin_max,
@@ -169,23 +163,12 @@ impl CraftDesign {
         }
     }
 
-    /// Each node's heat capacity (J/K) with `aboard` in the tanks: each
-    /// tank's own contents in the nodes where they sit. A grid with other
-    /// tanks than the list (a craft of parts of one part: its first tank)
-    /// takes the list's total as one fill, at its mean specific heat.
+    /// Each node's heat capacity (J/K) with `aboard` in the tanks (the
+    /// ship's regions, as the grid's): each tank's own contents in the nodes
+    /// where they sit.
     pub fn node_capacity(&self, aboard: &Aboard, out: &mut [f64]) {
         let held = &aboard.0;
-        if held.len() != self.volume.tanks() {
-            let mass: f64 = held.iter().map(|h| h.mass).sum();
-            let heat: f64 = held.iter().map(|h| h.mass * h.specific_heat).sum();
-            let c = if mass > 0.0 { heat / mass } else { 0.0 };
-            let fill = if self.tank_capacity > 0.0 { mass / self.tank_capacity } else { 0.0 };
-            self.volume.propellant(mass, fill, out);
-            for (o, dry) in out.iter_mut().zip(&self.dry_capacity) {
-                *o = dry + *o * c;
-            }
-            return;
-        }
+        debug_assert!(held.is_empty() || held.len() == self.volume.tanks(), "aboard and the grid's tanks");
         out.fill(0.0);
         for (k, h) in held.iter().enumerate().filter(|(_, h)| h.mass > 0.0) {
             let amount = h.mass * h.specific_heat;
@@ -203,12 +186,9 @@ impl CraftDesign {
     }
 }
 
-/// The engine parts of a craft of several parts and each one's share of
-/// the combined engine's wall heat (f·F·Isp, D077); none for one part.
+/// The engine parts and each one's share of the engines' wall heat
+/// (f·F·Isp, D077).
 fn engines(craft: &Craft) -> Vec<(u32, f64)> {
-    if craft.parts.len() < 2 {
-        return Vec::new();
-    }
     let heat = |e: &super::file::EngineFile| e.nozzle_heat_fraction * e.thrust_vac * e.isp_vac;
     let all: Vec<(u32, f64)> =
         (craft.parts.iter().enumerate()).filter_map(|(i, p)| p.engine.map(|e| (i as u32, heat(&e)))).collect();
@@ -218,18 +198,11 @@ fn engines(craft: &Craft) -> Vec<(u32, f64)> {
 
 /// Each node's heat capacity without propellant (J/K): each part's dry
 /// mass less its skin, spread over the volume it fills, at its interior's
-/// specific heat (one part: the craft's dry mass over the whole volume). A
-/// part too thin for the grid's samples (a fin, a panel) puts its interior
+/// specific heat. A part too thin for the grid's samples (a fin, a panel) puts its interior
 /// in the nodes beneath its cells (`cell_node`), by area.
 fn dry_capacity(craft: &Craft, volume: &VolumeGrid, cell_part: &[u32], cell_node: &[u32]) -> Vec<f64> {
     let t = &craft.spec.thermal;
     let cells = &craft.cells.cells;
-    if craft.parts.len() == 1 {
-        let skin: f64 = cells.iter().map(|c| c.skin_mass()).sum();
-        let per_m3 = (craft.spec.dry_mass - skin).max(0.0) / volume.volume();
-        let c = craft.parts[0].interior_specific_heat.unwrap_or(t.interior_specific_heat);
-        return volume.nodes.iter().map(|n| n.volume * per_m3 * c).collect();
-    }
     let n = craft.parts.len();
     let (mut skin, mut space) = (vec![0.0; n], vec![0.0; n]);
     for (c, &p) in cells.iter().zip(cell_part) {
