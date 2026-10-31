@@ -389,6 +389,20 @@ pub fn turn_lead(inertia: &DMat3, torque: DVec3) -> f64 {
     libm::ceil(t / super::TICK) * super::TICK
 }
 
+/// [`turn_lead`] with the turn rate capped at `max_rate` (rad/s; the gas
+/// a craft's thrusters can afford, `Vessel::gas_turn_cap`): where the cap
+/// binds, a half turn at that rate, its spin-up, and its stop at half the
+/// authority, then the settling.
+pub fn turn_lead_capped(inertia: &DMat3, torque: DVec3, max_rate: f64) -> f64 {
+    let lead = turn_lead(inertia, torque);
+    let alpha = (torque.x / inertia.x_axis.x).min(torque.y / inertia.y_axis.y);
+    if !(alpha.is_finite() && alpha > 0.0 && max_rate.is_finite() && max_rate > 0.0) {
+        return lead;
+    }
+    let capped = math::PI / max_rate + 1.5 * max_rate / alpha + SETTLE;
+    lead.max(libm::ceil(capped / super::TICK) * super::TICK)
+}
+
 /// Settling time of the hold after a turn (s): the critically damped tail
 /// from the braking phase to the snap threshold, with margin.
 pub const SETTLE: f64 = 30.0;

@@ -269,6 +269,11 @@ impl Vessel {
             })
             .collect();
         let (torque, rcs_flow) = def.rcs_authority(props.com, &fed);
+        // A turn on the thrusters alone spends gas: the rate it can afford
+        // (a running gimbal turns the stack without it).
+        let gimbals = t.thrust > 0.0 && t.gimbal > 0.0;
+        let diag = DVec3::new(props.inertia.x_axis.x, props.inertia.y_axis.y, props.inertia.z_axis.z);
+        let gas = if self.debug || gimbals { f64::INFINITY } else { gas_cap(def, state, diag, torque, rcs_flow) };
         // Deployed grid fins in the air add their authority.
         let fins = flow.map_or(Vec::new(), |_| crate::systems::fins::deployed(def, state));
         let fin_gains = flow.map_or(Vec::new(), |f| crate::systems::fins::gains(&fins, &f, props.com));
@@ -284,7 +289,7 @@ impl Vessel {
         let want = (controls.translate.clamp(DVec3::splat(-1.0), DVec3::splat(1.0)) + propulsion::ullage(def, state))
             .clamp_length_max(1.0);
         let push = crate::systems::rcs::translate(def, state, props.com, want, self.debug);
-        let limits = Some(limits(def, state, &t, dt, q));
+        let limits = Some(limits(def, state, &t, dt, q, gas));
         let tick = ShipTick {
             draws: t.draws,
             heat: t.heat,
@@ -417,11 +422,62 @@ pub fn turn_cap(q: f64) -> f64 {
     (10.0 * deg * (1_000.0 / q.max(1_000.0))).max(0.5 * deg)
 }
 
+/// The share of the propellant its thrusters have left that a turn on them
+/// may spend spinning up and stopping (E: PLANNER-2's default, open for the
+/// owner).
+pub const TURN_GAS_SHARE: f64 = 0.1;
+
+/// The fastest turn a craft of parts' thrusters can afford (rad/s): the
+/// rate whose spin-up and stop about an axis (`2·I·ω/τ` seconds of the
+/// couple's `flow`) cost at most [`TURN_GAS_SHARE`] of the propellant they
+/// have left ([`rcs_propellant`]), the slowest axis's. `inertia` is the
+/// diagonal, `torque` and `flow` the couples' per axis
+/// (`ShipDef::rcs_authority`). Infinite when no couple turns the craft.
+pub fn gas_cap(def: &ShipDef, state: &ShipState, inertia: DVec3, torque: DVec3, flow: DVec3) -> f64 {
+    let left = rcs_propellant(def, state);
+    (0..3)
+        .filter(|&k| torque[k] > 0.0 && flow[k] > 0.0 && inertia[k] > 0.0)
+        .map(|k| TURN_GAS_SHARE * left * torque[k] / (2.0 * inertia[k] * flow[k]))
+        .fold(f64::INFINITY, f64::min)
+}
+
+/// The propellant a craft of parts' enabled thrusters draw from (kg): their
+/// bottles' gas and their tanks' liquid, each counted once.
+pub fn rcs_propellant(def: &ShipDef, state: &ShipState) -> f64 {
+    let (mut bottles, mut tanks) = (std::collections::BTreeSet::new(), std::collections::BTreeSet::new());
+    for (d, _) in def.thrusters.iter().zip(&state.thrusters).filter(|(_, s)| s.enabled) {
+        match &d.feed {
+            crate::craft::ship::Feed::Bottles(b) => bottles.extend(b.iter().copied()),
+            crate::craft::ship::Feed::Tanks([o, f]) => tanks.extend(o.iter().chain(f).copied()),
+        }
+    }
+    let gas = |b: u32| state.bottles[b as usize].moles * crate::craft::state::molar_mass(&def.bottles[b as usize].gas);
+    bottles.into_iter().map(gas).sum::<f64>() + tanks.into_iter().map(|t| state.tanks[t as usize].liquid).sum::<f64>()
+}
+
+impl super::Vessel {
+    /// The turn rate a craft of parts' thrusters can afford now with all
+    /// its enabled, fed blocks ([`gas_cap`]; rad/s): the cap a planned
+    /// burn's schedule turns at. Infinite for the made-up craft and in
+    /// debug mode.
+    pub fn gas_turn_cap(&self) -> f64 {
+        let Some((def, state)) = self.ship_parts().filter(|_| !self.debug) else { return f64::INFINITY };
+        let fed: Vec<bool> = (0..def.thrusters.len())
+            .map(|i| state.thrusters[i].enabled && crate::systems::ship::block_ready(def, state, i))
+            .collect();
+        let props = self.mass_props();
+        let (torque, flow) = def.rcs_authority(props.com, &fed);
+        let diag = DVec3::new(props.inertia.x_axis.x, props.inertia.y_axis.y, props.inertia.z_axis.z);
+        gas_cap(def, state, diag, torque, flow)
+    }
+}
+
 /// A craft of parts' attitude limits over a tick of `dt` at dynamic
 /// pressure `q`: the running engines' gimbal actuators at the slowest one's
 /// rate (falcon9.md §2: the Merlins' 20°/s, the MVac's 10°/s) from where
-/// the gimbal holds now, and the turn cap.
-fn limits(def: &ShipDef, state: &ShipState, t: &ShipThrust, dt: f64, q: f64) -> super::attitude::Limits {
+/// the gimbal holds now, and the turn cap, under the rate the thrusters'
+/// gas affords (`gas`, rad/s).
+fn limits(def: &ShipDef, state: &ShipState, t: &ShipThrust, dt: f64, q: f64, gas: f64) -> super::attitude::Limits {
     let rate = (def.engines.iter().zip(&t.per_engine))
         .filter(|(e, &f)| f > 0.0 && e.data.gimbal_rate_dps > 0.0)
         .map(|(e, _)| e.data.gimbal_rate_dps)
@@ -430,7 +486,7 @@ fn limits(def: &ShipDef, state: &ShipState, t: &ShipThrust, dt: f64, q: f64) -> 
     super::attitude::Limits {
         gimbal_from: state.runtime.thrust_dir.unwrap_or(t.dir),
         gimbal_step: step,
-        max_rate: turn_cap(q),
+        max_rate: turn_cap(q).min(gas),
     }
 }
 

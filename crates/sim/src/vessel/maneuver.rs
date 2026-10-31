@@ -90,7 +90,8 @@ impl Vessel {
         let props = self.mass_props();
         let turn = self.rcs_authority().map_or(super::hold::SETTLE, |a| {
             let i = props.inertia;
-            super::turn_lead(&i, DVec3::new(a.rotate.x * i.x_axis.x, a.rotate.y * i.y_axis.y, a.rotate.z * i.z_axis.z))
+            let torque = DVec3::new(a.rotate.x * i.x_axis.x, a.rotate.y * i.y_axis.y, a.rotate.z * i.z_axis.z);
+            super::hold::turn_lead_capped(&i, torque, self.gas_turn_cap())
         });
         let (wake, ignite) = maneuver::schedule(node, (thrust, mdot, mass), start, turn);
         let wake = if wake < self.time { self.time } else { wake };

@@ -98,6 +98,23 @@ fn overshot_table() {
 }
 
 #[test]
+fn steers_table() {
+    // (step, |v_go| m/s, acceleration m/s²) → the direction follows v_go.
+    let cases = [
+        (Step::Turn, 0.5, 0.0, true),
+        (Step::Settle, 0.5, 8.0, true),
+        (Step::Burn, 100.0, 8.0, true), // 12.5 s to go
+        (Step::Burn, 16.0, 8.0, false), // 2 s: held
+        (Step::Burn, 1.0, 8.0, false),
+        (Step::Burn, 1.0, 0.0, true), // no estimate: still steers
+        (Step::TailOff, 100.0, 8.0, false),
+    ];
+    for (step, go, accel, want) in cases {
+        assert_eq!(steers(step, go, accel), want, "{step:?} {go} {accel}");
+    }
+}
+
+#[test]
 fn takeover_table() {
     let base = Controls { sas: true, hold: HoldMode::Stability, ..Controls::default() };
     let burning = Commands { hold: Some(DVec3::X), throttle: Some(1.0), ..Commands::default() };

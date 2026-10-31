@@ -54,6 +54,11 @@ pub const SETTLE_LEAD: f64 = 20.0;
 /// Past the ignition epoch, the program ignites even on unsettled
 /// propellant after this (s, E).
 pub const SETTLE_WAIT: f64 = 60.0;
+/// In a burn's last seconds the steering holds its direction (s; E: about
+/// the attitude hold's response time). Near the cutoff v_go is small, and
+/// errors across it swing its direction faster than any turn could follow:
+/// a gimballed stage chasing it ends the burn spinning.
+pub const STEER_HOLD: f64 = 2.0;
 
 /// A planned burn as the player sets it (D126): Δv along prograde, normal
 /// and radial-out (`dv.x`, `y`, `z`, m/s) at epoch `t`, relative to body
@@ -281,6 +286,18 @@ pub fn schedule(node: &Node, (thrust, mdot, m0): (f64, f64, f64), start: f64, tu
     (ignite.add_seconds(-(turn + SETTLE_LEAD)), ignite)
 }
 
+/// Whether the burn direction follows v_go this tick (|v_go| `go`, m/s,
+/// at an acceleration `accel`, m/s², from the stage estimate): through the
+/// turn and the settling, and in the burn until the time to go falls under
+/// [`STEER_HOLD`]; never in the tail-off.
+pub fn steers(step: Step, go: f64, accel: f64) -> bool {
+    match step {
+        Step::TailOff => false,
+        Step::Burn => go > STEER_HOLD * accel.max(0.0),
+        _ => true,
+    }
+}
+
 /// Whether engine `i`'s readout says it burns (starting or running).
 fn burning(view: &View, i: u32) -> bool {
     view.engines
@@ -314,10 +331,9 @@ pub fn step(x: &Inputs, p: &mut Program) -> Commands {
         }
     }
     let go = x.rel.zip(p.target).and_then(|(rel, target)| v_go(target, rel, x.mu, to_node));
-    if p.step != Step::TailOff {
-        if let Some(g) = go.filter(|g| g.length() > 0.0) {
-            p.dir = Some(g.normalize());
-        }
+    let accel = if x.mass > 0.0 { x.thrust / x.mass } else { 0.0 };
+    if let Some(g) = go.filter(|g| g.length() > 0.0 && steers(p.step, g.length(), accel)) {
+        p.dir = Some(g.normalize());
     }
     let hold = p.dir;
     let since = |e: Option<Epoch>| e.map_or(0.0, |e| x.t.seconds_since(e));
