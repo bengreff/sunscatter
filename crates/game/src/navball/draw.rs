@@ -5,11 +5,9 @@
 //! bar right of it, and the flight state under it. Everything
 //! else is in the task menus. Hidden in the tracking station.
 
-use super::altitude::AltitudeRef;
 use super::rules::{self, Mode};
-use super::{g_meter, ApsisReadout, NavState, Navball};
+use super::{NavState, Navball};
 use crate::commands::GameCommand;
-use crate::format::{duration as fmt_duration, DASH};
 use crate::interface::layout::InterfaceSettings;
 use crate::interface::theme;
 use crate::state::SimState;
@@ -17,8 +15,6 @@ use crate::tracking::TrackingStation;
 use bevy::prelude::*;
 use bevy_egui::{egui, EguiContexts};
 use egui::{vec2, Align2, Color32, RichText, Stroke};
-use sim::systems::Quantity;
-use sim::vessel::HoldMode;
 
 /// Width of the readouts left of the ball and of the controls right of it.
 const SIDE_PX: f32 = 150.0;
@@ -62,15 +58,14 @@ pub fn draw(
         ui.spacing_mut().item_spacing = vec2(4.0, 2.0);
         let has_target = shown.target.is_some();
         centred_row(ui, egui::Id::new("nav_switch"), |ui| switch(ui, shown.mode, locked, has_target, &mut actions));
+        let rows = rules::readouts(&shown);
         ui.vertical_centered(|ui| {
-            let speed = shown.known.speed(Quantity::Velocity, shown.speed);
-            ui.label(RichText::new(speed).monospace().size(20.0).color(theme::TEXT));
-            let about = shown.target.as_ref().filter(|_| shown.mode == Mode::Target).map_or(&shown.body, |t| &t.0);
-            ui.label(RichText::new(format!("{} · {about}", shown.mode.label())).monospace().small().color(theme::DIM));
+            ui.label(RichText::new(&rows.speed).monospace().size(20.0).color(theme::TEXT));
+            ui.label(RichText::new(&rows.caption).monospace().small().color(theme::DIM));
         });
         ui.add_space(2.0);
         ui.horizontal_top(|ui| {
-            fixed_column(ui, SIDE_PX, ball, |ui| readouts(ui, &shown, &mut actions));
+            fixed_column(ui, SIDE_PX, ball, |ui| readouts(ui, &rows, &mut actions));
             let (rect, response) = ui.allocate_exact_size(vec2(ball, ball), egui::Sense::click());
             super::ball::paint_ball(ui.painter(), rect, &state);
             if response.on_hover_text("Click to change the speed mode").clicked() {
@@ -150,91 +145,56 @@ fn switch(ui: &mut egui::Ui, mode: Mode, locked: bool, has_target: bool, actions
 }
 
 /// Altitude (its label the switch), G, Ap and Pe with the time to each
-/// (D076), as the craft knows them (D106: a dash for what it cannot
-/// measure).
-fn readouts(ui: &mut egui::Ui, s: &NavState, actions: &mut Vec<Action>) {
-    let k = &s.known;
-    let orbit = k.orbit();
-    let apsis = |name: &str, a: &Option<ApsisReadout>| match a {
-        Some(a) => [
-            (
-                a.other_body.as_ref().map_or(name.to_string(), |b| format!("{name} {b}")),
-                k.distance(Quantity::Position, a.above_datum),
-                Some(rules::apsis_hover(a, &s.body, k)),
-            ),
-            ("  in".to_string(), k.or_dash(orbit, || fmt_duration(a.in_s)), None),
-        ],
-        None => [(name.to_string(), DASH.to_string(), None), ("  in".to_string(), DASH.to_string(), None)],
-    };
-    // Above the terrain from an altimeter (or a fix), above the datum from the position.
-    let alt_q = if s.altitude_ref == AltitudeRef::Terrain { Quantity::Altitude } else { Quantity::Position };
-    let mut rows = vec![];
-    rows.extend(apsis("Ap", &s.ap));
-    rows.extend(apsis("Pe", &s.pe));
+/// (D076), as the craft knows them ([`rules::readouts`]).
+fn readouts(ui: &mut egui::Ui, rows: &rules::Readouts, actions: &mut Vec<Action>) {
     ui.add_space(10.0);
     let dim = |text: &str| RichText::new(text).monospace().small().color(theme::DIM);
-    let value = |ui: &mut egui::Ui, text: String, colour: Color32| {
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.label(RichText::new(text).monospace().color(colour))
-        })
-        .inner
+    let value = |ui: &mut egui::Ui, r: &rules::Readout| {
+        let shown = ui
+            .with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.label(RichText::new(&r.text).monospace().color(theme::level_colour(r.level)))
+            })
+            .inner;
+        if let Some(h) = &r.hover {
+            shown.on_hover_text(h);
+        }
     };
     egui::Grid::new("nav_readouts").num_columns(2).spacing([8.0, 3.0]).min_col_width(40.0).show(ui, |ui| {
-        let switch = ui.add(egui::Button::new(dim(&s.altitude.0)).frame(false));
-        let hint = "Click: above the datum (sea level; without a sea the lowest ground; on a giant its 1-bar \
-                    level) or above the terrain under the craft (TER). Ap and Pe are above the datum.";
-        if switch.on_hover_text(hint).clicked() {
+        let switch = ui.add(egui::Button::new(dim(&rows.altitude.label)).frame(false));
+        if switch.on_hover_text(rules::ALTITUDE_HINT).clicked() {
             actions.push(Action::ToggleAltitude);
         }
-        value(ui, k.distance(alt_q, s.altitude.1), theme::TEXT);
+        value(ui, &rules::Readout { hover: None, ..rows.altitude.clone() });
         ui.end_row();
-        ui.label(dim("G"));
-        let known = k.knows(Quantity::Acceleration);
-        let limit = s.g.limit.as_ref().map(|(l, _)| *l);
-        let colour = theme::level_colour(crate::format::limit_level(s.g.load, limit));
-        let text = if known { g_meter::text(&s.g) } else { DASH.to_string() };
-        value(ui, text, if known { colour } else { theme::TEXT }).on_hover_text(g_meter::hover(&s.g));
-        ui.end_row();
-        for (label, text, hover) in rows {
-            ui.label(dim(&label));
-            let r = value(ui, text, theme::TEXT);
-            if let Some(h) = hover {
-                r.on_hover_text(h);
-            }
+        for r in std::iter::once(&rows.g).chain(&rows.apsides) {
+            ui.label(dim(&r.label));
+            value(ui, r);
             ui.end_row();
         }
     });
 }
 
-/// SAS, the hold modes (click only, D111), and the throttle bar.
+/// SAS, the hold modes (click only, D111), and the throttle bar
+/// ([`rules::controls`]).
 fn controls(ui: &mut egui::Ui, sim: &SimState, s: &NavState, height: f32, actions: &mut Vec<Action>) {
     // What the vessel flies: a planned burn's program holds and throttles
     // over the pilot's controls (a click on SAS or a hold takes over, D126).
     let c = sim.ship().flown_controls(sim.controls());
+    let running = sim.ship().engine_running();
+    let shown = super::control_rows(sim, s);
     ui.horizontal_top(|ui| {
         ui.vertical(|ui| {
             ui.spacing_mut().item_spacing.y = 2.0;
-            // The hold stated in full, with prograde's speed reference (D075),
-            // and what the flight software says when it cannot hold (F3).
-            let (label, hover) = rules::sas_button(&c, &s.body, sim.ship().sas_status(&c));
-            let sas = hold_button(ui, label, "T", c.sas, true);
-            if sas.on_hover_text(hover).clicked() {
+            if hold_button(ui, &shown.sas).clicked() {
                 actions.push(Action::Command(GameCommand::SetSas(!c.sas)));
             }
-            let rcs = hold_button(ui, if c.rcs.on { "RCS ON" } else { "RCS OFF" }, "R", c.rcs.on, true);
-            let hint = "RCS: the thrusters translate (I K / J L / H N) and turn the craft; off, the rotation keys \
-                        use gimbals and fins only (SAS still fires them). Its menu: blocks, feeds, modes.";
-            if rcs.on_hover_text(hint).clicked() {
+            if hold_button(ui, &shown.rcs).clicked() {
                 let mode = sim::systems::rcs::RcsMode { on: !c.rcs.on, ..c.rcs };
                 actions.push(Action::Command(GameCommand::SetRcs(mode)));
             }
-            let has_burn = s.maneuver.is_some();
-            for mode in HoldMode::ALL {
-                let active = c.sas && c.hold == mode;
-                let enabled = active || rules::hold_available(mode, s.target.is_some(), has_burn);
-                let r = hold_button(ui, short(mode), "", active, enabled);
-                if r.on_hover_text(mode.label()).clicked() {
-                    actions.push(Action::Command(GameCommand::SetHold(mode)));
+            for (mode, b) in &shown.holds {
+                if hold_button(ui, b).clicked() {
+                    actions.push(Action::Command(GameCommand::SetHold(*mode)));
                 }
             }
         });
@@ -244,39 +204,25 @@ fn controls(ui: &mut egui::Ui, sim: &SimState, s: &NavState, height: f32, action
             let hint = "Shift / Ctrl, Z / X. A craft of parts' lit engines hold within their range: \
                         0 % is each one's minimum (a Merlin's 40 %), not off; shut them down to stop them.";
             ui.label(RichText::new("THR").monospace().small().color(theme::DIM)).on_hover_text(hint);
-            let running = sim.ship().engine_running();
             if let Some(t) = throttle_bar(ui, c.throttle, running, (height - 36.0).max(40.0)) {
                 actions.push(Action::Command(GameCommand::SetThrottle(t)));
             }
-            let lit = sim.ship().ship().is_some() && running;
-            let caption = rules::throttle_caption(c.throttle, lit);
-            ui.label(RichText::new(caption).monospace().small().color(theme::TEXT)).on_hover_text(hint);
+            ui.label(RichText::new(&shown.throttle).monospace().small().color(theme::TEXT)).on_hover_text(hint);
         });
     });
 }
 
 /// A hold button: the mode on the left, a key (if any) dim on the right,
-/// lit when active.
-fn hold_button(ui: &mut egui::Ui, name: &str, key: &str, lit: bool, enabled: bool) -> egui::Response {
-    let colour = if lit { theme::TEXT } else { theme::DIM };
+/// lit when active, with its hover.
+fn hold_button(ui: &mut egui::Ui, b: &rules::Button) -> egui::Response {
+    let colour = if b.lit { theme::TEXT } else { theme::DIM };
     let atoms = (
-        RichText::new(name).monospace().small().color(colour),
+        RichText::new(&b.caption).monospace().small().color(colour),
         egui::Atom::grow(),
-        RichText::new(key).monospace().small().color(theme::DIM),
+        RichText::new(b.key).monospace().small().color(theme::DIM),
     );
-    ui.add_enabled(enabled, egui::Button::new(atoms).selected(lit).min_size(vec2(HOLD_PX, 0.0)))
-}
-
-/// The short name on a hold button.
-fn short(mode: HoldMode) -> &'static str {
-    match mode {
-        HoldMode::Stability => "STAB",
-        HoldMode::Prograde => "PRO",
-        HoldMode::Retrograde => "RETRO",
-        HoldMode::Target => "TGT",
-        HoldMode::AntiTarget => "ANTI",
-        HoldMode::Maneuver => "MNV",
-    }
+    ui.add_enabled(b.enabled, egui::Button::new(atoms).selected(b.lit).min_size(vec2(HOLD_PX, 0.0)))
+        .on_hover_text(&b.hover)
 }
 
 /// The vertical throttle bar: filled from the bottom, ticks at quarters;

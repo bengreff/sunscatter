@@ -369,3 +369,33 @@ fn an_apsis_hover_says_above_what_and_from_where() {
         assert_eq!(apsis_hover(&apsis, body, &k), want);
     }
 }
+
+#[test]
+fn the_cluster_controls_say_what_is_lit_and_what_can_be_clicked() {
+    use sim::vessel::{Controls, HoldMode};
+    let mut c = Controls { sas: true, hold: HoldMode::Prograde, throttle: 0.0, ..Controls::default() };
+    // (target, planned burn, engines lit) → the enabled holds, the throttle's caption
+    let cases = [
+        ((false, false), false, ["STAB", "PRO", "RETRO"].as_slice(), "0%"),
+        ((true, false), true, ["STAB", "PRO", "RETRO", "TGT", "ANTI"].as_slice(), "min"),
+        ((false, true), false, ["STAB", "PRO", "RETRO", "MNV"].as_slice(), "0%"),
+    ];
+    for ((target, burn), lit, enabled, throttle) in cases {
+        let rows = controls(&c, "Earth", Sas::Holding, (target, burn), lit);
+        let on: Vec<&str> = rows.holds.iter().filter(|(_, b)| b.enabled).map(|(_, b)| b.caption.as_str()).collect();
+        assert_eq!(on, enabled, "{target} {burn}");
+        assert_eq!(rows.throttle, throttle);
+        let lit: Vec<&str> = rows.holds.iter().filter(|(_, b)| b.lit).map(|(_, b)| b.caption.as_str()).collect();
+        assert_eq!(lit, ["PRO"], "the hold held is lit");
+        assert_eq!((rows.sas.caption.as_str(), rows.sas.key, rows.sas.lit), ("SAS ON", "T", true));
+        assert_eq!(rows.rcs.caption, "RCS OFF");
+    }
+    // The hold held stays clickable without its target; SAS off lights none.
+    c.hold = HoldMode::Target;
+    let rows = controls(&c, "Earth", Sas::Holding, (false, false), false);
+    assert!(rows.holds.iter().any(|(m, b)| *m == HoldMode::Target && b.enabled && b.lit));
+    c.sas = false;
+    let rows = controls(&c, "Earth", Sas::Off, (false, false), false);
+    assert!(rows.holds.iter().all(|(_, b)| !b.lit));
+    assert_eq!(rows.sas.caption, "SAS OFF");
+}

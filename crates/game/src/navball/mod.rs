@@ -123,6 +123,16 @@ pub struct NavState {
     pub known: crate::format::Known,
 }
 
+/// The cluster's controls of the active vessel now ([`rules::controls`]:
+/// what it flies, a planned burn's program over the pilot's, D126): one
+/// gather for the cluster (`draw.rs`) and the agent's `read {navball}`.
+pub fn control_rows(sim: &SimState, s: &NavState) -> rules::ControlRows {
+    let v = sim.ship();
+    let c = v.flown_controls(sim.controls());
+    let lit = v.ship().is_some() && v.engine_running();
+    rules::controls(&c, &s.body, v.sas_status(&c), (s.target.is_some(), s.maneuver.is_some()), lit)
+}
+
 /// What can be targeted, in the Orbital menu's picker's order and the
 /// agent's `set_target`'s (D044): every body with a surface, then every
 /// vessel but the active one.

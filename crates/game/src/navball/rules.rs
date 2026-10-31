@@ -337,6 +337,151 @@ pub fn apsis_hover(a: &super::ApsisReadout, reference_body: &str, k: &crate::for
     )
 }
 
+/// One readout of the cluster: its label, its text as the craft knows it
+/// (D106: a dash for what it cannot measure), its level against a limit,
+/// and its hover.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Readout {
+    pub label: String,
+    pub text: String,
+    pub level: crate::format::Level,
+    pub hover: Option<String>,
+}
+
+/// The cluster's readouts as drawn: the speed and its caption over the
+/// ball, then left of it the altitude (its label the datum switch), G, and
+/// Ap and Pe with the time to each (D076). One model for the cluster
+/// (`draw.rs`) and the agent's `read {navball}`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Readouts {
+    pub speed: String,
+    /// The speed's mode and what it is about: "SURFACE · Earth".
+    pub caption: String,
+    pub altitude: Readout,
+    pub g: Readout,
+    /// Ap, its time, Pe, its time.
+    pub apsides: Vec<Readout>,
+}
+
+/// The altitude switch's hover.
+pub const ALTITUDE_HINT: &str = "Click: above the datum (sea level; without a sea the lowest ground; on a giant its \
+    1-bar level) or above the terrain under the craft (TER). Ap and Pe are above the datum.";
+
+/// The cluster's readouts of `s` ([`Readouts`]).
+pub fn readouts(s: &super::NavState) -> Readouts {
+    use crate::format::{duration, limit_level, Level, DASH};
+    use sim::systems::Quantity;
+    let k = &s.known;
+    let orbit = k.orbit();
+    let row = |label: String, text: String, hover: Option<String>| Readout { label, text, level: Level::Normal, hover };
+    let apsis = |name: &str, a: &Option<super::ApsisReadout>| match a {
+        Some(a) => [
+            row(
+                a.other_body.as_ref().map_or(name.to_string(), |b| format!("{name} {b}")),
+                k.distance(Quantity::Position, a.above_datum),
+                Some(apsis_hover(a, &s.body, k)),
+            ),
+            row("  in".into(), k.or_dash(orbit, || duration(a.in_s)), None),
+        ],
+        None => [row(name.into(), DASH.into(), None), row("  in".into(), DASH.into(), None)],
+    };
+    // Above the terrain from an altimeter (or a fix), above the datum from
+    // the position.
+    let alt_q =
+        if s.altitude_ref == super::altitude::AltitudeRef::Terrain { Quantity::Altitude } else { Quantity::Position };
+    let g_known = k.knows(Quantity::Acceleration);
+    let limit = s.g.limit.as_ref().map(|(l, _)| *l);
+    let g = Readout {
+        label: "G".into(),
+        text: if g_known { super::g_meter::text(&s.g) } else { DASH.into() },
+        level: if g_known { limit_level(s.g.load, limit) } else { Level::Normal },
+        hover: Some(super::g_meter::hover(&s.g)),
+    };
+    let about = s.target.as_ref().filter(|_| s.mode == Mode::Target).map_or(&s.body, |t| &t.0);
+    Readouts {
+        speed: k.speed(Quantity::Velocity, s.speed),
+        caption: format!("{} · {about}", s.mode.label()),
+        altitude: row(s.altitude.0.clone(), k.distance(alt_q, s.altitude.1), Some(ALTITUDE_HINT.into())),
+        g,
+        apsides: apsis("Ap", &s.ap).into_iter().chain(apsis("Pe", &s.pe)).collect(),
+    }
+}
+
+/// A button right of the ball: its caption, its key (dim, right), lit,
+/// whether it can be clicked, and its hover.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Button {
+    pub caption: String,
+    pub key: &'static str,
+    pub lit: bool,
+    pub enabled: bool,
+    pub hover: String,
+}
+
+/// The controls right of the ball as drawn: SAS (the hold stated in full
+/// in its hover), RCS, a button per hold mode, and the throttle's caption
+/// under its bar. One model for the cluster and the agent's
+/// `read {navball}`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ControlRows {
+    pub sas: Button,
+    pub rcs: Button,
+    pub holds: Vec<(sim::vessel::HoldMode, Button)>,
+    pub throttle: String,
+}
+
+/// The RCS button's hover.
+pub const RCS_HINT: &str = "RCS: the thrusters translate (I K / J L / H N) and turn the craft; off, the rotation \
+    keys use gimbals and fins only (SAS still fires them). Its menu: blocks, feeds, modes.";
+
+/// The controls of what the vessel flies (`c`: a planned burn's program
+/// over the pilot's, D126), about `body`, its flight software's SAS
+/// status, with or without a target and a planned burn, its engines
+/// (`lit`: a craft of parts' running).
+pub fn controls(
+    c: &sim::vessel::Controls,
+    body: &str,
+    status: Sas,
+    (has_target, has_burn): (bool, bool),
+    lit: bool,
+) -> ControlRows {
+    use sim::vessel::HoldMode;
+    let (sas, sas_hover) = sas_button(c, body, status);
+    let button = |caption: &str, key, lit, enabled, hover: &str| Button {
+        caption: caption.into(),
+        key,
+        lit,
+        enabled,
+        hover: hover.into(),
+    };
+    let holds = (HoldMode::ALL.into_iter())
+        .map(|mode| {
+            let active = c.sas && c.hold == mode;
+            let enabled = active || hold_available(mode, has_target, has_burn);
+            (mode, button(hold_short(mode), "", active, enabled, mode.label()))
+        })
+        .collect();
+    ControlRows {
+        sas: button(sas, "T", c.sas, true, &sas_hover),
+        rcs: button(if c.rcs.on { "RCS ON" } else { "RCS OFF" }, "R", c.rcs.on, true, RCS_HINT),
+        holds,
+        throttle: throttle_caption(c.throttle, lit),
+    }
+}
+
+/// The short name on a hold button.
+pub fn hold_short(mode: sim::vessel::HoldMode) -> &'static str {
+    use sim::vessel::HoldMode;
+    match mode {
+        HoldMode::Stability => "STAB",
+        HoldMode::Prograde => "PRO",
+        HoldMode::Retrograde => "RETRO",
+        HoldMode::Target => "TGT",
+        HoldMode::AntiTarget => "ANTI",
+        HoldMode::Maneuver => "MNV",
+    }
+}
+
 #[cfg(test)]
 #[path = "rules_tests.rs"]
 mod tests;
