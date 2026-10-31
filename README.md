@@ -5,7 +5,7 @@ Sunscatter is a real-scale spaceflight, mission-design and logistics game. It is
 | Version | Status | Where |
 |---|---|---|
 | **v0.1** | Archived 2D prototype in Rust/wgpu. It is still runnable. | [`archive/v0.1/`](archive/v0.1), whose README has screenshots, features and build instructions |
-| **v0.2** | In development. The Falcon 9 Block 5 with Crew Dragon, built from parts with their systems (plumbing, engines, structure, power, sensors, failures), flies from the pad through stage separation. The whole Solar System is on its real orbits, with measured gravity fields, terrain and atmospheres; one look, no graphics settings. Saves, map view, a tracking station, a burn planner and an MCP server for your own AI agent. See [the systems](docs/systems/README.md) for what is built and how far. | [`crates/`](crates), [`docs/`](docs) |
+| **v0.2** | In development. The Falcon 9 Block 5 with Crew Dragon, built from parts with their systems (plumbing, engines, structure, power, sensors, failures), flies from the pad through stage separation to orbit, and flies planned burns. The whole Solar System is on its real orbits, with measured gravity fields, terrain and atmospheres; one look, no graphics settings. Saves, map view, a tracking station, a burn planner and an MCP server for your own AI agent. See [the systems](docs/systems/README.md) for what is built and how far. | [`crates/`](crates), [`docs/`](docs) |
 
 ## Running v0.2
 
@@ -16,8 +16,10 @@ cargo test -p sim    # simulation tests (deterministic; CI runs them on macOS an
 
 Keys: Z full throttle, X cut; W/S, A/D, Q/E pitch, yaw and roll; I/K, J/L, H/N translate; T SAS, R RCS; Space the next stage, P parachutes; `.` and `,` warp, `/` back to 1×; Tab the systems screen, M the tracking station; Cmd+S / Cmd+L quicksave and quickload (Ctrl+Alt off a Mac); `[` and `]` the previous and next vessel; Shift+/ help; Esc the menu (settings, the performance overlay). The full list is in Settings ▸ Controls. Developer commands are in [CLAUDE.md](CLAUDE.md).
 
-![Map mode over Earth](docs/images/v0.2-visual/map_high.jpg)
-![Sunset after landing](docs/images/v0.2-visual/sunset_ultra.jpg)
+![The Falcon 9 with Crew Dragon on the pad at Kennedy, in the flight view: the navball, the staging bar and the action groups](docs/images/v0.2/pad.jpg)
+![The second stage in a 412 × 343 km orbit after two planned burns, in the map view with the Orbital menu](docs/images/v0.2/orbit-map.jpg)
+
+*Shots from the headless game through MCP's `shoot` (2026-10-30): the pad at the start of a new flight, and PLANNER-4's mission-test save after its two planned burns and Dragon's separation.*
 
 ## Reading guide
 
