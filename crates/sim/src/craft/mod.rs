@@ -42,7 +42,7 @@ pub use file::{AeroFile, ContactFile, CraftFile, GeometryFile, Primitive, Shape,
 pub use mass::{MassModel, MassProps};
 pub use mesh::{RenderMesh, Resolution, Surface};
 pub use parts::{CraftDef, Part, PartPower};
-pub use registry::craft_of;
+pub use registry::{craft_of, try_craft_of};
 pub use volume::{VolumeGrid, VolumeNode};
 
 use crate::body::DataError;
@@ -159,9 +159,11 @@ impl Craft {
     }
 }
 
-/// What a vessel keeps from its craft (saved with it, so a vessel is
-/// self-contained and deterministic).
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+/// What a vessel keeps from its craft: [`Craft::params`] of its id. Saved
+/// as the id alone and rebuilt from it at load (D063: a save holds no
+/// static data; building is deterministic, so the rebuilt parameters are
+/// the same bits).
+#[derive(Clone, Debug, PartialEq)]
 pub struct CraftParams {
     pub id: CraftId,
     pub mass: MassModel,
@@ -184,10 +186,23 @@ pub struct CraftParams {
     /// (the bottom of the feet; a deployed foot's pad is tilted, its rim
     /// lower than its base), else the surface's.
     pub bottom_z: f64,
-    /// The design's bake and thermal network: never saved, rebuilt from
-    /// the craft's files after a load.
-    #[serde(skip)]
+    /// The design's bake and thermal network, built on first use.
     pub design: DesignSlot,
+}
+
+impl serde::Serialize for CraftParams {
+    /// The craft's id: the rest is the craft's ([`Craft::params`]).
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        self.id.serialize(s)
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for CraftParams {
+    /// The parameters of the craft the id names (an error if it names none).
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let id = CraftId::deserialize(d)?;
+        registry::try_craft_of(&id).map(|c| c.params()).map_err(serde::de::Error::custom)
+    }
 }
 
 impl CraftParams {

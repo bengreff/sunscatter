@@ -3,9 +3,9 @@
 //! grid (`super::volume`) and the thermal network over its cells and nodes
 //! (`sim::thermal`, D065 revised).
 //!
-//! Never saved: a vessel's [`super::CraftParams`] holds a [`DesignSlot`]
-//! that is filled by [`super::Craft::params`] and, after loading a save,
-//! rebuilt from the craft's id on first use ([`design_of`],
+//! Never saved: a vessel's [`super::CraftParams`] (saved as its craft's
+//! id) holds a [`DesignSlot`] that [`super::Craft::params`] fills, at the
+//! vessel's creation and again at a load ([`design_of`],
 //! [`super::registry`]). The bake is deterministic, so a rebuilt design is
 //! the same bits.
 
@@ -253,9 +253,9 @@ pub fn mean_drag_area(bake: &AeroBake, cd0: f64) -> f64 {
     sum / bake.grid.dirs.len() as f64
 }
 
-/// A vessel's handle on its design: filled at creation, rebuilt after a
-/// load. Not serialised; compares equal to any other slot (it is derived
-/// from the craft id, which is compared).
+/// A vessel's handle on its design: filled by [`super::Craft::params`] (at
+/// creation and at a load). Not serialised; compares equal to any other
+/// slot (it is derived from the craft id, which is compared).
 #[derive(Clone, Default)]
 pub struct DesignSlot(OnceLock<Arc<CraftDesign>>);
 

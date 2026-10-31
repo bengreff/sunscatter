@@ -148,6 +148,56 @@ fn powered_flight_continues_identically_after_load() {
     assert_eq!(a, b);
 }
 
+/// The Falcon 9 (D100) on the pad, saved and loaded: the save names its
+/// craft by its id and holds none of the craft's static data (its contact
+/// points, mass model and drag area are rebuilt from the id), and the
+/// loaded vessel goes through its ignition and the clamps' release the
+/// same bits as the one never saved.
+#[test]
+fn the_falcon9_lifts_off_identically_after_load() {
+    let w = world();
+    let craft = sim::craft::craft_of(&sim::craft::CraftId("falcon9-crew".into()));
+    let mut a = Vessel::landed_at(&w, VesselId(1), "Earth", 28.6084, -80.6043, t0(), &craft);
+    let idle = Controls { sas: true, ..Default::default() };
+    let wait = t0().add_seconds(90.0);
+    fly(&w, &mut a, t0(), wait, 1.0, &idle);
+    let text = SaveGame::capture(&w, wait, std::slice::from_ref(&a), ids_up_to(1), 0).to_ron();
+    assert!(text.contains("craft: (\"falcon9-crew\")"), "the craft named by its id");
+    for field in ["contacts:", "bottom_z:", "cd_area:", "impact_max_speed:"] {
+        assert!(!text.contains(field), "the craft's {field} saved");
+    }
+    let mut b = through_save(&w, wait, std::slice::from_ref(&a)).remove(0);
+    assert_eq!(a, b);
+    let up = Controls { throttle: 1.0, sas: true, ..Default::default() };
+    for v in [&mut a, &mut b] {
+        assert_eq!(v.next_stage(&w).unwrap().0, "Ignition");
+    }
+    let release = wait.add_seconds(2.0);
+    fly(&w, &mut a, wait, release, 1.0 / 60.0, &up);
+    fly(&w, &mut b, wait, release, 1.0 / 60.0, &up);
+    for v in [&mut a, &mut b] {
+        assert_eq!(v.next_stage(&w).unwrap().0, "Liftoff");
+    }
+    let end = release.add_seconds(3.0);
+    fly(&w, &mut a, release, end, 1.0 / 60.0, &up);
+    fly(&w, &mut b, release, end, 1.0 / 60.0, &up);
+    assert!(matches!(a.phase, Phase::Powered { .. }));
+    assert_eq!(a, b);
+}
+
+/// A save naming a craft this build does not have is a format error.
+#[test]
+fn a_save_of_an_unknown_craft_is_rejected() {
+    let w = world();
+    let (earth, r, v) = leo(&w);
+    let ship = Vessel::coasting(&w, VesselId(1), t0(), earth, r, v, &sim::craft::small::rocket());
+    let text = SaveGame::capture(&w, t0(), &[ship], ids_up_to(1), 0).to_ron();
+    assert!(SaveGame::from_ron(&text).is_ok());
+    let unknown = text.replace("craft: (\"small-rocket\")", "craft: (\"no-such-craft\")");
+    assert_ne!(unknown, text);
+    assert!(matches!(SaveGame::from_ron(&unknown), Err(SaveError::Format(_))));
+}
+
 #[test]
 fn save_files_round_trip_and_check_the_ephemeris() {
     let w = world();

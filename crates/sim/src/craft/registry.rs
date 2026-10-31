@@ -107,18 +107,24 @@ pub fn cell_options(def: &CraftDef) -> CellOptions {
 }
 
 /// The craft `id` names, built once per process. Panics if it cannot be
-/// resolved.
+/// resolved ([`try_craft_of`] says why instead).
 pub fn craft_of(id: &CraftId) -> Arc<Craft> {
+    try_craft_of(id).unwrap_or_else(|e| panic!("{e}"))
+}
+
+/// The craft `id` names, built once per process, or why there is none (a
+/// save naming a craft this build does not have).
+pub fn try_craft_of(id: &CraftId) -> Result<Arc<Craft>, String> {
     static CRAFT: OnceLock<Mutex<BTreeMap<String, Arc<Craft>>>> = OnceLock::new();
     let cache = CRAFT.get_or_init(Default::default);
     if let Some(c) = cache.lock().expect("craft cache").get(&id.0) {
-        return c.clone();
+        return Ok(c.clone());
     }
     // Built outside the lock: other ids may build meanwhile.
-    let def = definition(id).unwrap_or_else(|e| panic!("{e}"));
+    let def = definition(id)?;
     let opts = cell_options(&def);
     let built = Craft::from_def(id.clone(), def, &Resolution::default(), &opts);
-    cache.lock().expect("craft cache").entry(id.0.clone()).or_insert_with(|| Arc::new(built)).clone()
+    Ok(cache.lock().expect("craft cache").entry(id.0.clone()).or_insert_with(|| Arc::new(built)).clone())
 }
 
 #[cfg(test)]

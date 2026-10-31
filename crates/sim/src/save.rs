@@ -13,6 +13,12 @@
 //! Re-deriving it from the segment's start instead would mean re-integrating
 //! a coast that can be years long.
 //!
+//! A save holds state, never static data (D063): what a vessel is made of
+//! is named by its craft's id ([`crate::craft::CraftParams`] is saved as
+//! the id), and its design, parameters and parts' behaviour are rebuilt
+//! from the id at load (deterministic, so the same bits; a load of a craft
+//! this build does not have is a format error). Body data is the world's.
+//!
 //! The format follows the sim's types directly; any change to a saved type
 //! must bump [`SAVE_VERSION`].
 
@@ -25,7 +31,7 @@ use std::fmt;
 use std::path::Path;
 
 /// Version of the save format. Loading any other version is an error.
-pub const SAVE_VERSION: u32 = 14;
+pub const SAVE_VERSION: u32 = 15;
 
 /// Which ephemeris a save was made against. Vessel states are only
 /// meaningful (and only reproducible) with the same body motions.
