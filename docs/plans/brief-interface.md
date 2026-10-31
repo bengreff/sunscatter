@@ -53,6 +53,32 @@ Small commits, each passing fmt, clippy and the game's tests you touched (`cargo
 
 ## State
 
+**INTERFACE-4 (2026-10-31), wrapped up at its context cap.** Did INTERFACE-3's Left, the red cone, gpu_trace.py; found and fixed three more on the way. Every commit passed fmt, clippy and the game's suite (478) in a private mirror of HEAD plus my files.
+
+**Landed:**
+- a252a77: `tools/gpu_trace.py` reads the one `*.trace` in its directory (it looked for the plunge demo's) and its notes record the headless game (`SUNSCATTER_DEV=1`, `--time-limit`) with the `bench` tool's rows. HANDOFF's and brief-fixes3's "gpu_trace.py launches the deleted plunge demo" lines can go (the lead's files).
+- 0172400: **the red cone was the sky, not a part.** From outside the atmosphere every geometry pixel went through `render_sky.wgsl`'s `ground_from_space`; for a craft above the air seen on a ray rising more than ~15°, its table branch read the transmittance back down through the planet: the craft dark red above a straight line across the view (it moved with the camera; shadows off changed nothing). Geometry the ray meets before the air now takes no aerial perspective (`sky::haze::air_before`, the shader's rule mirrored for a table test). Finding 27.
+- e2fbf20: a shot taken while the benchmark ran froze the clock for good (`get_state`: warp 100×; `profile`: warp achieved 0): each saved and restored the hold. Held now while any shot or benchmark is in flight (`session::clock_held`). Finding 28.
+- 25a149d: notifications after a load. A save's vessel ids repeat, so the per-id memory of what was notified replayed a loaded orbit's 16 events at once, and after loading an earlier save or reverting to launch hid every new event dated before the old timeline's last (no Ignition/Liftoff/MECO after a revert from orbit). `SimState::restores`, `events::to_notify` (step table test). Seen live: 0 replayed after a load. Finding 29.
+- da12434: `get_vessel` under thrust (PLANNER-4's item): `orbit.prediction_age_s` while the active vessel flies live, and `orbit.now_two_body` (apsides from the centre of the state now). Live mid-burn: Ap 441.9 km with age 0.14 s (≈8 m/s at 60 m/s²), then 456.5 km with time stopped; the two-body values steady. Finding 30.
+- b6d715b: MCP refuses an argument its tool's schema does not list, naming the tool's own (`mcp::protocol::unknown_arguments`): `set_camera {distance, pitch}` had answered as if it moved. Every call in the docs fits. Note: `step {id}` is now refused (step never listed `id`; `run_until` does). Finding 31.
+- 7a2605d: docs: interface-map findings 27–31, mcp.md, owners.md (INTERFACE-3's rows and mine).
+
+**INTERFACE-3's four commits seen at HEAD** (shots in `/private/tmp/claude-501/-Users-ben-sunscatter/7c5f130a-69ba-45d3-9965-ca858b31253e/scratchpad/interface4/shots/`): `k_landing.png` (Landing ▸ Thermal: S2.TANK 332/422 K, DRAGON.CAPSULE 397/2000 K, NOT MEASURED 10 parts), `k_card_crop.png` and `k_card_top.png` (the capsule's card: skin 397/2000 K, interior 291/1650 K; the pressure's value below its label), `k_ts.png` (the tracking list's and Settings' bars at the panels' edges), `l_burn_c.png` (a planned 200 m/s burn: SAS ON, MNV lit, THR 100 %, Maneuver "burning").
+
+**Shots for the lead:** the red craft before, `h_y0_zoom.png` (end-on: the bell and the tank's end seen through the dark red above the line) and `e_grid.png` (the stack at 20, 30 and 60 m, the line through it); after, `j_grid.png` (pitch −5°, −15°, −40° and end-on: no red) and `j_ground.png` (the ground's haze unchanged).
+
+**Left, in order:**
+1. **ONEKIND-7's (d2)** (brief-onekind.md, its State's Left 1), the game's branches for a craft without a ship definition. What I found: dead are `staging::{stack, StageInputs, canopy_part, activation, activate_next, Activation, grounded}`, `Refusal::Grounded` and their tests (keep `next`, `arms_chutes`, `no_stage_left`, `Refusal::NoStageLeft`, `parts`); `stack_of` is `parts::stack` (agent.rs `stages_json` already returns early without a ship); `commands.rs`' `GameCommand::NextStage` arm (always converted to `Stage(id)` now: make the conversion unconditional); `FlightData::stages` only feeds Landing ▸ PARACHUTE's test-craft rows (`landing.rs` `part_tone`, its test at ~353; `data.rs:328`, its test at ~614). Consider giving Landing ▸ PARACHUTE the craft's own canopies' states instead (`part_card::content::chutes`). `stage_bar/mod.rs:170`'s `None => rows::plain(…)` and `rows::plain` go with `rows_tests`' test-craft test: **STATE holds `stage_bar/rows_tests.rs`, `icons.rs`, `part_card/content.rs`, `systems_screen/{inspect, summary}.rs`** uncommitted (check `git status`). The rest of ONEKIND-7's list (rcs.rs' note, the `None` cases of power/crew/rcs_data, ships.rs' plain model, ui.rs' "one part", the comments) I did not start.
+2. Walk the screens again (the brief's aim): pad, ascent, orbit, after separation, the systems screen, map, tracking. Seen so far this round and fine: the tracking station (Earth is a speck at the Moon's-orbit zoom), Settings, the capsule's card. Not looked at: the systems screen's layers at HEAD after ONEKIND's deletions.
+3. Small, from INTERFACE-3: the systems screen's electrical summary names buses in capitals (S2.BUS) where the other layers use ids.
+4. Concurrent shots still share one `Restore` of the screens (a second shot started during the first saves the first's open screens and puts them back after): only the clock's hold was fixed (e2fbf20).
+
+**Open for the owner (INTERFACE-4):**
+- Notifications stay the session's log across a load (the load's own message after the old flight's); only the event memory restarts. The other choice is to empty the list on a load.
+- `get_vessel` gives both the predicted apsides (with their age) and the two-body ones now, rather than computing a fresh prediction on the call.
+- MCP refuses unknown argument names (strict), so a key a tool reads but does not list (`step`'s `id`) is refused too.
+
 **INTERFACE-3 (2026-10-31), wrapped up at its context cap.** Continued INTERFACE-2's "Left" (below), then walked the screens again in orbit (findings 21–26 in [interface-map.md](../technical/interface-map.md)) and took two items from PLANNER-4.
 
 **Landed:**
