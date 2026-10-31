@@ -25,7 +25,7 @@ fn a_switch_and_a_press_go_by_the_tabs_rule() {
     let want = GameCommand::SetSwitch { vessel: id, program: "chutes".into(), switch: Switch::Auto };
     assert_eq!(effects, vec![Effect::Command(want)]);
     let (v, effects) = press(&json!({"program": "chutes"}), &sim, &comms).unwrap();
-    assert_eq!(v["does"], "arm: the drogues' mortars fire");
+    assert_eq!(v["does"], "arm the drogues");
     assert_eq!(effects, vec![Effect::Command(GameCommand::Press { vessel: id, program: "chutes".into() })]);
     // (tool, arguments, the refusal says)
     let refused = [
@@ -56,7 +56,7 @@ fn the_programs_read_as_the_tab_lists_them() {
             switch: Switch::Press,
             now: "stowed: arms on a press".into(),
             tone: crate::interface::menus::Tone::Normal,
-            press: Ok("arm: the drogues' mortars fire".into()),
+            press: Ok("arm the drogues".into()),
         },
         Row {
             name: "maneuver".into(),
@@ -77,7 +77,7 @@ fn the_programs_read_as_the_tab_lists_them() {
         switches.iter().filter(|s| s["selected"] == true).map(|s| s["label"].as_str().unwrap()).collect();
     assert_eq!(selected, ["ON PRESS"]);
     assert_eq!(switches[0]["by"], r#"set_switch {program: "chutes", switch: "auto"}"#);
-    assert_eq!(chutes["press"], json!({"does": "arm: the drogues' mortars fire", "by": "press {program: \"chutes\"}"}));
+    assert_eq!(chutes["press"], json!({"does": "arm the drogues", "by": "press {program: \"chutes\"}"}));
     assert_eq!(v["programs"][1]["press"], json!({"refused": "no burn planned"}));
     assert_eq!(v["programs"][1]["tone"], "dim");
     // `read {programs: true}` on the Falcon 9 is the tab's rows.

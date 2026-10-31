@@ -61,7 +61,7 @@ fn the_parachutes_by_switch_state_and_altitude() {
     let spec = dragon();
     let (main, arm) = (distance(spec.main_height), distance(chutes::arm_height(&spec).expect("Dragon's drogues")));
     let (stowed, open) = (CanopyState::Stowed, CanopyState::Open { age: 30.0, diameter: 10.0 });
-    let (arm_it, call) = (Some("arm: the drogues' mortars fire"), Some("open the mains once the drogues let them"));
+    let (arm_it, call) = (Some("arm the drogues"), Some("open the mains once the drogues let them"));
     // (switch, armed, main, called, blind, now, tone, press)
     #[rustfmt::skip]
     let table = [

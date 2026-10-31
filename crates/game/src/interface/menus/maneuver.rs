@@ -11,16 +11,19 @@ use crate::format::duration as fmt_duration;
 use crate::systems_screen::programs::step_label;
 
 pub fn sections(d: &FlightData) -> Vec<Section> {
-    let mut s = summary(&d.burns);
-    if let Some(r) = d.programs.iter().find(|r| r.name == "maneuver") {
+    let program = d.programs.iter().find(|r| r.name == "maneuver");
+    // With the program's row, its "no burn planned" says it once.
+    let mut s = summary(&d.burns, program.is_none());
+    if let Some(r) = program {
         s.program("PROGRAM", r);
     }
     vec![s]
 }
 
-fn summary(burns: &[Burn]) -> Section {
+/// The burns, and "no burns planned" when there are none and `say_none`.
+fn summary(burns: &[Burn], say_none: bool) -> Section {
     let mut s = Section::summary();
-    if burns.is_empty() {
+    if burns.is_empty() && say_none {
         s.note("no burns planned", Tone::Dim);
     }
     for b in burns {
@@ -53,7 +56,7 @@ mod tests {
             Burn { dv: Some(12.34), in_s: 30.0, duration: 4.0, number: 1, step: None },
             Burn { dv: None, in_s: 600.0, duration: 20.0, number: 2, step: None },
         ];
-        let s = summary(&burns);
+        let s = summary(&burns, true);
         assert_eq!(s.value("BURN 1"), Some("Δv 12.3 m/s"));
         assert_eq!(s.rows().iter().filter(|(l, _)| *l == "  IGNITION IN").count(), 2);
         assert_eq!(s.tone("  IGNITION IN"), Some(Tone::Warn));
@@ -61,7 +64,7 @@ mod tests {
         assert!(s
             .items
             .contains(&Item::Button { label: "Open the burn planner".into(), action: MenuAction::OpenPlanner }));
-        assert!(summary(&[]).items.contains(&Item::Note("no burns planned".into(), Tone::Dim)));
+        assert!(summary(&[], true).items.contains(&Item::Note("no burns planned".into(), Tone::Dim)));
     }
 
     /// A node being flown: numbered as the log counts, what the program is
@@ -72,14 +75,14 @@ mod tests {
             Burn { dv: Some(100.0), in_s: -3.0, duration: 12.0, number: 2, step: Some(Step::Burn) },
             Burn { dv: Some(5.0), in_s: 3_000.0, duration: 0.6, number: 3, step: None },
         ];
-        let s = summary(&burns);
+        let s = summary(&burns, true);
         assert_eq!(s.value("BURN 2"), Some("Δv 100.0 m/s"));
         assert_eq!(s.value("  NOW"), Some("burning"));
         assert_eq!(s.tone("  NOW"), Some(Tone::Good));
         assert_eq!(s.rows().iter().filter(|(l, _)| *l == "  IGNITION IN").count(), 1);
         assert_eq!(s.value("BURN 3"), Some("Δv 5.0 m/s"));
         let turning = [Burn { step: Some(Step::Turn), in_s: 40.0, number: 1, ..Burn::default() }];
-        assert_eq!(summary(&turning).value("  NOW"), Some("turning to the burn"));
+        assert_eq!(summary(&turning, true).value("  NOW"), Some("turning to the burn"));
     }
 
     /// The maneuver program's switch under the burns: AUTO, ON PRESS, OFF
@@ -108,6 +111,7 @@ mod tests {
         assert!(s.items.contains(&Item::Note(row.now.clone(), Tone::Warn)));
         let press = Item::Button { label: "Press: fly burn 1".into(), action: MenuAction::Press("maneuver".into()) };
         assert!(s.items.contains(&press));
+        assert_eq!(s.items.iter().filter(|i| matches!(i, Item::Note(..))).count(), 1, "said once");
         // Nothing to press: no button.
         let d = FlightData { programs: vec![Row { press: Err("it runs by itself".into()), ..row }], ..d };
         assert!(!sections(&d)[0].items.iter().any(|i| matches!(i, Item::Button { action: MenuAction::Press(_), .. })));

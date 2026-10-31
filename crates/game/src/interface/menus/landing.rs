@@ -409,7 +409,7 @@ mod tests {
             switch: sim::systems::ship_os::Switch::Press,
             now: "stowed: arms on a press".into(),
             tone: Tone::Normal,
-            press: Ok("arm: the drogues' mortars fire".into()),
+            press: Ok("arm the drogues".into()),
         };
         let with = FlightData { programs: vec![row], ..d.clone() };
         let p = find(&shown(&with), "parachute").unwrap().clone();

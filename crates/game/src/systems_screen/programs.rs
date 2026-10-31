@@ -225,8 +225,8 @@ fn parachutes(c: &Chutes) -> Row {
     // A press is the manual deploy (D126: the same function): it arms, or,
     // armed, calls the main.
     let press = match (s.armed, s.main) {
-        (false, _) if drogue => Ok("arm: the drogues' mortars fire".to_string()),
-        (false, _) => Ok("arm: the mains open".into()),
+        (false, _) if drogue => Ok("arm the drogues".to_string()),
+        (false, _) => Ok("open the mains".into()),
         (true, CanopyState::Stowed) if drogue && !d.main_called => {
             Ok("open the mains once the drogues let them".into())
         }
