@@ -48,4 +48,44 @@ Docs are design until built: say so. End with the report agent-rules asks for, w
 
 ## State
 
-(Update as you go: findings, tests committed with hashes, what is left in order, Open for the owner.)
+**Done (2026-10-30).** All three items are written; nothing is left for AUDIT.
+
+**Landed:**
+- **14c2a4d** `crates/sim/tests/warp_course.rs`: an emulation of the game's frame loop, and two passing tests.
+  - Two days of the S2 with Dragon (fates seeded, an MVac restart and shutdown, Dragon's separation, the lattices) give the same bits in one pass and at 100×, 10⁴× and 10⁵×, and at 1× over the first 3,100 s.
+  - A seed whose fate fails the restart uncontained gives the same breakup into three vessels at every warp.
+  - Three `#[ignore]`d reproductions (D1–D3) assert D129 and fail today.
+- **The docs commit** (this State's commit): `docs/technical/warp-invariance.md` (audit), `docs/technical/software-layers.md` (design), `docs/plans/brief-advance.md` and `brief-layers.md` (drafts).
+
+**Findings** (warp-invariance.md §4, §5, §7):
+- The sim never reads the warp, and every model is chosen by state.
+- Six divergences, all decided at frame starts:
+  - D1: the TARGET hold on a vessel, fed per frame: 102° apart after 300 s.
+  - D2: light-delayed settings and commands act at frame starts: 109°.
+  - D3: a bubble's neighbour already moved past the epoch where its leader went live joins late or never: 0.15 m.
+  - D4: debris deletion at the frame's clock.
+  - D5: `run_until`'s conditions checked at frame ends.
+  - D6: rotation input zeroed at rails warp.
+- Model gaps that are the same at every warp:
+  - power and life support lose the span since the lattice on going live;
+  - power's shedding depends on the step's length;
+  - no failure off live ticks;
+  - a landed vessel's temperatures never step.
+- About the model, not warp:
+  - The S2 sheds every load at +12.7 h.
+  - Dragon's CO₂ passes 1 kPa after about a day: `dragon-eclss.ron` removes 4.0 kg a day against four crew's 4.16. So layer 1 alone does not coast for months today.
+
+**Changes needed in existing files** (not mine to edit; for the lead):
+- `docs/systems/motion.md`: link warp-invariance.md under Technical.
+- `docs/systems/avionics.md`: link software-layers.md under Technical.
+- `docs/systems/failures.md`: link software-layers.md §4 under Not built (the warp stop).
+- `docs/plans/HANDOFF.md`: AUDIT done; ADVANCE and LAYERS from the drafts.
+- My row in `flight-ui-2026-10-27.md`, if AUDIT has one.
+- `data/parts/dragon/dragon-eclss.ron`: CO₂ removal against four crew (LAYERS' step 6).
+- `docs/technical/failure-modes.md`: "hazards on the rails lattice" now has ADVANCE's step 3.
+
+**Open for the owner:**
+1. **The engine's wait for settled propellant.** PLANNER calls it layer 1. I put the push that settles it (another part's thrusters) in layer 2, and leave the engine its start on command (software-layers.md §8.1). LAYERS decides by D128's rule unless the owner says otherwise.
+2. **D6, rotation input at rails warp:** act on it as at 1×, or refuse rails warp while it is held? Taken: refuse, as thrust does (consistent with D129's "restrict the warp, don't change the model"). Recorded in brief-advance.md step 5.
+3. **D1, the TARGET hold:** fix it in the model (read the target's stored line at each control tick), or restrict the warp while a hold aims at a vessel? Taken: the model fix; a hold on a vessel is proximity work, and the cost is moderate.
+4. **The warp-stop thresholds** (software-layers.md §4): marked E until D116's crew thresholds are sourced.
