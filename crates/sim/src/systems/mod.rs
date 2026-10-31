@@ -30,6 +30,7 @@ pub mod failure;
 pub mod fins;
 pub mod flight;
 pub mod g_limit;
+pub mod maneuver;
 pub mod mechanisms;
 pub mod plumbing;
 pub mod power;

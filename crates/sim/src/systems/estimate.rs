@@ -122,21 +122,11 @@ pub struct Estimates {
 pub fn estimate(def: &ShipDef, state: &ShipState, inp: &Inputs) -> Estimates {
     let k = inp.knowledge;
     let truth: Vec<f64> = state.tanks.iter().map(|t| t.liquid).collect();
-    let bound = |high: bool| -> Vec<f64> {
-        (state.tanks.iter().zip(&def.tanks).enumerate())
-            .map(|(i, (s, d))| match (k.precision(Quantity::TankLevel(i as u32)), high) {
-                (Some(p), false) => (s.liquid - p).max(0.0),
-                (Some(p), true) => (s.liquid + p).min(d.capacity.max(s.liquid)),
-                (None, false) => 0.0,
-                (None, true) => d.capacity.max(s.liquid),
-            })
-            .collect()
-    };
     let main = walk(def, state, inp, &truth);
     let others = if k.perfect {
         Vec::new()
     } else {
-        vec![walk(def, state, inp, &bound(false)), walk(def, state, inp, &bound(true))]
+        vec![walk(def, state, inp, &bound(def, state, k, false)), walk(def, state, inp, &bound(def, state, k, true))]
     };
     let now = main.now.as_ref().map(|r| finish(def, inp, r, others.iter().map(|o| o.now.as_ref())));
     let stages = (main.stages.iter().enumerate())
@@ -146,6 +136,44 @@ pub fn estimate(def: &ShipDef, state: &ShipState, inp: &Inputs) -> Estimates {
         })
         .collect();
     Estimates { now, stages }
+}
+
+/// The burn engines `engines` (indices into `ShipDef::engines`) would make
+/// lit now at the held throttle, every other engine off, until the first of
+/// their propellants is out: the same walk and readings as the staging
+/// bar's, for a burn not yet started (a planned burn's, `systems::maneuver`).
+/// `None` when none of them is aboard.
+pub fn lit(def: &ShipDef, state: &ShipState, inp: &Inputs, engines: &[u32]) -> Option<Burn> {
+    let run = |levels: &[f64]| {
+        let mut w = Walk::new(def, state, inp, levels);
+        for i in 0..def.engines.len() {
+            if engines.contains(&(i as u32)) && !w.gone.contains(&def.engines[i].part) {
+                w.light(i);
+            } else {
+                w.douse(i);
+            }
+        }
+        w.burn()
+    };
+    let truth: Vec<f64> = state.tanks.iter().map(|t| t.liquid).collect();
+    let main = run(&truth)?;
+    let k = inp.knowledge;
+    let others: Vec<Option<Raw>> =
+        if k.perfect { Vec::new() } else { vec![run(&bound(def, state, k, false)), run(&bound(def, state, k, true))] };
+    Some(finish(def, inp, &main, others.iter().map(Option::as_ref)))
+}
+
+/// Every tank at the low (or high) end of what is known of it: an
+/// unmeasured one empty (or full).
+fn bound(def: &ShipDef, state: &ShipState, k: &Knowledge, high: bool) -> Vec<f64> {
+    (state.tanks.iter().zip(&def.tanks).enumerate())
+        .map(|(i, (s, d))| match (k.precision(Quantity::TankLevel(i as u32)), high) {
+            (Some(p), false) => (s.liquid - p).max(0.0),
+            (Some(p), true) => (s.liquid + p).min(d.capacity.max(s.liquid)),
+            (None, false) => 0.0,
+            (None, true) => d.capacity.max(s.liquid),
+        })
+        .collect()
 }
 
 /// A burn's raw numbers in one walk.

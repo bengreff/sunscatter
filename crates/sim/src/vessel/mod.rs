@@ -78,7 +78,7 @@ pub use burn::{
 pub use clock::{landed_rate, ShipClock, SiteClock, LANDED_STEP};
 pub use flown::BurnCraft;
 pub use helm::{fleet_controls, Helm};
-pub use hold::{hold_direction, hold_reference, laplace_radius, primary, turn_lead};
+pub use hold::{hold_direction, hold_reference, laplace_radius, primary, quat_arc, turn_lead};
 pub use hold::{HoldInputs, HoldMode, SpeedReference, TargetState};
 pub use id::{VesselId, VesselIds};
 pub use segment::{coast_tolerance, CoastStart, EndKind, Sample, Segment, SegmentEnd, SegmentKind};
