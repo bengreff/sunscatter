@@ -383,6 +383,22 @@ struct Run {
     q_max: f64,
     wall: f64,
     started: Epoch,
+    /// Stopped: what stopped it and when (real s), its answer waiting for
+    /// the predicted path from the stopped clock ([`answer_now`]).
+    stopped: Option<(&'static str, f64)>,
+}
+
+/// Real seconds a stopped run waits at most for the predicted path from
+/// the stopped clock (it is recomputed a few times a second of real time).
+const PREDICTION_WAIT_S: f64 = 5.0;
+
+/// Whether a run that has stopped answers now: at once while time runs on
+/// (`keep_running`: no path is ever from the clock), else once the
+/// predicted path is from the stopped clock (`current`), or after
+/// [`PREDICTION_WAIT_S`] without it. So `get_vessel` after a `step` reads
+/// the stopped state's apsides, the same on every replay (finding 55).
+fn answer_now(stopped: bool, current: bool, waited: f64) -> bool {
+    !stopped || current || waited >= PREDICTION_WAIT_S
 }
 
 struct Profile {
@@ -789,6 +805,7 @@ pub fn run(
     mut measures: Measures,
     mut out: Output,
     mut game: MessageWriter<GameCommand>,
+    prediction: Res<crate::state::Prediction>,
 ) {
     let dt = measures.real.delta_secs_f64();
     let session = &mut *session;
@@ -819,7 +836,7 @@ pub fn run(
     for job in jobs {
         let kept = match job {
             Job::Shot(s) => shot(s, dt, &mut commands, &mut screens, &mut out),
-            Job::Run(r) => run_job(r, dt, &mut sim, &mut stop),
+            Job::Run(r) => run_job(r, dt, &mut sim, &mut stop, &prediction),
             Job::Bench { call, path } => {
                 if measures.bench.running() {
                     Some(Job::Bench { call, path })
@@ -950,7 +967,7 @@ fn start(
             }
             sim.paused = false;
             let (fleet, q_max, started) = (s.fleet, s.q.unwrap_or(0.0), sim.clock);
-            Started::Job(Job::Run(Run { call, until, vessel: id, fleet, q_max, wall: 0.0, started }))
+            Started::Job(Job::Run(Run { call, until, vessel: id, fleet, q_max, wall: 0.0, started, stopped: None }))
         }
         "new_flight" => {
             let craft = args.get("craft").and_then(Value::as_str).unwrap_or("").to_string();
@@ -1153,8 +1170,15 @@ fn shot(mut s: Shot, dt: f64, commands: &mut Commands, screens: &mut Screens, ou
     }
 }
 
-/// A run's frame: answered when it stops.
-fn run_job(mut r: Run, dt: f64, sim: &mut SimState, stop: &mut StopAt) -> Option<Job> {
+/// A run's frame: answered when it stops, once the predicted path is from
+/// the stopped clock ([`answer_now`]).
+fn run_job(
+    mut r: Run,
+    dt: f64,
+    sim: &mut SimState,
+    stop: &mut StopAt,
+    prediction: &crate::state::Prediction,
+) -> Option<Job> {
     r.wall += dt;
     let Some(i) = sim.index_of(r.vessel) else {
         stop.0 = None;
@@ -1163,19 +1187,32 @@ fn run_job(mut r: Run, dt: f64, sim: &mut SimState, stop: &mut StopAt) -> Option
         return None;
     };
     let s = sample(sim, i);
-    r.q_max = r.q_max.max(s.q.unwrap_or(0.0));
-    let at_stop = r.until.stop.is_some_and(|t| sim.clock.seconds_since(t) >= 0.0);
-    let why = reached(&r.until, &s, at_stop, r.fleet, r.q_max).or_else(|| {
-        if r.until.timeout <= 0.0 {
-            Some("paused")
-        } else {
-            (r.wall >= r.until.timeout).then_some("timeout")
+    let why = match r.stopped {
+        Some((why, _)) => why,
+        None => {
+            r.q_max = r.q_max.max(s.q.unwrap_or(0.0));
+            let at_stop = r.until.stop.is_some_and(|t| sim.clock.seconds_since(t) >= 0.0);
+            let why = reached(&r.until, &s, at_stop, r.fleet, r.q_max).or_else(|| {
+                if r.until.timeout <= 0.0 {
+                    Some("paused")
+                } else {
+                    (r.wall >= r.until.timeout).then_some("timeout")
+                }
+            });
+            let Some(why) = why else { return Some(Job::Run(r)) };
+            stop.0 = None;
+            if why != "paused" {
+                sim.paused = !r.until.keep_running;
+            }
+            r.stopped = Some((why, r.wall));
+            why
         }
-    });
-    let Some(why) = why else { return Some(Job::Run(r)) };
-    stop.0 = None;
-    if why != "paused" {
-        sim.paused = !r.until.keep_running;
+    };
+    let ship = sim.ship();
+    let current = prediction.current(ship.id(), sim.clock, crate::trajectory::predict::needed(ship));
+    let waited = r.stopped.map_or(0.0, |(_, at)| r.wall - at);
+    if !answer_now(sim.paused, current, waited) {
+        return Some(Job::Run(r));
     }
     let out = json!({
         "reached": why, "clock": super::epoch_text(sim.clock), "elapsed_s": sim.clock.seconds_since(r.started),
@@ -1403,6 +1440,26 @@ mod tests {
         let cases = [(0.5, false, None), (1.0, false, Some(true)), (5.0, true, None), (15.0, true, Some(false))];
         for (t, busy, want) in cases {
             assert_eq!(settle(t, busy, 15.0), want, "{t} {busy}");
+        }
+    }
+
+    /// A stopped run answers once the predicted path is from the stopped
+    /// clock, or after the wait's bound; at once while time runs on
+    /// (finding 55: a `get_vessel` right after a `step` read a path from a
+    /// moment before, its apsides missing near the end of the insertion).
+    #[test]
+    fn a_stopped_run_answers_once_its_prediction_is_from_the_stop() {
+        // (time stopped, path current, real seconds waited) → answers now
+        let cases = [
+            (true, false, 0.0, false),
+            (true, false, 0.5, false),
+            (true, true, 0.0, true),
+            (true, true, 0.3, true),
+            (true, false, PREDICTION_WAIT_S, true),
+            (false, false, 0.0, true),
+        ];
+        for (stopped, current, waited, want) in cases {
+            assert_eq!(answer_now(stopped, current, waited), want, "{stopped} {current} {waited}");
         }
     }
 

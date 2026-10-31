@@ -555,8 +555,21 @@ pub struct Prediction {
     /// While coasting: the vessel and the start of the stored segment the
     /// prediction takes over from (at its entry).
     pub after: Option<(VesselId, Epoch)>,
-    task: Option<Task<trajectory::predict::Path>>,
+    /// The vessel and the clock the path was computed at.
+    pub from: Option<(VesselId, Epoch)>,
+    task: Option<(Task<trajectory::predict::Path>, (VesselId, Epoch))>,
     since_last: f64,
+}
+
+impl Prediction {
+    /// Whether the path is vessel `id`'s from `clock` (or none is `needed`):
+    /// a run that stops the clock answers once it is, so a reading after a
+    /// `step` is the stopped state's path, not one from a moment before
+    /// (interface-map finding 55: under 40 m/s² a path 0.7 s old fell 100
+    /// km short in periapsis, an impact where the orbit had none).
+    pub fn current(&self, id: VesselId, clock: Epoch, needed: bool) -> bool {
+        !needed || self.from == Some((id, clock))
+    }
 }
 
 pub fn update_prediction(
@@ -565,25 +578,24 @@ pub fn update_prediction(
     orbits: Res<OrbitSettings>,
     mut pred: ResMut<Prediction>,
 ) {
-    if let Some(task) = pred.task.as_mut() {
+    if let Some((task, from)) = pred.task.as_mut() {
         if let Some(path) = check_ready(task) {
-            (pred.segments, pred.after) = (path.segments, path.after);
+            (pred.segments, pred.after, pred.from) = (path.segments, path.after, Some(*from));
             pred.task = None;
         }
     }
     let ship = sim.ship();
     if !trajectory::predict::needed(ship) {
-        (pred.segments, pred.after) = (Vec::new(), None);
+        (pred.segments, pred.after, pred.from) = (Vec::new(), None, None);
         return;
     }
     pred.since_last += time.delta_secs_f64();
     if pred.task.is_none() && pred.since_last > 0.25 {
         pred.since_last = 0.0;
         let (world, vessel, controls, orbits) = (sim.world.clone(), ship.clone(), *sim.controls(), orbits.clone());
-        pred.task = Some(
-            AsyncComputeTaskPool::get()
-                .spawn(async move { trajectory::predict::path(&world, &vessel, &controls, &orbits) }),
-        );
+        let task = AsyncComputeTaskPool::get()
+            .spawn(async move { trajectory::predict::path(&world, &vessel, &controls, &orbits) });
+        pred.task = Some((task, (ship.id(), sim.clock)));
     }
 }
 

@@ -275,3 +275,25 @@ fn a_script_flies_an_inactive_probe_through_the_step() {
     assert_eq!(sim.fleet[2].controls().throttle, 0.4, "its own controls, kept");
     assert_eq!(sim.controls().throttle, 0.0, "the active vessel's untouched");
 }
+
+/// The predicted path is current only for the vessel and clock it was
+/// computed at; with nothing to predict it always is (finding 55).
+#[test]
+fn a_prediction_is_current_for_its_own_vessel_and_clock() {
+    let sim = SimState::new();
+    let (t, me, other) = (sim.clock, sim.ship().id(), VesselId(99));
+    let later = t.add_seconds(0.7);
+    let pred = |from| Prediction { from, ..Default::default() };
+    // (computed from, vessel, clock, needed) → current
+    let cases = [
+        (Some((me, t)), me, t, true, true),
+        (Some((me, t)), me, later, true, false),
+        (Some((me, t)), other, t, true, false),
+        (None, me, t, true, false),
+        (None, me, t, false, true),
+        (Some((me, t)), me, later, false, true),
+    ];
+    for (from, id, clock, needed, want) in cases {
+        assert_eq!(pred(from).current(id, clock, needed), want, "{from:?} {id:?} {needed}");
+    }
+}
