@@ -26,4 +26,35 @@ Small commits, each passing fmt, clippy, `cargo test -p sim` and the game's test
 
 ## State
 
-(Update as you land: the plan, commits with hashes, the cost before and after, what is left in order, Open for the owner.)
+### STATE-1 (2026-10-31)
+
+**The plan (step 1).**
+
+*The merged state, by subsystem.* `ShipState` keeps its per-item lists aligned with `ShipDef`'s (FOUNDATION's reason stands: the systems step definition and state in lockstep), and each item takes its run's fields, so `Runtime` disappears field by field. Groups (what comes in from `Runtime`):
+- **tanks** (`Tank`: liquid, liquid_k, ullage_moles, ullage_k + `TankRun`'s drift, drift_speed, pressurant_in, vented) and **bottles** (unchanged); **plumbing** (`pressure_regulated`).
+- **engines** (`Engine`: status, timer, ignitions, throttle, gimbal, selected + `EngineRun`'s level, cutoff, reason, settling); **propulsion** (`release_armed`, `release_engines` as `Vec<EngineId>`, `throttle_was`, `thrust_dir`).
+- **thrusters**, **valves** (unchanged); **surfaces** (the fins' deflections, `fins`, one per `ShipDef::surfaces` item, never empty).
+- **batteries**; **power** (the switches `power`, `unpowered`, `buses`).
+- **mechanisms** (unchanged).
+- **joints** (`Joint`: parent, child, intact + `JointRun`'s force, moment, ratio, to_ultimate) and `severed` (one list of `Joint`, not two); **parts** (unchanged); `clamped`.
+- **cabin** (`CabinState` + `CrewRun`'s held and injuries: the crew's exposure goes with the cabin by construction, which removes the partition's special case).
+- **failures** (`fates`, `lost`, `seed`, `launch`).
+- **program** (`sequence`, `stages`, `functions`, `orders`).
+- **felt** (`accel`, `omega`, `alpha`: the last tick's motion), `stepped`, `events` (the log).
+
+Not state (derived each tick, never saved): the feeds (`plumbing::Feed`), the thrust (`propulsion::output`), the loads' inputs, the bus voltages (`BusRun` stays a readout of the last power step, saved because the screens read it between steps; derivable, left as is).
+
+*Handles.* `TankId`, `BottleId`, `EngineId`, `ThrusterId`, `ValveId`, `BatteryId`, `MechanismId`, `SurfaceId`, `JointId`, `ComponentId` (newtypes over `u32`: the index into `ShipDef`'s list) and `PartId` (`Part::id`, the design index pieces keep). One owner `craft::handle` with the one resolution from a string: `ShipDef::resolve(&str) -> Option<Item>` and the glob `ShipDef::pick(pattern) -> Vec<Item>` (today's `matches` loops). Strings stay in files, saves (ids, so a save names its items), the interface and MCP. Inside: `Lost`/`unpowered` become sets of `Item` (an owner: a part or a component), `Fate.owner` an `Item`, `Effect::{Separate, Snap, Destroy}` take a `PartId`, `release_engines` `EngineId`s. Linear searches by id: **108 in sim** (regex `(position|find|any|filter|find_map)(|x| x.(id|owner|name|part) ==`, tests excluded), **about 70 of them in `systems/` and `vessel/`** (the review's count), run each tick: `failure` 20, `power` 11, `runtime` 6, `structure` 5, `command` 4. Target: none per tick (the build's stay, they run once).
+
+*The engine rule in one place (F8).* `systems::command::execute` owns ignite, shutdown, throttle, select and the mechanisms (start sequence, ignitions, the clamps' interlock, cycles). `ShipState::apply` keeps only the plain edits with no transient (valves, thrusters, power switches, separations, the clamps, the sequence's edits) and refuses an engine or mechanism command; `ShipState::next_stage` (only two tests use it) is deleted for `systems::command::next_stage`. `craft::engine::ship_thrust` (only a test uses it; the vessel flies `propulsion::output`) is deleted and its test moves onto `propulsion::output`.
+
+*Order.* Each a commit passing every test: (2a) tanks, (2b) engines and propulsion, (2c) joints and severed, (2d) surfaces, power, cabin and crew, failures, program, felt: `Runtime` deleted with its partition and merge folded into `craft::partition`; (3) handles, then the sets, then the per-tick searches, with the cost after; (4) F8; (5) the save and the playtest save; (6) docs.
+
+**Cost before** (`bench_scale craft parts=300,1000 runs=1`, release, HEAD bcc3cc7, load 8–12, one run):
+
+| parts | live tick: entry | ascent M 1.2 | vacuum burn | pad | thermal step 20 ms | coast step | lattice 600 s first, tenth | tumbling day, per point | 10⁶ s holding |
+|---|---|---|---|---|---|---|---|---|---|
+| 300 | 16.6 ms | 12.6 ms | 11.1 ms | 12.9 ms | 13.4 ms | 0.51 ms | 6.6, 4.8 ms | 4.3 ms | 5.5 s |
+| 1,000 | 90.4 ms | 75.2 ms | 62.4 ms | 73.7 ms | 84.3 ms | 3.2 ms | 39.9, 31.3 ms | 27.7 ms | 37.3 s |
+
+Read the ratios, not the last digit (other agents were building). The handles' gain shows in the live ticks and the lattice (the systems run in both).
