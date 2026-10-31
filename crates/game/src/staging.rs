@@ -8,6 +8,7 @@
 pub mod parts;
 
 use sim::chute::{CanopyState, ChuteSpec, ChuteState};
+use sim::systems::ship_os::chutes::Chutes;
 
 /// Where a stage is in the sequence.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -49,15 +50,18 @@ pub struct Stage {
 pub const NO_STAGE_LEFT: &str = "No stage left to activate";
 
 /// A craft's canopies in the D079 sequence: the drogues (if it has any),
-/// then the mains, each with its state (the Landing menu's PARACHUTE rows).
-pub fn canopies(spec: &ChuteSpec, chute: &ChuteState) -> Vec<Part> {
+/// then the mains, each with its state (the Landing menu's PARACHUTE rows);
+/// the mains' height the deploy's (`deploy`: the pilot's or the craft's,
+/// `ship_os::chutes::main_height`).
+pub fn canopies(spec: &ChuteSpec, deploy: &Chutes, chute: &ChuteState) -> Vec<Part> {
     let mut out = Vec::new();
     if let Some(d) = &spec.drogue {
         out.push(canopy_part("DROGUES", d, chute.drogue, chute.armed, None));
     }
     // Behind a drogue the main waits for its height; alone it opens on
     // the command (sim::chute).
-    let waiting = (chute.armed && spec.drogue.is_some()).then_some(spec.main_height);
+    let waiting =
+        (chute.armed && spec.drogue.is_some()).then(|| sim::systems::ship_os::chutes::main_height(spec, deploy));
     out.push(canopy_part("MAINS", &spec.main, chute.main, chute.armed, waiting));
     out
 }
@@ -141,18 +145,25 @@ mod tests {
         ];
         for (drogue, main, armed, want_d, want_m) in table {
             let chute = ChuteState { armed, drogue, main };
-            let c = canopies(&spec, &chute);
+            let c = canopies(&spec, &Chutes::default(), &chute);
             let names: Vec<&str> = c.iter().map(|p| p.name.as_str()).collect();
             assert_eq!(names, ["DROGUES", "MAINS"]);
             let states: Vec<&str> = c.iter().map(|p| p.state.as_str()).collect();
             assert_eq!(states, [want_d, want_m], "{drogue:?} {main:?}");
         }
+        // The deploy's own height, where the pilot set one (D126's config).
+        let pilots = Chutes { main_height: Some(2_000.0), ..Chutes::default() };
+        let waiting = ChuteState { armed: true, drogue: open(30.0), main: CanopyState::Stowed };
+        assert_eq!(canopies(&spec, &pilots, &waiting)[1].state, "armed · opens below 2000 m");
         let torn = ChuteState { armed: true, drogue: CanopyState::Failed, main: CanopyState::Stowed };
-        assert_eq!(canopies(&spec, &torn)[0].tone, PartTone::Failed);
+        assert_eq!(canopies(&spec, &Chutes::default(), &torn)[0].tone, PartTone::Failed);
         // Mains alone open on the command.
         let mains = ChuteSpec { drogue: None, ..spec.clone() };
         let armed = ChuteState { armed: true, ..ChuteState::default() };
-        assert_eq!(canopies(&mains, &armed).iter().map(|p| p.state.as_str()).collect::<Vec<_>>(), ["armed"]);
+        assert_eq!(
+            canopies(&mains, &Chutes::default(), &armed).iter().map(|p| p.state.as_str()).collect::<Vec<_>>(),
+            ["armed"]
+        );
     }
 
     /// Space after the sequence's last stage is told so (review: it gave

@@ -98,6 +98,7 @@ mod tests {
             now: "burn 1 wakes in 30s: waits for a press".into(),
             tone: Tone::Warn,
             press: Ok("fly burn 1".into()),
+            settings: Vec::new(),
         };
         let d = FlightData { programs: vec![row.clone()], ..FlightData::default() };
         let s = &sections(&d)[0];

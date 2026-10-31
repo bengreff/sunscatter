@@ -336,7 +336,7 @@ pub fn gather(s: &Sources) -> FlightData {
         craft: craft(sim),
         comms: comms(s),
         canopies: if ship.craft.design().parts.iter().any(|p| p.chute) {
-            crate::staging::canopies(&ship.craft.chute, &ship.chute)
+            crate::staging::canopies(&ship.craft.chute, &ship.software().chutes, &ship.chute)
         } else {
             Vec::new()
         },

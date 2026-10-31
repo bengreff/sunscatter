@@ -612,6 +612,7 @@ fn run(
         }
         "set_switch" => switches::set_switch(args, sim, comms)?,
         "press" => switches::press(args, sim, comms)?,
+        "configure_program" => switches::configure(args, sim, comms)?,
         "set_target" => {
             let t = target_arg(args, sim)?;
             (json!({"target": target_json(sim, t)}), vec![Effect::Target(t)])

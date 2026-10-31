@@ -392,7 +392,10 @@ mod tests {
         }
         let spec = sim::craft::small::rocket_ref().spec.chute.clone();
         let chute = sim::chute::ChuteState::default();
-        let mut d = FlightData { canopies: crate::staging::canopies(&spec, &chute), ..FlightData::default() };
+        let mut d = FlightData {
+            canopies: crate::staging::canopies(&spec, &Default::default(), &chute),
+            ..FlightData::default()
+        };
         d.chute = ChuteData { commanded: false, state: chute, q: Some(9_000.0), design_q: 5_500.0 };
         let s = shown(&d);
         let p = find(&s, "parachute").unwrap();
@@ -410,6 +413,7 @@ mod tests {
             now: "stowed: arms on a press".into(),
             tone: Tone::Normal,
             press: Ok("arm the drogues".into()),
+            settings: Vec::new(),
         };
         let with = FlightData { programs: vec![row], ..d.clone() };
         let p = find(&shown(&with), "parachute").unwrap().clone();

@@ -10,7 +10,10 @@
 //!   is not public: E), and the deploy command arms it too; `Press` (the
 //!   default) arms on the deploy command; `Off` opens nothing by itself:
 //!   each press opens the next canopy.
-//! - **The main** opens below `main_height` by the altitude reading, once
+//! - **The heights** ([`arm_height`], [`main_height`]) are the craft's
+//!   (`ChuteSpec`) until the pilot sets them (D126's config menu, [`set`]):
+//!   then they are the deploy's own, saved with its switch.
+//! - **The main** opens below [`main_height`] by the altitude reading, once
 //!   the drogue is out of its reefed stages or gone ([`main_now`]). Without
 //!   an altitude reading, or switched off, it opens when the pilot presses
 //!   deploy again ([`press`]: the manual deploy runs the same function,
@@ -23,12 +26,13 @@
 //! deploy_max_q, the mains' cut on water contact, the chute part's own
 //! baroswitch (layer 1's backup, open for the owner there).
 
+use super::program::Setting;
 use super::Switch;
 use crate::chute::{CanopyState, ChuteSpec, ChuteState};
 use serde::{Deserialize, Serialize};
 
-/// The deploy's switch and state (saved with the vessel).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+/// The deploy's switch, settings and state (saved with the vessel).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct Chutes {
     #[serde(default)]
     pub switch: Switch,
@@ -36,11 +40,18 @@ pub struct Chutes {
     /// soon as the drogue lets it.
     #[serde(default)]
     pub main_called: bool,
+    /// The heights it works to as the pilot set them (m above the ground;
+    /// [`set`]): the drogues' arming and the mains' opening. `None`: the
+    /// craft's ([`arm_height`], [`main_height`]).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub arm_height: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub main_height: Option<f64>,
 }
 
-/// What a landing prediction reads of the deploy: the switch and the
-/// press, and whether the computer lacks an altitude reading.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+/// What a landing prediction reads of the deploy: the switch, the press
+/// and the heights, and whether the computer lacks an altitude reading.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Deploy {
     pub chutes: Chutes,
     pub blind: bool,
@@ -56,14 +67,54 @@ pub fn press(c: &mut Chutes, chute: &mut ChuteState) {
     }
 }
 
-/// The height (m) below which `Auto` arms: the drogue's (`drogue_height`),
-/// or the main's for a chute without a drogue.
-pub fn arm_height(spec: &ChuteSpec) -> Option<f64> {
+/// The height (m) below which the mains open: the pilot's, or the craft's
+/// (`ChuteSpec::main_height`).
+pub fn main_height(spec: &ChuteSpec, c: &Chutes) -> f64 {
+    c.main_height.unwrap_or(spec.main_height)
+}
+
+/// The height (m) below which `Auto` arms: the drogues' (the pilot's, or
+/// the craft's `drogue_height`), or the mains' for a chute without a
+/// drogue.
+pub fn arm_height(spec: &ChuteSpec, c: &Chutes) -> Option<f64> {
     if spec.drogue.is_some() {
-        spec.drogue_height
+        c.arm_height.or(spec.drogue_height)
     } else {
-        Some(spec.main_height)
+        Some(main_height(spec, c))
     }
+}
+
+/// Sets one of the deploy's settings (D126's config menu): the drogues'
+/// arming height ([`Setting::ArmHeight`], on a chute with drogues) or the
+/// mains' ([`Setting::MainHeight`]), each a height above the ground (finite,
+/// not negative). The order of the two is the pilot's: mains set above the
+/// arming height open as soon as the drogues let them.
+pub fn set(c: &mut Chutes, spec: &ChuteSpec, s: &Setting) -> Result<(), String> {
+    let height = |h: f64| {
+        if h.is_finite() && h >= 0.0 {
+            Ok(Some(h))
+        } else {
+            Err(format!("a height above the ground is 0 m or more, not {h}"))
+        }
+    };
+    match s {
+        Setting::ArmHeight(_) if spec.drogue.is_none() => {
+            Err("no drogues: the mains open at their own height (its main height)".into())
+        }
+        Setting::ArmHeight(h) => height(*h).map(|h| c.arm_height = h),
+        Setting::MainHeight(h) => height(*h).map(|h| c.main_height = h),
+        other => Err(format!("the parachutes' deploy has no {}", other.name())),
+    }
+}
+
+/// Sets `settings` in order ([`set`]), all or none.
+pub fn configure(c: &mut Chutes, spec: &ChuteSpec, settings: &[Setting]) -> Result<(), String> {
+    let mut next = *c;
+    for s in settings {
+        set(&mut next, spec, s)?;
+    }
+    *c = next;
+    Ok(())
 }
 
 /// Whether the computer arms the chutes by itself now: switched `Auto`,
@@ -73,13 +124,13 @@ pub fn arm_now(spec: &ChuteSpec, c: &Chutes, chute: &ChuteState, altitude: Optio
     c.switch == Switch::Auto
         && !chute.armed
         && descending
-        && arm_height(spec).zip(altitude).is_some_and(|(arm, h)| h <= arm)
+        && arm_height(spec, c).zip(altitude).is_some_and(|(arm, h)| h <= arm)
 }
 
 /// Whether the altitude reading puts the vessel at or below the main's
 /// height (`None`: unknown, never).
-pub fn below_main(spec: &ChuteSpec, altitude: Option<f64>) -> bool {
-    altitude.is_some_and(|h| h <= spec.main_height)
+pub fn below_main(spec: &ChuteSpec, c: &Chutes, altitude: Option<f64>) -> bool {
+    altitude.is_some_and(|h| h <= main_height(spec, c))
 }
 
 /// Whether the main is the next canopy to open, by the switch, the press
@@ -87,7 +138,7 @@ pub fn below_main(spec: &ChuteSpec, altitude: Option<f64>) -> bool {
 pub fn main_expected(spec: &ChuteSpec, c: &Chutes, chute: &ChuteState, altitude: Option<f64>) -> bool {
     chute.armed
         && chute.main == CanopyState::Stowed
-        && (c.main_called || spec.drogue.is_none() || (c.switch != Switch::Off && below_main(spec, altitude)))
+        && (c.main_called || spec.drogue.is_none() || (c.switch != Switch::Off && below_main(spec, c, altitude)))
 }
 
 /// Whether the main opens now: [`main_expected`], and the drogue out of its
@@ -141,7 +192,7 @@ mod tests {
     fn the_main_opens_by_its_rule() {
         use CanopyState::{Failed, Stowed};
         let st = |drogue, main| ChuteState { armed: true, drogue, main };
-        let sw = |switch, main_called| Chutes { switch, main_called };
+        let sw = |switch, main_called| Chutes { switch, main_called, ..Default::default() };
         let (auto, press, off) = (Switch::Auto, Switch::Press, Switch::Off);
         // (drogue, chutes, state, altitude, opens)
         let cases = [
@@ -172,7 +223,7 @@ mod tests {
     #[test]
     fn auto_arms_below_its_height_descending_and_a_press_arms_then_calls_the_main() {
         let s = spec(true);
-        let auto = Chutes { switch: Switch::Auto, main_called: false };
+        let auto = Chutes { switch: Switch::Auto, ..Default::default() };
         let none = ChuteState::default();
         // (chutes, altitude, descending, arms)
         let cases = [
@@ -182,14 +233,14 @@ mod tests {
             (auto, Some(5_000.0), false, false), // climbing (an ascent)
             (auto, None, true, false),           // no altitude
             (Chutes::default(), Some(5_000.0), true, false),
-            (Chutes { switch: Switch::Off, main_called: false }, Some(5_000.0), true, false),
+            (Chutes { switch: Switch::Off, ..Default::default() }, Some(5_000.0), true, false),
         ];
         for (k, (c, altitude, descending, arms)) in cases.into_iter().enumerate() {
             assert_eq!(arm_now(&s, &c, &none, altitude, descending), arms, "case {k}");
         }
         let armed = ChuteState { armed: true, ..none };
         assert!(!arm_now(&s, &auto, &armed, Some(1.0), true), "armed already");
-        assert_eq!(arm_height(&spec(false)), Some(1_800.0), "no drogue: the main's height");
+        assert_eq!(arm_height(&spec(false), &auto), Some(1_800.0), "no drogue: the main's height");
         assert!(armed_at(&s, &auto, &none, Some(5_000.0)) && !armed_at(&s, &Chutes::default(), &none, Some(5_000.0)));
 
         let (mut c, mut state) = (Chutes::default(), ChuteState::default());
@@ -197,5 +248,54 @@ mod tests {
         assert!(state.armed && !c.main_called);
         press(&mut c, &mut state);
         assert!(c.main_called);
+    }
+
+    /// The pilot's heights replace the craft's in every rule; a setting
+    /// that is not a height above the ground, or not the deploy's, is
+    /// refused, and a call's settings land all or none.
+    #[test]
+    fn the_pilots_heights_replace_the_crafts() {
+        let s = spec(true);
+        let mut c = Chutes { switch: Switch::Auto, ..Default::default() };
+        assert_eq!((arm_height(&s, &c), main_height(&s, &c)), (Some(5_500.0), 1_800.0), "the craft's");
+        configure(&mut c, &s, &[Setting::ArmHeight(7_000.0), Setting::MainHeight(2_500.0)]).unwrap();
+        assert_eq!((arm_height(&s, &c), main_height(&s, &c)), (Some(7_000.0), 2_500.0), "the pilot's");
+        let none = ChuteState::default();
+        assert!(arm_now(&s, &c, &none, Some(6_500.0), true), "arms below the pilot's height");
+        let armed = ChuteState { armed: true, drogue: OPEN, ..none };
+        assert!(main_now(&s, &c, &armed, Some(2_400.0)) && !main_now(&s, &c, &armed, Some(2_600.0)));
+        let d = Deploy { chutes: c, blind: false };
+        let big = ChuteSpec { main: Canopy { cd_area: 50.0, ..s.main.clone() }, ..s.clone() };
+        let area = |h| predicted_cd_area(&big, &d, &none, h);
+        assert!(area(2_400.0) > area(2_600.0), "the prediction's mains from the pilot's height");
+
+        // (setting, accepted)
+        let cases = [
+            (Setting::MainHeight(0.0), true),
+            (Setting::MainHeight(9_000.0), true), // above the arming: once the drogues let them
+            (Setting::MainHeight(-1.0), false),
+            (Setting::MainHeight(f64::NAN), false),
+            (Setting::ArmHeight(f64::INFINITY), false),
+            (Setting::ArmHeight(3_000.0), true),
+            (Setting::Low(0.3), false),
+            (Setting::Period(60.0), false),
+        ];
+        for (k, (setting, ok)) in cases.into_iter().enumerate() {
+            let before = c;
+            assert_eq!(set(&mut c, &s, &setting).is_ok(), ok, "case {k}");
+            if !ok {
+                assert_eq!(c, before, "case {k}: unchanged");
+            }
+        }
+        let before = c;
+        assert!(configure(&mut c, &s, &[Setting::MainHeight(1_000.0), Setting::MainHeight(-1.0)]).is_err());
+        assert_eq!(c, before, "all or none");
+
+        // Without drogues the one height is the mains': it arms there too.
+        let lone = spec(false);
+        let mut c = Chutes::default();
+        assert!(set(&mut c, &lone, &Setting::ArmHeight(3_000.0)).is_err());
+        set(&mut c, &lone, &Setting::MainHeight(3_000.0)).unwrap();
+        assert_eq!(arm_height(&lone, &c), Some(3_000.0));
     }
 }

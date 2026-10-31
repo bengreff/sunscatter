@@ -7,8 +7,8 @@
 use super::Vessel;
 use crate::craft::command::ShipCommand;
 use crate::systems::command;
-use crate::systems::ship_os::program::{Context, Installed};
-use crate::systems::ship_os::{self, Switch};
+use crate::systems::ship_os::program::{self, Context, Installed, Setting};
+use crate::systems::ship_os::{self, power_guard, Switch};
 use crate::time::Epoch;
 use crate::world::World;
 
@@ -44,6 +44,16 @@ impl Vessel {
             }
         }
         Ok(())
+    }
+
+    /// Sets a program's settings (D126's config menu; the names of
+    /// [`Self::set_switch`]), all or none, by its owner's rule
+    /// (`ship_os::program::configure`): the parachutes' heights by the
+    /// craft's chutes, a load manager's loads from the components that draw
+    /// power.
+    pub fn configure(&mut self, name: &str, settings: &[Setting]) -> Result<(), String> {
+        let offered = self.ship_def().map_or_else(Vec::new, |d| power_guard::switchable(&d));
+        program::configure(&mut self.software, (&self.craft.chute, &offered), name, settings, self.time)
     }
 
     /// The player's press for a program (the names of [`Self::set_switch`]):

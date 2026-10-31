@@ -11,14 +11,20 @@
 //! planned burns' (`maneuver`), the parachutes' deploy (`chutes`, on a
 //! craft with canopies) and each scheduled program installed on the
 //! computer (`ship_os::program::Installed`, by its name).
+//!
+//! **The config menu** (D126): each program's settings ([`Param`]: the
+//! parachutes' heights, a load manager's loads, lines and period), its
+//! saved state, edited by one rule for the tab and MCP
+//! ([`settings_of`]: by the settings' keys, checked as the computer will
+//! check them, `ship_os::program::configure`).
 
 use crate::commands::GameCommand;
 use crate::format::{distance, duration};
 use crate::interface::menus::Tone;
 use sim::chute::{CanopyState, ChuteSpec, ChuteState};
 use sim::systems::maneuver::Step;
-use sim::systems::ship_os::program::{Builtin, Installed, Schedule, Slot};
-use sim::systems::ship_os::{chutes, Switch};
+use sim::systems::ship_os::program::{self, Builtin, Installed, Schedule, Setting, Slot};
+use sim::systems::ship_os::{chutes, power_guard, Software, Switch};
 use sim::time::Epoch;
 use sim::vessel::{Vessel, VesselId};
 
@@ -55,6 +61,115 @@ pub struct Row {
     pub tone: Tone,
     /// What a press does now, or why there is nothing to press.
     pub press: Result<String, String>,
+    /// Its config menu: the settings it works to (D126).
+    pub settings: Vec<Param>,
+}
+
+/// The settings' keys: MCP's names (`configure_program`'s `settings`), each
+/// with its unit.
+pub const ARM_HEIGHT: &str = "arm_height_m";
+pub const MAIN_HEIGHT: &str = "main_height_m";
+pub const LOADS: &str = "loads";
+pub const OFF_BELOW: &str = "off_below";
+pub const ON_AT: &str = "on_at";
+pub const PERIOD: &str = "period_s";
+
+/// One setting in a program's config menu, as the player reads it: the
+/// program's saved state.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Param {
+    /// Its key (MCP's name, [`ARM_HEIGHT`] …).
+    pub key: &'static str,
+    pub label: &'static str,
+    pub value: Value,
+}
+
+/// A setting's value.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Value {
+    /// A height above the ground (m); `None`: none set (it never arms by
+    /// itself).
+    Height(Option<f64>),
+    /// A share of the charge (0 to 1).
+    Share(f64),
+    /// A length of time (s).
+    Seconds(f64),
+    /// The components it switches, and those it could (the ones that draw
+    /// power, `power_guard::switchable`).
+    Loads { chosen: Vec<String>, offered: Vec<String> },
+}
+
+impl Value {
+    /// As the tab shows it.
+    pub fn text(&self) -> String {
+        match self {
+            Value::Height(Some(m)) => distance(*m),
+            Value::Height(None) => "none set".into(),
+            Value::Share(x) => format!("{:.0} %", x * 100.0),
+            Value::Seconds(s) => duration(*s),
+            Value::Loads { chosen, .. } if chosen.is_empty() => "none".into(),
+            Value::Loads { chosen, .. } => chosen.join(", "),
+        }
+    }
+}
+
+/// An edit of one setting, by the player or the agent: a number in the
+/// key's unit, or a list of ids.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Input {
+    Number(f64),
+    List(Vec<String>),
+}
+
+/// The setting a key and an input make (the keys' one table).
+fn setting(key: &str, input: &Input) -> Result<Setting, String> {
+    let number = || match input {
+        Input::Number(x) => Ok(*x),
+        Input::List(_) => Err(format!("`{key}` is a number")),
+    };
+    Ok(match key {
+        ARM_HEIGHT => Setting::ArmHeight(number()?),
+        MAIN_HEIGHT => Setting::MainHeight(number()?),
+        OFF_BELOW => Setting::Low(number()?),
+        ON_AT => Setting::High(number()?),
+        PERIOD => Setting::Period(number()?),
+        LOADS => match input {
+            Input::List(l) => Setting::Loads(l.clone()),
+            Input::Number(_) => return Err("`loads` is a list of component ids".into()),
+        },
+        _ => return Err(format!("unknown setting `{key}`")),
+    })
+}
+
+/// `program`'s settings from `changes` (by their keys, in order), checked
+/// by the program's own rule as the computer will check them on arrival
+/// (`ship_os::program::configure`, on a copy of the craft's software), so
+/// a refusal comes at once: the tab's and MCP's one rule. Its name and the
+/// settings to send.
+pub fn settings_of(x: &Inputs, program: &str, changes: &[(String, Input)]) -> Result<(String, Vec<Setting>), String> {
+    let rows = rows(x);
+    let r = find(&rows, program)?;
+    let keys: Vec<&str> = r.settings.iter().map(|p| p.key).collect();
+    if keys.is_empty() {
+        return Err(format!("{} has no settings", r.title));
+    }
+    if changes.is_empty() {
+        return Err(format!("{}: no setting given (it has {})", r.title, keys.join(", ")));
+    }
+    let settings = (changes.iter())
+        .map(|(k, v)| {
+            if keys.contains(&k.as_str()) {
+                setting(k, v)
+            } else {
+                Err(format!("{} has no setting `{k}` (it has {})", r.title, keys.join(", ")))
+            }
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let spec = x.chutes.as_ref().map_or_else(ChuteSpec::none, |c| c.spec.clone());
+    let mut software = x.software.clone();
+    program::configure(&mut software, (&spec, &x.switchable), &r.name, &settings, x.now)
+        .map_err(|why| format!("{}: {why}", r.title))?;
+    Ok((r.name.clone(), settings))
 }
 
 /// The burn the maneuver program waits on or flies.
@@ -83,11 +198,13 @@ pub struct Inputs {
     /// A flight computer works (`ship_os::Health::computing`): a scheduled
     /// program misses its epochs without one.
     pub computing: bool,
-    pub maneuver: Slot,
+    /// The programs' switches, settings and state (`Vessel::software`).
+    pub software: Software,
     pub burn: Option<Burn>,
     /// `None`: the craft has no parachutes.
     pub chutes: Option<Chutes>,
-    pub installed: Vec<Installed>,
+    /// The components a load manager may switch (`power_guard::switchable`).
+    pub switchable: Vec<String>,
     pub now: Epoch,
 }
 
@@ -105,10 +222,10 @@ impl Inputs {
         });
         Some(Inputs {
             computing: v.flight_health().computing(),
-            maneuver: software.maneuver,
+            software: software.clone(),
             burn,
             chutes,
-            installed: software.programs.clone(),
+            switchable: v.ship_def().map_or_else(Vec::new, |d| power_guard::switchable(&d)),
             now,
         })
     }
@@ -117,9 +234,9 @@ impl Inputs {
 /// Every program aboard, in the order the screen lists them: the planned
 /// burns, the parachutes, then the installed ones.
 pub fn rows(x: &Inputs) -> Vec<Row> {
-    let mut out = vec![maneuver(x.maneuver, x.burn)];
+    let mut out = vec![maneuver(x.software.maneuver, x.burn)];
     out.extend(x.chutes.as_ref().map(parachutes));
-    out.extend(x.installed.iter().map(|p| installed(p, x.now, x.computing)));
+    out.extend(x.software.programs.iter().map(|p| installed(p, x.now, x.computing, &x.switchable)));
     out
 }
 
@@ -171,6 +288,7 @@ fn maneuver(slot: Slot, burn: Option<Burn>) -> Row {
         now,
         tone,
         press,
+        settings: Vec::new(),
     }
 }
 
@@ -196,8 +314,8 @@ fn off() -> String {
 /// The parachutes' deploy (`chutes`; `ship_os::chutes`' rules).
 fn parachutes(c: &Chutes) -> Row {
     let (spec, d, s) = (&c.spec, &c.deploy, &c.state);
-    let main = distance(spec.main_height);
-    let arm = chutes::arm_height(spec).map_or_else(|| "its height".to_string(), distance);
+    let main = distance(chutes::main_height(spec, d));
+    let arm = chutes::arm_height(spec, d).map_or_else(|| "its height".to_string(), distance);
     let drogue = spec.drogue.is_some();
     let does = if drogue {
         format!(
@@ -241,11 +359,21 @@ fn parachutes(c: &Chutes) -> Row {
         }
         _ => Err("nothing left to open".into()),
     };
-    Row { name: "chutes".into(), title: "Parachutes".into(), does, switch: d.switch, now, tone, press }
+    let main_param =
+        |label| Param { key: MAIN_HEIGHT, label, value: Value::Height(Some(chutes::main_height(spec, d))) };
+    let settings = if drogue {
+        let arm =
+            Param { key: ARM_HEIGHT, label: "DROGUES ARM BELOW", value: Value::Height(chutes::arm_height(spec, d)) };
+        vec![arm, main_param("MAINS OPEN BELOW")]
+    } else {
+        vec![main_param("OPEN BELOW")]
+    };
+    Row { name: "chutes".into(), title: "Parachutes".into(), does, switch: d.switch, now, tone, press, settings }
 }
 
-/// A scheduled program installed on the computer, by its kind.
-fn installed(p: &Installed, now: Epoch, computing: bool) -> Row {
+/// A scheduled program installed on the computer, by its kind (a load
+/// manager's loads from `offered`).
+fn installed(p: &Installed, now: Epoch, computing: bool, offered: &[String]) -> Row {
     let next = p.schedule.next(p.last).map(|e| e.seconds_since(now));
     let when = next.map_or("nothing due".to_string(), |s| {
         if s > 0.0 {
@@ -254,8 +382,14 @@ fn installed(p: &Installed, now: Epoch, computing: bool) -> Row {
             "due now".into()
         }
     });
-    let (title, does, state, tone) = match &p.program {
+    let (title, does, state, tone, mut settings) = match &p.program {
         Builtin::PowerGuard(g) => {
+            let loads = Value::Loads { chosen: g.loads.clone(), offered: offered.to_vec() };
+            let settings = vec![
+                Param { key: LOADS, label: "LOADS", value: loads },
+                Param { key: OFF_BELOW, label: "OFF BELOW", value: Value::Share(g.low) },
+                Param { key: ON_AT, label: "ON AGAIN AT", value: Value::Share(g.high) },
+            ];
             let every = match p.schedule {
                 Schedule::Every { period, .. } => format!(", every {}", duration(period)),
                 Schedule::At(_) => String::new(),
@@ -271,7 +405,7 @@ fn installed(p: &Installed, now: Epoch, computing: bool) -> Row {
             } else {
                 ("loads on".to_string(), Tone::Normal)
             };
-            ("Load manager", does, state, tone)
+            ("Load manager", does, state, tone, settings)
         }
     };
     let (now_text, tone, press) = match (computing, p.slot.switch, p.slot.pressed) {
@@ -289,7 +423,22 @@ fn installed(p: &Installed, now: Epoch, computing: bool) -> Row {
         }
         (true, Switch::Off, _) => (format!("{state}; off"), Tone::Dim, Err(off())),
     };
-    Row { name: p.name.clone(), title: title.into(), does, switch: p.slot.switch, now: now_text, tone, press }
+    if let Schedule::Every { period, .. } = p.schedule {
+        settings.push(Param { key: PERIOD, label: "EVERY", value: Value::Seconds(period) });
+    }
+    Row { name: p.name.clone(), title: title.into(), does, switch: p.slot.switch, now: now_text, tone, press, settings }
+}
+
+/// The command that sets `program`'s settings `changes` (by their keys) on
+/// `vessel` ([`settings_of`]'s, the tab's and MCP's one rule).
+pub fn configure(
+    x: &Inputs,
+    vessel: VesselId,
+    program: &str,
+    changes: &[(String, Input)],
+) -> Result<GameCommand, String> {
+    let (program, settings) = settings_of(x, program, changes)?;
+    Ok(GameCommand::Configure { vessel, program, settings })
 }
 
 /// The row of `program` among `rows`, or why there is none (naming those

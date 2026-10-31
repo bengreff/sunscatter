@@ -66,9 +66,10 @@ pub fn draw(
             let x = Selected { def, state, facts: &view.facts, known: &known, vessel: vessel.id() };
             selected(ui, &mut screen, &x, &mut out);
         });
-        let programs =
-            super::programs::Inputs::of(vessel, sim.clock).map_or_else(Vec::new, |x| super::programs::rows(&x));
-        region(ui, regions.bottom, |ui| editors(ui, &mut screen, (def, state), &programs, vessel.id(), &mut out));
+        let programs = super::programs::Inputs::of(vessel, sim.clock);
+        let rows = programs.as_ref().map_or_else(Vec::new, super::programs::rows);
+        let at = (programs.as_ref(), rows.as_slice());
+        region(ui, regions.bottom, |ui| editors(ui, &mut screen, (def, state), at, vessel.id(), &mut out));
     });
     if ship.is_some() {
         screen.settle_layer(&view.facts);
@@ -320,7 +321,7 @@ fn editors(
     ui: &mut egui::Ui,
     screen: &mut SystemsScreen,
     (def, state): (&sim::craft::ship::ShipDef, &sim::craft::state::ShipState),
-    rows: &[super::programs::Row],
+    (x, rows): (Option<&super::programs::Inputs>, &[super::programs::Row]),
     vessel: sim::vessel::VesselId,
     out: &mut Vec<GameCommand>,
 ) {
@@ -337,7 +338,7 @@ fn editors(
         }
     });
     if screen.tab == Tab::Programs {
-        programs(ui, rows, vessel, out);
+        programs(ui, (x, rows), vessel, out);
         return;
     }
     let Some(mut drafts) = screen.drafts.take() else { return };
@@ -396,10 +397,10 @@ fn editors(
 /// The ship computer's programs (D126: "the autopilot is a switch with a
 /// config menu"; `super::programs`): each one's switch (AUTO, ON PRESS,
 /// OFF), its press while one acts (why not on hover), what it is doing now
-/// and what it does.
+/// and what it does, and its settings ([`settings`]).
 fn programs(
     ui: &mut egui::Ui,
-    rows: &[super::programs::Row],
+    (x, rows): (Option<&super::programs::Inputs>, &[super::programs::Row]),
     vessel: sim::vessel::VesselId,
     out: &mut Vec<GameCommand>,
 ) {
@@ -425,9 +426,113 @@ fn programs(
                 ui.label(now);
             });
             ui.label(egui::RichText::new(&r.does).small().color(theme::DIM));
+            if let Some(x) = x {
+                settings(ui, x, r, vessel, out);
+            }
             ui.add_space(4.0);
         }
     });
+}
+
+/// A program's config menu (D126): each setting's field, sent once its
+/// edit ends by the one rule (`programs::configure`, the agent's too); a
+/// refusal stays beside the row until the next edit is sent.
+fn settings(
+    ui: &mut egui::Ui,
+    x: &super::programs::Inputs,
+    r: &super::programs::Row,
+    vessel: sim::vessel::VesselId,
+    out: &mut Vec<GameCommand>,
+) {
+    use super::programs::{configure, Value};
+    if r.settings.is_empty() {
+        return;
+    }
+    let why_id = egui::Id::new(("program_refusal", vessel.0, &r.name));
+    ui.horizontal_wrapped(|ui| {
+        for p in &r.settings {
+            ui.label(egui::RichText::new(p.label).small().color(theme::MUTED));
+            let id = egui::Id::new(("program_setting", vessel.0, &r.name, p.key));
+            let tick = sim::vessel::TICK;
+            let change = match &p.value {
+                Value::Height(h) => {
+                    let field = number(ui, id, h.unwrap_or(0.0), (0.0, 100_000.0), (10.0, " m", 0));
+                    field.map(super::programs::Input::Number)
+                }
+                Value::Share(s) => {
+                    let field = number(ui, id, s * 100.0, (0.0, 100.0), (0.5, " %", 1));
+                    field.map(|v| super::programs::Input::Number(v / 100.0))
+                }
+                Value::Seconds(s) => {
+                    number(ui, id, *s, (tick, 1.0e7), (1.0, " s", 2)).map(super::programs::Input::Number)
+                }
+                Value::Loads { chosen, offered } => loads(ui, id, chosen, offered),
+            };
+            if let Some(input) = change {
+                match configure(x, vessel, &r.name, &[(p.key.to_string(), input)]) {
+                    Ok(c) => {
+                        out.push(c);
+                        ui.data_mut(|d| {
+                            d.remove::<String>(why_id);
+                        });
+                    }
+                    Err(why) => {
+                        ui.data_mut(|d| d.insert_temp(why_id, why));
+                    }
+                }
+            }
+        }
+    });
+    if let Some(why) = ui.data(|d| d.get_temp::<String>(why_id)) {
+        ui.label(egui::RichText::new(format!("Not set: {why}")).small().color(theme::WARN));
+    }
+}
+
+/// A number setting's field: the player's draft while the edit goes on
+/// (egui's memory, so a drag is not reset by the vessel's value each
+/// frame), and the value once the edit ends, if it changed.
+fn number(
+    ui: &mut egui::Ui,
+    id: egui::Id,
+    shown: f64,
+    (min, max): (f64, f64),
+    (speed, suffix, decimals): (f64, &str, usize),
+) -> Option<f64> {
+    let mut v = ui.data(|d| d.get_temp::<f64>(id)).unwrap_or(shown);
+    let field = egui::DragValue::new(&mut v).range(min..=max).speed(speed).suffix(suffix).max_decimals(decimals);
+    let r = ui.add(field);
+    let ended = r.drag_stopped() || r.lost_focus();
+    if !ended && (r.dragged() || r.has_focus()) {
+        ui.data_mut(|d| d.insert_temp(id, v));
+        None
+    } else {
+        ui.data_mut(|d| d.remove::<f64>(id));
+        (ended && v != shown).then_some(v)
+    }
+}
+
+/// A load manager's loads: each with its × to take it off, and a pick list
+/// of the others that draw power; the new list once one is chosen.
+fn loads(ui: &mut egui::Ui, id: egui::Id, chosen: &[String], offered: &[String]) -> Option<super::programs::Input> {
+    let mut next = None;
+    for (i, l) in chosen.iter().enumerate() {
+        if ui.small_button(format!("{l} ×")).on_hover_text("Take it off the list").clicked() {
+            let mut list = chosen.to_vec();
+            list.remove(i);
+            next = Some(list);
+        }
+    }
+    let others: Vec<&String> = offered.iter().filter(|o| !chosen.contains(o)).collect();
+    if !others.is_empty() {
+        egui::ComboBox::from_id_salt(id).selected_text("+ load").show_ui(ui, |ui| {
+            for o in others {
+                if ui.selectable_label(false, o.as_str()).clicked() {
+                    next = Some(chosen.iter().cloned().chain([o.clone()]).collect());
+                }
+            }
+        });
+    }
+    next.map(super::programs::Input::List)
 }
 
 /// Where an entry sits in the editor's view: the view's entries (their

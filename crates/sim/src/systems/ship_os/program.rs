@@ -17,13 +17,17 @@
 //!   for it (one run per press), or not at all.
 //! - **No computer, no program:** a due epoch without a working flight
 //!   computer is missed (`Health::computing`).
+//! - **The settings** (D126's config menu, [`Setting`]): each program's own,
+//!   saved with it, set by its owner's rule ([`Installed::configure`],
+//!   `chutes::set`), all of a call or none.
 //!
 //! The programs are native for now ([`Builtin`]); WASM modules with the
 //! same signature later (D043). The maneuver program (`systems::maneuver`)
 //! keeps its own inputs and flies live ticks; its switch is a [`Slot`] and
 //! its wake epoch stops the advance the same way.
 
-use super::{Health, Switch, View};
+use super::{Health, Software, Switch, View};
+use crate::chute::ChuteSpec;
 use crate::craft::command::ShipCommand;
 use crate::craft::ship::ShipDef;
 use crate::craft::state::ShipState;
@@ -153,6 +157,65 @@ impl Commands {
     }
 }
 
+/// One setting of a program's configuration (D126: "the autopilot is a
+/// switch with a config menu"), as the pilot or an agent sets it. Each
+/// program takes its own; the rest it refuses.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Setting {
+    /// The parachutes' deploy: the height the drogues arm below (m above
+    /// the ground; `chutes::set`).
+    ArmHeight(f64),
+    /// The parachutes' deploy: the height the mains open below (m).
+    MainHeight(f64),
+    /// A load manager: the components it switches (`PowerGuard::set`).
+    Loads(Vec<String>),
+    /// A load manager: it switches its loads off below this share of the
+    /// charge it reads (0 to 1).
+    Low(f64),
+    /// A load manager: on again at or above this share.
+    High(f64),
+    /// A program on a period: its length (s; [`Installed::configure`]).
+    Period(f64),
+}
+
+impl Setting {
+    /// What it is, in a refusal's words.
+    pub fn name(&self) -> &'static str {
+        match self {
+            Setting::ArmHeight(_) => "arming height",
+            Setting::MainHeight(_) => "main height",
+            Setting::Loads(_) => "loads",
+            Setting::Low(_) => "off line",
+            Setting::High(_) => "on line",
+            Setting::Period(_) => "period",
+        }
+    }
+}
+
+/// Sets the settings of program `name` on `software` (the names of
+/// `Vessel::set_switch`) at `now`, all or none, each by its owner's rule:
+/// the parachutes' deploy (`chutes`: `chutes::configure`, by the craft's
+/// `spec`) or an installed program by its name ([`Installed::configure`],
+/// a load manager's loads from `offered`). The vessel's setter and the
+/// game's check before it sends one.
+pub fn configure(
+    software: &mut Software,
+    (spec, offered): (&ChuteSpec, &[String]),
+    name: &str,
+    settings: &[Setting],
+    now: Epoch,
+) -> Result<(), String> {
+    match name {
+        "chutes" => super::chutes::configure(&mut software.chutes, spec, settings),
+        "maneuver" => Err("the planned burns have no settings".into()),
+        _ => {
+            let p =
+                software.programs.iter_mut().find(|p| p.name == name).ok_or_else(|| format!("no program {name}"))?;
+            p.configure(offered, settings, now)
+        }
+    }
+}
+
 /// The built-in programs (native until D043's WASM).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Builtin {
@@ -187,6 +250,39 @@ impl Installed {
         if behind {
             self.last = Some(now);
         }
+    }
+
+    /// Sets `settings` in order at `now`, all or none (D126's config menu):
+    /// a period's length here (at least the computer's tick,
+    /// `vessel::TICK`; a new period runs from `now` as a switch does,
+    /// [`Self::resume`]), the rest by the program's own rule (a load
+    /// manager's loads from `offered`, `power_guard::switchable`'s), then
+    /// the whole checked.
+    pub fn configure(&mut self, offered: &[String], settings: &[Setting], now: Epoch) -> Result<(), String> {
+        let mut next = self.clone();
+        for s in settings {
+            match (s, &mut next.schedule, &mut next.program) {
+                (Setting::Period(p), Schedule::Every { period, .. }, _) => {
+                    if !(p.is_finite() && *p >= crate::vessel::TICK) {
+                        return Err(format!(
+                            "a period is at least the computer's tick, {} s, not {p}",
+                            crate::vessel::TICK
+                        ));
+                    }
+                    *period = *p;
+                    next.resume(now);
+                }
+                (Setting::Period(_), Schedule::At(_), _) => {
+                    return Err("it runs at the epochs it asks for, not on a period".into());
+                }
+                (s, _, Builtin::PowerGuard(g)) => g.set(offered, s)?,
+            }
+        }
+        match &next.program {
+            Builtin::PowerGuard(g) => g.check()?,
+        }
+        *self = next;
+        Ok(())
     }
 
     /// Runs it at `cx.t` (one of its due epochs): its press is spent, and
@@ -246,5 +342,49 @@ mod tests {
         assert!(slot(Switch::Auto, false).may_run());
         assert!(!slot(Switch::Press, false).may_run() && slot(Switch::Press, true).may_run());
         assert!(!slot(Switch::Off, true).may_run());
+    }
+
+    /// A program's settings (D126's config menu): a period's length here,
+    /// the rest the program's, the whole checked; all of a call or none;
+    /// a new period runs from now.
+    #[test]
+    fn a_programs_settings_land_whole_or_not_at_all() {
+        use super::super::power_guard::PowerGuard;
+        let t0 = Epoch::new(100_000_000, 0.0);
+        let guard = PowerGuard { loads: vec!["a".into()], low: 0.3, high: 0.8, shed: false };
+        let p0 = Installed {
+            name: "guard".into(),
+            slot: Slot::auto(),
+            schedule: Schedule::Every { from: t0, period: 60.0 },
+            last: Some(t0.add_seconds(60.0)),
+            program: Builtin::PowerGuard(guard),
+        };
+        let offered = vec!["a".to_string(), "b".into()];
+        let now = t0.add_seconds(100.0);
+        // (settings, accepted)
+        let cases = [
+            (vec![Setting::Period(600.0)], true),
+            (vec![Setting::Period(crate::vessel::TICK)], true),
+            (vec![Setting::Period(0.001)], false),
+            (vec![Setting::Period(f64::NAN)], false),
+            (vec![Setting::Low(0.5), Setting::High(0.9)], true),
+            (vec![Setting::Low(0.9)], false), // above its on line
+            (vec![Setting::High(0.95), Setting::Low(0.9)], true),
+            (vec![Setting::Low(0.5), Setting::Loads(vec!["c".into()])], false),
+            (vec![Setting::ArmHeight(5_000.0)], false),
+        ];
+        for (k, (settings, ok)) in cases.into_iter().enumerate() {
+            let mut p = p0.clone();
+            assert_eq!(p.configure(&offered, &settings, now).is_ok(), ok, "case {k}");
+            if !ok {
+                assert_eq!(p, p0, "case {k}: unchanged");
+            }
+        }
+        // A shorter period whose epochs passed runs from now, not at once.
+        let mut p = p0.clone();
+        p.configure(&offered, &[Setting::Period(10.0)], now).unwrap();
+        assert_eq!(p.schedule.next(p.last), Some(t0.add_seconds(110.0)));
+        let mut at = Installed { schedule: Schedule::At(now), ..p0 };
+        assert!(at.configure(&offered, &[Setting::Period(60.0)], now).is_err(), "a wake epoch has no period");
     }
 }

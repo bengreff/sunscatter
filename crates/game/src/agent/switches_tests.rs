@@ -1,6 +1,7 @@
-//! `set_switch`, `press` and `read {programs}` on the Falcon 9: the
-//! programs as the PROGRAMS tab lists them with the tool of each control,
-//! a switch and a press by the screen's rule, and what is refused.
+//! `set_switch`, `press`, `configure_program` and `read {programs}` on the
+//! Falcon 9: the programs as the PROGRAMS tab lists them with the tool of
+//! each control, a switch, a press and the settings by the screen's rule,
+//! and what is refused.
 
 use super::*;
 use crate::commands::GameCommand;
@@ -57,6 +58,11 @@ fn the_programs_read_as_the_tab_lists_them() {
             now: "stowed: arms on a press".into(),
             tone: crate::interface::menus::Tone::Normal,
             press: Ok("arm the drogues".into()),
+            settings: vec![programs::Param {
+                key: programs::MAIN_HEIGHT,
+                label: "MAINS OPEN BELOW",
+                value: programs::Value::Height(Some(1_800.0)),
+            }],
         },
         Row {
             name: "maneuver".into(),
@@ -66,6 +72,7 @@ fn the_programs_read_as_the_tab_lists_them() {
             now: "no burn planned".into(),
             tone: crate::interface::menus::Tone::Dim,
             press: Err("no burn planned".into()),
+            settings: Vec::new(),
         },
     ];
     let v = programs_json(&rows);
@@ -79,6 +86,13 @@ fn the_programs_read_as_the_tab_lists_them() {
     assert_eq!(switches[0]["by"], r#"set_switch {program: "chutes", switch: "auto"}"#);
     assert_eq!(chutes["press"], json!({"does": "arm the drogues", "by": "press {program: \"chutes\"}"}));
     assert_eq!(v["programs"][1]["press"], json!({"refused": "no burn planned"}));
+    assert_eq!(
+        chutes["settings"],
+        json!([{"key": "main_height_m", "label": "MAINS OPEN BELOW", "value": 1800.0, "unit": "m above the ground",
+                "text": crate::format::distance(1_800.0),
+                "by": "configure_program {program: \"chutes\", settings: {main_height_m: <m above the ground>}}"}])
+    );
+    assert_eq!(v["programs"][1]["settings"], json!([]));
     assert_eq!(v["programs"][1]["tone"], "dim");
     // `read {programs: true}` on the Falcon 9 is the tab's rows.
     let (sim, _) = aboard();
@@ -87,4 +101,36 @@ fn the_programs_read_as_the_tab_lists_them() {
     assert_eq!(got, programs_json(&crate::systems_screen::programs::rows(&x)));
     let e = super::super::read::read(&json!({"programs": true, "navball": true}), &sim, &Default::default());
     assert!(e.unwrap_err().contains("alone"));
+}
+
+/// `configure_program` by the tab's rule: the settings checked and sent
+/// whole, with what they were; what the computer would refuse is refused
+/// at once, with why.
+#[test]
+fn a_programs_settings_go_by_the_tabs_rule() {
+    use sim::systems::ship_os::program::Setting;
+    let (sim, comms) = aboard();
+    let id = sim.ship().id();
+    let args = json!({"program": "chutes", "settings": {"arm_height_m": 6000, "main_height_m": 2000.5}});
+    let (v, effects) = configure(&args, &sim, &comms).unwrap();
+    assert_eq!(v["was"], json!({"arm_height_m": 5500.0, "main_height_m": 1800.0}), "Dragon's own");
+    assert_eq!((v["program"].as_str(), v["arrives_in_s"].as_f64()), (Some("chutes"), Some(0.0)));
+    let settings = vec![Setting::ArmHeight(6000.0), Setting::MainHeight(2000.5)];
+    assert_eq!(
+        effects,
+        vec![Effect::Command(GameCommand::Configure { vessel: id, program: "chutes".into(), settings })]
+    );
+    // (arguments, the refusal says)
+    let refused = [
+        (json!({"program": "chutes", "settings": {"main_height_m": -1}}), "a height above the ground is 0 m or more"),
+        (json!({"program": "chutes", "settings": {"main_height_m": "high"}}), "`main_height_m` is a number"),
+        (json!({"program": "chutes", "settings": {"loads": ["x"]}}), "Parachutes has no setting `loads`"),
+        (json!({"program": "maneuver", "settings": {"period_s": 9}}), "Planned burns has no settings"),
+        (json!({"program": "chutes"}), "`settings` maps"),
+        (json!({"program": "warp", "settings": {}}), "no program `warp` aboard"),
+    ];
+    for (args, says) in refused {
+        let e = configure(&args, &sim, &comms);
+        assert!(e.as_ref().unwrap_err().contains(says), "{args}: {e:?}");
+    }
 }

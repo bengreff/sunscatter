@@ -119,6 +119,14 @@ pub enum GameCommand {
         vessel: VesselId,
         program: String,
     },
+    /// A program's settings (D126's config menu; checked by
+    /// `systems_screen::programs::settings_of`), sent to the vessel and
+    /// applied whole or refused there.
+    Configure {
+        vessel: VesselId,
+        program: String,
+        settings: Vec<sim::systems::ship_os::program::Setting>,
+    },
     /// A craft's notifications (D128, software-layers.md §5): whether a
     /// risk to it stops time warp. The game's setting for the craft, not a
     /// command to it: applied at once.
@@ -269,6 +277,10 @@ pub fn apply(
                 let done = sim.index_of(*vessel).map(|i| sim.fleet[i].press(program));
                 refused(&mut toasts, now, *vessel, done);
             }
+            GameCommand::Configure { vessel, program, settings } => {
+                let done = sim.index_of(*vessel).map(|i| sim.fleet[i].configure(program, settings));
+                refused(&mut toasts, now, *vessel, done);
+            }
             GameCommand::SetNotify { vessel, on } => {
                 if let Some(i) = sim.index_of(*vessel) {
                     sim.fleet[i].set_notify(*on);
@@ -382,7 +394,8 @@ pub fn addressee(c: &GameCommand) -> Option<VesselId> {
         | GameCommand::SetStages { vessel, .. }
         | GameCommand::SetFunctions { vessel, .. }
         | GameCommand::SetSwitch { vessel, .. }
-        | GameCommand::Press { vessel, .. } => Some(*vessel),
+        | GameCommand::Press { vessel, .. }
+        | GameCommand::Configure { vessel, .. } => Some(*vessel),
         GameCommand::Stage(id) | GameCommand::SetControls { vessel: id, .. } => Some(*id),
         _ => None,
     }
@@ -635,6 +648,8 @@ mod tests {
         let press = GameCommand::Press { vessel: v, program: "maneuver".into() };
         assert_eq!((addressee(&switch), addressee(&press)), (Some(v), Some(v)));
         assert_eq!((orders(&switch), orders(&press)), (None, None));
+        let configure = GameCommand::Configure { vessel: v, program: "chutes".into(), settings: vec![] };
+        assert_eq!((addressee(&configure), orders(&configure)), (Some(v), None), "a program's settings too");
         assert_eq!(addressee(&GameCommand::SetWarp(2)), None);
     }
 
