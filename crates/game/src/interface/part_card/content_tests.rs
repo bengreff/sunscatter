@@ -26,7 +26,7 @@ fn an_engine_card_shows_its_state_thrust_and_commands() {
     let (def, mut state) = falcon9();
     let k = Knowledge::perfect();
     let thrusts = vec![0.0; def.engines.len()];
-    let live = Live { def: &def, state: &state, knowledge: &k, thrusts: &thrusts, kelvin: &[], chute: None };
+    let live = Live { def: &def, state: &state, knowledge: &k, thrusts: &thrusts, temps: &[], chute: None };
     let mvac = part(&def, "s2.mvac");
     let card = card(&live, mvac).unwrap();
     assert_eq!(card.title, "s2.mvac");
@@ -35,7 +35,7 @@ fn an_engine_card_shows_its_state_thrust_and_commands() {
     let commands: Vec<(&ShipCommand, bool)> = card.commands.iter().map(|c| (&c.command, c.confirm)).collect();
     assert_eq!(commands, [(&ShipCommand::Ignite("s2.mvac".into()), false)]);
     state.engines[def.engines.iter().position(|e| e.id == "s2.mvac").unwrap()].status = EngineStatus::Running;
-    let live = Live { def: &def, state: &state, knowledge: &k, thrusts: &thrusts, kelvin: &[], chute: None };
+    let live = Live { def: &def, state: &state, knowledge: &k, thrusts: &thrusts, temps: &[], chute: None };
     let card = super::card(&live, mvac).unwrap();
     assert_eq!(card.commands[0].command, ShipCommand::Shutdown("s2.mvac".into()));
 }
@@ -44,7 +44,7 @@ fn an_engine_card_shows_its_state_thrust_and_commands() {
 fn a_tank_card_shows_what_the_craft_measures() {
     let (def, state) = falcon9();
     let k = data::knowledge(&def, &state, false);
-    let live = Live { def: &def, state: &state, knowledge: &k, thrusts: &[], kelvin: &[], chute: None };
+    let live = Live { def: &def, state: &state, knowledge: &k, thrusts: &[], temps: &[], chute: None };
     let s1 = card(&live, part(&def, "s1.tank")).unwrap();
     assert!(matches!(value(&s1, "TANK s1.tank:lox", "contents"), Value::Shown(t) if t.ends_with(" t")), "{s1:?}");
     // Dragon's tanks have no level sensor (falcon9.md §5.2): their total
@@ -63,7 +63,7 @@ fn the_capsules_card_sums_what_it_carries() {
     let (def, state) = falcon9();
     let k = Knowledge::perfect();
     let thrusts = vec![0.0; def.engines.len()];
-    let live = Live { def: &def, state: &state, knowledge: &k, thrusts: &thrusts, kelvin: &[], chute: None };
+    let live = Live { def: &def, state: &state, knowledge: &k, thrusts: &thrusts, temps: &[], chute: None };
     let capsule = part(&def, "dragon.capsule");
     let card = card(&live, capsule).unwrap();
     let headings: Vec<&str> = card.sections.iter().map(|s| s.heading.as_str()).collect();
@@ -103,7 +103,7 @@ fn counts_read_in_the_order_met() {
 fn separations_and_clamps_are_confirmed() {
     let (def, state) = falcon9();
     let k = Knowledge::perfect();
-    let live = Live { def: &def, state: &state, knowledge: &k, thrusts: &[], kelvin: &[], chute: None };
+    let live = Live { def: &def, state: &state, knowledge: &k, thrusts: &[], temps: &[], chute: None };
     let interstage = card(&live, part(&def, "s1.interstage")).unwrap();
     assert_eq!(value(&interstage, "SEPARATION", "state"), &Value::Shown("attached".into()));
     let sep = interstage.commands.iter().find(|c| c.command == ShipCommand::Separate("stage separation".into()));
@@ -159,26 +159,32 @@ fn what_cannot_be_undone_is_confirmed() {
     assert_eq!(words, ["stowed", "armed", "open", "torn", "cut away"]);
 }
 
-/// A part's temperature against its rating colours by the one rule
-/// (`format::limit_level`), only where it is measured.
+/// A part's skin and interior against their own limits, as the systems
+/// screen shows them, colour by the one rule (`format::limit_level`), only
+/// where they are measured; a part without interior nodes has no interior
+/// line.
 #[test]
 fn a_hot_part_reads_amber_then_red() {
     let (def, state) = falcon9();
     let mvac = part(&def, "s2.mvac");
-    let rated = def.parts.iter().find(|p| p.part == mvac).unwrap().ratings.rated_k.expect("rated");
-    // (temperature as a share of its rating, knowledge, level)
+    let limit = 1_800.0;
+    // (skin temperature as a share of its limit, knowledge, level, value)
     let table = [
-        (0.5, Knowledge::perfect(), format::Level::Normal),
-        (0.9, Knowledge::perfect(), format::Level::Warn),
-        (1.1, Knowledge::perfect(), format::Level::Over),
-        (1.1, Knowledge::default(), format::Level::Normal),
+        (0.5, Knowledge::perfect(), format::Level::Normal, "900 K / 1800 K"),
+        (0.9, Knowledge::perfect(), format::Level::Warn, "1620 K / 1800 K"),
+        (1.1, Knowledge::perfect(), format::Level::Over, "1980 K / 1800 K"),
+        (1.1, Knowledge::default(), format::Level::Normal, ""),
     ];
-    for (share, k, want) in table {
-        let kelvin = [(mvac, share * rated)];
-        let live = Live { def: &def, state: &state, knowledge: &k, thrusts: &[], kelvin: &kelvin, chute: None };
+    for (share, k, want, text) in table {
+        let temps = [(mvac, (Some((share * limit, limit)), None))];
+        let live = Live { def: &def, state: &state, knowledge: &k, thrusts: &[], temps: &temps, chute: None };
         let card = card(&live, mvac).unwrap();
         let s = card.sections.iter().find(|s| s.heading.starts_with("PART")).unwrap();
-        let line = s.lines.iter().find(|l| l.label == "temperature").unwrap();
+        let line = s.lines.iter().find(|l| l.label == "skin").unwrap();
         assert_eq!(line.level, want, "{share} {}", k.perfect);
+        if let Value::Shown(v) = &line.value {
+            assert_eq!(v, text, "{share}");
+        }
+        assert!(s.lines.iter().all(|l| l.label != "interior" && l.label != "temperature"), "{share}");
     }
 }

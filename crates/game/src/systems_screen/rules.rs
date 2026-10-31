@@ -169,13 +169,80 @@ pub struct Temps<'a> {
     pub node_max: &'a [f64],
 }
 
-/// The hottest of `values` against its limit among those of part `k`:
-/// (temperature, limit), the one nearest its limit.
-fn hottest(values: &[f64], owner: &[u32], limits: &[f64], k: usize) -> Option<(f64, f64)> {
-    (0..values.len().min(owner.len()).min(limits.len()))
-        .filter(|&i| owner[i] as usize == k)
-        .map(|i| (values[i], limits[i]))
-        .max_by(|a, b| (a.0 / a.1).total_cmp(&(b.0 / b.1)))
+/// Each part's value nearest its own limit among `values` (the skin cells
+/// or the interior nodes, value `i` of part `owner[i]`, an index into the
+/// craft's `parts`, against `limits[i]`), in one pass: (K, limit K), `None`
+/// for a part with none.
+pub fn nearest_by_part(values: &[f64], owner: &[u32], limits: &[f64], parts: usize) -> Vec<Option<(f64, f64)>> {
+    let mut best: Vec<Option<(f64, f64)>> = vec![None; parts];
+    for i in 0..values.len().min(owner.len()).min(limits.len()) {
+        if let Some(b) = best.get_mut(owner[i] as usize) {
+            *b = nearer(*b, Some((values[i], limits[i])));
+        }
+    }
+    best
+}
+
+/// A temperature and its limit (K, limit K).
+pub type Kelvin = (f64, f64);
+
+/// A part's skin cell and interior node nearest their own limits (`None`:
+/// it has none).
+pub type PartTemps = (Option<Kelvin>, Option<Kelvin>);
+
+/// Each part's skin cell and interior node nearest their own limits, in
+/// the craft's parts' order: the systems screen's THERMAL rows and the part
+/// cards' (one owner; the card showed the skin's mean against the
+/// interior's rating, interface-map.md finding 25).
+pub fn part_temperatures(t: &Temps, parts: usize) -> Vec<PartTemps> {
+    let skin = nearest_by_part(t.skin, t.cell_part, t.skin_max, parts);
+    skin.into_iter().zip(nearest_by_part(t.nodes, t.node_part, t.node_max, parts)).collect()
+}
+
+/// Vessel `v`'s [`part_temperatures`] now, by part id (`Part::id`).
+pub fn vessel_temperatures(v: &sim::vessel::Vessel) -> Vec<(u32, PartTemps)> {
+    let design = v.craft.design();
+    let st = &v.thermal().state;
+    let t = Temps {
+        skin: &st.skin,
+        nodes: &st.nodes,
+        cell_part: &design.cell_part,
+        node_part: &design.node_part,
+        skin_max: &design.skin_max,
+        node_max: &design.node_max,
+    };
+    design.parts.iter().map(|p| p.id).zip(part_temperatures(&t, design.parts.len())).collect()
+}
+
+/// The nearer its limit of two temperatures (K, limit K); the second on a
+/// tie.
+pub fn nearer(a: Option<(f64, f64)>, b: Option<(f64, f64)>) -> Option<(f64, f64)> {
+    match (a, b) {
+        (Some(x), Some(y)) => Some(if x.0 / x.1 > y.0 / y.1 { x } else { y }),
+        (x, y) => x.or(y),
+    }
+}
+
+/// The parts nearest their temperature limits, nearest first (a tie keeps
+/// the given order), at most `n`, and how many parts nothing measures
+/// (`None`): the systems screen's summary and the Landing menu's THERMAL,
+/// one rule (D106: a part no sensor measures is counted, never ranked by
+/// the truth; interface-map.md finding 13).
+pub fn nearest_limits<T>(
+    parts: impl IntoIterator<Item = (T, Option<(f64, f64)>)>,
+    n: usize,
+) -> (Vec<(T, Kelvin)>, usize) {
+    let mut unmeasured = 0;
+    let mut hot: Vec<(T, Kelvin)> = Vec::new();
+    for (part, t) in parts {
+        match t {
+            Some(t) => hot.push((part, t)),
+            None => unmeasured += 1,
+        }
+    }
+    hot.sort_by(|a, b| (b.1 .0 / b.1 .1).total_cmp(&(a.1 .0 / a.1 .1)));
+    hot.truncate(n);
+    (hot, unmeasured)
 }
 
 /// Everything the layers read, per part of the craft (`parts`, in the
@@ -189,6 +256,7 @@ pub fn facts(
     known: &sim::systems::Knowledge,
 ) -> Vec<PartFacts> {
     use sim::systems::Quantity;
+    let temps = t.map(|t| part_temperatures(t, parts.len()));
     (parts.iter().enumerate())
         .map(|(k, p)| {
             let id = p.id;
@@ -219,7 +287,8 @@ pub fn facts(
                 })
                 .collect();
             // Temperatures where the craft measures them (D106).
-            let t = t.filter(|_| known.knows(Quantity::PartTemperature(id)));
+            let measured = known.knows(Quantity::PartTemperature(id));
+            let (skin, interior) = temps.as_ref().filter(|_| measured).map_or((None, None), |v| v[k]);
             let on = |part: u32| part == id;
             let plumbing = def.bottles.iter().any(|b| on(b.part))
                 || def.valves.iter().any(|v| on(v.part))
@@ -238,8 +307,8 @@ pub fn facts(
                 material: colours.get(k).copied().unwrap_or(crate::scene::parts::UNKNOWN),
                 ground: info.is_some_and(|i| i.ground),
                 joint,
-                skin: t.and_then(|t| hottest(t.skin, t.cell_part, t.skin_max, k)),
-                interior: t.and_then(|t| hottest(t.nodes, t.node_part, t.node_max, k)),
+                skin,
+                interior,
                 tanks,
                 plumbing,
                 source: def.batteries.iter().any(|b| on(b.part)),

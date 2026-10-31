@@ -124,23 +124,18 @@ fn structure(x: &Inputs) -> Vec<Group> {
     vec![g, joints]
 }
 
-/// A part's temperature nearest its limit (K, limit K).
-fn nearest(f: &PartFacts) -> Option<(f64, f64)> {
-    [f.skin, f.interior].into_iter().flatten().max_by(|a, b| (a.0 / a.1).total_cmp(&(b.0 / b.1)))
-}
-
-/// The parts nearest their temperature limits, and how many nothing
-/// measures.
+/// The parts nearest their temperature limits (each by its skin cell or
+/// interior node nearest its own, `rules::nearest_limits`), and how many
+/// nothing measures.
 fn thermal(x: &Inputs) -> Group {
     let mut g = Group::new("NEAREST THEIR LIMITS");
-    let parts: Vec<&PartFacts> = x.facts.iter().filter(|f| !f.ground).collect();
-    let mut hot: Vec<(&PartFacts, (f64, f64))> = parts.iter().filter_map(|f| Some((*f, nearest(f)?))).collect();
-    hot.sort_by(|a, b| (b.1 .0 / b.1 .1).total_cmp(&(a.1 .0 / a.1 .1)));
-    for (f, (t, limit)) in hot.iter().take(TOP) {
-        g.limit(&f.name, format!("{t:.0} K / {limit:.0} K"), Some(*t), *limit).opens(Selection::Part(f.id));
+    let parts = x.facts.iter().filter(|f| !f.ground).map(|f| (f, super::rules::nearer(f.skin, f.interior)));
+    let (hot, unmeasured) = super::rules::nearest_limits(parts, TOP);
+    for (f, (t, limit)) in hot {
+        g.limit(&f.name, format!("{t:.0} K / {limit:.0} K"), Some(t), limit).opens(Selection::Part(f.id));
     }
-    if hot.len() < parts.len() {
-        g.row("not measured", format!("{} parts (no temperature sensor)", parts.len() - hot.len()));
+    if unmeasured > 0 {
+        g.row("not measured", format!("{unmeasured} parts (no temperature sensor)"));
     }
     g
 }

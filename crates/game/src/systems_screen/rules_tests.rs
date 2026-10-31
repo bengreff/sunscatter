@@ -306,3 +306,31 @@ fn a_part_opens_at_its_main_layer() {
         assert_eq!(Layer::main(&f), want, "{f:?}");
     }
 }
+
+/// Each part's cell nearest its own limit in one pass, and the list of the
+/// parts nearest their limits with the unmeasured counted (one rule for
+/// the summary and the Landing menu, D106).
+#[test]
+fn the_parts_nearest_their_limits_count_what_nothing_measures() {
+    // Cells of parts 0, 0, 2, 0; part 1 has none.
+    let by = nearest_by_part(&[300.0, 900.0, 500.0, 1000.0], &[0, 0, 2, 0], &[1100.0, 950.0, 600.0, 2000.0], 3);
+    assert_eq!(by, [Some((900.0, 950.0)), None, Some((500.0, 600.0))]);
+    // (a, b, the nearer)
+    let table = [
+        (Some((300.0, 400.0)), Some((900.0, 1600.0)), Some((300.0, 400.0))),
+        (None, Some((900.0, 1600.0)), Some((900.0, 1600.0))),
+        (Some((200.0, 400.0)), Some((400.0, 800.0)), Some((400.0, 800.0))),
+        (None, None, None),
+    ];
+    for (a, b, want) in table {
+        assert_eq!(nearer(a, b), want, "{a:?} {b:?}");
+    }
+    let parts = [("bell", Some((1500.0, 1640.0))), ("tank", None), ("skirt", Some((300.0, 600.0))), ("nose", None)];
+    // (n, listed, not measured)
+    let table: [(usize, &[&str], usize); 3] = [(5, &["bell", "skirt"], 2), (1, &["bell"], 2), (0, &[], 2)];
+    for (n, listed, unmeasured) in table {
+        let (hot, blind) = nearest_limits(parts, n);
+        assert_eq!(hot.iter().map(|h| h.0).collect::<Vec<_>>(), listed, "{n}");
+        assert_eq!(blind, unmeasured, "{n}");
+    }
+}

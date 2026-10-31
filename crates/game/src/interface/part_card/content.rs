@@ -66,8 +66,9 @@ pub struct Live<'a> {
     pub knowledge: &'a Knowledge,
     /// Each engine's thrust now (N; aligned with `ShipDef::engines`).
     pub thrusts: &'a [f64],
-    /// Each part's temperature now (K): (part id, K).
-    pub kelvin: &'a [(u32, f64)],
+    /// Each part's skin cell and interior node nearest their limits, by
+    /// part id (`systems_screen::rules::vessel_temperatures`).
+    pub temps: &'a [(u32, crate::systems_screen::rules::PartTemps)],
     /// The parachutes' parts and their state's words, if the craft has them.
     pub chute: Option<(&'a [u32], &'a str)>,
 }
@@ -131,13 +132,15 @@ pub fn card(live: &Live, part: u32) -> Option<Card> {
     if let Some((_, words)) = live.chute.filter(|(parts, _)| parts.contains(&part)) {
         own.push(shown("parachutes", words));
     }
-    let k = live.kelvin.iter().find(|(p, _)| *p == part).map_or(f64::NAN, |x| x.1);
-    let rated = info.ratings.rated_k.map(|r| format!(" (rated {r:.0} K)")).unwrap_or_default();
-    let temperature = live.value(Quantity::PartTemperature(part), k, |r| format!("{}{rated}", scaled(r, 1.0, 0, "K")));
-    own.push(match info.ratings.rated_k {
-        Some(r) => against("temperature", temperature, k, r),
-        None => line("temperature", temperature),
-    });
+    // As the systems screen's THERMAL: the skin cell and the interior node
+    // nearest their own limits, where the part has them.
+    let (skin, interior) = live.temps.iter().find(|(p, _)| *p == part).map_or((None, None), |x| x.1);
+    for (label, t) in [("skin", skin), ("interior", interior)] {
+        let Some((k, limit)) = t else { continue };
+        let value =
+            live.value(Quantity::PartTemperature(part), k, |r| format!("{} / {limit:.0} K", scaled(r, 1.0, 0, "K")));
+        own.push(against(label, value, k, limit));
+    }
     sections.push(Section { heading: format!("PART {}", info.id), lines: own });
     Some(Card { title: info.id.clone(), entry: info.entry.clone(), sections, commands: commands(live, part) })
 }

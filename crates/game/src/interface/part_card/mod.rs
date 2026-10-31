@@ -116,10 +116,10 @@ pub fn show(
         sim::forces::ambient_pressure(&sim.world, &sim.world.snapshot(sim.clock), anchor, r)
     };
     let thrusts = v.engine_thrusts(sim.controls().throttle, p).unwrap_or_default();
-    let kelvin = v.part_kelvin();
+    let temps = crate::systems_screen::rules::vessel_temperatures(v);
     let (chute_parts, words) = content::chutes(v);
     let chute = (!chute_parts.is_empty()).then_some((chute_parts.as_slice(), words));
-    let live = Live { def: &def, state, knowledge: &knowledge, thrusts: &thrusts, kelvin: &kelvin, chute };
+    let live = Live { def: &def, state, knowledge: &knowledge, thrusts: &thrusts, temps: &temps, chute };
     let screen = ctx.content_rect();
     let right = screen.max.x - layout::MARGIN - stage_bar::WIDTH - layout::GAP;
     let top = screen.min.y + layout::MARGIN + 40.0;
