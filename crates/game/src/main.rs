@@ -296,6 +296,6 @@ impl Plugin for GameState {
             .init_resource::<rendezvous::Rendezvous>()
             .init_resource::<agent::session::Session>()
             .init_resource::<agent::session::StopAt>()
-            .init_resource::<agent::HeldRotation>();
+            .init_resource::<agent::HeldKeys>();
     }
 }

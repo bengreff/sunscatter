@@ -339,7 +339,7 @@ pub fn read_controls(
     mut sim: ResMut<SimState>,
     mut commands: MessageWriter<GameCommand>,
     mut shift_from: Local<Option<f64>>,
-    agent: Res<crate::agent::HeldRotation>,
+    agent: Res<crate::agent::HeldKeys>,
 ) {
     let held = Held::of(&keys);
     let just: Vec<Action> = keys.get_just_pressed().filter_map(|k| action(*k, held)).collect();
@@ -389,9 +389,11 @@ pub fn read_controls(
             DVec3::ZERO
         }
     };
-    // An agent aboard holds the rotation keys like the pilot (D044).
-    c.rotate = (on(ROTATE) + agent.of(active)).clamp(DVec3::splat(-1.0), DVec3::splat(1.0));
-    c.translate = on(TRANSLATE);
+    // An agent aboard holds the rotation and translation keys like the
+    // pilot (D044).
+    let held = agent.of(active);
+    c.rotate = (on(ROTATE) + held.rotate).clamp(DVec3::splat(-1.0), DVec3::splat(1.0));
+    c.translate = (on(TRANSLATE) + held.translate).clamp(DVec3::splat(-1.0), DVec3::splat(1.0));
 }
 
 #[cfg(test)]

@@ -45,8 +45,13 @@ pub enum Effect {
         delay: f64,
         command: GameCommand,
     },
-    /// The rotation input held on the active vessel ([`HeldRotation`]).
-    Rotate(VesselId, DVec3),
+    /// The flight keys held on the active vessel ([`HeldKeys`]): the
+    /// rotation and the translation, each `None` where the call leaves it.
+    Hold {
+        vessel: VesselId,
+        rotate: Option<DVec3>,
+        translate: Option<DVec3>,
+    },
     /// The navigation target (the Orbital menu's picker; `None` clears it).
     Target(Option<NavTarget>),
 }
@@ -64,16 +69,32 @@ pub struct Seen<'a> {
     pub station: bool,
 }
 
-/// The rotation input an agent aboard holds on the active vessel, like the
-/// pilot's keys (`commands::keys::read_controls` adds it): body axes, each
-/// −1–1 (x pitch, y yaw, z roll), held until the agent changes it.
+/// The flight keys an agent aboard holds on the active vessel, like the
+/// pilot's (`commands::keys::read_controls` adds them), held until the
+/// agent changes them: body axes, each −1–1.
 #[derive(Resource, Default)]
-pub struct HeldRotation(pub Option<(VesselId, DVec3)>);
+pub struct HeldKeys(pub Option<(VesselId, Keys)>);
 
-impl HeldRotation {
-    /// The input held on vessel `id`.
-    pub fn of(&self, id: VesselId) -> DVec3 {
-        self.0.filter(|(v, _)| *v == id).map_or(DVec3::ZERO, |(_, r)| r)
+/// The keys held: `rotate` (x pitch, y yaw, z roll) and `translate` (+X
+/// right, +Y down, +Z the nose: the I K, J L, H N keys, with RCS on).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Keys {
+    pub rotate: DVec3,
+    pub translate: DVec3,
+}
+
+impl HeldKeys {
+    /// The keys held on vessel `id`.
+    pub fn of(&self, id: VesselId) -> Keys {
+        self.0.filter(|(v, _)| *v == id).map_or(Keys::default(), |(_, k)| k)
+    }
+
+    /// Holds `rotate` and `translate` on vessel `id` (`None` keeps what it
+    /// holds there; another vessel's are let go).
+    pub fn set(&mut self, id: VesselId, rotate: Option<DVec3>, translate: Option<DVec3>) {
+        let now = self.of(id);
+        let k = Keys { rotate: rotate.unwrap_or(now.rotate), translate: translate.unwrap_or(now.translate) };
+        self.0 = (k != Keys::default()).then_some((id, k));
     }
 }
 
@@ -269,8 +290,10 @@ fn controls_tool(id: &Value) -> Tool {
              reference body; a planned burn is flown by the maneuver hold on its own. `rotate` is the pilot's \
              rotation keys held (body axes, each −1–1: x pitch, y yaw, z roll; [0,0,0] lets go), aboard the active \
              vessel only: for a short manoeuvre such as a pitch kick, flown from stopped time with `step` (agents \
-             fly by decisions, D044). `rcs` (off, on, translate or rotate only) and `rcs_fine` are the pilot's RCS \
-             mode (R and the RCS menu), aboard the active vessel only.",
+             fly by decisions, D044). `translate` is the pilot's translation keys held the same way (body axes, \
+             each −1–1: x right, y down, z forward along the nose; I K, J L, H N), with RCS on. `rcs` (off, on, \
+             translate or rotate only) and `rcs_fine` are the pilot's RCS mode (R and the RCS menu), aboard the \
+             active vessel only.",
         schema(
             json!({
                 "id": id,
@@ -279,6 +302,8 @@ fn controls_tool(id: &Value) -> Tool {
                 "hold": {"type": "string", "enum": HOLD_NAMES.map(|(n, _)| n)},
                 "speed_reference": {"type": "string", "enum": SPEED_NAMES.map(|(n, _)| n)},
                 "rotate": {"type": "array", "items": {"type": "number", "minimum": -1, "maximum": 1},
+                           "minItems": 3, "maxItems": 3},
+                "translate": {"type": "array", "items": {"type": "number", "minimum": -1, "maximum": 1},
                            "minItems": 3, "maxItems": 3},
                 "rcs": {"type": "string", "enum": RCS_NAMES.map(|(n, _)| n)},
                 "rcs_fine": {"type": "boolean"}
@@ -500,17 +525,12 @@ fn run(
                 ),
             };
             let mut effects = Vec::new();
-            if let Some(r) = args.get("rotate") {
-                let r: Vec<f64> =
-                    r.as_array().map(|a| a.iter().filter_map(Value::as_f64).collect()).unwrap_or_default();
-                let [x, y, z] = r[..] else { return Err("`rotate` is three numbers".into()) };
-                if [x, y, z].iter().any(|c| !(-1.0..=1.0).contains(c)) {
-                    return Err("`rotate`'s axes are each in −1–1".into());
-                }
+            let (rotate, translate) = (axes(args, "rotate")?, axes(args, "translate")?);
+            if rotate.is_some() || translate.is_some() {
                 if comms.location != Location::Vessel(id) || id != sim.ship().id() {
-                    return Err("the rotation keys are the pilot's: go aboard the active vessel".into());
+                    return Err("the rotation and translation keys are the pilot's: go aboard the active vessel".into());
                 }
-                effects.push(Effect::Rotate(id, DVec3::new(x, y, z)));
+                effects.push(Effect::Hold { vessel: id, rotate, translate });
             }
             let rcs = rcs_mode(args, sim.controls().rcs)?;
             if let Some(mode) = rcs {
@@ -522,9 +542,14 @@ fn run(
             let command = GameCommand::SetControls { vessel: id, throttle, sas, hold, speed };
             let hold = hold.and_then(|m| HOLD_NAMES.iter().find(|(_, h)| *h == m)).map(|(n, _)| *n);
             let speed = speed.and_then(|m| SPEED_NAMES.iter().find(|(_, s)| *s == m)).map(|(n, _)| *n);
+            // The thrusters translate only with RCS on (the keys' rule).
+            let rcs_on = rcs.map_or(sim.controls().rcs.on, |m| m.on);
+            let warning = (translate.is_some_and(|t| t != DVec3::ZERO) && !rcs_on)
+                .then_some("RCS is off: the thrusters translate only with RCS on (`rcs: \"on\"`)");
             let rcs = rcs.map(|m| json!({"mode": rcs_name(m), "fine": m.fine}));
             let reply = json!({"id": id.0, "throttle": throttle, "sas": sas, "hold": hold, "speed_reference": speed,
-                               "rotate": args.get("rotate"), "rcs": rcs, "arrives_in_s": arrives});
+                               "rotate": args.get("rotate"), "translate": args.get("translate"), "rcs": rcs,
+                               "arrives_in_s": arrives, "warning": warning});
             effects.push(Effect::Command(command));
             (reply, effects)
         }
@@ -549,6 +574,18 @@ fn run(
         "read" => (read::read(args, sim, &seen)?, Vec::new()),
         _ => return Err(format!("unknown tool {tool}")),
     })
+}
+
+/// `set_controls`' `rotate` or `translate` (`key`): three body-axis
+/// values each in −1–1, or `None` when not given.
+fn axes(args: &Value, key: &str) -> Result<Option<DVec3>, String> {
+    let Some(v) = args.get(key) else { return Ok(None) };
+    let r: Vec<f64> = v.as_array().map(|a| a.iter().filter_map(Value::as_f64).collect()).unwrap_or_default();
+    let [x, y, z] = r[..] else { return Err(format!("`{key}` is three numbers")) };
+    if [x, y, z].iter().any(|c| !(-1.0..=1.0).contains(c)) {
+        return Err(format!("`{key}`'s axes are each in −1–1"));
+    }
+    Ok(Some(DVec3::new(x, y, z)))
 }
 
 /// The pilot's RCS modes by name (`set_controls`' `rcs`).
@@ -1048,7 +1085,7 @@ pub fn serve(
     mut in_flight: ResMut<crate::commands::InFlight>,
     mut commands: MessageWriter<GameCommand>,
     mut session: ResMut<session::Session>,
-    mut held: ResMut<HeldRotation>,
+    mut held: ResMut<HeldKeys>,
     (mut nav, toasts, data): (ResMut<crate::navball::Navball>, Res<Toasts>, Res<crate::interface::menus::FlightData>),
 ) {
     // `SUNSCATTER_AGENT=<port>:<token>` turns the server on (demos, tests).
@@ -1110,7 +1147,7 @@ pub fn serve(
                 }
                 Effect::Station(open) => station.open = open,
                 Effect::Send { delay, command } => in_flight.send(sim.clock, delay, command),
-                Effect::Rotate(id, r) => held.0 = (r != DVec3::ZERO).then_some((id, r)),
+                Effect::Hold { vessel, rotate, translate } => held.set(vessel, rotate, translate),
                 Effect::Target(t) => nav.set_target(t),
             }
         }
@@ -1280,11 +1317,13 @@ mod tests {
             hold: None,
             speed: Some(SpeedReference::Surface),
         };
-        assert_eq!(e, vec![Effect::Rotate(active, DVec3::new(0.04, 0.0, 0.0)), Effect::Command(set)]);
+        let rotate = Effect::Hold { vessel: active, rotate: Some(DVec3::new(0.04, 0.0, 0.0)), translate: None };
+        assert_eq!(e, vec![rotate, Effect::Command(set)]);
         // (arguments, the error's words)
         let bad = [
             (json!({"rotate": [2.0, 0.0, 0.0]}), "−1–1"),
             (json!({"rotate": [0.0, 0.0]}), "three numbers"),
+            (json!({"translate": [0.0, 1.5, 0.0]}), "`translate`'s axes"),
             (json!({"speed_reference": "galactic"}), "unknown speed reference"),
         ];
         for (args, words) in bad {
@@ -1296,8 +1335,42 @@ mod tests {
         comms.signals.insert(active, Some(comms::Signal { delay: 0.0, rate: 1e6, via: vec![] }));
         let (r, _) = answer("set_controls", &json!({"rotate": [0.0, 0.1, 0.0]}), &sim, &comms, &Default::default());
         assert!(matches!(r, ToolResult::Err(e) if e.contains("aboard")));
-        let held = HeldRotation(Some((active, DVec3::X)));
-        assert_eq!((held.of(active), held.of(VesselId(999))), (DVec3::X, DVec3::ZERO));
+        let (r, _) = answer("set_controls", &json!({"translate": [0.0, 0.0, 1.0]}), &sim, &comms, &Default::default());
+        assert!(matches!(r, ToolResult::Err(e) if e.contains("aboard")));
+    }
+
+    #[test]
+    fn the_translation_keys_are_held_beside_the_rotation_keys() {
+        let (sim, mut comms) = setup();
+        let active = sim.ship().id();
+        comms.location = Location::Vessel(active);
+        // RCS off: held, with a warning that nothing translates yet; with
+        // `rcs: on` in the same call, none.
+        let args = json!({"translate": [0.0, 0.0, 1.0]});
+        let (ToolResult::Ok(v), e) = answer("set_controls", &args, &sim, &comms, &Default::default()) else { panic!() };
+        assert!(v["warning"].as_str().is_some_and(|w| w.contains("RCS is off")), "{v}");
+        assert_eq!(e[0], Effect::Hold { vessel: active, rotate: None, translate: Some(DVec3::Z) });
+        let args = json!({"translate": [0.0, 0.0, 1.0], "rcs": "on"});
+        let (ToolResult::Ok(v), _) = answer("set_controls", &args, &sim, &comms, &Default::default()) else { panic!() };
+        assert!(v["warning"].is_null(), "{v}");
+        // (held before, set: rotate, translate) → held after; `None` keeps
+        // what is held, another vessel's keys are let go, all zero is none.
+        let (a, b) = (VesselId(1), VesselId(2));
+        let k = |r: DVec3, t: DVec3| Keys { rotate: r, translate: t };
+        let cases = [
+            (None, (a, Some(DVec3::X), None), Some((a, k(DVec3::X, DVec3::ZERO)))),
+            (Some((a, k(DVec3::X, DVec3::ZERO))), (a, None, Some(DVec3::Z)), Some((a, k(DVec3::X, DVec3::Z)))),
+            (Some((a, k(DVec3::X, DVec3::Z))), (a, Some(DVec3::ZERO), None), Some((a, k(DVec3::ZERO, DVec3::Z)))),
+            (Some((a, k(DVec3::X, DVec3::Z))), (b, None, Some(DVec3::Y)), Some((b, k(DVec3::ZERO, DVec3::Y)))),
+            (Some((a, k(DVec3::X, DVec3::ZERO))), (a, Some(DVec3::ZERO), Some(DVec3::ZERO)), None),
+        ];
+        for (before, (id, r, t), after) in cases {
+            let mut held = HeldKeys(before);
+            held.set(id, r, t);
+            assert_eq!(held.0, after, "{before:?} {r:?} {t:?}");
+        }
+        let held = HeldKeys(Some((a, k(DVec3::X, DVec3::Y))));
+        assert_eq!((held.of(a).translate, held.of(VesselId(999))), (DVec3::Y, Keys::default()));
     }
 
     #[test]
