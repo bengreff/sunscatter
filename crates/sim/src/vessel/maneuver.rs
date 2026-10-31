@@ -193,6 +193,7 @@ impl Vessel {
         let mass = burn.as_ref().map_or_else(|| self.mass(), |b| b.mass.value);
         let thrust = burn.as_ref().and_then(|b| b.thrust.map(|t| t.value)).unwrap_or(0.0);
         let tail_impulse = p.engines.iter().map(|&i| def.engines[i as usize].data.shutdown_impulse).sum();
+        let level_min = p.engines.iter().map(|&i| def.engines[i as usize].data.throttle_min).fold(0.0, f64::max);
         let x = maneuver::Inputs {
             t: self.time,
             view: &view,
@@ -205,6 +206,7 @@ impl Vessel {
             mass,
             thrust,
             tail_impulse,
+            level_min,
             dt: super::TICK,
         };
         let before = p.step;

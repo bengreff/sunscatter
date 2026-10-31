@@ -47,22 +47,34 @@ fn a_node_is_flown_to_its_orbit_the_same_in_frames_as_in_one_jump() {
     let program = frames.program().unwrap().clone();
     assert_eq!(program.step, Step::Wait);
     assert!(program.wake < program.ignite && program.ignite < node.t, "{program:?}");
-    // The orbit the node gives (the prediction).
+    // The orbit the node gives (the prediction), from the stored coast.
+    frames.extend_coast(&w, node.t.add_seconds(60.0), usize::MAX);
     let after = frames.node_prediction(&w, 0).unwrap();
-    let target = Elements::from_state(after.after.1, after.after.2, earth.gm);
     // The small rocket's thruster blocks only turn it: it cannot settle,
     // and the planner says so (its start does what the physics says).
     println!("planner: {:?}", after.warnings);
+    assert!(after.warnings.iter().any(|w| w.contains("cannot be settled")), "{:?}", after.warnings);
     let mut jump = frames.clone();
     let controls = Controls::default();
     // Just past the burn (≈1.4 s about the node) and its tail-off.
     let end = node.t.add_seconds(20.0);
+    // The flown state carried to the node along its conic (the program's
+    // model; over the tenths of a second since the cutoff J2 is nothing).
+    let at_node = |s: &Vessel| {
+        let (anchor, r, v) = s.state(&w);
+        let k = w.eph.relative(anchor, earth.node, s.time);
+        sim::kepler::propagate(r + k.r, v + k.v, earth.gm, node.t.seconds_since(s.time)).unwrap()
+    };
     // Frames at 60 fps (the player at 1×) against one advance (10⁵×).
     let mut k = 0u64;
+    let mut cut = None;
     while frames.time < end {
         k += 1;
         let t = t0().add_seconds(k as f64 / 60.0);
         frames.advance(&w, if t > end { end } else { t }, &controls, usize::MAX);
+        if cut.is_none() && frames.program().is_some_and(|p| p.step == Step::Done) {
+            cut = Some(at_node(&frames));
+        }
     }
     while jump.time < end {
         jump.advance(&w, end, &controls, usize::MAX);
@@ -75,26 +87,23 @@ fn a_node_is_flown_to_its_orbit_the_same_in_frames_as_in_one_jump() {
         frames.ship_events().iter().map(|e| &e.text).collect::<Vec<_>>()
     );
     assert_eq!(p.step, Step::Done);
-    assert!(p.left.unwrap() < 0.5, "{:?}", p.left);
+    assert!(p.left.unwrap() < 0.2, "{:?}", p.left);
     assert!(matches!(frames.phase, Phase::Coasting { .. }), "coasting after the burn");
-    // On the orbit the program closed the loop on: the flown state carried
-    // back the 20 s to the node along its conic (the program's model; over
-    // longer spans J2 moves LEO states by metres per second, and osculating
-    // elements by kilometres, so neither is compared across long spans).
     let flown = earth_elements(&w, &frames);
+    let target = Elements::from_state(after.after.1, after.after.2, earth.gm);
     println!("apoapsis {:.0} m (prediction {:.0} m)", flown.apoapsis(), target.apoapsis());
-    let (anchor, r, v) = frames.state(&w);
-    let k = w.eph.relative(anchor, earth.node, frames.time);
-    let (rn, vn) = sim::kepler::propagate(r + k.r, v + k.v, earth.gm, node.t.seconds_since(frames.time)).unwrap();
+    // On the orbit the program closed the loop on, just after the cutoff.
+    let (rn, vn) = cut.unwrap();
     let aim = p.target.unwrap();
     let (dr, dv) = ((rn - aim.0).length(), (vn - aim.1).length());
     let off = (vn - after.after.2).length();
     println!("at the node: {dr:.1} m, {dv:.3} m/s from the target ({off:.2} m/s from the prediction)");
-    // 0.93 m/s of 40 m/s reached (2026-10-30), against the program's 0.27
-    // m/s left at its cutoff: the tail-off's Δv and the tick's quantisation
-    // are still to be matched (PLANNER's State, left 2).
-    assert!(dv < 1.5 && dr < 100.0, "{dr} m, {dv} m/s");
-    assert!(off < 20.0, "the prediction (two-body from 900 s out) within J2's reach: {off} m/s");
+    // The last ticks throttled to end on it (`maneuver::last_ticks`): 0.19
+    // m/s of 40 (2026-10-30), the steering's lag across the burn.
+    assert!(dv < 0.3 && dr < 50.0, "{dr} m, {dv} m/s");
+    // The prediction (the stored coast plus the Δv at once) against the
+    // target (two-body over the settling and half the burn, ~25 s of J2).
+    assert!(off < 0.6, "{off} m/s from the prediction");
     // D129: the same bits whatever the frames.
     assert_eq!(frames.time, jump.time);
     assert_eq!(frames.state(&w), jump.state(&w));

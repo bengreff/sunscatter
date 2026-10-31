@@ -4,9 +4,11 @@
 //! **A node** is a Δv along prograde, normal and radial-out at an epoch,
 //! relative to a body (the axes' reference: a control choice, never
 //! physics, rule 1). **The target** is the orbit the node gives: the
-//! navigation state when the program wakes, carried to the node along its
-//! conic (`kepler::propagate`, the software's model of the orbit), plus the
-//! node's Δv in its axes there.
+//! navigation state carried to the node along its conic (`kepler::propagate`,
+//! the software's model of the orbit), plus the node's Δv in its axes there;
+//! taken afresh each tick of the turn and latched when settling begins, so
+//! the two-body model spans only the settling and the burn (J2 moves a LEO
+//! state ~1 cm/s per second from its conic).
 //!
 //! **Inputs** are only what the flight software sees ([`super::flight::View`]:
 //! the attitude, the navigation solution, the engine controllers' readouts,
@@ -23,9 +25,10 @@
 //! unsettled, or for [`SETTLE_LEAD`] without one; *ignite* at the ignition
 //! epoch (settled, or [`SETTLE_WAIT`] after it regardless: the start then
 //! does what the physics says); *burn* along v_go, the target's velocity at
-//! the node minus the current state's carried there; cut off when |v_go|
-//! falls to the tail-off's Δv plus half a tick of thrust, or turns against
-//! the burn; *tail-off* until the engines are off; *done*. An engine that
+//! the node minus the current state's carried there; in its last ticks
+//! ([`last_ticks`]) throttle so the tick still committed, the next ones and
+//! the tail-off end on the target, then cut off (or when v_go turns against
+//! the burn); *tail-off* until the engines are off; *done*. An engine that
 //! stops on its own ends it *short*; the pilot's conflicting input
 //! ([`conflicts`]) ends it *manual*.
 //!
@@ -104,8 +107,9 @@ pub struct Program {
     pub step: Step,
     /// The engines it lights (indices into `ShipDef::engines`).
     pub engines: Vec<u32>,
-    /// The target state at the node relative to its reference, latched at
-    /// the wake.
+    /// The target state at the node relative to its reference: from the
+    /// navigation solution at each tick of the turn, latched when settling
+    /// begins (the settling's push is part of the burn).
     pub target: Option<(DVec3, DVec3)>,
     /// The burn direction now (inertial, unit), and at ignition.
     pub dir: Option<DVec3>,
@@ -171,8 +175,10 @@ pub struct Inputs<'a> {
     /// The mass (kg) and its engines' full thrust (N), from the estimate.
     pub mass: f64,
     pub thrust: f64,
-    /// The sum of its engines' shutdown impulses (N·s).
+    /// The sum of its engines' shutdown impulses (N·s), at full level.
     pub tail_impulse: f64,
+    /// The lowest level its engines run at (a fraction of full flow).
+    pub level_min: f64,
     /// The tick (s).
     pub dt: f64,
 }
@@ -200,11 +206,46 @@ pub fn aligned(att: &Attitude, axis: DVec3, dir: DVec3) -> bool {
     along >= crate::math::cos(ALIGN) && att.omega.length() <= ALIGN_RATE
 }
 
-/// Whether to cut off now: what is left (`go`) is no more than the
-/// tail-off gives plus half a tick of thrust (cutting at the nearest tick),
-/// or it has turned against the burn's first direction.
-pub fn cutoff(go: DVec3, first: Option<DVec3>, tail_dv: f64, tick_dv: f64) -> bool {
-    go.length() <= tail_dv + 0.5 * tick_dv || first.is_some_and(|f| go.dot(f) <= 0.0)
+/// Whether v_go has turned against the burn's first direction: overshot.
+pub fn overshot(go: DVec3, first: Option<DVec3>) -> bool {
+    first.is_some_and(|f| go.dot(f) <= 0.0)
+}
+
+/// The throttle in a burn's last ticks, or `None`: cut off now. A command
+/// reaches the engines a tick late, so this tick's thrust is committed: `a`
+/// (m/s) is what is left along v_go after it. `d` is a tick of
+/// full thrust and `tail` the tail-off from full level (m/s; the tail-off
+/// scales with the level it starts from), `now` the level this tick and
+/// `min` the lowest. Of cutting now (the tail-off from `now`) and one or
+/// two more ticks at one level then cutting (the tail-off from that
+/// level), it takes the end nearest the target; with more than two ticks
+/// left that is full throttle.
+pub fn last_ticks(a: f64, d: f64, tail: f64, now: f64, min: f64) -> Option<f64> {
+    if d.is_nan() || d <= 0.0 {
+        // No estimate of the thrust: burn until it has overshot.
+        return (a > 0.0).then_some(1.0);
+    }
+    let mut best = (None, (a - now * tail).abs());
+    for n in [1.0, 2.0] {
+        let per = n * d + tail;
+        let u = (a / per).clamp(min.clamp(0.0, 1.0), 1.0);
+        let err = (a - u * per).abs();
+        if err < best.1 {
+            best = (Some(u), err);
+        }
+    }
+    best.0
+}
+
+/// The mean level of the engines `engines` by their readouts (0 for one
+/// nothing reads).
+fn level(view: &View, engines: &[u32]) -> f64 {
+    if engines.is_empty() {
+        return 0.0;
+    }
+    let sum: f64 =
+        engines.iter().map(|&i| view.engines.get(i as usize).and_then(Option::as_ref).map_or(0.0, |r| r.level)).sum();
+    sum / engines.len() as f64
 }
 
 /// Whether the pilot's controls `now` conflict with the program (D126):
@@ -265,6 +306,13 @@ pub fn step(x: &Inputs, p: &mut Program) -> Commands {
         return Commands::default();
     }
     let to_node = x.node.t.seconds_since(x.t);
+    if p.step == Step::Turn {
+        // Still coasting: the target from the latest state, so the
+        // software's two-body model spans only the settling and the burn.
+        if let Some(t) = x.rel.and_then(|rel| target(rel, x.mu, to_node, x.node.dv)) {
+            p.target = Some(t);
+        }
+    }
     let go = x.rel.zip(p.target).and_then(|(rel, target)| v_go(target, rel, x.mu, to_node));
     if p.step != Step::TailOff {
         if let Some(g) = go.filter(|g| g.length() > 0.0) {
@@ -311,12 +359,23 @@ pub fn step(x: &Inputs, p: &mut Program) -> Commands {
             };
             let (tail, tick) =
                 if x.mass > 0.0 { (x.tail_impulse / x.mass, x.thrust / x.mass * x.dt) } else { (0.0, 0.0) };
-            if p.lit_seen && cutoff(g, p.first, tail, tick) {
-                p.step = Step::TailOff;
-                p.left = Some(g.length());
-                return Commands { hold, throttle: Some(0.0), ..Commands::default() };
+            // The thrust axis now (the attitude's), else the burn direction.
+            let along = x.view.attitude.map(|a| (a.q * x.axis).normalize()).or(hold).unwrap_or(g.normalize_or_zero());
+            let now = level(x.view, &p.engines);
+            // Left along v_go after this tick's committed thrust.
+            let a = g.length() - now * tick * along.dot(g.normalize_or_zero());
+            let throttle = if overshot(g, p.first) { None } else { last_ticks(a, tick, tail, now, x.level_min) };
+            match throttle {
+                None if p.lit_seen => {
+                    p.step = Step::TailOff;
+                    // What the committed tick and the tail-off leave.
+                    p.left = Some((g - along * now * (tick + tail)).length());
+                    Commands { hold, throttle: Some(0.0), ..Commands::default() }
+                }
+                // Not lit yet: its start is the engines' own.
+                None => Commands { hold, throttle: Some(1.0), ..Commands::default() },
+                Some(u) => Commands { hold, throttle: Some(u), ..Commands::default() },
             }
-            Commands { hold, throttle: Some(1.0), ..Commands::default() }
         }
         Step::TailOff => {
             if p.engines.iter().all(|&i| quiet(x.view, i)) {

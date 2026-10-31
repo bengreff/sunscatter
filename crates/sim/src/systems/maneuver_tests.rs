@@ -58,20 +58,42 @@ fn aligned_table() {
 }
 
 #[test]
-fn cutoff_table() {
-    // (v_go, first direction, tail-off Δv, tick Δv) → cut off now.
+fn last_ticks_table() {
+    // (left after this tick's committed thrust, a tick of full thrust,
+    // the tail-off from full level, the level now, the lowest level) →
+    // the next tick's throttle, or cut off now.
+    let cases = [
+        (10.0, 0.5, 0.0, 1.0, 0.4, Some(1.0)),   // more than two ticks left: full
+        (0.3, 0.5, 0.0, 1.0, 0.4, Some(0.6)),    // one tick at 60 % ends on it
+        (0.15, 0.5, 0.0, 1.0, 0.4, Some(0.4)),   // the lowest level: 0.05 over, not 0.15 short
+        (0.1, 0.5, 0.0, 1.0, 0.4, None),         // 0.1 short beats 0.1 over: cut
+        (0.75, 0.5, 0.0, 1.0, 0.64, Some(0.75)), // two ticks at 75 %
+        (0.55, 0.5, 0.0, 1.0, 0.64, Some(1.0)),  // one full tick (0.05 short) beats two at 64 % (0.09 over)
+        (0.35, 0.5, 0.2, 1.0, 0.4, Some(0.5)),   // a tick and its tail-off at 50 %
+        (0.08, 0.5, 0.2, 0.4, 0.4, None),        // the tail-off from 40 % gives it
+        (-0.2, 0.5, 0.0, 1.0, 0.4, None),        // the committed tick overshoots: cut
+        (1.0, 0.0, 0.0, 0.0, 0.4, Some(1.0)),    // no thrust estimate: burn on
+        (-1.0, 0.0, 0.0, 0.0, 0.4, None),
+    ];
+    for (a, d, tail, now, min, want) in cases {
+        let got = last_ticks(a, d, tail, now, min);
+        let close = got.zip(want).is_some_and(|(g, w)| (g - w).abs() < 1e-12);
+        assert!(close || got == want, "{a} {d} {tail} {now} {min}: {got:?}, want {want:?}");
+    }
+}
+
+#[test]
+fn overshot_table() {
+    // (v_go, the burn's first direction) → overshot.
     let x = DVec3::X;
     let cases = [
-        (x * 10.0, Some(x), 0.1, 0.5, false),
-        (x * 0.3, Some(x), 0.1, 0.5, true), // 0.3 ≤ 0.1 + 0.25
-        (x * 0.36, Some(x), 0.1, 0.5, false),
-        (x * 0.35, Some(x), 0.1, 0.5, true),
-        (-x * 3.0, Some(x), 0.1, 0.5, true),       // overshot
-        (DVec3::Y * 3.0, Some(x), 0.0, 0.0, true), // across the burn: overshot
-        (x * 3.0, None, 0.0, 0.0, false),
+        (x * 10.0, Some(x), false),
+        (-x * 3.0, Some(x), true),
+        (DVec3::Y * 3.0, Some(x), true), // across the burn
+        (x * 3.0, None, false),
     ];
-    for (go, first, tail, tick, want) in cases {
-        assert_eq!(cutoff(go, first, tail, tick), want, "{go} {tail} {tick}");
+    for (go, first, want) in cases {
+        assert_eq!(overshot(go, first), want, "{go}");
     }
 }
 
@@ -150,6 +172,7 @@ fn inputs<'a>(at: f64, view: &'a View, n: &'a Node, settled: Option<bool>) -> In
         mass: 1e4,
         thrust: 1e5,
         tail_impulse: 1e3,
+        level_min: 0.4,
         dt: 0.02,
     }
 }
@@ -193,14 +216,24 @@ fn the_steps_turn_settle_ignite_burn_and_cut_off() {
     let c = step(&inputs(941.0, &v, &n, Some(true)), &mut p);
     assert_eq!((p.step, c.throttle), (Step::Burn, Some(1.0)));
     assert!(p.lit_seen);
-    // On the target (the craft's state now has the Δv): cut off.
-    // At the node, 0.1 m/s short of the target velocity.
+    // Near the target: at the node, 0.35 m/s short of the target velocity,
+    // with a tick of full thrust (0.2 m/s) committed and a tail-off of 0.1
+    // m/s from full level: one tick at 50 % and its tail-off end on it.
     let (rt, vt) = p.target.unwrap();
     let v = view(on, vec![reading(EngineStatus::Running)]);
     let mut x = inputs(1_000.0, &v, &n, Some(true));
-    x.rel = Some((rt, vt - dir(&p) * 0.1));
+    x.rel = Some((rt, vt - dir(&p) * 0.35));
     let c = step(&x, &mut p);
-    assert_eq!((p.step, c.throttle), (Step::TailOff, Some(0.0)), "0.1 m/s left ≤ 0.1 + 0.1 m/s");
+    assert_eq!(p.step, Step::Burn);
+    assert!(c.throttle.is_some_and(|u| (u - 0.5).abs() < 1e-6), "{c:?}");
+    // Then that tick is committed at 50 %: 0.05 m/s left, the tail-off's:
+    // cut off.
+    let half = view(on, vec![Some(EngineReading { status: EngineStatus::Running, level: 0.5, reason: None })]);
+    let mut x = inputs(1_000.0, &half, &n, Some(true));
+    x.rel = Some((rt, vt - dir(&p) * 0.15));
+    let c = step(&x, &mut p);
+    assert_eq!((p.step, c.throttle), (Step::TailOff, Some(0.0)));
+    assert!(p.left.unwrap() < 1e-6, "{:?}", p.left);
     // Tail-off until the engine is off: done.
     let v = view(on, vec![reading(EngineStatus::ShuttingDown)]);
     assert_eq!(step(&inputs(941.1, &v, &n, Some(true)), &mut p).throttle, Some(0.0));
