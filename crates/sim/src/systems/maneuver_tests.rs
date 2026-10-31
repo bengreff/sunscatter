@@ -335,6 +335,30 @@ fn an_engine_that_stops_or_never_starts_ends_it_short() {
     assert_eq!(p.step, Step::Short);
 }
 
+/// What the navball shows during a programmed burn: the program's last
+/// hold and throttle over the pilot's controls while it flies, the pilot's
+/// before and after.
+#[test]
+fn the_controls_flown_are_the_program_s_while_it_flies() {
+    let pilot = Controls { throttle: 0.0, sas: true, hold: HoldMode::Stability, ..Controls::default() };
+    let mut p = Program::new(0, (t(0.0), t(60.0)), vec![0]);
+    (p.dir, p.throttle) = (Some(DVec3::X), Some(1.0));
+    // (step, throttle, hold flown)
+    let table = [
+        (Step::Wait, 0.0, HoldMode::Stability),
+        (Step::Turn, 1.0, HoldMode::Maneuver),
+        (Step::Burn, 1.0, HoldMode::Maneuver),
+        (Step::TailOff, 1.0, HoldMode::Maneuver),
+        (Step::Done, 0.0, HoldMode::Stability),
+        (Step::Manual, 0.0, HoldMode::Stability),
+    ];
+    for (step, throttle, hold) in table {
+        p.step = step;
+        let c = p.flown(&pilot);
+        assert_eq!((c.throttle, c.sas, c.hold), (throttle, true, hold), "{step:?}");
+    }
+}
+
 #[test]
 fn commands_lay_over_the_pilot_s_controls() {
     let pilot = Controls { throttle: 0.2, sas: false, chute: true, ..Controls::default() };

@@ -187,6 +187,12 @@ impl Vessel {
     }
 
     /// Whether a program flies the craft now (it needs live ticks).
+    /// The controls the vessel flies with the pilot's `pilot`: a flying
+    /// program's laid over them (`Program::flown`); the navball shows these.
+    pub fn flown_controls(&self, pilot: &super::Controls) -> super::Controls {
+        self.program.as_ref().map_or(*pilot, |p| p.flown(pilot))
+    }
+
     pub(super) fn program_flying(&self) -> bool {
         self.program.as_ref().is_some_and(|p| p.step.flying())
     }

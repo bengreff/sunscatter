@@ -456,6 +456,18 @@ impl Program {
         }
     }
 
+    /// The controls flown with the pilot's `pilot` after its last tick:
+    /// while it flies, its hold along the burn and its throttle laid over
+    /// them ([`Commands::over`], as the vessel flies them); else the
+    /// pilot's. What the navball shows (its hold buttons read the pilot's
+    /// STAB while the program held the burn).
+    pub fn flown(&self, pilot: &Controls) -> Controls {
+        if !self.step.flying() {
+            return *pilot;
+        }
+        Commands { hold: self.dir, throttle: self.throttle, ..Commands::default() }.over(pilot)
+    }
+
     /// Wakes the program at its wake epoch: the target from the navigation
     /// solution `rel` (relative to the node's reference) `to_node` seconds
     /// before the node, and the pilot's controls as the baseline. Without

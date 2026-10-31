@@ -208,7 +208,9 @@ fn readouts(ui: &mut egui::Ui, s: &NavState, actions: &mut Vec<Action>) {
 
 /// SAS, the hold modes (click only, D111), and the throttle bar.
 fn controls(ui: &mut egui::Ui, sim: &SimState, s: &NavState, height: f32, actions: &mut Vec<Action>) {
-    let c = *sim.controls();
+    // What the vessel flies: a planned burn's program holds and throttles
+    // over the pilot's controls (a click on SAS or a hold takes over, D126).
+    let c = sim.ship().flown_controls(sim.controls());
     ui.horizontal_top(|ui| {
         ui.vertical(|ui| {
             ui.spacing_mut().item_spacing.y = 2.0;
