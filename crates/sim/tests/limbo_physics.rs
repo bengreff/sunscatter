@@ -1,8 +1,8 @@
 //! Limbo physics against references (`docs/technical/limbo.md`): thin-air
 //! drag decay (King-Hele's rate; an ISS-like ballistic number against the
-//! station's observed decay), radiation pressure on a flat plate, a
-//! low-thrust spiral against Edelbaum, the hand-over from a decaying coast
-//! to live flight, and anchor invariance of a perturbed coast (rule 1).
+//! station's observed decay), radiation pressure on a flat plate, the
+//! hand-over from a decaying coast to live flight, and anchor invariance of
+//! a perturbed coast (rule 1).
 
 use glam::{DQuat, DVec3};
 use sim::craft::DesignSlot;
@@ -13,10 +13,7 @@ use sim::sol;
 use sim::time::Epoch;
 use sim::vessel::limbo::{Limbo, LowThrust};
 use sim::vessel::pointing::{self, Pointing, Rule};
-use sim::vessel::{
-    Attitude, BurnEnd, BurnLaw, CoastStart, Controls, DirectionLaw, FlightPlan, HoldMode, Phase, PlannedBurn, Segment,
-    Vessel, VesselId,
-};
+use sim::vessel::{Attitude, CoastStart, Controls, DirectionLaw, HoldMode, Phase, Segment, Vessel, VesselId};
 use sim::world::World;
 use std::sync::Arc;
 
@@ -44,32 +41,6 @@ fn rocket(w: &World, el: Elements, fill: f64) -> Vessel {
     let mut s = Vessel::coasting(w, VesselId(1), t0(), earth.node, r, v, &sim::craft::small::rocket());
     s.set_fill(w, fill);
     s
-}
-
-/// The test craft coasting on `el` about Earth with `propellant` kg: its
-/// made-up boil-off and planned burns go with the made-up path (D121).
-fn ship(w: &World, el: Elements, propellant: f64) -> Vessel {
-    let earth = w.find("Earth").unwrap();
-    let (r, v) = el.to_state(earth.gm);
-    let mut s = Vessel::coasting(w, VesselId(1), t0(), earth.node, r, v, sim::craft::test_craft());
-    s.set_propellant(w, propellant);
-    s
-}
-
-/// The osculating semi-major axis about Earth averaged over one orbit of
-/// `period` from the vessel's time (short-period terms cancel), advancing
-/// a copy.
-fn mean_a(w: &World, v: &Vessel, period: f64, controls: &Controls) -> f64 {
-    let mu = w.find("Earth").unwrap().gm;
-    let mut c = v.clone();
-    let n = 36;
-    let mut sum = 0.0;
-    for k in 0..n {
-        c.advance(w, v.time.add_seconds(period * k as f64 / n as f64), controls, usize::MAX);
-        let (_, r, vel) = c.state(w);
-        sum += Elements::from_state(r, vel, mu).a;
-    }
-    sum / n as f64
 }
 
 #[test]
@@ -243,36 +214,6 @@ fn radiation_pressure_on_a_flat_plate_is_the_analytic_value() {
 }
 
 #[test]
-fn a_low_thrust_spiral_takes_edelbaums_delta_v() {
-    let w = world();
-    let earth = w.find("Earth").unwrap();
-    // 1,000 km circular, equatorial; 2 N at Isp 3,000 s along prograde
-    // for 20 days (≈ 0.45 mm/s²).
-    let el = Elements { a: RE + 1_000_000.0, e: 0.0, i: 0.0, raan: 0.0, argp: 0.0, mean_anomaly: 0.0 };
-    let mut s = ship(&w, el, 500.0);
-    let controls = sas(HoldMode::Prograde);
-    let law = BurnLaw::from_isp(2.0, 3_000.0, DirectionLaw::Tracking { reference: earth.node, axes: DVec3::X });
-    let start = t0().add_seconds(600.0);
-    let burn = PlannedBurn { t_start: start, law, end: BurnEnd::Duration(20.0 * DAY) };
-    s.set_plan(&w, FlightPlan { burns: vec![burn] }).unwrap();
-    let a0 = mean_a(&w, &s, el.period(earth.gm), &controls);
-    let m0 = s.mass();
-    s.advance(&w, start.add_seconds(20.0 * DAY + 60.0), &controls, usize::MAX);
-    let m1 = s.mass();
-    let (_, r, v) = s.state(&w);
-    let a1 = mean_a(&w, &s, Elements::from_state(r, v, earth.gm).period(earth.gm), &controls);
-    let rocket = 3_000.0 * sim::vessel::G0 * (m0 / m1).ln();
-    // Edelbaum (1961): Δv = √(v₀² + v₁² − 2v₀v₁·cos(πΔi/2)), coplanar: v₀ − v₁.
-    let edelbaum = (earth.gm / a0).sqrt() - (earth.gm / a1).sqrt();
-    println!(
-        "spiral {:.0} → {:.0} km: rocket Δv {rocket:.2} m/s, Edelbaum {edelbaum:.2} m/s",
-        (a0 - RE) / 1e3,
-        (a1 - RE) / 1e3
-    );
-    assert!((rocket / edelbaum - 1.0).abs() < 0.01, "{rocket} vs {edelbaum}");
-}
-
-#[test]
 fn a_decaying_orbit_hands_over_to_live_flight_at_the_boundary() {
     let w = world();
     let earth = w.find("Earth").unwrap();
@@ -430,66 +371,4 @@ fn thin_air_heats_a_coasting_craft_at_the_free_molecular_rate() {
     let high = DVec3::new(RE + 800_000.0, 0.0, 0.0);
     let vh = DVec3::new(0.0, (earth.gm / high.length()).sqrt(), 0.0);
     assert!(sim::vessel::coast_air(&w, t0(), (earth.node, high, vh), Some(&pointing), &att, length).is_empty());
-}
-
-#[test]
-fn boil_off_ends_a_low_thrust_burn_when_the_tank_is_empty() {
-    // 100 kg aboard, 2 N at Isp 3,000 s (6.8e-5 kg/s) planned for 5 days,
-    // and 1e-3 kg/s boiling off: the tank is empty after 100 kg / (ṁ + b),
-    // ~1.1 days. The burn ends there and delivers F/(ṁ + b)·ln(m0/m_dry):
-    // the boiled propellant gives no thrust.
-    let w = world();
-    let earth = w.find("Earth").unwrap();
-    let el = Elements { a: RE + 2_000_000.0, e: 0.0, i: 0.0, raan: 0.0, argp: 0.0, mean_anomaly: 0.0 };
-    let mut s = ship(&w, el, 100.0);
-    s.set_boil_off(&w, 1e-3);
-    let law = BurnLaw::from_isp(2.0, 3_000.0, DirectionLaw::Tracking { reference: earth.node, axes: DVec3::X });
-    // After the orbit measured before it.
-    let ignition = t0().add_seconds(10_000.0);
-    let burn = PlannedBurn { t_start: ignition, law, end: BurnEnd::Duration(5.0 * DAY) };
-    s.set_plan(&w, FlightPlan { burns: vec![burn] }).unwrap();
-    let controls = sas(HoldMode::Prograde);
-    let a0 = mean_a(&w, &s, el.period(earth.gm), &controls);
-    let dry = s.craft.mass.dry_mass;
-    // Mid-burn: the segment's length is the tank's.
-    s.advance(&w, ignition.add_seconds(DAY / 2.0), &controls, usize::MAX);
-    let seg = s.segment().unwrap();
-    let m0 = seg.initial_mass();
-    let flow = law.mass_flow + 1e-3;
-    assert!(seg.limbo().unwrap().thrust.is_some());
-    assert!((seg.horizon() - (m0 - dry) / flow).abs() < 1e-6, "{} vs {}", seg.horizon(), (m0 - dry) / flow);
-    // After it: empty, no thrust, the orbit raised by the rocket equation
-    // with the total flow (Edelbaum, coplanar), and no more.
-    s.advance(&w, ignition.add_seconds(3.0 * DAY), &controls, usize::MAX);
-    assert_eq!(s.propellant(), 0.0);
-    let (_, r, v) = s.state(&w);
-    let period = Elements::from_state(r, v, earth.gm).period(earth.gm);
-    let a1 = mean_a(&w, &s, period, &controls);
-    s.advance(&w, ignition.add_seconds(5.0 * DAY), &controls, usize::MAX);
-    let a2 = mean_a(&w, &s, period, &controls);
-    let dv = (earth.gm / a0).sqrt() - (earth.gm / a1).sqrt();
-    let rocket = law.thrust / flow * (m0 / dry).ln();
-    println!("boil-off burn: Δv {dv:.2} m/s, F/(ṁ+b)·ln(m0/m1) {rocket:.2}; a after {:.1} m later", a2 - a1);
-    assert!((dv / rocket - 1.0).abs() < 0.03, "{dv} vs {rocket}");
-    assert!((a2 - a1).abs() < 50.0, "no thrust after the tank is empty: {} m", a2 - a1);
-}
-
-#[test]
-fn a_flown_burn_takes_no_boil_off() {
-    // A chemical burn is flown tick by tick from the engine's mass flow:
-    // its segment carries no boil-off, so falling mass never becomes thrust.
-    let w = world();
-    let earth = w.find("Earth").unwrap();
-    let mut s =
-        ship(&w, Elements { a: RE + 400_000.0, e: 0.0, i: 0.5, raan: 0.0, argp: 0.0, mean_anomaly: 0.0 }, 8_000.0);
-    s.set_boil_off(&w, 1e-2);
-    let engine = sim::craft::test_craft().params().engine;
-    let burn = PlannedBurn::delta_v_with(t0().add_seconds(600.0), DVec3::X * 20.0, &engine, Some(earth.node));
-    s.set_plan(&w, FlightPlan { burns: vec![burn] }).unwrap();
-    s.extend_coast(&w, t0().add_seconds(700.0), usize::MAX);
-    let traj = s.trajectory().unwrap();
-    let seg = traj.segments.iter().find(|g| matches!(g.kind, sim::vessel::SegmentKind::Burn(_))).unwrap();
-    assert_eq!(seg.limbo().unwrap().boil_off, 0.0);
-    assert!(seg.limbo().unwrap().thrust.is_none(), "flown by ticks");
-    assert_eq!(traj.segments[0].limbo().unwrap().boil_off, 1e-2, "the coast before it boils");
 }

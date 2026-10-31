@@ -1,5 +1,5 @@
 //! Limbo (`docs/technical/limbo.md`, D081): craft on rails under continuous
-//! forces (low thrust, thin-air drag, radiation pressure) evolve to the same
+//! forces (thin-air drag, radiation pressure) evolve to the same
 //! bits whatever the warp: one call, game frames at 1×, 1,000× and
 //! 1,000,000× (the game's budgets and look-ahead), and across a save.
 
@@ -9,10 +9,7 @@ use sim::kepler::Elements;
 use sim::save::SaveGame;
 use sim::sol;
 use sim::time::Epoch;
-use sim::vessel::{
-    BurnEnd, BurnLaw, Controls, DirectionLaw, FlightPlan, HoldMode, Phase, PlannedBurn, SegmentKind, Vessel, VesselId,
-    VesselIds,
-};
+use sim::vessel::{Controls, HoldMode, Phase, Vessel, VesselId, VesselIds};
 use sim::world::World;
 use std::sync::Arc;
 
@@ -39,17 +36,6 @@ fn ship(w: &World, el: Elements, fill: f64) -> Vessel {
     let (r, v) = el.to_state(earth.gm);
     let mut s = Vessel::coasting(w, VesselId(1), t0(), earth.node, r, v, &sim::craft::small::rocket());
     s.set_fill(w, fill);
-    assert!(matches!(s.phase, Phase::Coasting { .. }));
-    s
-}
-
-/// The test craft coasting on `el` with `propellant` kg: its planned
-/// low-thrust burns wait for planned burns on craft of parts (D126).
-fn test_ship(w: &World, el: Elements, propellant: f64) -> Vessel {
-    let earth = w.find("Earth").unwrap();
-    let (r, v) = el.to_state(earth.gm);
-    let mut s = Vessel::coasting(w, VesselId(1), t0(), earth.node, r, v, sim::craft::test_craft());
-    s.set_propellant(w, propellant);
     assert!(matches!(s.phase, Phase::Coasting { .. }));
     s
 }
@@ -103,46 +89,6 @@ fn same_at_every_warp(w: &World, start: &Vessel, span: f64, frames: &[f64], cont
         assert_same(w, &mut framed, &mut jump.clone(), &format!("frames of {dt} s"));
     }
     jump
-}
-
-/// A low-thrust burn: `thrust` N at Isp 3,000 s (an ion engine's) along
-/// the orbital prograde of Earth from `at` for `days`.
-fn ion_burn(w: &World, at: Epoch, thrust: f64, days: f64) -> PlannedBurn {
-    let earth = w.find("Earth").unwrap().node;
-    let direction = DirectionLaw::Tracking { reference: earth, axes: DVec3::X };
-    PlannedBurn { t_start: at, law: BurnLaw::from_isp(thrust, 3_000.0, direction), end: BurnEnd::Duration(days * DAY) }
-}
-
-#[test]
-fn a_month_of_low_thrust_is_the_same_at_every_warp() {
-    let w = world();
-    let mut s = test_ship(&w, circular(700_000.0, 0.9), 2_000.0);
-    let burn = ion_burn(&w, t0().add_seconds(600.0), 0.5, 30.0);
-    s.set_plan(&w, FlightPlan { burns: vec![burn] }).unwrap();
-    let controls = sas(HoldMode::Prograde);
-    // 1x for the turn and the first minute of thrust; then the month at
-    // 1,000x (its first day) and 1,000,000x.
-    let mut lead = s.clone();
-    lead.advance(&w, t0().add_seconds(540.0), &controls, usize::MAX);
-    same_at_every_warp(&w, &lead, 120.0, &[1.0 / 60.0], &controls);
-    same_at_every_warp(&w, &s, DAY, &[1_000.0 / 60.0], &controls);
-    let month = same_at_every_warp(&w, &s, 31.0 * DAY, &[1e6 / 60.0], &controls);
-    // Mid-burn it is a perturbed segment: continuous thrust, the attitude
-    // known (held on the burn's prograde law), not ticks.
-    let mut mid = s.clone();
-    mid.advance(&w, t0().add_seconds(5.0 * DAY), &controls, usize::MAX);
-    let seg = mid.segment().unwrap();
-    let limbo = seg.limbo().expect("a perturbed segment");
-    assert!(matches!(seg.kind, SegmentKind::Burn(_)) && limbo.thrust.is_some() && limbo.pointing.is_known());
-    let (_, _, v) = mid.state(&w);
-    assert!((mid.attitude.nose() - v.normalize()).length() < 1e-9, "engine on the prograde");
-    // The burn ran on rails as a perturbed segment, draining exactly
-    // ṁ·t = F/(Isp·g0)·30 days.
-    let drained = 2_000.0 - month.propellant();
-    let expected = 0.5 / (3_000.0 * sim::vessel::G0) * 30.0 * DAY;
-    assert!((drained - expected).abs() < 1e-9 * expected, "{drained} vs {expected}");
-    assert!(matches!(month.phase, Phase::Coasting { .. }));
-    println!("a month of 0.5 N: {drained:.3} kg of propellant");
 }
 
 #[test]
@@ -208,25 +154,4 @@ fn a_year_of_radiation_pressure_is_the_same_at_every_warp() {
         same_at_every_warp(&w, &spun, 3.0 * DAY, &[1_000.0 / 60.0], &controls);
         same_at_every_warp(&w, &spun, 365.0 * DAY, &[1e6 / 60.0], &controls);
     }
-}
-
-#[test]
-fn a_low_thrust_burn_continues_bit_for_bit_after_save_and_load() {
-    let w = world();
-    let mut s = test_ship(&w, circular(700_000.0, 0.9), 2_000.0);
-    let burn = ion_burn(&w, t0().add_seconds(600.0), 0.5, 10.0);
-    s.set_plan(&w, FlightPlan { burns: vec![burn] }).unwrap();
-    let controls = sas(HoldMode::Prograde);
-    let mid = t0().add_seconds(3.3 * DAY);
-    fly(&w, &mut s, mid, 1e6 / 60.0, &controls);
-    assert!(matches!(s.segment().unwrap().kind, SegmentKind::Burn(_)), "mid-burn");
-    let mut ids = VesselIds::default();
-    ids.allocate();
-    let text = SaveGame::capture(&w, mid, std::slice::from_ref(&s), ids, 0).to_ron();
-    let mut loaded = SaveGame::from_ron(&text).unwrap().vessels.remove(0);
-    assert_eq!(loaded, s);
-    let end = t0().add_seconds(12.0 * DAY);
-    fly(&w, &mut s, end, 1e6 / 60.0, &controls);
-    fly(&w, &mut loaded, end, 1e6 / 60.0, &controls);
-    assert_same(&w, &mut loaded, &mut s, "after load");
 }

@@ -3,7 +3,7 @@
 //! own mass and centre of mass; the made-up craft's engine law unchanged.
 
 use super::*;
-use crate::craft::{small, test_craft};
+use crate::craft::small;
 use crate::ephem::Ephemeris;
 use crate::sol;
 use crate::vessel::VesselId;
@@ -55,17 +55,4 @@ fn a_craft_of_parts_predicts_with_its_own_engines_and_mass() {
     let brake = braking_solution(&w, craft, &descent, 10.0).expect("a braking solution");
     println!("ignite at {:.0} m, stop {:.1} m above the ground", brake.ignite_height, brake.stop_height);
     assert!(brake.stop_height > 0.0);
-}
-
-/// The made-up craft's engine through the lumped law: the same bits.
-#[test]
-fn the_made_up_engine_gives_the_same_bits_through_the_lumped_law() {
-    let e = test_craft().params().engine;
-    let th = Thrust::of_engine(&e);
-    for throttle in [0.0, 0.05, 0.1, 0.5, 1.0, 1.2] {
-        for p in [0.0, 1_000.0, P_SEA_LEVEL, 1e7] {
-            let out = e.output(throttle, p);
-            assert_eq!(th.output(throttle, p), (out.thrust, out.mdot), "{throttle} at {p} Pa");
-        }
-    }
 }

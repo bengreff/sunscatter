@@ -353,7 +353,6 @@ pub fn components(parts: &[Part], cut: &[u32], removed: &[u32]) -> Vec<Vec<u32>>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::craft::test_craft;
 
     fn chain(n: usize) -> Vec<Part> {
         let base = crate::craft::small::rocket_ref().parts[0].clone();
@@ -384,20 +383,6 @@ mod tests {
         for (cut, removed, want) in cases {
             assert_eq!(components(&parts, cut, removed), want, "cut {cut:?} removed {removed:?}");
         }
-    }
-
-    #[test]
-    fn the_test_craft_is_one_part_with_the_files_numbers() {
-        let c = test_craft();
-        let def = CraftDef::whole(c.spec.clone(), c.geometry.clone());
-        def.validate().unwrap();
-        let p = &def.parts[0];
-        assert_eq!(p.primitives.len(), c.geometry.primitives.len());
-        assert_eq!((p.dry_mass, p.tank.unwrap().capacity, p.crew), (4000.0, 16000.0, 3));
-        assert_eq!(combine_engines(&[c.spec.engine]), c.spec.engine);
-        let (torque, flow) = rcs(&def.parts);
-        assert_eq!((torque, flow), (c.spec.attitude_control.rcs.torque(), c.spec.attitude_control.rcs.flow()));
-        assert!(p.control && p.power.source() && p.max_load == f64::INFINITY);
     }
 
     /// Two engines: thrust adds, the Isp is that of the summed flow, the

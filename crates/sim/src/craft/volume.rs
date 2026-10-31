@@ -303,13 +303,6 @@ mod tests {
             .fold((DVec3::splat(f64::MAX), DVec3::splat(f64::MIN)), |(lo, hi), p| (lo.min(*p), hi.max(*p)))
     }
 
-    /// The test craft's interior (one tank): the made-up craft's one fill,
-    /// which goes with it (D121).
-    fn test_craft_grid() -> VolumeGrid {
-        let c = crate::craft::test_craft();
-        VolumeGrid::new(&c.geometry.primitives, bounds(c), &c.geometry.tank, 1.0)
-    }
-
     #[test]
     fn the_small_rocket_s_interior_matches_its_solids() {
         let g = grid();
@@ -363,27 +356,6 @@ mod tests {
             }
         }
         assert!(!g.band(tanks.len(), 1000.0, (0.0, 1.0), &mut out), "no such tank");
-    }
-
-    #[test]
-    fn propellant_fills_from_the_tank_base() {
-        let g = test_craft_grid();
-        let mut out = vec![0.0; g.nodes.len()];
-        for fill in [1.0, 0.5, 0.1, 1e-4] {
-            g.propellant(1000.0, fill, &mut out);
-            let total: f64 = out.iter().sum();
-            assert!((total - 1000.0).abs() < 1e-9, "{fill}: {total}");
-            // Nothing above the level (plus a sample).
-            let level = -1.0 + 4.7 * fill + 0.25;
-            for (n, m) in g.nodes.iter().zip(&out) {
-                if *m > 0.0 {
-                    let lowest = n.tank.iter().fold(f64::MAX, |a, &h| a.min(h)) - 1.0;
-                    assert!(lowest <= level, "{fill}: node at {} holds {m}", n.centre);
-                }
-            }
-        }
-        g.propellant(0.0, 0.0, &mut out);
-        assert!(out.iter().all(|&m| m == 0.0));
     }
 
     #[test]

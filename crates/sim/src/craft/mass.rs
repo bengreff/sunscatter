@@ -290,7 +290,8 @@ mod tests {
         (a - b).x_axis.length().max((a - b).y_axis.length()).max((a - b).z_axis.length()) <= rel * scale
     }
 
-    fn cylinder_model(radius: f64, h: f64, base: DVec3) -> (MassModel, f64) {
+    /// A closed cylinder's dry shell of 1,000 kg (a part's, [`MassModel::shell`]).
+    fn cylinder_shell(radius: f64, h: f64, base: DVec3) -> (MassProps, f64) {
         let skin = crate::craft::small::rocket_ref().geometry.skin;
         let prim = Primitive {
             name: String::new(),
@@ -300,42 +301,21 @@ mod tests {
             nozzle: false,
         };
         let s = union_surface(std::slice::from_ref(&prim), &Resolution::default());
-        let tank = Tank { base, axis: DVec3::Z * h, radius };
         let area = 2.0 * std::f64::consts::PI * radius * (radius + h);
-        (MassModel::new(&s, &[prim], &skin, 1000.0, &tank, 5000.0), area)
+        (MassModel::shell(&s, &[prim], &skin, 1000.0), area)
     }
 
     #[test]
     fn closed_cylindrical_shell_matches_the_analytic_inertia() {
         let (r, h) = (1.0, 2.0);
-        let (m, area) = cylinder_model(r, h, DVec3::new(0.5, -0.3, 1.0));
+        let (m, area) = cylinder_shell(r, h, DVec3::new(0.5, -0.3, 1.0));
         let sigma = 1000.0 / area;
         let (side, cap) = (sigma * 2.0 * std::f64::consts::PI * r * h, sigma * std::f64::consts::PI * r * r);
         let izz = side * r * r + 2.0 * cap * r * r / 2.0;
         let ixx = side * (r * r / 2.0 + h * h / 12.0) + 2.0 * cap * (r * r / 4.0 + h * h / 4.0);
         let exact = DMat3::from_diagonal(DVec3::new(ixx, ixx, izz));
-        assert!(close(m.dry_inertia, exact, 5e-3), "{} vs {exact}", m.dry_inertia);
-        assert!((m.dry_com - DVec3::new(0.5, -0.3, 2.0)).length() < 1e-9);
-    }
-
-    #[test]
-    fn propellant_is_a_solid_cylinder_filling_from_the_base() {
-        let (r, h) = (1.0, 2.0);
-        let (m, _) = cylinder_model(r, h, DVec3::ZERO);
-        let dry = m.at(0.0);
-        // Half full: a 1 m slug at the bottom.
-        let half = m.at(2500.0);
-        let p_com = DVec3::Z * 0.5;
-        let com = (dry.com * 1000.0 + p_com * 2500.0) / 3500.0;
-        assert!((half.com - com).length() < 1e-12);
-        let slug = DMat3::from_diagonal(DVec3::new(
-            2500.0 * (3.0 * r * r + 1.0) / 12.0,
-            2500.0 * (3.0 * r * r + 1.0) / 12.0,
-            2500.0 * r * r / 2.0,
-        ));
-        let exact = dry.inertia + parallel_axis(1000.0, dry.com - com) + slug + parallel_axis(2500.0, p_com - com);
-        assert!(close(half.inertia, exact, 1e-12));
-        assert_eq!(m.at(1e9), m.at(5000.0), "clamped to capacity");
+        assert!(close(m.inertia, exact, 5e-3), "{} vs {exact}", m.inertia);
+        assert!((m.com - DVec3::new(0.5, -0.3, 2.0)).length() < 1e-9);
     }
 
     /// The parallel-axis theorem against direct integration: a solid

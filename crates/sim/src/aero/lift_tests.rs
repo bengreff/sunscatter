@@ -1,6 +1,6 @@
 //! Slender-body and fin lift (D070).
 
-use super::tests::{finned_bake, flow, shape};
+use super::tests::{flow, shape};
 use super::*;
 use crate::craft::Shape;
 
@@ -109,23 +109,6 @@ fn a_flat_plate_wing_has_the_finite_wing_lift_slope() {
 }
 
 #[test]
-fn the_test_crafts_fins_are_found_and_its_round_and_stubby_parts_are_not() {
-    // Its four tail fins (boxes 8 cm thick) are fins; its legs (thin
-    // struts) and feet (discs 0.6 m across, 0.12 m thick) are not wings.
-    let fins = &finned_bake().fins;
-    let prims = &crate::craft::test_craft().geometry.primitives;
-    let cells = &crate::craft::test_craft().cells.cells;
-    assert_eq!(fins.len(), 4);
-    for f in fins {
-        let name = &prims[cells[f.cells[0] as usize].primitive as usize].name;
-        assert!(name.starts_with("fin"), "{name}");
-        assert!(f.cells.iter().all(|&i| cells[i as usize].primitive == cells[f.cells[0] as usize].primitive));
-        // Upright plates (normal across the long axis) of ~3–4 m² outside the skirt.
-        assert!(f.normal.z.abs() < 1e-3 && f.area > 3.0 && f.area < 5.2, "{name}: {f:?}");
-    }
-}
-
-#[test]
 fn the_interference_factors_are_pitts_nielsen_and_kaattari_s() {
     // NACA Report 1307, eqs. 14 and 21 (chart 1): (r/s, K_W(B), K_B(W)).
     let table = [
@@ -174,18 +157,6 @@ fn fins_on_a_body_lift_with_the_interference_factors() {
     assert!((added / 4.10 - 1.0).abs() < 0.12, "{added}");
     // The free-standing wing keeps its own aspect ratio and no factors.
     assert_eq!(wing().fins[0].semispan, 0.0);
-}
-
-#[test]
-fn the_test_crafts_fins_are_mounted_on_its_body() {
-    // Fins from r 0.8 to 2.8 m on a body of radius 1.04–1.08 m at their
-    // centroid's station (the skirt flares to 1.52 m along their chord):
-    // r/s ≈ 0.38, the fins' lift ×(1 + r/s)² ≈ 1.9.
-    for f in &finned_bake().fins {
-        let x = f.body_radius / f.semispan;
-        assert!(f.body_radius > 1.0 && f.body_radius < 1.2 && (f.semispan - 2.8).abs() < 0.1, "{f:?}");
-        assert!(x > 0.34 && x < 0.43, "{x}");
-    }
 }
 
 /// A Sears–Haack body along Z, `l` long, radius `r` at the middle, as 32

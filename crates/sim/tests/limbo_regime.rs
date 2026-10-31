@@ -1,9 +1,9 @@
 //! Limbo regime changes (`docs/technical/limbo.md`, review of 2026-10-26):
 //! a perturbed coast restarts where its attitude regime changes, and those
-//! epochs never depend on the frames. A burn's turn forced by the maneuver
-//! hold, its settling, and a change of the hold's automatic reference body
-//! give the same bits in one call and in frames at 1×, 1,000× and
-//! 1,000,000×, for every hold mode; the reference never follows the anchor.
+//! epochs never depend on the frames. A change of the hold's automatic
+//! reference body gives the same bits in one call and in frames at 1×,
+//! 1,000× and 1,000,000×; the reference never follows the anchor; frames
+//! whose budgets run out anywhere give one call's bits.
 
 use glam::DVec3;
 use sim::ephem::Ephemeris;
@@ -11,10 +11,7 @@ use sim::kepler::Elements;
 use sim::sol;
 use sim::time::Epoch;
 use sim::vessel::pointing::Rule;
-use sim::vessel::{
-    BurnEnd, BurnLaw, Controls, DirectionLaw, EndKind, FlightPlan, HoldMode, Phase, PlannedBurn, SpeedReference,
-    TargetState, Vessel, VesselId,
-};
+use sim::vessel::{Controls, EndKind, HoldMode, Phase, SpeedReference, Vessel, VesselId};
 use sim::world::World;
 use std::sync::Arc;
 
@@ -52,46 +49,6 @@ fn assert_same(w: &World, a: &Vessel, b: &Vessel, what: &str) {
         b.extend_coast(w, until, usize::MAX);
     }
     assert_eq!(a, b, "{what}: vessel");
-}
-
-/// A planned 20 m/s burn after 3,000 s in low orbit, for every hold mode:
-/// the forced turn starts and settles at the same epochs in one call and
-/// in frames of 1/60 s, 1 s, 10 s and 16.7 s (1,000×), through the burn.
-#[test]
-fn a_burns_turn_starts_and_settles_at_the_same_epochs_at_every_frame_rate() {
-    let w = world();
-    let earth = w.find("Earth").unwrap();
-    let moon = w.find("Moon").unwrap().node;
-    let el = Elements { a: 6_778_137.0, e: 0.0005, i: 0.9, raan: 1.0, argp: 0.5, mean_anomaly: 0.0 };
-    let (r, v) = el.to_state(earth.gm);
-    let engine = sim::craft::test_craft().params().engine;
-    let ignition = t0().add_seconds(3_000.0);
-    let burn = PlannedBurn::delta_v_with(ignition, DVec3::new(20.0, 0.0, 0.0), &engine, Some(earth.node));
-    let target = Some(TargetState { anchor: moon, epoch: t0(), r: DVec3::ZERO, v: DVec3::ZERO });
-    for hold in HoldMode::ALL {
-        let controls = Controls { sas: true, hold, target, ..Controls::default() };
-        let mut s = Vessel::coasting(&w, VesselId(1), t0(), earth.node, r, v, sim::craft::test_craft());
-        s.set_plan(&w, FlightPlan { burns: vec![burn] }).unwrap();
-        s.advance(&w, t0().add_seconds(1.0), &controls, usize::MAX);
-        let end = ignition.add_seconds(300.0);
-        let mut jump = s.clone();
-        jump.advance(&w, end, &controls, usize::MAX);
-        for dt in [1.0, 10.0, 1_000.0 / 60.0] {
-            let mut framed = s.clone();
-            fly(&w, &mut framed, end, dt, &controls);
-            assert_same(&w, &framed, &jump, &format!("{hold:?}, frames of {dt} s"));
-        }
-        // 1x frames from shortly before the turn (its lead is ~100 s) to
-        // past the burn, from the one-call state there.
-        let mut before = s.clone();
-        before.advance(&w, ignition.add_seconds(-200.0), &controls, usize::MAX);
-        let mut framed = before.clone();
-        let mut jump = before.clone();
-        let end = ignition.add_seconds(60.0);
-        fly(&w, &mut framed, end, 1.0 / 60.0, &controls);
-        jump.advance(&w, end, &controls, usize::MAX);
-        assert_same(&w, &framed, &jump, &format!("{hold:?}, 1x frames"));
-    }
 }
 
 /// Leaving Earth's Laplace sphere (~924,000 km) held prograde, retrograde
@@ -185,60 +142,17 @@ fn fly_tight(w: &World, v: &mut Vessel, end: Epoch, dt: f64, controls: &Controls
     }
 }
 
-/// The test craft at 700 km with 2,000 kg of propellant and a 0.5 N burn
-/// at Isp 3,000 s for `days` from 600 s on, along `direction`.
-fn low_thrust(w: &World, direction: DirectionLaw, days: f64) -> Vessel {
-    let earth = w.find("Earth").unwrap();
-    let el = Elements { a: 6_378_137.0 + 700_000.0, e: 0.0005, i: 0.9, raan: 1.0, argp: 0.5, mean_anomaly: 0.0 };
-    let (r, v) = el.to_state(earth.gm);
-    let mut s = Vessel::coasting(w, VesselId(1), t0(), earth.node, r, v, sim::craft::test_craft());
-    s.set_propellant(w, 2_000.0);
-    let law = BurnLaw::from_isp(0.5, 3_000.0, direction);
-    let burn = PlannedBurn { t_start: t0().add_seconds(600.0), law, end: BurnEnd::Duration(days * 86_400.0) };
-    s.set_plan(w, FlightPlan { burns: vec![burn] }).unwrap();
-    s
-}
-
-/// At a low-thrust burn's ignition the burn is flown again from the
-/// vessel's attitude (`Trajectory::refly`); doing it again from the
-/// attitude it returned (a call that ends there, then the next) changes
-/// nothing: the same bits a day later as one call, for a tracking and an
-/// inertial law and every hold mode before it.
-#[test]
-fn reflying_a_low_thrust_burn_at_its_ignition_again_changes_nothing() {
-    let w = world();
-    let earth = w.find("Earth").unwrap().node;
-    let laws = [
-        DirectionLaw::Tracking { reference: earth, axes: DVec3::X },
-        DirectionLaw::Inertial(DVec3::new(0.3, -0.4, 0.5)),
-    ];
-    for law in laws {
-        for hold in HoldMode::ALL {
-            let controls = Controls { sas: true, hold, ..Controls::default() };
-            let mut s = low_thrust(&w, law, 2.0);
-            let ignition = t0().add_seconds(600.0);
-            assert_eq!(s.advance(&w, ignition, &controls, usize::MAX), ignition);
-            let mut once = s.clone();
-            for _ in 0..3 {
-                assert_eq!(s.advance(&w, ignition, &controls, usize::MAX), ignition);
-            }
-            let end = ignition.add_seconds(86_400.0);
-            s.advance(&w, end, &controls, usize::MAX);
-            once.advance(&w, end, &controls, usize::MAX);
-            assert_same(&w, &s, &once, &format!("{law:?} {hold:?}"));
-        }
-    }
-}
-
-/// A month of low thrust in frames whose budgets run out anywhere (one
-/// coast step a frame across the ignition at 1x; a few at 1,000x and
+/// A month held prograde at 700 km in frames whose budgets run out
+/// anywhere (one coast step a frame at 1x; a few at 1,000x and
 /// 1,000,000x) gives one call's bits.
 #[test]
-fn a_month_of_low_thrust_with_tight_budgets_is_one_calls() {
+fn a_month_held_prograde_with_tight_budgets_is_one_calls() {
     let w = world();
-    let earth = w.find("Earth").unwrap().node;
+    let earth = w.find("Earth").unwrap();
     let controls = Controls { sas: true, hold: HoldMode::Prograde, ..Controls::default() };
-    let s = low_thrust(&w, DirectionLaw::Tracking { reference: earth, axes: DVec3::X }, 30.0);
+    let el = Elements { a: 6_378_137.0 + 700_000.0, e: 0.0005, i: 0.9, raan: 1.0, argp: 0.5, mean_anomaly: 0.0 };
+    let (r, v) = el.to_state(earth.gm);
+    let s = Vessel::coasting(&w, VesselId(1), t0(), earth.node, r, v, &sim::craft::small::rocket());
     let mut lead = s.clone();
     lead.advance(&w, t0().add_seconds(540.0), &controls, usize::MAX);
     let cases =

@@ -2,7 +2,7 @@ use super::air::{cp_max, EARTH_AIR_GAMMA};
 use super::*;
 use crate::craft::cells::build_cells;
 use crate::craft::mesh::union_surface;
-use crate::craft::{test_craft, CellOptions, Cells, Primitive, Resolution, Shape, Skin, Surface};
+use crate::craft::{CellOptions, Cells, Primitive, Resolution, Shape, Skin, Surface};
 use std::sync::OnceLock;
 
 const SKIN: Skin = Skin {
@@ -54,13 +54,6 @@ pub(crate) fn craft_bake() -> &'static AeroBake {
     static B: OnceLock<AeroBake> = OnceLock::new();
     let c = crate::craft::small::rocket_ref();
     B.get_or_init(|| bake(&c.surface, &c.cells, &BakeOptions::default()))
-}
-
-/// The finned test craft's bake: its passive stability and fins (D074),
-/// which go with it.
-pub(crate) fn finned_bake() -> &'static AeroBake {
-    static B: OnceLock<AeroBake> = OnceLock::new();
-    B.get_or_init(|| bake(&test_craft().surface, &test_craft().cells, &BakeOptions::default()))
 }
 
 pub(super) fn flow(dir: DVec3, mach: f64, knudsen: f64) -> Flow {
@@ -240,35 +233,6 @@ fn a_blunt_capsule_trims_heat_shield_first() {
     // margin of an aft CoM shrinks.
     assert!(restoring(capsule(), aft, DVec3::Z, 10.0, 1e-5), "shield-first, CoM aft");
     assert!(restoring(capsule(), aft, -DVec3::Z, 10.0, 1e-5), "apex-first, CoM aft");
-}
-
-#[test]
-fn the_test_craft_is_stable_nose_first_at_every_mach_number() {
-    // D074. Below M 5 the fins' lift and the skirt's area growth put the
-    // centre of pressure behind the CoM; hypersonic (Newtonian) the skirt's
-    // normal force, linear in incidence at the base, outweighs the nose
-    // cone's; free molecular the side area behind the CoM (fins, skirt)
-    // does. Full and empty, at small and large incidence (up to 60°, where
-    // the side of the body is broadside and the fins have stalled), the
-    // torque turns the nose back into the air.
-    let c = test_craft();
-    for propellant in [0.0, c.spec.propellant.capacity] {
-        let com = c.mass.at(propellant).com;
-        let regimes = [0.3, 0.9, 1.2, 2.0, 5.0, 10.0, 25.0].map(|m| (m, 1e-5)).into_iter().chain([(25.0, 100.0)]);
-        for (mach, kn) in regimes {
-            for deg in [2.0, 5.0, 20.0, 60.0] {
-                assert!(
-                    restoring_from(finned_bake(), com, -DVec3::Z, (mach, kn), deg, c.spec.aero.cd0),
-                    "M {mach} Kn {kn} at {deg}°, CoM {com}"
-                );
-            }
-        }
-        // Tail first is the unstable trim (it turns around).
-        for mach in [0.9, 2.0, 10.0] {
-            let tail_first = restoring_from(finned_bake(), com, DVec3::Z, (mach, 1e-5), 5.0, c.spec.aero.cd0);
-            assert!(!tail_first, "tail first, M {mach}, CoM {com}");
-        }
-    }
 }
 
 #[test]

@@ -417,37 +417,6 @@ fn a_burning_vessel_in_frames_equals_one_jump() {
 }
 
 #[test]
-fn a_planned_burn_on_rails_heats_the_engine_at_any_frame_rate() {
-    use sim::vessel::{BurnEnd, BurnLaw, DirectionLaw, FlightPlan, PlannedBurn};
-    let w = world();
-    let t = t0();
-    let (earth, r, _) = sunlit(&w, t);
-    let mut idle = Vessel::coasting(&w, VesselId(1), t, earth, r * 14.0, DVec3::ZERO, sim::craft::test_craft());
-    idle.set_debug(&w, true);
-    let e = idle.craft.engine;
-    let law = BurnLaw::from_isp(e.thrust_vac, e.isp_vac, DirectionLaw::Inertial(DVec3::X));
-    let plan =
-        FlightPlan { burns: vec![PlannedBurn { t_start: t.add_seconds(90.0), law, end: BurnEnd::Duration(95.0) }] };
-    let mut a = idle.clone();
-    a.set_plan(&w, plan).unwrap();
-    let mut b = a.clone();
-    let end = t.add_seconds(600.0);
-    let mut clock = t;
-    while clock < end {
-        clock = clock.add_seconds(100.0 / 60.0);
-        a.advance(&w, if clock > end { end } else { clock }, &Controls::default(), usize::MAX);
-    }
-    b.advance(&w, end, &Controls::default(), usize::MAX);
-    idle.advance(&w, end, &Controls::default(), usize::MAX);
-    assert_eq!(a.thermal(), b.thermal());
-    let aft = sim::craft::test_craft().design().engine_node as usize;
-    let rise = node_rise(&a, &idle);
-    let nozzle = nozzle_max(&a) - nozzle_max(&idle);
-    println!("planned 95 s burn: nozzle {nozzle:+.1} K, mount node +{:.3} K after 10 min", rise[aft]);
-    assert!(rise[aft] > 0.01 && rise[aft] < 10.0, "{}", rise[aft]);
-}
-
-#[test]
 fn coast_sunlight_is_the_orbit_average_in_low_orbit() {
     let w = world();
     let t = t0();
