@@ -87,7 +87,7 @@ fn the_engines_run_dry_and_the_vessel_coasts() {
     ignite(&w, &mut ship);
     fly(&w, &mut ship, 60.0, &FULL);
     fly(&w, &mut twin, 60.0, &Controls::default());
-    assert!(!ship.engine_running(&FULL), "dry: the engines are out");
+    assert!(!ship.engine_running(), "dry: the engines are out");
     assert!(matches!(ship.phase, Phase::Coasting { .. }), "{:?}", ship.phase);
     // Against a twin that coasted: Δv from the rocket equation on the
     // mass the engines took.

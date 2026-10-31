@@ -77,9 +77,9 @@ pub(super) struct Model<'a> {
     craft: &'a CraftParams,
     design: &'a CraftDesign,
     thrust: super::Thrust,
-    /// A craft of parts' mass and centre of mass at the start, and the
-    /// propellant then (`LandingStart::mass`).
-    mass: Option<(f64, DVec3)>,
+    /// The mass and centre of mass at the start, and the propellant then
+    /// (`LandingStart::mass`).
+    mass: (f64, DVec3),
     propellant0: f64,
     body: NodeId,
     attitude: AssumedAttitude,
@@ -145,13 +145,10 @@ impl<'a> Model<'a> {
 
     /// Mass (kg) and centre of mass (body axes) with `propellant` aboard.
     pub(super) fn props(&self, propellant: f64) -> (f64, DVec3) {
-        match self.mass {
-            Some((m0, com)) if self.propellant0.is_finite() => (m0 - (self.propellant0 - propellant), com),
-            Some(held) => held,
-            None => {
-                let p = self.craft.mass.at(propellant);
-                (p.mass, p.com)
-            }
+        let (m0, com) = self.mass;
+        match self.propellant0.is_finite() {
+            true => (m0 - (self.propellant0 - propellant), com),
+            false => (m0, com),
         }
     }
 
@@ -236,12 +233,12 @@ impl<'a> Model<'a> {
         exact: bool,
     ) -> f64 {
         let ground = Ground::new(self.world, snap, anchor, body);
-        let h = ground.clearance(r) - self.craft.contact_reach(prop);
+        let com = self.props(prop).1;
+        let h = ground.clearance(r) - self.craft.contact_reach(com);
         if h > 1.0 && !exact {
             return h;
         }
         let q = self.attitude(snap, anchor, r, v);
-        let com = self.props(prop).1;
         (self.craft.contacts.iter()).map(|c| ground.clearance(r + q * (c.pos - com))).fold(f64::INFINITY, f64::min)
     }
 

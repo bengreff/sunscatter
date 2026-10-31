@@ -101,14 +101,14 @@ impl Game {
 
     /// `game::state::rails_block` for this fleet: refused while any vessel
     /// is live or produces thrust (no pad, no rails floor in orbit).
-    fn rails_allowed(&self, acting: &[Controls]) -> bool {
-        !(self.fleet.iter().zip(acting)).any(|(v, c)| matches!(v.phase, Phase::Powered { .. }) || v.engine_running(c))
+    fn rails_allowed(&self) -> bool {
+        !self.fleet.iter().any(|v| matches!(v.phase, Phase::Powered { .. }) || v.engine_running())
     }
 
     /// One frame at `warp` towards at most `end` (`game::state::advance`).
     fn frame(&mut self, w: &World, warp: f64, end: Epoch) {
         let acting = self.acting(w);
-        let warp = if self.rails_allowed(&acting) { warp } else { warp.min(PHYSICS_WARP) };
+        let warp = if self.rails_allowed() { warp } else { warp.min(PHYSICS_WARP) };
         let wanted = DT * warp;
         let span = if self.last > 0.0 { wanted.min(GROWTH * self.last) } else { wanted };
         let target = self.clock.add_seconds(span);

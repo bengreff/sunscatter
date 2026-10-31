@@ -11,14 +11,13 @@
 //!
 //! What a system may and may not do: a system that changes what the
 //! trajectory integrates (mass, thrust) must give the segment a continuous
-//! law it can integrate exactly (the propellant boil-off rate of
-//! [`Consumables`] is a mass flow of the vessel's segments and live ticks),
-//! never step it; anything else (power, life support, comms, crew later)
+//! law it can integrate exactly (a craft of parts' tanks on a coast:
+//! [`coast_law`]), never step it; anything else (power, life support, comms, crew later)
 //! steps here. A real system is one more field and one more call in
 //! [`Systems::step`], reading [`Env`].
 //!
-//! Placeholders until parts carry systems (D060): [`Power`] (a solar
-//! panel, a battery, constant loads) and [`Consumables`] (boil-off).
+//! A placeholder until parts carry it (D060): [`Power`] (a solar panel, a
+//! battery, constant loads).
 
 pub mod coast_law;
 pub mod command;
@@ -59,27 +58,6 @@ pub struct Env {
     pub sun: DVec3,
     /// Attitude (body → inertial).
     pub attitude: DQuat,
-    /// Propellant aboard (kg).
-    pub propellant: f64,
-}
-
-/// Propellant boil-off: a constant mass flow (kg/s) while there is
-/// propellant (a placeholder for a tank's heat leak over the latent heat;
-/// zero for the test craft's storable propellants). The vessel's segments
-/// and live ticks take it as a mass flow; the lattice keeps the ledger.
-#[derive(Clone, Copy, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct Consumables {
-    pub boil_off: f64,
-    /// Propellant boiled off so far (kg), at the lattice points.
-    pub boiled: f64,
-}
-
-impl Consumables {
-    fn step(&mut self, env: &Env, dt: f64) {
-        if env.propellant > 0.0 {
-            self.boiled += self.boil_off * dt;
-        }
-    }
 }
 
 /// A vessel's systems and where their lattice stands.
@@ -89,7 +67,6 @@ pub struct Systems {
     /// advances (the lattice then starts at its time).
     pub epoch: Option<Epoch>,
     pub power: Power,
-    pub consumables: Consumables,
 }
 
 impl Systems {
@@ -113,7 +90,6 @@ impl Systems {
     pub fn step(&mut self, env: &Env) {
         let Some(next) = self.next() else { return };
         self.power.step(env, STEP);
-        self.consumables.step(env, STEP);
         self.epoch = Some(next);
     }
 
@@ -134,7 +110,7 @@ mod tests {
     use super::*;
 
     fn env(sun: f64) -> Env {
-        Env { sun: DVec3::new(-sun, 0.0, 0.0), attitude: DQuat::IDENTITY, propellant: 10.0 }
+        Env { sun: DVec3::new(-sun, 0.0, 0.0), attitude: DQuat::IDENTITY }
     }
 
     #[test]
@@ -143,7 +119,6 @@ mod tests {
         // Sunlight that switches on and off (an eclipse every 50 min).
         let env_at = |e: Epoch| env(if (e.seconds_since(t0) / 3_000.0) as i64 % 2 == 0 { 1_361.0 } else { 0.0 });
         let mut one = Systems::starting(t0);
-        one.consumables.boil_off = 1e-5;
         let mut chunked = one.clone();
         one.advance(t0.add_seconds(86_400.0), env_at);
         let mut t = t0;
@@ -157,6 +132,5 @@ mod tests {
         chunked.advance(t0.add_seconds(86_400.0), env_at);
         assert_eq!(one, chunked);
         assert_eq!(one.epoch, Some(t0.add_seconds(86_400.0)));
-        assert!((one.consumables.boiled - 1e-5 * 86_400.0).abs() < 1e-9);
     }
 }

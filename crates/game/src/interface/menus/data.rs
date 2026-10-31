@@ -432,7 +432,7 @@ fn landing(s: &Sources) -> FlightData {
             radar: m.height - ship.contact_height(),
             v_vertical: m.v_vertical,
             v_horizontal: m.v_horizontal,
-            twr: sim::landing::twr(&ship.craft, ship.propellant(), m.pressure, m.gravity),
+            twr: sim::landing::twr(ship, m.pressure, m.gravity),
         }
     });
     let latest = s.landing.filter(|l| l.vessel == ship.id() && !grounded);
@@ -513,7 +513,12 @@ fn marked_entry(s: &Sources) -> Option<(f64, f64)> {
 
 fn craft(sim: &SimState, body: sim::frame::NodeId) -> CraftData {
     let ship = sim.ship();
-    let engine = &ship.craft.engine;
+    // The engines its throttle runs, lumped (the landing prediction's).
+    let (engine, _) = sim::landing::Thrust::of_vessel(ship);
+    let isp = |p: f64| if engine.mdot > 0.0 { engine.output(1.0, p).0 / (engine.mdot * sim::vessel::G0) } else { 0.0 };
+    let (isp_vac, isp_sl) = (isp(0.0), isp(sim::craft::engine::P_SEA_LEVEL));
+    // Its propellant as loaded.
+    let loaded = ship.ship_def().map_or(0.0, |d| sim::craft::state::ShipState::initial(&d).consumables(&d));
     // The vehicle's: not the pad's launch mount it stands on.
     let mass = crate::hud::vehicle_mass(ship);
     let (anchor, r, _) = ship.state_at(&sim.world, sim.clock);
@@ -526,13 +531,13 @@ fn craft(sim: &SimState, body: sim::frame::NodeId) -> CraftData {
         peak_heating: ship.thermal().peak_heating,
         debug: ship.debug(),
         propellant: ship.propellant(),
-        full: ship.craft.initial_propellant.max(1.0),
-        dv_vac: crate::hud::delta_v(engine.isp_vac, mass, ship.propellant()),
-        twr_vac: crate::hud::twr(engine.thrust_vac, mass, g),
+        full: loaded.max(1.0),
+        dv_vac: crate::hud::delta_v(isp_vac, mass, ship.propellant()),
+        twr_vac: crate::hud::twr(engine.vac, mass, g),
         mass,
-        thrust_vac: engine.thrust_vac,
-        isp_vac: engine.isp_vac,
-        isp_sl: engine.isp_sl,
+        thrust_vac: engine.vac,
+        isp_vac,
+        isp_sl,
         skin: ship.skin_nearest_limit(),
         hottest: super::hottest::listed(ship, &[], HOTTEST),
         clock_offset: sim.ship_clock_offset(sim.active),

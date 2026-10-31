@@ -52,6 +52,15 @@ impl Vessel {
         }
     }
 
+    /// The thrust axis (body axes, unit) of the engines its throttle runs
+    /// ([`Self::burn_engines`]): their mean direction, +Z without any.
+    /// The maneuver hold points it, the landing prediction thrusts along it.
+    pub fn thrust_axis(&self) -> DVec3 {
+        let Some((def, _)) = self.ship_parts() else { return DVec3::Z };
+        let dirs = self.burn_engines().into_iter().map(|e| def.engines[e as usize].data.dir.normalize());
+        dirs.sum::<DVec3>().try_normalize().unwrap_or(DVec3::Z)
+    }
+
     /// The stage estimate of a burn of `engines` lit now at full throttle
     /// in vacuum (`estimate::lit`).
     fn burn_estimate(&self, engines: &[u32]) -> Option<estimate::Burn> {

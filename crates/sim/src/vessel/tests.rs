@@ -114,7 +114,9 @@ fn coasting_rotation_input_is_independent_of_frame_rate() {
     // 10 s of input at authority / inertia (500 ticks, give or take the
     // partial tick left at the end).
     let props = frames.mass_props();
-    let rate = frames.craft.torque.z / props.inertia.z_axis.z;
+    let def = frames.ship_def().unwrap();
+    let on: Vec<bool> = def.thrusters.iter().map(|t| t.enabled).collect();
+    let rate = def.rcs_authority(props.com, &on).0.z / props.inertia.z_axis.z;
     let spin = frames.attitude.body_rate();
     assert!((spin.z - rate * 10.0).abs() <= rate * TICK * 1.01, "spin {spin} rad/s, {rate} rad/s²");
     // Up to its products of inertia: the components off its axis (the

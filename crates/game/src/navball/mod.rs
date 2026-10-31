@@ -383,7 +383,7 @@ mod tests {
             &sim::vessel::Controls { throttle: 1.0, ..Default::default() },
             usize::MAX,
         );
-        let expected = burn.craft.engine.thrust_vac / burn.mass() / rules::G0;
+        let expected = sim::landing::Thrust::of_vessel(&burn).0.vac / burn.mass() / rules::G0;
         let g = proper_accel(&w, burn.time, &burn, 1.0).length() / rules::G0;
         assert!((g - expected).abs() < 1e-6, "full thrust {g} vs {expected}");
     }

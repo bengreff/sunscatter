@@ -23,7 +23,6 @@ use super::pointing::{self, Pointing, Rule};
 use super::segment::{EndKind, SegmentEnd};
 use super::{Controls, Phase, Trajectory, Vessel, LIVE_STOP, TICK};
 use crate::craft::design::Aboard;
-use crate::craft::CraftParams;
 use crate::time::Epoch;
 use crate::world::World;
 use glam::{DMat3, DVec3};
@@ -203,7 +202,6 @@ impl Vessel {
     pub(super) fn limbo_model(&self, p: Pointing) -> Limbo {
         let mut l = Limbo::new(self.craft.id.clone(), self.craft.design.clone(), p, self.craft.mass.dry_mass);
         l.optics = self.limbo.optics;
-        l.boil_off = if self.debug { 0.0 } else { self.systems.consumables.boil_off };
         l.boundary = self.limbo.boundary;
         l.chute_area = self.chute.cd_area(&self.craft.chute);
         l
@@ -218,7 +216,7 @@ impl Vessel {
         controls: &Controls,
         budget: &mut Budget,
     ) -> Coasted {
-        if self.engine_running(controls) || self.ship_wants_ticks(controls) {
+        if self.engine_running() || self.ship_wants_ticks(controls) {
             self.law_to_now();
             self.thermal_to_now(world);
             let (anchor, r, v) = self.state(world);
@@ -254,8 +252,11 @@ impl Vessel {
             self.start_coast_pointing(world, state, Pointing::Mean);
             return true;
         };
-        let inertia_now = self.mass_props().inertia;
-        let fly = Rails::new(world, trajectory, &self.nodes, &self.craft, controls, inertia_now);
+        let props = self.mass_props();
+        let inertia_now = props.inertia;
+        let torque = thruster_torque(self.thrusters_enabled().as_ref(), props.com);
+        let turn = (inertia_now, self.thrust_axis(), torque);
+        let fly = Rails::new(world, trajectory, &self.nodes, controls, turn);
         let rule = fly.rule_at(self.time, state.0);
         if !self.repoint && current.is_known() && current.rule().same_regime(&rule) {
             return false;
@@ -280,6 +281,9 @@ impl Vessel {
     /// Returns whether it went live at the live boundary, and whether a turn
     /// settled where it stopped.
     fn coast_until(&mut self, world: &World, target: Epoch, controls: &Controls, budget: &mut Budget) -> (bool, bool) {
+        // The thrust axis and the thrusters the turns on rails use.
+        let axis = self.thrust_axis();
+        let thrusters = self.thrusters_enabled();
         let Phase::Coasting { trajectory } = &mut self.phase else { unreachable!() };
         budget.extend(world, trajectory, target);
         let computed = trajectory.computed_until();
@@ -293,24 +297,21 @@ impl Vessel {
         // Attitude and temperatures before pruning: control ticks read the
         // inertia, and the thermal lattice the position, at epochs after the
         // vessel's time, which the trajectory still holds.
-        // A craft of parts' mass is its ship state's at every lattice point
-        // (it vents there, F2; its segment integrates its perturbations
-        // with the mass it started with); a made-up craft's is the
-        // segment's mass law.
-        let (model, dry) = (self.craft.mass, self.craft.mass.dry_mass);
+        // The mass is the ship state's at every lattice point (it vents
+        // there, F2; its segment integrates its perturbations with the mass
+        // it started with).
+        let model = self.craft.mass;
         let ship_def = self.craft.design().ship.clone();
         let parts = |ship: Option<&crate::craft::state::ShipState>| {
-            ship.zip(ship_def.as_deref()).map(|(s, d)| super::ship_props(&model, d, s))
+            let props = ship.zip(ship_def.as_deref()).map(|(s, d)| super::ship_props(&model, d, s));
+            props.unwrap_or_else(|| model.dry())
         };
-        let mass_now = dry + self.propellant;
-        let segment_inertia = |e: Epoch| model.at(trajectory.mass_at(e).unwrap_or(mass_now) - dry).inertia;
-        let held = parts(self.ship.as_ref()).map(|p| p.inertia);
-        let inertia_now = held.unwrap_or_else(|| model.at(self.propellant).inertia);
-        let fly = Rails::new(world, trajectory, &self.nodes, &self.craft, controls, inertia_now);
+        let held = parts(self.ship.as_ref());
+        let (inertia_now, held_torque) = (held.inertia, thruster_torque(thrusters.as_ref(), held.com));
+        let fly = Rails::new(world, trajectory, &self.nodes, controls, (inertia_now, axis, held_torque));
         let stop_settled;
         (reach, stop_settled) = fly.regime_stops(self.time, reach);
         let design = self.craft.design().clone();
-        let segment_propellant = |e: Epoch| (trajectory.mass_at(e).unwrap_or(mass_now) - dry).max(0.0);
         let mut t = self.time;
         let mut stopped = false;
         let mut settled = None;
@@ -330,12 +331,11 @@ impl Vessel {
                 stopped = true;
                 break;
             }
-            // What a craft of parts holds now (its lattice steps so far).
+            // What it holds now (its lattice steps so far).
             let now = parts(self.ship.as_ref());
-            let propellant_at = |e: Epoch| now.map_or_else(|| segment_propellant(e), |p| p.mass - dry);
-            let inertia_at = |e: Epoch| now.map_or_else(|| segment_inertia(e), |p| p.inertia);
-            let inertia_now = now.map_or(inertia_now, |p| p.inertia);
-            let fly = Rails::new(world, trajectory, &self.nodes, &self.craft, controls, inertia_now);
+            let inertia_at = |_: Epoch| now.inertia;
+            let turn = (now.inertia, axis, thruster_torque(thrusters.as_ref(), now.com));
+            let fly = Rails::new(world, trajectory, &self.nodes, controls, turn);
             if e_systems.is_some() {
                 settled = fly.attitude(&mut self.attitude, &mut self.control, (t, e), &inertia_at, stop_settled);
                 if settled.is_some() {
@@ -343,7 +343,7 @@ impl Vessel {
                 }
                 t = e;
                 let (anchor, r, v) = trajectory.eval(e).expect("the lattice epoch is in the trajectory");
-                self.systems.step(&Vessel::systems_env(world, e, (anchor, r), self.attitude.q, propellant_at(e)));
+                self.systems.step(&Vessel::systems_env(world, e, (anchor, r), self.attitude.q));
                 let at = (e, (anchor, r, v), self.attitude.q);
                 let law = law_at(trajectory, e);
                 super::ship_tick::ship_lattice(self.ship.as_mut(), ship_def.as_deref(), world, at, None, law);
@@ -366,10 +366,8 @@ impl Vessel {
             let mut suns = super::coast_heat::coast_suns(world, e, state, known, &self.attitude);
             suns.air = super::coast_heat::coast_air(world, e, state, known, &self.attitude, design.bake.length);
             let units = solve_units(&design, suns.suns.len() + suns.air.len());
-            let aboard = match (self.ship.as_ref(), ship_def.as_deref()) {
-                (Some(s), Some(d)) => Aboard::Tanks(crate::systems::plumbing::held(d, s)),
-                _ => Aboard::Fill(propellant_at(e)),
-            };
+            let held = self.ship.as_ref().zip(ship_def.as_deref()).map(|(s, d)| crate::systems::plumbing::held(d, s));
+            let aboard = Aboard(held.unwrap_or_default());
             let solved = aerothermal::coast_step(&design, &mut self.thermal, &suns, &aboard, e, false);
             budget.charge(if solved { units } else { POINT_UNITS });
         }
@@ -379,9 +377,9 @@ impl Vessel {
             reach = t;
         } else {
             let now = parts(self.ship.as_ref());
-            let inertia_at = |e: Epoch| now.map_or_else(|| segment_inertia(e), |p| p.inertia);
-            let inertia_now = now.map_or(inertia_now, |p| p.inertia);
-            let fly = Rails::new(world, trajectory, &self.nodes, &self.craft, controls, inertia_now);
+            let inertia_at = |_: Epoch| now.inertia;
+            let turn = (now.inertia, axis, thruster_torque(thrusters.as_ref(), now.com));
+            let fly = Rails::new(world, trajectory, &self.nodes, controls, turn);
             if let Some(s) = fly.attitude(&mut self.attitude, &mut self.control, (t, reach), &inertia_at, stop_settled)
             {
                 reach = if s > self.time { s } else { self.time };
@@ -390,10 +388,6 @@ impl Vessel {
         }
         let keep = kept_from(&self.control, reach, trajectory);
         trajectory.prune_before(keep);
-        if self.ship.is_none() {
-            self.propellant =
-                (trajectory.mass_at(reach).expect("the vessel's time is in its trajectory") - dry).max(0.0);
-        }
         let delta = trajectory.proper_time_at(reach).expect("the vessel's time is in its trajectory");
         self.clock = ShipClock::at(reach, delta);
         let last = trajectory.last();
@@ -474,9 +468,29 @@ struct Rails<'a> {
     trajectory: &'a Trajectory,
     /// A craft of parts' nodes (the maneuver hold points along the next).
     nodes: &'a [crate::systems::maneuver::Node],
-    craft: &'a CraftParams,
     controls: &'a Controls,
     inertia_now: DMat3,
+    /// The thrust axis the maneuver hold points ([`Vessel::thrust_axis`]).
+    axis: DVec3,
+    /// The thrusters' torque authority per body axis (N·m) for its turns
+    /// ([`thruster_torque`]).
+    torque: DVec3,
+}
+
+/// The thrusters' torque authority per body axis (N·m) about `com` of a
+/// craft of parts' thrusters that are enabled (`ShipDef::rcs_authority`):
+/// what turns it on rails. None without thrusters.
+fn thruster_torque(thrusters: Option<&(std::sync::Arc<crate::craft::ship::ShipDef>, Vec<bool>)>, com: DVec3) -> DVec3 {
+    thrusters.map_or(DVec3::ZERO, |(def, on)| def.rcs_authority(com, on).0)
+}
+
+impl Vessel {
+    /// A craft of parts' definition and which of its thrusters are enabled.
+    fn thrusters_enabled(&self) -> Option<(std::sync::Arc<crate::craft::ship::ShipDef>, Vec<bool>)> {
+        let def = self.ship_def()?;
+        let on = self.ship.as_ref()?.thrusters.iter().map(|t| t.enabled).collect();
+        Some((def, on))
+    }
 }
 
 impl<'a> Rails<'a> {
@@ -484,11 +498,10 @@ impl<'a> Rails<'a> {
         world: &'a World,
         trajectory: &'a Trajectory,
         nodes: &'a [crate::systems::maneuver::Node],
-        craft: &'a CraftParams,
         controls: &'a Controls,
-        inertia_now: DMat3,
+        (inertia_now, axis, torque): (DMat3, DVec3, DVec3),
     ) -> Self {
-        Rails { world, trajectory, nodes, craft, controls, inertia_now }
+        Rails { world, trajectory, nodes, controls, inertia_now, axis, torque }
     }
 }
 
@@ -524,7 +537,7 @@ impl Rails<'_> {
             let (anchor, r) = self.trajectory.eval(epoch).map_or((anchor, DVec3::ZERO), |s| (s.0, s.1));
             super::hold::hold_reference(self.world, &self.world.snapshot(epoch), anchor, r)
         };
-        pointing::wanted(self.controls, self.next_burn(epoch).as_ref(), auto, self.craft.engine.mount_dir)
+        pointing::wanted(self.controls, self.next_burn(epoch).as_ref(), auto, self.axis)
     }
 
     /// Whether the attitude stays as it is over `(t, e)` (no rotation, no
@@ -542,7 +555,7 @@ impl Rails<'_> {
         let snap = LazySnapshot::new(self.world, epoch);
         let maneuver =
             (controls.hold == HoldMode::Maneuver).then(|| maneuver_direction(self.nodes, &snap, state)).flatten();
-        aim(controls, &hold_inputs(self.world, &snap, state, controls, maneuver), self.craft.engine.mount_dir)
+        aim(controls, &hold_inputs(self.world, &snap, state, controls, maneuver), self.axis)
     }
 
     /// Carries the attitude over `(t, e)`: by [`advance_coast`], or read
@@ -556,7 +569,7 @@ impl Rails<'_> {
         inertia_at: &impl Fn(Epoch) -> DMat3,
         stop_settled: bool,
     ) -> Option<Epoch> {
-        let torque = self.craft.torque;
+        let torque = self.torque;
         while t < e {
             let seg = self.trajectory.segment_at(t)?;
             let end = seg.end.map_or(e, |x| seg.t0.add_seconds(x.t));

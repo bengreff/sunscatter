@@ -87,7 +87,7 @@ fn every_vessel_field_has_its_rule_at_a_split() {
         assert!(p.breakup.is_none() && matches!(p.phase, Phase::Coasting { .. }));
         // The ship state with its parts, the propellant only its
         // consumables (F2), the temperatures on the piece's own cells.
-        assert_eq!((p.propellant, p.propellant()), (0.0, p.ship().unwrap().consumables(&p.ship_def().unwrap())));
+        assert_eq!(p.propellant(), p.ship().unwrap().consumables(&p.ship_def().unwrap()));
         let design = p.craft.design();
         assert_eq!((p.thermal.state.skin.len(), p.thermal.state.nodes.len()), (design.cells.len(), design.nodes()));
     }

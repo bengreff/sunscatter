@@ -94,7 +94,7 @@ impl<'a> StageInputs<'a> {
             controls,
             chute: &vessel.chute,
             spec: &vessel.craft.chute,
-            engine_running: vessel.engine_running(controls),
+            engine_running: vessel.engine_running(),
             fuelled: vessel.debug() || vessel.propellant() > 0.0,
         }
     }

@@ -15,11 +15,10 @@ use super::hold::Aim;
 use super::split::{Breakup, LOST_CHUTE};
 use super::{Controls, Vessel, TICK};
 use crate::craft::command::{ShipCommand, Stage};
-use crate::craft::engine::{file_of, ShipThrust};
-use crate::craft::parts::combine_engines;
+use crate::craft::engine::ShipThrust;
 use crate::craft::ship::ShipDef;
 use crate::craft::state::{Effect, ShipState};
-use crate::craft::{Engine, EngineOutput, MassProps};
+use crate::craft::{EngineOutput, MassProps};
 use crate::frame::NodeId;
 use crate::systems::{command, flight, propulsion, OrderKind};
 use crate::world::World;
@@ -99,26 +98,10 @@ impl Vessel {
         // cycles from here (D105 §6.3).
         let seed = state.runtime.seed;
         crate::systems::failure::draw_fates(&def, &mut state, seed, self.time);
-        // Its tanks and bottles hold its propellant (F2).
-        self.propellant = 0.0;
         self.ship = Some(state);
-        self.sync_engine();
         if !self.craft.design().parts.iter().any(|p| p.chute) {
             self.chute = LOST_CHUTE;
         }
-    }
-
-    /// The readouts' engine (`CraftParams::engine`: planned burns, the
-    /// navball, landing predictions): the selected main engines together,
-    /// else all the main engines; none, a zero-thrust stand-in.
-    pub(super) fn sync_engine(&mut self) {
-        let Some((def, state)) = self.ship_parts() else { return };
-        let main = |i: &usize| def.engines[*i].main;
-        let selected: Vec<usize> = (0..def.engines.len()).filter(main).filter(|&i| state.engines[i].selected).collect();
-        let all: Vec<usize> = (0..def.engines.len()).filter(main).collect();
-        let pick = if selected.is_empty() { all } else { selected };
-        let files: Vec<_> = pick.iter().map(|&i| file_of(&def.engines[i].data)).collect();
-        self.craft.engine = Engine::from_file(&combine_engines(&files));
     }
 
     /// The engines' output now at ambient pressure `p` over a tick (a craft
@@ -243,20 +226,10 @@ impl Vessel {
         props: &MassProps,
     ) -> (EngineOutput, Actuators, Option<ShipTick>) {
         let q = flow.map_or(0.0, |f| f.q);
-        let throttle = controls.throttle;
         let Some((def, state)) = self.ship_parts() else {
-            let engine = self.craft.engine;
-            let out = engine.tick_output(throttle, p, self.propellant, dt, self.debug);
-            let gimbal = Gimbal {
-                lever: engine.mount_pos - props.com,
-                dir: engine.mount_dir,
-                thrust: out.thrust,
-                max_angle: engine.gimbal,
-            };
-            // The RCS draws on the main propellant: dry, only the gimbal turns.
-            let rcs_fed = self.debug || self.propellant > 0.0;
-            let torque = if rcs_fed { self.craft.torque } else { DVec3::ZERO };
-            return (out, Actuators { torque, gimbal: Some(gimbal), limits: None }, None);
+            // No parts' systems: nothing to push or turn it.
+            let none = Actuators { torque: DVec3::ZERO, gimbal: None, limits: None };
+            return (EngineOutput { thrust: 0.0, mdot: 0.0 }, none, None);
         };
         let t = propulsion::output(def, state, p, dt, self.debug);
         let gimbal = Gimbal { lever: t.pos - props.com, dir: t.dir, thrust: t.thrust, max_angle: t.gimbal };
@@ -364,7 +337,6 @@ impl Vessel {
     /// out, grid fins in the flow), become the breakup the game applies
     /// (`plan_breakup`: the pieces, or one piece in its new configuration).
     pub(super) fn after_command(&mut self, _world: &World, effects: &[Effect]) {
-        self.sync_engine();
         let parts = &self.craft.design().parts;
         let separated: Vec<u32> = effects
             .iter()

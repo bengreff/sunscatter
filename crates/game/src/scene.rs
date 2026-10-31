@@ -185,7 +185,7 @@ pub fn light_up(dir: Vec3) -> Vec3 {
 /// burns on rails.
 pub fn engine_on(sim: &SimState, i: usize) -> bool {
     let v = &sim.fleet[i];
-    i == sim.active && matches!(v.phase, sim::vessel::Phase::Powered { .. }) && v.engine_running(sim.controls())
+    i == sim.active && matches!(v.phase, sim::vessel::Phase::Powered { .. }) && v.engine_running()
 }
 
 /// Drag coefficient of a round canopy on its nominal area (Knacke,

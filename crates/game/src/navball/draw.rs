@@ -244,7 +244,7 @@ fn controls(ui: &mut egui::Ui, sim: &SimState, s: &NavState, height: f32, action
             let hint = "Shift / Ctrl, Z / X. A craft of parts' lit engines hold within their range: \
                         0 % is each one's minimum (a Merlin's 40 %), not off; shut them down to stop them.";
             ui.label(RichText::new("THR").monospace().small().color(theme::DIM)).on_hover_text(hint);
-            let running = sim.ship().engine_running(&c);
+            let running = sim.ship().engine_running();
             if let Some(t) = throttle_bar(ui, c.throttle, running, (height - 36.0).max(40.0)) {
                 actions.push(Action::Command(GameCommand::SetThrottle(t)));
             }

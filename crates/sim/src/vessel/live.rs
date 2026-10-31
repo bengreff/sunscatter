@@ -398,12 +398,12 @@ impl Vessel {
             && super::limbo::may_coast(&self.limbo.boundary, world, snap, anchor, (r, v), LEAVE_ATMOSPHERE)
     }
 
-    /// Whether a live vessel would return to a coast now with `controls`
-    /// (it is live for its own reasons otherwise: thrust, air, the ground).
-    pub(super) fn would_coast(&self, world: &World, controls: &Controls) -> bool {
+    /// Whether a live vessel would return to a coast now (it is live for
+    /// its own reasons otherwise: thrust, air, the ground).
+    pub(super) fn would_coast(&self, world: &World) -> bool {
         let Phase::Powered { anchor, r, v } = self.phase else { return true };
         let near = self.nearest_surface(world, anchor, r);
-        self.coasts(world, &world.snapshot(self.time), (anchor, r, v), self.engine_running(controls), near)
+        self.coasts(world, &world.snapshot(self.time), (anchor, r, v), self.engine_running(), near)
     }
 
     /// Starts a live tick of `dt` ending at `until` with `controls`: the
@@ -420,7 +420,7 @@ impl Vessel {
         (dt, until): (f64, Epoch),
     ) -> Option<TickStart<'d>> {
         let Phase::Powered { anchor, r, v } = self.phase else { unreachable!() };
-        let engine_on = self.engine_running(controls) || self.ship_wants_ticks(controls);
+        let engine_on = self.engine_running() || self.ship_wants_ticks(controls);
         let near = self.nearest_surface(world, anchor, r);
         let live = self.live_height();
         let contact_body = near.filter(|&(_, h)| h <= live).map(|(b, _)| b);
@@ -541,7 +541,7 @@ impl Vessel {
             air,
             aero,
             cmd,
-            out,
+            out: _,
             att0,
             sun_body,
             ship,
@@ -575,14 +575,7 @@ impl Vessel {
                 let effects = self.ship_after_tick(world, tick, cmd.rcs, &m, controls.throttle);
                 (tick.heat, self.aboard(), effects)
             }
-            None => {
-                let engine = self.craft.engine;
-                let mdot = out.mdot + cmd.rcs.dot(self.craft.rcs_flow);
-                let mdot = mdot + self.systems.consumables.boil_off;
-                let left = if self.debug { self.propellant } else { (self.propellant - mdot * dt).max(0.0) };
-                self.propellant = left;
-                (engine.heat(out.thrust, out.mdot), crate::craft::design::Aboard::Fill(left), Vec::new())
-            }
+            None => (0.0, self.aboard(), Vec::new()),
         };
         let heat_tick = aero.as_ref().zip(air.as_ref());
         aerothermal::live_step(design, &mut self.thermal, heat_tick, att0, sun_body, engine_heat, &aboard, dt);

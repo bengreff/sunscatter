@@ -27,11 +27,10 @@
 //! program ([`maneuver`]). The skin and interior temperatures step on a
 //! fixed lattice while coasting.
 //!
-//! The vessel carries its propellant (burned by the engine in powered
-//! ticks) and the **debug mode** flag (D064): infinite
+//! The vessel carries the **debug mode** flag (D064): infinite
 //! propellant, no overheating, infinite impact tolerance, all together. A
-//! craft of catalog parts holds its propellant only in its ship state's
-//! tanks and bottles (F2): every total is derived from them.
+//! craft of parts holds its propellant only in its ship state's tanks and
+//! bottles (F2): every total is derived from them.
 
 mod aerothermal;
 mod anchor;
@@ -199,10 +198,6 @@ pub struct Vessel {
     /// People aboard (0: an uncrewed probe, controlled from elsewhere with
     /// light delay, D034, D067).
     crew: u32,
-    /// A made-up craft's propellant at `time` (kg). A craft of parts holds
-    /// its own only in its ship state (`ship`): this stays 0 and
-    /// [`Vessel::propellant`] sums the tanks and bottles.
-    propellant: f64,
     /// Debug mode (D064): infinite propellant, no overheating, infinite
     /// impact tolerance.
     #[serde(default)]
@@ -391,14 +386,11 @@ impl Vessel {
         self.repoint = matches!(self.phase, Phase::Coasting { .. });
     }
 
-    /// Whether the engine runs with these controls (a throttle, and
-    /// propellant or debug mode).
-    pub fn engine_running(&self, controls: &Controls) -> bool {
-        if let Some(on) = self.ship_engines_on() {
-            return on;
-        }
-        let engine = &self.craft.engine;
-        engine.thrust_vac > 0.0 && engine.setting(controls.throttle) > 0.0 && (self.debug || self.propellant > 0.0)
+    /// Whether an engine is starting, running or in its tail-off
+    /// (`systems::propulsion`; the pilot's throttle acts through the
+    /// engines' next step).
+    pub fn engine_running(&self) -> bool {
+        self.ship_engines_on().unwrap_or(false)
     }
 
     /// Thrust acceleration (inertial axes, m/s²) the engine would give at
@@ -406,11 +398,7 @@ impl Vessel {
     pub fn thrust_accel(&self, world: &World, throttle: f64) -> DVec3 {
         let (anchor, r, _) = self.state(world);
         let p = ambient_pressure(world, &world.snapshot(self.time), anchor, r);
-        if let Some(t) = self.ship_thrust(throttle, p) {
-            return self.attitude.q * t.dir * (t.thrust / self.mass());
-        }
-        let out = self.craft.engine.tick_output(throttle, p, self.propellant, TICK, self.debug);
-        self.attitude.q * self.craft.engine.mount_dir * (out.thrust / self.mass())
+        self.ship_thrust(throttle, p).map_or(DVec3::ZERO, |t| self.attitude.q * t.dir * (t.thrust / self.mass()))
     }
 
     /// Landed and crashed vessels rotate rigidly with their body.
@@ -473,7 +461,7 @@ impl Vessel {
         // Held by the pad's clamps, it stays put whatever runs (the mount is
         // anchored to the ground until the clamps release).
         let free = !self.clamped();
-        if free && (self.engine_running(controls) || controls.rotate != DVec3::ZERO || changed || !holds) {
+        if free && (self.engine_running() || controls.rotate != DVec3::ZERO || changed || !holds) {
             self.wake(world);
             return;
         }

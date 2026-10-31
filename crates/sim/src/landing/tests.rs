@@ -5,7 +5,7 @@
 
 use super::model::{Model, Run};
 use super::*;
-use crate::craft::{test_craft, CraftParams};
+use crate::craft::{small, CraftParams};
 use crate::ephem::Ephemeris;
 use crate::forces::ActiveSources;
 use crate::sol;
@@ -18,8 +18,12 @@ fn world() -> World {
 }
 
 fn craft() -> CraftParams {
-    test_craft().params()
+    small::rocket_ref().params()
 }
+
+/// The small rocket's propellant in the predictions (kg): its mass falls
+/// from dry plus this with its engines' flow.
+const PROPELLANT: f64 = 2_000.0;
 
 /// A start `height` metres (centre of mass) above the ground at `lat`,
 /// `lon` (rad) of `body`, moving `(east, north, up)` m/s relative to the ground.
@@ -34,14 +38,17 @@ fn start_over(w: &World, body: &str, (lat, lon, height): (f64, f64, f64), (e, n,
     let east = to_i(DVec3::new(-crate::math::sin(lon), crate::math::cos(lon), 0.0));
     let north = up.cross(east);
     let v = p.rotation.omega(t).raw().cross(r) + east * e + north * n + up * u;
+    // The small rocket's four engines (`Thrust::of_vessel`).
+    let rocket = crate::vessel::Vessel::coasting(w, crate::vessel::VesselId(1), t, src.node, r, v, &small::rocket());
+    let c = craft();
     LandingStart {
         t,
         anchor: src.node,
         r,
         v,
-        propellant: 2_000.0,
-        thrust: crate::landing::Thrust::of_engine(&craft().engine),
-        mass: None,
+        propellant: PROPELLANT,
+        thrust: Thrust::of_vessel(&rocket).0,
+        mass: (c.mass.dry_mass + PROPELLANT, c.mass.dry_com),
         infinite: false,
         throttle: 0.0,
         chute: Default::default(),
@@ -171,12 +178,12 @@ fn under_the_parachute_the_impact_speed_is_the_terminal_velocity() {
     let last = d.samples.last().unwrap();
     let snap = w.snapshot(hit.t);
     let air = air_at(&w, &snap, start.anchor, last.r, last.v).unwrap();
-    let props = c.mass.at(start.propellant);
-    let q = quat_z_to(last.r.normalize()) * quat_z_to(c.engine.mount_dir).inverse();
-    let tick = AeroTick::new(c.design(), &air, props.com, Some((c.chute.main.cd_area, c.chute.mount))).unwrap();
-    let (cd_area, _) = tick.drag_and_lift(q, props.mass);
+    let (mass, com) = start.mass;
+    let q = quat_z_to(last.r.normalize()) * quat_z_to(start.thrust.axis).inverse();
+    let tick = AeroTick::new(c.design(), &air, com, Some((c.chute.main.cd_area, c.chute.mount))).unwrap();
+    let (cd_area, _) = tick.drag_and_lift(q, mass);
     let g = w.find("Earth").unwrap().gm / last.r.length_squared();
-    let terminal = (2.0 * props.mass * g / (air.rho * cd_area)).sqrt();
+    let terminal = (2.0 * mass * g / (air.rho * cd_area)).sqrt();
     assert!((hit.speed / terminal - 1.0).abs() < 0.01, "{} vs {terminal}", hit.speed);
     assert!(hit.v_horizontal < 0.1, "{}", hit.v_horizontal);
 }
@@ -185,8 +192,11 @@ fn under_the_parachute_the_impact_speed_is_the_terminal_velocity() {
 fn the_braking_solution_stops_at_the_margin_when_flown() {
     let w = world();
     let c = craft();
-    // 8 km over the Moon, 150 m/s across and 80 m/s down.
-    let start = start_over(&w, "Moon", (0.2, 0.4, 8_000.0), (150.0, 0.0, -80.0));
+    // 8 km over the Moon, 150 m/s across and 80 m/s down, nearly full
+    // (12 t of propellant: ~29 m/s² at ignition, an 8 s burn).
+    let mut start = start_over(&w, "Moon", (0.2, 0.4, 8_000.0), (150.0, 0.0, -80.0));
+    start.propellant = 12_000.0;
+    start.mass.0 = c.mass.dry_mass + start.propellant;
     let d = predict_impact(&w, &c, &start, limits());
     let margin = 10.0;
     let b = braking_solution(&w, &c, &d, margin).expect("it can stop");
@@ -210,7 +220,8 @@ fn the_braking_solution_stops_at_the_margin_when_flown() {
     let height = model.clearance_exact(&burn, stop.0, stop.1, stop.2);
     assert!((height - margin).abs() < 1.5, "flown: stopped {height} m up");
     assert!(v_srf(&stop).length() < 1.0, "{}", v_srf(&stop).length());
-    assert!((b.t_stop.seconds_since(burn.t0.add_seconds(stop.0))).abs() < 0.2);
+    let late = b.t_stop.seconds_since(burn.t0.add_seconds(stop.0));
+    assert!(late.abs() < 0.2, "predicted stop {late} s after the flown one (burn {} s)", stop.0);
 }
 
 #[test]
@@ -232,7 +243,8 @@ fn a_craft_already_touching_the_ground_predicts_without_panicking() {
 fn a_craft_that_cannot_stop_has_no_braking_solution() {
     let w = world();
     let c = craft();
-    let start = start_over(&w, "Moon", (0.2, 0.4, 300.0), (0.0, 0.0, -200.0));
+    // 400 m/s down from 300 m: braking at ~100 m/s² takes ~800 m.
+    let start = start_over(&w, "Moon", (0.2, 0.4, 300.0), (0.0, 0.0, -400.0));
     let d = predict_impact(&w, &c, &start, limits());
     assert!(d.impact.is_some());
     assert_eq!(braking_solution(&w, &c, &d, 10.0), None);
@@ -257,11 +269,11 @@ fn predictions_are_deterministic_and_independent_of_the_anchor() {
 
 #[test]
 fn twr_uses_thrust_at_ambient_pressure() {
-    let c = craft();
-    let m = c.mass.dry_mass + 1_000.0;
-    let vac = twr(&c, 1_000.0, 0.0, 1.62);
-    assert!((vac - c.engine.thrust_vac / (m * 1.62)).abs() < 1e-12);
-    assert!(twr(&c, 1_000.0, 101_325.0, 1.62) < vac);
+    let w = world();
+    let start = start_over(&w, "Moon", (0.0, 0.0, 1_000.0), (0.0, 0.0, 0.0));
+    let vac = start.twr(0.0, 1.62);
+    assert!((vac - start.thrust.vac / (start.mass.0 * 1.62)).abs() < 1e-12);
+    assert!(start.twr(101_325.0, 1.62) < vac);
 }
 
 #[test]

@@ -286,7 +286,7 @@ impl SimState {
         if matches!(ship.phase, Phase::Powered { .. }) {
             // Held live near a live controllable craft (D082), else flown
             // live: thrusting, in the atmosphere or in contact.
-            if ship.in_bubble() && !ship.leads(&self.world, self.controls()) {
+            if ship.in_bubble() && !ship.leads(&self.world) {
                 if let Some(id) = self.bubble_leader() {
                     return Some(RailsBlock::Near(id));
                 }
@@ -511,7 +511,7 @@ pub enum RailsBlock {
 /// propellant (or in debug mode), or the pilot's RCS translation on a
 /// craft of parts (`systems::rcs::pilot`).
 pub fn produces_thrust(v: &Vessel, c: &Controls) -> bool {
-    v.engine_running(c) || (v.ship().is_some() && sim::systems::rcs::pilot(c).translate != DVec3::ZERO)
+    v.engine_running() || (v.ship().is_some() && sim::systems::rcs::pilot(c).translate != DVec3::ZERO)
 }
 
 /// Whether vessel `v` is held on the pad's clamps with its systems needing

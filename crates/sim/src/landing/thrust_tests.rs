@@ -1,6 +1,6 @@
 //! The landing prediction's engines and mass come from the vessel (D125):
 //! a craft of parts' stage estimate of the engines its throttle runs, its
-//! own mass and centre of mass; the made-up craft's engine law unchanged.
+//! own mass and centre of mass.
 
 use super::*;
 use crate::craft::small;
@@ -41,11 +41,11 @@ fn a_craft_of_parts_predicts_with_its_own_engines_and_mass() {
     let axis = main.iter().map(|e| e.data.dir.normalize()).sum::<DVec3>().normalize();
     assert!(th.axis.dot(axis) > 1.0 - 1e-12);
     // Its own mass and centre of mass; the propellant its engines burn.
-    assert_eq!(start.mass, Some((vessel.mass(), vessel.mass_props().com)));
+    assert_eq!(start.mass, (vessel.mass(), vessel.mass_props().com));
     // The small rocket reads no tank levels: its engines are assumed not to
     // run dry, and its mass is held.
     assert_eq!(start.propellant, f64::INFINITY);
-    let twr = start.twr(&vessel.craft, 0.0, 9.81);
+    let twr = start.twr(0.0, 9.81);
     assert!((twr - th.vac / (vessel.mass() * 9.81)).abs() < 1e-12);
     // It brakes on them: a braking solution exists and stops it above
     // the ground.

@@ -17,17 +17,17 @@ use glam::{DQuat, DVec3};
 
 impl Vessel {
     /// The systems' environment at `e` for a vessel at `(r, v)` relative to
-    /// `anchor` with attitude `q` and `propellant` kg aboard.
-    pub(super) fn systems_env(world: &World, e: Epoch, (anchor, r): (NodeId, DVec3), q: DQuat, propellant: f64) -> Env {
+    /// `anchor` with attitude `q`.
+    pub(super) fn systems_env(world: &World, e: Epoch, (anchor, r): (NodeId, DVec3), q: DQuat) -> Env {
         let sun = radiation::sunlight(world, &world.snapshot(e), anchor, r);
-        Env { sun, attitude: q, propellant }
+        Env { sun, attitude: q }
     }
 
     /// After a live tick: the lattice points the tick reached.
     pub(super) fn systems_after_tick(&mut self, world: &World) {
         let Phase::Powered { anchor, r, .. } = self.phase else { return };
-        let (q, propellant, time) = (self.attitude.q, self.propellant(), self.time);
-        self.systems.advance(time, |e| Vessel::systems_env(world, e, (anchor, r), q, propellant));
+        let (q, time) = (self.attitude.q, self.time);
+        self.systems.advance(time, |e| Vessel::systems_env(world, e, (anchor, r), q));
     }
 
     /// Landed or crashed until `target`: the lattice points on the ground.
@@ -43,25 +43,11 @@ impl Vessel {
         while let Some(e) = self.systems.next().filter(|e| e.seconds_since(target) <= 0.0) {
             let r = rot.to_inertial(fixed, e).raw();
             let q = (body_to_inertial(world, body, e) * att_fixed).normalize();
-            let propellant = self.propellant();
-            self.systems.step(&Vessel::systems_env(world, e, (body, r), q, propellant));
+            self.systems.step(&Vessel::systems_env(world, e, (body, r), q));
             // A craft of parts' slow systems (its liquids warm on the pad).
             let v = rot.omega(e).raw().cross(r);
             let at = (e, (body, r, v), q);
             super::ship_tick::ship_lattice(self.ship.as_mut(), def.as_deref(), world, at, Some(body), None);
-        }
-    }
-}
-
-impl Vessel {
-    /// Sets the propellant boil-off (kg/s, [`crate::systems::Consumables`]):
-    /// a mass flow the trajectory integrates, so a coast restarts from now
-    /// with it.
-    pub fn set_boil_off(&mut self, world: &World, rate: f64) {
-        self.systems.consumables.boil_off = rate.max(0.0);
-        if matches!(self.phase, Phase::Coasting { .. }) {
-            self.law_to_now();
-            self.start_coast(world);
         }
     }
 }

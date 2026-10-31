@@ -86,8 +86,8 @@ impl Default for LiveBoundary {
 }
 
 /// A vessel's limbo placeholders, saved with it until craft data carries
-/// them: skin optics and the live boundary. (Boil-off is the consumables
-/// system's, `crate::systems::Consumables`.)
+/// them: skin optics and the live boundary. (Boil-off is a craft of parts'
+/// tank law, `crate::systems::coast_law`.)
 #[derive(Clone, Copy, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct LimboSpec {
     pub optics: Optics,
@@ -104,9 +104,6 @@ pub struct Limbo {
     pub optics: Optics,
     /// The attitude within the segment.
     pub pointing: Pointing,
-    /// Propellant boil-off (kg/s), down to `dry_mass`.
-    #[serde(default)]
-    pub boil_off: f64,
     pub dry_mass: f64,
     /// Open parachutes' drag area (m²), along the flow.
     #[serde(default)]
@@ -193,7 +190,6 @@ impl Limbo {
             design,
             optics: Optics::default(),
             pointing,
-            boil_off: 0.0,
             dry_mass,
             chute_area: 0.0,
             boundary: LiveBoundary::DEFAULT,
@@ -252,19 +248,14 @@ impl Limbo {
     }
 
     /// Mass at local time `t` of a segment starting at `mass0`: a craft of
-    /// parts' law of its tanks, else less boil-off, never below the dry
-    /// mass.
+    /// parts' law of its tanks, else held.
     pub fn mass(&self, mass0: f64, t: f64) -> f64 {
         if let Some(law) = self.law.as_deref() {
             if let Some(def) = self.ship_def() {
                 return self.dry_mass + law.total(def, t);
             }
         }
-        if self.boil_off > 0.0 {
-            (mass0 - self.boil_off * t).max(self.dry_mass.min(mass0))
-        } else {
-            mass0
-        }
+        mass0
     }
 
     /// The non-gravitational acceleration (inertial, m/s²) of a vessel of

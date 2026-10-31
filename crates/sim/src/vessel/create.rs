@@ -22,7 +22,6 @@ impl Vessel {
         let params = craft.params();
         let mut vessel = Vessel {
             id,
-            propellant: params.initial_propellant,
             craft: params,
             phase,
             time: t,

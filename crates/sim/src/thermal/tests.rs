@@ -267,7 +267,7 @@ fn with_nodes() -> (&'static ThermalNetwork, Vec<f64>) {
     let mut cap = vec![0.0; d.nodes()];
     let def = rocket_ref().ship.as_deref().unwrap();
     let held = crate::systems::plumbing::held(def, &crate::craft::state::ShipState::initial(def));
-    d.node_capacity(&crate::craft::design::Aboard::Tanks(held), &mut cap);
+    d.node_capacity(&crate::craft::design::Aboard(held), &mut cap);
     (&d.network, cap)
 }
 

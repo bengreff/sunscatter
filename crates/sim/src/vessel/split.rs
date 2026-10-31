@@ -214,8 +214,6 @@ impl Vessel {
         let (anchor, r, v) = self.state(world);
         let old = self.craft.design().clone();
         let props = self.mass_props();
-        let capacity = self.craft.mass.capacity;
-        let fill = if capacity > 0.0 { self.propellant / capacity } else { 0.0 };
         let (q, omega) = (self.attitude.q, self.attitude.omega);
         // A split disarms the pad's armed release: the launch did not
         // happen (its stage is next again in every piece).
@@ -223,7 +221,7 @@ impl Vessel {
             let text = "Clamps: release disarmed by the separation; clamps held".to_string();
             crate::systems::propulsion::disarm(state, self.time, text, true);
         }
-        let cut = Cut { old: &old, at: (anchor, r, v), fill, total: Shares::of(&old.parts) };
+        let cut = Cut { old: &old, at: (anchor, r, v), total: Shares::of(&old.parts) };
         let mut crew = self.crew;
         let mut pieces: Vec<Vessel> = Vec::new();
         for (k, craft) in crafts.iter().enumerate() {
@@ -284,13 +282,12 @@ impl Vessel {
     fn piece(&self, cut: &Cut, craft: &Arc<Craft>, id: Option<VesselId>, crew: u32) -> Vessel {
         let Vessel {
             id: vessel_id,
-            craft: _,      // the piece's own
-            phase: _,      // set by the split (live at the piece's centre of mass)
-            time,          // the split's epoch, in every piece
-            attitude,      // the body axes and ω, in every piece
-            chute,         // with the parts that carry the parachutes
-            crew: _,       // by seats, the vessel's piece first (`crew`)
-            propellant: _, // the piece's tanks (a made-up craft: the craft's fill)
+            craft: _, // the piece's own
+            phase: _, // set by the split (live at the piece's centre of mass)
+            time,     // the split's epoch, in every piece
+            attitude, // the body axes and ω, in every piece
+            chute,    // with the parts that carry the parachutes
+            crew: _,  // by seats, the vessel's piece first (`crew`)
             debug,
             tick_accel: _, // a new live start
             control,
@@ -315,18 +312,14 @@ impl Vessel {
         let own = id.is_none();
         let design = craft.design();
         let params = craft.params();
-        let (propellant, ship) = match (ship, &craft.ship, cut.old.ship.as_deref()) {
-            // A craft of parts: each item goes with its part (`craft::partition`).
+        // Each item goes with its part (`craft::partition`); its propellant
+        // is its tanks' and bottles' (F2).
+        let ship = match (ship, &craft.ship, cut.old.ship.as_deref()) {
             (Some(state), Some(def), Some(whole)) => {
                 let parts: Vec<u32> = design.parts.iter().map(|p| p.id).collect();
-                // Its propellant is its tanks' and bottles' (F2).
-                (0.0, Some(state.partition(&parts, whole, def, own)))
+                Some(state.partition(&parts, whole, def, own))
             }
-            _ => {
-                debug_assert!(ship.is_none(), "a piece of a craft of parts is a craft of parts");
-                let capacity = params.mass.capacity;
-                ((cut.fill * capacity).min(capacity), None)
-            }
+            _ => None,
         };
         let mut th = VesselThermal::uniform(design.cells.len(), design.nodes(), 0.0, thermal.epoch);
         th.state = carry_temperatures(cut.old, &thermal.state, design);
@@ -338,7 +331,6 @@ impl Vessel {
             attitude: *attitude,
             chute: if design.parts.iter().any(|p| p.chute) { *chute } else { LOST_CHUTE },
             crew,
-            propellant,
             debug: *debug,
             // The vessel keeps its attitude control (its coast's lattice
             // restarts); a new piece starts without.
@@ -364,7 +356,6 @@ impl Vessel {
             nodes: if own { nodes.clone() } else { Vec::new() },
             program: None,
         };
-        piece.sync_engine();
         if own {
             piece.reschedule(program.as_ref());
         }
@@ -378,9 +369,7 @@ struct Cut<'a> {
     old: &'a CraftDesign,
     /// Its state (anchor, position, velocity) at the split.
     at: (NodeId, DVec3, DVec3),
-    /// Its tanks' fill (a craft not of parts).
-    fill: f64,
-    /// Its parts' power and tank placeholders.
+    /// Its parts' power placeholders.
     total: Shares,
 }
 
@@ -411,12 +400,11 @@ fn push_apart(pieces: &mut [Vessel], old: &CraftDesign, separated: &[u32], q: gl
     }
 }
 
-/// The parts' power and tank placeholders, to share a vessel's systems.
+/// The parts' power placeholders, to share a vessel's systems.
 struct Shares {
     produced: f64,
     battery: f64,
     consumed: f64,
-    capacity: f64,
 }
 
 impl Shares {
@@ -426,13 +414,12 @@ impl Shares {
             produced: sum(&|p| p.power.produced),
             battery: sum(&|p| p.power.battery),
             consumed: sum(&|p| p.power.consumed),
-            capacity: sum(&|p| p.tank.map_or(0.0, |t| t.capacity)),
         }
     }
 
     /// The systems of a piece with the placeholders `mine` out of these:
-    /// panel, battery (and its charge) and loads in proportion, boil-off by
-    /// tank capacity; the vessel's piece (`own`) keeps the ledgers.
+    /// panel, battery (and its charge) and loads in proportion; the
+    /// vessel's piece (`own`) keeps the ledgers.
     fn share(&self, mine: &Shares, systems: &crate::systems::Systems, own: bool) -> crate::systems::Systems {
         let ratio = |a: f64, b: f64| if b > 0.0 { a / b } else { 0.0 };
         let mut s = systems.clone();
@@ -443,10 +430,8 @@ impl Shares {
         p.spec.capacity *= battery;
         p.charge *= battery;
         p.spec.load *= ratio(mine.consumed, self.consumed);
-        s.consumables.boil_off *= ratio(mine.capacity, self.capacity);
         if !own {
             p.shortfall = 0.0;
-            s.consumables.boiled = 0.0;
         }
         s
     }

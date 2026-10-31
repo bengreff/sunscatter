@@ -266,8 +266,8 @@ mod tests {
 
     #[test]
     fn production_and_the_battery_table() {
-        let lit = |q: DQuat| Env { sun: DVec3::new(-1_361.0, 0.0, 0.0), attitude: q, propellant: 0.0 };
-        let dark = Env { sun: DVec3::ZERO, attitude: DQuat::IDENTITY, propellant: 0.0 };
+        let lit = |q: DQuat| Env { sun: DVec3::new(-1_361.0, 0.0, 0.0), attitude: q };
+        let dark = Env { sun: DVec3::ZERO, attitude: DQuat::IDENTITY };
         let fixed = Power { spec: PowerSpec { tracking: false, ..PowerSpec::default() }, ..Power::default() };
         // (power, environment, output W): a fixed panel facing the Sun
         // (+X lit side towards the light, which travels −X), turned 60°

@@ -231,7 +231,7 @@ fn the_nodes_hold_each_liquid_where_it_sits() {
     }
     let capacity = |s: &crate::craft::state::ShipState| {
         let mut out = vec![0.0; design.nodes()];
-        design.node_capacity(&Aboard::Tanks(plumbing::held(&def, s)), &mut out);
+        design.node_capacity(&Aboard(plumbing::held(&def, s)), &mut out);
         out
     };
     let added = |c: &[f64]| c.iter().zip(&design.dry_capacity).map(|(c, d)| c - d).sum::<f64>();

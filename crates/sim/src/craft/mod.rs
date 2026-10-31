@@ -71,7 +71,8 @@ pub struct Craft {
     pub mesh: RenderMesh,
     /// Surface cells and contact points (D065).
     pub cells: Cells,
-    /// Dry shell and tanks, for mass properties at any fill.
+    /// The dry craft's mass properties (its tanks' contents are the ship
+    /// state's: `systems::plumbing::contents`).
     pub mass: MassModel,
     /// The parts ([`parts`]; a craft file is one) and each one's dry mass
     /// properties.
@@ -96,7 +97,6 @@ impl Craft {
     /// attached to (a piece that breaks off keeps them); one part is the
     /// craft's shell over the whole surface with its one tank.
     pub fn from_def(id: CraftId, def: CraftDef, res: &Resolution, opts: &CellOptions) -> Self {
-        let tanks = def.tanks();
         let CraftDef { spec, geometry, parts, ship } = def;
         let surface = mesh::union_surface(&geometry.primitives, res);
         let cells = cells::build_cells(&surface, &geometry.primitives, &geometry.skin, opts);
@@ -113,11 +113,10 @@ impl Craft {
                     MassProps::sum(&items)
                 })
                 .collect();
-            (MassModel::of_parts(&part_mass, &tanks), part_mass)
+            (MassModel::of_parts(&part_mass), part_mass)
         } else if parts.len() == 1 {
-            let capacity = spec.propellant.capacity;
-            let mass = MassModel::new(&surface, &g.primitives, &g.skin, spec.dry_mass, &g.tank, capacity);
-            (mass, vec![mass.at(0.0)])
+            let mass = MassModel::new(&surface, &g.primitives, &g.skin, spec.dry_mass);
+            (mass, vec![mass.dry()])
         } else {
             let part_mass: Vec<MassProps> = (parts.iter())
                 .map(|p| {
@@ -125,7 +124,7 @@ impl Craft {
                     MassModel::shell(&mesh::union_surface(&own, res), &own, &g.skin, p.dry_mass)
                 })
                 .collect();
-            (MassModel::of_parts(&part_mass, &tanks), part_mass)
+            (MassModel::of_parts(&part_mass), part_mass)
         };
         let mesh = surface.render_mesh();
         Craft { id, spec, mesh, surface, cells, geometry, mass, parts, part_mass, ship, design: DesignSlot::default() }
@@ -148,15 +147,14 @@ impl Craft {
 
     /// Mass, centre of mass and inertia as loaded: a craft of parts' tanks
     /// and bottles as its loading fills them (`ShipState::initial`, the
-    /// plumbing's contents, as a vessel of it starts), else the made-up
-    /// craft full.
+    /// plumbing's contents, as a vessel of it starts), else the dry craft.
     pub fn loaded_props(&self) -> MassProps {
         match &self.ship {
             Some(def) => {
                 let (slugs, points) = crate::systems::plumbing::contents(def, &state::ShipState::initial(def));
                 self.mass.with_slugs(&slugs, &points)
             }
-            None => self.mass.at(self.mass.capacity),
+            None => self.mass.dry(),
         }
     }
 
@@ -164,19 +162,9 @@ impl Craft {
     pub fn params(&self) -> CraftParams {
         let s = &self.surface;
         let design = self.design().clone();
-        let (torque, rcs_flow) = match &self.ship {
-            Some(ship) => {
-                let enabled: Vec<bool> = ship.thrusters.iter().map(|t| t.enabled).collect();
-                ship.rcs_authority(self.mass.dry_com, &enabled)
-            }
-            None => parts::rcs(&self.parts),
-        };
         CraftParams {
             id: self.id.clone(),
-            engine: Engine::from_file(&self.spec.engine),
             mass: self.mass,
-            torque,
-            rcs_flow,
             cd_area: design.mean_drag_area,
             chute: self.spec.chute.clone(),
             thermal: self.spec.thermal,
@@ -187,7 +175,6 @@ impl Craft {
                 true => s.positions.iter().map(|p| p.z).fold(f64::MAX, f64::min),
                 false => self.cells.contacts.iter().map(|c| c.pos.z).fold(f64::MAX, f64::min),
             },
-            initial_propellant: self.spec.propellant.mass,
             design: DesignSlot::filled(design),
         }
     }
@@ -198,13 +185,7 @@ impl Craft {
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct CraftParams {
     pub id: CraftId,
-    pub engine: Engine,
     pub mass: MassModel,
-    /// Attitude-control torque authority per body axis (N·m): the RCS
-    /// couples.
-    pub torque: glam::DVec3,
-    /// RCS propellant flow per body axis at full command (kg/s).
-    pub rcs_flow: glam::DVec3,
     /// Attitude-independent hull drag area Cd·A (m²) of coasts and
     /// predictions: [`CraftDesign::mean_drag_area`]. Live ticks use the
     /// full aerodynamics of the design.
@@ -224,8 +205,6 @@ pub struct CraftParams {
     /// (the bottom of the feet; a deployed foot's pad is tilted, its rim
     /// lower than its base), else the surface's.
     pub bottom_z: f64,
-    /// Propellant loaded at the start (kg).
-    pub initial_propellant: f64,
     /// The design's bake and thermal network: never saved, rebuilt from
     /// the craft's files after a load.
     #[serde(skip)]
@@ -238,16 +217,10 @@ impl CraftParams {
         self.design.get(&self.id)
     }
 
-    /// Height of the centre of mass above the ground when standing (m).
-    pub fn contact_height(&self, propellant: f64) -> f64 {
-        self.mass.at(propellant).com.z - self.bottom_z
-    }
-
-    /// Farthest contact point from the centre of mass (m): below this
-    /// height plus [`crate::contact::NEAR`] the vessel flies live ticks
-    /// with contact substeps.
-    pub fn contact_reach(&self, propellant: f64) -> f64 {
-        let com = self.mass.at(propellant).com;
+    /// Farthest contact point from the centre of mass `com` (m, body
+    /// axes): below this height plus [`crate::contact::NEAR`] the vessel
+    /// flies live ticks with contact substeps.
+    pub fn contact_reach(&self, com: glam::DVec3) -> f64 {
         self.contacts.iter().map(|c| (c.pos - com).length()).fold(0.0, f64::max)
     }
 }

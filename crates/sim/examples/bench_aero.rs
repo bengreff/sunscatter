@@ -11,6 +11,12 @@ use sim::thermal::heating::SUTTON_GRAVES_EARTH;
 use sim::thermal::{cell_heat_flow, FlowHeat, ThermalState};
 use std::time::Instant;
 
+/// Its tanks and bottles as loaded, each where it sits.
+fn loaded(c: &sim::craft::Craft) -> sim::craft::design::Aboard {
+    let def = c.ship.as_ref().expect("a craft of parts");
+    sim::craft::design::Aboard(sim::systems::plumbing::held(def, &sim::craft::state::ShipState::initial(def)))
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.first().map(String::as_str) == Some("cells") {
@@ -41,11 +47,11 @@ fn main() {
         );
     }
     let b = bake(&c.surface, &c.cells, &BakeOptions::default());
-    // The design's network: skin cells and interior volume nodes (full tank).
+    // The design's network: skin cells and interior volume nodes (as loaded).
     let d = c.design();
     let net = &d.network;
     let mut cap = vec![0.0; d.nodes()];
-    d.node_capacity(&sim::craft::design::Aboard::Fill(c.spec.propellant.capacity), &mut cap);
+    d.node_capacity(&loaded(c), &mut cap);
     let node_heat = vec![0.0; d.nodes()];
     println!("interior: {} volume nodes", d.nodes());
     let mut state = ThermalState::uniform(c.cells.cells.len(), d.nodes(), 290.0);

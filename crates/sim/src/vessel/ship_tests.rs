@@ -57,7 +57,7 @@ fn a_craft_of_parts_lifts_off_on_its_engines() {
     assert!((v.propellant() - start.consumables(&def)).abs() < 1e-9);
     let com0 = v.mass_props().com;
     let (height0, m0) = (v.contact_height(), v.mass());
-    assert!(!v.engine_running(&full(1.0)), "engines off");
+    assert!(!v.engine_running(), "engines off");
     let (name, _) = v.next_stage(&w).unwrap();
     assert_eq!(name, "Ignition");
     assert!(v.ship().unwrap().engines.iter().all(|e| e.status == EngineStatus::Starting));
@@ -140,7 +140,8 @@ fn a_separation_partitions_the_ship_and_conserves_momentum() {
     assert_eq!((capsule.tanks.len(), tank.tanks.len()), (0, 2));
     assert_eq!((capsule.engines.len(), tank.engines.len()), (0, 4));
     assert_eq!(tank.tanks, state.tanks);
-    assert!(v.craft.engine.thrust_vac == 0.0 && pieces[0].craft.engine.thrust_vac == 400.0e3);
+    let vac = |v: &Vessel| crate::landing::Thrust::of_vessel(v).0.vac;
+    assert!(vac(&v) == 0.0 && vac(&pieces[0]) == 400.0e3);
     assert!(v.crew() == 1 && pieces[0].crew() == 0);
 }
 
@@ -191,7 +192,11 @@ fn the_falcon_9_stands_on_the_pad_and_lifts_off() {
     let pad: f64 = v.craft.design().parts.iter().filter(|p| p.name.starts_with("pad.")).map(|p| p.dry_mass).sum();
     println!("mass {:.0} kg with the mount's {pad:.0} kg, centre of mass {:.2} m up", v.mass(), v.contact_height());
     assert!(((v.mass() - pad) / 560_200.0 - 1.0).abs() < 0.01);
-    assert_eq!(v.craft.engine.thrust_vac, 9.0 * 914.0e3, "the readouts' engine: the nine Merlins");
+    assert_eq!(
+        crate::landing::Thrust::of_vessel(&v).0.vac,
+        9.0 * 914.0e3,
+        "the engines its throttle runs: the nine Merlins"
+    );
     assert_eq!(v.next_stage(&w).unwrap().0, "Ignition");
     // Lit from the ground's supply: E1, E5 and E9 keep their three relights.
     let merlins = |x: &Vessel| -> Vec<u32> {
@@ -262,7 +267,7 @@ fn the_falcon_9_stands_on_the_pad_and_lifts_off() {
     // upper stack's, `craft::program`).
     assert!(booster.clone().next_stage(&w).is_none());
     assert!(booster.controllable(), "the booster can be flown");
-    assert_eq!(v.craft.engine.thrust_vac, 981.0e3, "the readouts' engine: the MVac");
+    assert_eq!(crate::landing::Thrust::of_vessel(&v).0.vac, 981.0e3, "the engines its throttle runs: the MVac");
     assert_eq!(v.next_stage(&w).unwrap().0, "Second stage ignition");
     // Saved and loaded, both pieces are the same.
     let fleet = vec![v.clone(), booster.clone()];

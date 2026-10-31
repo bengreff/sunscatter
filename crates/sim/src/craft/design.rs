@@ -18,17 +18,12 @@ use std::sync::{Arc, OnceLock};
 /// Mach number of the orientation-averaged drag area (hypersonic).
 const MEAN_DRAG_MACH: f64 = 10.0;
 
-/// What the tanks hold, for the nodes' heat capacities.
+/// What the tanks hold, for the nodes' heat capacities (F2): each tank of
+/// the volume grid (the ship's tanks, then its bottles:
+/// `ShipDef::regions`) by its own contents where they sit
+/// (`systems::plumbing::held`).
 #[derive(Clone, Debug, PartialEq)]
-pub enum Aboard {
-    /// A made-up craft's propellant (kg): every tank filled to the same
-    /// fraction from its base, at the craft file's specific heat.
-    Fill(f64),
-    /// A craft of parts (F2): each tank of the volume grid (the ship's
-    /// tanks, then its bottles: `ShipDef::regions`) by its own contents
-    /// where they sit (`systems::plumbing::held`).
-    Tanks(Vec<Held>),
-}
+pub struct Aboard(pub Vec<Held>);
 
 /// One tank's contents for the nodes: `mass` (kg) of `specific_heat`
 /// (J/(kg·K)) between the heights `from` and `to` (m) along its region
@@ -52,8 +47,6 @@ pub struct CraftDesign {
     pub volume: VolumeGrid,
     /// Heat capacity of each node without propellant (J/K).
     pub dry_capacity: Vec<f64>,
-    /// Specific heat of the propellant (J/(kg·K)).
-    pub propellant_specific_heat: f64,
     /// Tank capacity (kg).
     pub tank_capacity: f64,
     /// The node at the engine's mount.
@@ -158,7 +151,6 @@ impl CraftDesign {
             network,
             volume,
             dry_capacity,
-            propellant_specific_heat: t.propellant_specific_heat,
             tank_capacity: craft.spec.propellant.capacity,
             engine_node,
             nozzle_cells,
@@ -177,38 +169,32 @@ impl CraftDesign {
         }
     }
 
-    /// Each node's heat capacity (J/K) with `aboard` in the tanks: a made-up
-    /// craft's propellant filling them together, or each tank's own
-    /// contents in the nodes where they sit. A grid with other tanks than
-    /// the list (a craft of parts of one part: its first tank) takes the
-    /// list's total as one fill, at its mean specific heat.
+    /// Each node's heat capacity (J/K) with `aboard` in the tanks: each
+    /// tank's own contents in the nodes where they sit. A grid with other
+    /// tanks than the list (a craft of parts of one part: its first tank)
+    /// takes the list's total as one fill, at its mean specific heat.
     pub fn node_capacity(&self, aboard: &Aboard, out: &mut [f64]) {
-        let fill = |mass: f64, c: f64, out: &mut [f64]| {
+        let held = &aboard.0;
+        if held.len() != self.volume.tanks() {
+            let mass: f64 = held.iter().map(|h| h.mass).sum();
+            let heat: f64 = held.iter().map(|h| h.mass * h.specific_heat).sum();
+            let c = if mass > 0.0 { heat / mass } else { 0.0 };
             let fill = if self.tank_capacity > 0.0 { mass / self.tank_capacity } else { 0.0 };
             self.volume.propellant(mass, fill, out);
             for (o, dry) in out.iter_mut().zip(&self.dry_capacity) {
                 *o = dry + *o * c;
             }
-        };
-        match aboard {
-            Aboard::Fill(propellant) => fill(*propellant, self.propellant_specific_heat, out),
-            Aboard::Tanks(held) if held.len() != self.volume.tanks() => {
-                let mass: f64 = held.iter().map(|h| h.mass).sum();
-                let heat: f64 = held.iter().map(|h| h.mass * h.specific_heat).sum();
-                fill(mass, if mass > 0.0 { heat / mass } else { 0.0 }, out);
+            return;
+        }
+        out.fill(0.0);
+        for (k, h) in held.iter().enumerate().filter(|(_, h)| h.mass > 0.0) {
+            let amount = h.mass * h.specific_heat;
+            if !self.volume.band(k, amount, (h.from, h.to), out) {
+                out[self.volume.nearest(h.at) as usize] += amount;
             }
-            Aboard::Tanks(held) => {
-                out.fill(0.0);
-                for (k, h) in held.iter().enumerate().filter(|(_, h)| h.mass > 0.0) {
-                    let amount = h.mass * h.specific_heat;
-                    if !self.volume.band(k, amount, (h.from, h.to), out) {
-                        out[self.volume.nearest(h.at) as usize] += amount;
-                    }
-                }
-                for (o, dry) in out.iter_mut().zip(&self.dry_capacity) {
-                    *o += dry;
-                }
-            }
+        }
+        for (o, dry) in out.iter_mut().zip(&self.dry_capacity) {
+            *o += dry;
         }
     }
 

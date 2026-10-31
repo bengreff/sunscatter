@@ -10,7 +10,7 @@
 //! the plumbing has its slug ([`Slug`], [`MassModel::with_slugs`]).
 //! Everything is in body axes; inertia tensors are about the centre of mass.
 
-use super::file::{Primitive, Skin, Tank};
+use super::file::{Primitive, Skin};
 use super::mesh::Surface;
 use glam::{DMat3, DVec3};
 
@@ -29,29 +29,6 @@ pub struct MassModel {
     pub dry_com: DVec3,
     /// Dry inertia about `dry_com` (kg·m²).
     pub dry_inertia: DMat3,
-    pub tank_base: DVec3,
-    /// Unit direction in which the tank fills.
-    pub tank_dir: DVec3,
-    pub tank_height: f64,
-    pub tank_radius: f64,
-    /// Propellant mass of a full tank (kg).
-    pub capacity: f64,
-    /// Several tanks (a craft of parts): all filled to the same fraction
-    /// (they feed together), their propellant's moments as polynomials in
-    /// that fraction. `None`: the one tank above.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tanks: Option<TankMoments>,
-}
-
-/// The propellant of several tanks filled to the same fraction f, each a
-/// solid cylinder filling from its base: its first moment `f·A + f²·B` and
-/// second moment `Σ m x xᵀ = f·S₁ + f²·S₂ + f³·S₃` about the body origin
-/// (per tank of capacity c, height H, radius r, base b and axis d: mass
-/// f·c, centroid b + d·fH/2, spread c·f·(r²/4)(𝟙 − d dᵀ) + c·f³·H²/12·d dᵀ).
-#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct TankMoments {
-    pub first: [DVec3; 2],
-    pub second: [DMat3; 3],
 }
 
 /// A tank's liquid as one solid cylinder: `mass` (kg) from `base` along the
@@ -66,23 +43,6 @@ pub struct Slug {
     pub axis: DVec3,
     pub height: f64,
     pub radius: f64,
-}
-
-impl TankMoments {
-    /// The moments of `tanks` (region, capacity).
-    pub fn of(tanks: &[(Tank, f64)]) -> Self {
-        let mut m = TankMoments { first: [DVec3::ZERO; 2], second: [DMat3::ZERO; 3] };
-        for &(t, c) in tanks {
-            let (b, d, h, r) = (t.base, t.axis.normalize(), t.axis.length(), t.radius);
-            m.first[0] += b * c;
-            m.first[1] += d * (c * h / 2.0);
-            let across = DMat3::IDENTITY - outer(d, d);
-            m.second[0] += (outer(b, b) + across * (r * r / 4.0)) * c;
-            m.second[1] += (outer(b, d) + outer(d, b)) * (c * h / 2.0);
-            m.second[2] += outer(d, d) * (c * h * h / 3.0);
-        }
-        m
-    }
 }
 
 impl MassProps {
@@ -172,31 +132,14 @@ fn inertia_from_second(second: DMat3) -> DMat3 {
 
 impl MassModel {
     /// The model of a craft: `dry_mass` spread over `surface` by skin areal
-    /// mass, and the tank.
-    pub fn new(
-        surface: &Surface,
-        primitives: &[Primitive],
-        default_skin: &Skin,
-        dry_mass: f64,
-        tank: &Tank,
-        capacity: f64,
-    ) -> Self {
+    /// mass.
+    pub fn new(surface: &Surface, primitives: &[Primitive], default_skin: &Skin, dry_mass: f64) -> Self {
         let (m, first, second) =
             shell_moments(surface, |p| primitives[p as usize].skin.unwrap_or(*default_skin).areal_mass);
         let scale = dry_mass / m;
         let com = first / m;
         let about_origin = inertia_from_second(second * scale);
-        MassModel {
-            dry_mass,
-            dry_com: com,
-            dry_inertia: about_origin - parallel_axis(dry_mass, com),
-            tank_base: tank.base,
-            tank_dir: tank.axis.normalize(),
-            tank_height: tank.axis.length(),
-            tank_radius: tank.radius,
-            capacity,
-            tanks: None,
-        }
+        MassModel { dry_mass, dry_com: com, dry_inertia: about_origin - parallel_axis(dry_mass, com) }
     }
 
     /// A part's dry mass properties: `dry_mass` spread over its own
@@ -210,25 +153,17 @@ impl MassModel {
     }
 
     /// The model of a craft of parts: their dry mass properties summed
-    /// (parallel-axis theorem) and their tanks (region, capacity), filled
-    /// to the same fraction.
-    pub fn of_parts(dry: &[MassProps], tanks: &[(Tank, f64)]) -> Self {
+    /// (parallel-axis theorem).
+    pub fn of_parts(dry: &[MassProps]) -> Self {
         let mass: f64 = dry.iter().map(|p| p.mass).sum();
         let com = dry.iter().map(|p| p.com * p.mass).sum::<DVec3>() / mass;
         let inertia = dry.iter().fold(DMat3::ZERO, |i, p| i + p.inertia + parallel_axis(p.mass, p.com - com));
-        let none = (Tank { base: DVec3::ZERO, axis: DVec3::Z, radius: 0.0 }, 0.0);
-        let (tank, _) = tanks.first().copied().unwrap_or(none);
-        MassModel {
-            dry_mass: mass,
-            dry_com: com,
-            dry_inertia: inertia,
-            tank_base: tank.base,
-            tank_dir: tank.axis.normalize(),
-            tank_height: tank.axis.length(),
-            tank_radius: tank.radius,
-            capacity: tanks.iter().map(|t| t.1).sum(),
-            tanks: (tanks.len() > 1).then(|| TankMoments::of(tanks)),
-        }
+        MassModel { dry_mass: mass, dry_com: com, dry_inertia: inertia }
+    }
+
+    /// The dry craft's mass properties.
+    pub fn dry(&self) -> MassProps {
+        MassProps { mass: self.dry_mass, com: self.dry_com, inertia: self.dry_inertia }
     }
 
     /// Mass properties with each tank's own contents (a craft of catalog
@@ -236,7 +171,7 @@ impl MassModel {
     /// cylinder, [`Slug`]: `systems::plumbing::contents`) and the point
     /// masses (the gas).
     pub fn with_slugs(&self, slugs: &[Slug], points: &[(DVec3, f64)]) -> MassProps {
-        let mut items = vec![MassProps { mass: self.dry_mass, com: self.dry_com, inertia: self.dry_inertia }];
+        let mut items = vec![self.dry()];
         for s in slugs.iter().filter(|s| s.mass > 0.0) {
             let com = s.base + s.axis * (0.5 * s.height);
             items.push(MassProps { mass: s.mass, com, inertia: solid_cylinder(s.mass, s.radius, s.height, s.axis) });
@@ -248,39 +183,11 @@ impl MassModel {
         }
         MassProps::sum(&items)
     }
-
-    /// Mass properties with `propellant` kg in the tank (clamped to
-    /// [0, capacity]).
-    pub fn at(&self, propellant: f64) -> MassProps {
-        let p = propellant.clamp(0.0, self.capacity);
-        let mass = self.dry_mass + p;
-        if p == 0.0 {
-            return MassProps { mass, com: self.dry_com, inertia: self.dry_inertia };
-        }
-        if let Some(t) = &self.tanks {
-            let f = p / self.capacity;
-            let first = t.first[0] * f + t.first[1] * (f * f);
-            let second = t.second[0] * f + t.second[1] * (f * f) + t.second[2] * (f * f * f);
-            let com = (self.dry_com * self.dry_mass + first) / mass;
-            // The propellant's second moment about the centre of mass.
-            let about = second - outer(first, com) - outer(com, first) + outer(com, com) * p;
-            let inertia =
-                self.dry_inertia + parallel_axis(self.dry_mass, self.dry_com - com) + inertia_from_second(about);
-            return MassProps { mass, com, inertia };
-        }
-        let h = self.tank_height * p / self.capacity;
-        let p_com = self.tank_base + self.tank_dir * (0.5 * h);
-        let com = (self.dry_com * self.dry_mass + p_com * p) / mass;
-        let inertia = self.dry_inertia
-            + parallel_axis(self.dry_mass, self.dry_com - com)
-            + solid_cylinder(p, self.tank_radius, h, self.tank_dir)
-            + parallel_axis(p, p_com - com);
-        MassProps { mass, com, inertia }
-    }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::super::file::Tank;
     use super::super::mesh::{union_surface, Resolution};
     use super::super::Shape;
     use super::*;
@@ -377,10 +284,9 @@ mod tests {
         }
     }
 
-    /// Several tanks at the same fill: the polynomial moments against each
-    /// tank's slug (a solid cylinder from its base) summed by the
-    /// parallel-axis theorem, at fills from empty to full; and the dry parts
-    /// summed the same way.
+    /// Several tanks' slugs (each a solid cylinder from its base) against
+    /// the bodies summed by the parallel-axis theorem by hand, at fills
+    /// from empty to full; and the dry parts summed the same way.
     #[test]
     fn several_tanks_fill_together_as_their_slugs_summed() {
         let tanks = [
@@ -400,12 +306,11 @@ mod tests {
                 inertia: DMat3::from_diagonal(DVec3::splat(80.0)),
             },
         ];
-        let m = MassModel::of_parts(&dry, &tanks);
+        let m = MassModel::of_parts(&dry);
         let dry_mass = 3_500.0;
         let dry_com = (dry[0].com * 3_000.0 + dry[1].com * 500.0) / dry_mass;
         assert!((m.dry_com - dry_com).length() < 1e-12);
-        let capacity = 24_900.0;
-        assert_eq!((m.dry_mass, m.capacity), (dry_mass, capacity));
+        assert_eq!(m.dry_mass, dry_mass);
         for f in [0.0, 1e-6, 0.13, 0.5, 0.97, 1.0] {
             // Each body: (mass, centre, inertia about its centre).
             let mut bodies: Vec<(f64, DVec3, DMat3)> = dry.iter().map(|p| (p.mass, p.com, p.inertia)).collect();
@@ -418,7 +323,16 @@ mod tests {
             let mass: f64 = bodies.iter().map(|b| b.0).sum();
             let com = bodies.iter().map(|b| b.1 * b.0).sum::<DVec3>() / mass;
             let inertia = bodies.iter().fold(DMat3::ZERO, |i, b| i + b.2 + parallel_axis(b.0, b.1 - com));
-            let props = m.at(capacity * f);
+            let slugs: Vec<Slug> = (tanks.iter())
+                .map(|(t, c)| Slug {
+                    mass: c * f,
+                    base: t.base,
+                    axis: t.axis.normalize(),
+                    height: t.axis.length() * f,
+                    radius: t.radius,
+                })
+                .collect();
+            let props = m.with_slugs(&slugs, &[]);
             assert!((props.mass - mass).abs() < 1e-9 * mass, "{f}");
             assert!((props.com - com).length() < 1e-10, "{f}: {} vs {com}", props.com);
             assert!(close(props.inertia, inertia, 1e-12), "{f}: {} vs {inertia}", props.inertia);

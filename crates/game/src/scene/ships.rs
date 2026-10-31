@@ -30,10 +30,6 @@ use std::sync::Arc;
 const SHIP_COLOR: [f32; 3] = [0.8, 0.8, 0.82];
 const ACTIVE_COLOR: [f32; 3] = [0.95, 0.85, 0.6];
 
-/// The test craft's flame mark: it starts this far behind the engine's
-/// mount point (the bell's throat) and is this wide (m).
-const TEST_FLAME_START: f64 = 1.1;
-const TEST_FLAME_RADIUS: f64 = 0.7;
 /// A component engine's (a thruster pod's) exit below its gimbal point (m).
 const POD_EXIT: f64 = 0.3;
 
@@ -192,19 +188,10 @@ impl ShipModels {
 
     fn build(&mut self, craft: &Craft, meshes: &mut Assets<Mesh>) -> Model {
         let Some(def) = craft.ship.as_deref() else {
-            let e = &craft.spec.engine;
-            let exhaust = -e.mount.dir.normalize_or(DVec3::Z);
-            let nozzle = Nozzle { exit: e.mount.pos + exhaust * TEST_FLAME_START, exhaust, radius: TEST_FLAME_RADIUS };
+            // No parts' systems: no engines, nothing burns.
             let plain = Drawn { mesh: meshes.add(bevy_mesh(&craft.mesh)), colour: None, mechanism: None };
             let bound = bound(std::iter::once(&craft.mesh));
-            // The test craft burns no named propellants: drawn as LOX/RP-1
-            // with its own nozzle and the default expansion (an assumption).
-            let source = sim::systems::exhaust::propellants().pair("LOX", "RP-1").map(|products| PlumeSource {
-                spec: NozzleSpec::of_engine(&craft.params().engine),
-                mixture_ratio: products.mixture_ratio,
-                products: products.clone(),
-            });
-            return Model { groups: vec![plain], flames: vec![(None, nozzle, false, source)], bound };
+            return Model { groups: vec![plain], flames: Vec::new(), bound };
         };
         let ids: Vec<u32> = craft.parts.iter().map(|p| p.id).collect();
         let colours = parts::part_colours(craft, def, sim::materials::materials());
@@ -493,7 +480,7 @@ pub fn update_parts(
                 (Some(def), Some(thrusts)) => {
                     Firing { pressure, fractions: parts::engine_fractions(&def, &thrusts), thrusts }
                 }
-                _ => Firing { pressure, thrusts: Vec::new(), fractions: vec![plain_fraction(&sim, i)] },
+                _ => Firing { pressure, thrusts: Vec::new(), fractions: Vec::new() },
             }
         });
         let k = flame.engine.unwrap_or(0);
@@ -531,21 +518,6 @@ pub fn update_parts(
         if cone {
             *t = parts::flame(&nozzle, fraction);
         }
-    }
-}
-
-/// The test craft's engine's share of full thrust: a planned burn's full
-/// thrust, else its setting at the throttle while it runs.
-fn plain_fraction(sim: &SimState, i: usize) -> f64 {
-    let Some(v) = sim.fleet.get(i) else { return 0.0 };
-    if !crate::scene::engine_on(sim, i) {
-        return 0.0;
-    }
-    let burning = v.trajectory().and_then(|tr| tr.segment_at(sim.clock)).is_some();
-    if burning {
-        1.0
-    } else {
-        v.craft.engine.setting(throttle_of(sim, i))
     }
 }
 

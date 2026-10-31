@@ -80,10 +80,10 @@ impl Vessel {
         self.bubble.member
     }
 
-    /// Whether the vessel leads a bubble with `controls`: controllable
+    /// Whether the vessel leads a bubble: controllable
     /// (D083) and live for its own reasons (it would not coast now).
-    pub fn leads(&self, world: &World, controls: &Controls) -> bool {
-        matches!(self.phase, Phase::Powered { .. }) && self.controllable() && !self.would_coast(world, controls)
+    pub fn leads(&self, world: &World) -> bool {
+        matches!(self.phase, Phase::Powered { .. }) && self.controllable() && !self.would_coast(world)
     }
 
     /// Hit by another craft at `speed` (m/s) on `part`: past the craft's
@@ -163,11 +163,11 @@ pub fn advance(world: &World, fleet: &mut [Vessel], controls: ControlsOf, target
     }
     // Leaders now, or about to be (a coast or landing whose engine starts
     // goes live at its own time), and members.
-    let starting = |v: &Vessel, c: &Controls| !matches!(v.phase, Phase::Powered { .. }) && v.engine_running(c);
+    let starting = |v: &Vessel| !matches!(v.phase, Phase::Powered { .. }) && v.engine_running();
     let mut cores: Vec<usize> = (0..n)
         .filter(|&i| {
-            let (v, c) = (&fleet[i], controls(i));
-            v.bubble.member || ((v.leads(world, &c) || starting(v, &c)) && v.controllable())
+            let v = &fleet[i];
+            v.bubble.member || ((v.leads(world) || starting(v)) && v.controllable())
         })
         .collect();
     if cores.is_empty() {
@@ -188,7 +188,7 @@ pub fn advance(world: &World, fleet: &mut [Vessel], controls: ControlsOf, target
     for k in 0..cores.len() {
         let i = cores[k];
         let c = controls(i);
-        if starting(&fleet[i], &c) && (0..n).any(|j| j != i && flying(&fleet[j]) && reach(&fleet[i], &fleet[j])) {
+        if starting(&fleet[i]) && (0..n).any(|j| j != i && flying(&fleet[j]) && reach(&fleet[i], &fleet[j])) {
             let t = fleet[i].time;
             fleet[i].advance(world, t, &c, COAST_BUDGET);
         }
@@ -327,7 +327,7 @@ fn epoch(
         .iter()
         .map(|&i| {
             let v = &fleet[i];
-            Candidate { flying: flying(v), leader: v.leads(world, &controls(i)), state: v.bubble }
+            Candidate { flying: flying(v), leader: v.leads(world), state: v.bubble }
         })
         .collect();
     let pos: Vec<DVec3> = here.iter().map(|&i| state_about(world, fleet[i], t, anchor).0).collect();
@@ -343,7 +343,7 @@ fn epoch(
             }
             (true, false) => {
                 v.bubble = BubbleState::default();
-                if matches!(v.phase, Phase::Powered { .. }) && v.would_coast(world, &c) {
+                if matches!(v.phase, Phase::Powered { .. }) && v.would_coast(world) {
                     v.start_coast(world);
                 }
             }

@@ -148,7 +148,7 @@ fn run(name: &str, craft: &Craft, runs: usize) {
     // Its tanks and bottles as loaded, each where it sits.
     let def = craft.ship.as_ref().expect("a craft of parts");
     let held = sim::systems::plumbing::held(def, &ShipState::initial(def));
-    design.node_capacity(&Aboard::Tanks(held), &mut capacity);
+    design.node_capacity(&Aboard(held), &mut capacity);
     let case = Case { design, capacity, node_heat: vec![0.0; m] };
     let (n, unknowns) = (case.design.cells.len(), case.design.cells.len() + m);
     let sun = DVec3::new(1361.0, 0.0, 0.0);

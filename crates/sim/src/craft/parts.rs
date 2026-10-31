@@ -297,16 +297,6 @@ pub fn aggregate(spec: &mut CraftFile, parts: &[Part]) {
     spec.crew = parts.iter().map(|p| p.crew).sum();
 }
 
-/// Attitude-control couple per body axis (N·m) and flow at full command
-/// (kg/s) of the parts' thrusters.
-pub fn rcs(parts: &[Part]) -> (DVec3, DVec3) {
-    match parts {
-        [one] => one.rcs.map_or((DVec3::ZERO, DVec3::ZERO), |r| (r.torque(), r.flow())),
-        _ => (parts.iter().filter_map(|p| p.rcs))
-            .fold((DVec3::ZERO, DVec3::ZERO), |(t, f), r| (t + r.torque(), f + r.flow())),
-    }
-}
-
 /// The connected groups of parts once the attachments of `cut` (part
 /// indices: each loses the link to its parent) are broken and the parts
 /// of `removed` are taken out (all their links): each group sorted, the

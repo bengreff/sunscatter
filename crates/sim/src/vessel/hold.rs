@@ -432,7 +432,7 @@ impl super::Vessel {
         let maneuver = (controls.hold == HoldMode::Maneuver)
             .then(|| self.program_direction().or_else(|| maneuver_direction(&self.nodes, &snap, state)));
         let inputs = hold_inputs(world, &snap, state, controls, maneuver.flatten());
-        aim(controls, &inputs, self.craft.engine.mount_dir)
+        aim(controls, &inputs, self.thrust_axis())
     }
 }
 
