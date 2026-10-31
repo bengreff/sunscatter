@@ -1,14 +1,14 @@
 # Brief: AUDIT, warp invariance and the software layers (2026-10-30)
 
-Two owner decisions from tonight ([interview-2026-10-30-roadmap.md](../archive/interviews/interview-2026-10-30-roadmap.md)) need a map of the code before the wave can build them:
+Two owner decisions from tonight ([interview-2026-10-30-roadmap.md](../interviews/interview-2026-10-30-roadmap.md)) need a map of the code before the wave can build them:
 - **D129:** "EXACTLY the same behavior at 100,000 warp as you would get at 1x warp." Only the player's input changes the course of events. The owner asked: "Tell me where that is difficult."
 - **D128:** three layers of ship software. Each part's own logic is layer 1; the ship computer's programs are layer 2; the agent outside the game is layer 3.
 
-Your job is to find out and write it down, not to fix. ADVANCE and LAYERS fix it later from your docs. Follow [agent-rules.md](agent-rules.md). Your name is AUDIT and your target dir is `target/agents/audit` (a cold start; sim only, mostly).
+Your job is to find out and write it down, not to fix. ADVANCE and LAYERS fix it later from your docs. Follow [agent-rules.md](../../plans/agent-rules.md). Your name is AUDIT and your target dir is `target/agents/audit` (a cold start; sim only, mostly).
 
 Two other agents edit code at the same time:
 - **PLANNER** ([brief-planner.md](brief-planner.md)) works on planned burns;
-- **ONEKIND-3** ([brief-onekind.md](brief-onekind.md)) works on tests and the stress craft.
+- **ONEKIND-3** ([brief-onekind.md](../../plans/brief-onekind.md)) works on tests and the stress craft.
 
 Write only **new** files: your docs, and test files of your own under `crates/sim/tests/`. Edit nothing else. List any other change you find needed in your State.
 

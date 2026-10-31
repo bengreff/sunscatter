@@ -7,8 +7,8 @@ D123 froze visual work until both flights fly. The owner's request is an excepti
 Follow [agent-rules.md](agent-rules.md). Your name is INTERFACE and your target dir is `target/agents/interface` (a cold start; you need a release build of the game for headless runs).
 
 Two other agents run at the same time:
-- **PLANNER-3** ([brief-planner.md](brief-planner.md)) moves the game's planner onto nodes: `game::planner`, `interface/menus/maneuver.rs`, the trajectory predictions, and MCP's `set_plan` in `game::agent`. Leave those files to it, and list what they need in your State.
-- **RESEARCH** ([brief-research.md](brief-research.md)) writes docs only.
+- **PLANNER-3** ([brief-planner.md](../archive/briefs/brief-planner.md)) moves the game's planner onto nodes: `game::planner`, `interface/menus/maneuver.rs`, the trajectory predictions, and MCP's `set_plan` in `game::agent`. Leave those files to it, and list what they need in your State.
+- **RESEARCH** ([brief-research.md](../archive/briefs/brief-research.md)) writes docs only.
 
 ONEKIND-4 starts later and moves the game's tests off the test craft (`menus/*` tests, `stage_bar/rows_tests`, `navball`, `saves`). Commit often, so it can work on top of you.
 

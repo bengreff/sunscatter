@@ -1,8 +1,8 @@
 # Brief: RESEARCH, the two flights' hard problems (2026-10-31)
 
-Phase 4 flies Crew Dragon to a station and back, and lands the Falcon 9's booster (D117, D123, D125, D126), after the sim-wide wave. This brief prepares the designs those flights need, so their agents start from researched designs instead of a blank page. Follow [agent-rules.md](agent-rules.md). Your name is RESEARCH. You build nothing and run no game, so you have no target dir.
+Phase 4 flies Crew Dragon to a station and back, and lands the Falcon 9's booster (D117, D123, D125, D126), after the sim-wide wave. This brief prepares the designs those flights need, so their agents start from researched designs instead of a blank page. Follow [agent-rules.md](../../plans/agent-rules.md). Your name is RESEARCH. You build nothing and run no game, so you have no target dir.
 
-Two agents edit code at the same time: **PLANNER-2** ([brief-planner.md](brief-planner.md)) and **ONEKIND-3** ([brief-onekind.md](brief-onekind.md)). You write only docs:
+Two agents edit code at the same time: **PLANNER-2** ([brief-planner.md](brief-planner.md)) and **ONEKIND-3** ([brief-onekind.md](../../plans/brief-onekind.md)). You write only docs:
 - new files under `docs/technical/`;
 - your additions to `docs/vehicles/falcon9.md`, as new rows or sections, never rewording existing ones;
 - this brief's State.
@@ -37,16 +37,16 @@ Keep it to what the flights' agents need. Each design doc ends with "Open for th
 
 **Done (RESEARCH, 2026-10-30).** All three items are written; each doc's status is *design*, and each ends with its own "Open for the owner". The docs landed in **26f4639**; this State in the commit after it.
 
-1. [landing-guidance.md](../technical/landing-guidance.md).
+1. [landing-guidance.md](../../technical/landing-guidance.md).
    - **Pick:** one layer-2 program, `ship_os::landing`. Its predictor is `sim::landing::model` taking a burn plan, the one owner of predicted descents. A Gauss–Newton corrector with a fixed number of steps per wake steers the boostback (velocity-to-be-gained, least-norm step), the entry burn (ignition and cutoff on the predicted q and heating) and the aero descent (an angle-of-attack command held by SAS through the fins).
    - **Landing burn:** a lossless-convexification SOCP (2007 thrust bounds, 2013 pointing). Drag is carried as a known acceleration from the last plan, and the back-pressure enters the mass flow exactly. Minimum error and minimum fuel are one exact-penalty solve; t_f is searched across wakes. It is solved every 0.2 s by a custom **primal–dual interior point** (ECOS's algorithm) with a fixed-pattern, pivot-free block-tridiagonal LDLᵀ and a cap of 30 iterations.
    - **Why the interior point:** the relaxation is tight only at the optimum, and a stage that cannot hover must not get a plan under its minimum throttle. It also certifies infeasibility for the fallback. PIPG/xPIPG (sub-ms) is the upgrade path. Estimate 5–15 ms per solve on one M2 Pro core.
    - Tests include the Açıkmeşe–Ploen Mars case (81 s, 399.5 kg) and Crew-13's RTLS.
-2. [entry-ablation.md](../technical/entry-ablation.md).
+2. [entry-ablation.md](../../technical/entry-ablation.md).
    - **Ablation:** a FIAT/CMA-class charring column per ablator cell (3-component Arrhenius integrated in closed form, a surface balance with film blowing, a B′c law derived from the atmosphere's oxygen), with TACOT's open parameters as PICA-X (E). Tests: Ablation Test-Cases 2.1 and 2.3 (15.7 / 19.5 / 25.7 mm at 60 s) and Stardust.
    - **Dragon's entry:** lift from the offset centre of mass through the existing aero model (Trevino 2008: L/D 0.18 at 12°, under 5 g), steered by an FNPEG-type bank predictor–corrector on the same predictor.
    - **Chutes:** layer-2 deploy from navigation plus barometric altitude, and an optional layer-1 baroswitch in the chute part, after Apollo's ELS (TN D-7437 checked: 24,000 ft, reefing 10 s, mains at 11,000 ft, 6 s and 10 s).
-3. [water-landing.md](../technical/water-landing.md). Per-cell hydrostatics; the slam by von Kármán's momentum method on the wetted footprint with the added mass implicit; drag in water. Checked by hand against TN D-3980: 20.4 g against the rigid theory's ~22 g, and ~490 kPa against 414 kPa measured. Dragon: 6.6 g at 7 m/s flat.
+3. [water-landing.md](../../technical/water-landing.md). Per-cell hydrostatics; the slam by von Kármán's momentum method on the wetted footprint with the added mass implicit; drag in water. Checked by hand against TN D-3980: 20.4 g against the rigid theory's ~22 g, and ~490 kPa against 414 kPa measured. Dragon: 6.6 g at 7 m/s flat.
 4. `falcon9.md`: 16 rows tagged (RESEARCH) in §3.2, §4.4, §4.5 and §5.5, and sources [S30]–[S36]. They cover:
    - Crew-13's RTLS timeline; the RTLS reserve (~57 t, D); relights (no spare); grid-fin authority (order of magnitude); the legs' energy (~5.3 m/s);
    - the trunk after the deorbit burn and Pacific splashdowns (2025); Crew-9's timeline; L/D; 3-of-4 mains;

@@ -1,14 +1,14 @@
 # Brief: PLANNER, planned burns for craft of parts (2026-10-30)
 
-D126: planned burns run closed-loop to their target state, with real engine starts, ullage settling and tail-off, as flight-layer programs. Today only the test craft can plan a burn (`Vessel::set_plan` returns `PlanError::PartsUnsupported` for a craft of parts), and its burn is open-loop: steady thrust at a constant mass flow along a direction law (`sim::vessel::burn`). Follow [agent-rules.md](agent-rules.md). Your name is PLANNER and your target dir is `target/agents/planner` (a cold start).
+D126: planned burns run closed-loop to their target state, with real engine starts, ullage settling and tail-off, as flight-layer programs. Today only the test craft can plan a burn (`Vessel::set_plan` returns `PlanError::PartsUnsupported` for a craft of parts), and its burn is open-loop: steady thrust at a constant mass flow along a direction law (`sim::vessel::burn`). Follow [agent-rules.md](../../plans/agent-rules.md). Your name is PLANNER and your target dir is `target/agents/planner` (a cold start).
 
 Two other agents run at the same time:
-- **ONEKIND-3** ([brief-onekind.md](brief-onekind.md)) moves the other tests onto craft of parts and rebuilds the stress craft. It deletes the made-up path and the test craft only **after** you land: leave the open-loop burn law in place, and tell the lead in your State when your tests no longer need it.
+- **ONEKIND-3** ([brief-onekind.md](../../plans/brief-onekind.md)) moves the other tests onto craft of parts and rebuilds the stress craft. It deletes the made-up path and the test craft only **after** you land: leave the open-loop burn law in place, and tell the lead in your State when your tests no longer need it.
 - **AUDIT** ([brief-audit.md](brief-audit.md)) reads the code for D129 (the same course of events at every warp) and D128 (the software layers), and writes only new docs and test files.
 
 ## Read first
 
-- Decisions: D126 (revised tonight: nodes only; an automatic burn settles with the craft's thrusters; the takeover rule), D128 (the three software layers: your program is layer 2), D129 (burns fly live for now; the same course of events at every warp), D075 (planned burns are flown by the maneuver hold), D029, D111, D022. The owner's answers: [interview-2026-10-30-roadmap.md](../archive/interviews/interview-2026-10-30-roadmap.md).
+- Decisions: D126 (revised tonight: nodes only; an automatic burn settles with the craft's thrusters; the takeover rule), D128 (the three software layers: your program is layer 2), D129 (burns fly live for now; the same course of events at every warp), D075 (planned burns are flown by the maneuver hold), D029, D111, D022. The owner's answers: [interview-2026-10-30-roadmap.md](../interviews/interview-2026-10-30-roadmap.md).
 - Docs: `docs/systems/motion.md`, `propulsion.md`, `avionics.md`; `docs/technical/engines.md` (start, tail-off, settling before a start), `plumbing.md` (settling by Bond number), `flight-software.md`, `ship-model.md` §5.10, `limbo.md` (low-thrust burns), `mcp.md` (`set_plan`), `testing.md` (how to fly a mission test). The planner's old spec: `docs/archive/plans/realism-1.md` §6a.
 - Code: `sim::vessel::burn` and `Vessel::set_plan` (`vessel/mod.rs`), `sim::vessel::trajectory`, `sim::systems::{flight, propulsion, rcs, estimate, plumbing}`, `sim::craft::program`, `game::planner`, `game::trajectory`, `crates/sim/tests/{planned_burns, hold_modes}.rs`.
 

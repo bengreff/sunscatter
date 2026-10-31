@@ -10,7 +10,7 @@ D124. The layout:
 - `docs/archive/` for finished work;
 - `docs/plans/` for live work and `HANDOFF.md`.
 
-Also remove the 700-line file cap. Follow [agent-rules.md](agent-rules.md). Your name is DOCS. You need no target dir: run `cargo` only for the checks CI runs (`tools/check_decision_refs.sh`, and clippy only if you touch code). Two other agents run at the same time: **ONEKIND** ([brief-onekind.md](brief-onekind.md)) on `sim` and `game`, and **MISSION** ([brief-mission.md](brief-mission.md)) on the game's MCP tools, the demo and `CLAUDE.md`'s Commands. They will list the doc changes their work needs in their briefs' State: apply them when you reach those docs.
+Also remove the 700-line file cap. Follow [agent-rules.md](agent-rules.md). Your name is DOCS. You need no target dir: run `cargo` only for the checks CI runs (`tools/check_decision_refs.sh`, and clippy only if you touch code). Two other agents run at the same time: **ONEKIND** ([brief-onekind.md](brief-onekind.md)) on `sim` and `game`, and **MISSION** ([brief-mission.md](../archive/briefs/brief-mission.md)) on the game's MCP tools, the demo and `CLAUDE.md`'s Commands. They will list the doc changes their work needs in their briefs' State: apply them when you reach those docs.
 
 ## The work, in order
 

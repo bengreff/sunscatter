@@ -1,14 +1,14 @@
 # Brief: ONEKIND, one kind of craft (2026-10-30)
 
 D121: "The test craft: delete it entirely". Every craft is built from parts (D100), and the made-up path (one placeholder part with a fuel number) goes. Follow [agent-rules.md](agent-rules.md). Your name is ONEKIND and your target dir is `target/agents/onekind`: start warm with `mv target/agents/flightsw target/agents/onekind`. Two other agents run at the same time:
-- **MISSION** ([brief-mission.md](brief-mission.md)) replaces the scripted demo and the tour with MCP tools. Leave `crates/game/src/demo*.rs` and the tour to it: they are being deleted. If they stop compiling because of you, tell the lead in your State and wait for MISSION's deletion.
+- **MISSION** ([brief-mission.md](../archive/briefs/brief-mission.md)) replaces the scripted demo and the tour with MCP tools. Leave `crates/game/src/demo*.rs` and the tour to it: they are being deleted. If they stop compiling because of you, tell the lead in your State and wait for MISSION's deletion.
 - **DOCS** ([brief-docs.md](brief-docs.md)) is restructuring `docs/`. Edit docs only where CI needs it (citations of a deleted decision). List every other doc change your work needs in your State, and DOCS or the lead applies it.
 
 ## ONEKIND-3 (2026-10-30, night)
 
 You continue from this brief's State ("Left, in order"). Your name is ONEKIND-3; your target dir is `target/agents/onekind3`: start warm with `mv target/agents/onekind2 target/agents/onekind3`. MISSION and DOCS have finished. Two other agents run now:
-- **PLANNER** ([brief-planner.md](brief-planner.md)) builds closed-loop planned burns for craft of parts and moves the planned-burn tests (`planned_burns`, `hold_modes`' maneuver holds, the game's planner and predictions, `landing::model`). Leave those to it.
-- **AUDIT** ([brief-audit.md](brief-audit.md)) reads the code for D128 and D129, and writes only new docs and test files.
+- **PLANNER** ([brief-planner.md](../archive/briefs/brief-planner.md)) builds closed-loop planned burns for craft of parts and moves the planned-burn tests (`planned_burns`, `hold_modes`' maneuver holds, the game's planner and predictions, `landing::model`). Leave those to it.
+- **AUDIT** ([brief-audit.md](../archive/briefs/brief-audit.md)) reads the code for D128 and D129, and writes only new docs and test files.
 
 The order:
 1. Left 1, the tests that are not blocked, and Left 2, the stress craft. Then report to the lead and wait for PLANNER to land before Left 3 and 4.
@@ -23,7 +23,7 @@ The owner's answers tonight ([interview-2026-10-30-roadmap.md](../archive/interv
 ## ONEKIND-4 (2026-10-31)
 
 You continue from ONEKIND-3's State. Your name is ONEKIND-4; your target dir is `target/agents/onekind4`: start warm with `mv target/agents/onekind3 target/agents/onekind4`. Running now:
-- **PLANNER-3** ([brief-planner.md](brief-planner.md)) moves the game's planner, `predict_tests` and `landing::model` onto nodes, and MCP's `set_plan` (`game::agent`). It says in its State when nothing needs the open-loop burn law any more.
+- **PLANNER-3** ([brief-planner.md](../archive/briefs/brief-planner.md)) moves the game's planner, `predict_tests` and `landing::model` onto nodes, and MCP's `set_plan` (`game::agent`). It says in its State when nothing needs the open-loop burn law any more.
 - **INTERFACE** ([brief-interface.md](brief-interface.md)) works in `game::systems_screen` and `game::interface`. Before you edit a game test file there, check `git status` for its uncommitted changes; if it has some, do other work first.
 
 The order:
