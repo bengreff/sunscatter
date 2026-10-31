@@ -82,6 +82,8 @@ pub struct LandingStart {
     pub throttle: f64,
     /// The parachutes, armed if the command is given.
     pub chute: crate::chute::ChuteState,
+    /// The ship computer's deploy of them (`ship_os::chutes`).
+    pub deploy: crate::systems::ship_os::chutes::Deploy,
     pub attitude: AssumedAttitude,
     /// The body the surface-relative quantities refer to (retrograde,
     /// vertical and horizontal speed, the braking stop).
@@ -116,7 +118,22 @@ impl LandingStart {
         let body = nearest_surface(world, &world.snapshot(t), anchor, r)?;
         let infinite = vessel.debug();
         let (propellant, thrust, mass) = propulsion_of(vessel, mass);
-        Some(LandingStart { t, anchor, r, v, propellant, thrust, mass, infinite, throttle, chute, attitude, body })
+        let deploy = vessel.chute_deploy();
+        Some(LandingStart {
+            t,
+            anchor,
+            r,
+            v,
+            propellant,
+            thrust,
+            mass,
+            infinite,
+            throttle,
+            chute,
+            deploy,
+            attitude,
+            body,
+        })
     }
 
     /// Thrust-to-weight ratio at full throttle with thrust at ambient

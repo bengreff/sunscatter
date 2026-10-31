@@ -13,6 +13,6 @@
             main: (cd_area: 3150.0, diameter: 35.4, fill_constant: 7.0,
                    reefing: [(cd_fraction: 0.15, until: 6.0)],
                    deploy_max_q: 2.5e3, max_load: 1.0e6),
-            main_height: 1800.0,
+            main_height: 1800.0, drogue_height: Some(5500.0),          // P (falcon9.md §4.5)
         ))),
 )

@@ -168,6 +168,7 @@ fn air_start(
         infinite: vessel.debug(),
         throttle: 0.0,
         chute,
+        deploy: vessel.chute_deploy(),
         attitude: crate::landing::assumed_attitude(controls, vessel.attitude.q),
         body,
     })

@@ -3,11 +3,11 @@
 //! the vessel wires them up, `aero` turns the drag area into force).
 //!
 //! * **Sequence:** the command arms it. The drogue opens at once; the
-//!   main opens when the craft is below `main_height` above the ground
-//!   and the drogue is out of its reefed stages (or gone), and the drogue
-//!   is cut away at that moment (Apollo, Orion and Soyuz all fly this
-//!   order; sources in the craft file). A chute without a drogue opens
-//!   its main on the command.
+//!   main opens when the ship computer says so (`systems::ship_os::chutes`,
+//!   D128 layer 2: below `main_height` by the altitude reading, once the
+//!   drogue is out of its reefed stages or gone, [`ChuteState::drogue_done`]),
+//!   and the drogue is cut away at that moment (Apollo, Orion and Soyuz all
+//!   fly this order; sources in the craft file).
 //! * **Reefing:** each canopy opens to its reefed stages in turn, on
 //!   timers from line stretch (pyrotechnic reefing-line cutters), then to
 //!   full.
@@ -71,6 +71,10 @@ pub struct ChuteSpec {
     pub main: Canopy,
     /// Height above the ground at which the main opens (m).
     pub main_height: f64,
+    /// Height below which the computer, switched to arm by itself, fires
+    /// the drogues (m; `ship_os::chutes`). `None`: it never arms by itself.
+    #[serde(default)]
+    pub drogue_height: Option<f64>,
 }
 
 /// Where one canopy is.
@@ -111,8 +115,6 @@ pub struct Flow {
     pub q: f64,
     /// Airspeed (m/s).
     pub speed: f64,
-    /// Height above the ground (m).
-    pub height: f64,
 }
 
 impl ChuteSpec {
@@ -127,7 +129,7 @@ impl ChuteSpec {
             deploy_max_q: 0.0,
             max_load: 0.0,
         };
-        ChuteSpec { mount: glam::DVec3::ZERO, drogue: None, main, main_height: 0.0 }
+        ChuteSpec { mount: glam::DVec3::ZERO, drogue: None, main, main_height: 0.0, drogue_height: None }
     }
 }
 
@@ -172,28 +174,38 @@ impl ChuteState {
         spec.drogue.as_ref().map_or(0.0, |d| d.cd_area_of(self.drogue)) + spec.main.cd_area_of(self.main)
     }
 
-    /// One step of `dt` seconds: arms on `command`, opens what the
-    /// sequence calls for, fills the open canopies and fails the
+    /// Whether the drogue lets the main open: none, failed, released, or
+    /// out of its reefed stages (its cutters' timers).
+    pub fn drogue_done(&self, spec: &ChuteSpec) -> bool {
+        match (&spec.drogue, self.drogue) {
+            (None, _) | (_, CanopyState::Failed | CanopyState::Released) => true,
+            (Some(d), CanopyState::Open { age, .. }) => !d.reefed(age),
+            (Some(_), CanopyState::Stowed) => false,
+        }
+    }
+
+    /// One step of `dt` seconds: arms on `command`, opens the drogue on
+    /// arming and the main when `open_main` (the ship computer's word,
+    /// `ship_os::chutes::main_now`), fills the open canopies and fails the
     /// overloaded ones (the drag of the step's end against `max_load`;
     /// none if `unbreakable`, debug mode, D064).
-    pub fn step(&mut self, spec: &ChuteSpec, command: bool, flow: Flow, dt: f64, unbreakable: bool) -> Vec<ChuteEvent> {
+    pub fn step(
+        &mut self,
+        spec: &ChuteSpec,
+        (command, open_main): (bool, bool),
+        flow: Flow,
+        dt: f64,
+        unbreakable: bool,
+    ) -> Vec<ChuteEvent> {
         let mut events = Vec::new();
         self.armed |= command;
         if !self.armed {
             return events;
         }
-        let drogue_done = match (&spec.drogue, self.drogue) {
-            (None, _) | (_, CanopyState::Failed | CanopyState::Released) => true,
-            (Some(d), CanopyState::Open { age, .. }) => !d.reefed(age),
-            (Some(_), CanopyState::Stowed) => false,
-        };
         if spec.drogue.is_some() && self.drogue == CanopyState::Stowed && self.main == CanopyState::Stowed {
             self.drogue = CanopyState::Open { age: 0.0, diameter: 0.0 };
             events.push(ChuteEvent::DrogueOpened);
-        } else if self.main == CanopyState::Stowed
-            && drogue_done
-            && (spec.drogue.is_none() || flow.height <= spec.main_height)
-        {
+        } else if self.main == CanopyState::Stowed && open_main {
             self.main = CanopyState::Open { age: 0.0, diameter: 0.0 };
             if matches!(self.drogue, CanopyState::Open { .. }) {
                 self.drogue = CanopyState::Released;
@@ -220,15 +232,15 @@ impl ChuteState {
 }
 
 impl ChuteState {
-    /// The drag area a landing prediction assumes at `height` above the
-    /// ground (m²): each canopy fully open from the moment the sequence
-    /// would open it, no filling and no failures.
-    pub fn predicted_cd_area(&self, spec: &ChuteSpec, height: f64) -> f64 {
+    /// The drag area a landing prediction assumes (m²): each canopy fully
+    /// open from the moment the sequence would open it, no filling and no
+    /// failures; `main_next` says the main is the next to open there
+    /// (`ship_os::chutes::main_expected`).
+    pub fn predicted_cd_area(&self, spec: &ChuteSpec, main_next: bool) -> f64 {
         use CanopyState::{Open, Stowed};
         if !self.armed {
             return 0.0;
         }
-        let main_next = self.main == Stowed && (spec.drogue.is_none() || height <= spec.main_height);
         match (&spec.drogue, self.drogue) {
             _ if matches!(self.main, Open { .. }) || main_next => spec.main.cd_area,
             (Some(d), Stowed | Open { .. }) if self.main == Stowed => d.cd_area,

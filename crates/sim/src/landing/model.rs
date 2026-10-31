@@ -84,6 +84,7 @@ pub(super) struct Model<'a> {
     body: NodeId,
     attitude: AssumedAttitude,
     chute: crate::chute::ChuteState,
+    deploy: crate::systems::ship_os::chutes::Deploy,
     infinite: bool,
     /// End a run where the vessel could coast again by this hand-over rule.
     exit: Option<LiveBoundary>,
@@ -123,6 +124,7 @@ impl<'a> Model<'a> {
             body: start.body,
             attitude: start.attitude,
             chute: start.chute,
+            deploy: start.deploy,
             infinite: start.infinite,
             exit: None,
         }
@@ -204,9 +206,9 @@ impl<'a> Model<'a> {
         } else {
             0.0
         };
-        let chute_area = if self.chute.armed {
+        let chute_area = if self.chute.armed || self.deploy.chutes.switch == crate::systems::ship_os::Switch::Auto {
             let height = Ground::new(self.world, snap, run.anchor, self.body).clearance(r);
-            self.chute.predicted_cd_area(&self.craft.chute, height)
+            crate::systems::ship_os::chutes::predicted_cd_area(&self.craft.chute, &self.deploy, &self.chute, height)
         } else {
             0.0
         };

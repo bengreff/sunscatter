@@ -150,6 +150,26 @@ impl Vessel {
         }
     }
 
+    /// The parachutes' deploy as a landing prediction reads it
+    /// (`ship_os::chutes`): its switch and press, and whether the vessel
+    /// lacks an altitude reading.
+    pub fn chute_deploy(&self) -> ship_os::chutes::Deploy {
+        let blind = !self.knowledge().knows(crate::systems::Quantity::Altitude);
+        ship_os::chutes::Deploy { chutes: self.software.chutes, blind }
+    }
+
+    /// The ship computer's software (D128 layer 2: the programs' switches
+    /// and state).
+    pub fn software(&self) -> &ship_os::Software {
+        &self.software
+    }
+
+    /// The parachutes' deploy switch (D126; the systems screen and MCP set
+    /// it like any setting).
+    pub fn set_chute_switch(&mut self, switch: ship_os::Switch) {
+        self.software.chutes.switch = switch;
+    }
+
     /// The computers' health (`systems::ship_os::health`; all working for a
     /// craft without the part system).
     pub fn flight_health(&self) -> ship_os::Health {
@@ -333,11 +353,16 @@ impl Vessel {
         out
     }
 
-    /// After commands or a tick: the readouts' engine; separations, and a
+    /// After commands or a tick: the parachutes' press; separations, and a
     /// shape whose mechanisms reached or left their deployed angle (legs
     /// out, grid fins in the flow), become the breakup the game applies
     /// (`plan_breakup`: the pieces, or one piece in its new configuration).
     pub(super) fn after_command(&mut self, _world: &World, effects: &[Effect]) {
+        // The deploy command (a press): the ship computer arms the chutes,
+        // or calls the main (`ship_os::chutes::press`, D126).
+        if self.destroyed.is_none() && effects.contains(&Effect::ArmChutes) {
+            ship_os::chutes::press(&mut self.software.chutes, &mut self.chute);
+        }
         let parts = &self.craft.design().parts;
         let separated: Vec<u32> = effects
             .iter()

@@ -48,6 +48,7 @@ impl Vessel {
             launch: None,
             nodes: Vec::new(),
             program: None,
+            software: Default::default(),
         };
         vessel.init_ship();
         vessel

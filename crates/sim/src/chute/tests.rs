@@ -1,16 +1,21 @@
 use super::*;
+use crate::systems::ship_os::chutes::{main_expected, main_now, Chutes};
 
 fn spec() -> ChuteSpec {
     crate::craft::small::rocket_ref().spec.chute.clone()
 }
 
-const STILL: Flow = Flow { q: 0.0, speed: 0.0, height: 10_000.0 };
+const STILL: (Flow, f64) = (Flow { q: 0.0, speed: 0.0 }, 10_000.0);
 
 /// Steps `state` for `seconds` in a constant `flow`, returning the events.
-fn run(state: &mut ChuteState, spec: &ChuteSpec, flow: Flow, seconds: f64) -> Vec<ChuteEvent> {
+/// The ship computer reads the height exactly (`ship_os::chutes`, on the
+/// press).
+fn run(state: &mut ChuteState, spec: &ChuteSpec, (flow, height): (Flow, f64), seconds: f64) -> Vec<ChuteEvent> {
     let mut events = Vec::new();
     for _ in 0..(seconds / 0.02).round() as usize {
-        events.extend(state.step(spec, true, flow, 0.02, false));
+        let armed = ChuteState { armed: true, ..*state };
+        let main = main_now(spec, &Chutes::default(), &armed, Some(height));
+        events.extend(state.step(spec, (true, main), flow, 0.02, false));
     }
     events
 }
@@ -19,9 +24,9 @@ fn run(state: &mut ChuteState, spec: &ChuteSpec, flow: Flow, seconds: f64) -> Ve
 fn nothing_happens_until_the_command() {
     let s = spec();
     let mut c = ChuteState::default();
-    assert!(c.step(&s, false, STILL, 0.02, false).is_empty());
+    assert!(c.step(&s, (false, false), STILL.0, 0.02, false).is_empty());
     assert_eq!(c, ChuteState::default());
-    assert_eq!(c.step(&s, true, STILL, 0.02, false), vec![ChuteEvent::DrogueOpened]);
+    assert_eq!(c.step(&s, (true, false), STILL.0, 0.02, false), vec![ChuteEvent::DrogueOpened]);
     assert!(c.armed);
 }
 
@@ -30,7 +35,7 @@ fn the_drogue_fills_at_v_over_n_to_its_reefed_stage_then_full() {
     let s = spec();
     let d = s.drogue.clone().unwrap();
     let mut c = ChuteState::default();
-    let flow = Flow { q: 2_000.0, speed: 60.0, height: 7_000.0 };
+    let flow = (Flow { q: 2_000.0, speed: 60.0 }, 7_000.0);
     run(&mut c, &s, flow, 0.1);
     // The mouth grows at V/n: 60/10 = 6 m/s, 0.6 m after 0.1 s.
     let CanopyState::Open { diameter, .. } = c.drogue else { panic!("{c:?}") };
@@ -46,7 +51,7 @@ fn the_drogue_fills_at_v_over_n_to_its_reefed_stage_then_full() {
 fn the_main_opens_below_its_height_after_the_drogue_disreefs_and_cuts_it_away() {
     let s = spec();
     let mut c = ChuteState::default();
-    let low = Flow { q: 300.0, speed: 22.0, height: 2_000.0 };
+    let low = (Flow { q: 300.0, speed: 22.0 }, 2_000.0);
     // Commanded low: the drogue first, the main only after its 10 s reef.
     let events = run(&mut c, &s, low, 9.9);
     assert_eq!(events, vec![ChuteEvent::DrogueOpened]);
@@ -72,13 +77,13 @@ fn an_overload_tears_the_canopy_and_nothing_refuses_the_command() {
     assert!(breaking > d.deploy_max_q);
     for (q, fails) in [(d.deploy_max_q, false), (0.99 * breaking, false), (1.01 * breaking, true)] {
         let mut c = ChuteState::default();
-        let events = run(&mut c, &s, Flow { q, speed: 150.0, height: 9_000.0 }, 2.0);
+        let events = run(&mut c, &s, (Flow { q, speed: 150.0 }, 9_000.0), 2.0);
         assert_eq!(events.contains(&ChuteEvent::DrogueFailed), fails, "{q}");
         assert_eq!(c.drogue == CanopyState::Failed, fails);
         // Debug mode: nothing breaks.
         let mut c = ChuteState::default();
         for _ in 0..100 {
-            c.step(&s, true, Flow { q, speed: 150.0, height: 9_000.0 }, 0.02, true);
+            c.step(&s, (true, false), Flow { q, speed: 150.0 }, 0.02, true);
         }
         assert!(matches!(c.drogue, CanopyState::Open { .. }));
     }
@@ -88,10 +93,10 @@ fn an_overload_tears_the_canopy_and_nothing_refuses_the_command() {
 fn without_a_drogue_the_main_opens_on_the_command_and_a_failed_drogue_lets_it_open_low() {
     let mut s = spec();
     let mut c = ChuteState::default();
-    run(&mut c, &s, Flow { q: 1e6, speed: 300.0, height: 9_000.0 }, 0.1);
+    run(&mut c, &s, (Flow { q: 1e6, speed: 300.0 }, 9_000.0), 0.1);
     assert_eq!(c.drogue, CanopyState::Failed);
     assert_eq!(c.main, CanopyState::Stowed);
-    let events = run(&mut c, &s, Flow { q: 500.0, speed: 30.0, height: 3_000.0 }, 0.02);
+    let events = run(&mut c, &s, (Flow { q: 500.0, speed: 30.0 }, 3_000.0), 0.02);
     assert_eq!(events, vec![ChuteEvent::MainOpened]);
     s.drogue = None;
     let mut c = ChuteState::default();
@@ -115,6 +120,10 @@ fn predictions_assume_the_canopy_the_sequence_reaches() {
         (failed_main, 1_000.0, 0.0),
     ];
     for (state, h, want) in cases {
-        assert_eq!(state.predicted_cd_area(&s, h), want, "{state:?} at {h}");
+        assert_eq!(
+            state.predicted_cd_area(&s, main_expected(&s, &Chutes::default(), &state, Some(h))),
+            want,
+            "{state:?} at {h}"
+        );
     }
 }

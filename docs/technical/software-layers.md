@@ -52,7 +52,7 @@ Neither: the physics (what happens), the native boundary (sensors to `Knowledge`
 | **The stage sequence and functions** | Space runs the next stage; AGAIN; saved functions; the sequence's position | was `systems::command` (`next_stage`, `again`, `function`, `run`), `craft::program` | **built:** `ship_os::sequence` (`next_stage`, `again`, `function`, `edit_sequence`, `release_undone`); `command::carry_out` dispatches the orders to it | the edits are the systems screen's (`edit_sequence`); the piece's view stays `craft::program` |
 | Interlocks | the legs refused while the clamps hold; a stage with nothing left refused | was `systems::command`, `game::staging` | **built:** `ship_os::sequence::interlock` (the legs; `command::apply` asks it) | the stage with nothing left is the interface's (`game::staging`) |
 | **Aborts** (D120) | the procedure's commands; the automatic decision on a thrust-to-weight margin | the procedure: a function (`program::offered` for the offer); the decision: not built | `ship_os::abort` | the offer stays an interface rule |
-| **Parachute deploy** (D126) | arming on command; Dragon's automatic arming on barometric altitude; the main's opening at `main_height` | arming: `Controls::chute` / `ArmChutes`; the main's height: `chute::step` reads the true height | `ship_os::chutes`: arming and the main's height from `Knowledge` (barometric) | flight-software.md: "the parachutes' deploy heights read the true height" |
+| **Parachute deploy** (D126) | arming on command; Dragon's automatic arming on barometric altitude; the main's opening at `main_height` | was `Controls::chute` and `chute::step` on the true height | **built:** `ship_os::chutes` (`arm_now`, `main_now`, `press`, the prediction's `predicted_cd_area`; D126's `Switch` in `ship_os::Software`), from `Knowledge`'s altitude (GNSS, or the barometric altimeter in the air) | without an altitude the main waits for a second press; `ShipCommand::ArmChutes` is a press (it now arms through an order too) |
 | The ullage push | see layer 1's settling rows | **built:** `ship_os::ullage` | | open point 1, decided |
 | **The maneuver program** (D126) | a planned burn closed-loop to its node's orbit | `systems::maneuver` (PLANNER, c7c2de4: `step(&Inputs, &mut Program) -> Commands`) | `ship_os::maneuver` | the first program on the layer-2 API |
 | Landing guidance, docking (D117, D123) | the booster's burns; Dragon's approach | not built | `ship_os` programs | |
@@ -131,7 +131,7 @@ sim::systems::
     commit    the pad's launch commit
     sequence  the stage sequence, functions, interlocks
     abort     the procedure and, automated, its decision (D120)
-    chutes    arming and the main's height from Knowledge (D126)
+    chutes    arming and the main's height from Knowledge (D126; built)
     ullage    the settling push before a start
     maneuver  PLANNER's program
     warp_stop the built-in bare-minimum rule (§4) and a program's replacement
@@ -159,7 +159,7 @@ sim::systems::
 1. *Built.* `systems::flight` → `systems::ship_os::{mod, sas, commit}`; `safing` → `propulsion`'s engine controller (D123's lost controller with it); the data links both layers read → `systems::links`.
 2. *Built.* The ullage push out of `propulsion` into `ship_os::ullage`, with the engine's own start rule left in `propulsion` (open point 1: the wait goes with the push). The wait's state stays each engine's `settling` (saved; the game reads it), and it still reads the true liquid position (FIXES3: the level sensors, a timed burn without them).
 3. *Built.* The sequence, functions and interlocks out of `systems::command` into `ship_os::sequence`; `command::apply` stays the native boundary.
-4. The chutes' arming and main height into `ship_os::chutes`, from the barometric altitude in `Knowledge`.
+4. *Built.* The chutes' arming and main height into `ship_os::chutes`, from the altitude in `Knowledge` (Dragon's barometric altimeter and cabin air monitor added, E).
 5. The schedule: programs at fixed epochs that stop the advance like orders (with ADVANCE's arrivals-as-orders, [warp-invariance.md](warp-invariance.md) §7, point 4).
 6. `ship_os::warp_stop`: the built-in rule (§4) as a pure function with a table test, the program's replacement, and `notify` per craft; the game's warp stop at the stop's epoch.
 7. The power priorities as parameters; the life support's stocks; the bare-minimum test: Dragon coasting a month on layer 1 alone, set up, with nothing stopping warp. Today it fails on CO₂ within a day.

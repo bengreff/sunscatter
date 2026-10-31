@@ -52,6 +52,7 @@ fn start_over(w: &World, body: &str, (lat, lon, height): (f64, f64, f64), (e, n,
         infinite: false,
         throttle: 0.0,
         chute: Default::default(),
+        deploy: Default::default(),
         attitude: AssumedAttitude::SurfaceRetrograde,
         body: src.node,
     }

@@ -272,6 +272,10 @@ pub struct Vessel {
     nodes: Vec<crate::systems::maneuver::Node>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     program: Option<crate::systems::maneuver::Program>,
+    /// The ship computer's software and its state (D128 layer 2,
+    /// `systems::ship_os::Software`).
+    #[serde(default)]
+    software: crate::systems::ship_os::Software,
 }
 
 /// Rotation matrix taking body-fixed axes of `body` to inertial axes at `t`.

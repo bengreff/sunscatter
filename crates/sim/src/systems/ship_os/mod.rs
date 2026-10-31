@@ -31,6 +31,9 @@
 //!   a saved function, run through the native boundary.
 //! - The settling push before a start ([`ullage`]): an ignition on floating
 //!   propellant waits while the thrusters along its thrust settle it.
+//! - The parachutes' deploy ([`chutes`]): arming, on the press or by
+//!   itself below its height, and the main's opening by the altitude
+//!   reading (D126's switch, [`Switch`]).
 //! - What the landing prediction needs ([`can_predict`]); the stage
 //!   estimates read the same `Knowledge` (`systems::estimate`).
 //!
@@ -43,6 +46,7 @@
 //! controls the attitude controller flies, run on the computer that
 //! carries them (its health in [`Health::computers`]).
 
+pub mod chutes;
 pub mod commit;
 pub mod sas;
 pub mod sequence;
@@ -58,6 +62,26 @@ use crate::craft::state::{EngineStatus, ShipState};
 use crate::frame::NodeId;
 use crate::vessel::Attitude;
 use glam::DVec3;
+
+/// D126's switch for an automatic sequence: it runs by itself, when the
+/// player presses for it, or not at all (manual control stays possible in
+/// every position).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum Switch {
+    Auto,
+    #[default]
+    Press,
+    Off,
+}
+
+/// The ship computer's software on a vessel and its saved state (D128
+/// layer 2; saved with the vessel, copied to each piece of a split).
+#[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct Software {
+    /// The parachutes' deploy.
+    #[serde(default)]
+    pub chutes: chutes::Chutes,
+}
 
 /// The computers' health: the flight software's second input.
 #[derive(Clone, Debug, Default, PartialEq)]

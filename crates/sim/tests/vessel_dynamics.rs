@@ -395,6 +395,40 @@ fn a_light_craft_lands_intact_under_its_parachute() {
     assert!(matches!(vessel.phase, Phase::Landed { .. }), "{:?}", vessel.phase);
 }
 
+/// The ship computer's deploy (`ship_os::chutes`, D126): with no altitude
+/// reading (its GPS receiver switched off) the main does not open by
+/// height and the pilot's second press opens it; switched to arm by
+/// itself, the chutes arm below their drogue height as the craft descends.
+#[test]
+fn without_an_altitude_the_main_waits_for_a_press_and_auto_arms_below_its_height() {
+    use sim::craft::command::ShipCommand;
+    let w = world();
+    let main_height = sim::craft::small::rocket().spec.chute.main_height;
+    let mut blind = above_the_cape(&w, 4_000.0, 60.0, Some(5_000.0));
+    blind.command(&w, &ShipCommand::Power("gps".into(), false)).unwrap();
+    let controls = Controls { chute: true, sas: true, ..Default::default() };
+    while height(&w, &blind) > main_height - 1_000.0 {
+        blind.advance(&w, blind.time.add_seconds(0.02), &controls, usize::MAX);
+        assert!(matches!(blind.phase, Phase::Powered { .. }));
+    }
+    assert!(matches!(blind.chute.drogue, CanopyState::Open { .. }), "{:?}", blind.chute);
+    assert_eq!(blind.chute.main, CanopyState::Stowed, "no altitude: the main waits");
+    blind.command(&w, &ShipCommand::ArmChutes).unwrap();
+    blind.advance(&w, blind.time.add_seconds(0.02), &controls, usize::MAX);
+    assert!(matches!(blind.chute.main, CanopyState::Open { .. }), "the press opens it: {:?}", blind.chute);
+
+    let mut auto = above_the_cape(&w, 7_000.0, 110.0, Some(5_000.0));
+    auto.craft.chute.drogue_height = Some(5_000.0);
+    auto.set_chute_switch(sim::systems::ship_os::Switch::Auto);
+    let hands_off = Controls { sas: true, ..Default::default() };
+    while !auto.chute.armed {
+        let h = height(&w, &auto);
+        assert!(h > 4_990.0, "armed late: {h} m");
+        auto.advance(&w, auto.time.add_seconds(0.02), &hands_off, usize::MAX);
+    }
+    assert!(height(&w, &auto) <= 5_000.0);
+}
+
 #[test]
 fn falling_without_parachute_crashes() {
     let w = world();

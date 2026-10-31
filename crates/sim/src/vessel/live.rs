@@ -436,8 +436,8 @@ impl Vessel {
             let speed = air.as_ref().map_or(0.0, |a| a.wind.length());
             let q = air.as_ref().map_or(0.0, |a| 0.5 * a.rho * speed * speed);
             let height = near.map_or(f64::INFINITY, |(_, h)| h);
-            let flow = chute::Flow { q, speed, height };
-            chute_now.step(&self.craft.chute, controls.chute, flow, dt, self.debug);
+            let word = self.chute_word(world, controls.chute, (anchor, r, v), near.map(|(b, _)| b), height);
+            chute_now.step(&self.craft.chute, word, chute::Flow { q, speed }, dt, self.debug);
         }
         let chute_area = chute_now.cd_area(&self.craft.chute);
         let chute = (chute_area > 0.0).then_some((chute_area, self.craft.chute.mount));
@@ -486,6 +486,35 @@ impl Vessel {
             cmd,
             before,
         })
+    }
+
+    /// The ship computer's word on the parachutes this tick
+    /// (`ship_os::chutes`): whether they arm (the pilot's `command`, or by
+    /// themselves) and whether the main opens, from the altitude reading
+    /// (`height` above `body`'s surface while `Knowledge` has an altitude)
+    /// and, to arm by itself, the navigation solution's descent.
+    fn chute_word(
+        &self,
+        world: &World,
+        command: bool,
+        (anchor, r, v): (NodeId, DVec3, DVec3),
+        body: Option<NodeId>,
+        height: f64,
+    ) -> (bool, bool) {
+        use crate::systems::ship_os::{self, chutes, Switch};
+        let (spec, c) = (&self.craft.chute, &self.software.chutes);
+        let k = self.knowledge();
+        let altitude = k.knows(crate::systems::Quantity::Altitude).then_some(height);
+        let auto = c.switch == Switch::Auto && !self.chute.armed;
+        let descending = auto
+            && ship_os::navigation(&k)
+            && body.is_some_and(|b| {
+                let rel = world.eph.relative(anchor, b, self.time);
+                (v + rel.v).dot(r + rel.r) < 0.0
+            });
+        let arm = command || chutes::arm_now(spec, c, &self.chute, altitude, descending);
+        let armed = crate::chute::ChuteState { armed: self.chute.armed || arm, ..self.chute };
+        (arm, chutes::main_now(spec, c, &armed, altitude))
     }
 
     /// Flies a tick on its own: away from surfaces the translation
