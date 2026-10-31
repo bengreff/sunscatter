@@ -8,6 +8,7 @@ Each agent has one brief (`brief-<name>.md`); these rules apply to all of them. 
 - **Commit only your own paths, through a private index**, from a tree whose base is the current HEAD (check right before): `GIT_INDEX_FILE=<scratchpad>/index git read-tree HEAD; GIT_INDEX_FILE=… git update-index --add <paths>; GIT_INDEX_FILE=… git commit …`, then push at once (the pre-push hook runs CI's checks), then `git reset -q -- <paths>` so the shared index matches. A local commit is public: the other agent's push sends it.
 - Do not edit a file the other agent has uncommitted changes in. If you need one, do your other work first and edit it after they commit it, keeping your hunks small. Never revert or reformat someone else's work; use `cargo fmt -p <crate>` or `rustfmt <your files>`, not `cargo fmt --all`.
 - Temporary files go in your own scratchpad subfolder.
+- **A patch carried over from another agent** (made at an older commit) goes in with `git apply --3way` against HEAD, never as whole files laid over the tree: whole files silently revert what others pushed since (2026-10-31: a step-(b) patch from 534d9c8 nearly reverted INTERFACE-3's a3a4336). Before committing, `git diff HEAD -- <file>` must show only your own change.
 
 ## The machine
 
