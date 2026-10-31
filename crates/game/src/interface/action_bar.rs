@@ -4,9 +4,8 @@
 //! the systems screen (Tab) and the active craft's functions pinned in the
 //! systems screen, each run by a click (no craft-specific keys: abort is one
 //! of them, shown only while it would save the crew, D120:
-//! `sim::craft::program::offered`), wrapping onto more lines. Nothing for a
-//! craft without a ship definition (the test craft). The staging bar stops
-//! below it.
+//! `sim::craft::program::offered`), wrapping onto more lines. The staging
+//! bar stops below it.
 
 use super::{layout, theme};
 use crate::commands::GameCommand;

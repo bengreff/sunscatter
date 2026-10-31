@@ -393,7 +393,7 @@ mod tests {
     }
 
     /// The measured parts against their limits (amber near one), then how
-    /// many nothing measures; nothing without parts.
+    /// many nothing measures.
     #[test]
     fn thermal_lists_the_measured_parts_and_counts_the_rest() {
         use super::super::hottest::Hottest;

@@ -1,8 +1,8 @@
 //! Ships in the scene: each vessel a root entity placed camera-relative
 //! from its state at the clock, its parts drawn as children
 //! (`super::parts`: a craft of catalog parts by part, static parts merged
-//! by colour, moving parts turned from the ship state; the test craft as
-//! one mesh in the ship colour), a flame per engine sized by its thrust,
+//! by colour, moving parts turned from the ship state), a flame per engine
+//! sized by its thrust,
 //! and the ship's light (`ship_light`: every star with its eclipses and
 //! the air on the way, planetshine, its own sky and shadow cascade, D110)
 //! in one buffer its materials share.
@@ -25,10 +25,6 @@ use sim::craft::{Craft, RenderMesh};
 use sim::systems::exhaust::{NozzleSpec, Products};
 use std::collections::HashMap;
 use std::sync::Arc;
-
-/// Ship base colours (sRGB) of the test craft: other vessels and the active one.
-const SHIP_COLOR: [f32; 3] = [0.8, 0.8, 0.82];
-const ACTIVE_COLOR: [f32; 3] = [0.95, 0.85, 0.6];
 
 /// A component engine's (a thruster pod's) exit below its gimbal point (m).
 const POD_EXIT: f64 = 0.3;
@@ -58,15 +54,12 @@ impl ShipVisual {
 #[derive(Component)]
 pub struct ShipGroup {
     mechanism: Option<usize>,
-    /// The test craft: coloured as the active ship or another.
-    plain: bool,
 }
 
-/// An engine's flame (an index into the ship definition's engines; `None`:
-/// the test craft's one engine).
+/// An engine's flame (an index into the ship definition's engines).
 #[derive(Component)]
 pub struct Flame {
-    engine: Option<usize>,
+    engine: usize,
     nozzle: Nozzle,
     /// A main engine: its flame follows the gimbal.
     main: bool,
@@ -89,18 +82,17 @@ pub struct Plume {
     source: PlumeSource,
 }
 
-/// A drawn group: its mesh, colour (linear; `None`: the ship colour) and
-/// mechanism.
+/// A drawn group: its mesh, colour (linear) and mechanism.
 struct Drawn {
     mesh: Handle<Mesh>,
-    colour: Option<[f32; 3]>,
+    colour: [f32; 3],
     mechanism: Option<usize>,
 }
 
 /// A craft's drawing.
 pub struct Model {
     groups: Vec<Drawn>,
-    flames: Vec<(Option<usize>, Nozzle, bool, Option<PlumeSource>)>,
+    flames: Vec<(usize, Nozzle, bool, Option<PlumeSource>)>,
     /// The bounding sphere (centre in body axes, radius; m), with room for
     /// the mechanisms (legs, fins) to swing out.
     bound: (Vec3, f32),
@@ -154,13 +146,9 @@ impl ShipModels {
         self.parts.entry(key).or_insert_with(|| Arc::new(parts::part_mesh(craft, k))).clone()
     }
 
-    /// Every part's mesh of `craft` in body axes (the test craft's one
-    /// mesh), kept as [`Self::part_mesh`].
+    /// Every part's mesh of `craft` in body axes, kept as
+    /// [`Self::part_mesh`].
     pub fn meshes_of(&mut self, craft: &Craft) -> Vec<Arc<RenderMesh>> {
-        if craft.ship.is_none() {
-            let key = (craft.id.base().to_string(), u32::MAX, false);
-            return vec![self.parts.entry(key).or_insert_with(|| Arc::new(craft.mesh.clone())).clone()];
-        }
         (0..craft.parts.len()).map(|k| self.part_mesh(craft, k)).collect()
     }
 
@@ -187,11 +175,10 @@ impl ShipModels {
     }
 
     fn build(&mut self, craft: &Craft, meshes: &mut Assets<Mesh>) -> Model {
+        // Every craft is built from parts (D100): one without a ship
+        // definition has nothing to draw.
         let Some(def) = craft.ship.as_deref() else {
-            // No parts' systems: no engines, nothing burns.
-            let plain = Drawn { mesh: meshes.add(bevy_mesh(&craft.mesh)), colour: None, mechanism: None };
-            let bound = bound(std::iter::once(&craft.mesh));
-            return Model { groups: vec![plain], flames: Vec::new(), bound };
+            return Model { groups: Vec::new(), flames: Vec::new(), bound: (Vec3::ZERO, 0.0) };
         };
         let ids: Vec<u32> = craft.parts.iter().map(|p| p.id).collect();
         let colours = parts::part_colours(craft, def, sim::materials::materials());
@@ -200,11 +187,11 @@ impl ShipModels {
             .map(|g| match g {
                 Group::Static { colour, parts: list } => {
                     let merged = parts::merge(list.iter().map(|&k| part_meshes[k].as_ref()));
-                    Drawn { mesh: meshes.add(bevy_mesh(&merged)), colour: Some(colour), mechanism: None }
+                    Drawn { mesh: meshes.add(bevy_mesh(&merged)), colour, mechanism: None }
                 }
                 Group::Moving { colour, part, mechanism } => {
                     let mesh = meshes.add(bevy_mesh(&part_meshes[part]));
-                    Drawn { mesh, colour: Some(colour), mechanism: Some(mechanism) }
+                    Drawn { mesh, colour, mechanism: Some(mechanism) }
                 }
             })
             .collect();
@@ -225,7 +212,7 @@ impl ShipModels {
                         products: p.clone(),
                         mixture_ratio: e.data.mixture_ratio,
                     });
-                (Some(i), nozzle, e.main, source)
+                (i, nozzle, e.main, source)
             })
             .collect();
         let bound = bound(part_meshes.iter().map(|m| m.as_ref()));
@@ -280,17 +267,14 @@ fn spawn(
             Visibility::Visible,
         ))
         .id();
-    for Drawn { mesh, colour, mechanism } in &model.groups {
-        let base_color = match colour {
-            Some([r, g, b]) => Color::linear_rgb(*r, *g, *b),
-            None => Color::srgb_from_array(SHIP_COLOR),
-        };
+    for Drawn { mesh, colour: [r, g, b], mechanism } in &model.groups {
+        let base_color = Color::linear_rgb(*r, *g, *b);
         let material = ship_materials.add(ShipMaterial {
             base: StandardMaterial { base_color, ..default() },
             extension: ShipExt { light: light.clone() },
         });
         commands.spawn((
-            ShipGroup { mechanism: *mechanism, plain: colour.is_none() },
+            ShipGroup { mechanism: *mechanism },
             Mesh3d(mesh.clone()),
             MeshMaterial3d(material),
             // Drawn by the camera, and cast into the craft's shadow
@@ -344,7 +328,7 @@ pub fn update_ships(
     mut buffers: ResMut<Assets<ShaderBuffer>>,
     mut craft_groups: ResMut<crate::lighting::shadows::CraftGroups>,
     mut ships: Query<(Entity, &mut ShipVisual, &mut Transform, &Children)>,
-    groups: Query<(&ShipGroup, &MeshMaterial3d<ShipMaterial>)>,
+    groups: Query<&MeshMaterial3d<ShipMaterial>, With<ShipGroup>>,
 ) {
     let snap = sim.world.snapshot(sim.clock);
     let bodies = scene.spheres();
@@ -376,21 +360,11 @@ pub fn update_ships(
         let sky = crate::sky::sky_radiance_at(pos, &scene, &defs);
         let data = crate::ship_light::ship_light(&light, &star_dirs, sky);
         let centre = origin + q * ship.bound.0.as_dvec3();
-        let want = Color::srgb_from_array(if ship.index == sim.active { ACTIVE_COLOR } else { SHIP_COLOR });
-        let mut light_done = false;
-        for child in children.iter() {
-            let Ok((group, mat)) = groups.get(child) else { continue };
-            let Some(m) = ship_materials.get(&mat.0) else { continue };
-            if !light_done {
-                lit.push((m.extension.light.clone(), data, (centre, f64::from(ship.bound.1))));
-                light_done = true;
-            }
-            // The test craft's colour changes only when the active ship does.
-            if group.plain && m.base.base_color != want {
-                if let Some(mut m) = ship_materials.get_mut(&mat.0) {
-                    m.base.base_color = want;
-                }
-            }
+        // The ship's light buffer, shared by its groups' materials.
+        let material = |c: Entity| ship_materials.get(&groups.get(c).ok()?.0);
+        let buffer = children.iter().find_map(|c| material(c).map(|m| m.extension.light.clone()));
+        if let Some(buffer) = buffer {
+            lit.push((buffer, data, (centre, f64::from(ship.bound.1))));
         }
     }
     let spheres: Vec<(DVec3, f64)> = lit.iter().map(|l| l.2).collect();
@@ -425,8 +399,7 @@ fn brightest_starlight(
 }
 
 /// A vessel's engines now: the air pressure at it (Pa), each engine's
-/// thrust (N) and share of its full thrust (the test craft's one engine:
-/// its share only).
+/// thrust (N) and share of its full thrust.
 struct Firing {
     pressure: f64,
     thrusts: Vec<f64>,
@@ -483,9 +456,8 @@ pub fn update_parts(
                 _ => Firing { pressure, thrusts: Vec::new(), fractions: Vec::new() },
             }
         });
-        let k = flame.engine.unwrap_or(0);
-        let fraction = now.fractions.get(k).copied().unwrap_or(0.0);
-        let thrust = flame.engine.map(|e| now.thrusts.get(e).copied().unwrap_or(0.0));
+        let fraction = now.fractions.get(flame.engine).copied().unwrap_or(0.0);
+        let thrust = now.thrusts.get(flame.engine).copied().unwrap_or(0.0);
         let steered = v.ship().and_then(|s| s.thrust_dir).filter(|_| flame.main);
         let nozzle = parts::gimballed(&flame.nozzle, steered);
         if let Some(Ok((source, mut pt, mut pvis, mat))) = flame.plume.map(|e| plumes.get_mut(e)) {
@@ -494,10 +466,7 @@ pub fn update_parts(
                 let (ship, root) =
                     ships.get(parent).map(|(s, t)| (s.starlight, *t)).unwrap_or(([0.0; 3], Transform::IDENTITY));
                 let src = &source.source;
-                let level = match thrust {
-                    Some(f) => src.spec.level(f, now.pressure),
-                    None => fraction,
-                };
+                let level = src.spec.level(thrust, now.pressure);
                 let seed = sim::systems::exhaust::exit_state(&src.spec, &src.products, src.mixture_ratio, level);
                 let p = exhaust::plume(&seed, &sim::systems::exhaust::jet(&seed, now.pressure), now.pressure);
                 // A plume without soot is not drawn (nearly invisible).

@@ -34,8 +34,8 @@ pub struct Battery {
     pub known: bool,
 }
 
-/// The electrical system of `v` (`None`: the test craft, or a craft of
-/// parts with neither buses nor batteries).
+/// The electrical system of `v` (`None`: a craft with neither buses nor
+/// batteries).
 pub fn gather(v: &Vessel) -> Option<PowerData> {
     let (def, state) = (v.ship_def()?, v.ship()?);
     if def.buses.is_empty() && def.batteries.is_empty() {

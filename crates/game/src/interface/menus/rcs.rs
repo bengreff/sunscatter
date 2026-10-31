@@ -21,8 +21,8 @@ pub const IMBALANCE: f64 = 0.1;
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RcsData {
     pub mode: RcsMode,
-    /// What it can do now (`None`: the test craft, whose torque is ideal).
-    pub authority: Option<Authority>,
+    /// What it can do now.
+    pub authority: Authority,
     pub feeds: Vec<Feed>,
     pub blocks: Vec<Block>,
 }
@@ -96,10 +96,11 @@ fn mode(r: &RcsData) -> Section {
 /// Translation per direction and rotation per axis.
 fn authority(r: &RcsData) -> Section {
     let mut s = Section::new("authority", "AUTHORITY");
-    let Some(a) = &r.authority else {
-        s.note("the test craft: ideal torque, no thrusters", Tone::Dim);
+    if r.blocks.is_empty() {
+        s.note("no thruster blocks", Tone::Dim);
         return s;
-    };
+    }
+    let a = &r.authority;
     let mut turns = Vec::new();
     for (name, (accel, miss)) in DIRECTIONS.iter().zip(a.translate) {
         if accel <= 0.0 {
@@ -179,7 +180,7 @@ mod tests {
         a.translate[4] = (0.08, 0.4);
         RcsData {
             mode: RcsMode { on: true, ..Default::default() },
-            authority: Some(a),
+            authority: a,
             feeds: vec![Feed { name: "s2.n2".into(), kg: 3.0, full: 50.0, known: true }],
             blocks: vec![
                 block("s2.rcs#1", true, BlockState::Ready),
@@ -265,16 +266,15 @@ mod tests {
         assert_eq!(find(&sections(&r), "feeds").unwrap().value("N2"), Some(crate::format::DASH));
     }
 
-    /// The test craft: no thrusters, said so; no block count.
+    /// A craft without thruster blocks: said so, no authority per
+    /// direction, no block count.
     #[test]
-    fn the_test_craft_has_ideal_torque() {
+    fn a_craft_without_thrusters_says_so() {
         let s = sections(&RcsData::default());
         assert!(find(&s, "blocks").unwrap().items.is_empty());
-        assert!(find(&s, "authority")
-            .unwrap()
-            .items
-            .iter()
-            .any(|i| matches!(i, Item::Note(t, _) if t.contains("ideal"))));
+        let authority = find(&s, "authority").unwrap();
+        assert!(authority.items.iter().any(|i| matches!(i, Item::Note(t, _) if t == "no thruster blocks")));
+        assert!(authority.rows().is_empty(), "{:?}", authority.rows());
         assert!(s[0].value("BLOCKS ON").is_none());
     }
 }

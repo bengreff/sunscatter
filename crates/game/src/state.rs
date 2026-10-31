@@ -514,11 +514,9 @@ pub enum RailsBlock {
 }
 
 /// Whether vessel `v` produces thrust under controls `c` (D111: what
-/// refuses rails warp, not where the throttle sits): an engine of a craft
-/// of parts lit, in its tail-off or settling its propellant (the
-/// thrusters' push), the test craft's engine with its throttle open and
-/// propellant (or in debug mode), or the pilot's RCS translation on a
-/// craft of parts (`systems::rcs::pilot`).
+/// refuses rails warp, not where the throttle sits): an engine lit, in
+/// its tail-off or settling its propellant (the thrusters' push),
+/// or the pilot's RCS translation (`systems::rcs::pilot`).
 pub fn produces_thrust(v: &Vessel, c: &Controls) -> bool {
     v.engine_running() || (v.ship().is_some() && sim::systems::rcs::pilot(c).translate != DVec3::ZERO)
 }

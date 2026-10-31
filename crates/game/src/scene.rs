@@ -180,9 +180,7 @@ pub fn light_up(dir: Vec3) -> Vec3 {
 }
 
 /// Whether vessel `i`'s engine is running now: live flight with an engine
-/// giving thrust at the pilot's throttle (`Vessel::engine_running`:
-/// propellant or debug mode; a craft of parts' running engines). Nothing
-/// burns on rails.
+/// running (`Vessel::engine_running`). Nothing burns on rails.
 pub fn engine_on(sim: &SimState, i: usize) -> bool {
     let v = &sim.fleet[i];
     i == sim.active && matches!(v.phase, sim::vessel::Phase::Powered { .. }) && v.engine_running()

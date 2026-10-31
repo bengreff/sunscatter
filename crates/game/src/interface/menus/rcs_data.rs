@@ -11,12 +11,11 @@ use sim::systems::Quantity;
 use sim::vessel::Vessel;
 use std::collections::BTreeSet;
 
-/// The RCS of `v` with the pilot's mode `mode` (the test craft: the mode
-/// only).
+/// The RCS of `v` with the pilot's mode `mode`.
 pub fn gather(v: &Vessel, mode: RcsMode) -> RcsData {
     let mut r = RcsData { mode, ..Default::default() };
     let (Some(def), Some(state)) = (v.ship_def(), v.ship()) else { return r };
-    r.authority = v.rcs_authority();
+    r.authority = v.rcs_authority().unwrap_or_default();
     let knowledge = v.knowledge();
     let (mut bottles, mut tanks) = (BTreeSet::new(), BTreeSet::new());
     for (t, s) in def.thrusters.iter().zip(&state.thrusters) {
@@ -76,7 +75,7 @@ mod tests {
         let sim = crate::state::SimState::new();
         let mode = RcsMode { on: true, only: RcsOnly::Rotate, fine: true };
         let d = gather(sim.ship(), mode);
-        assert!(d.mode == mode && d.authority.is_some());
+        assert!(d.mode == mode && d.authority.rotate.max_element() > 0.0, "{:?}", d.authority);
         let blocks: Vec<(&str, usize, f64, bool)> =
             d.blocks.iter().map(|b| (b.id.as_str(), b.nozzles, b.thrust, b.on)).collect();
         let want: Vec<(String, usize, f64, bool)> = (1..=4).map(|k| (format!("rcs#{k}"), 2, 400.0, true)).collect();
@@ -93,7 +92,7 @@ mod tests {
         let r = gather(sim.ship(), RcsMode::default());
         let def = sim.ship().ship_def().unwrap();
         assert_eq!(r.blocks.len(), def.thrusters.len());
-        assert!(!r.blocks.is_empty() && r.authority.is_some());
+        assert!(!r.blocks.is_empty());
         for (b, t) in r.blocks.iter().zip(&def.thrusters) {
             assert_eq!((b.id.as_str(), b.on, b.nozzles), (t.id.as_str(), t.enabled, t.nozzles.len()));
             assert_eq!(b.state, BlockState::Ready, "{}", b.id);

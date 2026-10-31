@@ -50,7 +50,8 @@ pub struct Signal {
     pub via: Vec<String>,
 }
 
-/// The antenna every vessel carries for now (the test craft's, D064).
+/// The antenna every vessel carries for now: the links do not yet read a
+/// craft's own antennas from its parts.
 pub const VESSEL_ANTENNA: Antenna = Antenna { gain_dbi: 20.0, power_w: 20.0 };
 
 #[derive(Resource)]

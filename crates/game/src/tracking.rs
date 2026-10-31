@@ -594,7 +594,7 @@ mod tests {
         switch_to(&mut sim, &mut rig, &mut pred, ids[0]);
         assert_eq!((sim.controls().throttle, sim.fleet[2].controls().throttle), (0.7, 0.3), "both sets kept");
         switch_to(&mut sim, &mut rig, &mut pred, ids[2]);
-        assert_eq!(left_lit_notice(&sim.fleet[0]), None, "the test craft: no engines of parts");
+        assert_eq!(left_lit_notice(&sim.fleet[0]), None, "its throttle open, no engine lit");
         rig.focus = Focus::Vessel(ids[3]);
         tracked.set_tracked(ids[0], false);
         assert!(!delete_vessel(&mut sim, &mut tracked, &mut rig, ids[2]), "the active vessel cannot be deleted");

@@ -53,14 +53,9 @@ pub fn draw(
         ui.set_min_size(full.size());
         let name = ship.as_ref().map_or_else(|| craft.spec.name.clone(), |(d, _)| d.name.clone());
         region(ui, regions.top, |ui| top_bar(ui, &mut screen, &name, vessel.id().0));
-        let Some((def, state)) = ship.as_ref() else {
-            region(ui, regions.view, |ui| {
-                ui.label(
-                    "The test craft is one part (D064): it has no systems to show. Esc > New flight… for the Falcon 9.",
-                );
-            });
-            return;
-        };
+        // Every craft is built from parts (D100); one without a ship
+        // definition has nothing to show but the bar that closes the screen.
+        let Some((def, state)) = ship.as_ref() else { return };
         region(ui, regions.left, |ui| {
             let power = crate::interface::menus::power::gather(vessel);
             let x = super::summary::Inputs {

@@ -140,7 +140,7 @@ pub fn estimates_of(sim: &SimState, i: usize, air: Air) -> Option<Estimates> {
 }
 
 /// Vessel `v`'s rows on the bar with `estimates` (its parachutes' look
-/// from their state); `None` for a vessel without parts.
+/// from their state); `None` for a vessel without a ship definition.
 pub fn rows_of(v: &sim::vessel::Vessel, estimates: &Estimates) -> Option<Vec<rows::Row>> {
     let (def, state) = (v.ship_def()?, v.ship()?);
     let chute_parts: Vec<u32> = v.craft.design().parts.iter().filter(|p| p.chute).map(|p| p.id).collect();

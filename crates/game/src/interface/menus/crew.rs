@@ -61,8 +61,7 @@ pub enum LifeSupport {
     Out(String),
 }
 
-/// The crew of `v` (`None`: the test craft, or a craft of parts with
-/// neither seats nor a cabin).
+/// The crew of `v` (`None`: a craft with neither seats nor a cabin).
 pub fn gather(v: &Vessel) -> Option<CrewData> {
     let (def, state) = (v.ship_def()?, v.ship()?);
     let crew = sim::systems::crew::crew_of(&def);

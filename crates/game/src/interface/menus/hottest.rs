@@ -34,7 +34,7 @@ pub fn listed(ship: &sim::vessel::Vessel, listed: &[String], n: usize) -> Hottes
 
 /// The `n` measured parts nearest their limits, nearest first, and how
 /// many are not measured; the launch mount (ground parts) is not the
-/// vehicle's. Nothing for a craft without parts.
+/// vehicle's.
 pub fn parts(ship: &sim::vessel::Vessel, n: usize) -> Hottest {
     use sim::systems::Quantity;
     let Some(def) = ship.ship_def() else { return Hottest::default() };

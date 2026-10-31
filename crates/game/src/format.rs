@@ -111,8 +111,7 @@ pub fn speed_of(r: Option<Reading>) -> String {
 }
 
 /// What the craft knows (D106: `Vessel::knowledge`, from its working
-/// sensors) for the readouts: everything by default (a craft without the
-/// part system, debug mode).
+/// sensors) for the readouts: everything by default (debug mode).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Known {
     pub knowledge: Knowledge,
@@ -129,7 +128,7 @@ impl Default for Known {
 }
 
 impl From<Knowledge> for Known {
-    /// Vehicle quantities only (a craft without tanks or parts to read).
+    /// Vehicle quantities only (no tanks or parts read).
     fn from(knowledge: Knowledge) -> Self {
         let perfect = knowledge.perfect;
         Known { knowledge, propellant: perfect, temperatures: perfect }

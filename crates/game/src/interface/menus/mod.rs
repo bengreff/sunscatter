@@ -151,13 +151,11 @@ impl MenuId {
             MenuId::Power => power::sections(d.power.as_ref()),
             MenuId::Comms => comms::sections(d),
         };
-        if d.parts {
-            let mut more = Section::new("more", "");
-            let layer = self.layer();
-            let label = layer.map_or("The systems screen".to_string(), |l| format!("The systems screen: {}", l.name()));
-            more.button(label, MenuAction::OpenSystems(layer, None));
-            all.push(more);
-        }
+        let mut more = Section::new("more", "");
+        let layer = self.layer();
+        let label = layer.map_or("The systems screen".to_string(), |l| format!("The systems screen: {}", l.name()));
+        more.button(label, MenuAction::OpenSystems(layer, None));
+        all.push(more);
         all.into_iter().filter(|s| !s.items.is_empty()).collect()
     }
 }
@@ -503,17 +501,16 @@ mod tests {
         assert_eq!(drawn[0].rows().len(), 2);
     }
 
-    /// A craft of parts' pages end with a link into the systems screen at
-    /// their layer; the test craft's do not.
+    /// Every page ends with a link into the systems screen at its layer.
     #[test]
     fn pages_link_into_the_systems_screen() {
-        let mut d = FlightData::default();
-        assert!(MenuId::Landing.sections(&d).iter().all(|s| s.id != "more"));
-        d.parts = true;
-        let s = MenuId::Landing.sections(&d);
-        let more = s.last().unwrap();
-        let want = MenuAction::OpenSystems(Some(Layer::Thermal), None);
-        assert!(more.items.iter().any(|i| matches!(i, Item::Button { action, .. } if *action == want)));
+        let d = FlightData::default();
+        for m in MenuId::ALL {
+            let s = m.sections(&d);
+            let more = s.last().unwrap();
+            let want = MenuAction::OpenSystems(m.layer(), None);
+            assert!(more.items.iter().any(|i| matches!(i, Item::Button { action, .. } if *action == want)), "{m:?}");
+        }
     }
 
     /// Before the first snapshot (and in any degenerate state) no value
