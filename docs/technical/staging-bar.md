@@ -58,7 +58,7 @@ The one owner of rays against craft: `scene::pick::ray_hit(origin, dir, placemen
 
 ## Code map
 
-`sim::systems::estimate` (estimates), `sim::systems::command::edit_sequence` (edits), `game::interface::stage_bar` (`rows`, `icons`: pure; `draw`, `mod`: Bevy/egui), `game::interface::part_card` (`content`: pure; `place`: clicks, anchors, `beside`; `mod`: drawing), `game::scene::pick`, `game::format::{mass, force, speed_of}`.
+`sim::systems::estimate` (estimates), `sim::systems::ship_os::sequence::edit_sequence` (edits), `game::interface::stage_bar` (`rows`, `icons`: pure; `draw`, `mod`: Bevy/egui), `game::interface::part_card` (`content`: pure; `place`: clicks, anchors, `beside`; `mod`: drawing), `game::scene::pick`, `game::format::{mass, force, speed_of}`.
 
 ## Not done
 

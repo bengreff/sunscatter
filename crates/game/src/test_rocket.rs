@@ -127,5 +127,6 @@ pub fn deployed(def: &ShipDef, state: &mut ShipState, sel: &str) {
 
 /// Runs the next stage as a vessel does (`sim::systems::command`).
 pub fn next_stage(def: &ShipDef, state: &mut ShipState) {
-    sim::systems::command::next_stage(def, state, sim::time::Epoch::new(1_000_000_000, 0.0)).expect("a stage to run");
+    sim::systems::ship_os::sequence::next_stage(def, state, sim::time::Epoch::new(1_000_000_000, 0.0))
+        .expect("a stage to run");
 }

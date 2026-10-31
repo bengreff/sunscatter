@@ -206,7 +206,7 @@ fn several_engines_and_one_off() {
     let ship = a.def.ship.clone().unwrap();
     let mut state = ShipState::initial(&ship);
     assert!(state.engines.iter().all(|e| e.selected), "the sequence's first ignition selects them");
-    command::next_stage(&ship, &mut state, t0()).unwrap();
+    crate::systems::ship_os::sequence::next_stage(&ship, &mut state, t0()).unwrap();
     assert!(state.engines.iter().all(|e| e.status == EngineStatus::Starting && e.ignitions == 2));
     at_level(&ship, &mut state, 1.0);
     let all = propulsion::output(&ship, &state, 0.0, 0.02, false);
@@ -266,8 +266,8 @@ fn ship_definitions_and_states_partition_by_part() {
     // what it has (`craft::program`): the capsule none, the tank both
     // stages less the separation (its joint is gone).
     let mut flown = state.clone();
-    command::next_stage(&ship, &mut flown, t0()).unwrap();
-    command::next_stage(&ship, &mut flown, t0()).unwrap();
+    crate::systems::ship_os::sequence::next_stage(&ship, &mut flown, t0()).unwrap();
+    crate::systems::ship_os::sequence::next_stage(&ship, &mut flown, t0()).unwrap();
     let (fu, fl) = (flown.partition(&upper, &ship, &du, true), flown.partition(&lower, &ship, &dl, false));
     for p in [&fu, &fl] {
         assert!((&p.stages, &p.functions, p.sequence) == (&flown.stages, &flown.functions, 2));
@@ -291,8 +291,8 @@ fn the_build_is_deterministic() {
     assert_eq!(ca, cb);
     let ship = ca.ship.clone().unwrap();
     let mut state = ShipState::initial(&ship);
-    assert_eq!(command::next_stage(&ship, &mut state, t0()).unwrap().0, "Ignition");
-    let (name, effects) = command::next_stage(&ship, &mut state, t0()).unwrap();
+    assert_eq!(crate::systems::ship_os::sequence::next_stage(&ship, &mut state, t0()).unwrap().0, "Ignition");
+    let (name, effects) = crate::systems::ship_os::sequence::next_stage(&ship, &mut state, t0()).unwrap();
     assert_eq!((name.as_str(), effects), ("Separation", vec![super::state::Effect::Separate(1)]));
-    assert!(command::next_stage(&ship, &mut state, t0()).is_none());
+    assert!(crate::systems::ship_os::sequence::next_stage(&ship, &mut state, t0()).is_none());
 }

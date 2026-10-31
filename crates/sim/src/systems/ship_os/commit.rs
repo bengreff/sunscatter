@@ -79,7 +79,7 @@ pub fn disarm(state: &mut ShipState, at: Epoch, text: String, alarm: bool) {
     }
     state.release_armed = false;
     await_none(state);
-    state.sequence = crate::systems::command::release_undone(&state.stages, state.sequence);
+    state.sequence = super::sequence::release_undone(&state.stages, state.sequence);
     state.event(at, text, alarm);
 }
 

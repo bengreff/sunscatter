@@ -17,7 +17,8 @@ fn falcon9() -> (ShipDef, ShipState, Vec<Hull>) {
 
 /// Runs the next stage as a vessel does (`sim::systems::command`).
 fn next_stage(def: &ShipDef, state: &mut ShipState) {
-    sim::systems::command::next_stage(def, state, sim::time::Epoch::new(1_000_000_000, 0.0)).expect("a stage to run");
+    sim::systems::ship_os::sequence::next_stage(def, state, sim::time::Epoch::new(1_000_000_000, 0.0))
+        .expect("a stage to run");
 }
 
 fn bar(def: &ShipDef, state: &ShipState, hull: &[Hull], k: &Knowledge) -> Vec<Row> {

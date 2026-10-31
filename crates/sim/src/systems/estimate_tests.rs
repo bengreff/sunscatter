@@ -73,7 +73,7 @@ fn on_the_pad_the_sequence_has_two_burns() {
 #[test]
 fn the_burn_now_carries_thrust_weight_ratio_and_mean_isp() {
     let (def, mut state, hull) = falcon9();
-    crate::systems::command::next_stage(&def, &mut state, crate::time::Epoch::new(0, 0.0)).unwrap();
+    crate::systems::ship_os::sequence::next_stage(&def, &mut state, crate::time::Epoch::new(0, 0.0)).unwrap();
     // Their starts done.
     for r in state.engines.iter_mut() {
         if r.status == EngineStatus::Starting {
@@ -228,7 +228,7 @@ fn the_mass_aboard_is_the_burns_own() {
     assert!(close(a.mass.value, flying + consumables, 1e-12), "{:?}", a.mass);
     assert_eq!(a.mass.precision, 0.0);
     // Burning: the burn now starts from it, to the same precision.
-    crate::systems::command::next_stage(&def, &mut state, crate::time::Epoch::new(0, 0.0)).unwrap();
+    crate::systems::ship_os::sequence::next_stage(&def, &mut state, crate::time::Epoch::new(0, 0.0)).unwrap();
     let k = data::knowledge(&def, &state, false);
     let e = estimate(&def, &state, &inputs(&hull, &k, 0.0));
     let now = e.now.as_ref().expect("the first stage burns");

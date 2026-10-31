@@ -303,7 +303,7 @@ impl Vessel {
     pub fn next_stage(&mut self, world: &World) -> Option<(String, Vec<Effect>)> {
         let def = self.ship_def()?;
         let at = self.time;
-        let (name, effects) = command::next_stage(&def, self.ship.as_mut()?, at)?;
+        let (name, effects) = ship_os::sequence::next_stage(&def, self.ship.as_mut()?, at)?;
         self.after_command(world, &effects);
         Some((name, effects))
     }

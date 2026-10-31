@@ -15,9 +15,9 @@
 //! epoch ([`crate::craft::state::ShipState::order`]), so the same orders give the
 //! same flight whatever the frames.
 
+use super::ship_os::sequence;
 use crate::catalog::Igniter;
-use crate::craft::command::{matches, SequenceEdit, ShipCommand, Stage};
-use crate::craft::program;
+use crate::craft::command::{matches, ShipCommand};
 use crate::craft::ship::{Owner, ShipDef};
 use crate::craft::state::OrderKind;
 use crate::craft::state::{Effect, EngineStatus, ShipState};
@@ -120,15 +120,7 @@ pub fn apply(def: &ShipDef, state: &mut ShipState, command: &ShipCommand, cx: Co
             }
             for i in picked {
                 let m = &def.mechanisms[i].item;
-                // Legs stay stowed while the pad's clamps hold the vessel:
-                // deployed, their feet would reach below the launch mount
-                // and the ground (the real pad's interlock; a reshaping
-                // there blew the stack apart, found by review 2026-10-27).
-                if state.clamped
-                    && m.foot.is_some()
-                    && matches!(command, ShipCommand::Deploy(_) | ShipCommand::Angle(..))
-                {
-                    let text = format!("{}: cannot deploy while the clamps hold the vessel", def.mechanisms[i].id);
+                if let Some(text) = sequence::interlock(def, state, i, command) {
                     state.event(cx.at, text, true);
                     continue;
                 }
@@ -166,114 +158,6 @@ pub fn apply(def: &ShipDef, state: &mut ShipState, command: &ShipCommand, cx: Co
     }
 }
 
-/// Edits the stage sequence (D111: the staging bar in flight), by indices
-/// into the program: moves a stage, moves one of a stage's commands to the
-/// end of another, or deletes a stage. Only stages still to run (from
-/// `sequence` on) in the piece's view (`def`: `craft::program`) change, and
-/// only commands it takes move; anything else is refused and nothing
-/// changes. A stage left without commands stays (it can be deleted).
-pub fn edit_sequence(def: &ShipDef, stages: &mut Vec<Stage>, sequence: u32, edit: &SequenceEdit) -> Result<(), String> {
-    let pending = |k: u32| match stages.get(k as usize) {
-        Some(s) if k >= sequence && program::shows(def, s) => Ok(k as usize),
-        _ => Err(format!("{edit:?}: stage {k} is not one still to run here ({sequence}..{})", stages.len())),
-    };
-    match *edit {
-        SequenceEdit::Move { from, to } => {
-            let (from, to) = (pending(from)?, pending(to)?);
-            let stage = stages.remove(from);
-            stages.insert(to, stage);
-        }
-        SequenceEdit::MoveAction { from, action, to } => {
-            let (from, to) = (pending(from)?, pending(to)?);
-            let taken = stages[from].actions.get(action as usize).is_some_and(|c| program::takes(def, c));
-            if !taken || from == to {
-                return Err(format!("{edit:?}: no such command to move"));
-            }
-            let command = stages[from].actions.remove(action as usize);
-            stages[to].actions.push(command);
-        }
-        SequenceEdit::Delete(k) => {
-            stages.remove(pending(k)?);
-        }
-    }
-    Ok(())
-}
-
-/// The sequence's position once a clamp release that did not let go is
-/// undone (a pad abort, a split while it was armed; the clamps still hold
-/// the vessel): the last stage run that releases the clamps is next again,
-/// and the stages run after it are to run again too (review 2026-10-27:
-/// after a pad abort, Space ran MECO and the stage separation on the pad).
-/// AGAIN on the ignition relights the engines (D114). `sequence` itself if
-/// no stage run releases them. A function never moves the sequence.
-pub fn release_undone(stages: &[Stage], sequence: u32) -> u32 {
-    let run = &stages[..(sequence as usize).min(stages.len())];
-    run.iter().rposition(|s| s.actions.contains(&ShipCommand::ReleaseClamps)).map_or(sequence, |k| k as u32)
-}
-
-/// Whether an engine named by `s` waits for its propellant to settle.
-fn settling(def: &ShipDef, state: &ShipState, s: &str) -> bool {
-    let waits = |i: usize| state.engines.get(i).is_some_and(|r| r.settling.is_some());
-    def.engines_of(s).into_iter().any(|i| waits(i) && state.engines[i].status == EngineStatus::Off)
-}
-
-/// Runs the next stage of the ship's own sequence in its view
-/// (`craft::program`: a stage of other pieces only is skipped): its
-/// commands the craft takes; `None` when it has none left. While an
-/// ignition of its active stage waits for its propellant to settle, the
-/// order starts it now instead (its hint says so) and the sequence stays:
-/// running on, the next stage's shutdown would cancel the start (review
-/// H4: Space while the second stage settled ran SECO).
-pub fn next_stage(def: &ShipDef, state: &mut ShipState, at: Epoch) -> Option<(String, Vec<Effect>)> {
-    let last = program::active(def, &state.stages, state.sequence).map(|k| &state.stages[k]);
-    let waiting: Vec<ShipCommand> = last
-        .map(|st| st.actions.iter().filter(|a| matches!(a, ShipCommand::Ignite(s) if settling(def, state, s))))
-        .into_iter()
-        .flatten()
-        .cloned()
-        .collect();
-    if !waiting.is_empty() {
-        let name = format!("{}: start now", last.map_or("", |st| st.name.as_str()));
-        let cx = Context { at, sequence: true };
-        let effects = waiting.iter().flat_map(|a| apply(def, state, a, cx).unwrap_or_default()).collect();
-        return Some((name, effects));
-    }
-    let k = program::next(def, &state.stages, state.sequence)?;
-    let stage = program::mine(def, &state.stages[k]);
-    state.sequence = k as u32 + 1;
-    let cx = Context { at, sequence: true };
-    Some((stage.name.clone(), run(def, state, &stage, cx)))
-}
-
-/// Runs stage `k` of the program again (D114), one already run in the
-/// craft's view: each of its commands that can act does (an engine with an
-/// ignition left starts), the rest do nothing (a joint already parted,
-/// clamps let go, a mechanism where it is); the sequence stays. `None` for
-/// a stage not yet run or not in the view.
-pub fn again(def: &ShipDef, state: &mut ShipState, k: u32, at: Epoch) -> Option<(String, Vec<Effect>)> {
-    if !program::has_run(def, &state.stages, state.sequence, k) {
-        return None;
-    }
-    let stage = program::mine(def, &state.stages[k as usize]);
-    let cx = Context { at, sequence: true };
-    Some((stage.name.clone(), run(def, state, &stage, cx)))
-}
-
-/// Runs a saved function by name, its commands the craft takes; `None` if
-/// its view has none of that name.
-pub fn function(def: &ShipDef, state: &mut ShipState, name: &str, at: Epoch) -> Option<Vec<Effect>> {
-    let stage = program::mine(def, program::function(def, &state.functions, name)?);
-    Some(run(def, state, &stage, Context { at, sequence: false }))
-}
-
-fn run(def: &ShipDef, state: &mut ShipState, stage: &Stage, cx: Context) -> Vec<Effect> {
-    let mut effects = Vec::new();
-    for a in &stage.actions {
-        effects.extend(apply(def, state, a, cx).unwrap_or_default());
-    }
-    effects
-}
-
 /// Carries out an order: its effects, and a line for the event log.
 pub fn carry_out(def: &ShipDef, state: &mut ShipState, kind: &OrderKind, at: Epoch) -> Vec<Effect> {
     match kind {
@@ -284,14 +168,14 @@ pub fn carry_out(def: &ShipDef, state: &mut ShipState, kind: &OrderKind, at: Epo
                 Vec::new()
             }
         },
-        OrderKind::Stage => match next_stage(def, state, at) {
+        OrderKind::Stage => match sequence::next_stage(def, state, at) {
             Some((name, e)) => {
                 state.event(at, format!("Stage: {name}"), false);
                 e
             }
             None => Vec::new(),
         },
-        OrderKind::Again(k) => match again(def, state, *k, at) {
+        OrderKind::Again(k) => match sequence::again(def, state, *k, at) {
             Some((name, e)) => {
                 state.event(at, format!("Stage again: {name}"), false);
                 e
@@ -301,7 +185,7 @@ pub fn carry_out(def: &ShipDef, state: &mut ShipState, kind: &OrderKind, at: Epo
                 Vec::new()
             }
         },
-        OrderKind::Function(name) => match function(def, state, name, at) {
+        OrderKind::Function(name) => match sequence::function(def, state, name, at) {
             Some(e) => {
                 state.event(at, format!("Function: {name}"), false);
                 e
@@ -318,28 +202,6 @@ pub fn carry_out(def: &ShipDef, state: &mut ShipState, kind: &OrderKind, at: Epo
 mod tests {
     use super::*;
     use crate::craft::state::Lost;
-
-    /// A release undone puts the sequence back to the last stage run that
-    /// releases the clamps; without one, it stays.
-    #[test]
-    fn a_release_undone_is_next_again() {
-        let stage =
-            |actions: Vec<ShipCommand>| Stage { name: String::new(), key: None, actions, pinned: false, abort: false };
-        let ignite = || ShipCommand::Ignite("s1".into());
-        let stages = vec![
-            stage(vec![ignite()]),
-            stage(vec![ShipCommand::ReleaseClamps]),
-            stage(vec![ShipCommand::Shutdown("s1".into())]),
-            stage(vec![ignite(), ShipCommand::ReleaseClamps]),
-            stage(vec![]),
-        ];
-        // (sequence, after)
-        let cases = [(0, 0), (1, 1), (2, 1), (3, 1), (4, 3), (5, 3), (9, 3)];
-        for (sequence, want) in cases {
-            assert_eq!(release_undone(&stages, sequence), want, "{sequence}");
-        }
-        assert_eq!(release_undone(&stages[..1], 1), 1, "no release run");
-    }
 
     /// The engine rule, in one place (F8 of the fidelity review): one
     /// engine of the small rocket (TEA-TEB, three charges) commanded in
@@ -485,228 +347,5 @@ mod tests {
         state.unpowered.clear();
         apply(&def, &mut state, &ShipCommand::Ignite("s2".into()), cx).unwrap();
         assert!(matches!(state.engines[mvac].status, EngineStatus::Starting) || state.engines[mvac].settling.is_some());
-    }
-
-    /// A stage run again (D114) starts the engines that are off and can
-    /// start, does nothing to those lit, and leaves the sequence; a stage
-    /// not yet run is refused.
-    #[test]
-    fn a_stage_runs_again() {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/craft/falcon9-crew");
-        let def = crate::craft::load_definition(&path).unwrap().ship.unwrap();
-        let at = Epoch::new(1_000_000_000, 0.0);
-        let mut state = ShipState::initial(&def);
-        next_stage(&def, &mut state, at).unwrap();
-        let lit: Vec<usize> =
-            (0..def.engines.len()).filter(|&i| state.engines[i].status != EngineStatus::Off).collect();
-        assert!(!lit.is_empty(), "the first stage lights engines");
-        let sequence = state.sequence;
-        assert!(again(&def, &mut state, sequence, at).is_none(), "not run yet");
-        let before = state.engines.clone();
-        again(&def, &mut state, 0, at).unwrap();
-        assert_eq!(state.engines, before, "lit engines: nothing");
-        for &i in &lit {
-            state.engines[i].status = EngineStatus::Off;
-        }
-        let (name, _) = again(&def, &mut state, 0, at).unwrap();
-        assert_eq!(name, state.stages[0].name);
-        assert!(lit.iter().all(|&i| state.engines[i].status == EngineStatus::Starting));
-        assert_eq!(state.sequence, sequence);
-        // Off the pad, only the engines with a charge left relight (the
-        // Falcon 9's E1, E5 and E9); the rest do nothing.
-        state.clamped = false;
-        for &i in &lit {
-            state.engines[i].status = EngineStatus::Off;
-        }
-        again(&def, &mut state, 0, at).unwrap();
-        for &i in &lit {
-            let want = if state.engines[i].ignitions > 0 { EngineStatus::Starting } else { EngineStatus::Off };
-            assert_eq!(state.engines[i].status, want, "{}", def.engines[i].id);
-        }
-        assert_eq!(lit.iter().filter(|&&i| state.engines[i].status == EngineStatus::Starting).count(), 3);
-    }
-
-    /// After the stage separation each piece keeps the whole program and
-    /// runs its own stages (`craft::program`): Space on the booster skips
-    /// the upper stack's to its own next one, on the upper stack it runs
-    /// the second stage's ignition; AGAIN refuses another piece's stage.
-    #[test]
-    fn each_piece_runs_its_own_stages_after_a_split() {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/craft/falcon9-crew");
-        let def = crate::craft::load_definition(&path).unwrap().ship.unwrap();
-        let at = Epoch::new(1_000_000_000, 0.0);
-        let mut state = ShipState::initial(&def);
-        let fins = Stage { name: "Grid fins".into(), key: None, actions: vec![], pinned: false, abort: false };
-        state.stages.push(Stage { actions: vec![ShipCommand::Deploy("s1.gridfin#*".into())], ..fins });
-        state.clamped = false;
-        for _ in 0..4 {
-            next_stage(&def, &mut state, at).unwrap();
-        }
-        let ids = |f: &dyn Fn(&str) -> bool| def.parts.iter().filter(|p| f(&p.id)).map(|p| p.part).collect::<Vec<_>>();
-        let upper = |id: &str| id.starts_with("s2.") || id.starts_with("dragon.");
-        let (a, b) = (ids(&upper), ids(&|id| !upper(id)));
-        let (da, db) = (def.subset(&a), def.subset(&b));
-        let (mut pa, mut pb) = (state.partition(&a, &def, &da, true), state.partition(&b, &def, &db, false));
-        assert_eq!(next_stage(&db, &mut pb, at).unwrap().0, "Grid fins");
-        assert_eq!(pb.sequence, 8);
-        let fin = db.mechanisms.iter().position(|m| m.id.starts_with("s1.gridfin")).unwrap();
-        assert_eq!(pb.mechanisms[fin].target, db.mechanisms[fin].item.deployed_deg);
-        assert!(next_stage(&db, &mut pb, at).is_none(), "none left");
-        assert!(again(&db, &mut pb, 4, at).is_none(), "the upper stack's");
-        assert_eq!(again(&db, &mut pb, 3, at).unwrap().0, "Stage separation");
-        assert_eq!(next_stage(&da, &mut pa, at).unwrap().0, "Second stage ignition");
-        assert_eq!(pa.sequence, 5);
-    }
-
-    /// The sequence is edited in flight (D111) through the ship's commands:
-    /// stages still to run move, swap commands and go; the stages run,
-    /// out-of-range indices and what is not in the craft's view are refused
-    /// whole.
-    #[test]
-    fn the_sequence_is_edited_where_it_has_not_run() {
-        use SequenceEdit::{Delete, Move, MoveAction};
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/craft/falcon9-crew");
-        let def = crate::craft::load_definition(&path).unwrap().ship.unwrap();
-        // Commands every craft takes (they name nothing).
-        let stage = |name: &str, n: usize| Stage {
-            name: name.into(),
-            key: None,
-            actions: (0..n)
-                .map(|k| if k % 2 == 0 { ShipCommand::ArmChutes } else { ShipCommand::ReleaseClamps })
-                .collect(),
-            pinned: false,
-            abort: false,
-        };
-        let names = |s: &[Stage]| s.iter().map(|s| format!("{}{}", s.name, s.actions.len())).collect::<Vec<_>>();
-        // (edit, sequence, stages after, or refused)
-        let cases: [(SequenceEdit, u32, Option<[&str; 4]>); 9] = [
-            (Move { from: 3, to: 1 }, 1, Some(["a1", "d1", "b2", "c0"])),
-            (Move { from: 1, to: 3 }, 1, Some(["a1", "c0", "d1", "b2"])),
-            (Move { from: 0, to: 2 }, 1, None),
-            (Move { from: 1, to: 4 }, 0, None),
-            (MoveAction { from: 1, action: 1, to: 3 }, 1, Some(["a1", "b1", "c0", "d2"])),
-            (MoveAction { from: 1, action: 2, to: 3 }, 1, None),
-            (MoveAction { from: 1, action: 0, to: 1 }, 0, None),
-            (MoveAction { from: 0, action: 0, to: 2 }, 1, None),
-            (Delete(2), 2, Some(["a1", "b2", "d1", ""])),
-        ];
-        for (edit, sequence, want) in cases {
-            let mut stages = vec![stage("a", 1), stage("b", 2), stage("c", 0), stage("d", 1)];
-            let before = stages.clone();
-            let got = edit_sequence(&def, &mut stages, sequence, &edit);
-            match want {
-                Some(w) => {
-                    got.unwrap();
-                    let w: Vec<String> = w.iter().filter(|s| !s.is_empty()).map(|s| s.to_string()).collect();
-                    assert_eq!(names(&stages), w, "{edit:?}");
-                }
-                None => {
-                    assert!(got.is_err(), "{edit:?}");
-                    assert_eq!(stages, before, "refused whole");
-                }
-            }
-        }
-        // In the booster's view after the stage separation, the upper
-        // stack's stages and commands stay as they are.
-        let parts: Vec<u32> = (def.parts.iter())
-            .filter(|p| !p.id.starts_with("s2.") && !p.id.starts_with("dragon."))
-            .map(|p| p.part)
-            .collect();
-        let booster = def.subset(&parts);
-        let mut stages = def.sequence.clone();
-        let refused =
-            [Move { from: 4, to: 3 }, Move { from: 2, to: 5 }, Delete(6), MoveAction { from: 3, action: 0, to: 2 }];
-        for edit in refused {
-            assert!(edit_sequence(&booster, &mut stages, 2, &edit).is_err(), "{edit:?}");
-        }
-        edit_sequence(&booster, &mut stages, 2, &MoveAction { from: 3, action: 1, to: 2 }).unwrap();
-        assert_eq!(
-            stages[2].actions,
-            [ShipCommand::Shutdown("s1".into()), ShipCommand::Rcs("s1.coldgas#*".into(), true)]
-        );
-        assert_eq!(stages[3].actions, [ShipCommand::Separate("stage separation".into())], "the cut joint's stays");
-        // As a ship command: the moved command keeps its place in order.
-        let mut state = ShipState::initial(&def);
-        let cx = Context { at: Epoch::new(1_000_000_000, 0.0), sequence: false };
-        let n = state.stages.len();
-        let edit = ShipCommand::Sequence(MoveAction { from: 3, action: 1, to: 6 });
-        apply(&def, &mut state, &edit, cx).unwrap();
-        assert_eq!(state.stages[6].actions.last(), Some(&ShipCommand::Rcs("s1.coldgas#*".into(), true)));
-        apply(&def, &mut state, &ShipCommand::Sequence(Delete(5)), cx).unwrap();
-        assert_eq!(state.stages.len(), n - 1);
-        assert!(def.check(&edit).is_err(), "never a stage's own command");
-    }
-
-    /// The sequence's second-stage ignition on floating propellant waits
-    /// for it to settle; the next stage order starts it now (as its hint
-    /// says) instead of running SECO, which would cancel the start; then
-    /// the sequence runs on (review H4).
-    #[test]
-    fn staging_again_while_settling_starts_the_engine() {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/craft/falcon9-crew");
-        let def = crate::craft::load_definition(&path).unwrap().ship.unwrap();
-        let mvac = def.engines.iter().position(|e| e.id == "s2.mvac").unwrap();
-        let at = Epoch::new(1_000_000_000, 0.0);
-        let mut state = ShipState::initial(&def);
-        state.clamped = false;
-        let ignition = (state.stages.iter())
-            .position(|st| st.actions.iter().any(|a| matches!(a, ShipCommand::Ignite(s) if s == "s2")))
-            .expect("the second stage's ignition");
-        state.sequence = ignition as u32;
-        // Floating: the liquids drifted off their outlets in free fall.
-        for t in state.tanks.iter_mut() {
-            t.drift = 100.0;
-        }
-        let (name, _) = next_stage(&def, &mut state, at).unwrap();
-        println!("{name}: {:?}", state.events.last());
-        assert_eq!(state.engines[mvac].status, EngineStatus::Off);
-        assert!(state.engines[mvac].settling.is_some());
-        assert!(state.events.iter().any(|e| e.text.contains("stage again to start now")));
-        let (name, _) = next_stage(&def, &mut state, at).unwrap();
-        assert!(name.ends_with("start now"), "{name}");
-        assert_eq!(state.engines[mvac].status, EngineStatus::Starting);
-        assert_eq!(state.sequence as usize, ignition + 1, "the sequence waits");
-        let (name, _) = next_stage(&def, &mut state, at).unwrap();
-        assert!(!name.ends_with("start now"), "{name}");
-        assert_eq!(state.sequence as usize, ignition + 2);
-    }
-
-    /// The Falcon 9's "Launch abort" terminates the stack's thrust (the
-    /// AFSS and stage 2's pyrovalve, falcon9.md §5.1) as Dragon separates
-    /// and lights its SuperDracos: on the pad with the Merlins at full
-    /// thrust, in flight on the booster, and in flight on the second stage.
-    #[test]
-    fn a_launch_abort_shuts_the_stack_down() {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/craft/falcon9-crew");
-        let def = crate::craft::load_definition(&path).unwrap().ship.unwrap();
-        let at = Epoch::new(1_000_000_000, 0.0);
-        let stack = |i: usize| def.engines[i].id.starts_with("s1.") || def.engines[i].id.starts_with("s2.");
-        let lit = |s: EngineStatus| matches!(s, EngineStatus::Starting | EngineStatus::Running);
-        // (case, clamped, the engines running before)
-        let cases: [(&str, bool, &str); 3] = [
-            ("on the pad", true, "s1.merlin"),
-            ("booster burning", false, "s1.merlin"),
-            ("second stage", false, "s2.mvac"),
-        ];
-        for (case, clamped, running) in cases {
-            let mut state = ShipState::initial(&def);
-            state.clamped = clamped;
-            for (i, d) in def.engines.iter().enumerate() {
-                if d.id.starts_with(running) {
-                    state.engines[i].status = EngineStatus::Running;
-                    state.engines[i].level = 1.0;
-                }
-            }
-            let effects = function(&def, &mut state, "Launch abort", at).expect("the function");
-            assert!(!effects.is_empty(), "{case}: Dragon separates");
-            for (i, d) in def.engines.iter().enumerate() {
-                let s = state.engines[i].status;
-                if stack(i) {
-                    assert!(!lit(s), "{case}: {} is {s:?}", d.id);
-                } else if d.id.starts_with("dragon.superdraco") {
-                    assert!(lit(s), "{case}: {} is {s:?}", d.id);
-                }
-            }
-        }
     }
 }
