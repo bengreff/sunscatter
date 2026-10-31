@@ -27,7 +27,7 @@ How a craft makes thrust and feeds it: tanks and their pressures, the pressurant
 ## Not built
 
 - The vacuum relight, boostback and entry burns for the booster's return (D117, D123); Dragon's helium bottles with thrust following feed pressure, which D125 asks of every pressure-fed engine; flow separation in vacuum nozzles at sea level (queued in the hand-off).
-- Planned burns for craft of parts, closed-loop with real starts, ullage and tail-off (D126, PLANNER). Today's planned burn is open-loop steady thrust on the made-up path ([motion](motion.md)).
+- Planned burns on translation thrusters (Dragon's Dracos). Planned burns on main engines, closed-loop with real starts, settling and tail-off, are *playable* ([planner.md](../technical/planner.md)): a turn spends at most 10 % (E) of the thrusters' propellant left (`vessel::ship::gas_cap`).
 - An engine and propulsion simulator for designing engines (D020): *direction*.
 - Advanced propulsion (fusion and beyond): not written.
 

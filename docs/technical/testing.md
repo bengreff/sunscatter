@@ -68,6 +68,10 @@ Each step is one call unless it says otherwise. The numbers are what this flight
 
 The booster, uncontrolled after separation (its return guidance is not built, D123), broke up on its way down; its pieces were then deleted as debris (D083).
 
+### Worked example: planned burns on the second stage (2026-10-31)
+
+From an orbit save (step 10 above), `set_plan {id, burns: [{in_s, prograde}]}` with `in_s` the node: the burn's middle, here the apoapsis's `in_s` from `get_vessel`. Its answer gives each node's ignition, duration and warnings, and the Δv available. `run_until {seconds, warp: 6}` to a few minutes before the node: the vessel wakes at the program's epoch whatever the warp ("burn 1: turning to the burn" in the log; the Maneuver menu says what the program is doing). Then `step` through the settling, the ignition and the cutoff ("burn 1: on target (0.26 m/s left)"). Read the orbit from a `step` or `run_until` answer (`apoapsis_m`, osculating, from the state) rather than `get_vessel`'s apsides, which come from the predicted path and lag the state while an engine runs. Flown numbers and shots: [planner.md](planner.md).
+
 ### What to check
 
 - Each call's `reached` is the stop you asked for, not `timeout`, `paused` or `vessel_gone`.

@@ -125,3 +125,31 @@ Small commits, each with its tests passing (`cargo test -p sim`, the game's test
 
 **Open for the owner** (defaults taken, E): the landing prediction with unmeasured propellant assumes the engines do not run dry and holds the mass (the small rocket reads no tank levels; reading the truth would be the software knowing what it cannot sense); a node's time is the burn's middle, in the planner and MCP; the gas cap's 10 % share stands.
 
+
+### State (PLANNER-4, 2026-10-31)
+
+**Landed:**
+- 178e814 **The turn on the gas the thrusters can afford** (PLANNER-3's draft, compiled and fixed): a craft of parts slews no faster than spinning up and stopping costs 10 % (E) of its thrusters' propellant left (`vessel::ship::gas_cap`, `Vessel::gas_turn_cap`; the schedule's `hold::turn_lead_capped`), unless a gimballed engine runs or in debug mode. The second stage with Dragon and full tanks turns at 0.25°/s on 14 % of its nitrogen (it emptied the bottle before). **The steering is held for a burn's last 2 s** (E, `maneuver::STEER_HOLD`, `steers`): near the cutoff v_go's direction swung 12° in 0.8 s and the MVac's gimbal chasing it left the stage spinning at 0.14 rad/s. PLANNER-2's second-stage test is permanent: 0.06 m/s and 7 m from its target, 0.0002 rad/s at the cutoff. The small rocket's 40 m/s node: 0.08 m/s (was 0.19).
+- a2a9d55 **A separation mid-burn** ends the burn, logged as an alarm ("burn N: ended by the separation"); later nodes stay with the kept piece; the others leave with no plan.
+- 1eb6715 **The Maneuver menu** lists the burn being flown, then the nodes not yet burnt (numbered as the log numbers burns), with Δv, ignition countdown and duration from `predict_node`, and what the program is doing.
+- 431155d **Takeover hands the burn over as it was flying** (`maneuver::handover`, `Helm::hand_over`, `Helm::current`): in what the program commanded and the pilot had not changed, the program's throttle and SAS on stability; the rest of that step reads the handed controls (a closed throttle for one tick would shut the engine down). A separation hands over the same way (`Program::throttle`).
+- 2dfd940 The planner warns when a craft has no main engine to burn a node (Dragon after separation).
+- Docs (this commit): `technical/planner.md` (new), the status lines (motion, propulsion, avionics: *playable* on main engines), `owners.md` rows, `testing.md`'s planned-burn example, the plan's row.
+
+**The mission test** (D122): from INTERFACE-2's orbit save (192 × 343 km, debug off), MCP `set_plan` with 43.9 m/s prograde at the apoapsis and 20 m/s 46 min later. Both woke out of warp 6, turned, settled, lit the MVac and cut off inside its 3 s start, "on target (0.26 / 0.27 m/s left)": one tick at the MVac's 64 % floor is ~0.6 m/s on this light stage. Burn 1 gave 340 × 353 km (e 0.0009); after both the Orbital menu read 412.1 × 343.2 km against the planner's 413.2 × 343.5. Shots, in `/private/tmp/claude-501/-Users-ben-sunscatter/7c5f130a-69ba-45d3-9965-ca858b31253e/scratchpad/planner4/shots/`: `01-menu-nodes.png` (both nodes listed), `02-turning.png` ("turning to the burn"), `04-settling.png` ("settling the propellant"), `05-burning.png` (the plume; the stage in Earth's shadow), `06-after-burn1.png`, `07-after-burn2.png` (the stack lit, the orbit, "no burns planned", the log). Save after: `planner4/home/saves/planner4-orbit-after.ron`.
+
+**INTERFACE-2's finding 20** (the lead's question): not the engine. In the sim a closed throttle shuts the running MVac down at once (D114): one more tick of propellant (the tick already committed, which `last_ticks` counts), then off, with no tail-off (its shutdown impulse is 0, and so is the program's tail term). The 80 km is `get_vessel`'s apsides lagging: they come from the predicted path, recomputed every 0.25 s of real time as an engine-off coast (`state::update_prediction`). 1 s into burn 2 they read 343.9 km while the state's osculating apoapsis was 360.0 km (the `step` answer's `apoapsis_m`). For the game's owner (INTERFACE/agent): recompute the prediction before an MCP answer at a stop, or give the osculating apsides while powered.
+
+**Found, not fixed:**
+- Dragon's Dracos cannot fly a planned burn: the program burns main engines only (now warned). D125's same mechanism needs the program to command a translation on thruster blocks in place of an ignition.
+- With the pilot's throttle at 0 at the wake, X (cut) during a burn changes nothing and does not take over (no change from the baseline).
+- The navball's hold buttons show the pilot's hold (STAB) while the program flies the maneuver hold.
+- During the turn the stage was in Earth's shadow: the shots show only the plume. A lit burn needs a node on the day side.
+
+**Left, in order:**
+1. A throttle cut during a burn when the throttle was already closed (above): the program moving the pilot's throttle as it flies (an autothrottle moving the lever) makes X a conflict and the hand-over trivial. A change to PLANNER-1's design: open for the owner.
+2. Planned burns on translation thrusters (Dragon's Dracos, D125).
+3. The navball's hold buttons during a program; the game's planner window used on screen with nodes (a shot).
+4. `get_vessel`'s apsides while powered (finding 20; the game's owner).
+
+**Open for the owner** (defaults taken, E), beyond PLANNER-1..3's: the steering held for a burn's last 2 s; the hand-over gives the program's throttle and SAS on stability in what the pilot had not changed; a separation mid-burn hands over the same way.

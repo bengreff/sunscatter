@@ -40,7 +40,7 @@ What a craft knows, what its own computers decide, how it is powered, and how it
 - Radiation's single-event upsets (open question 1).
 - **The ship OS** (D043, D035; pillar 4 of the [vision](../vision.md)): the WASM runtime and its one API, the compute budget summed from the computers, the vehicle's flight software as WASM modules, the player's scripts and their command-line tool.
 - **D034's routing:** commands to a vessel leave only from the nearest mission control, and programs upload over the relay network; with one mission control there is no choice of the nearest yet.
-- **D126's switch:** each automatic sequence by itself, on a press or off; the autopilot's config menu; planned burns as flight-layer programs (PLANNER, [motion](motion.md)); taking over only where the player's input conflicts with the sequence.
+- **D126's switch:** each automatic sequence by itself, on a press or off; the autopilot's config menu; taking over elsewhere than planned burns. Planned burns are built as a layer-2 program (*playable*, [planner.md](../technical/planner.md)): taken over only where the player's input conflicts with it, and handed over as it was flying.
 - **D128's three layers:** today `sim::systems::flight` mixes the parts' own logic (layer 1: engine controllers, valves, regulators, the fail-safe shutdown) with the ship computer's (layer 2: SAS, the holds, the launch commit, functions, aborts). LAYERS splits them, with the bare minimum defined by layer 1 alone (enough to coast for months) and the warp-stop line on it.
 - **Antennas from the parts** (D125): every vessel carries the same antenna constant (`game::comms::VESSEL_ANTENNA`, the test craft's).
 
