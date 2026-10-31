@@ -140,18 +140,20 @@ pub fn tools(dev: bool) -> Vec<Tool> {
              `width`/`height` size the image of a headless game (SUNSCATTER_OFFSCREEN=1); `ui_scale` scales the \
              interface for this shot (0.2 shrinks it to specks: a shot of the scene); `menus` are the flight view's \
              menus open for the shot (the others closed); the systems screen opens on `layer` with `part` (a \
-             craft-file id) selected. Everything is put back after the shot.",
+             craft-file id) selected; `help` shows the keys and every way in; `cards` opens those parts' cards \
+             (craft-file ids) by the staging bar. Everything is put back after the shot.",
             schema(
                 json!({
                     "path": {"type": "string"}, "name": {"type": "string"},
                     "width": {"type": "integer", "minimum": 16, "maximum": 8192},
                     "height": {"type": "integer", "minimum": 16, "maximum": 8192},
                     "ui_scale": {"type": "number", "exclusiveMinimum": 0},
-                    "screen": {"type": "string", "enum": ["flight", "systems", "tracking", "pause", "settings"]},
+                    "screen": {"type": "string", "enum": ["flight", "systems", "tracking", "pause", "settings", "help"]},
                     "layer": {"type": "string", "enum": names(&LAYER_NAMES)},
                     "part": {"type": "string"},
                     "menus": {"type": "array", "items": {"type": "string", "enum": names(&MENU_NAMES)}},
                     "settings_tab": {"type": "string", "enum": names(&TAB_NAMES)},
+                    "cards": {"type": "array", "items": {"type": "string"}},
                     "settle_s": num("Real seconds to wait at most for the terrain (default 15)"),
                 }),
                 &[],
@@ -284,6 +286,8 @@ struct Restore {
     station: bool,
     pause_menu: bool,
     settings: (bool, SettingsTab),
+    help: bool,
+    cards: Vec<crate::interface::part_card::Open>,
     ui_scale: Option<f32>,
     held: bool,
 }
@@ -318,6 +322,9 @@ pub struct ShotSpec {
     pub ui_scale: Option<f32>,
     pub screen: Screen,
     pub menus: Option<Vec<MenuId>>,
+    /// Part cards open for the shot (craft-file ids), stacked by the
+    /// staging bar; `None` leaves the open ones.
+    pub cards: Option<Vec<String>>,
     pub settle_max: f64,
 }
 
@@ -329,6 +336,8 @@ pub enum Screen {
     Tracking,
     Pause,
     Settings(SettingsTab),
+    /// The keys and every way in (`?`).
+    Help,
 }
 
 impl ShotSpec {
@@ -349,6 +358,7 @@ impl ShotSpec {
             "systems" => Screen::Systems { layer, part: s("part").map(str::to_string) },
             "tracking" => Screen::Tracking,
             "pause" => Screen::Pause,
+            "help" => Screen::Help,
             "settings" => {
                 Screen::Settings(by_name(&TAB_NAMES, s("settings_tab").unwrap_or("interface"), "settings tab")?)
             }
@@ -365,6 +375,15 @@ impl ShotSpec {
             ),
             Some(_) => return Err("`menus` is a list of names".into()),
         };
+        let cards = match args.get("cards") {
+            None => None,
+            Some(Value::Array(list)) => Some(
+                list.iter()
+                    .map(|c| c.as_str().map(str::to_string).ok_or_else(|| "cards are part ids".to_string()))
+                    .collect::<Result<Vec<_>, _>>()?,
+            ),
+            Some(_) => return Err("`cards` is a list of part ids".into()),
+        };
         let name = s("name").and_then(crate::saves::sanitize).unwrap_or_else(|| "shot".into());
         let settle_max = args.get("settle_s").and_then(Value::as_f64).unwrap_or(SETTLE_MAX).clamp(SETTLE_MIN, 120.0);
         Ok(ShotSpec {
@@ -374,6 +393,7 @@ impl ShotSpec {
             ui_scale: ui_scale.map(|u| u as f32),
             screen,
             menus,
+            cards,
             settle_max,
         })
     }
@@ -639,6 +659,8 @@ pub struct Screens<'w> {
     station: ResMut<'w, crate::tracking::TrackingStation>,
     menu: ResMut<'w, crate::interface::pause::PauseMenu>,
     settings: ResMut<'w, SettingsUi>,
+    help: ResMut<'w, crate::interface::help::Help>,
+    cards: ResMut<'w, crate::interface::part_card::PartCards>,
 }
 
 /// The developer's measures.
@@ -777,6 +799,8 @@ fn start(
                     station: screens.station.open,
                     pause_menu: screens.menu.open,
                     settings: (screens.settings.open, screens.settings.tab),
+                    help: screens.help.open,
+                    cards: screens.cards.open.clone(),
                     ui_scale: out.offscreen.ui_scale,
                     held: pause.0,
                 };
@@ -912,6 +936,15 @@ fn show(spec: &ShotSpec, sim: &SimState, s: &mut Screens) -> Result<(), String> 
     s.station.open = false;
     s.menu.open = false;
     s.settings.open = false;
+    s.help.open = false;
+    if let Some(cards) = &spec.cards {
+        let (vessel, def) = (sim.ship().id(), sim.ship().ship_def());
+        s.cards.open.clear();
+        for c in cards {
+            let part = def.as_ref().and_then(|d| d.part_named(c)).ok_or_else(|| format!("the active vessel has no part `{c}`"))?;
+            s.cards.open(vessel, part, crate::interface::part_card::From::Bar);
+        }
+    }
     match &spec.screen {
         Screen::Flight => {}
         Screen::Systems { layer, part } => {
@@ -929,6 +962,7 @@ fn show(spec: &ShotSpec, sim: &SimState, s: &mut Screens) -> Result<(), String> 
         }
         Screen::Tracking => s.station.open = true,
         Screen::Pause => s.menu.open = true,
+        Screen::Help => s.help.open = true,
         Screen::Settings(tab) => {
             s.menu.open = true;
             (s.settings.open, s.settings.tab) = (true, *tab);
@@ -977,6 +1011,8 @@ fn shot(
             screens.station.open = r.station;
             screens.menu.open = r.pause_menu;
             (screens.settings.open, screens.settings.tab) = r.settings;
+            screens.help.open = r.help;
+            screens.cards.open = r.cards.clone();
             out.offscreen.ui_scale = r.ui_scale;
             pause.0 = r.held;
             let size = out.offscreen.image.as_ref().map(|_| out.offscreen.size);
@@ -1162,6 +1198,8 @@ mod tests {
             ShotSpec::parse(&json!({"screen": "settings"})).unwrap().screen,
             Screen::Settings(SettingsTab::Interface)
         );
+        let spec = ShotSpec::parse(&json!({"screen": "help", "cards": ["s1.tank", "m1d#1"]})).unwrap();
+        assert_eq!((spec.screen, spec.cards), (Screen::Help, Some(vec!["s1.tank".into(), "m1d#1".into()])));
         // (arguments, the error's words)
         let bad = [
             (json!({"width": 100}), "together"),
@@ -1169,6 +1207,7 @@ mod tests {
             (json!({"layer": "x-ray"}), "unknown layer"),
             (json!({"screen": "bridge"}), "unknown screen"),
             (json!({"ui_scale": 0.0}), "ui_scale"),
+            (json!({"cards": "s1.tank"}), "list of part ids"),
         ];
         for (args, words) in bad {
             let e = ShotSpec::parse(&args).unwrap_err();
