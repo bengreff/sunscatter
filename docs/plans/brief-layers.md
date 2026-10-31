@@ -53,3 +53,5 @@ Small commits, one purpose each; `cargo test -p sim` and the game's touched test
 ### From the lead (2026-10-31)
 
 - INTERFACE-2's finding 19: Crew Dragon has no cabin sensors in its data (`data/parts/dragon*`). The bare minimum's crew-at-risk line reads the cabin through `Knowledge` (D106), so give the cabin its real sensors (CO₂, O₂, pressure, temperature; sourced or E) before the warp-stop test.
+- STATE is finished (2026-10-31): `Runtime` is merged into `ShipState` by subsystem, owners are typed handles (`craft::handle`), the engine rule lives only in `systems::command::apply` (F8), and `Vessel::powered()` comes from `systems::power::powered` (the ship's batteries and arrays). Read `brief-state.md`'s States for where things moved; the code paths named above may have changed.
+- Your target dir: start warm with `mv target/agents/state target/agents/layers`. INTERFACE-9 runs beside you in the game crate and `game::agent`.
