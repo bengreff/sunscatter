@@ -31,6 +31,7 @@
 
 pub mod edit;
 pub mod inspect;
+pub mod programs;
 pub mod rules;
 pub mod summary;
 pub mod thermal;
@@ -60,6 +61,8 @@ pub enum Tab {
     #[default]
     Stages,
     Functions,
+    /// The ship computer's programs: each one's switch (D126).
+    Programs,
 }
 
 /// The stage sequence and functions being edited, for one vessel and craft
@@ -183,6 +186,13 @@ impl SystemsScreen {
             self.select(Some(Selection::Part(part)));
         }
         self.pick_layer = layer.is_none() && part.is_some();
+    }
+
+    /// Opens the screen at the editors' `tab` (the Maneuver menu's link
+    /// opens the programs), the layer view as it is.
+    pub fn open_tab(&mut self, tab: Tab) {
+        self.open = true;
+        self.tab = tab;
     }
 
     /// Selects `sel` and isolates its part (a component's part): the
@@ -338,6 +348,10 @@ mod tests {
             (screen.layer, screen.pick_layer, screen.selected),
             (Layer::Plumbing, false, Some(Selection::Part(4)))
         );
+        // The Maneuver menu's link: the programs, the layer view as it was.
+        screen.close();
+        screen.open_tab(Tab::Programs);
+        assert_eq!((screen.open, screen.tab, screen.layer), (true, Tab::Programs, Layer::Plumbing));
     }
 
     /// The left column starts on the craft as a whole; a selection is one

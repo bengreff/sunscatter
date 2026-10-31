@@ -216,6 +216,10 @@ fn parachute(d: &FlightData) -> Section {
     for p in &d.canopies {
         s.toned(p.name.clone(), &p.state, part_tone(p.tone));
     }
+    // The deploy's switch (D126), what it waits for, its press.
+    if let Some(r) = d.programs.iter().find(|r| r.name == "chutes") {
+        s.program("DEPLOY", r);
+    }
     // The q as DYN. PRESSURE reads it (one rule, D106): it read the truth.
     let read = q.and_then(|q| dynamic_pressure(&d.known, q));
     let q_text = read.map_or(DASH.to_string(), |q| format!("{:.1}", q / 1e3));
@@ -396,6 +400,23 @@ mod tests {
         d.chute.commanded = true;
         let s = shown(&d);
         assert!(!find(&s, "parachute").unwrap().items.iter().any(|i| matches!(i, Item::Note(..))), "armed: no advice");
+        // The deploy's switch under the canopies (D126), what it waits for.
+        let row = crate::systems_screen::programs::Row {
+            name: "chutes".into(),
+            title: "Parachutes".into(),
+            does: String::new(),
+            switch: sim::systems::ship_os::Switch::Press,
+            now: "stowed: arms on a press".into(),
+            tone: Tone::Normal,
+            press: Ok("arm: the drogues' mortars fire".into()),
+        };
+        let with = FlightData { programs: vec![row], ..d.clone() };
+        let p = find(&shown(&with), "parachute").unwrap().clone();
+        assert!(p
+            .items
+            .iter()
+            .any(|i| matches!(i, Item::Choice { label, current, .. } if label == "DEPLOY" && current == "ON PRESS")));
+        assert!(p.items.contains(&Item::Note("stowed: arms on a press".into(), Tone::Normal)));
         // A craft without canopies (the booster): said so, no advice.
         let none = FlightData { canopies: Vec::new(), ..d.clone() };
         let s = shown(&none);

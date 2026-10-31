@@ -188,3 +188,37 @@ fn the_navball_reads_its_rows_as_the_cluster_draws_them() {
     assert!(got["speed"].as_str().is_some_and(|t| t != crate::format::DASH), "{got}");
     assert!(read(&json!({"navball": true}), &sim, &seen(&data, None)).is_err(), "nothing drawn yet");
 }
+
+/// A choice's options each say the call that picks them, with its
+/// arguments: the RCS menu's USE, a target by name or id, a program's
+/// switch; its buttons the same (a press, the programs' page).
+#[test]
+fn each_option_of_a_choice_names_its_call() {
+    use crate::navball::NavTarget;
+    use sim::systems::rcs::{RcsMode, RcsOnly};
+    use sim::systems::ship_os::Switch;
+    let mut s = Section::summary();
+    let rcs = |only| MenuAction::SetRcs(RcsMode { on: true, only, fine: false });
+    let use_ = vec![("translate only".to_string(), true, rcs(RcsOnly::Translate))];
+    s.items.push(Item::Choice { label: "USE".into(), current: "translate only".into(), options: use_ });
+    let target = vec![
+        ("none".to_string(), true, MenuAction::SetTarget(None)),
+        ("Vessel 3".to_string(), false, MenuAction::SetTarget(Some(NavTarget::Vessel(sim::vessel::VesselId(3))))),
+        ("Moon".to_string(), false, MenuAction::SetTarget(Some(NavTarget::Body(sim::frame::NodeId(2))))),
+    ];
+    s.items.push(Item::Choice { label: "TARGET".into(), current: "none".into(), options: target });
+    let switch = vec![("OFF".to_string(), false, MenuAction::SetSwitch("chutes".into(), Switch::Off))];
+    s.items.push(Item::Choice { label: "DEPLOY".into(), current: "ON PRESS".into(), options: switch });
+    s.button("Press: fly burn 1", MenuAction::Press("maneuver".into()));
+    s.button("The systems screen: PROGRAMS", MenuAction::OpenPrograms);
+    let v = menu_json(MenuId::Maneuver, &[s], &[]);
+    let items = &v["sections"][0]["items"];
+    let by = |i: usize, o: usize| items[i]["options"][o]["by"].as_str().unwrap().to_string();
+    assert_eq!(by(0, 0), r#"set_controls {rcs: "translate", rcs_fine: false}"#);
+    assert_eq!(by(1, 0), "set_target {none: true}");
+    assert_eq!(by(1, 1), "set_target {vessel: 3}");
+    assert_eq!(by(1, 2), r#"set_target {body: "Moon"}"#);
+    assert_eq!(by(2, 0), r#"set_switch {program: "chutes", switch: "off"}"#);
+    assert_eq!(items[3]["by"], r#"press {program: "maneuver"}"#);
+    assert_eq!(items[4]["by"], "read {programs: true}");
+}

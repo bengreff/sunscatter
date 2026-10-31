@@ -1,15 +1,21 @@
 //! The Maneuver menu (key 3): the planned burns and the way into the burn
 //! planner (D111: from the Orbital menu; N is translate-back now). A craft
 //! of parts lists its nodes (D126) with the sim's prediction of each, and
-//! what the maneuver program is doing while it flies one.
+//! what the maneuver program is doing while it flies one; then the
+//! program's switch (D126: by itself, on a press, off), what it is doing
+//! and its press (`systems_screen::programs`, the PROGRAMS tab's rows).
 
 use super::data::{Burn, FlightData};
 use super::{MenuAction, Section, Tone};
 use crate::format::duration as fmt_duration;
-use sim::systems::maneuver::Step;
+use crate::systems_screen::programs::step_label;
 
 pub fn sections(d: &FlightData) -> Vec<Section> {
-    vec![summary(&d.burns)]
+    let mut s = summary(&d.burns);
+    if let Some(r) = d.programs.iter().find(|r| r.name == "maneuver") {
+        s.program("PROGRAM", r);
+    }
+    vec![s]
 }
 
 fn summary(burns: &[Burn]) -> Section {
@@ -32,25 +38,13 @@ fn summary(burns: &[Burn]) -> Section {
     s
 }
 
-/// What the maneuver program is doing, in the menu's words (the ship's log
-/// tells how a burn ended).
-fn step_label(step: Step) -> &'static str {
-    match step {
-        Step::Wait => "waiting",
-        Step::Turn => "turning to the burn",
-        Step::Settle => "settling the propellant",
-        Step::Burn => "burning",
-        Step::TailOff => "cutting off",
-        Step::Done => "on target",
-        Step::Manual => "taken over",
-        Step::Short => "ended short",
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::super::Item;
     use super::*;
+    use crate::systems_screen::programs::Row;
+    use sim::systems::maneuver::Step;
+    use sim::systems::ship_os::Switch;
 
     /// The burns in order, ignition soon in amber, and the planner's button.
     #[test]
@@ -86,5 +80,36 @@ mod tests {
         assert_eq!(s.value("BURN 3"), Some("Δv 5.0 m/s"));
         let turning = [Burn { step: Some(Step::Turn), in_s: 40.0, number: 1, ..Burn::default() }];
         assert_eq!(summary(&turning).value("  NOW"), Some("turning to the burn"));
+    }
+
+    /// The maneuver program's switch under the burns: AUTO, ON PRESS, OFF
+    /// with the one set, what it is doing, and its press while it does
+    /// something.
+    #[test]
+    fn the_programs_switch_and_press() {
+        let row = Row {
+            name: "maneuver".into(),
+            title: "Planned burns".into(),
+            does: String::new(),
+            switch: Switch::Press,
+            now: "burn 1 wakes in 30s: waits for a press".into(),
+            tone: Tone::Warn,
+            press: Ok("fly burn 1".into()),
+        };
+        let d = FlightData { programs: vec![row.clone()], ..FlightData::default() };
+        let s = &sections(&d)[0];
+        let set = |sw| MenuAction::SetSwitch("maneuver".into(), sw);
+        let options = vec![
+            ("AUTO".to_string(), false, set(Switch::Auto)),
+            ("ON PRESS".to_string(), true, set(Switch::Press)),
+            ("OFF".to_string(), false, set(Switch::Off)),
+        ];
+        assert!(s.items.contains(&Item::Choice { label: "PROGRAM".into(), current: "ON PRESS".into(), options }));
+        assert!(s.items.contains(&Item::Note(row.now.clone(), Tone::Warn)));
+        let press = Item::Button { label: "Press: fly burn 1".into(), action: MenuAction::Press("maneuver".into()) };
+        assert!(s.items.contains(&press));
+        // Nothing to press: no button.
+        let d = FlightData { programs: vec![Row { press: Err("it runs by itself".into()), ..row }], ..d };
+        assert!(!sections(&d)[0].items.iter().any(|i| matches!(i, Item::Button { action: MenuAction::Press(_), .. })));
     }
 }

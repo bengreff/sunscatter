@@ -51,6 +51,13 @@ pub const WAYS: &[Way] = &[
         mcp: "shoot {screen: systems, layer, part}",
     },
     Way {
+        what: "The ship computer's programs: each automatic sequence's switch (AUTO, ON PRESS, OFF), what it is \
+               doing, its press",
+        key: Key::None,
+        clicks: "systems screen: PROGRAMS; the Maneuver menu's PROGRAM; Landing ▸ PARACHUTE's DEPLOY",
+        mcp: "read {programs: true}, set_switch, press, shoot {screen: systems, tab: programs}",
+    },
+    Way {
         what: "A part isolated in the systems screen (the rest ghosted, framed)",
         key: Key::None,
         clicks: "click it in the view, in PARTS or in a row about it; Esc or its × goes back",

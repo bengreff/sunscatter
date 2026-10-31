@@ -139,6 +139,18 @@ impl MenuId {
         }
     }
 
+    /// The link at a page's end into the systems screen: at its layer, the
+    /// Maneuver menu's at the ship computer's programs (D126: the
+    /// autopilot's switches).
+    pub fn more(self) -> (String, MenuAction) {
+        if self == MenuId::Maneuver {
+            return ("The systems screen: PROGRAMS".into(), MenuAction::OpenPrograms);
+        }
+        let layer = self.layer();
+        let label = layer.map_or("The systems screen".to_string(), |l| format!("The systems screen: {}", l.name()));
+        (label, MenuAction::OpenSystems(layer, None))
+    }
+
     /// What the menu shows, summary first, then the link into the systems
     /// screen at its layer.
     pub fn sections(self, d: &FlightData) -> Vec<Section> {
@@ -152,9 +164,8 @@ impl MenuId {
             MenuId::Comms => comms::sections(d),
         };
         let mut more = Section::new("more", "");
-        let layer = self.layer();
-        let label = layer.map_or("The systems screen".to_string(), |l| format!("The systems screen: {}", l.name()));
-        more.button(label, MenuAction::OpenSystems(layer, None));
+        let (label, action) = self.more();
+        more.button(label, action);
         all.push(more);
         all.into_iter().filter(|s| !s.items.is_empty()).collect()
     }
@@ -192,6 +203,13 @@ pub enum MenuAction {
     Ship(sim::craft::command::ShipCommand),
     /// The pilot's RCS mode (`GameCommand::SetRcs`).
     SetRcs(sim::systems::rcs::RcsMode),
+    /// A ship-computer program's switch, by its name
+    /// (`systems_screen::programs::set_switch`).
+    SetSwitch(String, sim::systems::ship_os::Switch),
+    /// The press for a program, by its name (`programs::press`).
+    Press(String),
+    /// Opens the systems screen at the programs (`SystemsScreen::open_tab`).
+    OpenPrograms,
 }
 
 /// One line of a section.
@@ -272,6 +290,23 @@ impl Section {
         action: MenuAction,
     ) -> &mut Self {
         self.items.push(Item::Toggle { label: label.into(), on, value: value.into(), tone, action });
+        self
+    }
+
+    /// A ship-computer program (`systems_screen::programs::Row`): its
+    /// switch as a choice under `label`, what it is doing now, and its
+    /// press while one does something.
+    pub fn program(&mut self, label: impl Into<String>, r: &crate::systems_screen::programs::Row) -> &mut Self {
+        use crate::systems_screen::programs::{label as switch_label, SWITCHES};
+        let options = SWITCHES
+            .iter()
+            .map(|(sw, text, _)| (text.to_string(), *sw == r.switch, MenuAction::SetSwitch(r.name.clone(), *sw)));
+        let current = switch_label(r.switch).to_string();
+        self.items.push(Item::Choice { label: label.into(), current, options: options.collect() });
+        self.note(&r.now, r.tone);
+        if let Ok(what) = &r.press {
+            self.button(format!("Press: {what}"), MenuAction::Press(r.name.clone()));
+        }
         self
     }
 
@@ -501,14 +536,18 @@ mod tests {
         assert_eq!(drawn[0].rows().len(), 2);
     }
 
-    /// Every page ends with a link into the systems screen at its layer.
+    /// Every page ends with a link into the systems screen at its layer;
+    /// the Maneuver menu's at the programs.
     #[test]
     fn pages_link_into_the_systems_screen() {
         let d = FlightData::default();
         for m in MenuId::ALL {
             let s = m.sections(&d);
             let more = s.last().unwrap();
-            let want = MenuAction::OpenSystems(m.layer(), None);
+            let want = match m {
+                MenuId::Maneuver => MenuAction::OpenPrograms,
+                _ => MenuAction::OpenSystems(m.layer(), None),
+            };
             assert!(more.items.iter().any(|i| matches!(i, Item::Button { action, .. } if *action == want)), "{m:?}");
         }
     }

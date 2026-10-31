@@ -7,7 +7,8 @@
 //! (`systems_screen::summary::summary`, its inputs by `with_inputs` and
 //! `view::facts_of`), an item's inspector (`inspect::details`, its
 //! commands `inspect::commands`), and the navball cluster
-//! (`navball::rules::readouts`, `navball::control_rows`).
+//! (`navball::rules::readouts`, `navball::control_rows`), and the ship
+//! computer's programs (`systems_screen::programs`, the PROGRAMS tab).
 //!
 //! Each control on a page says which tool works it (`by`): the agent
 //! clicks through its own tools, sent like any command; a command to the
@@ -36,13 +37,16 @@ pub fn tool() -> Tool {
         `layer` (a systems-screen layer's summary of the craft as a whole) and/or `item` (a part's or component's \
         inspector, as the screen's right panel shows it, with its commands), or `navball: true` (the cluster: \
         speed, altitude, G, Ap and Pe, SAS, RCS, the hold buttons, the throttle and the flight state). Not in the \
-        tracking station, whose flight view is not drawn.";
+        tracking station, whose flight view is not drawn. Or `programs: true`: the systems screen's PROGRAMS tab, \
+        the ship computer's programs (D126), each with its switch (`set_switch`), what it does and is doing now, \
+        and its press (`press`) or why there is nothing to press.";
     let properties = json!({
         "menu": {"type": "string", "enum": names(&MENU_NAMES)},
         "card": {"type": "string", "description": "A part's id, as get_vessel and the systems screen name it"},
         "layer": {"type": "string", "enum": names(&LAYER_NAMES)},
         "item": {"type": "string", "description": "A part's or component's id"},
-        "navball": {"type": "boolean"}
+        "navball": {"type": "boolean"},
+        "programs": {"type": "boolean"}
     });
     Tool {
         name: "read".into(),
@@ -68,6 +72,15 @@ pub fn read(args: &Value, sim: &SimState, seen: &Seen) -> Result<Value, String> 
     }
     let s = |k: &str| args.get(k).and_then(Value::as_str);
     let navball = args.get("navball").and_then(Value::as_bool) == Some(true);
+    if args.get("programs").and_then(Value::as_bool) == Some(true) {
+        let alone = ["menu", "card", "layer", "item", "navball"].iter().all(|k| args.get(k).is_none());
+        if !alone {
+            return Err("one page a call: `programs: true` alone".into());
+        }
+        let x = crate::systems_screen::programs::Inputs::of(sim.ship(), sim.clock)
+            .ok_or("the active vessel is not a craft of parts (it has no ship computer)")?;
+        return Ok(super::switches::programs_json(&crate::systems_screen::programs::rows(&x)));
+    }
     match (s("menu"), s("card"), s("layer").is_some() || s("item").is_some(), navball) {
         (Some(name), None, false, false) => {
             let menu = by_name(&MENU_NAMES, name, "menu")?;
@@ -94,7 +107,7 @@ pub fn read(args: &Value, sim: &SimState, seen: &Seen) -> Result<Value, String> 
             let line = crate::hud::state_line(sim);
             Ok(navball_json(&nav::readouts(now), &crate::navball::control_rows(sim, now), line))
         }
-        _ => Err("one page a call: `menu`, `card`, `layer` and/or `item`, or `navball: true`".into()),
+        _ => Err("one page a call: `menu`, `card`, `layer` and/or `item`, `navball: true` or `programs: true`".into()),
     }
 }
 
@@ -131,7 +144,7 @@ fn systems(layer: Option<&str>, item: Option<&str>, sim: &SimState) -> Result<Va
     Ok(Value::Object(out))
 }
 
-fn tone_name(t: Tone) -> Option<&'static str> {
+pub(super) fn tone_name(t: Tone) -> Option<&'static str> {
     match t {
         Tone::Normal => None,
         Tone::Dim => Some("dim"),
@@ -185,7 +198,30 @@ fn by(action: &MenuAction, items: &Items) -> String {
             };
             items.iter().find_map(offered).unwrap_or_else(|| command_by(None, &crate::staging::parts::label(c)))
         }
-        MenuAction::SetRcs(_) => "set_controls {rcs, rcs_fine}".into(),
+        MenuAction::SetRcs(m) => {
+            let only = m.on.then_some(m.only);
+            let name = super::RCS_NAMES.iter().find(|(_, o)| *o == only).map_or("on", |(n, _)| n);
+            format!("set_controls {{rcs: \"{name}\", rcs_fine: {}}}", m.fine)
+        }
+        MenuAction::SetSwitch(program, s) => {
+            let s = crate::systems_screen::programs::name(*s);
+            format!("set_switch {{program: \"{program}\", switch: \"{s}\"}}")
+        }
+        MenuAction::Press(program) => format!("press {{program: \"{program}\"}}"),
+        MenuAction::OpenPrograms => "read {programs: true}".into(),
+    }
+}
+
+/// The tool a choice's option works, with its arguments: a target by the
+/// option's name (a body) or id (a vessel), else as [`by`] gives it.
+fn option_by(name: &str, action: &MenuAction, items: &Items) -> String {
+    match action {
+        MenuAction::SetTarget(None) => "set_target {none: true}".into(),
+        MenuAction::SetTarget(Some(crate::navball::NavTarget::Vessel(id))) => {
+            format!("set_target {{vessel: {}}}", id.0)
+        }
+        MenuAction::SetTarget(Some(crate::navball::NavTarget::Body(_))) => format!("set_target {{body: \"{name}\"}}"),
+        _ => by(action, items),
     }
 }
 
@@ -195,23 +231,16 @@ fn item_json(i: &Item, items: &Items) -> Value {
         Item::Row(r) => with(json!({"label": r.label, "value": r.value}), "tone", tone_name(r.tone)),
         Item::Note(text, tone) => with(json!({"note": text}), "tone", tone_name(*tone)),
         Item::Choice { label, current, options } => {
-            let options: Vec<Value> =
-                options.iter().map(|(name, selected, _)| json!({"name": name, "selected": selected})).collect();
-            let by = options_by(i, items);
-            json!({"choice": label, "current": current, "options": options, "by": by})
+            let options: Vec<Value> = options
+                .iter()
+                .map(|(name, selected, a)| json!({"name": name, "selected": selected, "by": option_by(name, a, items)}))
+                .collect();
+            json!({"choice": label, "current": current, "options": options})
         }
         Item::Button { label, action } => json!({"button": label, "by": by(action, items)}),
         Item::Toggle { label, on, value, tone, action } => {
             with(json!({"switch": label, "on": on, "value": value, "by": by(action, items)}), "tone", tone_name(*tone))
         }
-    }
-}
-
-/// The tool a choice's options work (its first option's).
-fn options_by(i: &Item, items: &Items) -> Option<String> {
-    match i {
-        Item::Choice { options, .. } => options.first().map(|(_, _, a)| by(a, items)),
-        _ => None,
     }
 }
 

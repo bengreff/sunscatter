@@ -107,6 +107,12 @@ const TAB_NAMES: [(&str, SettingsTab); 4] = [
     ("interface", SettingsTab::Interface),
     ("visuals", SettingsTab::Visuals),
 ];
+/// The systems screen's editors' tabs (`shoot {screen: systems, tab}`).
+const EDITOR_TABS: [(&str, crate::systems_screen::Tab); 3] = [
+    ("stages", crate::systems_screen::Tab::Stages),
+    ("functions", crate::systems_screen::Tab::Functions),
+    ("programs", crate::systems_screen::Tab::Programs),
+];
 const STATUSES: [&str; 4] = ["landed", "crashed", "coasting", "powered"];
 
 pub(super) fn names<T>(list: &[(&'static str, T)]) -> Vec<&'static str> {
@@ -156,7 +162,7 @@ pub fn tools(dev: bool) -> Vec<Tool> {
              `width`/`height` size the image of a headless game (SUNSCATTER_OFFSCREEN=1); `ui_scale` scales the \
              interface for this shot (0.2 shrinks it to specks: a shot of the scene); `menus` are the flight view's \
              menus open for the shot (the others closed; the RCS menu shows while RCS is on); the systems screen opens on `layer` with `part` (a \
-             craft-file id of a part, isolated, or of a component, selected), the thermal layer's cut-away at `cut` (0 none, 1 all); `help` shows the keys and every way in, `saves` the \
+             craft-file id of a part, isolated, or of a component, selected), the thermal layer's cut-away at `cut` (0 none, 1 all), the editors at `tab` (`programs`: the ship computer's switches); `help` shows the keys and every way in, `saves` the \
              Saves window; `cards` opens those parts' cards \
              (craft-file ids) by the staging bar. Everything is put back after the shot.",
             schema(
@@ -172,6 +178,7 @@ pub fn tools(dev: bool) -> Vec<Tool> {
                     "settings_tab": {"type": "string", "enum": names(&TAB_NAMES)},
                     "cards": {"type": "array", "items": {"type": "string"}},
                     "cut": {"type": "number", "minimum": 0, "maximum": 1},
+                    "tab": {"type": "string", "enum": names(&EDITOR_TABS)},
                     "settle_s": num("Real seconds to wait at most for the terrain (default 15)"),
                 }),
                 &[],
@@ -461,6 +468,8 @@ pub enum Screen {
         layer: Option<Layer>,
         part: Option<String>,
         cut: Option<f32>,
+        /// The editors' tab at the bottom (the programs: D126's switches).
+        tab: Option<crate::systems_screen::Tab>,
     },
     Tracking,
     Pause,
@@ -490,6 +499,7 @@ impl ShotSpec {
                 layer,
                 part: s("part").map(str::to_string),
                 cut: args.get("cut").and_then(Value::as_f64).map(|c| c.clamp(0.0, 1.0) as f32),
+                tab: s("tab").map(|t| by_name(&EDITOR_TABS, t, "tab")).transpose()?,
             },
             "tracking" => Screen::Tracking,
             "pause" => Screen::Pause,
@@ -1160,7 +1170,7 @@ fn show(spec: &ShotSpec, sim: &SimState, s: &mut Screens) -> Result<(), String> 
     }
     match &spec.screen {
         Screen::Flight => {}
-        Screen::Systems { layer, part, cut } => {
+        Screen::Systems { layer, part, cut, tab } => {
             use crate::systems_screen::inspect::{named, Selection};
             let def = sim.ship().ship_def();
             let sel = match part {
@@ -1182,6 +1192,9 @@ fn show(spec: &ShotSpec, sim: &SimState, s: &mut Screens) -> Result<(), String> 
             }
             if let Some(c) = cut {
                 s.systems.cut = *c;
+            }
+            if let Some(t) = tab {
+                s.systems.open_tab(*t);
             }
         }
         Screen::Tracking => s.station.open = true,
@@ -1482,11 +1495,14 @@ mod tests {
         let spec = ShotSpec::parse(&json!({"layer": "plumbing", "part": "s1.tank", "name": "max q!"})).unwrap();
         assert_eq!(
             spec.screen,
-            Screen::Systems { layer: Some(Layer::Plumbing), part: Some("s1.tank".into()), cut: None }
+            Screen::Systems { layer: Some(Layer::Plumbing), part: Some("s1.tank".into()), cut: None, tab: None }
         );
         assert_eq!(spec.name, "max_q_", "a file name");
         let spec = ShotSpec::parse(&json!({"layer": "thermal", "cut": 2.0})).unwrap();
-        assert_eq!(spec.screen, Screen::Systems { layer: Some(Layer::Thermal), part: None, cut: Some(1.0) });
+        assert_eq!(spec.screen, Screen::Systems { layer: Some(Layer::Thermal), part: None, cut: Some(1.0), tab: None });
+        let spec = ShotSpec::parse(&json!({"screen": "systems", "tab": "programs"})).unwrap();
+        let tab = Some(crate::systems_screen::Tab::Programs);
+        assert_eq!(spec.screen, Screen::Systems { layer: None, part: None, cut: None, tab });
         let spec = ShotSpec::parse(&json!({"menus": ["Orbital", "landing"], "width": 3024, "height": 1964})).unwrap();
         assert_eq!(spec.menus, Some(vec![MenuId::Orbital, MenuId::Landing]));
         assert_eq!(spec.size, Some((3024, 1964)));

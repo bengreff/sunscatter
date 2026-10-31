@@ -66,7 +66,9 @@ pub fn draw(
             let x = Selected { def, state, facts: &view.facts, known: &known, vessel: vessel.id() };
             selected(ui, &mut screen, &x, &mut out);
         });
-        region(ui, regions.bottom, |ui| editors(ui, &mut screen, def, state, vessel.id(), &mut out));
+        let programs =
+            super::programs::Inputs::of(vessel, sim.clock).map_or_else(Vec::new, |x| super::programs::rows(&x));
+        region(ui, regions.bottom, |ui| editors(ui, &mut screen, (def, state), &programs, vessel.id(), &mut out));
     });
     if ship.is_some() {
         screen.settle_layer(&view.facts);
@@ -312,26 +314,33 @@ fn groups(
 /// (`sim::craft::program`: after a split, what acts on this piece; edits by
 /// the program's indices); the stages already run are shown locked
 /// ([`edit::allowed`]); a function runs only where the piece offers it (an
-/// abort only while it would save the crew, `program::offered`).
+/// abort only while it would save the crew, `program::offered`). Beside
+/// them, the ship computer's programs ([`programs`]).
 fn editors(
     ui: &mut egui::Ui,
     screen: &mut SystemsScreen,
-    def: &sim::craft::ship::ShipDef,
-    state: &sim::craft::state::ShipState,
+    (def, state): (&sim::craft::ship::ShipDef, &sim::craft::state::ShipState),
+    rows: &[super::programs::Row],
     vessel: sim::vessel::VesselId,
     out: &mut Vec<GameCommand>,
 ) {
     let sequence = state.sequence as usize;
-    let Some(mut drafts) = screen.drafts.take() else { return };
     ui.horizontal(|ui| {
-        for (tab, name) in
-            [(Tab::Stages, "STAGES (Space runs the next)"), (Tab::Functions, "FUNCTIONS (pinned: the action bar)")]
-        {
+        for (tab, name) in [
+            (Tab::Stages, "STAGES (Space runs the next)"),
+            (Tab::Functions, "FUNCTIONS (pinned: the action bar)"),
+            (Tab::Programs, "PROGRAMS (the ship computer's switches)"),
+        ] {
             if ui.selectable_label(screen.tab == tab, name).clicked() {
                 screen.tab = tab;
             }
         }
     });
+    if screen.tab == Tab::Programs {
+        programs(ui, rows, vessel, out);
+        return;
+    }
+    let Some(mut drafts) = screen.drafts.take() else { return };
     let functions = screen.tab == Tab::Functions;
     let k = usize::from(functions);
     let list = if functions { &mut drafts.functions } else { &mut drafts.stages };
@@ -382,6 +391,43 @@ fn editors(
         out.push(GameCommand::Ship { vessel, commands: actions });
     }
     screen.drafts = Some(drafts);
+}
+
+/// The ship computer's programs (D126: "the autopilot is a switch with a
+/// config menu"; `super::programs`): each one's switch (AUTO, ON PRESS,
+/// OFF), its press while one acts (why not on hover), what it is doing now
+/// and what it does.
+fn programs(
+    ui: &mut egui::Ui,
+    rows: &[super::programs::Row],
+    vessel: sim::vessel::VesselId,
+    out: &mut Vec<GameCommand>,
+) {
+    use super::programs::{press, set_switch, SWITCHES};
+    let scroll = egui::ScrollArea::vertical().id_salt("systems_programs").auto_shrink([false, true]);
+    scroll.max_height(ui.available_height().max(40.0)).show(ui, |ui| {
+        for r in rows {
+            ui.horizontal_wrapped(|ui| {
+                ui.label(egui::RichText::new(&r.title).color(theme::ACCENT));
+                for (switch, text, _) in SWITCHES {
+                    if ui.selectable_label(r.switch == switch, text).clicked() && r.switch != switch {
+                        out.extend(set_switch(rows, vessel, &r.name, switch));
+                    }
+                }
+                let text = r.press.as_ref().map_or("press".to_string(), |what| format!("press: {what}"));
+                let button = ui.add_enabled(r.press.is_ok(), egui::Button::new(text));
+                if let Err(why) = &r.press {
+                    button.on_disabled_hover_text(format!("Nothing to press: {why}"));
+                } else if button.clicked() {
+                    out.extend(press(rows, vessel, &r.name));
+                }
+                let now = egui::RichText::new(&r.now).color(crate::interface::menus::render::tone_colour(r.tone));
+                ui.label(now);
+            });
+            ui.label(egui::RichText::new(&r.does).small().color(theme::DIM));
+            ui.add_space(4.0);
+        }
+    });
 }
 
 /// Where an entry sits in the editor's view: the view's entries (their

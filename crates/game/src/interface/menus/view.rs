@@ -124,6 +124,20 @@ pub fn draw(
             MenuAction::SetRcs(mode) => {
                 cmds.write(GameCommand::SetRcs(mode));
             }
+            // One rule for the screen, the menus and MCP; the menus offer
+            // only the programs aboard, and a press only where it acts.
+            MenuAction::SetSwitch(program, switch) => {
+                let id = sim.ship().id();
+                if let Ok(c) = crate::systems_screen::programs::set_switch(&data.programs, id, &program, switch) {
+                    cmds.write(c);
+                }
+            }
+            MenuAction::Press(program) => {
+                if let Ok(c) = crate::systems_screen::programs::press(&data.programs, sim.ship().id(), &program) {
+                    cmds.write(c);
+                }
+            }
+            MenuAction::OpenPrograms => systems.open_tab(crate::systems_screen::Tab::Programs),
         }
     }
     Ok(())

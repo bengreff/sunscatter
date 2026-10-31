@@ -106,6 +106,19 @@ pub enum GameCommand {
         vessel: VesselId,
         functions: Vec<Stage>,
     },
+    /// A ship-computer program's switch (D126: by itself, on a press, or
+    /// off; `systems_screen::programs`), sent to the vessel.
+    SetSwitch {
+        vessel: VesselId,
+        program: String,
+        switch: sim::systems::ship_os::Switch,
+    },
+    /// The player's press for a program (D126: a manual deploy runs the
+    /// same function), sent to the vessel.
+    Press {
+        vessel: VesselId,
+        program: String,
+    },
 }
 
 /// Commands on their way to a vessel at light speed (D063, D067): applied
@@ -241,6 +254,14 @@ pub fn apply(
                 let done = sim.index_of(*vessel).map(|i| sim.fleet[i].set_nodes(nodes.clone()));
                 planned(&mut toasts, time.elapsed_secs_f64(), *vessel, done);
             }
+            GameCommand::SetSwitch { vessel, program, switch } => {
+                let done = sim.index_of(*vessel).map(|i| sim.fleet[i].set_switch(program, *switch));
+                refused(&mut toasts, now, *vessel, done);
+            }
+            GameCommand::Press { vessel, program } => {
+                let done = sim.index_of(*vessel).map(|i| sim.fleet[i].press(program));
+                refused(&mut toasts, now, *vessel, done);
+            }
             GameCommand::SetHold(mode) => {
                 sim.controls_mut().hold = *mode;
                 sim.controls_mut().sas = true;
@@ -347,7 +368,9 @@ pub fn addressee(c: &GameCommand) -> Option<VesselId> {
         | GameCommand::Function { vessel, .. }
         | GameCommand::StageAgain { vessel, .. }
         | GameCommand::SetStages { vessel, .. }
-        | GameCommand::SetFunctions { vessel, .. } => Some(*vessel),
+        | GameCommand::SetFunctions { vessel, .. }
+        | GameCommand::SetSwitch { vessel, .. }
+        | GameCommand::Press { vessel, .. } => Some(*vessel),
         GameCommand::Stage(id) | GameCommand::SetControls { vessel: id, .. } => Some(*id),
         _ => None,
     }
@@ -397,6 +420,21 @@ fn place(
     }
     if arms && i == sim.active && delay == 0.0 {
         sim.controls_mut().chute = true;
+    }
+}
+
+/// The toast of a switch or press `vessel` refused (`None`: no such
+/// vessel); one it took shows on the page that gave it.
+fn refused(
+    toasts: &mut crate::interface::toasts::Toasts,
+    now: f64,
+    vessel: VesselId,
+    done: Option<Result<(), String>>,
+) {
+    match done {
+        Some(Ok(())) => {}
+        Some(Err(e)) => toasts.push_linked(now, e, true, to(vessel)),
+        None => toasts.push(now, format!("{}: no such vessel", crate::tracking::vessel_name(vessel)), true),
     }
 }
 
@@ -580,6 +618,11 @@ mod tests {
         assert_eq!(orders(&GameCommand::Stage(v)), Some(vec![OrderKind::Stage]));
         assert_eq!(orders(&GameCommand::SetStages { vessel: v, stages: vec![] }), None, "applied as sent");
         assert_eq!(addressee(&GameCommand::SetFunctions { vessel: v, functions: vec![] }), Some(v));
+        // A program's switch and press travel to the vessel too, applied as sent.
+        let switch = GameCommand::SetSwitch { vessel: v, program: "chutes".into(), switch: Default::default() };
+        let press = GameCommand::Press { vessel: v, program: "maneuver".into() };
+        assert_eq!((addressee(&switch), addressee(&press)), (Some(v), Some(v)));
+        assert_eq!((orders(&switch), orders(&press)), (None, None));
         assert_eq!(addressee(&GameCommand::SetWarp(2)), None);
     }
 

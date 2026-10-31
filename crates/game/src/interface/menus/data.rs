@@ -38,6 +38,9 @@ pub struct FlightData {
     pub target: TargetData,
     /// Planned burns not yet ignited, in order.
     pub burns: Vec<Burn>,
+    /// The ship computer's programs (`systems_screen::programs`: each
+    /// one's switch, what it does now, its press).
+    pub programs: Vec<crate::systems_screen::programs::Row>,
     pub surface: Option<Surface>,
     pub impact: Option<ImpactData>,
     /// The impact is still being predicted: no prediction of this flight
@@ -326,6 +329,8 @@ pub fn gather(s: &Sources) -> FlightData {
         elements: elements(sim, body).filter(|_| !matches!(ship.phase, Phase::Landed { .. } | Phase::Crashed { .. })),
         target: target(s, body),
         burns: burns(sim),
+        programs: crate::systems_screen::programs::Inputs::of(ship, sim.clock)
+            .map_or_else(Vec::new, |x| crate::systems_screen::programs::rows(&x)),
         g_load: nav.map_or(0.0, |n| n.g.load),
         attitude: nav.map(|n| [n.angles.heading, n.angles.pitch, n.angles.roll]),
         craft: craft(sim),

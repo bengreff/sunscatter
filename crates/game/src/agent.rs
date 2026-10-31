@@ -15,6 +15,7 @@
 pub mod program;
 pub mod read;
 pub mod session;
+pub mod switches;
 
 use crate::commands::GameCommand;
 use crate::comms::{self, Comms, Location};
@@ -281,6 +282,9 @@ fn interface_tools(id: &Value) -> Vec<Tool> {
         ),
         program::tool(id),
     ]
+    .into_iter()
+    .chain(switches::tools(id))
+    .collect()
 }
 
 /// The `set_controls` tool's definition (`flight_tools`).
@@ -588,6 +592,8 @@ fn run(
         "command" => command(args, sim, comms)?,
         "edit_stages" => edit_stages(args, sim, comms)?,
         "edit_program" => program::edit_program(args, sim, comms)?,
+        "set_switch" => switches::set_switch(args, sim, comms)?,
+        "press" => switches::press(args, sim, comms)?,
         "set_target" => {
             let t = target_arg(args, sim)?;
             (json!({"target": target_json(sim, t)}), vec![Effect::Target(t)])
@@ -614,7 +620,7 @@ fn axes(args: &Value, key: &str) -> Result<Option<DVec3>, String> {
 }
 
 /// The pilot's RCS modes by name (`set_controls`' `rcs`).
-const RCS_NAMES: [(&str, Option<RcsOnly>); 4] = [
+pub(crate) const RCS_NAMES: [(&str, Option<RcsOnly>); 4] = [
     ("off", None),
     ("on", Some(RcsOnly::Both)),
     ("translate", Some(RcsOnly::Translate)),
