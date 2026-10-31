@@ -18,6 +18,10 @@ Each agent has one brief (`brief-<name>.md`); these rules apply to all of them. 
 - No sub-agents.
 - Keep every blocking call under ~5 minutes: the stream watchdog stops an agent whose call shows no output for 600 s. Run long builds and the whole test suite with `run_in_background` and wait for the notification, or run narrower targets (`--test <name>`). Split long MCP `run_until` spans.
 
+## Saves
+
+- A change to a craft's data or state that changes what a save holds **bumps `SAVE_VERSION` in the same commit**, and a load refuses a save that does not fit the current craft (`ShipState::fits`) instead of panicking (2026-10-31: new Dragon sensors made every older save, the playtest save included, crash at the first power step). If the playtest save (`docs/plans/playtest-2026-10-01-orbit.ron`) stops loading, fly it again (`testing.md`).
+
 ## Context and finishing
 
 - **At about 300k tokens of context, wrap up** (owner, 2026-10-30): commit what has landed, update your brief (landed with hashes, drafts in the tree and what they need, what is left in order), update your row in [flight-ui-2026-10-27.md](flight-ui-2026-10-27.md), commit and push the docs. A fresh agent continues from the brief.
