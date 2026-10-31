@@ -20,6 +20,27 @@ index="$root/target/prepush/index"
 export CARGO_TARGET_DIR="$root/target/prepush/target"
 status=0
 
+# One check at a time: the mirror and its target are shared by every push
+# from this checkout, so two agents pushing at once would overwrite each
+# other's checkout (2026-10-31: a commit failed on another push's code).
+# The lock is a directory holding its owner's pid; a dead owner's lock, or
+# one left without a pid for over a minute, is stale.
+lock="$root/target/prepush.lock"
+waited=0
+until mkdir "$lock" 2>/dev/null; do
+  holder=$(cat "$lock/pid" 2>/dev/null)
+  if { [ -n "$holder" ] && ! kill -0 "$holder" 2>/dev/null; } \
+    || { [ -z "$holder" ] && [ -n "$(find "$lock" -maxdepth 0 -mmin +1 2>/dev/null)" ]; }; then
+    rm -rf "$lock"
+    continue
+  fi
+  [ $waited -eq 0 ] && echo "pre-push: waiting for another push's check (pid ${holder:-?})" >&2
+  waited=1
+  sleep 5
+done
+echo $$ >"$lock/pid"
+trap 'rm -rf "$lock"' EXIT
+
 check() {
   local sha=$1 base=$2
   local files

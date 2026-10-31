@@ -86,6 +86,7 @@ Older: `falcon9.md`'s U/E data, Dragon's CO₂ removal, the Moon's field degree,
   - Their private-index commits leave the shared index stale, so run `git reset -q` before every lead commit, or commit through a private index.
   - The stop hook tests the shared tree, so an agent's unfinished work fails it: check `git diff HEAD --stat` before chasing a failure.
   - Agents stall at the stream watchdog when one call shows no output for 600 s: the whole sim suite under load, or a long MCP `run_until`. Brief them to keep blocking calls under ~5 minutes (`run_in_background`, narrower test targets, shorter spans). `SendMessage` resumes them.
+- **Pushes queue:** the pre-push hook takes `target/prepush.lock` (its pid inside; a dead owner's lock is cleared), because two checks in the one mirror overwrote each other (2026-10-31). A push may print "waiting for another push's check"; run pushes with `run_in_background`.
 - **A linker error saying `Undefined symbols … _anon.….llvm`** is a corrupted incremental cache, not code: `cargo clean -p sim` (23.7 GB freed on 2026-10-30).
 - **The machine:** three agents building at once turn an hour into ~40 minutes of work. One game at a time under `target/demo.lock` (the lock kept its name).
 - **Mission tests:** `./run headless <port>` plus MCP ([mcp.md](../technical/mcp.md)). The booster's plumes sit behind the navball cluster: `shoot` with `ui_scale: 0.2`, `set_camera` farther out, and crop with `sips`.
