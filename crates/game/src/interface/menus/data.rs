@@ -122,14 +122,15 @@ pub struct Burn {
 }
 
 /// Motion relative to the nearest surface.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Surface {
     /// Lowest contact point above the ground (m).
     pub radar: f64,
     pub v_vertical: f64,
     pub v_horizontal: f64,
-    /// Full thrust at the ambient pressure against local gravity.
-    pub twr: f64,
+    /// Full thrust at the ambient pressure against local gravity, to the
+    /// precision the craft knows its mass ([`local_twr`]).
+    pub twr: sim::systems::Reading,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -430,6 +431,20 @@ fn burns(sim: &SimState) -> Vec<Burn> {
         .collect()
 }
 
+/// Vessel `v`'s thrust-to-weight ratio at full throttle of the engines its
+/// throttle runs, at ambient pressure `pressure` against local gravity
+/// `gravity` (`sim::landing::twr`, the braking burn's), to the precision it
+/// knows its mass: the staging bar's (`stage_bar::aboard_of`), not dashed
+/// whole when a tank is unmeasured (finding 41's rule). The Landing menu's
+/// and MCP's `get_landing_prediction`.
+pub fn local_twr(v: &sim::vessel::Vessel, pressure: f64, gravity: f64) -> sim::systems::Reading {
+    let value = sim::landing::twr(v, pressure, gravity);
+    let share = crate::interface::stage_bar::aboard_of(v)
+        .filter(|a| a.mass.value > 0.0)
+        .map_or(0.0, |a| a.mass.precision / a.mass.value);
+    sim::systems::Reading { value, precision: value.abs() * share }
+}
+
 /// Surface motion, impact, braking, air, entry and the chute.
 fn landing(s: &Sources) -> FlightData {
     let sim = s.sim;
@@ -443,7 +458,7 @@ fn landing(s: &Sources) -> FlightData {
             radar: m.height - ship.contact_height(),
             v_vertical: m.v_vertical,
             v_horizontal: m.v_horizontal,
-            twr: sim::landing::twr(ship, m.pressure, m.gravity),
+            twr: local_twr(ship, m.pressure, m.gravity),
         }
     });
     let latest = s.landing.filter(|l| l.vessel == ship.id() && !grounded);
@@ -626,6 +641,22 @@ mod tests {
         }
     }
 
+    /// The local TWR is known to the precision of the mass (Dragon's
+    /// unmeasured tanks widen it, as on the staging bar), exactly in debug.
+    #[test]
+    fn the_local_twr_reads_to_the_precision_of_the_mass() {
+        if !crate::state::craft_exists("falcon9-crew") {
+            return;
+        }
+        let mut sim = SimState::with_craft(&crate::state::craft_or_fallback("falcon9-crew"));
+        let twr = local_twr(sim.ship(), 101_325.0, 9.81);
+        assert!(twr.value > 0.0 && twr.precision > 0.0 && twr.precision < 0.05 * twr.value, "{twr:?}");
+        assert_eq!(twr.value, sim::landing::twr(sim.ship(), 101_325.0, 9.81));
+        let (world, active) = (sim.world.clone(), sim.active);
+        sim.fleet[active].set_debug(&world, true);
+        assert_eq!(local_twr(sim.ship(), 101_325.0, 9.81).precision, 0.0);
+    }
+
     #[test]
     fn on_the_pad_the_snapshot_is_landed_with_its_tanks_loaded_and_stowed_chutes() {
         let sim = SimState::new();
@@ -635,7 +666,7 @@ mod tests {
         assert!(d.landed && d.impact.is_none() && d.braking.is_none() && d.air.is_none());
         let s = d.surface.expect("over Earth");
         assert!(s.radar.abs() < 1.0, "on its feet: {}", s.radar);
-        assert!(s.twr > 1.0, "the small rocket lifts off: {}", s.twr);
+        assert!(s.twr.value > 1.0, "the small rocket lifts off: {:?}", s.twr);
         // As loaded (its tanks' liquids, ullages and bottle).
         assert!((d.craft.propellant / d.craft.full - 1.0).abs() < 1e-4, "{:?}", d.craft);
         assert!(d.craft.dv_vac > 1000.0 && d.craft.twr_vac.is_some_and(|t| t > 1.0));

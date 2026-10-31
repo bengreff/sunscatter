@@ -59,8 +59,8 @@ fn braking(d: &FlightData) -> Section {
     let k = &d.known;
     let known = k.orbit() && k.propellant;
     if let Some(m) = d.surface {
-        let tone = if m.twr < 1.0 { Tone::Warn } else { Tone::Normal };
-        s.toned("LOCAL TWR", k.or_dash(k.propellant, || format!("{:.2}", m.twr)), tone);
+        let tone = if m.twr.value < 1.0 { Tone::Warn } else { Tone::Normal };
+        s.toned("LOCAL TWR", crate::format::ratio(Some(m.twr)), tone);
     }
     match brake {
         Brake::Burn { in_s, ignite_height } => {
@@ -224,7 +224,12 @@ mod tests {
     fn falling() -> FlightData {
         FlightData {
             body: "Earth".into(),
-            surface: Some(Surface { radar: 2_850.0, v_vertical: -152.3, v_horizontal: 40.0, twr: 1.4 }),
+            surface: Some(Surface {
+                radar: 2_850.0,
+                v_vertical: -152.3,
+                v_horizontal: 40.0,
+                twr: sim::systems::Reading { value: 1.4, precision: 0.0 },
+            }),
             impact: Some(ImpactData {
                 body: "Earth".into(),
                 in_s: 22.0,

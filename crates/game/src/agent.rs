@@ -926,11 +926,11 @@ fn landing_json(sim: &SimState) -> Value {
             "stop_in_s": b.t_stop.seconds_since(sim.clock), "stop_height_m": b.stop_height,
         })
     });
-    let twr = start.twr(m.pressure, m.gravity);
+    let twr = crate::interface::menus::data::local_twr(ship, m.pressure, m.gravity);
     let surface = json!({
         "body": name(start.body), "radar_altitude_m": known_value(&known, Quantity::Altitude, m.height - ship.contact_height()),
         "vertical_ms": m.v_vertical, "horizontal_ms": m.v_horizontal,
-        "twr": known.propellant.then_some(twr),
+        "twr": twr.shown(),
     });
     json!({"impact": impact, "braking": braking, "surface": surface})
 }

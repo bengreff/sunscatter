@@ -139,6 +139,16 @@ pub fn estimates_of(sim: &SimState, i: usize, air: Air) -> Option<Estimates> {
     Some(estimate::estimate(&def, state, &inputs))
 }
 
+/// What is aboard vessel `v` now as it knows it (`estimate::aboard`: the
+/// mass the bar's burn starts from, to the sensors' precision, the pad's
+/// mount left out), for every readout of its mass; `None` for a vessel
+/// without a ship definition.
+pub fn aboard_of(v: &sim::vessel::Vessel) -> Option<estimate::Aboard> {
+    let (def, state) = (v.ship_def()?, v.ship()?);
+    let hull = estimate::hull(&v.craft.design().parts);
+    Some(estimate::aboard(&def, state, &hull, &v.knowledge()))
+}
+
 /// Vessel `v`'s rows on the bar with `estimates` (its parachutes' look
 /// from their state); `None` for a vessel without a ship definition.
 pub fn rows_of(v: &sim::vessel::Vessel, estimates: &Estimates) -> Option<Vec<rows::Row>> {

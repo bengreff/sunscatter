@@ -115,6 +115,13 @@ pub fn force(r: Option<Reading>) -> String {
     read(r, force_unit)
 }
 
+/// A ratio as it is known (a thrust-to-weight ratio: the staging bar's and
+/// the Landing menu's), at most two decimals and no more than its precision
+/// gives; a dash when unknown.
+pub fn ratio(r: Option<Reading>) -> String {
+    r.map_or(DASH.into(), |r| format!("{:.*}", decimals(r.precision, 1.0, 2), r.shown()))
+}
+
 /// A speed (a Δv) as it is known.
 pub fn speed_of(r: Option<Reading>) -> String {
     read(r, speed_unit)
@@ -268,6 +275,24 @@ pub fn limit_level(value: f64, limit: Option<f64>) -> Level {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A ratio (a TWR) to its precision, at most two decimals; a dash
+    /// unknown.
+    #[test]
+    fn ratios_read_to_their_precision() {
+        let r = |value: f64, precision: f64| Some(Reading { value, precision });
+        let table = [
+            (r(1.4321, 0.0), "1.43"),
+            (r(1.4321, 0.03), "1.43"),
+            (r(1.4321, 0.2), "1.4"),
+            (r(1.62, 0.6), "1.6"),
+            (r(1.62, 2.0), "2"),
+            (None, DASH),
+        ];
+        for (reading, want) in table {
+            assert_eq!(ratio(reading), want, "{reading:?}");
+        }
+    }
 
     #[test]
     fn delays_and_rates() {

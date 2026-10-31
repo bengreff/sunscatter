@@ -154,7 +154,7 @@ pub fn figures(b: &Burn, active: bool) -> Figures {
     };
     let active = active.then(|| ActiveFigures {
         thrust: format::force(b.thrust),
-        twr: b.twr.map_or(format::DASH.into(), |r| format!("{:.*}", format::decimals(r.precision, 1.0, 2), r.shown())),
+        twr: format::ratio(b.twr),
         mass: format!("{} → {}", format::mass(Some(b.mass)), format::mass(b.burnout_mass)),
         isp: format!("{:.0} s", b.isp),
     });
