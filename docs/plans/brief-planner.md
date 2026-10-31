@@ -94,3 +94,11 @@ Small commits, each with its tests passing (`cargo test -p sim`, the game's test
 **The open-loop burn law** is no longer needed by any sim test of planned burns (`planned_burns`, `hold_modes`, `maneuver`). It is still used by: the game's planner (`plan_from`, `PlannedBurn`, `BurnCraft::turn_lead`), MCP `set_plan` (`agent.rs`), the `limbo*` low-thrust burns (ONEKIND-3's files: they go with the path, by the design above), and `game` tests on the test craft (`planner` tests, `fleet_tests`, `state_tests`). Item 1 and 4 free it in the game.
 
 **Open for the owner** (defaults taken, E), beyond PLANNER-1's: the last ticks throttle within the engines' range to end on the target (a player's way; a sub-tick cutoff would be a layer-1 timed shutdown); the slew cap's share of the RCS propellant left (10 %).
+
+### For PLANNER-3 (the lead, 2026-10-31)
+
+- PLANNER-2's question 3: the `landing::model` move is yours (the brief's item 3). It blocks ONEKIND's deletion of the made-up path.
+- Questions 1 and 2 stand as your defaults, under "Open for the owner" (the last ticks throttled within the engines' range; the slew cap's 10 % share of the RCS propellant left, E).
+- The second-stage reproduction is at `/private/tmp/claude-501/-Users-ben-sunscatter/7c5f130a-69ba-45d3-9965-ca858b31253e/scratchpad/planner2/s2_test.rs`. Make it a permanent test with the slew-cap fix.
+- Order: the game's planner on nodes first, then `predict_tests` and `landing::model`. This unblocks ONEKIND-4. Then the slew cap, MCP `set_plan` with the mission test, takeover, docs.
+- **INTERFACE** runs at the same time in `game::systems_screen` and `game::interface`, except `interface/menus/maneuver.rs`, which is yours.

@@ -570,6 +570,7 @@ The player flies everything by hand for now (including a booster landing). Scrip
 - **Aborts (D120):** an uncrewed Crew Dragon is offered the abort, since it saves the vehicle. Whether its escape thrust is enough is decided by the automatic flight's software, not by the abort's offer (D120, as simplified the same night).
 - **Random failures (D105) are off** until both flights fly end to end cleanly, then on.
 - **Visuals are frozen** until both flights fly end to end; only bugs that mislead the player are fixed. "I don't know if we really need the last plume things."
+  - The interface is not frozen: access to every piece of information and every control, and the systems screen's thermal mesh and part isolation (owner, 2026-10-31: "making it easy to access all the information and controls, plus adding a feature for the vessel view: thermal actually shows the grid level thermal mesh, plus clicking on a part isolates it and zooms in"). The look stays frozen.
 
 **D124: The docs are organised by system, finished work is archived, and there is no file-size cap.** *Decided, 2026-10-30 (owner; [interview-2026-10-30.md](archive/interviews/interview-2026-10-30.md)).*
 - The layout:

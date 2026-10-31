@@ -186,6 +186,18 @@ At 1,000,000× the frame now stays under the 60 fps budget and the warp falls to
 
 **Going live** (`tests/frame_live_stop.rs`): the test craft falling onto the Moon from 30 km stops at the hand-over within one 1,000,000× frame (under 1 s of work, instead of flying to the ground in that frame), is then flown to the ground in 4× frames, and ends at the same bits as one jump; an engine starting in a long frame stops there, in a physics-warp frame it flies.
 
+**The stress craft of catalog parts** (ONEKIND-3, 2026-10-31, be83b64; release, a busy machine; `stress-<n>`: a capsule on a core stack with rings of radial boosters; 300 parts = 40 boosters and 164 engines, 5,000 = 312 boosters and 1,252 engines):
+
+| | 300 parts | 1,000 parts | 5,000 parts |
+|---|---|---|---|
+| Build | 0.39 s | 3.2 s | done (time not recorded) |
+| Design (bake, volume grid, network) | 0.58 s | 8.5 s | done |
+| A live tick on entry | 17 ms | 103 ms | done |
+| A coast step | 0.98 ms | 3.2 ms | **did not finish**: over 40 min, stopped |
+| 10⁶ s holding attitude | 7.0 s | 37 s | — |
+
+`bench_coast`: 32 µs a step. At 5,000 parts the coast's time goes into the tank law (`coast_law::TankLaw::temperature`), evaluated for each of ~6,500 tank compartments at every sample: the first scale cost to fix (PERF). D121's target is a 5,000-part craft at 60 fps live (16.7 ms a frame): a live tick is 17 ms at 300 parts today.
+
 ## Choices and what was not built
 
 - **No reduced-order thermal model.** The task allowed one for coasting craft (aggregate cells per part or region, handed over to the full network on going live). After the block solver and the `VolumeGrid` fix, a coast thermal solve of a 300-part craft costs ~1 ms and runs only while the temperatures move (`STEP_CHANGE_K`), and the thermal lattice is a minority of the 1,000,000× frame (the integration dominates, SOL's work). A per-part aggregate would cut the solve ~10× more but merges the sunlit and shaded sides of a part (tens of kelvin on a held craft) and needs a hand-over rule with its own error: not worth it while it is not the bottleneck. If it becomes one: aggregate by part and facing direction, keep the nodes, carry each cell's offset from its aggregate's mean through the coast, and test the hand-over against the full network.
