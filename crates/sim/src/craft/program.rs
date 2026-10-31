@@ -159,7 +159,7 @@ pub fn offered(def: &ShipDef, state: &ShipState, f: &Stage) -> Result<(), NoEsca
     let mut why = NoEscape::NothingToLeave;
     for c in &f.actions {
         let ShipCommand::Separate(name) = c else { continue };
-        let Some(j) = def.joints.iter().position(|j| j.name == *name) else { continue };
+        let Some(j) = def.joint_named(name) else { continue };
         if !state.joints[j].intact {
             continue;
         }

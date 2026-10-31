@@ -107,6 +107,11 @@ pub struct EngineState {
     /// start sequence fires the thrusters that push along its thrust.
     #[serde(default)]
     pub settling: Option<f64>,
+    /// The pad's armed release waits for its rated thrust (it was lit when
+    /// the release was armed, or at the end of that tick): set only while
+    /// [`ShipState::release_armed`] is. It goes with its engine at a split.
+    #[serde(default)]
+    pub awaited: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -238,15 +243,11 @@ pub struct ShipState {
     // Propulsion.
     pub engines: Vec<EngineState>,
     /// The sequence's clamp release is armed: it lets go at the first tick
-    /// every ignited engine delivers its rated thrust, and aborts the start
-    /// if one fails (the real pad's rule, falcon9.md §1.2, §4.2).
+    /// every engine it waits for ([`EngineState::awaited`]) delivers its
+    /// rated thrust, and aborts the start if one fails (the real pad's
+    /// rule, falcon9.md §1.2, §4.2).
     #[serde(default)]
     pub release_armed: bool,
-    /// The engines (indices into `ShipDef::engines`) the armed release
-    /// waits for: those lit when it was armed, or at the end of that tick
-    /// (with none lit then, nor one settling to start, it is disarmed).
-    #[serde(default)]
-    pub release_engines: Vec<u32>,
     /// The pilot's throttle at the last step: closing it (open to 0) shuts
     /// the engines down (D114).
     #[serde(default)]
@@ -669,7 +670,7 @@ impl ShipState {
                 Ok(Vec::new())
             }
             ShipCommand::Separate(name) => {
-                let Some(j) = def.joints.iter().position(|j| j.name == *name) else { return none() };
+                let Some(j) = def.joint_named(name) else { return none() };
                 if !self.joints[j].intact {
                     return Ok(Vec::new());
                 }

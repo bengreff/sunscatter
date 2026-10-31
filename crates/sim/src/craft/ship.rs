@@ -83,6 +83,8 @@ pub struct TankDef {
     /// `owner:compartment`.
     pub id: String,
     pub part: u32,
+    /// Its part, or the component it sits in (whose heaters hold it).
+    pub owner: Owner,
     pub fluid: String,
     /// m³, less what components inside displace.
     pub volume: f64,
@@ -103,6 +105,8 @@ pub struct TankDef {
 pub struct BottleDef {
     pub id: String,
     pub part: u32,
+    /// Its part, or the component that carries it.
+    pub owner: Owner,
     pub gas: String,
     /// m³, Pa, K at loading, position.
     pub volume: f64,

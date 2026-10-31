@@ -20,8 +20,9 @@
 //!   surfaces' deflections; the bus readouts of the buses the piece keeps
 //!   (a bus the split cuts is read in both until each piece's next power
 //!   step).
-//! * **With the clamps' piece**: the armed release and the engines it
-//!   waits for (a split disarms it first: `propulsion::disarm`).
+//! * **With the clamps' piece**: the armed release (a split disarms it
+//!   first: `propulsion::disarm`); the engines it waits for are marked on
+//!   the engines (`EngineState::awaited`), which go with their parts.
 //! * **With the vessel's piece** (`own`): the orders (sent to the vessel)
 //!   and the pilot's last throttle (the others start closed, as their
 //!   controls do: `Controls::for_piece`).
@@ -97,7 +98,6 @@ impl ShipState {
             pressure_regulated,
             engines,
             release_armed,
-            release_engines,
             throttle_was,
             thrust_dir,
             thrusters,
@@ -138,11 +138,6 @@ impl ShipState {
             pressure_regulated: *pressure_regulated && !piece.tanks.is_empty(),
             engines: by(engines, |x| x.part, kept),
             release_armed: *release_armed && clamps,
-            release_engines: if clamps {
-                renumber(release_engines, &whole.engines, &piece.engines)
-            } else {
-                Vec::new()
-            },
             throttle_was: if own { *throttle_was } else { 0.0 },
             thrust_dir: thrust_dir.filter(|_| !piece.engines.is_empty()),
             thrusters: by(thrusters, |x| x.part, kept),
@@ -203,7 +198,6 @@ impl ShipState {
             pressure_regulated,
             engines,
             release_armed,
-            release_engines: _,
             throttle_was,
             thrust_dir,
             thrusters,
@@ -273,7 +267,6 @@ impl ShipState {
         log.sort_by(|x, y| x.at.partial_cmp(&y.at).unwrap_or(std::cmp::Ordering::Equal));
         let drop = log.len().saturating_sub(EVENTS_KEPT);
         log.drain(..drop);
-        let waits = |r: &ShipState, d: &ShipDef| renumber(&r.release_engines, &d.engines, &whole.engines);
         let b_has_cabin = !b_def.seats.is_empty() && a_def.seats.is_empty();
         Ok(ShipState {
             tanks: zip_merge(w.tanks.iter().map(|x| x.part), &in_a, tanks, &b.tanks, "tanks")?,
@@ -281,7 +274,6 @@ impl ShipState {
             pressure_regulated: *pressure_regulated || b.pressure_regulated,
             engines: zip_merge(w.engines.iter().map(|x| x.part), &in_a, engines, &b.engines, "engines")?,
             release_armed: *release_armed || b.release_armed,
-            release_engines: if b.release_armed && !release_armed { waits(b, b_def) } else { waits(a, a_def) },
             throttle_was: *throttle_was,
             thrust_dir: thrust_dir.or(b.thrust_dir),
             thrusters: zip_merge(w.thrusters.iter().map(|x| x.part), &in_a, thrusters, &b.thrusters, "thrusters")?,
@@ -315,17 +307,4 @@ impl ShipState {
             events: log,
         })
     }
-}
-
-/// Indices into the engines `from` of the engines `list`, as indices into
-/// `to` (those `to` lacks dropped), by engine id.
-pub(crate) fn renumber(
-    list: &[u32],
-    from: &[crate::craft::ship::EngineDef],
-    to: &[crate::craft::ship::EngineDef],
-) -> Vec<u32> {
-    (list.iter())
-        .filter_map(|&i| from.get(i as usize))
-        .filter_map(|e| to.iter().position(|t| t.id == e.id).map(|k| k as u32))
-        .collect()
 }

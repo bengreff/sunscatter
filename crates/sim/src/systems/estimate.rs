@@ -406,7 +406,7 @@ impl<'a> Walk<'a> {
                 }
             }
             ShipCommand::Separate(name) => {
-                if let Some(j) = def.joints.iter().position(|j| j.name == *name) {
+                if let Some(j) = def.joint_named(name) {
                     self.s.joints[j].intact = false;
                     self.regroup();
                 }

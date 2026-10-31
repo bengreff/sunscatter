@@ -3,7 +3,7 @@
 //! [`Owner`] and a part is its `Part::id`, found in a definition's lists by
 //! a binary search, since the lists are in design order and a split's
 //! subset keeps it. The one resolution from a string is
-//! [`ShipDef::owner_named`].
+//! [`ShipDef::owner_named`] (a joint's: [`ShipDef::joint_named`]).
 
 use super::ship::{ComponentDef, ShipDef};
 use crate::catalog::{FailureMode, Ratings};
@@ -45,6 +45,13 @@ impl ShipDef {
     pub fn owner_named(&self, id: &str) -> Option<Owner> {
         (self.parts.iter().find(|p| p.id == id).map(|p| Owner::Part(p.part)))
             .or_else(|| self.components.iter().find(|c| c.id == id).map(|c| Owner::Component(c.n)))
+    }
+
+    /// The joint named `name` (its index in `joints`): the one resolution
+    /// of a joint from a string (a stage's separation, the interface, MCP).
+    /// Names are unique (the build refuses a taken one).
+    pub fn joint_named(&self, name: &str) -> Option<usize> {
+        self.joints.iter().position(|j| j.name == name)
     }
 
     /// The part an owner sits on (`None` when this definition lacks it).
@@ -127,5 +134,22 @@ mod tests {
         for m in &def.mechanisms {
             assert_eq!(def.owner_id(m.owner), m.id);
         }
+        // A tank's owner is the one its id names (`owner:compartment`),
+        // in the whole and in a piece; some sit in components (Dragon's).
+        for d in [&*def, &piece] {
+            for t in &d.tanks {
+                assert_eq!(Some(d.owner_id(t.owner)), t.id.split(':').next(), "{}", t.id);
+                assert_eq!(d.owner_part(t.owner), Some(t.part), "{}", t.id);
+            }
+            for b in &d.bottles {
+                assert!(b.id.starts_with(d.owner_id(b.owner)) && d.owner_part(b.owner) == Some(b.part), "{}", b.id);
+            }
+        }
+        assert!(def.tanks.iter().any(|t| matches!(t.owner, Owner::Component(_))));
+        // Every joint resolves by its name; an unknown name to nothing.
+        for (j, x) in def.joints.iter().enumerate() {
+            assert_eq!(def.joint_named(&x.name), Some(j));
+        }
+        assert_eq!(def.joint_named("no such joint"), None);
     }
 }

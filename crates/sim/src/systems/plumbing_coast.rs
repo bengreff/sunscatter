@@ -58,7 +58,7 @@ pub fn heat_law(def: &ShipDef, i: usize, suns: &[DVec3], air_k: Option<f64>) -> 
         end: alpha * math::PI * r * r * end / n,
         emit: epsilon * STEFAN_BOLTZMANN,
         air_k,
-        held: heated_inside(def, t),
+        held: heated_inside(t),
     }
 }
 

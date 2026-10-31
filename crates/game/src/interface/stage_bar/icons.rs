@@ -116,8 +116,8 @@ pub fn icons(def: &ShipDef, state: &ShipState, c: &ShipCommand, chute: (&[u32], 
                 icon(kind, look, m.part, &m.id)
             })
             .collect(),
-        ShipCommand::Separate(name) => (def.joints.iter().zip(&state.joints))
-            .filter(|(d, _)| d.name == *name)
+        ShipCommand::Separate(name) => (def.joint_named(name).into_iter())
+            .filter_map(|j| Some((&def.joints[j], state.joints.get(j)?)))
             .map(|(d, s)| joint_icon(d, s.intact, state))
             .collect(),
         ShipCommand::ReleaseClamps => (def.joints.iter().zip(&state.joints))

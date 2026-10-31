@@ -98,6 +98,20 @@ pub fn lit(state: &ShipState) -> Vec<u32> {
         .collect()
 }
 
+/// The armed release waits for the engines lit now (and for no other).
+pub(crate) fn await_lit(state: &mut ShipState) {
+    for e in &mut state.engines {
+        e.awaited = matches!(e.status, EngineStatus::Starting | EngineStatus::Running);
+    }
+}
+
+/// The release waits for no engine (it is disarmed or let go).
+fn await_none(state: &mut ShipState) {
+    for e in &mut state.engines {
+        e.awaited = false;
+    }
+}
+
 /// Whether any engine is doing something (settling its propellant to
 /// start, starting, running or in its tail-off): the vessel flies live
 /// ticks.
@@ -464,7 +478,7 @@ pub fn disarm(state: &mut ShipState, at: Epoch, text: String, alarm: bool) {
         return;
     }
     state.release_armed = false;
-    state.release_engines.clear();
+    await_none(state);
     state.sequence = super::command::release_undone(&state.stages, state.sequence);
     state.event(at, text, alarm);
 }
@@ -475,11 +489,12 @@ pub fn disarm(state: &mut ShipState, at: Epoch, text: String, alarm: bool) {
 fn release(def: &ShipDef, state: &mut ShipState, at: Epoch, debug: bool) -> Vec<Effect> {
     if !state.release_armed || !state.clamped {
         state.release_armed = false;
+        await_none(state);
         return Vec::new();
     }
-    if state.release_engines.is_empty() {
-        state.release_engines = lit(state);
-        if state.release_engines.is_empty() {
+    if !state.engines.iter().any(|e| e.awaited) {
+        await_lit(state);
+        if !state.engines.iter().any(|e| e.awaited) {
             // None lit (one waiting for its propellant to settle is about
             // to): armed, it would hold the vessel in live ticks for ever.
             if !state.engines.iter().any(|r| r.settling.is_some()) {
@@ -488,7 +503,7 @@ fn release(def: &ShipDef, state: &mut ShipState, at: Epoch, debug: bool) -> Vec<
             return Vec::new();
         }
     }
-    let waits: Vec<usize> = state.release_engines.iter().map(|&i| i as usize).collect();
+    let waits: Vec<usize> = (state.engines.iter().enumerate()).filter(|(_, e)| e.awaited).map(|(i, _)| i).collect();
     // The flight software's launch commit, on the controllers' readouts.
     let k = super::data::knowledge(def, state, debug);
     match flight::commit(def, &flight::engine_readings(def, state, &k), &waits) {
@@ -503,7 +518,7 @@ fn release(def: &ShipDef, state: &mut ShipState, at: Epoch, debug: bool) -> Vec<
         flight::Commit::Release => {}
     }
     state.release_armed = false;
-    state.release_engines.clear();
+    await_none(state);
     state.event(at, "Liftoff: the clamps released at full thrust", false);
     state.apply(def, &ShipCommand::ReleaseClamps).unwrap_or_default()
 }

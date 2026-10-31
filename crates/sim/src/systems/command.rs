@@ -142,7 +142,7 @@ pub fn apply(def: &ShipDef, state: &mut ShipState, command: &ShipCommand, cx: Co
         ShipCommand::ReleaseClamps if !state.clamped => Ok(Vec::new()),
         ShipCommand::ReleaseClamps if cx.sequence => {
             state.release_armed = true;
-            state.release_engines = super::propulsion::lit(state);
+            super::propulsion::await_lit(state);
             state.event(cx.at, "Clamps armed: release at full thrust", false);
             Ok(Vec::new())
         }

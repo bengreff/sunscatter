@@ -398,6 +398,7 @@ fn functions(id: &str, owner: Owner, part: u32, pose: &Pose, fs: &[Function], ma
             Function::Bottle(b) => ship.bottles.push(BottleDef {
                 id: id.into(),
                 part,
+                owner,
                 gas: b.gas.clone(),
                 volume: b.volume,
                 pressure: b.pressure,
@@ -427,11 +428,16 @@ fn tanks(
     ship: &mut ShipDef,
     errors: &mut Vec<String>,
 ) {
-    let owners = (parts.iter().enumerate().map(|(i, p)| (&p.id, i as u32, &p.pose, &p.built.generated, true)))
-        .chain(components.iter().map(|c| (&c.id, c.part, &c.pose, &c.built.generated, false)));
-    for (owner, part, pose, g, of_part) in owners {
+    let owners = (parts.iter().enumerate())
+        .map(|(i, p)| (&p.id, Owner::Part(i as u32), i as u32, &p.pose, &p.built.generated))
+        .chain(
+            (components.iter().enumerate())
+                .map(|(n, c)| (&c.id, Owner::Component(n as u32), c.part, &c.pose, &c.built.generated)),
+        );
+    for (name, owner, part, pose, g) in owners {
+        let of_part = matches!(owner, Owner::Part(_));
         for t in &g.tanks {
-            let id = format!("{owner}:{}", t.name);
+            let id = format!("{name}:{}", t.name);
             let base = pose.point(t.base);
             let axis = pose.dir(t.axis).normalize();
             let height = t.volume / (math::PI * t.radius * t.radius);
@@ -474,6 +480,7 @@ fn tanks(
             ship.tanks.push(TankDef {
                 id,
                 part,
+                owner,
                 fluid: t.fluid.clone(),
                 volume,
                 region: Tank { base, axis: axis * h_cap, radius: t.radius },

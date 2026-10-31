@@ -83,8 +83,9 @@ fn every_field_set(def: &ShipDef) -> ShipState {
     }
     s.orders = vec![Order { at: t0.add_seconds(5.0), kind: OrderKind::Stage }];
     s.release_armed = true;
-    s.release_engines =
-        (def.engines.iter().enumerate()).filter(|(_, e)| e.id.starts_with("s1.")).map(|(i, _)| i as u32).collect();
+    for (x, d) in s.engines.iter_mut().zip(&def.engines) {
+        x.awaited = d.id.starts_with("s1.");
+    }
     s.throttle_was = 0.75;
     (s.accel, s.omega, s.alpha) = (DVec3::new(1.0, 2.0, 30.0), DVec3::new(0.01, 0.0, 0.02), DVec3::Y * 0.003);
     s.thrust_dir = Some(DVec3::new(0.01, 0.0, 1.0).normalize());
@@ -120,7 +121,6 @@ fn assert_every_field_set(s: &ShipState, at_load: &ShipState) {
         pressure_regulated,
         engines,
         release_armed,
-        release_engines,
         throttle_was,
         thrust_dir,
         thrusters,
@@ -175,7 +175,6 @@ fn assert_every_field_set(s: &ShipState, at_load: &ShipState) {
     let run = [
         (orders != &r.orders, "orders"),
         (release_armed != &r.release_armed, "release_armed"),
-        (release_engines != &r.release_engines, "release_engines"),
         (throttle_was != &r.throttle_was, "throttle_was"),
         (accel != &r.accel && omega != &r.omega && alpha != &r.alpha, "motion"),
         (thrust_dir != &r.thrust_dir, "thrust_dir"),
@@ -231,7 +230,6 @@ fn a_split_puts_each_item_in_exactly_one_piece() {
                 x.lost.len(),
                 x.unpowered.len(),
                 x.orders.len(),
-                x.release_engines.len(),
             ]
         };
         let (na, nb, ns) = (n(&pa), n(&pb), n(&s));

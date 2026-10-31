@@ -118,7 +118,7 @@ pub fn status(def: &ShipDef, state: &ShipState, c: &ShipCommand, chute_armed: bo
                 (format!("{angle:.0}°"), PartTone::Working)
             }
         }
-        ShipCommand::Separate(name) => match def.joints.iter().position(|j| j.name == *name) {
+        ShipCommand::Separate(name) => match def.joint_named(name) {
             Some(j) if state.joints.get(j).is_some_and(|j| j.intact) => ("attached".into(), PartTone::Idle),
             Some(_) => ("separated".into(), PartTone::Working),
             None => ("separated".into(), PartTone::Working),

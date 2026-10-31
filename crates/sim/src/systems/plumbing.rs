@@ -459,9 +459,8 @@ pub struct Surroundings {
 
 /// Whether tank `t` sits inside a component, whose heaters hold it (no
 /// heat from outside reaches its liquid).
-fn heated_inside(def: &ShipDef, t: &TankDef) -> bool {
-    let owner = t.id.split(':').next().unwrap_or("");
-    def.components.iter().any(|c| c.id == owner)
+fn heated_inside(t: &TankDef) -> bool {
+    matches!(t.owner, crate::craft::handle::Owner::Component(_))
 }
 
 /// Solar absorptivity and emissivity of tank `t`'s wall: its part's finish,
@@ -482,7 +481,7 @@ fn optics(def: &ShipDef, t: &TankDef) -> (f64, f64) {
 pub fn heat_in(def: &ShipDef, state: &ShipState, i: usize, env: &Surroundings) -> f64 {
     let t = &def.tanks[i];
     let s = &state.tanks[i];
-    if s.liquid <= 0.0 || heated_inside(def, t) {
+    if s.liquid <= 0.0 || heated_inside(t) {
         return 0.0;
     }
     let g = geometry(t, s);

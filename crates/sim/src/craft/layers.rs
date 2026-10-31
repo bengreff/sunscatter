@@ -284,7 +284,7 @@ pub(super) fn check(ship: &ShipDef, command: &ShipCommand) -> Result<(), String>
         ShipCommand::Deploy(s) | ShipCommand::Retract(s) | ShipCommand::Angle(s, _) => {
             some(named(s, ship.mechanisms.iter().map(|v| &v.id)), "mechanism")
         }
-        ShipCommand::Separate(s) => some(ship.joints.iter().any(|j| j.name == *s), "joint"),
+        ShipCommand::Separate(s) => some(ship.joint_named(s).is_some(), "joint"),
         ShipCommand::Rcs(s, _) => some(named(s, ship.thrusters.iter().map(|v| &v.id)), "thruster block"),
         ShipCommand::Power(s, _) => some(named(s, ship.components.iter().map(|v| &v.id)), "component"),
         ShipCommand::ReleaseClamps | ShipCommand::ArmChutes => Ok(()),
