@@ -10,6 +10,9 @@ D121: "a ~5,000-part craft flown live at 1× and 60 fps on the M2 Pro, and D081'
 
 ## The work, in order
 
+STATE-2's profile of the 1,000-part live tick (2026-10-31): the thermal network 62 %, the volume grid 7 %, aero 4 %, the ship systems about 3 %. So step 3 (thermal at its own rate, `ThermalNetwork::step_to`) is the live tick's lever; take it right after step 1.
+
+
 Measure before and after each step on the stress craft at 300, 1,000 and 5,000 parts, and record the numbers in `scale-performance.md`. Every step keeps the warp, chunked = single-pass, determinism and `warp_course` tests green, bit for bit, unless it says otherwise and the change is tested.
 
 1. **The coast at 5,000 parts.** It did not finish in 40 minutes: `coast_law::TankLaw::temperature` runs for each of ~6,500 tank compartments at every sample. Evaluate it once per span and only where it is read.
