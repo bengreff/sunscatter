@@ -117,12 +117,16 @@ pub struct Approach {
     pub over_body: bool,
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct Burn {
     /// m/s (`None`: a burn of fixed duration).
     pub dv: Option<f64>,
     pub in_s: f64,
-    pub duration: f64,
+    /// From the stage estimate (`None`: unknown, as the planner's).
+    pub duration: Option<f64>,
+    /// The planner's warnings for it ("no main engine to burn it: the
+    /// node cannot be flown").
+    pub warnings: Vec<String>,
     /// Its number, as the ship's log counts burns (from 1).
     pub number: usize,
     /// A node's maneuver program while it flies the craft (turning,
@@ -426,9 +430,10 @@ fn burns(sim: &SimState) -> Vec<Burn> {
             let flying = program.filter(|p| p.node == i);
             let ignite = flying.map_or_else(|| p.as_ref().map_or(n.t, |p| p.ignite), |p| p.ignite);
             let step = flying.map(|p| p.step);
-            let duration = p.and_then(|p| p.duration).unwrap_or(0.0);
+            let duration = p.as_ref().and_then(|p| p.duration);
+            let warnings = p.map_or_else(Vec::new, |p| p.warnings);
             let in_s = ignite.seconds_since(sim.clock);
-            Burn { dv: Some(n.dv.length()), in_s, duration, number: i + 1, step }
+            Burn { dv: Some(n.dv.length()), in_s, duration, warnings, number: i + 1, step }
         })
         .collect()
 }

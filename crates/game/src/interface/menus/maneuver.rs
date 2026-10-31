@@ -35,7 +35,10 @@ fn summary(burns: &[Burn], say_none: bool) -> Section {
         if b.in_s >= 0.0 {
             s.toned("  IGNITION IN", fmt_duration(b.in_s), if b.in_s < 60.0 { Tone::Warn } else { Tone::Normal });
         }
-        s.row("  DURATION", fmt_duration(b.duration));
+        s.row("  DURATION", b.duration.map_or_else(|| "—".to_string(), fmt_duration));
+        for w in &b.warnings {
+            s.note(w, Tone::Warn);
+        }
     }
     s.button("Open the burn planner", MenuAction::OpenPlanner);
     s
@@ -53,8 +56,8 @@ mod tests {
     #[test]
     fn the_burns_and_the_planner() {
         let burns = [
-            Burn { dv: Some(12.34), in_s: 30.0, duration: 4.0, number: 1, step: None },
-            Burn { dv: None, in_s: 600.0, duration: 20.0, number: 2, step: None },
+            Burn { dv: Some(12.34), in_s: 30.0, duration: Some(4.0), number: 1, ..Burn::default() },
+            Burn { dv: None, in_s: 600.0, duration: Some(20.0), number: 2, ..Burn::default() },
         ];
         let s = summary(&burns, true);
         assert_eq!(s.value("BURN 1"), Some("Δv 12.3 m/s"));
@@ -65,6 +68,14 @@ mod tests {
             .items
             .contains(&Item::Button { label: "Open the burn planner".into(), action: MenuAction::OpenPlanner }));
         assert!(summary(&[], true).items.contains(&Item::Note("no burns planned".into(), Tone::Dim)));
+        // A node the craft cannot fly: its duration unknown, the planner's
+        // warning beside it (it read "DURATION 0s" with no warning).
+        let warning = "no main engine to burn it: the node cannot be flown".to_string();
+        let unflown =
+            [Burn { dv: Some(5.0), in_s: 1_800.0, warnings: vec![warning.clone()], number: 1, ..Burn::default() }];
+        let s = summary(&unflown, true);
+        assert_eq!(s.value("  DURATION"), Some("—"));
+        assert!(s.items.contains(&Item::Note(warning, Tone::Warn)));
     }
 
     /// A node being flown: numbered as the log counts, what the program is
@@ -72,8 +83,15 @@ mod tests {
     #[test]
     fn a_node_being_flown() {
         let burns = [
-            Burn { dv: Some(100.0), in_s: -3.0, duration: 12.0, number: 2, step: Some(Step::Burn) },
-            Burn { dv: Some(5.0), in_s: 3_000.0, duration: 0.6, number: 3, step: None },
+            Burn {
+                dv: Some(100.0),
+                in_s: -3.0,
+                duration: Some(12.0),
+                number: 2,
+                step: Some(Step::Burn),
+                ..Burn::default()
+            },
+            Burn { dv: Some(5.0), in_s: 3_000.0, duration: Some(0.6), number: 3, ..Burn::default() },
         ];
         let s = summary(&burns, true);
         assert_eq!(s.value("BURN 2"), Some("Δv 100.0 m/s"));
