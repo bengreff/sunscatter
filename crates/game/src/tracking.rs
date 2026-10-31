@@ -115,15 +115,17 @@ pub fn switch_to(sim: &mut SimState, rig: &mut CameraRig, pred: &mut Prediction,
 
 /// What the pilot is told on leaving vessel `left` for another, if anything:
 /// a craft of parts left with engines lit burns on at its own throttle
-/// (D112: each vessel keeps its controls) until they are cut.
-pub fn left_lit_notice(left: &sim::vessel::Vessel) -> Option<String> {
+/// (D112: each vessel keeps its controls) until they are cut. The message
+/// leads back to it (one click; it had no link, finding 63).
+pub fn left_lit_notice(left: &sim::vessel::Vessel) -> Option<(String, crate::interface::toasts::Link)> {
     let lit = left.ship().is_some_and(|s| !sim::systems::propulsion::lit(s).is_empty());
     let (id, throttle) = (left.id(), left.controls().throttle * 100.0);
     lit.then(|| {
-        format!(
+        let text = format!(
             "{} left with its engines lit: they burn on at its throttle ({throttle:.0} %) until cut",
             vessel_name(id)
-        )
+        );
+        (text, crate::interface::toasts::Link::Vessel(id))
     })
 }
 
@@ -552,11 +554,12 @@ mod tests {
         assert_eq!(left_lit_notice(sim.ship()), None, "nothing lit");
         let s = &mut sim;
         s.fleet[a].next_stage(&s.world).expect("the ignition");
-        let id = sim.ship().id().0;
-        let want = format!("Vessel {id} left with its engines lit: they burn on at its throttle (0 %) until cut");
-        assert_eq!(left_lit_notice(sim.ship()), Some(want));
+        let id = sim.ship().id();
+        let want = format!("Vessel {} left with its engines lit: they burn on at its throttle (0 %) until cut", id.0);
+        let link = crate::interface::toasts::Link::Vessel(id);
+        assert_eq!(left_lit_notice(sim.ship()), Some((want, link)), "and it leads back to it");
         sim.controls_mut().throttle = 0.6;
-        assert!(left_lit_notice(sim.ship()).unwrap().contains("at its throttle (60 %)"));
+        assert!(left_lit_notice(sim.ship()).unwrap().0.contains("at its throttle (60 %)"));
     }
 
     #[test]

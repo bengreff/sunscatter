@@ -192,9 +192,10 @@ pub fn apply(
             GameCommand::Switch(i) => {
                 let left = sim.active;
                 tracking::switch_to(&mut sim, &mut rig, &mut pred, *i);
-                if let Some(text) = (sim.active != left).then(|| tracking::left_lit_notice(&sim.fleet[left])).flatten()
+                if let Some((text, link)) =
+                    (sim.active != left).then(|| tracking::left_lit_notice(&sim.fleet[left])).flatten()
                 {
-                    toasts.push(now, text, true);
+                    toasts.push_linked(now, text, true, Some(link));
                 }
                 // Leaving the station restores the flight camera: follow the
                 // new vessel.
