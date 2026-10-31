@@ -20,7 +20,8 @@ Each item gets a table test (rule 8) and fixes the model or the default, never t
 7. **D034's routing:** commands to an uncrewed vessel leave only from the nearest mission control and travel the relay network. A crewed vessel nearby never commands a probe (today it does: the command leaves from wherever the player is).
 8. **D123's switch for random failures:** statistical failures off until both flights fly end to end, then on. It is per save, set at a new flight and by MCP's `new_flight`, and it stays off by default for now. The physical triggers stay on.
 9. **The pilot's throttle under a program** (PLANNER-4): a throttle cut (X) during a planned burn does nothing if the pilot's throttle was already 0 when the program woke. Default: the program moves the pilot's throttle as it flies, so X disagrees and takes over (D126's takeover rule); record it under Open for the owner.
-10. **Small items from the hand-off**, each only if it is quick:
+10. **The buses' first readout** (INTERFACE-5's finding 34): until the first power step (on the pad the next comes a minute later) the buses have no readout, and the game shows "not read yet". The power state exists from the moment the craft is built: give it a readout at once.
+11. **Small items from the hand-off**, each only if it is quick:
    - the render scale flips between 0.8 and 1.0 every half second in a headless game.
 
 Docs in the same round: the systems docs' "Not built" lines (avionics, failures, crew, propulsion), `owners.md` rows, the technical docs touched. Small commits, each passing fmt, clippy, `cargo test -p sim` and the game's touched tests. End with the report agent-rules asks for.
