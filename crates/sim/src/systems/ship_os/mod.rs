@@ -56,6 +56,7 @@ pub mod program;
 pub mod sas;
 pub mod sequence;
 pub mod ullage;
+pub mod warp_stop;
 
 pub use commit::{commit, Commit};
 pub use sas::{sas, Sas};
@@ -93,11 +94,24 @@ pub struct Software {
     /// The scheduled programs, in the order they run at a shared epoch.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub programs: Vec<program::Installed>,
+    /// The warp-stop program, replacing the built-in line while it runs
+    /// (`warp_stop`; none: the built-in line).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub warp_stop: Option<warp_stop::Program>,
+    /// The risks at the last check and a stop not yet taken.
+    #[serde(default)]
+    pub watch: warp_stop::Watch,
 }
 
 impl Default for Software {
     fn default() -> Self {
-        Software { chutes: Default::default(), maneuver: program::Slot::auto(), programs: Vec::new() }
+        Software {
+            chutes: Default::default(),
+            maneuver: program::Slot::auto(),
+            programs: Vec::new(),
+            warp_stop: None,
+            watch: Default::default(),
+        }
     }
 }
 

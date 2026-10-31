@@ -43,8 +43,11 @@ pub struct ActionBarPlugin;
 
 impl Plugin for ActionBarPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, super::events::toast_events.after(crate::state::advance))
-            .add_systems(bevy_egui::EguiPrimaryContextPass, draw.after(crate::hud::draw));
+        app.add_systems(
+            Update,
+            (super::events::toast_events, super::events::toast_warp_stops).after(crate::state::advance),
+        )
+        .add_systems(bevy_egui::EguiPrimaryContextPass, draw.after(crate::hud::draw));
     }
 }
 

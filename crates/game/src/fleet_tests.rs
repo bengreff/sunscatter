@@ -68,6 +68,7 @@ fn a_shrinking_target_never_moves_a_vessel_back() {
     for target in [400.0, 1_500.0, 1_200.0, 2_010.0, 1_990.0, 3_000.0, 2_500.0, 4_000.0] {
         let before: Vec<Epoch> = fleet.iter().map(|v| v.time).collect();
         let adv = advance_fleet(&w, &mut fleet, &controls, t(target), None);
+        take_warp_stops(&mut fleet); // as `SimState::step`
         for (k, v) in fleet.iter().enumerate() {
             assert!(v.time >= before[k], "vessel {k} went back from the target {target} s");
             assert_eq!(adv.reached[k], v.time);
@@ -181,6 +182,7 @@ fn deadlines_and_threads_change_the_clock_not_the_motion() {
         let deadline = Instant::now() + std::time::Duration::from_micros(300);
         let adv = advance_fleet(&w, &mut fleet, &controls, target, Some(deadline));
         let next = clock_after(&adv, target);
+        take_warp_stops(&mut fleet); // as `SimState::step`
         limited += usize::from(next < target);
         assert!(next >= clock, "the clock never goes back");
         clock = next;

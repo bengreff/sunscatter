@@ -138,6 +138,11 @@ impl Vessel {
         if target < self.time {
             return (self.time, 0);
         }
+        // A warp stop not yet taken holds a frame's advance at its epoch
+        // (the game drops the warp there, D128).
+        if stop_live && self.warp_stop().is_some() {
+            return (self.time, 0);
+        }
         let mut budget = Budget::new(budget);
         self.systems.start_at(self.time);
         // A wreck has no engine or controls; the pilot's RCS mode gates and
@@ -190,7 +195,8 @@ impl Vessel {
                 && !live_at_start
                 && matches!(self.phase, Phase::Powered { .. })
                 && target.seconds_since(self.time) > LIVE_STOP;
-            if self.time >= target || stuck || spent || went_live || woke {
+            let warp_stop = stop_live && self.warp_stop().is_some();
+            if self.time >= target || stuck || spent || went_live || woke || warp_stop {
                 return (self.time, budget.spent);
             }
         }
@@ -313,7 +319,7 @@ impl Vessel {
         (reach, stop_settled) = fly.regime_stops(self.time, reach);
         let design = self.craft.design().clone();
         let mut t = self.time;
-        let mut stopped = false;
+        let (mut stopped, mut halt) = (false, false);
         let mut settled = None;
         loop {
             // The thermal and systems lattices in time order (the attitude
@@ -327,7 +333,8 @@ impl Vessel {
             // never between the systems step and the thermal point of one
             // epoch (a vessel at t has every lattice event at t done, as in
             // one call: a frame ending there would otherwise differ).
-            if budget.thermal == 0 && e.seconds_since(t) > 0.0 {
+            // A warp stop raised (`warp_stop`) ends it the same way.
+            if (budget.thermal == 0 || halt) && e.seconds_since(t) > 0.0 {
                 stopped = true;
                 break;
             }
@@ -347,6 +354,8 @@ impl Vessel {
                 let at = (e, (anchor, r, v), self.attitude.q);
                 let law = law_at(trajectory, e);
                 super::ship_tick::ship_lattice(self.ship.as_mut(), ship_def.as_deref(), world, at, None, law);
+                let ship = (ship_def.as_deref(), self.ship.as_ref());
+                halt |= super::warp_stop::watch(&mut self.software, &self.helm, ship, self.debug, e);
                 budget.charge(SYSTEMS_UNITS);
                 continue;
             }

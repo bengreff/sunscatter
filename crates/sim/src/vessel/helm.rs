@@ -64,6 +64,20 @@ pub struct Helm {
     /// ones until the caller passes others.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     taken: Option<Controls>,
+    /// Notifications on (D128, software-layers.md §5): a risk to this craft
+    /// stops time warp (`ship_os::warp_stop`). Off, nothing on it does; its
+    /// events are still logged. The game's setting for the craft, not a
+    /// command to it: no light delay.
+    #[serde(default = "notify_on", skip_serializing_if = "is_on")]
+    notify: bool,
+}
+
+fn notify_on() -> bool {
+    true
+}
+
+fn is_on(on: &bool) -> bool {
+    *on
 }
 
 impl Default for Helm {
@@ -75,7 +89,16 @@ impl Default for Helm {
 impl Helm {
     /// Controls `set`, already received.
     pub fn new(set: Controls) -> Self {
-        Helm { set, received: set, queue: VecDeque::new(), taken: None }
+        Helm { set, received: set, queue: VecDeque::new(), taken: None, notify: true }
+    }
+
+    /// Whether a risk to the craft stops warp (D128).
+    pub fn notify(&self) -> bool {
+        self.notify
+    }
+
+    pub fn set_notify(&mut self, on: bool) {
+        self.notify = on;
     }
 
     /// Hands the pilot the controls `handed` (a planned burn taken over
@@ -108,9 +131,9 @@ impl Helm {
     /// The helm a piece of a split starts with (every piece but the one
     /// that keeps the vessel's id): the controls of [`Controls::for_piece`],
     /// received at once (nothing in flight: settings sent were for the
-    /// vessel).
+    /// vessel), and the vessel's notifications.
     pub(super) fn for_piece(&self) -> Self {
-        Helm::new(self.set.for_piece())
+        Helm { notify: self.notify, ..Helm::new(self.set.for_piece()) }
     }
 
     /// What the vessel acts on at `now`: `crewed`, its controls as set;

@@ -119,6 +119,9 @@ pub struct SimState {
     /// its vessel ids come back with it, so what was seen of a vessel
     /// before (`interface::events`) belongs to another timeline. Not saved.
     pub restores: u64,
+    /// The warp stops taken and not yet notified (D128: a risk to a craft
+    /// whose notifications are on drops the warp at its epoch). Not saved.
+    pub warp_stops: Vec<(VesselId, sim::systems::ship_os::warp_stop::Stop)>,
 }
 
 /// A new game's seed: the wall clock and the process, mixed (tests: 0, so
@@ -195,6 +198,7 @@ impl SimState {
             seed,
             launch_pending: true,
             restores: 0,
+            warp_stops: Vec::new(),
         }
     }
 
@@ -377,6 +381,13 @@ impl SimState {
         let clock = crate::fleet::clock_after(&adv, target);
         self.compute_limited = clock < target;
         self.clock = clock;
+        // A risk's stop (D128): the vessel held the clock at its epoch; the
+        // warp drops there.
+        let stops = crate::fleet::take_warp_stops(&mut self.fleet);
+        if !stops.is_empty() {
+            self.warp = 0;
+            self.warp_stops.extend(stops);
+        }
         clock
     }
 

@@ -56,7 +56,7 @@ Neither: the physics (what happens), the native boundary (sensors to `Knowledge`
 | The ullage push | see layer 1's settling rows | **built:** `ship_os::ullage` | | open point 1, decided |
 | **The maneuver program** (D126) | a planned burn closed-loop to its node's orbit | `systems::maneuver` (PLANNER, c7c2de4: `step(&Inputs, &mut Program) -> Commands`) | `ship_os::maneuver` | the first program on the layer-2 API |
 | Landing guidance, docking (D117, D123) | the booster's burns; Dragon's approach | not built | `ship_os` programs | |
-| The warp-stop line, replaced | §4 | not built | a program's `warp_stop` | |
+| The warp-stop line, replaced | §4 | **built:** `ship_os::warp_stop::Line` in `Software::warp_stop` (D126's switch) | a program's `warp_stop` | the built-in line returns when it is off or its computer is lost |
 
 ### Layer 3, and the game's own rules
 
@@ -94,6 +94,8 @@ So the bare minimum needs, in data and model:
 
 ## 4. The warp-stop line
 
+*Built* (LAYERS-3): `ship_os::warp_stop` (`Facts`, `risks` with its table test `the_risks_table`, `bare_minimum`, `Line`, `decide`), the vessel's check at each lattice step of its systems (`vessel::warp_stop::watch`: in the coast's lattice loop, on the ground, and at a live tick that crosses a lattice epoch), a frame's advance held at the stop's epoch until the game takes it (`Vessel::take_warp_stop`; the coast stops as at its budget, so the bits are the same: `warp_course.rs` gives the same stops at 100×, 10⁴× and 10⁵× and the same fleet as one pass), and the game dropping the warp there with a toast (`game::fleet::take_warp_stops`, `SimState::step`, `interface::events::toast_warp_stops`). The risks are read from the parts' own state and the cabin's air through `Knowledge`; not yet read: the cabin's temperature (no sensor quantity), the acceleration limits (the crew's injuries are logged), a consumable's time to empty (step 6: stocks), the receiver (no receiver part in the data).
+
 **Built in, on layer 1** (D128): a failure that puts the crew or the vessel at risk stops warp at its own epoch, with the craft's state at that epoch. Anything else is logged (`ShipState::event`, its `alarm` flag as today).
 
 **At risk** (a pure rule with a table test, one owner: `ship_os::warp_stop::bare_minimum`):
@@ -114,7 +116,7 @@ Not a stop: a benign engine shutdown on a coast, a stuck valve, a cell lost, a s
 
 ## 5. Notifications off per craft
 
-A per-vessel setting kept with the vessel's own controls (D112, `vessel::helm`), saved: `notify` (on by default). Off: nothing on that craft stops warp, neither the built-in rule nor its program's. Events are still logged and shown in the tracking station, without toasts. "If something fails, it fails, the autopilot scripts do the best they can." The game's warp stop reads it; MCP sets it like any setting.
+*Built* (LAYERS-3): `Helm::notify`, `Vessel::{notify, set_notify}`, the game's `GameCommand::SetNotify`, MCP `set_notify`; a piece of a split keeps the craft's setting. A per-vessel setting kept with the vessel's own controls (D112, `vessel::helm`), saved: `notify` (on by default). Off: nothing on that craft stops warp, neither the built-in rule nor its program's. Events are still logged and shown in the tracking station, without toasts. "If something fails, it fails, the autopilot scripts do the best they can." The game's warp stop reads it; MCP sets it like any setting.
 
 ## 6. The module layout and the two APIs
 
@@ -136,7 +138,7 @@ sim::systems::
     maneuver  PLANNER's program (its Commands are the API's; its switch built)
     program   the API: Context, Commands, Schedule, Slot, Installed (built)
     power_guard the load manager, the first scheduled program (built)
-    warp_stop the built-in bare-minimum rule (§4) and a program's replacement
+    warp_stop the built-in bare-minimum rule (§4) and a program's replacement (built)
 ```
 
 **Layer 1's API: part behaviour set by parameters (D125).** Each part kind's logic is one function of its own definition (catalog parameters), its own state, its inputs through its declared connections and the step:
@@ -163,7 +165,7 @@ sim::systems::
 3. *Built.* The sequence, functions and interlocks out of `systems::command` into `ship_os::sequence`; `command::apply` stays the native boundary.
 4. *Built.* The chutes' arming and main height into `ship_os::chutes`, from the altitude in `Knowledge` (Dragon's barometric altimeter and cabin air monitor added, E).
 5. *Built (LAYERS-2).* The program API, `ship_os::program`: `Context` in (the `View`, `Health`, the definition, and `Context::read` for the ship-state quantities `Knowledge` knows, `systems::data::truth`), `Commands` out (the maneuver program's, moved here, plus ship commands and a wake epoch), saved state (`Installed` in `ship_os::Software`, saved with the vessel). The schedule (`Schedule`: a period from its own epoch, or a wake epoch): `Vessel::programs_stop` joins `order_stop`, so each due epoch stops the continuous advance as an order does; due programs run where orders are applied (`vessel::programs`; live ticks at the first tick at or after). D126's switch per program (`Slot`: by itself, one run per press, off; a switch or press restarts a period from now, `Installed::resume`), and the maneuver program's own (`Software::maneuver`). The first scheduled program: the load manager `ship_os::power_guard`. Test: `tests/ship_programs.rs` (the same switch epochs and battery bits at 1× and 10⁵×). Left: `systems::maneuver` still lives outside `ship_os` (the move waits for `game::commands` to be free); the agent's and the systems screen's switches (game).
-6. `ship_os::warp_stop`: the built-in rule (§4) as a pure function with a table test, the program's replacement, and `notify` per craft; the game's warp stop at the stop's epoch.
+6. *Built (LAYERS-3).* `ship_os::warp_stop`: the built-in rule (§4) as a pure function with a table test, the program's replacement, and `notify` per craft; the game's warp stop at the stop's epoch (a lattice epoch; SAVE_VERSION 18). Left: `run_until` ending on a stop (MCP), the bubble's joint tick (`vessel::bubble`) does not check.
 7. The power priorities as parameters; the life support's stocks; the bare-minimum test: Dragon coasting a month on layer 1 alone, set up, with nothing stopping warp. Today it fails on CO₂ within a day.
 
 ## 8. Open

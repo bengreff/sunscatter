@@ -60,8 +60,11 @@ fn a_coast_onto_a_surface_stops_where_it_goes_live_in_a_rails_frame() {
         let target = clock.add_seconds(4.0 / 60.0);
         let target = if target > end { end } else { target };
         let (r, _) = framed.advance_frame(&w, target, &controls, 2_000);
-        assert!(target.seconds_since(r) <= TICK, "a physics-warp frame flies through");
-        clock = target;
+        // A warp stop (D128) holds the frame at its epoch; the game takes it
+        // and the next frame goes on.
+        let stop = framed.take_warp_stop();
+        assert!(stop.is_some() || target.seconds_since(r) <= TICK, "a physics-warp frame flies through");
+        clock = if stop.is_some() { r } else { target };
     }
     let mut jump = start.clone();
     jump.advance(&w, end, &controls, usize::MAX);

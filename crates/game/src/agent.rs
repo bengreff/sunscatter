@@ -178,6 +178,14 @@ fn flight_tools() -> Vec<Tool> {
             schema(json!({"level": {"type": "integer", "minimum": 0}}), &["level"]),
         ),
         t(
+            "set_notify",
+            "A craft's notifications (D128): `on` (the default), a risk to it (its crew's air or life support, a \
+             part destroyed, no flight computer, an essential load shed) drops time warp at the risk's epoch, as \
+             the player is told; off, nothing on it stops warp (its events are still logged). A craft's \
+             warp-stop program, where it has one, decides instead of the built-in line while it runs.",
+            schema(json!({"id": id, "on": {"type": "boolean"}}), &["on"]),
+        ),
+        t(
             "switch_vessel",
             "Fly a vessel: it becomes the active vessel, and your control location is aboard it if it is crewed, \
              mission control if it is not (as for the player).",
@@ -592,6 +600,16 @@ fn run(
         "command" => command(args, sim, comms)?,
         "edit_stages" => edit_stages(args, sim, comms)?,
         "edit_program" => program::edit_program(args, sim, comms)?,
+        "set_notify" => {
+            let id = vessel_or_active(args, sim)?;
+            let i = sim.index_of(id).ok_or("no such vessel")?;
+            let on = args.get("on").and_then(Value::as_bool).ok_or("`on` is true or false")?;
+            let was = sim.fleet[i].notify();
+            (
+                json!({"id": id.0, "notify": on, "was": was}),
+                vec![Effect::Command(GameCommand::SetNotify { vessel: id, on })],
+            )
+        }
         "set_switch" => switches::set_switch(args, sim, comms)?,
         "press" => switches::press(args, sim, comms)?,
         "set_target" => {

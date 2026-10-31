@@ -119,6 +119,13 @@ pub enum GameCommand {
         vessel: VesselId,
         program: String,
     },
+    /// A craft's notifications (D128, software-layers.md §5): whether a
+    /// risk to it stops time warp. The game's setting for the craft, not a
+    /// command to it: applied at once.
+    SetNotify {
+        vessel: VesselId,
+        on: bool,
+    },
 }
 
 /// Commands on their way to a vessel at light speed (D063, D067): applied
@@ -261,6 +268,11 @@ pub fn apply(
             GameCommand::Press { vessel, program } => {
                 let done = sim.index_of(*vessel).map(|i| sim.fleet[i].press(program));
                 refused(&mut toasts, now, *vessel, done);
+            }
+            GameCommand::SetNotify { vessel, on } => {
+                if let Some(i) = sim.index_of(*vessel) {
+                    sim.fleet[i].set_notify(*on);
+                }
             }
             GameCommand::SetHold(mode) => {
                 sim.controls_mut().hold = *mode;

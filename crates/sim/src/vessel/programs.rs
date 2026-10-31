@@ -25,12 +25,17 @@ impl Vessel {
     }
 
     /// Sets a program's switch (D126): `maneuver` is the planned burns'
-    /// program, `chutes` the parachutes' deploy, else an installed one by
-    /// name.
+    /// program, `chutes` the parachutes' deploy, `warp_stop` the warp-stop
+    /// line where one is installed (off: the built-in line), else an
+    /// installed one by name.
     pub fn set_switch(&mut self, name: &str, switch: Switch) -> Result<(), String> {
         match name {
             "maneuver" => self.software.maneuver.switch = switch,
             "chutes" => self.software.chutes.switch = switch,
+            "warp_stop" => {
+                let p = self.software.warp_stop.as_mut().ok_or("no warp-stop program (the built-in line decides)")?;
+                p.slot.switch = switch;
+            }
             _ => {
                 let now = self.time;
                 let p = self.installed_mut(name)?;

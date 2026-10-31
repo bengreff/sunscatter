@@ -62,6 +62,7 @@ mod ship_tick;
 pub mod split;
 mod systems;
 mod trajectory;
+mod warp_stop;
 
 pub use aerothermal::{
     air_at, coast_sunlight, in_atmosphere, AeroTick, Air, ShockLayer, VesselThermal, LATTICE, LEAVE_ATMOSPHERE,

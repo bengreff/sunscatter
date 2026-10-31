@@ -73,12 +73,26 @@ struct Game {
     frames: usize,
     /// The vessels a bubble ever held (D082), and from when.
     members: Vec<(VesselId, Epoch)>,
+    /// The warp stops taken (D128), in the order taken: as the game, each
+    /// frame takes them after the advance (the vessel held the clock there).
+    stops: Vec<(VesselId, Epoch, String)>,
 }
 
 impl Game {
     fn new(fleet: Vec<Vessel>, set: Vec<Controls>, ids: VesselIds) -> Self {
         let clock = fleet[0].time;
-        Game { fleet, set, delay: None, target_of: None, ids, clock, last: 0.0, frames: 0, members: Vec::new() }
+        Game {
+            fleet,
+            set,
+            delay: None,
+            target_of: None,
+            ids,
+            clock,
+            last: 0.0,
+            frames: 0,
+            members: Vec::new(),
+            stops: Vec::new(),
+        }
     }
 
     /// The controls each vessel acts on in a frame from the clock.
@@ -140,11 +154,22 @@ impl Game {
         }
         self.clock = clock;
         self.last = clock.seconds_since(before);
+        self.take_stops();
         self.split_all(w);
         for v in &mut self.fleet {
             v.extend_coast(w, clock.add_seconds(LOOKAHEAD), LOOKAHEAD_STEPS);
         }
         self.frames += 1;
+    }
+
+    /// Takes every vessel's warp stop (`game::state::advance` drops the warp
+    /// there; the vessel advances on).
+    fn take_stops(&mut self) {
+        for v in &mut self.fleet {
+            if let Some(s) = v.take_warp_stop() {
+                self.stops.push((v.id(), s.at, s.why));
+            }
+        }
     }
 
     /// Applies every breakup waiting (the game builds it on a task and
@@ -182,6 +207,7 @@ impl Game {
         while k < self.fleet.len() {
             let c = self.set[k];
             self.fleet[k].advance(w, end, &c, usize::MAX);
+            self.take_stops();
             if self.fleet[k].plan_breakup().is_some() {
                 self.split_all(w);
                 continue;
@@ -243,6 +269,12 @@ fn assert_same_course(w: &World, framed: &mut Game, reference: &mut Game, what: 
             panic!("{what}: vessel {:?} differs; first: {}", a.id(), first_difference(a, b));
         }
         println!("{what}: vessel {:?} {:016x} ({} frames)", a.id(), hash(a), framed.frames);
+    }
+    // The warp stops (D128) at the same epochs: the reference's first one
+    // per vessel among the frames' (a frame takes each, so later ones come
+    // too).
+    for stop in &reference.stops {
+        assert!(framed.stops.contains(stop), "{what}: the warp stop {stop:?} not in {:?}", framed.stops);
     }
 }
 
@@ -335,10 +367,16 @@ fn same_course(seed: u64, span: f64, span_1x: f64, warps: &[f64]) -> Game {
     let mut at_1x = start.clone();
     at_1x.fly(&w, 1.0, end_1x);
     assert_same_course(&w, &mut at_1x, &mut short, "1×");
+    let mut stops = None;
     for &warp in warps {
         let mut framed = start.clone();
         framed.fly(&w, warp, end);
         assert_same_course(&w, &mut framed, &mut reference.clone(), &format!("{warp}×"));
+        let at = stops.get_or_insert_with(|| framed.stops.clone());
+        assert_eq!(&framed.stops, at, "{warp}×: the warp stops");
+    }
+    for s in stops.unwrap_or_default() {
+        println!("warp stop: {s:?}");
     }
     for e in events(&reference) {
         println!("{e}");
@@ -361,6 +399,27 @@ fn the_upper_stage_and_dragon_fly_the_same_course_at_every_warp() {
     assert_eq!(g.fleet.len(), 2, "Dragon separated from the stage");
     let after = g.fleet.iter().find_map(mvac_ignitions).expect("the stage");
     assert_eq!(Some(after), before.map(|n| n - 1), "the MVac restarted once");
+}
+
+/// Notifications off (D128, software-layers.md §5): the course's two
+/// risks (the stage's computer shed at +12.7 h, Dragon's cabin CO₂ after a
+/// day) stop nothing, on the vessel or the piece it split off, and the
+/// flight is the same bits as one pass.
+#[test]
+fn with_notifications_off_nothing_stops_warp() {
+    let w = world();
+    let (mut v, ids) = upper_stage(&w, 0);
+    orders(&mut v);
+    v.set_notify(false);
+    let start = Game::new(vec![v], vec![controls()], ids);
+    let end = t0().add_seconds(1.5 * 86_400.0);
+    let mut reference = start.clone();
+    reference.one_pass(&w, end);
+    let mut framed = start.clone();
+    framed.fly(&w, 1e5, end);
+    assert_same_course(&w, &mut framed, &mut reference, "10⁵×, notifications off");
+    assert!(framed.stops.is_empty() && reference.stops.is_empty(), "{:?}", framed.stops);
+    assert!(framed.fleet.iter().all(|v| !v.notify()), "the piece keeps the craft's setting");
 }
 
 /// The same span with a seed whose fate makes the MVac's restart fail

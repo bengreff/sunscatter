@@ -15,8 +15,9 @@ impl Vessel {
     /// After a live tick: the lattice points the tick reached (its ticks
     /// stepped the ship's systems).
     pub(super) fn systems_after_tick(&mut self) {
-        if matches!(self.phase, Phase::Powered { .. }) {
-            self.systems.advance(self.time);
+        if matches!(self.phase, Phase::Powered { .. }) && self.systems.advance(self.time) > 0 {
+            // The risks at the tick that crossed a lattice epoch (D128).
+            self.watch_now();
         }
     }
 
@@ -38,6 +39,8 @@ impl Vessel {
             let v = rot.omega(e).raw().cross(r);
             let at = (e, (body, r, v), q);
             super::ship_tick::ship_lattice(self.ship.as_mut(), def.as_deref(), world, at, Some(body), None);
+            let ship = (def.as_deref(), self.ship.as_ref());
+            super::warp_stop::watch(&mut self.software, &self.helm, ship, self.debug, e);
         }
     }
 }

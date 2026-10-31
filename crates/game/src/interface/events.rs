@@ -75,6 +75,19 @@ pub fn toast_events(sim: Res<SimState>, time: Res<Time>, mut toasts: ResMut<Toas
     }
 }
 
+/// Notifies each warp stop (D128): why the warp dropped, as an alert linked
+/// to its vessel.
+pub fn toast_warp_stops(mut sim: ResMut<SimState>, time: Res<Time>, mut toasts: ResMut<Toasts>) {
+    for (id, stop) in std::mem::take(&mut sim.warp_stops) {
+        toasts.push_linked(
+            time.elapsed_secs_f64(),
+            format!("Warp stopped: {}", stop.why),
+            true,
+            Some(Link::Vessel(id)),
+        );
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

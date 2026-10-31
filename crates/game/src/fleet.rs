@@ -115,7 +115,17 @@ pub fn stopped(vessel: &Vessel) -> bool {
 /// hand-over to live flight: the clock waits for it; landed vessels reach
 /// the target in one call).
 fn can_continue(vessel: &Vessel, reached: Epoch, target: Epoch) -> bool {
-    target.seconds_since(reached) > TICK && matches!(vessel.phase, Phase::Coasting { .. }) && !stopped(vessel)
+    target.seconds_since(reached) > TICK
+        && matches!(vessel.phase, Phase::Coasting { .. })
+        && !stopped(vessel)
+        && vessel.warp_stop().is_none()
+}
+
+/// Takes every vessel's warp stop (D128, `sim::systems::ship_os::warp_stop`):
+/// each held the clock at its epoch this frame; the game drops the warp
+/// there and says why.
+pub fn take_warp_stops(fleet: &mut [Vessel]) -> Vec<(sim::vessel::VesselId, sim::systems::ship_os::warp_stop::Stop)> {
+    fleet.iter_mut().filter_map(|v| Some((v.id(), v.take_warp_stop()?))).collect()
 }
 
 /// Advances every vessel of `fleet` towards `target` with `controls(i)`,

@@ -109,7 +109,7 @@ The lead's six points ([interview-2026-10-30-roadmap.md](../archive/interviews/i
    - at their own epoch: orders, the live boundary, surface ends, ignitions, a turn's start, separations;
    - on the lattice: shedding, the CO₂ alarm, the tank state;
    - at frame starts: light-delayed settings (D2) and debris deletion (D4).
-4. *Stopping warp:* not built. Nothing stops the warp on an event today; `rails_block` only reacts to a vessel that has gone live. It needs each event's epoch from its law, a stop there, and the clock held there (§7, point 3).
+4. *Stopping warp:* built at lattice epochs (LAYERS-3, `ship_os::warp_stop`, software-layers.md §4): a frame's advance stops at the risk's lattice epoch as at its budget, and the game drops the warp there; same stops at every warp (`warp_course.rs`). Was: not built. Nothing stops the warp on an event today; `rails_block` only reacts to a vessel that has gone live. It needs each event's epoch from its law, a stop there, and the clock held there (§7, point 3).
 5. *Ship programs under warp:* PLANNER's maneuver program (`systems::maneuver::step`) waits for a wake epoch. That epoch must stop the advance as an order does, or the program's first step lands at a frame start (D2's mechanism).
 6. *The player's input:* accepted. Add D6.
 
