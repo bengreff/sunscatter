@@ -41,12 +41,14 @@ impl Vessel {
         Ok(())
     }
 
-    /// The player's press for a program switched to run on a press: it
-    /// runs at its next due epoch (a planned burn at its wake epoch, or now
-    /// if that has passed).
+    /// The player's press for a program (the names of [`Self::set_switch`]):
+    /// a scheduled one runs at its next due epoch, a planned burn at its
+    /// wake epoch (or now if that has passed), the parachutes' deploy now
+    /// (`ship_os::chutes::press`, as `ShipCommand::ArmChutes`).
     pub fn press(&mut self, name: &str) -> Result<(), String> {
         match name {
             "maneuver" => self.software.maneuver.pressed = true,
+            "chutes" => ship_os::chutes::press(&mut self.software.chutes, &mut self.chute),
             _ => {
                 let now = self.time;
                 let p = self.installed_mut(name)?;

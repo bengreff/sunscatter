@@ -99,7 +99,11 @@ fn a_program_switched_off_never_runs_and_a_press_runs_it_once() {
     v.press("power").unwrap();
     v.advance(&w, t.add_seconds(1_800.0), &Controls::default(), usize::MAX);
     assert_eq!(v.programs()[0].last, Some(t.add_seconds(1_207.0)), "once, at its next epoch");
-    assert!(v.set_switch("nothing", Switch::Auto).is_err());
+    assert!(v.set_switch("nothing", Switch::Auto).is_err() && v.press("nothing").is_err());
+    // The parachutes' deploy takes the same names: a press arms them.
+    v.set_switch("chutes", Switch::Auto).unwrap();
+    v.press("chutes").unwrap();
+    assert!(v.chute.armed);
 }
 
 /// The maneuver program's switch (D126): off, a planned burn's program
