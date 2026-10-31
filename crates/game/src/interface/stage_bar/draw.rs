@@ -34,12 +34,12 @@ pub const PAD: f32 = 6.0;
 pub fn bar(ctx: &egui::Context, rows: &[Row], bar: &mut StageBar) -> Vec<Action> {
     let mut out = Vec::new();
     let screen = ctx.content_rect();
-    let done = rows.iter().filter(|r| r.place == Place::Done).count() as f32;
+    let done = rows.iter().filter(|r| r.place == Place::Done).count();
     // Up to below the action bar (top right) when it is drawn.
     let top = ctx.memory(|m| m.area_rect(Id::new(crate::interface::action_bar::AREA)));
     let top = top.map_or(screen.min.y + layout::MARGIN, |r| r.max.y + layout::GAP);
     let tall = screen.max.y - layout::MARGIN - top;
-    let room = (tall - 240.0 - DONE_HEIGHT * done).max(120.0);
+    let room = scroll_room(tall, rows.iter().any(|r| r.place == Place::Active), done);
     egui::Area::new(Id::new(AREA))
         .anchor(Align2::RIGHT_BOTTOM, [-layout::MARGIN, -layout::MARGIN])
         .movable(false)
@@ -78,6 +78,22 @@ pub fn bar(ctx: &egui::Context, rows: &[Row], bar: &mut StageBar) -> Vec<Action>
 
 /// The height of a stage run before the active one (one line).
 const DONE_HEIGHT: f32 = 19.0;
+/// The room kept for the active stage (its bars and figures) and for the
+/// CURRENT AIR / VACUUM switch (logical px).
+const ACTIVE_HEIGHT: f32 = 210.0;
+const SWITCH_HEIGHT: f32 = 30.0;
+/// The stages still to run get at least this much (logical px).
+const MIN_ROOM: f32 = 120.0;
+
+/// The height the stages still to run may take before they scroll, in a
+/// column `tall` px high: what the active stage (when one runs), the `done`
+/// stages run before it and the switch leave. On the pad no stage is
+/// active, and the room kept for one hid the top stage (Dragon separation)
+/// behind the scroll with the column's top empty (finding 61).
+pub fn scroll_room(tall: f32, active: bool, done: usize) -> f32 {
+    let active = if active { ACTIVE_HEIGHT } else { 0.0 };
+    (tall - SWITCH_HEIGHT - active - DONE_HEIGHT * done as f32).max(MIN_ROOM)
+}
 
 /// A stage run before the active one: its number and name, and AGAIN.
 fn done_line(ui: &mut egui::Ui, row: &Row, out: &mut Vec<Action>) {
@@ -299,6 +315,20 @@ mod tests {
 
     fn row(stage: usize, place: Place, figures: Option<Figures>) -> Row {
         Row { stage: Some(stage), number: Some(stage as u32), name: format!("S{stage}"), place, items: vec![], figures }
+    }
+
+    #[test]
+    fn the_stages_to_run_take_the_room_the_rest_leaves() {
+        // (column height, a stage active, stages run, room)
+        let cases = [
+            (735.0, false, 0, 705.0), // on the pad: all but the switch
+            (735.0, true, 0, 495.0),  // in flight: the active stage's room kept
+            (735.0, true, 3, 438.0),  // and a line per stage run
+            (300.0, true, 5, MIN_ROOM),
+        ];
+        for (tall, active, done, want) in cases {
+            assert_eq!(scroll_room(tall, active, done), want, "{tall} {active} {done}");
+        }
     }
 
     /// The bar is as tall as its rows: an active stage (drawn below the
