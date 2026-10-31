@@ -49,7 +49,16 @@ fn cone() -> &'static AeroBake {
     })
 }
 
+/// The small rocket's bake (`craft::small`).
 pub(crate) fn craft_bake() -> &'static AeroBake {
+    static B: OnceLock<AeroBake> = OnceLock::new();
+    let c = crate::craft::small::rocket_ref();
+    B.get_or_init(|| bake(&c.surface, &c.cells, &BakeOptions::default()))
+}
+
+/// The finned test craft's bake: its passive stability and fins (D074),
+/// which go with it.
+pub(crate) fn finned_bake() -> &'static AeroBake {
     static B: OnceLock<AeroBake> = OnceLock::new();
     B.get_or_init(|| bake(&test_craft().surface, &test_craft().cells, &BakeOptions::default()))
 }
@@ -249,60 +258,60 @@ fn the_test_craft_is_stable_nose_first_at_every_mach_number() {
         for (mach, kn) in regimes {
             for deg in [2.0, 5.0, 20.0, 60.0] {
                 assert!(
-                    restoring_from(craft_bake(), com, -DVec3::Z, (mach, kn), deg, c.spec.aero.cd0),
+                    restoring_from(finned_bake(), com, -DVec3::Z, (mach, kn), deg, c.spec.aero.cd0),
                     "M {mach} Kn {kn} at {deg}°, CoM {com}"
                 );
             }
         }
         // Tail first is the unstable trim (it turns around).
         for mach in [0.9, 2.0, 10.0] {
-            let tail_first = restoring_from(craft_bake(), com, DVec3::Z, (mach, 1e-5), 5.0, c.spec.aero.cd0);
+            let tail_first = restoring_from(finned_bake(), com, DVec3::Z, (mach, 1e-5), 5.0, c.spec.aero.cd0);
             assert!(!tail_first, "tail first, M {mach}, CoM {com}");
         }
     }
 }
 
 #[test]
-fn the_bell_shadows_the_base_when_flying_base_first() {
+fn the_nozzles_shadow_the_base_when_flying_base_first() {
+    // The small rocket's base: the thrust structure's bottom disc at z = −5
+    // (r 1 m, less the four powerheads' 0.15 m footprints), under four
+    // nozzle exits (r 0.2 m, 0.8 m below it, 0.6 m off the axis). Base
+    // first, each exit shadows the ring r 0.15–0.2 m round its powerhead.
     let b = craft_bake();
     let mut f = vec![0.0; b.cells];
     b.exposure_at(DVec3::Z, &mut f);
-    let c = test_craft();
-    let named = |i: usize, names: &[&str]| {
-        names.contains(&c.geometry.primitives[c.cells.cells[i].primitive as usize].name.as_str())
-    };
-    let (mut shadowed, mut open, mut area, mut exposed) = (0, 0, 0.0, 0.0);
+    let c = crate::craft::small::rocket_ref();
+    let named = |i: usize, name: &str| c.geometry.primitives[c.cells.cells[i].primitive as usize].name == name;
+    let (mut area, mut exposed, mut rings) = (0.0, 0.0, 0);
     for (i, cell) in c.cells.cells.iter().enumerate() {
-        // The skirt's base disc at z = −6 (r 0.35–1.5 m); the bell (r 0.35 m
-        // at the base, 0.8 m at its mouth 1 m below) shadows it to r 0.8.
-        let base = named(i, &["skirt"]) && cell.normal.dot(-DVec3::Z) > 0.99 && (cell.centroid.z + 6.0).abs() < 1e-6;
-        let r = cell.centroid.truncate().length();
-        if base {
+        let down = cell.normal.dot(-DVec3::Z) > 0.99;
+        if named(i, "thrust structure") && down && (cell.centroid.z + 5.0).abs() < 1e-6 {
             area += cell.area;
             exposed += cell.area * f[i];
         }
-        // Cells are ~0.4 m²: the inner ring straddles the bell's rim.
-        if base && r < 0.7 {
-            assert!(f[i] < 0.3, "cell {i} at r {r}: {}", f[i]);
-            shadowed += 1;
-        }
-        if base && r > 1.15 {
-            assert!(f[i] > 0.95, "cell {i} at r {r}: {}", f[i]);
-            open += 1;
+        // The powerheads' bottom rings, round the nozzles' throats: in
+        // their exits' shadow.
+        if named(i, "powerhead") && down {
+            assert!(f[i] < 0.05, "cell {i}: {}", f[i]);
+            rings += 1;
         }
         // Back faces are never exposed.
         if cell.normal.dot(DVec3::Z) > 0.0 {
             assert_eq!(f[i], 0.0);
         }
     }
-    assert!(shadowed > 0 && open > 0, "{shadowed} {open}");
-    // The exposed share: the ring outside the bell's mouth.
-    let want = (1.5f64.powi(2) - 0.8f64.powi(2)) / (1.5f64.powi(2) - 0.35f64.powi(2));
-    assert!((exposed / area / want - 1.0).abs() < 0.1, "{} vs {want}", exposed / area);
-    // Nose first, the stagnation region is the rounded tip (radius 0.5 m),
-    // not the fin tops 10 m downstream that face the flow too.
+    assert_eq!(rings, 4);
+    let pi = std::f64::consts::PI;
+    let base = pi * (1.0 - 4.0 * 0.15f64.powi(2));
+    assert!((area / base - 1.0).abs() < 0.02, "{area} vs {base}");
+    let want = 1.0 - 4.0 * pi * (0.2f64.powi(2) - 0.15f64.powi(2)) / base;
+    assert!((exposed / area / want - 1.0).abs() < 0.02, "{} vs {want}", exposed / area);
+    // Nose first, the stagnation region is the capsule's flat top (r 0.4
+    // m: a face without a smooth stagnation region takes its cell's
+    // size), not the tank's shoulder 1.5 m downstream that faces the flow
+    // too.
     let rn = b.sums_at(-DVec3::Z).nose_radius;
-    assert!((rn / 0.5 - 1.0).abs() < 0.1, "Rn {rn}");
+    assert!((rn / 0.4 - 1.0).abs() < 0.1, "Rn {rn}");
 }
 
 #[test]
@@ -331,14 +340,15 @@ fn flat_faces_take_zoby_and_sullivan_s_effective_nose_radius() {
 #[test]
 fn the_knudsen_length_is_the_maximum_body_diameter() {
     // Wilmoth's Kn = λ/D_b (AIAA 97-2510): a sphere's diameter, a capsule's
-    // heat-shield diameter (2·√(4.7² − 4.2²) = 4.22 m), the slender test
-    // craft's broadside silhouette (14.5 m long, 3 m skirt).
+    // heat-shield diameter (2·√(4.7² − 4.2²) = 4.22 m), the slender small
+    // rocket's broadside silhouette (7.3 m long, 2.4 m across its stowed
+    // legs).
     assert!((sphere().length / 2.0 - 1.0).abs() < 0.01, "{}", sphere().length);
     let shield = 2.0 * (4.7f64 * 4.7 - 4.2 * 4.2).sqrt();
     assert!((capsule().length / shield - 1.0).abs() < 0.02, "{}", capsule().length);
     let craft = craft_bake().length;
-    println!("test craft: D_b {craft:.2} m");
-    assert!(craft > 4.0 && craft < 8.0, "{craft}");
+    println!("small rocket: D_b {craft:.2} m");
+    assert!(craft > 2.4 && craft < 7.3, "{craft}");
 }
 
 #[test]
@@ -493,10 +503,10 @@ fn a_blunt_base_carries_the_published_base_pressure() {
 
 #[test]
 fn a_tick_s_boundary_layer_gives_the_same_forces() {
-    // The test craft at M 1.2, 12 km (turbulent aft), skin at 300–600 K:
+    // The small rocket at M 1.2, 12 km (turbulent aft), skin at 300–600 K:
     // the layer computed once gives aero_forces_wall's bits at its own
     // flow, and within 0.1 % at a flow 2 mrad away (an integration stage).
-    let c = test_craft();
+    let c = crate::craft::small::rocket_ref();
     let wall: Vec<f64> = (0..c.cells.cells.len()).map(|i| 300.0 + (i % 7) as f64 * 50.0).collect();
     let mut f = flow(DVec3::new(0.05, 0.02, -1.0), 1.2, 1e-5);
     (f.reynolds_per_m, f.temperature, f.speed) = (6.4e6, 216.65, 354.0);

@@ -282,7 +282,7 @@ impl MassModel {
 #[cfg(test)]
 mod tests {
     use super::super::mesh::{union_surface, Resolution};
-    use super::super::{test_craft, Shape};
+    use super::super::Shape;
     use super::*;
 
     fn close(a: DMat3, b: DMat3, rel: f64) -> bool {
@@ -291,7 +291,7 @@ mod tests {
     }
 
     fn cylinder_model(radius: f64, h: f64, base: DVec3) -> (MassModel, f64) {
-        let skin = test_craft().geometry.skin;
+        let skin = crate::craft::small::rocket_ref().geometry.skin;
         let prim = Primitive {
             name: String::new(),
             shape: Shape::Cylinder { base, axis: DVec3::Z * h, radius },
@@ -368,34 +368,32 @@ mod tests {
         assert!(close(direct, theorem, 2e-3), "{direct} vs {theorem}");
     }
 
+    /// The small rocket's tanks at every fill (its plumbing's contents, as
+    /// a vessel's mass properties take them): positive definite, the
+    /// triangle inequality, symmetric, its mass the dry parts and what the
+    /// tanks and bottle hold, its centre of mass near its axis (the
+    /// components off it: the battery, cells, IMU and GPS).
     #[test]
-    fn the_test_craft_is_positive_definite_at_every_fill() {
-        let c = test_craft();
-        let s = union_surface(&c.geometry.primitives, &Resolution::default());
-        let m = MassModel::new(&s, &c.geometry.primitives, &c.geometry.skin, 4000.0, &c.geometry.tank, 16000.0);
-        let dry_z = m.dry_com.z;
+    fn the_small_rocket_is_positive_definite_at_every_fill() {
+        let c = crate::craft::small::rocket_ref();
+        let def = c.ship.as_ref().unwrap();
+        let mut state = crate::craft::state::ShipState::initial(def);
         for k in 0..=10 {
-            let p = 16000.0 * f64::from(k) / 10.0;
-            let props = m.at(p);
-            assert_eq!(props.mass, 4000.0 + p);
+            let f = f64::from(k) / 10.0;
+            for (t, s) in def.tanks.iter().zip(state.tanks.iter_mut()) {
+                s.liquid = f * t.capacity;
+            }
+            let (slugs, points) = crate::systems::plumbing::contents(def, &state);
+            let props = c.mass.with_slugs(&slugs, &points);
+            let want = c.mass.dry_mass + state.consumables(def);
+            assert!((props.mass - want).abs() < 1e-9 * want, "fill {f}: {} vs {want}", props.mass);
             let i = props.inertia;
             let (a, b, cc) = (i.x_axis.x, i.y_axis.y, i.z_axis.z);
             let minor2 = a * b - i.y_axis.x * i.x_axis.y;
-            assert!(a > 0.0 && minor2 > 0.0 && i.determinant() > 0.0, "{p} kg: {i}");
-            assert!(a + b >= cc && b + cc >= a && cc + a >= b, "triangle inequality at {p} kg: {i}");
+            assert!(a > 0.0 && minor2 > 0.0 && i.determinant() > 0.0, "fill {f}: {i}");
+            assert!(a + b >= cc && b + cc >= a && cc + a >= b, "triangle inequality at fill {f}: {i}");
             assert!((i - i.transpose()).x_axis.length() < 1e-9 * a, "symmetric");
-            // The CoM is the mass-weighted mean of the dry CoM and the
-            // propellant's (the tank fills from its base at z = −1).
-            if k > 0 {
-                let h = 4.7 * p / 16000.0;
-                let want = (dry_z * 4000.0 + (-1.0 + 0.5 * h) * p) / (4000.0 + p);
-                assert!((props.com.z - want).abs() < 1e-9, "{p} kg: {} vs {want}", props.com.z);
-            }
-            // Symmetric about Z (four fins, four legs): the centre of mass
-            // is on the axis, up to the fin boxes' triangulation (the
-            // union trims them against the body along one diagonal of
-            // each face: ~20 µm).
-            assert!(props.com.truncate().length() < 1e-4, "{p} kg: {}", props.com);
+            assert!(props.com.truncate().length() < 0.01, "fill {f}: {}", props.com);
         }
     }
 

@@ -1,11 +1,17 @@
 use super::super::file::Primitive;
 use super::super::mesh::{analytic_volume, contains, union_surface, Resolution};
-use super::super::{test_craft, Shape};
+use super::super::Shape;
 use super::*;
 use std::collections::VecDeque;
 
+/// The small rocket on its legs (`craft::small::legs_out`).
+fn rocket() -> std::sync::Arc<crate::craft::Craft> {
+    crate::craft::small::legs_out()
+}
+
 fn craft_cells(target: usize) -> (Surface, Cells) {
-    let g = &test_craft().geometry;
+    let craft = rocket();
+    let g = &craft.geometry;
     let s = union_surface(&g.primitives, &Resolution::default());
     let opts = CellOptions { target, cell_area: f64::INFINITY, ..CellOptions::default() };
     let cells = build_cells(&s, &g.primitives, &g.skin, &opts);
@@ -21,21 +27,22 @@ fn cell_count_respects_the_target() {
     }
 }
 
-/// Cells by area: the test craft keeps its 512 (0.26 m² each); a large
+/// Cells by area: the small rocket keeps its 512 (0.10 m² each); a large
 /// craft gets its area over [`CELL_AREA`] (a 300-part stress craft built
 /// with the default options, as a craft file would be: not one cell per
 /// face), a craft of parts at least [`CELLS_PER_PART`] per part.
 #[test]
 fn cells_follow_the_area() {
     let (s, c) = craft_cells(512);
-    let g = &test_craft().geometry;
+    let craft = rocket();
+    let g = &craft.geometry;
     let default = build_cells(&s, &g.primitives, &g.skin, &CellOptions::default());
     assert_eq!(default, c);
-    let l = crate::craft::stress::layout(300);
+    let l = crate::craft::stress::def(300);
     let s = union_surface(&l.geometry.primitives, &Resolution::default());
     let big = build_cells(&s, &l.geometry.primitives, &l.geometry.skin, &CellOptions::default());
     assert_eq!(big.cells.len(), libm::ceil(s.area() / CELL_AREA) as usize);
-    let l = crate::craft::stress::layout(1);
+    let l = crate::craft::stress::def(1);
     let s = union_surface(&l.geometry.primitives, &Resolution::default());
     let one = build_cells(&s, &l.geometry.primitives, &l.geometry.skin, &CellOptions::for_parts(1));
     assert_eq!(one.cells.len(), libm::ceil(s.area() / CELL_AREA) as usize);
@@ -58,31 +65,25 @@ fn cells_cover_the_surface_and_it_is_closed_with_outward_normals() {
     let vector: DVec3 = c.cells.iter().map(|c| c.normal * c.area).sum();
     assert!(vector.length() < 5e-3 * total, "Σ n·a = {vector} for area {total}");
     // Outward: by the divergence theorem ⅓ Σ (c·n) a is the enclosed
-    // volume, positive and close to the union's (the capsule stack, the
-    // parts of the bell, legs and feet outside it).
+    // volume, positive and close to the union's (the capsule, tank and
+    // thrust structure, the engines below it, the legs and feet outside).
     let volume: f64 = (0..s.triangles.len())
         .map(|t| {
             let (c, n, a) = s.triangle(t);
             c.dot(n) * a / 3.0
         })
         .sum();
-    let prims = &test_craft().geometry.primitives;
-    let v = |name: &str| analytic_volume(&prims.iter().find(|p| p.name == name).unwrap().shape);
+    let craft = rocket();
+    let prims = &craft.geometry.primitives;
+    let sum = |name: &str| -> f64 { prims.iter().filter(|p| p.name == name).map(|p| analytic_volume(&p.shape)).sum() };
     let pi = std::f64::consts::PI;
-    // The union, by hand: the skirt (z −6 to −4.5), the body above it
-    // (π·1.04²·8.5), the cabin cone, the nose cap beyond the cone's end
-    // (0.396 of its 0.5 m sphere), the bell below the skirt (r 0.8 → 0.391
-    // over 1 m), the feet and the fins beyond the skirt's widest radius
-    // (1.28 m of each 2 m span). At most: plus the legs, the fins' remaining parts and
-    // the whole nose cap.
-    let frustum = |h: f64, a: f64, b: f64| pi * h * (a * a + a * b + b * b) / 3.0;
-    let feet: f64 = prims.iter().filter(|p| p.foot).map(|p| analytic_volume(&p.shape)).sum();
-    let legs: f64 = prims.iter().filter(|p| p.name.starts_with("leg")).map(|p| analytic_volume(&p.shape)).sum();
-    let fins: f64 = prims.iter().filter(|p| p.name.starts_with("fin")).map(|p| analytic_volume(&p.shape)).sum();
-    let fins_out = fins * 1.28 / 2.0;
-    let nose_out = pi * 0.396 * 0.396 * (1.5 - 0.396) / 3.0;
-    let lo = v("skirt") + pi * 1.04 * 1.04 * 8.5 + v("cabin") + nose_out + frustum(1.0, 0.8, 0.391) + feet + fins_out;
-    let hi = lo + legs + (fins - fins_out) + v("nose");
+    // The union, by hand: the capsule, tank and thrust structure (end to
+    // end), the powerheads' 0.2 m below the thrust structure's base, the
+    // nozzles below them and the feet. At most: every solid whole (the
+    // legs, and the powerheads' tops inside the thrust structure).
+    let below = 4.0 * pi * 0.15 * 0.15 * 0.2;
+    let lo = sum("shell") + sum("barrel") + sum("thrust structure") + below + sum("nozzle") + sum("foot");
+    let hi: f64 = prims.iter().map(|p| analytic_volume(&p.shape)).sum();
     assert!(volume > 0.99 * lo && volume < 1.01 * hi, "volume {volume}, expected {lo}..{hi}");
     // Each triangle faces out of its own primitive: just inside it along −n,
     // outside everything along +n (away from the joints).
@@ -101,19 +102,20 @@ fn cells_cover_the_surface_and_it_is_closed_with_outward_normals() {
 #[test]
 fn cells_are_smaller_where_the_surface_curves() {
     let (_, c) = craft_cells(512);
-    let prims = &test_craft().geometry.primitives;
+    let craft = rocket();
+    let prims = &craft.geometry.primitives;
     let mean_area = |name: &str| {
-        let p = prims.iter().position(|p| p.name == name).unwrap() as u32;
-        let v: Vec<f64> = c.cells.iter().filter(|c| c.primitive == p).map(|c| c.area).collect();
+        let v: Vec<f64> = c.cells.iter().filter(|c| prims[c.primitive as usize].name == name).map(|c| c.area).collect();
         v.iter().sum::<f64>() / v.len() as f64
     };
-    // Against the flat fins; the body (radius 1 m) curves too.
-    let flat = mean_area("fin +X");
-    for (name, ratio) in [("body", 0.9), ("nose", 0.6), ("foot +X", 0.6), ("leg +Y", 0.4), ("engine bell", 0.9)] {
-        println!("{name}: {:.3} m² (fin {flat:.3} m²)", mean_area(name));
-        assert!(mean_area(name) < ratio * flat, "{name}: {} m² vs fin {flat} m²", mean_area(name));
+    // Against the thrust structure (its flat base, a short side of the
+    // tank's radius); the tank (radius 1 m) curves too.
+    let flat = mean_area("thrust structure");
+    for (name, ratio) in [("barrel", 0.9), ("nozzle", 0.6), ("foot", 0.6), ("leg", 0.4), ("powerhead", 0.6)] {
+        println!("{name}: {:.3} m² (thrust structure {flat:.3} m²)", mean_area(name));
+        assert!(mean_area(name) < ratio * flat, "{name}: {} m² vs {flat} m²", mean_area(name));
     }
-    assert!(mean_area("nose") < mean_area("body"));
+    assert!(mean_area("nozzle") < mean_area("barrel"));
 }
 
 #[test]
@@ -143,20 +145,21 @@ fn neighbours_are_symmetric_and_connect_every_cell() {
 #[test]
 fn contact_points_are_the_feet_and_the_hull() {
     let (_, c) = craft_cells(512);
-    let prims = &test_craft().geometry.primitives;
+    let craft = rocket();
+    let prims = &craft.geometry.primitives;
     let feet: Vec<_> = c.contacts.iter().filter(|p| p.kind == ContactKind::Foot).collect();
     assert_eq!(feet.len(), 4);
     for f in &feet {
-        assert_eq!(f.pos.z, -7.7);
+        // The feet's bases, 2.5 m legs deployed at 120° (3.13 m out).
+        assert!((f.pos.z + 6.065).abs() < 1e-3 && (f.pos.truncate().length() - 3.128).abs() < 1e-3, "{}", f.pos);
         assert!(prims[c.cells[f.cell as usize].primitive as usize].foot);
     }
     let hull: Vec<_> = c.contacts.iter().filter(|p| p.kind == ContactKind::Hull).collect();
     assert!(hull.len() > 20, "{} hull points", hull.len());
-    // The nose tip (6.8 m), the skirt's rim and the fin tips are on the hull.
+    // The capsule's top (1.5 m) and the legs' lower ends are on the hull.
     let top = hull.iter().map(|p| p.pos.z).fold(f64::MIN, f64::max);
-    assert!(top > 6.5, "highest hull point at {top} m");
-    assert!(hull.iter().any(|p| p.pos.truncate().length() > 1.3 && p.pos.z < -5.5), "no skirt rim point");
-    assert!(hull.iter().any(|p| p.pos.truncate().length() > 2.6), "no fin tip point");
+    assert!(top > 1.45, "highest hull point at {top} m");
+    assert!(hull.iter().any(|p| p.pos.truncate().length() > 3.0 && p.pos.z < -6.0), "no leg end point");
     // Every contact point's cell is flagged, and only those.
     let flagged = c.cells.iter().filter(|c| c.contact).count();
     assert_eq!(flagged, c.contacts.len());
@@ -173,7 +176,16 @@ fn cells_match_golden_hash() {
         prim(Shape::Strut { from: DVec3::new(0.8, 0.0, 0.5), to: DVec3::new(1.6, 0.3, -0.8), radius: 0.05 }, false),
         prim(Shape::Box { center: DVec3::new(1.6, 0.3, -0.85), half: DVec3::new(0.2, 0.2, 0.05) }, true),
     ];
-    let skin = test_craft().geometry.skin;
+    // An aluminium skin of fixed numbers (the hash's own: not a craft's).
+    let skin = super::super::file::Skin {
+        areal_mass: 8.1,
+        specific_heat: 900.0,
+        emissivity: 0.8,
+        conductivity: 150.0,
+        thickness: 0.003,
+        max_k: None,
+        coupling: None,
+    };
     let build = || {
         let s = union_surface(&prims, &Resolution::default());
         build_cells(&s, &prims, &skin, &CellOptions { target: 128, ..CellOptions::default() })
@@ -189,7 +201,7 @@ const CELLS_GOLDEN: u64 = 0x08b0_181e_cdce_2a8d;
 
 #[test]
 fn render_mesh_indexes_its_vertices() {
-    let s = union_surface(&test_craft().geometry.primitives, &Resolution::default());
+    let s = union_surface(&rocket().geometry.primitives, &Resolution::default());
     let m = s.render_mesh();
     assert_eq!(m.indices.len(), 3 * s.triangles.len());
     assert_eq!(m.positions.len(), m.normals.len());
@@ -202,7 +214,8 @@ fn render_mesh_indexes_its_vertices() {
 #[test]
 #[ignore = "timing; run with --ignored --nocapture"]
 fn build_time() {
-    let g = &test_craft().geometry;
+    let craft = rocket();
+    let g = &craft.geometry;
     let t0 = std::time::Instant::now();
     let s = union_surface(&g.primitives, &Resolution::default());
     let t1 = std::time::Instant::now();
@@ -223,7 +236,7 @@ fn build_time() {
 /// a stress craft whose target splits thousands of times.
 #[test]
 fn the_split_queue_matches_the_full_scan() {
-    let l = crate::craft::stress::layout(40);
+    let l = crate::craft::stress::def(40);
     let s = union_surface(&l.geometry.primitives, &Resolution::default());
     let opts = CellOptions { target: 1500, ..CellOptions::default() };
     let tris = Tris::of(&s);
@@ -252,8 +265,8 @@ fn the_split_queue_matches_the_full_scan() {
 }
 
 /// Scale baseline problem 2: no cell is a tube whose normals cancel (a
-/// thin strut split along its length gave rings, coherence ~0): the test
-/// craft's legs and a stress craft's struts and antennas are split across
+/// thin strut split along its length gave rings, coherence ~0): the small
+/// rocket's legs and a stress craft's legs and nozzles are split across
 /// their circumference into half-tubes.
 #[test]
 fn no_cell_is_a_tube() {
@@ -267,8 +280,8 @@ fn no_cell_is_a_tube() {
         sums.iter().map(|(v, a)| v.length() / a).fold(f64::MAX, f64::min)
     };
     let (s, c) = craft_cells(512);
-    assert!(coherence(&s, &c) > TUBE_COHERENCE, "test craft: {}", coherence(&s, &c));
-    let l = crate::craft::stress::layout(40);
+    assert!(coherence(&s, &c) > TUBE_COHERENCE, "small rocket: {}", coherence(&s, &c));
+    let l = crate::craft::stress::def(40);
     let s = union_surface(&l.geometry.primitives, &Resolution::default());
     let c = build_cells(&s, &l.geometry.primitives, &l.geometry.skin, &CellOptions::for_parts(40));
     assert!(coherence(&s, &c) > TUBE_COHERENCE, "stress craft: {}", coherence(&s, &c));

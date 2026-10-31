@@ -286,37 +286,49 @@ fn heights(n: &VolumeNode, tank: Option<u32>) -> impl Iterator<Item = f64> + '_ 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::craft::test_craft;
+    use crate::craft::small;
 
+    /// The small rocket's interior at its node size (0.5 m): its parts'
+    /// solids, its tank's two compartments.
     fn grid() -> VolumeGrid {
-        let c = test_craft();
+        let c = small::rocket_ref();
+        let def = c.def();
+        VolumeGrid::with_parts(&c.geometry.primitives, &def.primitive_part(), bounds(c), &def.tanks(), 0.5)
+    }
+
+    fn bounds(c: &crate::craft::Craft) -> (DVec3, DVec3) {
         let s = &c.surface;
-        let (lo, hi) = s
-            .positions
+        s.positions
             .iter()
-            .fold((DVec3::splat(f64::MAX), DVec3::splat(f64::MIN)), |(lo, hi), p| (lo.min(*p), hi.max(*p)));
-        VolumeGrid::new(&c.geometry.primitives, (lo, hi), &c.geometry.tank, 1.0)
+            .fold((DVec3::splat(f64::MAX), DVec3::splat(f64::MIN)), |(lo, hi), p| (lo.min(*p), hi.max(*p)))
+    }
+
+    /// The test craft's interior (one tank): the made-up craft's one fill,
+    /// which goes with it (D121).
+    fn test_craft_grid() -> VolumeGrid {
+        let c = crate::craft::test_craft();
+        VolumeGrid::new(&c.geometry.primitives, bounds(c), &c.geometry.tank, 1.0)
     }
 
     #[test]
-    fn the_test_craft_interior_matches_its_solids() {
+    fn the_small_rocket_s_interior_matches_its_solids() {
         let g = grid();
-        let c = test_craft();
-        // The skirt, the body above it (π·1.04²·8.5) and the cabin cone; the
-        // bell, nose cap, fins and legs (small): the grid's volume within
-        // a sample layer.
+        let c = small::rocket_ref();
+        // The capsule's frustum, the tank and the thrust structure; the
+        // engines and stowed legs (small): the grid's volume within a
+        // sample layer.
         let pi = std::f64::consts::PI;
         let frustum = |h: f64, a: f64, b: f64| pi * h * (a * a + a * b + b * b) / 3.0;
-        let main = frustum(1.5, 1.52, 1.04) + pi * 1.04 * 1.04 * 8.5 + frustum(2.4, 1.04, 0.49);
+        let main = frustum(1.5, 1.0, 0.4) + pi * 4.5 + pi * 0.5;
         let analytic: f64 = c.geometry.primitives.iter().map(|p| crate::craft::mesh::analytic_volume(&p.shape)).sum();
         assert!(analytic > main);
         let v = g.volume();
         assert!((v / main - 1.0).abs() < 0.1, "{v} vs {main}");
         println!("{} nodes, {} links, {v:.1} m³", g.nodes.len(), g.links.len());
-        assert!(g.nodes.len() > 40 && g.nodes.len() < 200);
+        assert!(g.nodes.len() > 100 && g.nodes.len() < 400, "{} nodes", g.nodes.len());
         // Every link joins face neighbours with a positive open area.
         for &(a, b, area) in &g.links {
-            assert!(a < b && area > 0.0 && area <= 1.0);
+            assert!(a < b && area > 0.0 && area <= 0.25);
         }
     }
 
@@ -325,26 +337,37 @@ mod tests {
     #[test]
     fn a_band_goes_where_it_sits() {
         let g = grid();
+        let tanks = small::rocket_ref().def().tanks();
         let mut out = vec![0.0; g.nodes.len()];
-        for (from, to) in [(0.0, 0.5), (1.5, 2.5), (4.0, 4.7), (9.0, 9.5)] {
-            out.fill(0.0);
-            assert!(g.band(0, 1000.0, (from, to), &mut out));
-            let total: f64 = out.iter().sum();
-            assert!((total - 1000.0).abs() < 1e-9, "{from}..{to}: {total}");
-            let step = g.size / SAMPLES as f64;
-            for (n, m) in g.nodes.iter().zip(&out) {
-                if *m > 0.0 && to < 4.7 {
-                    let near = n.tank.iter().any(|&h| h > from - step && h < to + step);
-                    assert!(near, "{from}..{to}: node at {} holds {m}", n.centre);
+        // The tank's two compartments have samples of their own; the
+        // nitrogen bottle inside it has none (its samples are the tank's).
+        let own: Vec<bool> = (0..tanks.len()).map(|k| !g.by_tank[k].is_empty()).collect();
+        assert_eq!(own.iter().filter(|&&o| !o).count(), 1, "{own:?}");
+        for (k, (tank, _)) in tanks.iter().enumerate() {
+            let l = tank.axis.length();
+            for (from, to) in [(0.0, 0.1 * l), (0.3 * l, 0.5 * l), (0.85 * l, l), (2.0 * l, 2.1 * l)] {
+                out.fill(0.0);
+                assert_eq!(g.band(k, 1000.0, (from, to), &mut out), own[k]);
+                if !own[k] {
+                    continue;
+                }
+                let total: f64 = out.iter().sum();
+                assert!((total - 1000.0).abs() < 1e-9, "tank {k}, {from}..{to}: {total}");
+                let step = g.size / SAMPLES as f64;
+                for (n, m) in g.nodes.iter().zip(&out) {
+                    if *m > 0.0 && to < l {
+                        let near = heights(n, Some(k as u32)).any(|h| h > from - step && h < to + step);
+                        assert!(near, "tank {k}, {from}..{to}: node at {} holds {m}", n.centre);
+                    }
                 }
             }
         }
-        assert!(!g.band(1, 1000.0, (0.0, 1.0), &mut out), "no such tank");
+        assert!(!g.band(tanks.len(), 1000.0, (0.0, 1.0), &mut out), "no such tank");
     }
 
     #[test]
     fn propellant_fills_from_the_tank_base() {
-        let g = grid();
+        let g = test_craft_grid();
         let mut out = vec![0.0; g.nodes.len()];
         for fill in [1.0, 0.5, 0.1, 1e-4] {
             g.propellant(1000.0, fill, &mut out);
@@ -373,7 +396,7 @@ mod tests {
         }
         assert_eq!(g.node_at(DVec3::new(50.0, 0.0, 0.0)), None);
         let far = g.nearest(DVec3::new(0.0, 0.0, 50.0));
-        assert!(g.nodes[far as usize].centre.z > 1.5, "the nose end");
+        assert!(g.nodes[far as usize].centre.z > 0.75, "the capsule's end");
     }
 
     /// Two tanks filled together: each holds its share by capacity, from

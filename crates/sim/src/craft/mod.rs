@@ -146,6 +146,20 @@ impl Craft {
         self.design.get_or_init(|| std::sync::Arc::new(CraftDesign::new(self)))
     }
 
+    /// Mass, centre of mass and inertia as loaded: a craft of parts' tanks
+    /// and bottles as its loading fills them (`ShipState::initial`, the
+    /// plumbing's contents, as a vessel of it starts), else the made-up
+    /// craft full.
+    pub fn loaded_props(&self) -> MassProps {
+        match &self.ship {
+            Some(def) => {
+                let (slugs, points) = crate::systems::plumbing::contents(def, &state::ShipState::initial(def));
+                self.mass.with_slugs(&slugs, &points)
+            }
+            None => self.mass.at(self.mass.capacity),
+        }
+    }
+
     /// The parameters a vessel of this craft carries.
     pub fn params(&self) -> CraftParams {
         let s = &self.surface;

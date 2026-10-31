@@ -475,7 +475,7 @@ mod tests {
     /// scan of every primitive did.
     #[test]
     fn the_union_matches_the_full_scan() {
-        let prims = crate::craft::stress::layout(60).geometry.primitives;
+        let prims = crate::craft::stress::def(60).geometry.primitives;
         let fast = union_surface(&prims, &Resolution::default());
         let mut s = Surface::default();
         for (i, p) in prims.iter().enumerate() {

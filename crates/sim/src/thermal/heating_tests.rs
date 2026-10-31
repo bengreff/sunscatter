@@ -300,18 +300,23 @@ fn a_sharp_cone_heats_like_tauber_s_cone() {
 }
 
 #[test]
-fn the_test_craft_s_nose_takes_the_stagnation_flux_and_its_lee_a_little() {
+fn the_small_rocket_s_nose_takes_the_stagnation_flux_and_its_lee_a_little() {
     // Nose first at 65 km, 6 km/s, cold wall (300 K): the cells facing the
-    // flow (the nose cap, the fins' tops) take the stagnation flux at the
-    // nose radius (+0.5 %: λ/Rn 1.3e-3 there, Wilmoth's bridge begins), the
-    // aft-facing half at least the 3 % floor.
-    let c = crate::craft::test_craft();
+    // flow (the capsule's flat top, the stowed feet's tops) take the
+    // stagnation flux at the nose radius: Sutton–Graves, +3 % from
+    // Wilmoth's bridge (λ/Rn 1.3e-3 on the 0.4 m top, where it begins:
+    // 0.14 % of the way to free molecular, ½ρV³ being 23 times Sutton–
+    // Graves); the aft-facing half at least the 3 % floor.
+    let c = crate::craft::small::rocket_ref();
     let (cells, b) = (&c.cells.cells, crate::aero::tests::craft_bake());
     let flow = earth_flow(65e3, 6000.0, -DVec3::Z, b.length);
-    let q0 = sutton_graves(SUTTON_GRAVES_EARTH, 2.0 * flow.q / (6000.0 * 6000.0), b.nose_radius_at(flow.dir), 6000.0)
-        * (1.0 - 300.0 / (flow.temperature * (1.0 + 0.2 * flow.mach * flow.mach)));
     let wall = vec![300.0; cells.len()];
     let air = FlowHeat { flow: &flow, sutton_graves_k: SUTTON_GRAVES_EARTH, radiative: None, wall: &wall };
+    let (rho, rn) = (2.0 * flow.q / (6000.0 * 6000.0), b.nose_radius_at(flow.dir));
+    let st = super::stagnation(&air, rho, 6000.0, rn, b.length);
+    let continuum = sutton_graves(SUTTON_GRAVES_EARTH, rho, rn, 6000.0);
+    assert!(st.rarefied > 0.0 && st.rarefied < 2e-3 && st.convective < 1.04 * continuum, "{st:?}");
+    let q0 = st.convective * (1.0 - 300.0 / (flow.temperature * (1.0 + 0.2 * flow.mach * flow.mach)));
     let (mut out, mut scratch) = (vec![0.0; cells.len()], vec![0.0; cells.len()]);
     cell_heat_flow(b, cells, Some(&air), DVec3::ZERO, &mut scratch, &mut out);
     let flux: Vec<f64> = out.iter().zip(cells).map(|(h, c)| h / c.area).collect();
@@ -366,7 +371,7 @@ fn coast_heat_is_the_per_sample_calls_bit_for_bit() {
     // shadow) and in thin air from 12 directions: one pass over the cells
     // gives the same bits as the sunlight averaged per sample, then the
     // air's samples added one by one.
-    let c = crate::craft::test_craft();
+    let c = crate::craft::small::rocket_ref();
     let (cells, b) = (&c.cells.cells, crate::aero::tests::craft_bake());
     let n = cells.len();
     let dir = |k: usize| {
@@ -407,7 +412,7 @@ fn coast_heat_is_the_per_sample_calls_bit_for_bit() {
 fn exposure_at_divides_each_weighted_byte_as_before() {
     // The lookup tables give the bits of Σ w·e/255 summed from zero in grid
     // order, as the division per cell did.
-    let (cells, b) = (crate::craft::test_craft().cells.cells.len(), crate::aero::tests::craft_bake());
+    let (cells, b) = (crate::craft::small::rocket_ref().cells.cells.len(), crate::aero::tests::craft_bake());
     for k in 0..40 {
         let a = 0.37 * k as f64;
         let d = DVec3::new(math::cos(a), math::sin(a), 0.05 * k as f64 - 1.0).normalize();

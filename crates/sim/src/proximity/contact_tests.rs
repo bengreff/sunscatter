@@ -1,5 +1,5 @@
 use super::*;
-use crate::craft::test_craft;
+use crate::craft::small;
 use crate::rigid;
 use crate::vessel::Attitude;
 
@@ -12,11 +12,11 @@ struct Free {
 }
 
 fn hull() -> Hull {
-    Hull::new(&test_craft().def())
+    Hull::new(&small::rocket_ref().def())
 }
 
 fn props() -> crate::craft::MassProps {
-    test_craft().mass.at(test_craft().spec.propellant.mass)
+    small::rocket_ref().loaded_props()
 }
 
 fn body<'a>(hull: &'a Hull, f: &Free) -> Body<'a> {
@@ -39,8 +39,9 @@ fn totals(bodies: &[Free]) -> (DVec3, DVec3, f64) {
 }
 
 /// One contact substep of two free bodies: forces from the start of the
-/// substep, velocity and spin kicked by the impulse, then drift and
-/// torque-free rotation (as the bubble's contact substeps do).
+/// substep (and `push` on A, its opposite on B), velocity and spin kicked
+/// by the impulse, then drift and torque-free rotation (as the bubble's
+/// contact substeps do).
 fn substep(h: &Hull, a: &mut Free, b: &mut Free, dt: f64, push: DVec3) -> PairForces {
     let m = props();
     let f = pair_forces(&body(h, a), &body(h, b), 0.5, 0.05, dt);
@@ -52,12 +53,12 @@ fn substep(h: &Hull, a: &mut Free, b: &mut Free, dt: f64, push: DVec3) -> PairFo
         s.att = rigid::tick(&s.att, &m.inertia, DVec3::ZERO, dt);
     };
     kick(a, f.force + push, f.torque_a);
-    kick(b, -f.force, f.torque_b);
+    kick(b, -f.force - push, f.torque_b);
     f
 }
 
-/// Two test craft side by side, one turned 45° about its axis so a fin
-/// meets the other's body, offset so the hit is off-centre.
+/// Two small rockets side by side, one turned 45° about its axis, offset
+/// along it so the hit is off-centre.
 fn approach(speed: f64) -> (Free, Free) {
     let a = Free { r: DVec3::ZERO, v: DVec3::ZERO, att: Attitude { q: DQuat::IDENTITY, omega: DVec3::ZERO } };
     let eighth = crate::math::PI / 8.0;
@@ -104,10 +105,11 @@ fn contact_forces_are_equal_and_opposite() {
     assert!(tested >= 6, "{tested} poses touch");
 }
 
-/// Two craft nose to nose (B turned over), the nose tips `gap` apart, B
+/// Two craft nose to nose (B turned over), the capsules' tops `gap` apart, B
 /// closing at `speed` along the line of centres.
 fn nose_to_nose(gap: f64, speed: f64) -> (Free, Free) {
-    let tip = 6.796 - props().com.z;
+    let top = small::rocket_ref().surface.positions.iter().map(|p| p.z).fold(f64::MIN, f64::max);
+    let tip = top - props().com.z;
     let still = Attitude { q: DQuat::IDENTITY, omega: DVec3::ZERO };
     let a = Free { r: DVec3::ZERO, v: DVec3::ZERO, att: still };
     let flipped = Attitude { q: DQuat::from_xyzw(1.0, 0.0, 0.0, 0.0), omega: DVec3::ZERO };
@@ -191,17 +193,22 @@ fn an_off_centre_hit_conserves_momentum_and_angular_momentum() {
 /// nose to nose along the line of centres) comes to rest against it: after
 /// a few seconds the two move together, with no jitter in the depth or
 /// the relative velocity.
+/// Two craft pressed together top to top, by equal and opposite pushes
+/// along their line of centres (no net force: pushing only one would make
+/// the other an inverted column on it, falling over in ~20 s), come to
+/// rest: a steady depth, no relative motion.
 #[test]
 fn a_craft_pressed_against_another_rests_without_jitter() {
     let h = hull();
     let (mut a, mut b) = nose_to_nose(0.05, 0.0);
     a.v = DVec3::new(0.0, 0.0, 0.05);
     let dt = 0.002;
-    let push = DVec3::new(0.0, 0.0, 0.02 * props().mass);
     let (mut depths, mut rel) = (Vec::new(), Vec::new());
-    for k in 0..(30.0 / dt) as usize {
+    // Flat tops: they rock among their contact points for ~25 s, then seat.
+    for k in 0..(40.0 / dt) as usize {
+        let push = (b.r - a.r).normalize() * (0.02 * props().mass);
         let f = substep(&h, &mut a, &mut b, dt, push);
-        if k as f64 * dt > 20.0 {
+        if k as f64 * dt > 30.0 {
             depths.push(f.depth);
             rel.push((b.v - a.v).length() + (b.att.omega - a.att.omega).length());
         }
@@ -233,6 +240,8 @@ fn near_points_find_every_touch_within_their_margin() {
         let full = pair_forces(&body(&h, &a), &body(&h, &b), 0.5, 0.05, 0.002);
         let cached = pair_forces_near(&body(&h, &a), &body(&h, &b), &near, 0.5, 0.05, 0.002);
         assert_eq!(full, cached, "step {step}");
-        assert_eq!(full.count > 0, step >= 5, "step {step}: {} touching", full.count);
+        // The capsules' flat tops: at step 4 the gap has closed and the
+        // turn lifts B's rim 2 mm into A.
+        assert_eq!(full.count > 0, step >= 4, "step {step}: {} touching", full.count);
     }
 }

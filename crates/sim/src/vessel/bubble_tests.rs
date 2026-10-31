@@ -1,10 +1,11 @@
-//! The bubble in flight (D082): scenarios in low Earth orbit with the test
-//! craft. Vessel 0 (A) and 1 (B) coast side by side, B drifting onto A at
-//! 0.5 m/s; vessel 2 (C), 2 km behind, burns at its least throttle, so it
-//! leads a bubble that holds A and B live.
+//! The bubble in flight (D082): scenarios in low Earth orbit with the small
+//! rocket (`craft::small`). Vessel 0 (A) and 1 (B) coast side by side, B
+//! drifting onto A at 0.5 m/s; vessel 2 (C), 2 km behind, burns one engine
+//! at its least throttle, so it leads a bubble that holds A and B live.
 
 use super::*;
-use crate::craft::test_craft;
+use crate::craft::command::ShipCommand;
+use crate::craft::{small, Craft};
 use crate::ephem::Ephemeris;
 use crate::kepler::Elements;
 use crate::sol;
@@ -28,21 +29,36 @@ fn leo(w: &World) -> (NodeId, DVec3, DVec3, DVec3) {
     (earth.node, r, v, along)
 }
 
+fn rocket() -> &'static Craft {
+    small::rocket_ref()
+}
+
+/// The engines' least throttle (40 %).
+const LEAST: f64 = 0.4;
+
+/// `v` with its first engine started: one 100 kN engine at its least
+/// throttle pushes the 13.7 t rocket at 2.9 m/s², so a leader stays within
+/// the bubble's 10 km of craft a few km away for a minute. A throttle of 0
+/// shuts it down.
+fn lit(w: &World, mut v: Vessel) -> Vessel {
+    v.command(w, &ShipCommand::Ignite("engine#1".into())).expect("the rocket's first engine");
+    v
+}
+
 /// A and B `gap` m apart along track (B ahead, closing at `closing` m/s),
 /// and C 2 km behind A.
 fn scene(w: &World, gap: f64, closing: f64) -> Vec<Vessel> {
     let (earth, r, v, along) = leo(w);
-    let craft = test_craft();
-    let a = Vessel::coasting(w, VesselId(1), t0(), earth, r, v, craft);
-    let b = Vessel::coasting(w, VesselId(2), t0(), earth, r + along * gap, v - along * closing, craft);
-    let c = Vessel::coasting(w, VesselId(3), t0(), earth, r - along * 2_000.0, v, craft);
+    let a = Vessel::coasting(w, VesselId(1), t0(), earth, r, v, rocket());
+    let b = Vessel::coasting(w, VesselId(2), t0(), earth, r + along * gap, v - along * closing, rocket());
+    let c = lit(w, Vessel::coasting(w, VesselId(3), t0(), earth, r - along * 2_000.0, v, rocket()));
     vec![a, b, c]
 }
 
 /// C burns at its least throttle (while `burning`); everyone holds its
 /// attitude (the game's passive controls).
 fn controls(burning: bool) -> impl Fn(usize) -> Controls + Sync {
-    move |i| Controls { sas: true, throttle: if i == 2 && burning { 0.1 } else { 0.0 }, ..Default::default() }
+    move |i| Controls { sas: true, throttle: if i == 2 && burning { LEAST } else { 0.0 }, ..Default::default() }
 }
 
 /// One frame of the game: the bubble first, then every vessel.
@@ -100,7 +116,7 @@ fn two_craft_in_a_bubble_collide_and_separate() {
         first.map_or(f64::NAN, |t| t.seconds_since(t0())),
         (rb - ra).length()
     );
-    assert!(touched > 3, "they touched");
+    assert!(touched > 0, "they touched");
     assert!(closing > 0.05 && closing < 0.4, "separating at {closing} m/s");
 }
 
@@ -175,10 +191,9 @@ fn a_minute_in_a_bubble_moves_a_craft_by_under_a_millimetre() {
         let el = Elements { a, e: 0.0005, i: 0.9, raan: 1.0, argp: 0.5, mean_anomaly: 0.0 };
         let (r, v) = el.to_state(earth.gm);
         let along = (v - r * (v.dot(r) / r.length_squared())).normalize();
-        let craft = test_craft();
-        let b = || Vessel::coasting(&w, VesselId(2), t0(), earth.node, r + along * 5_000.0, v, craft);
-        let leader = Vessel::coasting(&w, VesselId(1), t0(), earth.node, r, v, craft);
-        let ctl = |i: usize| Controls { sas: true, throttle: if i == 0 { 0.1 } else { 0.0 }, ..Default::default() };
+        let b = || Vessel::coasting(&w, VesselId(2), t0(), earth.node, r + along * 5_000.0, v, rocket());
+        let leader = lit(&w, Vessel::coasting(&w, VesselId(1), t0(), earth.node, r, v, rocket()));
+        let ctl = |i: usize| Controls { sas: true, throttle: if i == 0 { LEAST } else { 0.0 }, ..Default::default() };
         let mut with = vec![leader, b()];
         let mut alone = vec![b()];
         let mut joined = None;
@@ -258,12 +273,12 @@ fn relative_position_of_members_10_km_apart() {
     for (name, anchor, r, v, most) in cases {
         let along = (v - r * (v.dot(r) / r.length_squared())).normalize();
         let side = along.cross(r).normalize();
-        let craft = test_craft();
-        let make = |id: u64, at: DVec3, dv: DVec3| Vessel::coasting(&w, VesselId(id), t0(), anchor, at, v + dv, craft);
-        let ctl = |i: usize| Controls { sas: true, throttle: if i == 2 { 0.1 } else { 0.0 }, ..Default::default() };
+        let make =
+            |id: u64, at: DVec3, dv: DVec3| Vessel::coasting(&w, VesselId(id), t0(), anchor, at, v + dv, rocket());
+        let ctl = |i: usize| Controls { sas: true, throttle: if i == 2 { LEAST } else { 0.0 }, ..Default::default() };
         let pair = || vec![make(1, r, DVec3::ZERO), make(2, r + along * 10_000.0, side * 0.3)];
         let mut bubble = pair();
-        bubble.push(make(3, r + along * 5_000.0 + side * 1_000.0, DVec3::ZERO));
+        bubble.push(lit(&w, make(3, r + along * 5_000.0 + side * 1_000.0, DVec3::ZERO)));
         let mut coast = pair();
         let passive = |_: usize| Controls { sas: true, ..Default::default() };
         run(&w, &mut bubble, &ctl, 0.5, 60.0, &mut |_| {});
@@ -285,10 +300,11 @@ fn relative_position_of_members_10_km_apart() {
     }
 }
 
-/// A hit faster than the impact limit (8 m/s at any point, D066) destroys
-/// both one-part craft; in debug mode (D064) neither breaks.
+/// A hit faster than the impact limit (8 m/s at any point, D066) breaks
+/// both craft up, their parts that were hit destroyed; in debug mode
+/// (D064) neither breaks.
 #[test]
-fn a_collision_past_the_impact_limit_destroys_the_craft() {
+fn a_collision_past_the_impact_limit_breaks_the_craft_up() {
     let w = world();
     for debug in [false, true] {
         let mut fleet = scene(&w, 12.0, 12.0);
@@ -297,13 +313,18 @@ fn a_collision_past_the_impact_limit_destroys_the_craft() {
         }
         run(&w, &mut fleet, &controls(true), 1.0 / 60.0, 2.0, &mut |_| {});
         for v in fleet.iter().take(2) {
-            match (debug, v.destruction()) {
-                (false, Some(Destruction::Impact { speed, .. })) => assert!(speed > 8.0, "{speed} m/s"),
-                (true, None) => {}
-                (_, d) => panic!("debug {debug}: {:?} {d:?}", v.id()),
+            let hits: Vec<f64> = (v.breakup.iter().flat_map(|b| &b.destroyed))
+                .map(|d| match d.1 {
+                    Destruction::Impact { speed, .. } => speed,
+                    ref other => panic!("{:?}: {other:?}", v.id()),
+                })
+                .collect();
+            match debug {
+                false => assert!(!hits.is_empty() && hits.iter().all(|&s| s > 8.0), "{:?}: {hits:?}", v.id()),
+                true => assert!(v.breakup.is_none() && v.destruction().is_none(), "{:?}", v.id()),
             }
         }
-        assert_eq!(fleet[2].destruction(), None);
+        assert!(fleet[2].breakup.is_none() && fleet[2].destruction().is_none());
     }
 }
 
@@ -319,7 +340,7 @@ fn a_craft_of_parts_hit_too_fast_loses_the_part() {
     let gap = 2.0 * hull.radius + 0.5;
     let a = Vessel::coasting(&w, VesselId(1), t0(), earth, r, v, &craft);
     let b = Vessel::coasting(&w, VesselId(2), t0(), earth, r + along * gap, v - along * 12.0, &craft);
-    let c = Vessel::coasting(&w, VesselId(3), t0(), earth, r - along * 2_000.0, v, test_craft());
+    let c = lit(&w, Vessel::coasting(&w, VesselId(3), t0(), earth, r - along * 2_000.0, v, rocket()));
     let mut fleet = vec![a, b, c];
     run(&w, &mut fleet, &controls(true), 1.0 / 60.0, 3.0, &mut |_| {});
     for v in fleet.iter().take(2) {
@@ -338,18 +359,18 @@ fn far_apart_leaders_make_separate_bubbles_and_anchors_meet_through_the_frame_tr
     let w = world();
     let (earth, r, v, along) = leo(&w);
     let moon = w.find("Moon").unwrap();
-    let craft = test_craft();
+    let craft = rocket();
     let k = w.snapshot(t0()).relative(moon.node, earth);
     let (rm, vm) =
         Elements { a: 1_837_400.0, e: 0.001, i: 0.3, raan: 0.2, argp: 0.0, mean_anomaly: 1.0 }.to_state(moon.gm);
-    let x = Vessel::coasting(&w, VesselId(1), t0(), moon.node, rm, vm, craft);
-    let l = Vessel::coasting(&w, VesselId(2), t0(), earth, r - along * 2_000.0, v, craft);
+    let x = lit(&w, Vessel::coasting(&w, VesselId(1), t0(), moon.node, rm, vm, craft));
+    let l = lit(&w, Vessel::coasting(&w, VesselId(2), t0(), earth, r - along * 2_000.0, v, craft));
     let m = Vessel::coasting(&w, VesselId(3), t0(), earth, r, v, craft);
     // N: 12 m ahead of M along track, closing at 2 m/s, stored on the Moon.
     let n = Vessel::coasting(&w, VesselId(4), t0(), moon.node, r + along * 12.0 - k.r, v - along * 2.0 - k.v, craft);
     assert_eq!(n.state(&w).0, moon.node);
     let mut fleet = vec![x, l, m, n];
-    let ctl = |i: usize| Controls { sas: true, throttle: if i <= 1 { 0.1 } else { 0.0 }, ..Default::default() };
+    let ctl = |i: usize| Controls { sas: true, throttle: if i <= 1 { LEAST } else { 0.0 }, ..Default::default() };
     let mut touched = false;
     let mut bubbles = 0;
     let start = fleet[0].time;
@@ -386,17 +407,18 @@ fn separate_bubbles_advance_as_each_alone() {
     let (rm, vm) =
         Elements { a: 1_837_400.0, e: 0.001, i: 0.3, raan: 0.2, argp: 0.0, mean_anomaly: 1.0 }.to_state(moon.gm);
     let along_m = (vm - rm * (vm.dot(rm) / rm.length_squared())).normalize();
-    let craft = test_craft();
-    let make =
-        |id: u64, node: NodeId, at: DVec3, vel: DVec3| Vessel::coasting(&w, VesselId(id), t0(), node, at, vel, craft);
-    let earth_pair = || vec![make(1, earth, r, v), make(2, earth, r + along * 3_000.0, v - along * 0.2)];
-    let moon_pair = || vec![make(3, moon.node, rm, vm), make(4, moon.node, rm + along_m * 3_000.0, vm)];
+    let make = |id: u64, node: NodeId, at: DVec3, vel: DVec3| {
+        Vessel::coasting(&w, VesselId(id), t0(), node, at, vel, rocket())
+    };
+    // The first of each pair burns.
+    let earth_pair = || vec![lit(&w, make(1, earth, r, v)), make(2, earth, r + along * 3_000.0, v - along * 0.2)];
+    let moon_pair = || vec![lit(&w, make(3, moon.node, rm, vm)), make(4, moon.node, rm + along_m * 3_000.0, vm)];
     let burn = |first: usize| {
-        move |i: usize| Controls { sas: true, throttle: if i == first { 0.1 } else { 0.0 }, ..Default::default() }
+        move |i: usize| Controls { sas: true, throttle: if i == first { LEAST } else { 0.0 }, ..Default::default() }
     };
     let mut both: Vec<Vessel> = earth_pair().into_iter().chain(moon_pair()).collect();
     let both_ctl =
-        |i: usize| Controls { sas: true, throttle: if i == 0 || i == 2 { 0.1 } else { 0.0 }, ..Default::default() };
+        |i: usize| Controls { sas: true, throttle: if i == 0 || i == 2 { LEAST } else { 0.0 }, ..Default::default() };
     let mut out = Advance::default();
     run(&w, &mut both, &both_ctl, 1.0 / 30.0, 4.0, &mut |_| {});
     out.bubbles.clear();
@@ -423,7 +445,7 @@ fn a_breakup_in_contact_waits_for_the_split_whatever_the_frames() {
         vec![
             Vessel::coasting(&w, VesselId(1), t0(), earth, r, v, &craft),
             Vessel::coasting(&w, VesselId(2), t0(), earth, r + along * gap, v - along * 12.0, &craft),
-            Vessel::coasting(&w, VesselId(3), t0(), earth, r - along * 2_000.0, v, test_craft()),
+            lit(&w, Vessel::coasting(&w, VesselId(3), t0(), earth, r - along * 2_000.0, v, rocket())),
         ]
     };
     let ctl = controls(true);

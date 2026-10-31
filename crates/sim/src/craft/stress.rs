@@ -971,6 +971,13 @@ pub fn definition(base: &str) -> Option<Result<CraftDef, String>> {
     Some(super::build::build(&file(n), super::small::catalog(), &ctx).map(|a| a.def).map_err(|e| e.join("\n")))
 }
 
+/// The definition of the stress craft of `n` parts (its primitives and
+/// parts, without the cells and mass a [`craft`] builds). Panics if it
+/// does not build.
+pub fn def(n: usize) -> CraftDef {
+    definition(&id(n).0).expect("a stress craft's id").unwrap_or_else(|e| panic!("{e}"))
+}
+
 /// The stress craft of `n` parts (`stress-<n>`), built once per process.
 pub fn craft(n: usize) -> std::sync::Arc<Craft> {
     super::craft_of(&id(n))

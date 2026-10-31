@@ -153,15 +153,15 @@ impl Broad {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::craft::stress::layout;
+    use crate::craft::stress;
 
     /// Against the scan of every primitive, at points spread through and
-    /// around a stress craft and the test craft: the same answers.
+    /// around a stress craft and the small rocket: the same answers.
     #[test]
     fn the_broad_phase_answers_as_the_full_scan() {
-        let craft = crate::craft::test_craft();
+        let craft = crate::craft::small::rocket_ref();
         for shapes in [
-            layout(120).geometry.primitives.iter().map(|p| p.shape).collect::<Vec<_>>(),
+            stress::def(120).geometry.primitives.iter().map(|p| p.shape).collect::<Vec<_>>(),
             craft.geometry.primitives.iter().map(|p| p.shape).collect(),
         ] {
             let broad = Broad::new(&shapes);
@@ -194,7 +194,7 @@ mod tests {
 
     #[test]
     fn bounds_cover_their_solids() {
-        let shapes = layout(60).geometry.primitives.iter().map(|p| p.shape).collect::<Vec<_>>();
+        let shapes = stress::def(60).geometry.primitives.iter().map(|p| p.shape).collect::<Vec<_>>();
         for s in &shapes {
             let (lo, hi) = bounds(s);
             let mut s2 = crate::craft::mesh::Surface::default();

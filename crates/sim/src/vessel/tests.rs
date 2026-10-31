@@ -26,7 +26,7 @@ fn a_coast_started_near_the_ephemeris_end_stops_at_the_end() {
     let (earth, r, v) = leo(&w);
     let t0 = w.end().add_seconds(-6.0 * 3600.0);
     PAST_END_CALLS.with(|c| c.set(0));
-    let mut ship = Vessel::coasting(&w, VesselId(1), t0, earth, r, v, crate::craft::test_craft());
+    let mut ship = Vessel::coasting(&w, VesselId(1), t0, earth, r, v, crate::craft::small::rocket_ref());
     let reached = ship.advance(&w, w.end().add_seconds(86_400.0), &Controls::default(), usize::MAX);
     assert!(reached.seconds_since(w.end()).abs() < 1e-6, "stopped {} s from the end", reached.seconds_since(w.end()));
     assert!(reached <= w.end());
@@ -58,7 +58,7 @@ fn a_segment_ended_at_its_horizon_is_continued() {
     let w = world();
     let (earth, r, v) = leo(&w);
     let t0 = sol::sol_epoch().add_seconds(86_400.0);
-    let mut ship = Vessel::coasting(&w, VesselId(1), t0, earth, r, v, crate::craft::test_craft());
+    let mut ship = Vessel::coasting(&w, VesselId(1), t0, earth, r, v, crate::craft::small::rocket_ref());
     let start = CoastStart {
         anchor: earth,
         r,
@@ -87,11 +87,15 @@ fn a_segment_ended_at_its_horizon_is_continued() {
 }
 
 /// Coasts one ship at 60 fps and another in one jump over 10 s; returns both.
+/// The small rocket with its LOX tank empty: no boil-off, so its mass and
+/// inertia hold still.
 fn attitude_after_frames_and_jump(controls: Controls, omega0: DVec3) -> (Vessel, Vessel) {
     let w = world();
     let (earth, r, v) = leo(&w);
     let t0 = sol::sol_epoch().add_seconds(86_400.0);
-    let mut frames = Vessel::coasting(&w, VesselId(1), t0, earth, r, v, crate::craft::test_craft());
+    let mut frames = Vessel::coasting(&w, VesselId(1), t0, earth, r, v, crate::craft::small::rocket_ref());
+    let lox = frames.ship_def().unwrap().tanks.iter().position(|t| t.id == "tank:ox").unwrap();
+    assert!(frames.set_tank(&w, lox, 0.0));
     frames.attitude.omega = omega0;
     let mut jump = frames.clone();
     for k in 1..=600 {
@@ -113,8 +117,11 @@ fn coasting_rotation_input_is_independent_of_frame_rate() {
     let rate = frames.craft.torque.z / props.inertia.z_axis.z;
     let spin = frames.attitude.body_rate();
     assert!((spin.z - rate * 10.0).abs() <= rate * TICK * 1.01, "spin {spin} rad/s, {rate} rad/s²");
-    // Up to the products of inertia of the mesh's asymmetry (~20 µm).
-    assert!(spin.truncate().length() < 1e-5 * spin.z, "{spin}");
+    // Up to its products of inertia: the components off its axis (the
+    // battery, the cells, the IMU and GPS; I_xz, I_yz ~0.3 % of I_zz).
+    let i = props.inertia;
+    let skew = glam::DVec2::new(i.z_axis.x, i.z_axis.y).length() / i.z_axis.z;
+    assert!(skew < 0.02 && spin.truncate().length() < 2.0 * skew * spin.z, "{spin}, products {skew}");
     assert_eq!(frames.attitude, jump.attitude);
     // Any input: the same bits at 60 fps and in one jump.
     let mixed = Controls { rotate: DVec3::new(0.3, -1.0, 0.5), ..Controls::default() };

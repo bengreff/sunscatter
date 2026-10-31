@@ -240,9 +240,22 @@ pub fn ship_thrust(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
-    use crate::craft::test_craft;
+
+    /// A 300 kN engine (Isp 320 s in vacuum, 280 s at sea level, down to
+    /// 10 %) at the base of a craft, thrusting along +Z.
+    pub(crate) fn test_file() -> EngineFile {
+        EngineFile {
+            thrust_vac: 300e3,
+            isp_vac: 320.0,
+            isp_sl: 280.0,
+            min_throttle: 0.1,
+            gimbal_deg: 5.0,
+            mount: super::super::file::Mount { pos: DVec3::new(0.0, 0.0, -5.9), dir: DVec3::Z },
+            nozzle_heat_fraction: 2.2e-3,
+        }
+    }
 
     #[test]
     fn engine_heat_is_a_share_of_the_jet_power() {
@@ -254,7 +267,7 @@ mod tests {
     }
 
     fn engine() -> Engine {
-        Engine::from_file(&test_craft().spec.engine)
+        Engine::from_file(&test_file())
     }
 
     #[test]

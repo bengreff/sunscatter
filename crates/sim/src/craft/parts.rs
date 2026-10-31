@@ -356,7 +356,7 @@ mod tests {
     use crate::craft::test_craft;
 
     fn chain(n: usize) -> Vec<Part> {
-        let base = CraftDef::whole(test_craft().spec.clone(), test_craft().geometry.clone()).parts[0].clone();
+        let base = crate::craft::small::rocket_ref().parts[0].clone();
         (0..n)
             .map(|i| Part {
                 id: i as u32,
@@ -404,7 +404,7 @@ mod tests {
     /// mount is thrust-weighted, the wall heat adds.
     #[test]
     fn engines_combine_by_flow() {
-        let a = test_craft().spec.engine;
+        let a = crate::craft::engine::tests::test_file();
         let b = EngineFile {
             thrust_vac: 100e3,
             isp_vac: 300.0,

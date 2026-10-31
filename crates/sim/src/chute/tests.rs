@@ -1,7 +1,7 @@
 use super::*;
 
 fn spec() -> ChuteSpec {
-    crate::craft::test_craft().params().chute
+    crate::craft::small::rocket_ref().spec.chute.clone()
 }
 
 const STILL: Flow = Flow { q: 0.0, speed: 0.0, height: 10_000.0 };

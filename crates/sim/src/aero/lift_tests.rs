@@ -1,6 +1,6 @@
 //! Slender-body and fin lift (D070).
 
-use super::tests::{craft_bake, flow, shape};
+use super::tests::{finned_bake, flow, shape};
 use super::*;
 use crate::craft::Shape;
 
@@ -112,7 +112,7 @@ fn a_flat_plate_wing_has_the_finite_wing_lift_slope() {
 fn the_test_crafts_fins_are_found_and_its_round_and_stubby_parts_are_not() {
     // Its four tail fins (boxes 8 cm thick) are fins; its legs (thin
     // struts) and feet (discs 0.6 m across, 0.12 m thick) are not wings.
-    let fins = &craft_bake().fins;
+    let fins = &finned_bake().fins;
     let prims = &crate::craft::test_craft().geometry.primitives;
     let cells = &crate::craft::test_craft().cells.cells;
     assert_eq!(fins.len(), 4);
@@ -181,7 +181,7 @@ fn the_test_crafts_fins_are_mounted_on_its_body() {
     // Fins from r 0.8 to 2.8 m on a body of radius 1.04–1.08 m at their
     // centroid's station (the skirt flares to 1.52 m along their chord):
     // r/s ≈ 0.38, the fins' lift ×(1 + r/s)² ≈ 1.9.
-    for f in &craft_bake().fins {
+    for f in &finned_bake().fins {
         let x = f.body_radius / f.semispan;
         assert!(f.body_radius > 1.0 && f.body_radius < 1.2 && (f.semispan - 2.8).abs() < 0.1, "{f:?}");
         assert!(x > 0.34 && x < 0.43, "{x}");

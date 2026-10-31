@@ -230,22 +230,21 @@ fn cube_param(i: usize) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::craft::test_craft;
 
     #[test]
     fn the_mean_continuum_area_is_the_designs_mean_drag_area() {
-        let d = test_craft().design();
+        let d = crate::craft::small::rocket_ref().design();
         assert_eq!(d.surfaces.mean.cont, d.mean_drag_area);
         // Cauchy: a convex body's mean projected area is a quarter of its
-        // surface; the craft is not convex (legs, fins shade each other),
-        // so less.
+        // surface; the craft is not convex (its legs and engines shade
+        // each other and the base), so less.
         let surface: f64 = d.cells.iter().map(|c| c.area).sum();
         assert!(d.surfaces.mean.area < 0.25 * surface && d.surfaces.mean.area > 0.15 * surface, "{}", surface);
     }
 
     #[test]
     fn the_lookup_matches_the_bake_at_its_directions_and_is_continuous() {
-        let d = test_craft().design();
+        let d = crate::craft::small::rocket_ref().design();
         let t = &d.surfaces;
         // At grid directions the cube map is an interpolation of the
         // exact rows: within a few per cent of the bake's own sums.

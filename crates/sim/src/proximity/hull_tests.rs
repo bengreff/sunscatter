@@ -1,6 +1,6 @@
 use super::*;
 use crate::craft::mesh::contains;
-use crate::craft::{stress, test_craft};
+use crate::craft::{small, stress};
 
 fn shapes_of(def: &CraftDef) -> Vec<Shape> {
     def.geometry.primitives.iter().map(|p| p.shape).collect()
@@ -13,7 +13,7 @@ fn shapes_of(def: &CraftDef) -> Vec<Shape> {
 /// samples' spacing).
 #[test]
 fn signed_distance_is_the_distance_to_each_solid() {
-    let defs = [test_craft().def(), stress::layout(40).def()];
+    let defs = [small::rocket_ref().def(), stress::def(40)];
     let mut checked = 0;
     for def in &defs {
         for shape in shapes_of(def) {
@@ -50,7 +50,7 @@ fn signed_distance_is_the_distance_to_each_solid() {
 /// craft's union surface has one near), and their areas add up to it.
 #[test]
 fn sample_points_cover_the_union_surface() {
-    let craft = test_craft();
+    let craft = small::rocket_ref();
     let hull = Hull::new(&craft.def());
     for p in &hull.points {
         let i = p.primitive as usize;
@@ -68,7 +68,7 @@ fn sample_points_cover_the_union_surface() {
     assert!(worst < SPACING, "a surface triangle {worst} m from every sample point");
     let area: f64 = hull.points.iter().map(|p| p.area).sum();
     assert!((area / s.area() - 1.0).abs() < 0.1, "points' area {area} m² against the surface's {}", s.area());
-    assert!(hull.points.len() > 2_000 && hull.points.len() < 6_000, "{} points", hull.points.len());
+    assert!(hull.points.len() > 1_000 && hull.points.len() < 4_000, "{} points", hull.points.len());
     // The bounding sphere holds every solid.
     for shape in &hull.shapes {
         let (lo, hi) = bounds(shape);
@@ -77,27 +77,29 @@ fn sample_points_cover_the_union_surface() {
 }
 
 /// A point inside the union leaves through the outer surface: near the
-/// body's top (where the cabin sits on it) sideways, not up into the
-/// cabin; in a fin, through its nearer side; outside, nothing.
+/// tank's top (where the capsule sits on it) sideways, not up into the
+/// capsule; in a stowed leg beyond the tank, through its outer side;
+/// outside, nothing.
 #[test]
 fn penetration_leaves_through_the_outer_surface() {
-    let hull = Hull::new(&test_craft().def());
+    let hull = Hull::new(&small::rocket_ref().def());
     // (point, depth, normal)
     let cases = [
-        // 4 cm inside the body's side, 1 cm below the cabin: out the side.
-        (DVec3::new(1.0, 0.0, 3.99), 0.04, DVec3::X),
-        // Under the skin of the body at mid-height.
-        (DVec3::new(0.0, -1.03, 0.0), 0.01, -DVec3::Y),
-        // In fin +X beyond the body: out its nearer side face.
-        (DVec3::new(2.0, 0.03, -4.6), 0.01, DVec3::Y),
-        // 1 cm into the nose cap along the axis.
-        (DVec3::new(0.0, 0.0, 6.786), 0.01, DVec3::Z),
+        // 4 cm inside the tank's side, 1 cm below the capsule: out the side.
+        (DVec3::new(0.96, 0.0, -0.01), 0.04, DVec3::X),
+        // Under the tank's skin, between the legs.
+        (DVec3::new(0.0, -0.99, -1.0), 0.01, -DVec3::Y),
+        // In leg 1 (a strut of radius 0.0875 m on x = 1.075 m) beyond the
+        // tank: out its outer side, not through the tank.
+        (DVec3::new(1.12, 0.0, -3.5), 0.0425, DVec3::X),
+        // 1 cm into the capsule's flat top along the axis.
+        (DVec3::new(0.0, 0.0, 1.49), 0.01, DVec3::Z),
     ];
     for (p, depth, n) in cases {
         let (d, normal, _) = hull.penetration(p).unwrap_or_else(|| panic!("{p} not inside"));
         assert!((d - depth).abs() < 1e-9 && (normal - n).length() < 1e-9, "{p}: {d} along {normal}");
     }
-    for p in [DVec3::new(1.1, 0.0, 0.0), DVec3::new(0.0, 0.0, 6.8), DVec3::new(0.0, 0.0, -20.0), DVec3::splat(1e6)] {
+    for p in [DVec3::new(1.1, 0.0, 0.0), DVec3::new(0.0, 0.0, 1.51), DVec3::new(0.0, 0.0, -20.0), DVec3::splat(1e6)] {
         assert_eq!(hull.penetration(p), None, "{p}");
     }
 }
@@ -107,7 +109,7 @@ fn penetration_leaves_through_the_outer_surface() {
 #[test]
 fn stress_craft_hulls() {
     for n in [1, 50, 300] {
-        let def = stress::layout(n).def();
+        let def = stress::def(n);
         let t = std::time::Instant::now();
         let hull = Hull::new(&def);
         let ms = t.elapsed().as_secs_f64() * 1e3;

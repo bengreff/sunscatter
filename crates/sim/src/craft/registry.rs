@@ -160,7 +160,7 @@ mod tests {
             assert_eq!(id.parts(), Some(want));
             assert_eq!(id.base(), "stress-300");
         }
-        assert_eq!(CraftId("test-craft".into()).parts(), None);
+        assert_eq!(CraftId("small-rocket".into()).parts(), None);
         assert_eq!(CraftId("stress-3#x".into()).parts(), None);
     }
 
@@ -169,8 +169,8 @@ mod tests {
     /// directly.
     #[test]
     fn ids_resolve_to_definitions() {
-        let test = definition(&CraftId(super::super::TEST_CRAFT.into())).unwrap();
-        assert_eq!(test.parts.len(), 1);
+        let small = definition(&super::super::small::id("rocket")).unwrap();
+        assert_eq!(small.parts.len(), super::super::small::rocket_ref().parts.len());
         let whole = definition(&CraftId("stress-12".into())).unwrap();
         assert_eq!(whole.parts.len(), 12);
         assert_eq!(Some(Ok(whole.clone())), super::super::stress::definition("stress-12"));
