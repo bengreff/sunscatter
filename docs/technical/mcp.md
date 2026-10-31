@@ -30,7 +30,7 @@ The agent is at a **control location** like you (D067): mission control when the
 | `go_to_mission_control` | Open the tracking station (mission control) |
 | `set_controls` | Throttle, SAS, the hold and the speed reference of any vessel (`id`, default the active one; D112), after the light delay from anywhere but aboard; `rotate`, the pilot's rotation keys held aboard the active vessel |
 | `stage` | A craft of parts' next stage (`id`, default the active one), sent like any command |
-| `set_plan` | Replace a vessel's planned burns (prograde/normal/radial Δv, time); sent with light delay. Refused for a craft of parts until D126's planned burns land |
+| `set_plan` | Replace a vessel's planned burns (prograde/normal/radial Δv, time); sent with light delay. A craft of parts gets nodes (D126: `in_s` is the burn's middle, flown closed-loop by the maneuver program); the result gives each node's predicted ignition, duration and warnings, and the Δv available |
 | `get_landing_prediction` | Where, when and how fast the active vessel meets the ground (needs a navigation solution) |
 | `closest_approaches` | Closest approaches between two vessels (nearest first) |
 
