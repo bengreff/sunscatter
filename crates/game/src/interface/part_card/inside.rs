@@ -5,7 +5,7 @@
 //! The components themselves are on the systems screen (the card's
 //! "more"). A total is measured only when every item in it is.
 
-use super::content::{against, line, shown, Live, Section, Value};
+use super::content::{against, known, line, shown, Live, Section, Value};
 use crate::format;
 use sim::systems::{Quantity, Reading};
 
@@ -62,12 +62,9 @@ fn total(live: &Live, items: impl IntoIterator<Item = (Quantity, f64)>) -> Resul
     items.into_iter().map(|(q, truth)| live.knowledge.read(q, truth).ok_or(q)).sum()
 }
 
-/// A total as shown, or unknown with the sensor that would measure it.
+/// A total as shown, or a dash with the sensor that would measure it.
 fn value(live: &Live, total: Result<Reading, Quantity>, show: impl Fn(Reading) -> String) -> Value {
-    match total {
-        Ok(r) => Value::Shown(show(r)),
-        Err(q) => Value::Unknown(super::content::sensor_for(live.def, q)),
-    }
+    known(live.def, total, |r| r.map_or(format::DASH.into(), &show))
 }
 
 /// The sections of what the part carries inside it, by kind.
@@ -88,7 +85,7 @@ pub fn sections(live: &Live, inside: &Inside) -> Vec<Section> {
         let b = &inside.batteries;
         let cap: f64 = b.iter().map(|&j| def.batteries[j].item.capacity).sum();
         let charge = total(live, b.iter().map(|&j| (Quantity::BatteryCharge(j as u32), state.batteries[j].charge)));
-        let lines = vec![line("charge", value(live, charge, |r| format::charge(Some(r), cap)))];
+        let lines = vec![line("charge", known(def, charge, |r| format::charge(r, cap)))];
         out.push(Section { heading: format!("BATTERIES · {}", n(b)), lines });
     }
     if !inside.thrusters.is_empty() {
@@ -163,8 +160,7 @@ fn tanks(live: &Live, tanks: &[usize]) -> Section {
         let of: Vec<usize> = tanks.iter().copied().filter(|&t| def.tanks[t].fluid == fluid).collect();
         let cap: f64 = of.iter().map(|&t| def.tanks[t].capacity).sum();
         let held = total(live, of.iter().map(|&t| (Quantity::TankLevel(t as u32), state.tanks[t].liquid)));
-        let text = |r: Reading| crate::format::amount(Some(r), cap);
-        lines.push(line(fluid, value(live, held, text)));
+        lines.push(line(fluid, known(def, held, |r| format::amount(r, cap))));
     }
     // The tank nearest its burst pressure stands for them all.
     let ratio =

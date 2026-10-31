@@ -43,11 +43,13 @@ pub struct Line {
     pub level: format::Level,
 }
 
-/// A value as shown, or unknown with the sensor that would measure it.
+/// A value as shown, or unknown: what its rule shows without a reading (a
+/// dash; a store's "—/793 kg", its capacity known) and the sensor that
+/// would measure it (on hover).
 #[derive(Clone, Debug, PartialEq)]
 pub enum Value {
     Shown(String),
-    Unknown(String),
+    Unknown { text: String, sensor: String },
 }
 
 /// A command on the card; `confirm`: it cannot be undone.
@@ -77,10 +79,32 @@ impl Live<'_> {
     /// A value of `q` (true value `truth`) as `show` writes its reading,
     /// else unknown with its sensor.
     pub(super) fn value(&self, q: Quantity, truth: f64, show: impl Fn(sim::systems::Reading) -> String) -> Value {
-        match self.knowledge.read(q, truth) {
-            Some(r) => Value::Shown(show(r)),
-            None => Value::Unknown(sensor_for(self.def, q)),
-        }
+        self.held(q, truth, |r| r.map_or(format::DASH.into(), &show))
+    }
+
+    /// A store's value (a tank's contents, a battery's charge) by its rule,
+    /// which shows the capacity unmeasured too (`format::amount`'s
+    /// "—/793 kg", as the systems screen and the menus).
+    pub(super) fn held(
+        &self,
+        q: Quantity,
+        truth: f64,
+        show: impl Fn(Option<sim::systems::Reading>) -> String,
+    ) -> Value {
+        known(self.def, self.knowledge.read(q, truth).ok_or(q), show)
+    }
+}
+
+/// A value from a reading or the quantity no sensor measures, as `show`
+/// writes it either way, with that sensor when unknown.
+pub(super) fn known(
+    def: &ShipDef,
+    read: Result<sim::systems::Reading, Quantity>,
+    show: impl Fn(Option<sim::systems::Reading>) -> String,
+) -> Value {
+    match read {
+        Ok(r) => Value::Shown(show(Some(r))),
+        Err(q) => Value::Unknown { text: show(None), sensor: sensor_for(def, q) },
     }
 }
 
@@ -92,7 +116,7 @@ pub(super) fn line(label: &str, value: Value) -> Line {
 pub(super) fn against(label: &str, value: Value, x: f64, limit: f64) -> Line {
     let level = match value {
         Value::Shown(_) => format::limit_level(x, Some(limit)),
-        Value::Unknown(_) => format::Level::Normal,
+        Value::Unknown { .. } => format::Level::Normal,
     };
     Line { level, ..line(label, value) }
 }
@@ -187,7 +211,7 @@ fn tank(live: &Live, t: usize) -> Section {
     let (d, s) = (&live.def.tanks[t], &live.state.tanks[t]);
     let i = t as u32;
     let cap = d.capacity;
-    let level = live.value(Quantity::TankLevel(i), s.liquid, |r| crate::format::amount(Some(r), cap));
+    let level = live.held(Quantity::TankLevel(i), s.liquid, |r| crate::format::amount(r, cap));
     let p = inspect::ullage_pressure(d, s);
     let pressure = live.value(Quantity::TankPressure(i), p, |r| {
         format!("{} of {}", format::pressure(Some(r)), format::bar(d.pressure))
@@ -214,7 +238,7 @@ fn stores(live: &Live, part: u32, inside: &Inside, out: &mut Vec<Section>) {
     for (j, b) in def.batteries.iter().enumerate().filter(|(j, b)| b.part == part && !inside.batteries.contains(j)) {
         let cap = b.item.capacity;
         let charge = state.batteries[j].charge;
-        let v = live.value(Quantity::BatteryCharge(j as u32), charge, |r| format::charge(Some(r), cap));
+        let v = live.held(Quantity::BatteryCharge(j as u32), charge, |r| format::charge(r, cap));
         out.push(Section { heading: format!("BATTERY {}", b.id), lines: vec![line("charge", v)] });
     }
     for (j, t) in def.thrusters.iter().enumerate().filter(|(j, t)| t.part == part && !inside.thrusters.contains(j)) {

@@ -48,11 +48,17 @@ fn a_tank_card_shows_what_the_craft_measures() {
     let s1 = card(&live, part(&def, "s1.tank")).unwrap();
     assert!(matches!(value(&s1, "TANK s1.tank:lox", "contents"), Value::Shown(t) if t.ends_with(" t")), "{s1:?}");
     // Dragon's tanks have no level sensor (falcon9.md §5.2): their total
-    // on the capsule's card is a dash naming it.
+    // on the capsule's card is `amount`'s dash with the capacity ("—/793
+    // kg", as the systems screen and the RCS menu), naming the sensor.
     let t = def.tanks.iter().position(|t| t.id.starts_with("dragon")).unwrap();
     let dragon = card(&live, def.tanks[t].part).unwrap();
     let fluid = def.tanks[t].fluid.as_str();
-    assert_eq!(value(&dragon, "TANKS", fluid), &Value::Unknown("a level sensor in the tank: none fitted".into()));
+    let cap: f64 =
+        def.tanks.iter().filter(|d| d.part == def.tanks[t].part && d.fluid == fluid).map(|d| d.capacity).sum();
+    let text = format::amount(None, cap);
+    assert!(text.starts_with("—/") && text.ends_with(" kg"), "{text}");
+    let sensor = "a level sensor in the tank: none fitted".to_string();
+    assert_eq!(value(&dragon, "TANKS", fluid), &Value::Unknown { text, sensor });
 }
 
 /// A battery's charge by the one rule (finding 47, `format::charge`): the

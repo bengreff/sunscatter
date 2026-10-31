@@ -245,7 +245,7 @@ fn line(ui: &mut egui::Ui, label: &str, value: &Value, level: crate::format::Lev
         Value::Shown(text) => {
             place::value_below(width(label.clone(), ui), width(shown(text), ui), ui.available_width())
         }
-        Value::Unknown(_) => false,
+        Value::Unknown { .. } => false,
     };
     ui.horizontal(|ui| {
         ui.label(label);
@@ -258,16 +258,17 @@ fn line(ui: &mut egui::Ui, label: &str, value: &Value, level: crate::format::Lev
     }
 }
 
-/// A row's value, right-aligned: a reading, or a dash whose tooltip, after
-/// [`DASH_HOVER_S`] of hovering, names the sensor that would measure it.
+/// A row's value, right-aligned: a reading, or its rule's text without one
+/// (a dash; a store's "—/793 kg") whose tooltip, after [`DASH_HOVER_S`] of
+/// hovering, names the sensor that would measure it.
 fn value_widget(ui: &mut egui::Ui, value: &Value, level: crate::format::Level) {
     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| match value {
         Value::Shown(text) => {
             ui.label(egui::RichText::new(text).small().monospace().color(theme::level_colour(level)));
         }
-        Value::Unknown(sensor) => {
+        Value::Unknown { text, sensor } => {
             let dash =
-                ui.add(egui::Label::new(egui::RichText::new(crate::format::DASH).small()).sense(egui::Sense::hover()));
+                ui.add(egui::Label::new(egui::RichText::new(text).small().monospace()).sense(egui::Sense::hover()));
             let now = ui.ctx().input(|i| i.time);
             let key = dash.id.with("hover_since");
             let since = ui.data_mut(|d| {
