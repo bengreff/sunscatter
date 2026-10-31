@@ -30,7 +30,6 @@ The Bevy app (`crates/game`, D045): it reads the simulation's state each frame, 
 
 - The 11-vessel performance numbers on craft of parts (`spawn_vessels` then `profile`); the old tour's low views (a camera looking at the horizon), the plunge view and the zoom sweep.
 - A warp to a point for the player (D126; agents have `run_until`).
-- Editing a program's configuration (D126's "config menu": the PROGRAMS tab shows each one's heights, loads and lines, read-only; [avionics](avionics.md)).
 - The visual editor for craft (D102); the career's screens (D027); colonies' (D019).
 - Frozen (D123): the plume's rest, the reentry glow, clouds.
 
