@@ -53,6 +53,33 @@ Small commits, each passing fmt, clippy and the game's tests you touched (`cargo
 
 ## State
 
+**INTERFACE-9 (2026-10-31), wrapped up at its context cap.** Closed INTERFACE-8's Left 1–5, the parity table's gaps and overs (interface-map.md's parity section now reads "yes" on every row), and found and fixed finding 57. Not done: the `owners.md` rows (LAYERS has the file open) and the walk of every screen (only the new tools were checked live). LAYERS' sim move left the shared tree uncompilable mid-round, so every commit passed fmt, clippy (game) and the touched modules' tests in a private mirror of HEAD plus my files; the pre-push check ran the whole suites.
+
+**Landed:**
+- 242881a: the navball cluster's rows as a model: `navball::rules::{readouts, controls}` (`Readouts`, `ControlRows`, `Button`, `hold_short`), gathered by `navball::control_rows`; `draw.rs` only lays them out. Table test of the controls.
+- df0a483: MCP `read` (`agent/read.rs`, one model two views): `{menu}` (`MenuId::sections` of the dock's snapshot; while time is stopped it waits up to 60 frames for the stopped clock's snapshot: `FlightData::clock`, `read::fresh`), `{card}` (`part_card::Gathered`, now the cards' own inputs), `{layer}` and `{item}` (`systems_screen::summary::with_inputs` and `view::facts_of`, now the screen's own builders; `rules::Temps::of`), `{navball}`. Unmeasured lines carry `measured_by`; each menu control says which tool works it (`by`). Refused in the tracking station and for the RCS menu while RCS is off. Tests in `read_tests.rs`.
+- 1c88f1e: `set_controls {translate}`: `agent::HeldKeys` (rotation and translation, replacing `HeldRotation`; `Effect::Hold`), added in `keys::read_controls`; a warning when RCS is off.
+- 2b7a6e3: `edit_program` (`agent/program.rs`): a list read as the editor shows it (the piece's view) with the catalogue; edits (add, remove, swap, rename, add_command by label, remove_command, swap_commands, pin) by the editors' rules (`systems_screen::edit`), anything the editor would not allow refused; the list sent whole as "save to the vessel".
+- dde5b7f: the overs (D106): `get_vessel`'s orbit, `get_trajectory`, `get_landing_prediction`, `closest_approaches` through the craft's knowledge by the menus' rules (`agent::known_time`, `known_digits`, `known_ground`; `format::DEGREE_DECIMALS`, `ECCENTRICITY_DECIMALS`, read by the Orbital menu too); `closest_approaches` needs a signal to both vessels.
+- 4bb3520: `list_saves` and `revert_to_launch`: `saves::listing`, `saves::revert` (one rule, the pause menu's Revert reads it).
+- f0fb5cb: finding 57, a body's distance (its double-click menu) through the position's reading, `hud::body_distance`, and `list_bodies`' `distance_m`.
+- the docs commit after them: mcp.md, interface-map.md (the parity table, findings 57–58), the plan's row, this State.
+
+**Live** (headless, debug off, the Falcon 9 on the pad, HEAD 4bb3520): `read {navball}` ("SAS ON", "CLAMPED", G "1.00 / 7.5 g ▲", Ap "—"), `{menu: orbital}`, `{card: dragon.capsule}` (NTO "—/1587 kg", `measured_by` "a level sensor in the tank: none fitted"), `{layer: structural}` (560 t, centre of mass 29.2 m), `{item: s2.battery#1}`; `edit_program` defined "Nose open" (DEPLOY dragon.nose), pinned: it shows on the action bar; a stage removed on the pad came back with `revert_to_launch`; `translate` with RCS off warned. Shots: `/private/tmp/claude-501/-Users-ben-sunscatter/7c5f130a-69ba-45d3-9965-ca858b31253e/scratchpad/interface9/shots/a_pinned_bar.png` (the agent's function on the action bar), `a_pinned.png`.
+
+**Left, in order:**
+1. `owners.md` rows (LAYERS holds the file): INTERFACE-8's (`Reading`'s `Add` and `Sum`, a sum's precision; `state::Prediction::current` and `session::answer_now`, a run's answer after its stop; `part_card::content::known` and `Live::held`, a card's value unmeasured) and mine: `agent::read` (the pages as data from the screens' models), `agent::program` (the editors for the agent), `agent::HeldKeys` (the agent's held flight keys), `navball::rules::{readouts, controls}` and `navball::control_rows` (the cluster's rows), `part_card::Gathered` (the cards' inputs), `systems_screen::view::facts_of` and `summary::with_inputs` (the screen's inputs), `saves::revert` and `saves::listing`, `hud::body_distance`, `format::DEGREE_DECIMALS` and `ECCENTRICITY_DECIMALS`, `agent::known_time`, `known_digits`, `known_ground` (a number through the craft's knowledge by its menu's rule).
+2. Finding 58: `step` and `run_until` answer with the vessel's `state` as raw truth: `session::Sample::json` through `Known`.
+3. The walk of every screen at HEAD (pad, ascent, separation, orbit, Dragon alone), reading each page through `read` beside its shot.
+4. Small: a menu control's `by` for a ship command says `command {item, do}` without naming the item; `read {menu}` could give it.
+
+**Open for the owner (INTERFACE-9):**
+- The agent reads every page as data through `read`, from the model the page draws; a menu read while time is stopped waits for the stopped clock's snapshot (at most 60 frames), so a replay reads the same.
+- `edit_program` applies a call's edits to the vessel's list and sends it whole at once (the player edits a draft, then saves); the player's open draft is left alone.
+- `closest_approaches` still takes any two vessels (the player can switch to any and target any) but needs a signal to both and reads through the first's knowledge; it lists up to 5 where the Orbital menu shows the first.
+- The orbit's angles and eccentricity reach the agent to the Orbital menu's decimals (2 and 5); an impact's latitude and longitude to the position's precision along the ground.
+- Translation held by the agent with RCS off is kept, with a warning (the player's keys do nothing then either).
+
 **INTERFACE-8 (2026-10-31), wrapped up at its context cap.** Did INTERFACE-7's Left 1–3 and the first half of item 2 (the parity table); the gaps it lists are not closed yet, and the walk (item 3) is not done. Every commit passed fmt, clippy (game; sim too for 09e51e1) and the touched modules' tests (sim data and estimate 12, the card 14, agent, state and trajectory 71); the pre-push check the whole suites. STATE-4 runs beside (it landed 2ddecb8, SAVE_VERSION 16, and has `owners.md` and `brief-state.md` open).
 
 **Landed:**

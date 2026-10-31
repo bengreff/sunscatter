@@ -137,6 +137,8 @@ Hidden, missing a way in, reached two ways that disagree, closed differently. *F
 
 55. **MCP: mid-insertion `get_vessel` read no apsides and an impact in 58 min** while the two-body orbit was 160 × 216 km (INTERFACE-7's insertion could not see its periapsis). The predicted path was from a moment before the stop: it is recomputed a few times a second of real time, and under the second stage's 40 m/s² near burnout a path 0.7 s old is ~30 m/s slow, its periapsis ~100 km lower, so it reentered. Its age hung on real-time scheduling, so a replay from a save read differently too. *Fixed* (INTERFACE-8): `step` and `run_until`, once they stop the clock, answer when the path is the active vessel's from the stopped clock (`state::Prediction::current`, `session::answer_now`, at most 5 real seconds); after a `step` under thrust `prediction_age_s` reads 0.02 s (one live tick), not up to 0.8 s.
 56. **The part card's unmeasured store read a bare dash** (Dragon's NTO and MMH) where the systems screen and the RCS menu give `format::amount`'s "—/793 kg". *Fixed* (INTERFACE-8): the card's `Value::Unknown` carries its rule's text with the sensor on hover (`content::known`, `Live::held`) for tanks and batteries, own and grouped. With it, a group's sum takes `Reading`'s one rule for a sum (the precisions add, as the estimate's bounds: `sim::systems::data`), so the second stage's two batteries read "4000/4000 Wh (100 %)", not to half a per cent.
+57. **A body's distance in its double-click menu was the truth** whatever the active vessel knew of its position (D106; a blind craft read a distance to the metre). *Fixed* (INTERFACE-9): `hud::body_distance` through `Known::distance`, the menu and `list_bodies`' `distance_m` by one rule.
+58. **MCP: `step` and `run_until` answer with the vessel's `state` as raw truth** (on the pad: `altitude_m` 30.078471440821886, `apoapsis_m` −4891.77…), where every other number reads through the craft's knowledge. *Open*: `session::Sample::json` through `Known` (the conditions are already refused on what no sensor measures).
 
 Seen by INTERFACE-8 at HEAD (shots in `scratchpad/interface8/shots/`): "LOX 286/286 t" on the pad's bar (`a_pad.png`, finding 51), the batteries' sums on the cards (`a_pad_cards.png`), "Vessel 1 separated: a new vessel · Vessel 2 ›" (`g_sep.png`, finding 54), and the booster just after the switch: "predicting the impact…" and "PARACHUTE · no parachutes aboard" (`g_booster_switch.png`, findings 52–53).
 
@@ -152,49 +154,46 @@ D044 and D128's layer 3: the agent reaches the ship computer, calls its function
 |---|---|---|---|
 | The clock (TT, the site), warp, time stopped | time panel | `get_state` | yes |
 | Frame rate | time panel | `profile` (developer flag) | the player's diagnostic |
-| Speed in the navball's frame (ORBIT / SURFACE / TARGET) | navball | `get_vessel` velocity about the body; `get_landing_prediction` surface speeds | **gap**: no speed in the frame shown, no target speed |
-| Altitude above the datum or the terrain | navball (ALT SEA / TER) | `get_vessel` above the ellipsoid; radar altitude in `get_landing_prediction` | **gap**: not the datum the navball reads |
-| Ap and Pe with their times | navball, map | `get_vessel` `orbit.apsides` | yes (**over**: raw digits, below) |
-| G-load and its limit | navball's G | — | **gap** |
-| SAS, the hold, RCS, throttle, flight state (CLAMPED, POWERED…) | navball | `set_controls` sets them; `status` in `get_state` | **gap**: nothing reads the controls back |
+| Speed in the navball's frame (ORBIT / SURFACE / TARGET) | navball | `read {navball}` (`speed`, `caption`) | yes (INTERFACE-9) |
+| Altitude above the datum or the terrain | navball (ALT SEA / TER) | `read {navball}` (the switch's datum); `get_vessel` above the ellipsoid | yes |
+| Ap and Pe with their times | navball, map | `get_vessel` `orbit.apsides`, `read {navball}` | yes |
+| G-load and its limit | navball's G | `read {navball}` (its level against the limit) | yes |
+| SAS, the hold, RCS, throttle, flight state (CLAMPED, POWERED…) | navball | `set_controls` sets them; `read {navball}` reads them back (`controls`, `state`) | yes |
 | Stages: propellant, burnout, Δv, the active stage's figures | staging bar | `get_vessel` `stages.sequence` | yes |
 | The functions offered | action bar | `command {}` | yes |
-| A part's card | click a part or its icon | `command {item}` lists its commands; `shoot {cards}` | **gap**: its rows |
-| The systems screen's layer summaries (mass, joints, temperatures, tanks, power, data, health) | Tab, a link | `shoot {screen: systems, layer}` | **gap**: its rows |
-| An item's inspector (a part, a battery, a bottle) | the screen's click | `shoot {screen: systems, part}` | **gap**: its rows |
-| Orbital: elements, target, closest approach, ship clock | 1 | `get_vessel` (i, e, period), `closest_approaches`, `get_state` (the ship clock's offset) | partial: no target distance, the menu's rows |
-| Landing: impact, braking, reentry, the parts nearest their limits, parachute, attitude | 2 | `get_landing_prediction` (impact, braking, surface) | **gap**: reentry, thermal, parachute rows |
-| Maneuver: the planned burns | 3 | `set_plan`'s reply | **gap**: reading the plan without changing it |
-| Crew: crew, cabin air, life support, injuries | 4 | — | **gap** |
-| Power: buses, batteries, what has no power | 5 | — | **gap** |
+| A part's card | click a part or its icon | `read {card}` (`part_card::Gathered`, the cards' own inputs); `command {item, do}` | yes |
+| The systems screen's layer summaries (mass, joints, temperatures, tanks, power, data, health) | Tab, a link | `read {layer}` (`summary::with_inputs`, `view::facts_of`, the screen's builders) | yes |
+| An item's inspector (a part, a battery, a bottle) | the screen's click | `read {item}` (with its commands) | yes |
+| Orbital: elements, target, closest approach, ship clock | 1 | `read {menu: orbital}`; `get_vessel`, `closest_approaches`, `get_state` | yes |
+| Landing: impact, braking, reentry, the parts nearest their limits, parachute, attitude | 2 | `read {menu: landing}`; `get_landing_prediction` | yes |
+| Maneuver: the planned burns | 3 | `read {menu: maneuver}`; `set_plan` | yes |
+| Crew: crew, cabin air, life support, injuries | 4 | `read {menu: crew}` | yes |
+| Power: buses, batteries, what has no power | 5 | `read {menu: power}` | yes |
 | Comms: the link home, delay | 6 | `get_state`, `get_vessel` `signal` | yes |
-| RCS: authority, blocks, feeds | R | `command` (the blocks' commands) | **gap**: authority, feeds |
+| RCS: authority, blocks, feeds | R | `read {menu: rcs}` (while RCS is on); `command` | yes |
 | Notifications | bottom left | `notifications` | yes |
 | The vessels, their status | tracking station (M) | `get_state` | yes |
-| A body's distance | double-click a body | `list_bodies` (no distance) | small gap |
-| The saves | pause → Saves | `save_game`, `load_game` by name | **gap**: the list |
+| A body's distance | double-click a body | `list_bodies` (`distance_m`, `hud::body_distance`, one rule) | yes |
+| The saves | pause → Saves | `list_saves` (`saves::listing`), `save_game`, `load_game` | yes |
 | The keys and every way in | help (`?`) | `tools/list` | the agent's own |
 | Throttle, SAS, the hold, speed reference; rotation | keys, navball | `set_controls` | yes |
-| Translation (I K, J L, H N) | keys | — | **gap** |
+| Translation (I K, J L, H N) | keys | `set_controls {translate}` (`agent::HeldKeys`) | yes |
 | RCS on, mode, fine; a block | R, the RCS menu | `set_controls {rcs, rcs_fine}`; `command` | yes |
 | Next stage; the bar's edits | Space; drags, ×, AGAIN | `stage`; `edit_stages` | yes |
-| Define stages and functions, rename, their commands, pin, save to the vessel | systems screen editors | — | **gap** |
+| Define stages and functions, rename, their commands, pin, save to the vessel | systems screen editors | `edit_program` (`systems_screen::edit`'s rules) | yes |
 | Functions; a part's commands; parachutes | action bar, card, screen; P | `command` | yes |
 | Warp, stop time | `.` `,` `/`, the time panel | `set_warp`, `pause`, `step`, `run_until` | yes |
 | Switch vessel; mission control | `[` `]`, a link, tracking | `switch_vessel`, `go_to_mission_control` | yes |
 | Target | Orbital → TARGET | `set_target` | yes |
 | Camera | drag, scroll, F, a body's Focus | `set_camera` | yes |
 | Save, load; new flight | Cmd+S / Cmd+L, Saves; pause | `save_game`, `load_game`; `new_flight` | yes |
-| Revert to launch | pause → Revert | — | **gap** |
+| Revert to launch | pause → Revert | `revert_to_launch` (`saves::revert`, one rule) | yes |
 | Debug mode; performance overlay | pause | `set_debug`; `profile` | yes |
 | Settings (orbits, controls, interface, visuals) | pause → Settings | — | the player's preferences, not the flight (Open for the owner) |
 
-**Over (D106):**
-- `closest_approaches` reads any two vessels' stored trajectories, the truth, with no signal or sensor check, where the player sees only the active vessel's approach to its target (Orbital).
-- `get_landing_prediction` gives the impact, the braking burn and the surface speeds as raw floats, the surface speeds ungated by the velocity's sensor; the Landing menu shows them to the readings' precision.
-- `get_vessel`'s orbit numbers (the apsides, `now_two_body`, inclination, eccentricity, period) and `get_trajectory`'s points are gated on the orbit being known but not rounded to the position's precision, as `known_value` rounds the position itself.
+**Over (D106), closed by INTERFACE-9:** `closest_approaches` read any two vessels' stored trajectories with no signal or sensor check; `get_landing_prediction` gave raw floats, the surface speeds ungated; `get_vessel`'s orbit numbers and `get_trajectory`'s points were not rounded to the position's precision. Each number now reads as its menu shows it (`agent::known_time`, `known_digits`, `known_ground` beside `known_value`): times and the impact's place with the orbit, distances through the position's reading, speeds through the velocity's, the braking burn with the propellant, the elements to the Orbital menu's decimals (`format::DEGREE_DECIMALS`, `ECCENTRICITY_DECIMALS`); `closest_approaches` needs a signal to both vessels and reads through `a`'s knowledge. Debug mode shows the truth.
 
-**How to close them (the next agent):** one `read` tool for what the player reads on a page, from the same models the screens draw, so it cannot drift and keeps D106 by construction: `{menu}` → `MenuId::sections(&FlightData)` (the snapshot is a resource refreshed every 0.1 s; refused in the tracking station and RCS while off, as `shoot`); `{card}` → `part_card::content::card` with `Live` built as `part_card/mod.rs` does; `{layer}` → `systems_screen::summary::summary` (its `Inputs` as `systems_screen/ui.rs` builds them, the facts by `rules::facts` as `view.rs`); `{layer, item}` → `inspect::details`; `{navball}` → the cluster's readouts and control captions, first moved out of `navball/draw.rs` into `navball::rules` as rows both read. `set_controls {translate}` through the agent's held keys (`agent::HeldRotation` → rotation and translation; `commands::keys::read_controls`). An `edit_program` tool over `systems_screen::edit::{allowed, apply, catalogue}`, sent as `SetStages` / `SetFunctions`. The saves' list and revert to launch (`saves::launch_of`). The overs through `known_value` (`Reading::shown`), `closest_approaches` limited to what the Orbital menu shows.
+A body's distance (its double-click menu) read the truth whatever the craft knew (finding 57): now through the position's reading, the menu and `list_bodies` by one rule (`hud::body_distance`). The settings stay the player's preferences (INTERFACE-8's Open for the owner).
 
 ## Not mapped
 
