@@ -280,7 +280,7 @@ fn part_groups(def: &ShipDef, state: &ShipState, id: u32, f: Option<&PartFacts>,
     }
     for (i, s) in def.surfaces.iter().enumerate().filter(|(_, s)| s.part == id) {
         let mut g = Group::new(format!("AERO SURFACE {}", s.id));
-        let now = state.runtime.fins.get(i).map_or(0.0, |d| d.to_degrees());
+        let now = state.fins.get(i).map_or(0.0, |d| d.to_degrees());
         g.row("kind", if s.item.lattice { "lattice (grid) fin" } else { "fin" })
             .row("area", format!("{:.2} m²", s.item.area))
             .limit(
@@ -429,7 +429,7 @@ fn stores(def: &ShipDef, state: &ShipState, id: &str, k: &Known, out: &mut Vec<G
             .row("temperature", k.or_dash(k.knowledge.perfect, || kelvin(s.k)));
         // The bus it feeds, as `systems::power` runs it.
         for bus in def.buses.iter().filter(|bus| bus.members.iter().any(|m| m.0 == b.id)) {
-            if let Some(run) = state.runtime.buses.iter().find(|r| r.name == bus.name) {
+            if let Some(run) = state.buses.iter().find(|r| r.name == bus.name) {
                 g.row("bus", format!("{} · {:.1} V · {:.0} W", run.name, run.volts, run.load));
             }
         }

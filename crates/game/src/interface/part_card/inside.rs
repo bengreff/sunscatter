@@ -102,7 +102,7 @@ pub fn sections(live: &Live, inside: &Inside) -> Vec<Section> {
     if !inside.thrusters.is_empty() {
         let t = &inside.thrusters;
         let words = t.iter().map(|&j| {
-            if state.runtime.out(&def.thrusters[j].id) {
+            if state.out(&def.thrusters[j].id) {
                 "LOST"
             } else if state.thrusters.get(j).is_some_and(|s| s.enabled) {
                 "enabled"

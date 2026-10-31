@@ -18,7 +18,7 @@
 //!   stops it, `propulsion::stop`) or an ignition failure (the start
 //!   aborted); an uncontained engine failure (the engine destroyed); a
 //!   valve stuck open or closed; a battery cell lost; a function lost (a
-//!   computer, a sensor, a pump: recorded in `Runtime::lost`; a mechanism
+//!   computer, a sensor, a pump: recorded in `ShipState::lost`; a mechanism
 //!   lost freezes where it is); a part destroyed (its mass a wreck: a
 //!   split). A burst tank or bottle explodes ([`blast`]): its gas's
 //!   expansion energy and its propellants' yield, whose overpressure
@@ -44,8 +44,8 @@ pub fn step(def: &ShipDef, state: &mut ShipState, env: &TickEnv) -> Vec<Effect> 
     if env.debug {
         return Vec::new();
     }
-    if let Some(launch) = state.runtime.launch {
-        draw_fates(def, state, state.runtime.seed, launch);
+    if let Some(launch) = state.launch {
+        draw_fates(def, state, state.seed, launch);
     }
     let mut destroyed: Vec<(u32, PartFailure)> = Vec::new();
     for k in accumulate(def, state, env.dt) {
@@ -67,7 +67,7 @@ pub fn step(def: &ShipDef, state: &mut ShipState, env: &TickEnv) -> Vec<Effect> 
         let Some(s) = state.parts.iter_mut().find(|p| p.part == part && p.integrity > 0.0) else { continue };
         s.integrity = 0.0;
         let name = def.parts.iter().find(|p| p.part == part).map_or("a part", |p| p.id.as_str());
-        state.runtime.event(env.at, format!("{name}: destroyed ({})", why.describe()), true);
+        state.event(env.at, format!("{name}: destroyed ({})", why.describe()), true);
         effects.push(Effect::Destroy(part, why));
     }
     effects
@@ -91,14 +91,14 @@ fn fatigue(def: &ShipDef, state: &mut ShipState, part: u32, at: Epoch) {
     } else if def.mechanisms.iter().any(|m| m.part == part) {
         lose(state, part, &p.id, "vibration fatigue", at);
     } else {
-        state.runtime.event(at, format!("{}: vibration damage at its qualification", p.id), true);
+        state.event(at, format!("{}: vibration damage at its qualification", p.id), true);
     }
 }
 
 /// A lost mechanism stays where it is (its actuator is gone).
 fn freeze_lost(def: &ShipDef, state: &mut ShipState) {
     for (m, s) in def.mechanisms.iter().zip(state.mechanisms.iter_mut()) {
-        if state.runtime.lost.iter().any(|l| l.part == m.part || l.owner == m.id) {
+        if state.lost.iter().any(|l| l.part == m.part || l.owner == m.id) {
             s.target = s.angle;
         }
     }
@@ -130,10 +130,10 @@ pub fn draw_fates(def: &ShipDef, state: &mut ShipState, seed: u64, launch: Epoch
 /// The fates drawn again with the save's `seed` (a new game's seed set on a
 /// vessel just created, D105 §6.3): each threshold from the seed, the
 /// launch epoch, its owner and mode; the hazards and counters stay. The
-/// seed is kept in the runtime, so a split's pieces carry it.
+/// seed is kept in the ship state, so a split's pieces carry it.
 pub fn reseed(state: &mut ShipState, seed: u64) {
-    state.runtime.seed = seed;
-    let Some(launch) = state.runtime.launch else { return };
+    state.seed = seed;
+    let Some(launch) = state.launch else { return };
     for f in &mut state.fates {
         f.threshold = fates::threshold(seed, launch, &f.owner, &f.mode);
     }
@@ -241,7 +241,7 @@ pub fn outcome(def: &ShipDef, state: &mut ShipState, k: usize, at: Epoch) -> Con
             for &i in &engines {
                 super::propulsion::stop(def, state, i, super::propulsion::Stop::Fail(why.clone()), at);
             }
-            state.runtime.event(at, format!("{owner}: uncontained failure, the engine is destroyed"), true);
+            state.event(at, format!("{owner}: uncontained failure, the engine is destroyed"), true);
             return Consequence::Destroyed(part, PartFailure::Uncontained);
         }
         Outcome::StuckOpen | Outcome::StuckClosed => {
@@ -249,17 +249,17 @@ pub fn outcome(def: &ShipDef, state: &mut ShipState, k: usize, at: Epoch) -> Con
                 let s = &mut state.valves[v];
                 (s.stuck, s.open) = (true, mode.outcome == Outcome::StuckOpen);
             }
-            state.runtime.event(at, format!("{owner}: {why}"), true);
+            state.event(at, format!("{owner}: {why}"), true);
         }
         Outcome::CellLoss => {
             if let Some(b) = def.batteries.iter().position(|b| b.id == owner) {
                 // A module of four lost (E: the batteries' modules are not data).
                 state.batteries[b].charge *= 0.75;
             }
-            state.runtime.event(at, format!("{owner}: {why}"), true);
+            state.event(at, format!("{owner}: {why}"), true);
         }
         Outcome::Burst | Outcome::Melt => {
-            state.runtime.event(at, format!("{owner}: {why}"), true);
+            state.event(at, format!("{owner}: {why}"), true);
             return Consequence::Destroyed(part, PartFailure::Burst { pa: 0.0 });
         }
         Outcome::GimbalStuck | Outcome::Leak | Outcome::Lost | Outcome::Snap => {
@@ -271,9 +271,9 @@ pub fn outcome(def: &ShipDef, state: &mut ShipState, k: usize, at: Epoch) -> Con
 
 /// Records `owner`'s function as lost (once) and tells the player.
 pub fn lose(state: &mut ShipState, part: u32, owner: &str, why: &str, at: Epoch) {
-    if !state.runtime.lost.iter().any(|l| l.owner == owner) {
-        state.runtime.lost.push(crate::systems::runtime::Lost { part, owner: owner.into(), why: why.into() });
-        state.runtime.event(at, format!("{owner}: lost: {why}"), true);
+    if !state.lost.iter().any(|l| l.owner == owner) {
+        state.lost.push(crate::craft::state::Lost { part, owner: owner.into(), why: why.into() });
+        state.event(at, format!("{owner}: lost: {why}"), true);
     }
 }
 

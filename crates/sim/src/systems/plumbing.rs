@@ -546,7 +546,7 @@ pub fn slow(def: &ShipDef, state: &mut ShipState, env: &Surroundings, dt: f64) -
 /// under the settling accelerations `a`.
 pub fn fast(def: &ShipDef, state: &mut ShipState, before: &[f64], a: &[f64], dt: f64) {
     // The regulator runs: the structure reads the tanks' real pressures.
-    state.runtime.pressure_regulated = true;
+    state.pressure_regulated = true;
     for i in 0..def.tanks.len() {
         let t = &def.tanks[i];
         let gamma = fluids().gas(&t.load.pressurant).map_or(1.667, |g| g.gamma);

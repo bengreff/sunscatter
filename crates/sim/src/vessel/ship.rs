@@ -87,7 +87,7 @@ impl Vessel {
     pub(super) fn init_ship(&mut self) {
         let Some(def) = self.ship_def() else { return };
         let mut state = ShipState::initial(&def);
-        state.runtime.launch = Some(self.time);
+        state.launch = Some(self.time);
         let deployed = self.craft.id.deployed();
         for (d, m) in def.mechanisms.iter().zip(&mut state.mechanisms) {
             if deployed.contains(&d.part) {
@@ -96,7 +96,7 @@ impl Vessel {
         }
         // The fates are drawn at the launch, counting the parts' starts and
         // cycles from here (D105 §6.3).
-        let seed = state.runtime.seed;
+        let seed = state.seed;
         crate::systems::failure::draw_fates(&def, &mut state, seed, self.time);
         self.ship = Some(state);
         if !self.craft.design().parts.iter().any(|p| p.chute) {
@@ -183,7 +183,7 @@ impl Vessel {
 
     /// The ship's event log (failures, aborts, stages; newest last).
     pub fn ship_events(&self) -> &[crate::systems::Event] {
-        self.ship.as_ref().map_or(&[], |s| &s.runtime.events)
+        self.ship.as_ref().map_or(&[], |s| &s.events)
     }
 
     /// Replaces the stage sequence, the whole program's (the systems
@@ -314,7 +314,7 @@ impl Vessel {
     /// vessel's time is applied at its next tick.
     pub fn order_at(&mut self, at: crate::time::Epoch, kind: OrderKind) -> Result<(), String> {
         let state = self.ship.as_mut().ok_or("not a craft of parts")?;
-        state.runtime.order(at, kind);
+        state.order(at, kind);
         Ok(())
     }
 
@@ -456,7 +456,7 @@ fn limits(def: &ShipDef, state: &ShipState, t: &ShipThrust, dt: f64, q: f64, gas
         .fold(f64::INFINITY, f64::min);
     let step = if rate.is_finite() { rate * crate::math::PI / 180.0 * dt } else { f64::INFINITY };
     super::attitude::Limits {
-        gimbal_from: state.runtime.thrust_dir.unwrap_or(t.dir),
+        gimbal_from: state.thrust_dir.unwrap_or(t.dir),
         gimbal_step: step,
         max_rate: turn_cap(q).min(gas),
     }

@@ -215,18 +215,18 @@ pub fn step(def: &ShipDef, state: &mut ShipState, accel: Option<DVec3>, outside:
     let life = def.life_support.iter().find(|l| l.part == part);
     let volume = life.map_or(9.3, |l| l.item.cabin_volume);
     let working = life.filter(|l| {
-        let out = |list: &[crate::systems::runtime::Lost]| list.iter().any(|x| x.owner == l.id);
-        !out(&state.runtime.lost) && !out(&state.runtime.unpowered)
+        let out = |list: &[crate::craft::state::Lost]| list.iter().any(|x| x.owner == l.id);
+        !out(&state.lost) && !out(&state.unpowered)
     });
     let was_fresh = cabin.co2 < 1_000.0;
     let c = state.cabin.as_mut().expect("checked");
     air(c, volume, crew, working.map(|l| &l.item), outside, dt);
     if was_fresh && c.co2 >= 1_000.0 {
         let text = format!("cabin CO₂ at {:.1} kPa: the life support is not removing it", c.co2 / 1e3);
-        state.runtime.event(at, text, true);
+        state.event(at, text, true);
     }
     let Some(a) = accel.filter(|_| crew > 0) else { return };
-    let run = &mut state.runtime.crew;
+    let run = &mut state.crew;
     run.held.resize(AXES.len(), Vec::new());
     let now = crew_axes(a);
     let mut hurt = Vec::new();
@@ -246,8 +246,8 @@ pub fn step(def: &ShipDef, state: &mut ShipState, accel: Option<DVec3>, outside:
             i.seconds,
             i.limit / 9.80665
         );
-        state.runtime.event(at, text, true);
-        state.runtime.crew.injuries.push(i);
+        state.event(at, text, true);
+        state.crew.injuries.push(i);
     }
 }
 
@@ -332,20 +332,20 @@ mod tests {
                 let a = thrust / (m0 - mdot * dt * f64::from(k));
                 let side = 0.3 * crate::math::sin(0.01 * f64::from(k));
                 step(&def, &mut s, Some(DVec3::new(side, 0.0, a)), 293.0, dt, t0.add_seconds(t));
-                most = s.runtime.crew.held.iter().map(Vec::len).fold(most, usize::max);
+                most = s.crew.held.iter().map(Vec::len).fold(most, usize::max);
                 t += dt;
             }
         }
         println!("ascent: at most {most} windows on an axis");
-        assert!(s.runtime.crew.injuries.is_empty(), "{:?}", s.runtime.crew.injuries);
+        assert!(s.crew.injuries.is_empty(), "{:?}", s.crew.injuries);
         assert!(most < 50, "{most} windows");
         for k in 0..12_000 {
             let a = (f64::from(k) * dt + 20.0).min(100.0);
             step(&def, &mut s, Some(DVec3::Z * a), 293.0, dt, t0.add_seconds(t));
-            most = s.runtime.crew.held.iter().map(Vec::len).fold(most, usize::max);
+            most = s.crew.held.iter().map(Vec::len).fold(most, usize::max);
             t += dt;
         }
-        assert!(!s.runtime.crew.injuries.is_empty());
+        assert!(!s.crew.injuries.is_empty());
         assert!(most < 50, "{most} windows");
     }
 
@@ -396,18 +396,18 @@ mod tests {
         for k in 0..500 {
             step(&def, &mut s, Some(DVec3::Z * 14.7), 293.0, 0.02, t0.add_seconds(0.02 * f64::from(k)));
         }
-        assert!(s.runtime.crew.injuries.is_empty());
+        assert!(s.crew.injuries.is_empty());
         // 9 g held (88 m/s² "eyeballs in": the limit over 30 s is ~120, over 300 s 73.5).
         for k in 0..20_000 {
             step(&def, &mut s, Some(DVec3::Z * 88.0), 293.0, 0.02, t0.add_seconds(10.0 + 0.02 * f64::from(k)));
-            if !s.runtime.crew.injuries.is_empty() {
+            if !s.crew.injuries.is_empty() {
                 break;
             }
         }
-        let i = &s.runtime.crew.injuries[0];
+        let i = &s.crew.injuries[0];
         println!("{i:?}");
         assert_eq!(i.axis, "+Ax");
         assert!(i.seconds > 30.0 && i.seconds < 300.0 && (i.limit - 88.0).abs() < 1.0, "{i:?}");
-        assert!(s.runtime.events.iter().any(|e| e.alarm && e.text.starts_with("crew: +Ax")));
+        assert!(s.events.iter().any(|e| e.alarm && e.text.starts_with("crew: +Ax")));
     }
 }

@@ -62,7 +62,7 @@ pub fn g_limit(def: &ShipDef, state: &ShipState, a: glam::DVec3) -> Option<GLimi
         .filter(|&(j, _)| j < def.joints.len() && intact(j))
         .filter_map(|(j, run)| run.to_ultimate.map(|k| (k * mag, Limiter::Joint(j))));
     let crewed = crew::crew_of(def) > 0 && state.cabin.is_some();
-    let crew = crewed.then(|| crew::limit_along(a, &state.runtime.crew.held)).flatten();
+    let crew = crewed.then(|| crew::limit_along(a, &state.crew.held)).flatten();
     joints
         .chain(crew.map(|(l, k)| (l, Limiter::Crew(k))))
         .min_by(|x, y| x.0.total_cmp(&y.0))

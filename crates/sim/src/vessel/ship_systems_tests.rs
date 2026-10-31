@@ -55,7 +55,7 @@ fn the_clamps_release_only_when_all_nine_run_at_rated_thrust() {
     v.advance(&w, ignition.add_seconds(1.0), &full(), usize::MAX);
     assert!(v.clamped() && matches!(v.phase, Phase::Landed { .. }));
     assert!(statuses(&v)[1..10].iter().all(|s| *s == EngineStatus::Starting), "the Merlins: {:?}", statuses(&v));
-    assert!(v.ship().unwrap().runtime.release_armed);
+    assert!(v.ship().unwrap().release_armed);
     // Half way: the clamps hold the stage down against less than its
     // weight: no load yet pulls on them (they push up, the vehicle rests).
     let hold = |v: &Vessel| {
@@ -101,7 +101,7 @@ fn a_pad_abort_and_a_manual_release() {
     assert!(v.clamped(), "held");
     let abort = v.ship_events().iter().find(|e| e.text.starts_with("Pad abort")).expect("an abort");
     assert!(abort.alarm && abort.text.contains("s1.merlin.3"), "{}", abort.text);
-    assert!(!v.ship().unwrap().runtime.release_armed);
+    assert!(!v.ship().unwrap().release_armed);
     assert!(statuses(&v)
         .iter()
         .all(|s| matches!(s, EngineStatus::ShuttingDown | EngineStatus::Off | EngineStatus::Failed)));
@@ -210,7 +210,7 @@ fn falcon9_ascent_profile() {
             100.0 * left / s1_load,
             s1_load - left,
             worst,
-            s.runtime.accel.length()
+            s.accel.length()
         );
         if v.plan_breakup().is_some() {
             println!("broke up: {:?}", v.ship_events().iter().rev().take(3).collect::<Vec<_>>());
@@ -324,8 +324,7 @@ fn falcon9_gravity_turn_profile() {
         let st = v.ship().unwrap();
         let worst = st.joints.iter().map(|j| j.ratio).fold(0.0, f64::max);
         worst_all = worst_all.max(worst);
-        let gimbal =
-            st.runtime.thrust_dir.map_or(0.0, |d| crate::math::acos(d.normalize().z.clamp(-1.0, 1.0)).to_degrees());
+        let gimbal = st.thrust_dir.map_or(0.0, |d| crate::math::acos(d.normalize().z.clamp(-1.0, 1.0)).to_degrees());
         let alt = crate::forces::altitude_above(&w, &w.snapshot(v.time), anchor, anchor, r).0;
         println!(
             "T+{s:>5.1} alt {alt:>6.0} m surf {:>6.1} m/s pitch {pitch:>5.1}° α {alpha:>5.2}° gimbal {gimbal:>4.2}° ω {:.4} worst joint {worst:.2}",
@@ -405,7 +404,7 @@ fn booster_grid_fin_descent_profile() {
             let surf = vel - rot.omega(v.time).raw().cross(r);
             let off = crate::math::acos((-v.attitude.nose()).dot(surf.normalize()).clamp(-1.0, 1.0)).to_degrees();
             let alt = crate::forces::altitude_above(&w, &w.snapshot(v.time), anchor, anchor, r).0;
-            let fins = v.ship().unwrap().runtime.fins.iter().map(|d| d.to_degrees()).collect::<Vec<_>>();
+            let fins = v.ship().unwrap().fins.iter().map(|d| d.to_degrees()).collect::<Vec<_>>();
             if k % 3 == 0 {
                 println!(
                     "fins {deploy} T+{k} alt {alt:.0} speed {:.0} off-retrograde {off:.2}° ω {:.4} fins {fins:.1?}",
@@ -471,7 +470,7 @@ fn the_booster_lands_on_one_engine() {
             break;
         }
     }
-    let t0b = v.ship().unwrap().runtime.launch.unwrap();
+    let t0b = v.ship().unwrap().launch.unwrap();
     let events: Vec<String> =
         v.ship_events().iter().map(|e| format!("{:.2} {}", e.at.seconds_since(t0b), e.text)).collect();
     println!(
@@ -674,7 +673,7 @@ fn a_tick_begun_changes_no_ship_state_until_it_commits() {
         }
     }
     assert!(matches!(v.phase, Phase::Powered { .. }));
-    assert!(v.ship().unwrap().runtime.fins.iter().any(|d| *d != 0.0), "the fins steer");
+    assert!(v.ship().unwrap().fins.iter().any(|d| *d != 0.0), "the fins steer");
     let (before, mut alone) = (v.ship.clone(), v.clone());
     let design = v.craft.design().clone();
     let until = v.time.add_seconds(TICK);

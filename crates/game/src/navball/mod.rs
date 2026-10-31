@@ -202,7 +202,7 @@ pub fn proper_accel(world: &World, t: Epoch, vessel: &Vessel) -> DVec3 {
                 .map_or(DVec3::ZERO, |p| p.rotation.omega(t).raw());
             omega.cross(omega.cross(r)) - gravity
         }
-        Phase::Powered { .. } => vessel.ship().map_or(DVec3::ZERO, |s| vessel.attitude.q * s.runtime.accel),
+        Phase::Powered { .. } => vessel.ship().map_or(DVec3::ZERO, |s| vessel.attitude.q * s.accel),
         Phase::Coasting { .. } => ctx(Some(vessel.drag()), DVec3::ZERO).accel_with(&snap, r, v) - gravity,
     }
 }

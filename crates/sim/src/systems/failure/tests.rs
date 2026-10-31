@@ -44,7 +44,7 @@ fn fate(state: &ShipState, owner: &str, mode: &str) -> usize {
 
 fn launched(def: &ShipDef) -> ShipState {
     let mut s = ShipState::initial(def);
-    s.runtime.launch = Some(t0());
+    s.launch = Some(t0());
     draw_fates(def, &mut s, 0, t0());
     s
 }
@@ -73,7 +73,7 @@ fn fates_are_drawn_once_from_the_launch() {
 }
 
 /// The save's seed redraws the thresholds (the same seed the same bits),
-/// keeps the hazards, and stays in the runtime for a split's pieces.
+/// keeps the hazards, and stays in the ship state for a split's pieces.
 #[test]
 fn a_seed_redraws_the_fates() {
     let def = falcon9();
@@ -83,13 +83,13 @@ fn a_seed_redraws_the_fates() {
     reseed(&mut a, 42);
     reseed(&mut b, 42);
     assert_eq!(a, b);
-    assert_eq!((a.runtime.seed, a.fates[0].hazard), (42, 0.25));
+    assert_eq!((a.seed, a.fates[0].hazard), (42, 0.25));
     let mut fresh = ShipState::initial(&def);
     draw_fates(&def, &mut fresh, 42, t0());
     assert!(a.fates.iter().zip(&fresh.fates).all(|(x, y)| x.threshold == y.threshold));
     assert!(a.fates.iter().zip(&launched(&def).fates).all(|(x, y)| x.threshold != y.threshold));
     let kept: Vec<u32> = def.parts.iter().filter(|p| p.id.starts_with("s1.")).map(|p| p.part).collect();
-    assert_eq!(a.partition(&kept, &def, &def.subset(&kept), true).runtime.seed, 42);
+    assert_eq!(a.partition(&kept, &def, &def.subset(&kept), true).seed, 42);
 }
 
 /// The same running from the same launch: the same hazards to the bit; a
@@ -128,7 +128,7 @@ fn each_outcome() {
     s.fates[k].threshold = 1e-12;
     assert!(step(&def, &mut s, &env(0.02, false)).is_empty());
     assert_eq!(s.engines[e3].status, EngineStatus::Failed);
-    assert!(s.runtime.events.iter().any(|e| e.alarm && e.text.contains("in-flight shutdown")));
+    assert!(s.events.iter().any(|e| e.alarm && e.text.contains("in-flight shutdown")));
     // An ignition: the start counted, the fate reached: aborted.
     let e5 = engine(&def, "s1.merlin.5");
     s.engines[e5].status = EngineStatus::Starting;
@@ -158,7 +158,7 @@ fn each_outcome() {
     s.fates[k].threshold = 1e-12;
     s.mechanisms[m].target = def.mechanisms[m].item.deployed_deg;
     step(&def, &mut s, &env(0.02, false));
-    assert!(s.runtime.lost.iter().any(|l| l.owner == "s1.gridfin#2"));
+    assert!(s.lost.iter().any(|l| l.owner == "s1.gridfin#2"));
     assert_eq!(s.mechanisms[m].target, s.mechanisms[m].angle, "frozen");
     // The others' fates are untouched.
     assert!(s.fates.iter().filter(|f| f.hazard >= f.threshold).count() == 4);
@@ -228,6 +228,6 @@ fn a_bottle_burst_cascades_into_its_tank() {
     assert_eq!(s.bottles[b].moles, 0.0);
     let others = def.bottles.iter().enumerate().filter(|(i, x)| *i != b && x.id.starts_with("s2.helium"));
     assert!(others.clone().count() == 2 && others.into_iter().all(|(i, _)| s.bottles[i].moles > 0.0));
-    let texts: Vec<&str> = s.runtime.events.iter().map(|e| e.text.as_str()).collect();
+    let texts: Vec<&str> = s.events.iter().map(|e| e.text.as_str()).collect();
     assert!(texts.iter().any(|t| t.contains("s2.helium#1: burst")), "{texts:?}");
 }

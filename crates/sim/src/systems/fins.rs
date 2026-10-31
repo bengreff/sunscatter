@@ -124,14 +124,14 @@ pub fn forces(fins: &[Fin], flow: &FinFlow, com: DVec3, deflections: &[f64]) -> 
 
 /// The deflections the ship's fins hold now (aligned with `fins`).
 pub fn held(state: &ShipState, fins: &[Fin]) -> Vec<f64> {
-    fins.iter().map(|f| state.runtime.fins.get(f.surface).copied().unwrap_or(0.0)).collect()
+    fins.iter().map(|f| state.fins.get(f.surface).copied().unwrap_or(0.0)).collect()
 }
 
 /// Stores the fins' deflections.
 pub fn hold(def: &ShipDef, state: &mut ShipState, fins: &[Fin], deflections: &[f64]) {
-    state.runtime.fins.resize(def.surfaces.len(), 0.0);
+    state.fins.resize(def.surfaces.len(), 0.0);
     for (f, &d) in fins.iter().zip(deflections) {
-        state.runtime.fins[f.surface] = d;
+        state.fins[f.surface] = d;
     }
 }
 

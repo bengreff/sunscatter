@@ -306,8 +306,8 @@ fn health(x: &Inputs) -> Vec<Group> {
         let text = format!("integrity {:.0} % · damage {:.2} / 1", f.integrity * 100.0, f.damage);
         g.row(&f.name, text).level(limit_level(worn(f), Some(1.0))).opens(Selection::Part(f.id));
     }
-    let mut lost = Group::new(format!("LOST · {}", x.state.runtime.lost.len()));
-    for l in &x.state.runtime.lost {
+    let mut lost = Group::new(format!("LOST · {}", x.state.lost.len()));
+    for l in &x.state.lost {
         lost.row(&l.owner, format!("{} ({})", l.why, name(x.def, l.part))).level(Level::Over);
     }
     vec![g, lost]

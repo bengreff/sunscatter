@@ -253,7 +253,7 @@ mod tests {
         let unpowered = |d: &ShipDef, s: &mut ShipState| {
             for i in superdracos(d) {
                 let (part, owner) = (d.engines[i].part, d.engines[i].owner.clone());
-                s.runtime.unpowered.push(crate::systems::runtime::Lost { part, owner, why: "bus dead".into() });
+                s.unpowered.push(crate::craft::state::Lost { part, owner, why: "bus dead".into() });
             }
         };
         let separated = |d: &ShipDef, s: &mut ShipState| {

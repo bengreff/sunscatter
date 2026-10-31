@@ -158,7 +158,7 @@ const CABIN_K: f64 = 293.15;
 /// (each to its maximum power, losing I²R in its resistance and warming).
 /// A bus short of power sheds its loads, the non-essential first, then the
 /// largest; a shed or lost-power load's function stops
-/// (`Runtime::unpowered`) until power returns. Surplus charges the
+/// (`ShipState::unpowered`) until power returns. Surplus charges the
 /// batteries. Events tell the player when a load loses or regains power.
 pub fn step_ship(def: &ShipDef, state: &mut ShipState, sun: DVec3, dt: f64, at: Epoch) {
     let solar = solar_output(def, sun);
@@ -167,7 +167,7 @@ pub fn step_ship(def: &ShipDef, state: &mut ShipState, sun: DVec3, dt: f64, at: 
     let mut unpowered: Vec<(u32, String)> = Vec::new();
     for bus in &def.buses {
         let on = |id: &str| bus.members.iter().any(|m| m.0 == id);
-        let lost = |id: &str| state.runtime.lost.iter().any(|l| l.owner == id);
+        let lost = |id: &str| state.lost.iter().any(|l| l.owner == id);
         let mut loads: Vec<(usize, f64, bool)> = (def.components.iter().enumerate())
             .filter(|(c, d)| on(&d.id) && d.power > 0.0 && state.power[*c].on && !lost(&d.id))
             .map(|(c, d)| (c, d.power, essential(def, &d.id)))
@@ -243,20 +243,20 @@ pub fn step_ship(def: &ShipDef, state: &mut ShipState, sun: DVec3, dt: f64, at: 
         buses.push(BusRun { name: bus.name.clone(), volts, load, solar: sun_w, ground: false });
     }
     // Tell the player what lost or regained power.
-    let before: Vec<String> = state.runtime.unpowered.iter().map(|u| u.owner.clone()).collect();
+    let before: Vec<String> = state.unpowered.iter().map(|u| u.owner.clone()).collect();
     for (part, id) in &unpowered {
         if !before.contains(id) {
-            state.runtime.event(at, format!("{id}: no power (its bus is short; shed)"), true);
+            state.event(at, format!("{id}: no power (its bus is short; shed)"), true);
         }
         let _ = part;
     }
     for id in before.iter().filter(|id| !unpowered.iter().any(|u| &u.1 == *id)) {
-        state.runtime.event(at, format!("{id}: powered again"), false);
+        state.event(at, format!("{id}: powered again"), false);
     }
-    state.runtime.unpowered = (unpowered.into_iter())
-        .map(|(part, owner)| crate::systems::runtime::Lost { part, owner, why: "no power".into() })
+    state.unpowered = (unpowered.into_iter())
+        .map(|(part, owner)| crate::craft::state::Lost { part, owner, why: "no power".into() })
         .collect();
-    state.runtime.buses = buses;
+    state.buses = buses;
 }
 
 #[cfg(test)]
@@ -314,7 +314,7 @@ mod tests {
         }
 
         fn bus<'a>(s: &'a ShipState, name: &str) -> &'a BusRun {
-            s.runtime.buses.iter().find(|b| b.name == name).unwrap()
+            s.buses.iter().find(|b| b.name == name).unwrap()
         }
 
         fn load_of(def: &ShipDef, name: &str) -> f64 {
@@ -336,7 +336,7 @@ mod tests {
             let s1 = bus(&s, "s1.bus");
             assert!(s1.ground && s1.volts == 28.0 && (s1.load - load_of(&def, "s1.bus")).abs() < 1e-9);
             assert!(s.batteries[b].charge > 0.5 * def.batteries[b].item.capacity);
-            assert!(s.runtime.unpowered.is_empty());
+            assert!(s.unpowered.is_empty());
             // Released: an hour on the first stage's two batteries.
             s.clamped = false;
             let cells: Vec<usize> =
@@ -354,7 +354,7 @@ mod tests {
             assert!(used > load * 3600.0 && used < load * 3600.0 * 1.01, "{used} for {load} W");
             let v = bus(&s, "s1.bus").volts;
             assert!(v > 0.8 * 28.0 && v < 1.1 * 28.0, "{v}");
-            assert!(s.runtime.unpowered.is_empty());
+            assert!(s.unpowered.is_empty());
         }
 
         /// Dragon's trunk cells with the Sun square on them give their 3.6 kW
@@ -402,7 +402,7 @@ mod tests {
                 }
             }
             step_ship(&def, &mut s, DVec3::ZERO, 60.0, t0());
-            let shed = |s: &ShipState, id: &str| s.runtime.unpowered.iter().any(|u| u.owner == id);
+            let shed = |s: &ShipState, id: &str| s.unpowered.iter().any(|u| u.owner == id);
             assert!(shed(&s, "dragon.eclss") && shed(&s, "dragon.computer") && shed(&s, "dragon.docking"));
             assert!(!shed(&s, "s1.computer"), "the first stage's own batteries");
             assert_eq!(bus(&s, "dragon.bus").load, 0.0, "nothing powered");
@@ -412,7 +412,7 @@ mod tests {
             step_ship(&def, &mut s, DVec3::new(-flux, 0.0, 0.0), 60.0, t0().add_seconds(60.0));
             assert!(shed(&s, "dragon.docking"));
             assert!(!shed(&s, "dragon.eclss") && !shed(&s, "dragon.computer"));
-            assert!(s.runtime.events.iter().any(|e| e.text.starts_with("dragon.eclss: powered again")));
+            assert!(s.events.iter().any(|e| e.text.starts_with("dragon.eclss: powered again")));
         }
     }
 }

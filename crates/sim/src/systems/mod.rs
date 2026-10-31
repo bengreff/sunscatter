@@ -35,13 +35,12 @@ pub mod plumbing;
 pub mod power;
 pub mod propulsion;
 pub mod rcs;
-pub mod runtime;
 pub mod ship;
 pub mod structure;
 
+pub use crate::craft::state::{Event, Order, OrderKind};
 pub use data::{Knowledge, Quantity, Reading};
 pub use power::{Power, PowerSpec};
-pub use runtime::{Event, Order, OrderKind, Runtime};
 
 use crate::time::Epoch;
 use glam::{DQuat, DVec3};

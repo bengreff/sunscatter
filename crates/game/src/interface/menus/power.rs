@@ -50,12 +50,11 @@ pub fn gather(v: &Vessel) -> Option<PowerData> {
             known: knowledge.knows(Quantity::BatteryCharge(j as u32)),
         })
         .collect();
-    let run = &state.runtime;
     Some(PowerData {
-        buses: run.buses.clone(),
+        buses: state.buses.clone(),
         bus_names: def.buses.iter().map(|b| b.name.clone()).collect(),
         batteries,
-        unpowered: run.unpowered.iter().map(|l| (l.owner.clone(), l.why.clone())).collect(),
+        unpowered: state.unpowered.iter().map(|l| (l.owner.clone(), l.why.clone())).collect(),
     })
 }
 

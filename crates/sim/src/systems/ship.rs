@@ -57,16 +57,15 @@ pub fn tick(def: &ShipDef, state: &mut ShipState, env: &TickEnv, draws: &[f64], 
         }
     }
     super::mechanisms::step(def, state, env.dt);
-    let r = &mut state.runtime;
-    (r.accel, r.omega, r.alpha) = (env.accel, env.omega, env.alpha);
+    (state.accel, state.omega, state.alpha) = (env.accel, env.omega, env.alpha);
     let a = plumbing::accels(def, state, env.com, env.accel, env.omega, env.alpha);
     plumbing::fast(def, state, &before, &a, env.dt);
     // The slow part covers the time since it last stepped (the lattice's,
     // before the vessel went live), else the tick.
     let end = env.at.add_seconds(env.dt);
-    let since = state.runtime.stepped.map_or(env.dt, |s| end.seconds_since(s).max(0.0));
+    let since = state.stepped.map_or(env.dt, |s| end.seconds_since(s).max(0.0));
     plumbing::slow(def, state, &plumbing::Surroundings { sun: env.sun, air_k: env.air_k }, since);
-    state.runtime.stepped = Some(end);
+    state.stepped = Some(end);
     let feeds = plumbing::feeds(def, state, &a);
     let penv = propulsion::Env { at: env.at, dt: env.dt, throttle: env.throttle, debug: env.debug };
     let mut effects = propulsion::step(def, state, &penv, &feeds);
@@ -120,7 +119,7 @@ pub fn draw_block(def: &ShipDef, state: &mut ShipState, i: usize, kg: f64) {
 /// Whether thruster block `i` can fire: its function in (not lost, with
 /// power) and its feed holding anything.
 pub fn block_ready(def: &ShipDef, state: &ShipState, i: usize) -> bool {
-    !state.runtime.out(&def.thrusters[i].id) && block_fed(&def.thrusters[i].feed, state)
+    !state.out(&def.thrusters[i].id) && block_fed(&def.thrusters[i].feed, state)
 }
 
 /// Whether a thruster block's feed holds anything.
@@ -137,7 +136,7 @@ pub fn block_fed(feed: &Feed, state: &ShipState) -> bool {
 /// Whether the systems need live ticks now: an engine starting, running or
 /// in its tail-off, a mechanism moving, the clamps' release armed.
 pub fn busy(state: &ShipState) -> bool {
-    propulsion::active(state) || super::mechanisms::moving(state) || state.runtime.release_armed
+    propulsion::active(state) || super::mechanisms::moving(state) || state.release_armed
 }
 
 /// The ship's slow systems on the lattice (coasting or standing): the
@@ -146,9 +145,9 @@ pub fn busy(state: &ShipState) -> bool {
 /// they last stepped to `at`, under the proper acceleration `accel` (body
 /// axes). Returns the mass vented overboard (kg).
 pub fn lattice(def: &ShipDef, state: &mut ShipState, at: Epoch, env: &plumbing::Surroundings, accel: DVec3) -> f64 {
-    let dt = state.runtime.stepped.map_or(0.0, |s| at.seconds_since(s));
-    if state.runtime.stepped.is_none() || dt > 0.0 {
-        state.runtime.stepped = Some(at);
+    let dt = state.stepped.map_or(0.0, |s| at.seconds_since(s));
+    if state.stepped.is_none() || dt > 0.0 {
+        state.stepped = Some(at);
     }
     if dt <= 0.0 {
         return 0.0;
@@ -173,13 +172,13 @@ pub fn coast_lattice(
     env: &plumbing::Surroundings,
     (law, t): (&super::coast_law::CoastLaw, f64),
 ) {
-    let dt = state.runtime.stepped.map_or(0.0, |s| at.seconds_since(s));
-    if state.runtime.stepped.is_none() || dt > 0.0 {
-        state.runtime.stepped = Some(at);
+    let dt = state.stepped.map_or(0.0, |s| at.seconds_since(s));
+    if state.stepped.is_none() || dt > 0.0 {
+        state.stepped = Some(at);
     }
     law.apply(def, state, t);
     // The regulator holds the ullages at span starts (the law's top-up).
-    state.runtime.pressure_regulated = true;
+    state.pressure_regulated = true;
     if dt <= 0.0 {
         return;
     }

@@ -77,7 +77,7 @@ impl Vessel {
     }
 
     /// The parts with the engines' thrust `out` along `dir` (body axes; the
-    /// runtime's realised direction if `None`) and the ambient pressure.
+    /// ship state's realised direction if `None`) and the ambient pressure.
     fn gather(&self, out: &ShipThrust, dir: Option<DVec3>, ambient: f64) -> Gathered {
         let design = self.craft.design();
         let ids: Vec<u32> = design.parts.iter().map(|p| p.id).collect();
@@ -87,7 +87,7 @@ impl Vessel {
         let mut pushes = Vec::new();
         if let Some((def, state)) = self.ship_parts() {
             let index = |id: u32| ids.iter().position(|&x| x == id);
-            pushes = structure::engine_pushes(def, &out.per_engine, dir.or(state.runtime.thrust_dir), index);
+            pushes = structure::engine_pushes(def, &out.per_engine, dir.or(state.thrust_dir), index);
         }
         Gathered {
             parents: design.parts.iter().map(|p| p.parent).collect(),

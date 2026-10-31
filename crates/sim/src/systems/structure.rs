@@ -482,7 +482,7 @@ pub fn part_masses(def: &ShipDef, state: &ShipState, b: &Bodies) -> Vec<MassProp
 /// the head of its liquid above the cut under `accel` (body axes, proper),
 /// less `ambient`; zero if none does (an unpressurised skirt or interstage).
 /// Until the plumbing has regulated the pressures (it sets
-/// `Runtime::pressure_regulated`) the ullage holds at least its loading
+/// `ShipState::pressure_regulated`) the ullage holds at least its loading
 /// (flight) pressure.
 pub fn section_gauge(def: &ShipDef, state: &ShipState, j: &JointDef, accel: DVec3, ambient: f64) -> f64 {
     gauge_at(&gauge_terms(def, state, j, accel, ambient), 1.0)
@@ -508,7 +508,7 @@ pub fn gauge_terms(def: &ShipDef, state: &ShipState, j: &JointDef, accel: DVec3,
         // Unregulated (no plumbing step yet): at least the flight pressure
         // the tank is loaded at and its regulator holds.
         let ullage = plumbing::pressure(t, s);
-        let ullage = if state.runtime.pressure_regulated { ullage } else { ullage.max(t.load.pressure) };
+        let ullage = if state.pressure_regulated { ullage } else { ullage.max(t.load.pressure) };
         terms.push((ullage - ambient, head));
     }
     terms
@@ -586,7 +586,7 @@ pub fn consistent(total: &MassProps, pushes: &[Push], omega: DVec3) -> Motion {
 
 /// One tick of the joints (see the module), the motion the forces give
 /// ([`consistent`]; `m` gives the angular velocity): each intact joint's force, moment and ratio
-/// into the ship state's runtime (the pad's hold-down excepted: the held
+/// into the ship state (the pad's hold-down excepted: the held
 /// ticks fill it); each part's peak ratio into its history; a joint at or
 /// over its ultimate load snaps (not in debug mode), logged, and returned
 /// as the effect the vessel acts on.
@@ -637,7 +637,7 @@ pub fn step(def: &ShipDef, state: &mut ShipState, b: &Bodies, m: &Motion, at: Ep
             state.joints[j].intact = false;
             let kn = force.length() / 1e3;
             let what = if sec.compression >= sec.tension { "buckled" } else { "snapped" };
-            state.runtime.event(
+            state.event(
                 at,
                 format!("{}: {what} at {:.0} % of its ultimate load ({kn:.0} kN)", d.name, r * 100.0),
                 true,

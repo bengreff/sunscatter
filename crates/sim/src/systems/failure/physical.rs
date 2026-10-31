@@ -139,7 +139,7 @@ pub fn bursts(def: &ShipDef, state: &mut ShipState, ambient: f64, at: Epoch) -> 
     for (i, t) in def.tanks.iter().enumerate() {
         let p = tank_pressure(def, state, i);
         if t.burst > 0.0 && p >= t.burst && !destroyed.iter().any(|d| d.0 == t.part) {
-            state.runtime.event(at, format!("{}: burst at {:.1} bar", t.id, p / 1e5), true);
+            state.event(at, format!("{}: burst at {:.1} bar", t.id, p / 1e5), true);
             destroyed.push((t.part, PartFailure::Burst { pa: p }));
             let tnt = tank_tnt(def, state, i, ambient) + mixing_tnt(def, state, t.part);
             queue.push(Explosion { at: t.region.base + t.region.axis * 0.5, tnt });
@@ -148,7 +148,7 @@ pub fn bursts(def: &ShipDef, state: &mut ShipState, ambient: f64, at: Epoch) -> 
     for (i, d) in def.bottles.iter().enumerate() {
         let p = bottle_pressure(def, state, i);
         if d.burst > 0.0 && p >= d.burst {
-            state.runtime.event(at, format!("{}: burst at {:.0} bar", d.id, p / 1e5), true);
+            state.event(at, format!("{}: burst at {:.0} bar", d.id, p / 1e5), true);
             burst_bottles[i] = true;
             let gamma = fluids().gas(&d.gas).map_or(1.4, |g| g.gamma);
             queue.push(Explosion { at: d.pos, tnt: blast::tnt_of(blast::gas_energy(p, d.volume, gamma, ambient)) });
@@ -170,7 +170,7 @@ pub fn bursts(def: &ShipDef, state: &mut ShipState, ambient: f64, at: Epoch) -> 
             let r = to_cylinder(e.at, t.region.base, t.region.axis, t.region.radius);
             let p = blast::overpressure(r, e.tnt, medium);
             if p >= rating {
-                state.runtime.event(at, format!("{}: ruptured by a blast of {:.1} bar", t.id, p / 1e5), true);
+                state.event(at, format!("{}: ruptured by a blast of {:.1} bar", t.id, p / 1e5), true);
                 destroyed.push((t.part, PartFailure::Blast { pa: p }));
                 let tnt = tank_tnt(def, state, i, ambient) + mixing_tnt(def, state, t.part);
                 queue.push(Explosion { at: t.region.base + t.region.axis * 0.5, tnt });
@@ -187,7 +187,7 @@ pub fn bursts(def: &ShipDef, state: &mut ShipState, ambient: f64, at: Epoch) -> 
                 .fold(ambient, f64::max);
             let p = blast::overpressure((d.pos - e.at).length(), e.tnt, medium);
             if p >= d.burst {
-                state.runtime.event(at, format!("{}: ruptured by a blast", d.id), true);
+                state.event(at, format!("{}: ruptured by a blast", d.id), true);
                 burst_bottles[i] = true;
                 let gamma = fluids().gas(&d.gas).map_or(1.4, |g| g.gamma);
                 let q = bottle_pressure(def, state, i);

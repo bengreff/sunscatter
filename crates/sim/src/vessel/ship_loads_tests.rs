@@ -70,7 +70,7 @@ fn the_falcon_9_joints_on_the_pad_and_after_lift_off() {
     // Held at nearly full thrust: the tank on the octaweb carries the weight
     // above it (the clamps take thrust less weight).
     let (d, run) = joint(&v, "s1.tank|s1.octaweb");
-    let g = v.ship().unwrap().runtime.accel.length();
+    let g = v.ship().unwrap().accel.length();
     let weight = above(&v, d.child) * g;
     let along = run.force.dot(d.normal);
     println!("held: {:.0} kN on the octaweb's joint against {:.0} kN of weight above", along / 1e3, weight / 1e3);
@@ -88,7 +88,7 @@ fn the_falcon_9_joints_on_the_pad_and_after_lift_off() {
     v.advance(&w, end, &full(), usize::MAX);
     assert!(v.plan_breakup().is_none(), "nothing broke");
     assert!(v.ship_events().iter().all(|e| !e.text.contains("snapped") && !e.text.contains("buckled")));
-    let a = v.ship().unwrap().runtime.accel.length();
+    let a = v.ship().unwrap().accel.length();
     for name in
         ["dragon separation", "s2.ring|s2.tank", "stage separation", "s1.interstage|s1.tank", "s1.tank|s1.octaweb"]
     {

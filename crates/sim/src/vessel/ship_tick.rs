@@ -96,7 +96,7 @@ impl Vessel {
     pub(super) fn hold_effectors(&mut self, ship: Option<&ShipTick>, cmd: &super::attitude::Command, fins: &[f64]) {
         let def = self.ship_def();
         let Some(s) = self.ship.as_mut() else { return };
-        s.runtime.thrust_dir = Some(cmd.thrust_dir);
+        s.thrust_dir = Some(cmd.thrust_dir);
         if let (Some(t), Some(def)) = (ship, def) {
             if !fins.is_empty() {
                 crate::systems::fins::hold(&def, s, &t.fins, fins);
@@ -121,7 +121,7 @@ impl Vessel {
             Phase::Landed { .. } => !(self.clamped() && self.ship_needs_ticks()),
             Phase::Powered { .. } => false,
         };
-        let order = continuous.then(|| self.ship.as_ref()?.runtime.next_order()).flatten();
+        let order = continuous.then(|| self.ship.as_ref()?.next_order()).flatten();
         // A planned burn's program wakes at its epoch the same way.
         let wake = continuous.then(|| self.program_stop()).flatten();
         match (order, wake) {
@@ -134,14 +134,14 @@ impl Vessel {
     pub(super) fn apply_orders(&mut self, world: &World) {
         let at = self.time;
         let Some(state) = self.ship.as_ref() else { return };
-        if state.runtime.next_order().is_none_or(|e| e > at) {
+        if state.next_order().is_none_or(|e| e > at) {
             return;
         }
         let Some(def) = self.ship_def() else { return };
         self.law_to_now();
         let state = self.ship.as_mut().expect("checked");
         let mut effects = Vec::new();
-        for order in state.runtime.due(at) {
+        for order in state.due(at) {
             effects.extend(command::carry_out(&def, state, &order.kind, at));
         }
         self.after_command(world, &effects);
@@ -184,11 +184,7 @@ impl Vessel {
                 run.moment = DVec3::ZERO;
                 run.ratio = if capacity > 0.0 { on_vehicle.length() / capacity } else { 0.0 };
                 if run.ratio >= 1.0 && !debug && state.joints[j].intact {
-                    state.runtime.event(
-                        at,
-                        format!("{}: torn out at {:.1} MN", d.name, on_vehicle.length() / 1e6),
-                        true,
-                    );
+                    state.event(at, format!("{}: torn out at {:.1} MN", d.name, on_vehicle.length() / 1e6), true);
                     effects.extend(
                         state.apply(&def, &crate::craft::command::ShipCommand::ReleaseClamps).unwrap_or_default(),
                     );

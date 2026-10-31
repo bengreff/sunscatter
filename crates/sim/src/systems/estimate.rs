@@ -296,8 +296,8 @@ impl<'a> Walk<'a> {
             clamped: state.clamped,
             ..ShipState::default()
         };
-        s.runtime.lost = state.runtime.lost.clone();
-        s.runtime.unpowered = state.runtime.unpowered.clone();
+        s.lost = state.lost.clone();
+        s.unpowered = state.unpowered.clone();
         // Each burn of the walk settles its liquids on their outlets.
         for (t, &kg) in s.tanks.iter_mut().zip(levels) {
             (t.liquid, t.drift, t.drift_speed) = (kg, 0.0, 0.0);

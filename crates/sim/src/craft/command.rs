@@ -5,7 +5,7 @@
 //! file's ids: a part or component id, a pattern's copies with `#*`
 //! (`s1.merlin#*`), or an engine group's name; joints by their name.
 //!
-//! What a command does is the systems' (`sim::systems`, RUNTIME): this
+//! What a command does is the systems' (`sim::systems`): this
 //! module only defines the data and how a selector matches ids.
 
 use serde::{Deserialize, Serialize};

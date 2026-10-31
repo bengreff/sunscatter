@@ -19,11 +19,11 @@ pub fn travel(angle: f64, target: f64, rate: f64, dt: f64) -> f64 {
     }
 }
 
-/// Whether mechanism `i`'s actuator is lost (`Runtime::lost`: its pump,
+/// Whether mechanism `i`'s actuator is lost (`ShipState::lost`: its pump,
 /// its drive) or without power: it stays where it is.
 pub fn stuck(def: &ShipDef, state: &ShipState, i: usize) -> bool {
     let m = &def.mechanisms[i];
-    state.runtime.lost.iter().any(|l| l.part == m.part || l.owner == m.id) || state.runtime.out(&m.id)
+    state.lost.iter().any(|l| l.part == m.part || l.owner == m.id) || state.out(&m.id)
 }
 
 /// Moves every mechanism for `dt` seconds (a lost one stays).
@@ -83,12 +83,12 @@ mod tests {
         let mut state = ShipState::initial(&def);
         let fin = |id: &str| def.mechanisms.iter().position(|m| m.id == id).unwrap();
         let (two, three) = (fin("s1.gridfin#2"), fin("s1.gridfin#3"));
-        let lost = crate::systems::runtime::Lost {
+        let lost = crate::craft::state::Lost {
             part: def.mechanisms[two].part,
             owner: "s1.gridfin#2".into(),
             why: "pump".into(),
         };
-        state.runtime.lost.push(lost);
+        state.lost.push(lost);
         let at = crate::time::Epoch::new(1_000_000_000, 0.0);
         apply(&def, &mut state, &ShipCommand::Deploy("s1.gridfin#*".into()), Context { at, sequence: false }).unwrap();
         for _ in 0..150 {

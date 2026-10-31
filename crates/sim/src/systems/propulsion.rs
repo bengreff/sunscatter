@@ -167,11 +167,11 @@ fn settle_or_start(def: &ShipDef, state: &mut ShipState, env: &Env) {
             state.engines[i].settling = None;
         } else if feeds_settled(def, state, i) || env.debug {
             light(def, state, i);
-            state.runtime.event(env.at, format!("{}: settled after {waited:.1} s, starting", def.engines[i].id), false);
+            state.event(env.at, format!("{}: settled after {waited:.1} s, starting", def.engines[i].id), false);
         } else if waited + env.dt > SETTLE_LIMIT {
             state.engines[i].settling = None;
             let text = format!("{}: start abandoned, its propellant would not settle", def.engines[i].id);
-            state.runtime.event(env.at, text, true);
+            state.event(env.at, text, true);
         } else {
             state.engines[i].settling = Some(waited + env.dt);
         }
@@ -311,7 +311,7 @@ pub fn stop(def: &ShipDef, state: &mut ShipState, i: usize, why: Stop, at: Epoch
     run.level = 0.0;
     run.cutoff = 0.0;
     run.reason = Some(text.clone());
-    state.runtime.event(at, format!("{}: {text}", def.engines[i].id), alarm);
+    state.event(at, format!("{}: {text}", def.engines[i].id), alarm);
 }
 
 /// Advances every engine over a tick (`env`) with its tanks' conditions
@@ -343,7 +343,7 @@ fn safe(def: &ShipDef, state: &mut ShipState, at: Epoch) {
     }
     for i in flight::safing(&flight::health(def, state), &lit) {
         shut_down(state, i, "safed by its controller: no flight computer");
-        state.runtime.event(at, format!("{}: safed by its controller: no flight computer", def.engines[i].id), true);
+        state.event(at, format!("{}: safed by its controller: no flight computer", def.engines[i].id), true);
     }
 }
 
@@ -364,8 +364,8 @@ pub fn shut_down(state: &mut ShipState, i: usize, why: &str) {
 /// Closing the pilot's throttle (open at the last step, 0 now) shuts every
 /// lit engine down (D114); an engine lit with it closed runs at its minimum.
 fn close_throttle(def: &ShipDef, state: &mut ShipState, env: &Env) {
-    let closed = env.throttle <= 0.0 && state.runtime.throttle_was > 0.0;
-    state.runtime.throttle_was = env.throttle;
+    let closed = env.throttle <= 0.0 && state.throttle_was > 0.0;
+    state.throttle_was = env.throttle;
     if !closed {
         return;
     }
@@ -380,7 +380,7 @@ fn close_throttle(def: &ShipDef, state: &mut ShipState, env: &Env) {
     }
     if !lit.is_empty() {
         let text = format!("Throttle closed: {} engine{} shut down", lit.len(), if lit.len() == 1 { "" } else { "s" });
-        state.runtime.event(env.at, text, false);
+        state.event(env.at, text, false);
     }
 }
 
@@ -460,26 +460,26 @@ fn step_engine(def: &ShipDef, state: &mut ShipState, i: usize, env: &Env) {
 /// `text`: the release's stage is next again
 /// (`command::release_undone`). Nothing if it is not armed.
 pub fn disarm(state: &mut ShipState, at: Epoch, text: String, alarm: bool) {
-    if !state.runtime.release_armed {
+    if !state.release_armed {
         return;
     }
-    state.runtime.release_armed = false;
-    state.runtime.release_engines.clear();
+    state.release_armed = false;
+    state.release_engines.clear();
     state.sequence = super::command::release_undone(&state.stages, state.sequence);
-    state.runtime.event(at, text, alarm);
+    state.event(at, text, alarm);
 }
 
 /// The pad's armed release (see the module): it waits on the flight
 /// software's launch commit (`flight::commit`), which reads the engine
 /// controllers' readouts.
 fn release(def: &ShipDef, state: &mut ShipState, at: Epoch, debug: bool) -> Vec<Effect> {
-    if !state.runtime.release_armed || !state.clamped {
-        state.runtime.release_armed = false;
+    if !state.release_armed || !state.clamped {
+        state.release_armed = false;
         return Vec::new();
     }
-    if state.runtime.release_engines.is_empty() {
-        state.runtime.release_engines = lit(state);
-        if state.runtime.release_engines.is_empty() {
+    if state.release_engines.is_empty() {
+        state.release_engines = lit(state);
+        if state.release_engines.is_empty() {
             // None lit (one waiting for its propellant to settle is about
             // to): armed, it would hold the vessel in live ticks for ever.
             if !state.engines.iter().any(|r| r.settling.is_some()) {
@@ -488,7 +488,7 @@ fn release(def: &ShipDef, state: &mut ShipState, at: Epoch, debug: bool) -> Vec<
             return Vec::new();
         }
     }
-    let waits: Vec<usize> = state.runtime.release_engines.iter().map(|&i| i as usize).collect();
+    let waits: Vec<usize> = state.release_engines.iter().map(|&i| i as usize).collect();
     // The flight software's launch commit, on the controllers' readouts.
     let k = super::data::knowledge(def, state, debug);
     match flight::commit(def, &flight::engine_readings(def, state, &k), &waits) {
@@ -502,9 +502,9 @@ fn release(def: &ShipDef, state: &mut ShipState, at: Epoch, debug: bool) -> Vec<
         }
         flight::Commit::Release => {}
     }
-    state.runtime.release_armed = false;
-    state.runtime.release_engines.clear();
-    state.runtime.event(at, "Liftoff: the clamps released at full thrust", false);
+    state.release_armed = false;
+    state.release_engines.clear();
+    state.event(at, "Liftoff: the clamps released at full thrust", false);
     state.apply(def, &ShipCommand::ReleaseClamps).unwrap_or_default()
 }
 

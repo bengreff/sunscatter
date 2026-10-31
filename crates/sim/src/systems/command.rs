@@ -8,15 +8,15 @@
 //! pad's rule); a release commanded by hand lets go at once. Everything
 //! else is the ship state's plain effect (`ShipState::apply`).
 //!
-//! Commands are applied at a tick: orders wait in the runtime for their
-//! epoch ([`super::runtime::Runtime::order`]), so the same orders give the
+//! Commands are applied at a tick: orders wait in the ship state for their
+//! epoch ([`crate::craft::state::ShipState::order`]), so the same orders give the
 //! same flight whatever the frames.
 
-use super::runtime::OrderKind;
 use crate::catalog::Igniter;
 use crate::craft::command::{matches, SequenceEdit, ShipCommand, Stage};
 use crate::craft::program;
 use crate::craft::ship::ShipDef;
+use crate::craft::state::OrderKind;
 use crate::craft::state::{Effect, EngineStatus, ShipState};
 use crate::time::Epoch;
 
@@ -39,7 +39,7 @@ pub fn can_ignite(igniter: Igniter, ignitions: u32, ground: bool) -> bool {
 /// function in (not lost, with power), and if computers are linked to it,
 /// one of them working (`systems::flight::commanded`).
 pub fn reachable(def: &ShipDef, state: &ShipState, owner: &str) -> bool {
-    !state.runtime.out(owner) && super::flight::commanded(def, state, owner)
+    !state.out(owner) && super::flight::commanded(def, state, owner)
 }
 
 /// Applies `command` (see the module); the effects the vessel acts on are
@@ -59,12 +59,12 @@ pub fn apply(def: &ShipDef, state: &mut ShipState, command: &ShipCommand, cx: Co
                     continue;
                 }
                 if !reachable(def, state, &d.owner) {
-                    state.runtime.event(cx.at, format!("{}: no working controller or computer: no start", d.id), true);
+                    state.event(cx.at, format!("{}: no working controller or computer: no start", d.id), true);
                     continue;
                 }
                 let e = &mut state.engines[i];
                 if !can_ignite(d.data.igniter, e.ignitions, ground) {
-                    state.runtime.event(cx.at, format!("{}: no ignition left", d.id), true);
+                    state.event(cx.at, format!("{}: no ignition left", d.id), true);
                     continue;
                 }
                 e.selected = true;
@@ -80,7 +80,7 @@ pub fn apply(def: &ShipDef, state: &mut ShipState, command: &ShipCommand, cx: Co
                     // ([`next_stage`]).
                     let again = if cx.sequence { "stage" } else { "ignite" };
                     let text = format!("{}: {how} its propellant before the start ({again} again to start now)", d.id);
-                    state.runtime.event(cx.at, text, false);
+                    state.event(cx.at, text, false);
                     continue;
                 }
                 super::propulsion::light(def, state, i);
@@ -113,7 +113,7 @@ pub fn apply(def: &ShipDef, state: &mut ShipState, command: &ShipCommand, cx: Co
                     && matches!(command, ShipCommand::Deploy(_) | ShipCommand::Angle(..))
                 {
                     let text = format!("{}: cannot deploy while the clamps hold the vessel", def.mechanisms[i].id);
-                    state.runtime.event(cx.at, text, true);
+                    state.event(cx.at, text, true);
                     continue;
                 }
                 let before = state.mechanisms[i].target;
@@ -141,9 +141,9 @@ pub fn apply(def: &ShipDef, state: &mut ShipState, command: &ShipCommand, cx: Co
         // Released already (a stage run again, D114): nothing to do.
         ShipCommand::ReleaseClamps if !state.clamped => Ok(Vec::new()),
         ShipCommand::ReleaseClamps if cx.sequence => {
-            state.runtime.release_armed = true;
-            state.runtime.release_engines = super::propulsion::lit(state);
-            state.runtime.event(cx.at, "Clamps armed: release at full thrust", false);
+            state.release_armed = true;
+            state.release_engines = super::propulsion::lit(state);
+            state.event(cx.at, "Clamps armed: release at full thrust", false);
             Ok(Vec::new())
         }
         _ => state.apply(def, command),
@@ -264,34 +264,34 @@ pub fn carry_out(def: &ShipDef, state: &mut ShipState, kind: &OrderKind, at: Epo
         OrderKind::Command(c) => match apply(def, state, c, Context { at, sequence: false }) {
             Ok(e) => e,
             Err(e) => {
-                state.runtime.event(at, e, true);
+                state.event(at, e, true);
                 Vec::new()
             }
         },
         OrderKind::Stage => match next_stage(def, state, at) {
             Some((name, e)) => {
-                state.runtime.event(at, format!("Stage: {name}"), false);
+                state.event(at, format!("Stage: {name}"), false);
                 e
             }
             None => Vec::new(),
         },
         OrderKind::Again(k) => match again(def, state, *k, at) {
             Some((name, e)) => {
-                state.runtime.event(at, format!("Stage again: {name}"), false);
+                state.event(at, format!("Stage again: {name}"), false);
                 e
             }
             None => {
-                state.runtime.event(at, format!("Stage {} has not run yet on this vessel", k + 1), true);
+                state.event(at, format!("Stage {} has not run yet on this vessel", k + 1), true);
                 Vec::new()
             }
         },
         OrderKind::Function(name) => match function(def, state, name, at) {
             Some(e) => {
-                state.runtime.event(at, format!("Function: {name}"), false);
+                state.event(at, format!("Function: {name}"), false);
                 e
             }
             None => {
-                state.runtime.event(at, format!("No function {name:?}"), true);
+                state.event(at, format!("No function {name:?}"), true);
                 Vec::new()
             }
         },
@@ -301,7 +301,7 @@ pub fn carry_out(def: &ShipDef, state: &mut ShipState, kind: &OrderKind, at: Epo
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::systems::runtime::Lost;
+    use crate::craft::state::Lost;
 
     /// A release undone puts the sequence back to the last stage run that
     /// releases the clamps; without one, it stays.
@@ -337,11 +337,11 @@ mod tests {
         let mut state = ShipState::initial(&def);
         state.clamped = false;
         let part = def.computers.iter().find(|c| c.id == "s2.computer").unwrap().part;
-        state.runtime.unpowered.push(Lost { part, owner: "s2.computer".into(), why: "bus dead".into() });
+        state.unpowered.push(Lost { part, owner: "s2.computer".into(), why: "bus dead".into() });
         apply(&def, &mut state, &ShipCommand::Ignite("s2".into()), cx).unwrap();
         assert_eq!(state.engines[mvac].status, EngineStatus::Off);
-        assert!(state.runtime.events.last().unwrap().text.contains("no working controller"));
-        state.runtime.unpowered.clear();
+        assert!(state.events.last().unwrap().text.contains("no working controller"));
+        state.unpowered.clear();
         apply(&def, &mut state, &ShipCommand::Ignite("s2".into()), cx).unwrap();
         assert!(matches!(state.engines[mvac].status, EngineStatus::Starting) || state.engines[mvac].settling.is_some());
     }
@@ -517,10 +517,10 @@ mod tests {
             t.drift = 100.0;
         }
         let (name, _) = next_stage(&def, &mut state, at).unwrap();
-        println!("{name}: {:?}", state.runtime.events.last());
+        println!("{name}: {:?}", state.events.last());
         assert_eq!(state.engines[mvac].status, EngineStatus::Off);
         assert!(state.engines[mvac].settling.is_some());
-        assert!(state.runtime.events.iter().any(|e| e.text.contains("stage again to start now")));
+        assert!(state.events.iter().any(|e| e.text.contains("stage again to start now")));
         let (name, _) = next_stage(&def, &mut state, at).unwrap();
         assert!(name.ends_with("start now"), "{name}");
         assert_eq!(state.engines[mvac].status, EngineStatus::Starting);

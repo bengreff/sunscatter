@@ -14,8 +14,22 @@
 //!   its child's piece (the joint whose child part is this, as
 //!   `Effect::Separate` names it), held in `severed` until a merge joins
 //!   its parts again, with its load at the cut.
-//! * **The cabin** goes with its part; the crew's exposure with it
-//!   (`Runtime::partition`).
+//! * **The cabin** goes with its part; the crew's exposure with it (with
+//!   the vessel's piece when the craft has no cabin).
+//! * **By part**: the lost functions and unpowered loads, the aero
+//!   surfaces' deflections; the bus readouts of the buses the piece keeps
+//!   (a bus the split cuts is read in both until each piece's next power
+//!   step).
+//! * **With the clamps' piece**: the armed release and the engines it
+//!   waits for (a split disarms it first: `propulsion::disarm`).
+//! * **With the vessel's piece** (`own`): the orders (sent to the vessel)
+//!   and the pilot's last throttle (the others start closed, as their
+//!   controls do: `Controls::for_piece`).
+//! * The engines' thrust direction with a piece that has engines, the
+//!   regulated flag with a piece that has tanks.
+//! * **Copies in every piece**: the motion felt (one rigid body until
+//!   now), the fates' seed and launch, the slow systems' epoch, the event
+//!   log (the history they share).
 //! * **The vessel's own** (by name): the clamps to the piece keeping a
 //!   hold-down joint; the program (the stages, the functions and the
 //!   sequence's position) whole to every piece, a copy each: it is the
@@ -26,7 +40,7 @@
 use super::assembly::JointKind;
 use super::command::Stage;
 use super::ship::ShipDef;
-use super::state::{JointState, ShipState};
+use super::state::{Event, JointState, ShipState, EVENTS_KEPT};
 
 /// The items of `items` whose part (`part`) is kept, in order.
 pub(crate) fn by<T: Clone>(items: &[T], part: impl Fn(&T) -> u32, kept: &[u32]) -> Vec<T> {
@@ -80,8 +94,14 @@ impl ShipState {
         let ShipState {
             tanks,
             bottles,
+            pressure_regulated,
             engines,
+            release_armed,
+            release_engines,
+            throttle_was,
+            thrust_dir,
             thrusters,
+            fins,
             valves,
             batteries,
             mechanisms,
@@ -89,21 +109,44 @@ impl ShipState {
             severed,
             parts,
             power,
+            unpowered,
+            buses,
             cabin,
+            crew,
             fates,
+            lost,
+            seed,
+            launch,
             clamped,
             sequence,
             stages,
             functions,
-            runtime,
+            orders,
+            accel,
+            omega,
+            alpha,
+            stepped,
+            events,
         } = self;
+        let clamps = holds(piece);
+        let has_cabin = whole.seats.first().map_or(own, |s| kept.contains(&s.part));
         let within = |j: &JointState| kept.contains(&j.parent) && kept.contains(&j.child);
         let cut = |j: &JointState| !kept.contains(&j.parent) && kept.contains(&j.child);
         ShipState {
             tanks: by(tanks, |x| x.part, kept),
             bottles: by(bottles, |x| x.part, kept),
+            pressure_regulated: *pressure_regulated && !piece.tanks.is_empty(),
             engines: by(engines, |x| x.part, kept),
+            release_armed: *release_armed && clamps,
+            release_engines: if clamps {
+                renumber(release_engines, &whole.engines, &piece.engines)
+            } else {
+                Vec::new()
+            },
+            throttle_was: if own { *throttle_was } else { 0.0 },
+            thrust_dir: thrust_dir.filter(|_| !piece.engines.is_empty()),
             thrusters: by(thrusters, |x| x.part, kept),
+            fins: (fins.iter().zip(&whole.surfaces)).filter(|(_, s)| kept.contains(&s.part)).map(|(&d, _)| d).collect(),
             valves: by(valves, |x| x.part, kept),
             batteries: by(batteries, |x| x.part, kept),
             mechanisms: by(mechanisms, |x| x.part, kept),
@@ -114,14 +157,25 @@ impl ShipState {
                 .collect(),
             parts: by(parts, |x| x.part, kept),
             power: by(power, |x| x.part, kept),
+            unpowered: by(unpowered, |l| l.part, kept),
+            buses: buses.iter().filter(|r| piece.buses.iter().any(|b| b.name == r.name)).cloned().collect(),
             cabin: cabin.clone().filter(|c| kept.contains(&c.part)),
+            crew: if has_cabin { crew.clone() } else { Default::default() },
             fates: by(fates, |x| x.part, kept),
-            clamped: *clamped && holds(piece),
+            lost: by(lost, |l| l.part, kept),
+            seed: *seed,
+            launch: *launch,
+            clamped: *clamped && clamps,
             // The vessel's as a whole: a copy in every piece.
             sequence: *sequence,
             stages: stages.clone(),
             functions: functions.clone(),
-            runtime: runtime.partition(kept, whole, piece, own),
+            orders: if own { orders.clone() } else { Vec::new() },
+            accel: *accel,
+            omega: *omega,
+            alpha: *alpha,
+            stepped: *stepped,
+            events: events.clone(),
         }
     }
 
@@ -146,8 +200,14 @@ impl ShipState {
         let ShipState {
             tanks,
             bottles,
+            pressure_regulated,
             engines,
+            release_armed,
+            release_engines: _,
+            throttle_was,
+            thrust_dir,
             thrusters,
+            fins,
             valves,
             batteries,
             mechanisms,
@@ -155,13 +215,24 @@ impl ShipState {
             severed: _,
             parts,
             power,
+            unpowered,
+            buses,
             cabin,
+            crew,
             fates,
+            lost,
+            seed,
+            launch,
             clamped,
             sequence,
             stages,
             functions,
-            runtime,
+            orders,
+            accel,
+            omega,
+            alpha,
+            stepped,
+            events,
         } = a;
         let w = whole;
         let mut severed: Vec<JointState> = a.severed.iter().chain(&b.severed).cloned().collect();
@@ -190,11 +261,31 @@ impl ShipState {
         if cabin.is_some() && b.cabin.is_some() {
             return Err("both pieces have a cabin (one cabin per ship state)".into());
         }
+        // Each piece's surfaces' deflections, by id (none: never deflected).
+        let deflection = |s: &super::ship::Owned<crate::catalog::AeroSurface>| {
+            let (run, def) = if in_a(s.part) { (fins, a_def) } else { (&b.fins, b_def) };
+            def.surfaces.iter().position(|x| x.id == s.id).and_then(|i| run.get(i).copied()).unwrap_or(0.0)
+        };
+        let any_fins = !fins.is_empty() || !b.fins.is_empty();
+        // The events of both in epoch order (the history they share once).
+        let mut log: Vec<Event> = events.clone();
+        log.extend(b.events.iter().filter(|e| !events.contains(e)).cloned());
+        log.sort_by(|x, y| x.at.partial_cmp(&y.at).unwrap_or(std::cmp::Ordering::Equal));
+        let drop = log.len().saturating_sub(EVENTS_KEPT);
+        log.drain(..drop);
+        let waits = |r: &ShipState, d: &ShipDef| renumber(&r.release_engines, &d.engines, &whole.engines);
+        let b_has_cabin = !b_def.seats.is_empty() && a_def.seats.is_empty();
         Ok(ShipState {
             tanks: zip_merge(w.tanks.iter().map(|x| x.part), &in_a, tanks, &b.tanks, "tanks")?,
             bottles: zip_merge(w.bottles.iter().map(|x| x.part), &in_a, bottles, &b.bottles, "bottles")?,
+            pressure_regulated: *pressure_regulated || b.pressure_regulated,
             engines: zip_merge(w.engines.iter().map(|x| x.part), &in_a, engines, &b.engines, "engines")?,
+            release_armed: *release_armed || b.release_armed,
+            release_engines: if b.release_armed && !release_armed { waits(b, b_def) } else { waits(a, a_def) },
+            throttle_was: *throttle_was,
+            thrust_dir: thrust_dir.or(b.thrust_dir),
             thrusters: zip_merge(w.thrusters.iter().map(|x| x.part), &in_a, thrusters, &b.thrusters, "thrusters")?,
+            fins: if any_fins { w.surfaces.iter().map(deflection).collect() } else { Vec::new() },
             valves: zip_merge(w.valves.iter().map(|x| x.part), &in_a, valves, &b.valves, "valves")?,
             batteries: zip_merge(w.batteries.iter().map(|x| x.part), &in_a, batteries, &b.batteries, "batteries")?,
             mechanisms: zip_merge(w.mechanisms.iter().map(|x| x.part), &in_a, mechanisms, &b.mechanisms, "mechanisms")?,
@@ -202,13 +293,39 @@ impl ShipState {
             severed,
             parts: zip_merge(w.parts.iter().map(|x| x.part), &in_a, parts, &b.parts, "parts")?,
             power: zip_merge(w.components.iter().map(|x| x.part), &in_a, power, &b.power, "power")?,
+            unpowered: keyed(unpowered, &b.unpowered, |l| l.part),
+            buses: (w.buses.iter())
+                .filter_map(|x| buses.iter().chain(&b.buses).find(|r| r.name == x.name).cloned())
+                .collect(),
             cabin: cabin.clone().or_else(|| b.cabin.clone()),
+            crew: if b_has_cabin { b.crew.clone() } else { crew.clone() },
             fates: keyed(fates, &b.fates, |f| f.part),
+            lost: keyed(lost, &b.lost, |l| l.part),
+            seed: *seed,
+            launch: *launch,
             clamped: *clamped || b.clamped,
             sequence: *sequence,
             stages: union(stages, &b.stages),
             functions: union(functions, &b.functions),
-            runtime: crate::systems::Runtime::merge(runtime, a_def, &b.runtime, b_def, whole)?,
+            orders: orders.clone(),
+            accel: *accel,
+            omega: *omega,
+            alpha: *alpha,
+            stepped: *stepped,
+            events: log,
         })
     }
+}
+
+/// Indices into the engines `from` of the engines `list`, as indices into
+/// `to` (those `to` lacks dropped), by engine id.
+pub(crate) fn renumber(
+    list: &[u32],
+    from: &[crate::craft::ship::EngineDef],
+    to: &[crate::craft::ship::EngineDef],
+) -> Vec<u32> {
+    (list.iter())
+        .filter_map(|&i| from.get(i as usize))
+        .filter_map(|e| to.iter().position(|t| t.id == e.id).map(|k| k as u32))
+        .collect()
 }

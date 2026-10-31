@@ -209,9 +209,9 @@ pub fn arms_chutes(
 /// Whether Space finds no stage left in a craft of parts' sequence (`def`'s
 /// view, `sim::craft::program`): every stage run, or already ordered (an
 /// order waits for its tick, or for the signal's light delay, in
-/// `Runtime::orders`).
+/// `ShipState::orders`).
 pub fn no_stage_left(def: &sim::craft::ship::ShipDef, state: &sim::craft::state::ShipState) -> bool {
-    let ordered = state.runtime.orders.iter().filter(|o| matches!(o.kind, sim::systems::OrderKind::Stage)).count();
+    let ordered = state.orders.iter().filter(|o| matches!(o.kind, sim::systems::OrderKind::Stage)).count();
     sim::craft::program::pending(def, &state.stages, state.sequence).len() <= ordered
 }
 
@@ -298,11 +298,11 @@ mod tests {
         let table = [(0, 0, false), (n - 1, 0, false), (n, 0, true), (n - 1, 1, true), (0, n, true)];
         for (run, ordered, want) in table {
             state.sequence = run as u32;
-            state.runtime.orders.clear();
+            state.orders.clear();
             for _ in 0..ordered {
-                state.runtime.order(sim.clock, OrderKind::Stage);
+                state.order(sim.clock, OrderKind::Stage);
             }
-            state.runtime.order(sim.clock, OrderKind::Function("x".into()));
+            state.order(sim.clock, OrderKind::Function("x".into()));
             assert_eq!(no_stage_left(&def, &state), want, "{run} {ordered}");
         }
     }

@@ -5,11 +5,11 @@
 
 use super::*;
 use crate::craft::state::EngineStatus;
+use crate::craft::state::Lost;
 use crate::craft::{craft_of, CraftId};
 use crate::ephem::Ephemeris;
 use crate::sol;
 use crate::systems::flight::Sas;
-use crate::systems::runtime::Lost;
 use std::sync::Arc;
 
 fn world() -> World {
@@ -58,7 +58,7 @@ fn lose(v: &mut Vessel, select: impl Fn(&str) -> bool) {
     let def = v.ship_def().unwrap();
     let state = v.ship.as_mut().unwrap();
     for s in def.sensors.iter().filter(|s| select(&s.id)) {
-        state.runtime.lost.push(Lost { part: s.part, owner: s.id.clone(), why: "test".into() });
+        state.lost.push(Lost { part: s.part, owner: s.id.clone(), why: "test".into() });
     }
 }
 
@@ -132,7 +132,7 @@ fn a_stage_computer_unpowered_safes_its_engines() {
     let t = v.time.add_seconds(0.1);
     fly(&mut v, &w, t, &full());
     let s = v.ship().unwrap();
-    assert!(s.runtime.unpowered.iter().any(|l| l.owner == "s1.computer"), "the bus is dead");
+    assert!(s.unpowered.iter().any(|l| l.owner == "s1.computer"), "the bus is dead");
     for (d, e) in def.engines.iter().zip(&s.engines).filter(|(d, _)| d.id.starts_with("s1.merlin")) {
         assert!(matches!(e.status, EngineStatus::ShuttingDown | EngineStatus::Off), "{}: {:?}", d.id, e.status);
     }
@@ -157,7 +157,7 @@ fn a_lost_controller_on_the_pad_aborts_the_launch() {
         let def = v.ship_def().unwrap();
         let e5 = def.engines.iter().find(|e| e.owner == "s1.merlin.5").unwrap();
         let lost = Lost { part: e5.part, owner: e5.owner.clone(), why: "controller lost".into() };
-        v.ship.as_mut().unwrap().runtime.lost.push(lost);
+        v.ship.as_mut().unwrap().lost.push(lost);
         v.advance(&w, t0().add_seconds(3.0), &full(), usize::MAX);
         let abort = v.ship_events().iter().find(|e| e.text.starts_with("Pad abort"));
         if debug {
@@ -165,7 +165,7 @@ fn a_lost_controller_on_the_pad_aborts_the_launch() {
         } else {
             let abort = abort.expect("a pad abort");
             assert!(abort.alarm && abort.text.contains("s1.merlin.5 no thrust reading"), "{}", abort.text);
-            assert!(v.clamped() && !v.ship().unwrap().runtime.release_armed);
+            assert!(v.clamped() && !v.ship().unwrap().release_armed);
         }
     }
 }

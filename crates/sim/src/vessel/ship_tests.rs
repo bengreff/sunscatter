@@ -52,7 +52,7 @@ fn a_craft_of_parts_lifts_off_on_its_engines() {
     let def = v.ship_def().unwrap();
     let start = v.ship().unwrap().clone();
     let mut loaded = ShipState::initial(&def);
-    loaded.runtime.launch = Some(t0());
+    loaded.launch = Some(t0());
     assert_eq!(start, loaded);
     assert!((v.propellant() - start.consumables(&def)).abs() < 1e-9);
     let com0 = v.mass_props().com;
@@ -440,7 +440,7 @@ fn the_throttle_shuts_the_merlins_down_and_again_relights_them() {
     assert_eq!(merlins(&v), [EngineStatus::Off; 9], "the throttle closed");
     v.advance(&w, t0().add_seconds(7.0), &full(1.0), usize::MAX);
     assert_eq!(merlins(&v), [EngineStatus::Off; 9], "opening it does not relight");
-    v.order_at(v.time, crate::systems::runtime::OrderKind::Again(0)).unwrap();
+    v.order_at(v.time, crate::craft::state::OrderKind::Again(0)).unwrap();
     v.advance(&w, t0().add_seconds(7.1), &full(1.0), usize::MAX);
     assert!(merlins(&v).iter().all(|s| *s != EngineStatus::Off), "{:?}", merlins(&v));
     v.advance(&w, t0().add_seconds(10.0), &full(1.0), usize::MAX);

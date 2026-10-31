@@ -62,7 +62,7 @@ pub struct Icon {
 /// the canopies' look now).
 pub fn icons(def: &ShipDef, state: &ShipState, c: &ShipCommand, chute: (&[u32], Look)) -> Vec<Icon> {
     let icon = |kind, look, part, id: &str| Icon { kind, look, part, id: id.to_string() };
-    let lost = |id: &str| state.runtime.out(id);
+    let lost = |id: &str| state.out(id);
     match c {
         ShipCommand::Ignite(s) | ShipCommand::Shutdown(s) | ShipCommand::Throttle(s, _) | ShipCommand::Select(s) => {
             let kind = if matches!(c, ShipCommand::Ignite(_) | ShipCommand::Shutdown(_)) {
@@ -155,7 +155,7 @@ pub fn icons(def: &ShipDef, state: &ShipState, c: &ShipCommand, chute: (&[u32], 
 /// A separation joint's or the pad clamps' icon, on the child's part.
 fn joint_icon(d: &sim::craft::ship::JointDef, intact: bool, state: &ShipState) -> Icon {
     let clamp = d.kind == JointKind::HoldDown;
-    let look = match (intact, clamp && state.runtime.release_armed) {
+    let look = match (intact, clamp && state.release_armed) {
         (false, _) => Look::Spent,
         (true, true) => Look::Armed,
         (true, false) => Look::Idle,
@@ -173,7 +173,7 @@ pub fn engine_look(def: &ShipDef, state: &ShipState, i: usize) -> Look {
     match e.status {
         EngineStatus::Failed => Look::Failed,
         EngineStatus::Starting | EngineStatus::Running | EngineStatus::ShuttingDown => Look::Running,
-        EngineStatus::Off if state.runtime.out(&d.owner) => Look::Failed,
+        EngineStatus::Off if state.out(&d.owner) => Look::Failed,
         EngineStatus::Off if settling => Look::Armed,
         EngineStatus::Off if !fed || !can_ignite(d.data.igniter, e.ignitions, state.clamped) => Look::Spent,
         EngineStatus::Off => Look::Idle,

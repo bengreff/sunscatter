@@ -5,10 +5,9 @@
 //! pieces gives it back bit for bit.
 
 use super::ship::ShipDef;
-use super::state::{Fate, JointState, ShipState};
+use super::state::{Event, Fate, JointState, Lost, Order, OrderKind, ShipState, EVENTS_KEPT};
 use crate::systems::crew::{CrewRun, Injury};
 use crate::systems::power::BusRun;
-use crate::systems::runtime::{Event, Lost, Order, OrderKind, Runtime};
 use crate::time::Epoch;
 use glam::DVec3;
 
@@ -81,23 +80,22 @@ fn every_field_set(def: &ShipDef) -> ShipState {
         (x.force, x.moment, x.ratio, x.to_ultimate) =
             (DVec3::splat(v(i, 1e3)), DVec3::X * v(i, 9.0), v(i, 0.3), Some(v(i, 2.0)));
     }
-    let r = &mut s.runtime;
-    r.orders = vec![Order { at: t0.add_seconds(5.0), kind: OrderKind::Stage }];
-    r.release_armed = true;
-    r.release_engines =
+    s.orders = vec![Order { at: t0.add_seconds(5.0), kind: OrderKind::Stage }];
+    s.release_armed = true;
+    s.release_engines =
         (def.engines.iter().enumerate()).filter(|(_, e)| e.id.starts_with("s1.")).map(|(i, _)| i as u32).collect();
-    r.throttle_was = 0.75;
-    (r.accel, r.omega, r.alpha) = (DVec3::new(1.0, 2.0, 30.0), DVec3::new(0.01, 0.0, 0.02), DVec3::Y * 0.003);
-    r.thrust_dir = Some(DVec3::new(0.01, 0.0, 1.0).normalize());
-    r.fins = (0..def.surfaces.len()).map(|i| v(i, 0.01)).collect();
-    r.seed = 42;
-    (r.launch, r.stepped) = (Some(t0), Some(t0.add_seconds(60.0)));
-    r.events = (0..3).map(|k| Event { at: t0.add_seconds(k as f64), text: format!("{k}"), alarm: k == 1 }).collect();
-    r.pressure_regulated = true;
+    s.throttle_was = 0.75;
+    (s.accel, s.omega, s.alpha) = (DVec3::new(1.0, 2.0, 30.0), DVec3::new(0.01, 0.0, 0.02), DVec3::Y * 0.003);
+    s.thrust_dir = Some(DVec3::new(0.01, 0.0, 1.0).normalize());
+    s.fins = (0..def.surfaces.len()).map(|i| v(i, 0.01)).collect();
+    s.seed = 42;
+    (s.launch, s.stepped) = (Some(t0), Some(t0.add_seconds(60.0)));
+    s.events = (0..3).map(|k| Event { at: t0.add_seconds(k as f64), text: format!("{k}"), alarm: k == 1 }).collect();
+    s.pressure_regulated = true;
     let lost = |p: &super::ship::PartInfo| Lost { part: p.part, owner: p.id.clone(), why: "test".into() };
-    r.lost = def.parts.iter().step_by(11).map(lost).collect();
-    r.unpowered = def.parts.iter().skip(3).step_by(13).map(lost).collect();
-    r.buses = (def.buses.iter().enumerate())
+    s.lost = def.parts.iter().step_by(11).map(lost).collect();
+    s.unpowered = def.parts.iter().skip(3).step_by(13).map(lost).collect();
+    s.buses = (def.buses.iter().enumerate())
         .map(|(i, b)| BusRun {
             name: b.name.clone(),
             volts: v(i, 28.0),
@@ -107,7 +105,7 @@ fn every_field_set(def: &ShipDef) -> ShipState {
         })
         .collect();
     let injury = Injury { at: t0, axis: "+Ax".into(), level: 60.0, seconds: 2.0, limit: 50.0 };
-    r.crew = CrewRun { held: vec![vec![(1.0, 20.0)], vec![], vec![(0.5, 45.0)]], injuries: vec![injury] };
+    s.crew = CrewRun { held: vec![vec![(1.0, 20.0)], vec![], vec![(0.5, 45.0)]], injuries: vec![injury] };
     s
 }
 
@@ -118,8 +116,14 @@ fn assert_every_field_set(s: &ShipState, at_load: &ShipState) {
     let ShipState {
         tanks,
         bottles,
+        pressure_regulated,
         engines,
+        release_armed,
+        release_engines,
+        throttle_was,
+        thrust_dir,
         thrusters,
+        fins,
         valves,
         batteries,
         mechanisms,
@@ -127,13 +131,24 @@ fn assert_every_field_set(s: &ShipState, at_load: &ShipState) {
         severed,
         parts,
         power,
+        unpowered,
+        buses,
         cabin,
+        crew,
         fates,
+        lost,
+        seed,
+        launch,
         clamped,
         sequence,
         stages,
         functions,
-        runtime,
+        orders,
+        accel,
+        omega,
+        alpha,
+        stepped,
+        events,
     } = s;
     let l = at_load;
     let ship = [
@@ -155,27 +170,7 @@ fn assert_every_field_set(s: &ShipState, at_load: &ShipState) {
         (stages != &l.stages, "stages"),
         (functions != &l.functions, "functions"),
     ];
-    let Runtime {
-        orders,
-        release_armed,
-        release_engines,
-        throttle_was,
-        accel,
-        omega,
-        alpha,
-        thrust_dir,
-        fins,
-        seed,
-        launch,
-        stepped,
-        events,
-        pressure_regulated,
-        lost,
-        unpowered,
-        buses,
-        crew,
-    } = runtime;
-    let r = &l.runtime;
+    let r = l;
     let run = [
         (orders != &r.orders, "orders"),
         (release_armed != &r.release_armed, "release_armed"),
@@ -218,7 +213,6 @@ fn a_split_puts_each_item_in_exactly_one_piece() {
         let (da, db) = (def.subset(&a), def.subset(&b));
         let (pa, pb) = (s.partition(&a, &def, &da, true), s.partition(&b, &def, &db, false));
         let n = |x: &ShipState| {
-            let r = &x.runtime;
             [
                 x.tanks.len(),
                 x.bottles.len(),
@@ -232,11 +226,11 @@ fn a_split_puts_each_item_in_exactly_one_piece() {
                 x.power.len(),
                 x.cabin.iter().count(),
                 x.fates.len(),
-                r.fins.len(),
-                r.lost.len(),
-                r.unpowered.len(),
-                r.orders.len(),
-                r.release_engines.len(),
+                x.fins.len(),
+                x.lost.len(),
+                x.unpowered.len(),
+                x.orders.len(),
+                x.release_engines.len(),
             ]
         };
         let (na, nb, ns) = (n(&pa), n(&pb), n(&s));
@@ -250,15 +244,15 @@ fn a_split_puts_each_item_in_exactly_one_piece() {
                 (p.tanks.len(), p.engines.len(), p.power.len()),
                 (d.tanks.len(), d.engines.len(), d.components.len())
             );
-            assert_eq!((p.joints.len(), p.runtime.fins.len()), (d.joints.len(), d.surfaces.len()), "{name}");
+            assert_eq!((p.joints.len(), p.fins.len()), (d.joints.len(), d.surfaces.len()), "{name}");
         }
         // The cabin and the crew's exposure go with Dragon; the clamps and
         // the armed release with the pad's piece; the orders and the
         // pilot's last throttle with the vessel's.
-        assert!(pa.cabin.is_some() && pa.runtime.crew == s.runtime.crew && pb.runtime.crew == CrewRun::default());
-        assert!(!pa.clamped && !pa.runtime.release_armed && pb.clamped && pb.runtime.release_armed, "{name}");
-        assert_eq!((pa.runtime.throttle_was, pb.runtime.throttle_was), (0.75, 0.0));
-        assert!(pb.runtime.orders.is_empty());
+        assert!(pa.cabin.is_some() && pa.crew == s.crew && pb.crew == CrewRun::default());
+        assert!(!pa.clamped && !pa.release_armed && pb.clamped && pb.release_armed, "{name}");
+        assert_eq!((pa.throttle_was, pb.throttle_was), (0.75, 0.0));
+        assert!(pb.orders.is_empty());
         // The program is the vessel's as a whole: a copy in each piece.
         for p in [&pa, &pb] {
             assert!((&p.stages, &p.functions, p.sequence) == (&s.stages, &s.functions, s.sequence), "{name}");
@@ -301,4 +295,65 @@ fn a_merge_refuses_two_cabins_and_starts_a_new_joint_unloaded() {
     let m = ShipState::merge(&px, &dx, &py, &dy, &def).unwrap();
     assert!(m.joints.iter().all(|j| j.intact));
     assert!(m.joints.iter().all(|j| j.force == DVec3::ZERO && j.ratio == 0.0));
+}
+
+#[test]
+fn orders_come_due_in_epoch_order_ties_as_given() {
+    let t0 = Epoch::new(1_000_000_000, 0.0);
+    let mut r = ShipState::default();
+    let stage = |n: &str| OrderKind::Function(n.into());
+    r.order(t0.add_seconds(2.0), stage("c"));
+    r.order(t0.add_seconds(1.0), stage("a"));
+    r.order(t0.add_seconds(2.0), stage("d"));
+    r.order(t0.add_seconds(1.0), stage("b"));
+    assert_eq!(r.next_order(), Some(t0.add_seconds(1.0)));
+    assert!(r.due(t0.add_seconds(0.5)).is_empty());
+    let names = |o: Vec<Order>| {
+        o.into_iter()
+            .map(|o| match o.kind {
+                OrderKind::Function(n) => n,
+                _ => unreachable!(),
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(names(r.due(t0.add_seconds(1.0))), ["a", "b"]);
+    assert_eq!(names(r.due(t0.add_seconds(9.0))), ["c", "d"]);
+    assert_eq!(r.next_order(), None);
+}
+
+/// Each piece of a split keeps its own aero surfaces' deflections,
+/// aligned with its own definition's surfaces (review, 2026-10-27: they
+/// were copied whole, so a piece's fin read another's); never deflected,
+/// none.
+#[test]
+fn a_split_partitions_the_fin_deflections() {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/craft/falcon9-crew");
+    let def = crate::craft::load_definition(&path).unwrap().ship.unwrap();
+    let mut whole = ShipState::default();
+    assert!(whole.partition(&[], &def, &def.subset(&[]), true).fins.is_empty(), "never deflected");
+    whole.fins = (0..def.surfaces.len()).map(|i| 0.01 * (i + 1) as f64).collect();
+    let booster: Vec<u32> = (def.surfaces.iter()).filter(|s| s.id.starts_with("s1.")).map(|s| s.part).collect();
+    let rest: Vec<u32> = (def.surfaces.iter()).filter(|s| !s.id.starts_with("s1.")).map(|s| s.part).collect();
+    assert!(!booster.is_empty() && !rest.is_empty(), "the grid fins and Dragon's");
+    for kept in [booster, rest] {
+        let piece = def.subset(&kept);
+        let fins = whole.partition(&kept, &def, &piece, true).fins;
+        assert_eq!(fins.len(), piece.surfaces.len());
+        for (s, d) in piece.surfaces.iter().zip(&fins) {
+            let i = def.surfaces.iter().position(|w| w.id == s.id).unwrap();
+            assert_eq!(*d, whole.fins[i], "{}", s.id);
+        }
+    }
+}
+
+#[test]
+fn events_keep_the_newest() {
+    let t0 = Epoch::new(1_000_000_000, 0.0);
+    let mut r = ShipState::default();
+    for k in 0..100 {
+        r.event(t0.add_seconds(k as f64), format!("{k}"), false);
+    }
+    assert_eq!(r.events.len(), EVENTS_KEPT);
+    assert_eq!(r.events.last().unwrap().text, "99");
+    assert_eq!(r.events[0].text, format!("{}", 100 - EVENTS_KEPT));
 }

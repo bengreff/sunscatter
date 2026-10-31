@@ -71,8 +71,7 @@ pub fn gather(v: &Vessel) -> Option<CrewData> {
     }
     let cabin = state.cabin.as_ref();
     let life = cabin.and_then(|c| def.life_support.iter().find(|l| l.part == c.part));
-    let run = &state.runtime;
-    let out = life.and_then(|l| run.lost.iter().chain(&run.unpowered).find(|x| x.owner == l.id));
+    let out = life.and_then(|l| state.lost.iter().chain(&state.unpowered).find(|x| x.owner == l.id));
     let life_support = match (life, out) {
         (None, _) => LifeSupport::None,
         (Some(_), None) => LifeSupport::Working,
@@ -82,7 +81,7 @@ pub fn gather(v: &Vessel) -> Option<CrewData> {
         crew,
         cabin: cabin.map(|c| Cabin { o2: c.o2, n2: c.n2, co2: c.co2, h2o: c.h2o, k: c.k }),
         life_support,
-        injuries: (run.crew.injuries.iter()).map(|i| (i.axis.clone(), i.level, i.seconds, i.limit)).collect(),
+        injuries: (state.crew.injuries.iter()).map(|i| (i.axis.clone(), i.level, i.seconds, i.limit)).collect(),
     })
 }
 

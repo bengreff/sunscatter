@@ -10,7 +10,14 @@
 //! definition, and a docking merges it, each field by its own rule
 //! (`craft::partition`: [`ShipState::partition`], [`ShipState::merge`]).
 //!
-//! What the systems do with it is `sim::systems` (RUNTIME). Here: the state
+//! The state is grouped by subsystem (plumbing, propulsion, attitude
+//! control, valves, batteries, mechanisms, structure, power, the cabin and
+//! crew, failures, the program, the motion felt): each item of a part
+//! holds all of its state, and the vessel-wide fields sit with their
+//! subsystem. One state per vessel (D121): what the systems keep between
+//! ticks is here too, not in a second state.
+//!
+//! What the systems do with it is `sim::systems`. Here: the state
 //! at load (tanks filled at their loading temperatures, bottles at their
 //! pressure) and the plain effect of each [`ShipCommand`] ([`ShipState::apply`]:
 //! engines start and stop at once, valves and mechanisms move at once; the
@@ -21,6 +28,9 @@ use super::ship::ShipDef;
 use crate::catalog::Igniter;
 use crate::fluids::{self, fluids};
 use crate::systems::command::edit_sequence;
+use crate::systems::crew::CrewRun;
+use crate::systems::power::BusRun;
+use crate::time::Epoch;
 use glam::DVec3;
 use serde::{Deserialize, Serialize};
 
@@ -214,10 +224,42 @@ pub struct Switch {
 /// Everything about a craft of parts that changes in flight.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct ShipState {
+    // Plumbing.
     pub tanks: Vec<TankState>,
     pub bottles: Vec<BottleState>,
+    /// Whether the plumbing regulates the tanks' pressures (its regulator
+    /// sets it when it runs). Until it does, the structure takes each tank's
+    /// flight (loading) pressure as its stabilising pressure at the least: a
+    /// pressure that falls only because nothing re-pressurises the tank is
+    /// not one to break a joint on (D105).
+    #[serde(default)]
+    pub pressure_regulated: bool,
+    // Propulsion.
     pub engines: Vec<EngineState>,
+    /// The sequence's clamp release is armed: it lets go at the first tick
+    /// every ignited engine delivers its rated thrust, and aborts the start
+    /// if one fails (the real pad's rule, falcon9.md §1.2, §4.2).
+    #[serde(default)]
+    pub release_armed: bool,
+    /// The engines (indices into `ShipDef::engines`) the armed release
+    /// waits for: those lit when it was armed, or at the end of that tick
+    /// (with none lit then, nor one settling to start, it is disarmed).
+    #[serde(default)]
+    pub release_engines: Vec<u32>,
+    /// The pilot's throttle at the last step: closing it (open to 0) shuts
+    /// the engines down (D114).
+    #[serde(default)]
+    pub throttle_was: f64,
+    /// The engines' realised thrust direction after the gimbal (body axes;
+    /// `None` until they first run): the actuators move it at their rate.
+    #[serde(default)]
+    pub thrust_dir: Option<glam::DVec3>,
+    // Attitude control and the aero surfaces.
     pub thrusters: Vec<ThrusterState>,
+    /// Each aero surface's deflection (rad; aligned with
+    /// `ShipDef::surfaces`, or empty before any deflects).
+    #[serde(default)]
+    pub fins: Vec<f64>,
     pub valves: Vec<ValveState>,
     pub batteries: Vec<BatteryState>,
     pub mechanisms: Vec<MechanismState>,
@@ -227,12 +269,34 @@ pub struct ShipState {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub severed: Vec<JointState>,
     pub parts: Vec<PartState>,
+    // Power.
     /// One per component.
     pub power: Vec<Switch>,
+    /// The loads without power now (their bus short: shed, or no source)
+    /// and the buses as they stood (`systems::power`).
+    #[serde(default)]
+    pub unpowered: Vec<Lost>,
+    #[serde(default)]
+    pub buses: Vec<BusRun>,
+    // The cabin and its crew.
     #[serde(default)]
     pub cabin: Option<CabinState>,
+    /// The crew's exposure to acceleration and their injuries
+    /// (`systems::crew`).
+    #[serde(default)]
+    pub crew: CrewRun,
+    // Failures (D105 §6.3, §6.4).
     #[serde(default)]
     pub fates: Vec<Fate>,
+    /// The functions lost to failures (by part, as the rest).
+    #[serde(default)]
+    pub lost: Vec<Lost>,
+    /// The failure fates' seed (the save's) and the launch epoch they are
+    /// drawn with (D105 §6.3).
+    #[serde(default)]
+    pub seed: u64,
+    #[serde(default)]
+    pub launch: Option<Epoch>,
     /// Held by the pad's clamps.
     #[serde(default)]
     pub clamped: bool,
@@ -245,10 +309,72 @@ pub struct ShipState {
     pub stages: Vec<Stage>,
     #[serde(default)]
     pub functions: Vec<Stage>,
-    /// The systems' own state (`sim::systems::runtime`, RUNTIME).
+    /// Orders not yet applied, in the order given (applied by epoch, ties
+    /// in that order).
     #[serde(default)]
-    pub runtime: crate::systems::Runtime,
+    pub orders: Vec<Order>,
+    // The vessel's motion as the systems felt it, and their clock.
+    /// The last tick's proper acceleration at the centre of mass, angular
+    /// velocity and angular acceleration (body axes): what the liquids,
+    /// joints and accelerometers felt.
+    #[serde(default)]
+    pub accel: glam::DVec3,
+    #[serde(default)]
+    pub omega: glam::DVec3,
+    #[serde(default)]
+    pub alpha: glam::DVec3,
+    /// Where the slow systems (the plumbing's heat, relief and boil-off)
+    /// last stepped to.
+    #[serde(default)]
+    pub stepped: Option<Epoch>,
+    /// What happened to the ship, for the player (newest last).
+    #[serde(default)]
+    pub events: Vec<Event>,
 }
+
+/// What an order does when its epoch comes.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub enum OrderKind {
+    /// A ship command (as from the systems screen or a function).
+    Command(ShipCommand),
+    /// The next stage of the sequence (Space).
+    Stage,
+    /// Stage `k` of the sequence again, one already run (D114): what can
+    /// act does, the rest does nothing; the sequence stays where it is.
+    Again(u32),
+    /// A saved function by name.
+    Function(String),
+}
+
+/// An order waiting for its epoch: commands from aboard arrive at once,
+/// from mission control after the light time (D067).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Order {
+    pub at: Epoch,
+    pub kind: OrderKind,
+}
+
+/// Something that happened to the ship, for the player (newest last).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Event {
+    pub at: Epoch,
+    pub text: String,
+    /// Bad news (a failure, an abort).
+    pub alarm: bool,
+}
+
+/// A function lost to a failure (D105 §6.4): a computer, a sensor, a pump,
+/// a mechanism's actuator (`sim::systems::failure`).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct Lost {
+    pub part: u32,
+    /// The part's or component's id.
+    pub owner: String,
+    pub why: String,
+}
+
+/// How many events are kept.
+pub const EVENTS_KEPT: usize = 64;
 
 /// How a part failed destroyed (D105 §6.4; `sim::systems::failure`).
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -381,7 +507,7 @@ impl ShipState {
             sequence: 0,
             stages: def.sequence.clone(),
             functions: def.functions.clone(),
-            runtime: crate::systems::Runtime::default(),
+            ..ShipState::default()
         }
     }
 
@@ -398,6 +524,38 @@ impl ShipState {
             && self.joints.len() == def.joints.len()
             && self.parts.len() == def.parts.len()
             && self.power.len() == def.components.len()
+    }
+
+    /// Whether `owner`'s function is out: lost to a failure, or without
+    /// power (`systems::power`).
+    pub fn out(&self, owner: &str) -> bool {
+        self.lost.iter().chain(&self.unpowered).any(|l| l.owner == owner)
+    }
+
+    /// Records an event (the oldest dropped beyond [`EVENTS_KEPT`]).
+    pub fn event(&mut self, at: Epoch, text: impl Into<String>, alarm: bool) {
+        self.events.push(Event { at, text: text.into(), alarm });
+        if self.events.len() > EVENTS_KEPT {
+            self.events.remove(0);
+        }
+    }
+
+    /// Queues an order (kept in epoch order; equal epochs in arrival order).
+    pub fn order(&mut self, at: Epoch, kind: OrderKind) {
+        let i = self.orders.iter().position(|o| o.at > at).unwrap_or(self.orders.len());
+        self.orders.insert(i, Order { at, kind });
+    }
+
+    /// The epoch of the next order, if any.
+    pub fn next_order(&self) -> Option<Epoch> {
+        self.orders.first().map(|o| o.at)
+    }
+
+    /// Removes and returns the orders due at `now` (epoch at or before it),
+    /// in order.
+    pub fn due(&mut self, now: Epoch) -> Vec<Order> {
+        let n = self.orders.iter().take_while(|o| o.at <= now).count();
+        self.orders.drain(..n).collect()
     }
 
     /// Liquid in the tanks (kg).

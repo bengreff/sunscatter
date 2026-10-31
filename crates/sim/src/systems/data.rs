@@ -317,7 +317,7 @@ mod tests {
         let mut state = ShipState::initial(&def);
         for id in ["s1.gps#1", "s1.gps#2", "s2.gps#1", "s2.gps#2", "dragon.gps#1", "dragon.gps#2"] {
             let part = def.sensors.iter().find(|s| s.id == id).unwrap().part;
-            state.runtime.lost.push(crate::systems::runtime::Lost { part, owner: id.into(), why: "test".into() });
+            state.lost.push(crate::craft::state::Lost { part, owner: id.into(), why: "test".into() });
         }
         let k = knowledge(&def, &state, false);
         assert!(!k.knows(Quantity::Position) && k.knows(Quantity::Attitude));

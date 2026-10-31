@@ -70,7 +70,7 @@ fn after_a_pad_abort_liftoff_is_next_again() {
     v.order_at(v.time, OrderKind::Stage).unwrap();
     v.advance(&w, t.add_seconds(1.0), &full(), usize::MAX);
     let s = v.ship().unwrap();
-    assert!(s.runtime.release_armed && s.sequence == liftoff + 1);
+    assert!(s.release_armed && s.sequence == liftoff + 1);
     v.advance(&w, t.add_seconds(3.0), &full(), usize::MAX);
     assert!(!v.clamped(), "released at full thrust: {:?}", v.ship_events().last());
 }
@@ -100,9 +100,9 @@ fn a_launch_abort_on_the_pad_leaves_liftoff_next() {
     assert_eq!(held.len(), 1, "the stack stays on the pad");
     let stack = held[0];
     let s = stack.ship().unwrap();
-    assert!(!s.runtime.release_armed);
+    assert!(!s.release_armed);
     assert_eq!(s.stages[s.sequence as usize].name, "Liftoff", "Liftoff is next again");
-    assert!(s.runtime.events.iter().any(|e| e.text.starts_with("Clamps: release disarmed")), "{:?}", s.runtime.events);
+    assert!(s.events.iter().any(|e| e.text.starts_with("Clamps: release disarmed")), "{:?}", s.events);
     assert!(merlins(stack).iter().all(|s| !lit(*s)), "thrust terminated: {:?}", merlins(stack));
     for p in free {
         assert!(!p.ship().unwrap().clamped, "{:?}: nothing holds it", p.craft.id);
@@ -167,11 +167,11 @@ fn a_release_with_no_engine_lit_is_disarmed() {
     let liftoff = stage(&v, "Liftoff");
     v.ship.as_mut().unwrap().sequence = liftoff;
     v.next_stage(&w).unwrap();
-    assert!(v.ship().unwrap().runtime.release_armed && v.ship_needs_ticks());
+    assert!(v.ship().unwrap().release_armed && v.ship_needs_ticks());
     v.advance(&w, t0().add_seconds(1.0), &full(), usize::MAX);
     let s = v.ship().unwrap();
-    assert!(!s.runtime.release_armed && !v.ship_needs_ticks(), "disarmed: {:?}", s.runtime.events);
-    let event = s.runtime.events.iter().find(|e| e.text.starts_with("Clamps: release disarmed")).expect("an event");
+    assert!(!s.release_armed && !v.ship_needs_ticks(), "disarmed: {:?}", s.events);
+    let event = s.events.iter().find(|e| e.text.starts_with("Clamps: release disarmed")).expect("an event");
     assert!(event.text.contains("no engine lit") && event.alarm, "{}", event.text);
     assert_eq!(s.sequence, liftoff);
     assert!(v.clamped() && matches!(v.phase, Phase::Landed { .. }));
@@ -180,12 +180,12 @@ fn a_release_with_no_engine_lit_is_disarmed() {
     v.order_at(t, OrderKind::Again(stage(&v, "Ignition"))).unwrap();
     v.order_at(t, OrderKind::Stage).unwrap();
     v.advance(&w, t.add_seconds(1.0), &full(), usize::MAX);
-    assert!(v.ship().unwrap().runtime.release_armed);
+    assert!(v.ship().unwrap().release_armed);
     let closed = Controls { throttle: 0.0, ..full() };
     v.advance(&w, t.add_seconds(1.1), &closed, usize::MAX);
     let s = v.ship().unwrap();
-    assert!(!s.runtime.release_armed && s.sequence == liftoff, "{:?}", s.runtime.events);
-    assert!(s.runtime.events.iter().any(|e| e.text.starts_with("Pad abort")));
+    assert!(!s.release_armed && s.sequence == liftoff, "{:?}", s.events);
+    assert!(s.events.iter().any(|e| e.text.starts_with("Pad abort")));
     v.advance(&w, t.add_seconds(6.0), &closed, usize::MAX);
     assert!(!v.ship_needs_ticks() && v.clamped());
 }

@@ -339,7 +339,7 @@ pub enum Pad {
 }
 
 /// What the pad's state line says: from engines lit, the release armed
-/// (`Runtime::release_armed`) and the pilot's throttle.
+/// (`ShipState::release_armed`) and the pilot's throttle.
 pub fn pad_state(lit: bool, armed: bool, throttle: f64) -> Pad {
     match (armed, lit) {
         (true, _) if throttle < 1.0 => Pad::ThrottleUp,
@@ -389,7 +389,7 @@ pub fn state_line(sim: &SimState) -> (String, bool) {
         s.engines.iter().any(|e| matches!(e.status, Starting | Running))
     };
     let pad = ship.ship().filter(|_| ship.clamped());
-    let pad = pad.map(|s| pad_state(lit(s), s.runtime.release_armed, sim.controls().throttle));
+    let pad = pad.map(|s| pad_state(lit(s), s.release_armed, sim.controls().throttle));
     state_word(destroyed, pad, landed, crate::scene::engine_on(sim, sim.active), ship.chute.open())
 }
 

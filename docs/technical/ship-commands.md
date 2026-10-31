@@ -1,6 +1,6 @@
 # Ship commands, the sequence and the pad
 
-As built for craft of catalog parts in `sim::systems::{command, runtime}`, wired by `sim::vessel::ship_tick` (D103–D106). The design: [ship-model.md](ship-model.md) §5.0 and §8. Built by RUNTIME (2026-10-27); the Falcon 9 Crew's numbers are tested in `sim`. The system: [avionics](../systems/avionics.md).
+As built for craft of catalog parts in `sim::systems::command` (the orders in `sim::craft::state`), wired by `sim::vessel::ship_tick` (D103–D106). The design: [ship-model.md](ship-model.md) §5.0 and §8. Built by RUNTIME (2026-10-27); the Falcon 9 Crew's numbers are tested in `sim`. The system: [avionics](../systems/avionics.md).
 
 **Status: playable.**
 

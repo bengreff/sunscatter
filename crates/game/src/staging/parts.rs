@@ -127,7 +127,7 @@ pub fn status(def: &ShipDef, state: &ShipState, c: &ShipCommand, chute_armed: bo
             // The pad's hold-down joints (`Vessel::clamped` holds while one does).
             let hold = |j: &sim::craft::ship::JointDef| j.kind == sim::craft::assembly::JointKind::HoldDown;
             let holding = def.joints.iter().zip(&state.joints).any(|(d, s)| hold(d) && s.intact);
-            if state.clamped && holding && state.runtime.release_armed {
+            if state.clamped && holding && state.release_armed {
                 // The pad's rule: they let go when every lit engine is at its rated thrust.
                 ("armed: lets go at full thrust".into(), PartTone::Working)
             } else if state.clamped && holding {

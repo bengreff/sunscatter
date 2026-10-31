@@ -179,7 +179,7 @@ impl Vessel {
         if let Some(p) = old.filter(|p| p.step.flying()) {
             let (at, text) = (self.time, format!("burn {}: ended by the separation", p.node + 1));
             if let Some(state) = self.ship.as_mut() {
-                state.runtime.event(at, text, true);
+                state.event(at, text, true);
             }
             if let Some(base) = p.pilot {
                 let last = maneuver::Commands { hold: p.dir, throttle: p.throttle, ..Default::default() };
@@ -322,7 +322,7 @@ impl Vessel {
         };
         let (at, ended, next) = (self.time, p.step.ended(), p.node + 1);
         if let Some(state) = self.ship.as_mut() {
-            state.runtime.event(at, text, alarm);
+            state.event(at, text, alarm);
         }
         if ended {
             if let Some(next) = self.schedule_node(next) {

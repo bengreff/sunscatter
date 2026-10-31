@@ -486,7 +486,7 @@ pub fn update_parts(
         let k = flame.engine.unwrap_or(0);
         let fraction = now.fractions.get(k).copied().unwrap_or(0.0);
         let thrust = flame.engine.map(|e| now.thrusts.get(e).copied().unwrap_or(0.0));
-        let steered = v.ship().and_then(|s| s.runtime.thrust_dir).filter(|_| flame.main);
+        let steered = v.ship().and_then(|s| s.thrust_dir).filter(|_| flame.main);
         let nozzle = parts::gimballed(&flame.nozzle, steered);
         if let Some(Ok((source, mut pt, mut pvis, mat))) = flame.plume.map(|e| plumes.get_mut(e)) {
             let shown = plumes_on && fraction > 0.0;

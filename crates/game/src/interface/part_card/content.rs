@@ -228,7 +228,7 @@ fn stores(live: &Live, part: u32, inside: &Inside, out: &mut Vec<Section>) {
         });
     }
     for (j, t) in def.thrusters.iter().enumerate().filter(|(j, t)| t.part == part && !inside.thrusters.contains(j)) {
-        let lost = state.runtime.out(&t.id);
+        let lost = state.out(&t.id);
         let on = state.thrusters.get(j).is_some_and(|s| s.enabled);
         let words = if lost {
             "LOST (failed or no power)"
@@ -266,7 +266,7 @@ fn joints_and_mechanisms(live: &Live, part: u32, inside: &Inside, out: &mut Vec<
     for (j, d) in def.joints.iter().enumerate().filter(|(_, d)| d.child == part) {
         let intact = state.joints.get(j).is_some_and(|s| s.intact);
         let words = match (&d.kind, intact) {
-            (JointKind::HoldDown, true) if state.runtime.release_armed => "armed: lets go at full thrust",
+            (JointKind::HoldDown, true) if state.release_armed => "armed: lets go at full thrust",
             (JointKind::HoldDown, true) => "holding",
             (JointKind::HoldDown, false) => "released",
             (JointKind::Separation { .. }, true) => "attached",

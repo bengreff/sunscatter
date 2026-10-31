@@ -52,7 +52,7 @@ pub fn works(def: &ShipDef, state: &ShipState, id: &str, part: u32) -> bool {
         let i = def.components.iter().position(|c| c.id == id);
         i.is_none_or(|i| state.power.get(i).is_none_or(|s| s.on))
     };
-    intact && !state.runtime.out(id) && switched()
+    intact && !state.out(id) && switched()
 }
 
 /// Whether a working computer is linked to `id`: `None` when no data link

@@ -2,9 +2,9 @@
 //! the Falcon 9 Crew.
 
 use super::*;
+use crate::craft::state::Lost;
 use crate::craft::state::ShipState;
 use crate::systems::data::{knowledge, provides};
-use crate::systems::runtime::Lost;
 
 fn knows(quantities: &[&str]) -> Knowledge {
     let mut k = Knowledge::default();
@@ -174,9 +174,9 @@ fn the_falcon_9s_health_and_view() {
             .1;
         let l = Lost { part, owner: id.into(), why: "test".into() };
         if unpowered {
-            state.runtime.unpowered.push(l)
+            state.unpowered.push(l)
         } else {
-            state.runtime.lost.push(l)
+            state.lost.push(l)
         }
     };
     // Every IMU lost.
@@ -231,7 +231,7 @@ fn the_estimates_read_what_the_computers_receive() {
         }
     }
     let part = def.computers.iter().find(|c| c.id == "s1.computer").unwrap().part;
-    state.runtime.unpowered.push(Lost { part, owner: "s1.computer".into(), why: "test".into() });
+    state.unpowered.push(Lost { part, owner: "s1.computer".into(), why: "test".into() });
     for debug in [false, true] {
         let k = knowledge(def, &state, debug);
         let e = estimate(def, &state, &Inputs { hull: &hull, knowledge: &k, throttle: 1.0, p: 0.0, g: Some(9.81) });

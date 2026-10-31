@@ -182,7 +182,7 @@ fn max_q_at_a_few_degrees_bends_the_stack_safely() {
             s.ullage_moles = crate::fluids::moles(3.5e5, t.volume - s.liquid / rho, s.ullage_k);
         }
     }
-    state.runtime.pressure_regulated = true;
+    state.pressure_regulated = true;
     let (ids, parents, kelvin) = bodies_of(&craft);
     let index = |name: &str| craft.parts.iter().position(|p| def.parts[p.id as usize].id == name).unwrap();
     let (q, alpha) = (36e3, 4.0f64.to_radians());
@@ -290,14 +290,14 @@ fn an_unregulated_tank_keeps_its_flight_pressure() {
     let m = Motion { accel: DVec3::Z * (9.0 * 914e3 / total), ..Motion::default() };
     let t0 = Epoch::new(1_000_000_000, 0.0);
     let ratio = |state: &ShipState, name: &str| state.joints[joint(def, name)].ratio;
-    assert!(!state.runtime.pressure_regulated);
+    assert!(!state.pressure_regulated);
     assert!(step(def, &mut state, &b, &m, t0, false).is_empty());
     for name in ["s1.interstage|s1.tank", "s1.tank|s1.octaweb"] {
         assert!(ratio(&state, name) < 0.5, "{name}: {}", ratio(&state, name));
     }
     let mut regulated = ShipState::initial(def);
     regulated.tanks = state.tanks.clone();
-    regulated.runtime.pressure_regulated = true;
+    regulated.pressure_regulated = true;
     step(def, &mut regulated, &b, &m, t0, true);
     assert!(ratio(&regulated, "s1.tank|s1.octaweb") > 0.75, "{}", ratio(&regulated, "s1.tank|s1.octaweb"));
 }
@@ -331,11 +331,7 @@ fn an_overload_snaps_the_joint() {
     let effects = step(def, &mut state, &b, &m, t0, false);
     let ring = def.parts.iter().find(|p| p.id == "s2.tank").unwrap().part;
     assert!(effects.iter().any(|e| matches!(e, Effect::Snap(c, _) if *c == ring)), "{effects:?}");
-    assert!(
-        state.runtime.events.iter().any(|e| e.alarm && e.text.contains("s2.ring|s2.tank")),
-        "{:?}",
-        state.runtime.events
-    );
+    assert!(state.events.iter().any(|e| e.alarm && e.text.contains("s2.ring|s2.tank")), "{:?}", state.events);
     // A leg hangs by its hinge and strut, not a ring: its load is shown,
     // never judged (its feet's overload is the contact's).
     let leg = &state.joints[joint(def, "s1.octaweb|s1.leg#1")];

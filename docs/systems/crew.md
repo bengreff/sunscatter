@@ -18,7 +18,7 @@ The people aboard: the cabin's air they breathe, the accelerations they can take
 
 ## Not built
 
-- D116's doses (replacing `Runtime::crew`'s injuries).
+- D116's doses (replacing `ShipState::crew`'s injuries).
 - Radiation dose (open question 1); Brinkley's dynamic response for landing; suits; deconditioned limits after a long flight; consumables as tanks; leaks.
 - Skills, tasks and who flies (open question 2); colonists and life in colonies (D019): not written.
 

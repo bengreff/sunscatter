@@ -94,7 +94,7 @@ So the bare minimum needs, in data and model:
 
 ## 4. The warp-stop line
 
-**Built in, on layer 1** (D128): a failure that puts the crew or the vessel at risk stops warp at its own epoch, with the craft's state at that epoch. Anything else is logged (`Runtime::event`, its `alarm` flag as today).
+**Built in, on layer 1** (D128): a failure that puts the crew or the vessel at risk stops warp at its own epoch, with the craft's state at that epoch. Anything else is logged (`ShipState::event`, its `alarm` flag as today).
 
 **At risk** (a pure rule with a table test, one owner: `ship_os::warp_stop::bare_minimum`):
 
