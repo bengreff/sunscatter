@@ -8,21 +8,29 @@ buffer and they complete in order on one queue, so a command buffer's GPU
 time is its completion minus the later of its commit and the previous
 completion (exact while the GPU is busy, i.e. when it is the limit).
 
-Record (it runs the game; one at a time on the shared machine):
+Record (it runs the game's release binary, `cargo build -p game --release`,
+headless as `./run headless` does; one game at a time on the shared
+machine, under `target/demo.lock`):
 
     xcrun xctrace record --template 'Metal System Trace' --no-prompt \\
-        --output DIR/view.trace --env SUNSCATTER_HOME=DIR \\
-        --env SUNSCATTER_OFFSCREEN=1 --env SUNSCATTER_AGENT=7777:dev \\
+        --time-limit 90s --output DIR/view.trace --env SUNSCATTER_HOME=DIR \\
+        --env SUNSCATTER_OFFSCREEN=1 --env SUNSCATTER_DEV=1 \\
+        --env SUNSCATTER_AGENT=7777:dev \\
         --env SUNSCATTER_RENDER_SCALE=1 --launch -- target/release/game
 
-(each --env and its value are two arguments), and set the view meanwhile
-through MCP (`shoot` with a width and height, `set_camera`). Then:
+(each --env and its value are two arguments; use your own CARGO_TARGET_DIR's
+binary), and set the view meanwhile through MCP (`tools/mcp.sh`: `shoot`
+with a width and height, `set_camera`, `load_game`); the recording and
+the game stop at the time limit (or Ctrl+C). Then, with DIR holding the
+one trace:
 
     tools/gpu_trace.py DIR              # per second: GPU busy, frames, main pass
     tools/gpu_trace.py DIR 11 18        # and the passes between 11 and 18 s
 
-Recording with the benchmark (no NO_BENCH) times each of its rows: they
-are 4 s each after the view's measurement, in `look::Parts::each_off` order.
+The `bench` tool (the developer flag) times each of its rows while it
+records: 4 s each (`bench::WARMUP` + `MEASURE`), the whole look first, then
+the look without each part in `look::Parts::each_off` order; `profile`
+gives the CPU side of the same seconds.
 The exported tables are kept next to the trace (DIR/t_*.xml); delete the
 trace when done, it is hundreds of MB.
 """
@@ -40,8 +48,16 @@ TABLES = [
 MAIN_PASS = "main_opaque_pass_3d"
 
 
+def trace_in(names: list[str]) -> str:
+    """The trace among a directory's entries: the one `*.trace` there."""
+    traces = sorted(n for n in names if n.endswith(".trace"))
+    if len(traces) != 1:
+        sys.exit(f"expected one *.trace in the directory, found {traces or 'none'}")
+    return traces[0]
+
+
 def export(d: Path) -> None:
-    trace = d / "plunge.trace"
+    trace = d / trace_in([p.name for p in d.iterdir()])
     for t in TABLES:
         out = d / f"t_{t}.xml"
         if out.exists() and out.stat().st_size > 0:
