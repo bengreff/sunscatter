@@ -1,6 +1,6 @@
 # Brief: REVIEW, tonight's sim changes against the rules (2026-10-31)
 
-Overnight (2026-10-30/31) about 25 agents changed `crates/sim` from fac4bda to HEAD: 173 commits, 131 files, ~8,000 lines added and ~7,000 deleted (PLANNER, ONEKIND, STATE, LAYERS, AUDIT; the interface agents' sim additions). Each commit passed fmt, clippy and the tests. Tests do not catch everything the rules forbid, so a reader looks for what they miss before the rest of the wave builds on it. Follow [agent-rules.md](agent-rules.md). Your name is REVIEW. You **read only**: no code edits, no builds beyond what reading needs.
+Overnight (2026-10-30/31) about 25 agents changed `crates/sim` from fac4bda to HEAD: 173 commits, 131 files, ~8,000 lines added and ~7,000 deleted (PLANNER, ONEKIND, STATE, LAYERS, AUDIT; the interface agents' sim additions). Each commit passed fmt, clippy and the tests. Tests do not catch everything the rules forbid, so a reader looks for what they miss before the rest of the wave builds on it. Follow [agent-rules.md](../../plans/agent-rules.md). Your name is REVIEW. You **read only**: no code edits, no builds beyond what reading needs.
 
 LAYERS-2 is editing sim now; review HEAD as committed (`git show`, `git diff fac4bda HEAD -- crates/sim`), not the work tree.
 
@@ -29,7 +29,7 @@ Wrap up at about 300k tokens of context: commit the review doc through a private
 
 ## State
 
-**Done** (REVIEW, 2026-10-31, at 0476067, which includes LAYERS-2's 215f0ea and 5187deb). The review is [review-2026-10-31.md](../technical/review-2026-10-31.md): 13 findings, ranked, plus what was checked and found clean, and what was read fully, in part, or not at all.
+**Done** (REVIEW, 2026-10-31, at 0476067, which includes LAYERS-2's 215f0ea and 5187deb). The review is [review-2026-10-31.md](../../technical/review-2026-10-31.md): 13 findings, ranked, plus what was checked and found clean, and what was read fully, in part, or not at all.
 
 - **Areas:**
   - Read fully: partition and split, typed handles, saves, `ship_os` (chutes, ullage, commit, program API), `kepler::propagate`.

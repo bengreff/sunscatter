@@ -2,7 +2,7 @@
 
 Phase 4 flies Crew Dragon to a station and back, and lands the Falcon 9's booster (D117, D123, D125, D126), after the sim-wide wave. This brief prepares the designs those flights need, so their agents start from researched designs instead of a blank page. Follow [agent-rules.md](../../plans/agent-rules.md). Your name is RESEARCH. You build nothing and run no game, so you have no target dir.
 
-Two agents edit code at the same time: **PLANNER-2** ([brief-planner.md](brief-planner.md)) and **ONEKIND-3** ([brief-onekind.md](../../plans/brief-onekind.md)). You write only docs:
+Two agents edit code at the same time: **PLANNER-2** ([brief-planner.md](brief-planner.md)) and **ONEKIND-3** ([brief-onekind.md](brief-onekind.md)). You write only docs:
 - new files under `docs/technical/`;
 - your additions to `docs/vehicles/falcon9.md`, as new rows or sections, never rewording existing ones;
 - this brief's State.

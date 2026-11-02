@@ -1,6 +1,6 @@
 # Brief: LAYERS, the three layers of ship software (draft, 2026-10-30)
 
-**Drafted by AUDIT; reviewed by the lead 2026-10-31.** You run after STATE ([brief-state.md](brief-state.md)), alone in the sim; INTERFACE may still be at work in the game's interface.
+**Drafted by AUDIT; reviewed by the lead 2026-10-31.** You run after STATE ([brief-state.md](../archive/briefs/brief-state.md)), alone in the sim; INTERFACE may still be at work in the game's interface.
 
 D128 (owner, [interview-2026-10-30-roadmap.md](../archive/interviews/interview-2026-10-30-roadmap.md)):
 - **Layer 1:** "Each part should have built in, fundamental logic … synonomous with how the part actually works". With it alone a ship "should be enough to coast for months if everything is set up".

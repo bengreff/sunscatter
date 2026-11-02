@@ -3,7 +3,7 @@
 D126: planned burns run closed-loop to their target state, with real engine starts, ullage settling and tail-off, as flight-layer programs. Today only the test craft can plan a burn (`Vessel::set_plan` returns `PlanError::PartsUnsupported` for a craft of parts), and its burn is open-loop: steady thrust at a constant mass flow along a direction law (`sim::vessel::burn`). Follow [agent-rules.md](../../plans/agent-rules.md). Your name is PLANNER and your target dir is `target/agents/planner` (a cold start).
 
 Two other agents run at the same time:
-- **ONEKIND-3** ([brief-onekind.md](../../plans/brief-onekind.md)) moves the other tests onto craft of parts and rebuilds the stress craft. It deletes the made-up path and the test craft only **after** you land: leave the open-loop burn law in place, and tell the lead in your State when your tests no longer need it.
+- **ONEKIND-3** ([brief-onekind.md](brief-onekind.md)) moves the other tests onto craft of parts and rebuilds the stress craft. It deletes the made-up path and the test craft only **after** you land: leave the open-loop burn law in place, and tell the lead in your State when your tests no longer need it.
 - **AUDIT** ([brief-audit.md](brief-audit.md)) reads the code for D129 (the same course of events at every warp) and D128 (the software layers), and writes only new docs and test files.
 
 ## Read first

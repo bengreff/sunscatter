@@ -1,8 +1,8 @@
 # Brief: MISSION, one testing framework (2026-10-30)
 
 D122: unit tests, plus mission tests flown headless through MCP by a development agent on the real flight software, with screenshots. The scripted demo and the body tour are deleted. Follow [agent-rules.md](../../plans/agent-rules.md). Your name is MISSION and your target dir is `target/agents/mission`: start warm with `mv target/agents/fixes2 target/agents/mission` (a release build of the game is in it). Two other agents run at the same time:
-- **ONEKIND** ([brief-onekind.md](../../plans/brief-onekind.md)) is deleting the test craft across `sim` and `game`, except the demo and the tour, which are yours.
-- **DOCS** ([brief-docs.md](../../plans/brief-docs.md)) is restructuring `docs/`. Edit docs only for the commands you change (`CLAUDE.md`'s Commands section, the MCP's doc). List the rest in your State.
+- **ONEKIND** ([brief-onekind.md](brief-onekind.md)) is deleting the test craft across `sim` and `game`, except the demo and the tour, which are yours.
+- **DOCS** ([brief-docs.md](brief-docs.md)) is restructuring `docs/`. Edit docs only for the commands you change (`CLAUDE.md`'s Commands section, the MCP's doc). List the rest in your State.
 
 ## The work, in order
 

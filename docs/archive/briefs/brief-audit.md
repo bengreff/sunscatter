@@ -8,7 +8,7 @@ Your job is to find out and write it down, not to fix. ADVANCE and LAYERS fix it
 
 Two other agents edit code at the same time:
 - **PLANNER** ([brief-planner.md](brief-planner.md)) works on planned burns;
-- **ONEKIND-3** ([brief-onekind.md](../../plans/brief-onekind.md)) works on tests and the stress craft.
+- **ONEKIND-3** ([brief-onekind.md](brief-onekind.md)) works on tests and the stress craft.
 
 Write only **new** files: your docs, and test files of your own under `crates/sim/tests/`. Edit nothing else. List any other change you find needed in your State.
 
