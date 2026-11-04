@@ -19,19 +19,18 @@ A SessionStart hook loads this file automatically after `/clear` or at startup. 
 - **Playtest save:** SAVE_VERSION 21, Dragon alone at 199 × 639 km; `./run play`, then Cmd+L.
 - **Usage:** the night's 34 agents ran into the weekly limit (reset 2026-11-02 01:00 CT), past CLAUDE.md's 20 %-a-night cap: agents running to 300k+ cost far more than the earlier "5 agents ≈ 3 %".
 
-## Next steps
+## Next steps (owner + Director, 2026-11-03: scope reassessment)
 
-1. **LAYERS' last items**, starting from `stash@{0}`.
-2. **The wave, one sim-wide agent at a time**, briefs written and reviewed: [FIXES3](brief-fixes3.md) (REVIEW's #2–#4 first: `Vessel.ship` not optional, the made-up engine in thermal, the estimate's engine rule), [ADVANCE](brief-advance.md) (AUDIT's divergences D1–D6, events at their own epochs), [PERF](brief-perf.md) (the coast's tank law at 5,000 parts, then the thermal network: 62 % of a 1,000-part live tick), [DEBRIS](brief-debris.md).
-3. **The two flights** (D117, D123), each checked by an MCP mission test (D122), from RESEARCH's designs:
-   - Crew Dragon: docking (`partition::merge` keeps only one vessel's orders: REVIEW #5), burns on the Dracos, the trunk joint, 1-D ablation, the chutes on AUTO, a calm sea, D116's doses, a placeholder station;
-   - the booster: relight, boostback and entry by predictor–corrector, convex landing guidance (D043), a landing zone first.
-4. **Small items:** the render scale flips 0.8 ↔ 1.0 in a headless game; stage 2's RP-1 reads 29.70 t against 29.66 t on the pad; a tumbling craft with liquids keeps angular momentum at a split only to ~2e-7; the 11-vessel performance check (`spawn_vessels`, then `profile` at warps 0, 6, 9); Windows on backhouse (port 22 did not answer on 2026-10-31).
-5. **Queued:** Dragon's helium bottles; nozzle flow separation; the Falcon 9's U/E data. After the flights: D115's fidelity. **Frozen:** visuals (the interface is not, D123). **The career:** after v0.3.
+**Read [scope-2026-11.md](scope-2026-11.md) first.** The owner's 68-answer interview ([interview-2026-11-02-scope.md](../archive/interviews/interview-2026-11-02-scope.md)) redefined v0.2 around a general foundation (generic part types, calibration on Electron/Falcon 1, then F9 + Dragon, a probe, warp and scale benchmarks). Until the design sessions settle it:
+
+1. **Land stash@{0}** (LAYERS-4 + INTERFACE-13), tested, so main is clean.
+2. **Then only research spikes**, no feature work: warp invariance (scope 3.3's four cases at 1x / 10^3x / 10^5x), CoolProp over FFI, Rapier determinism Mac vs Windows, one ExoPlaSim climatology.
+3. **Design sessions with the owner**, craft data model first (scope section 8).
+4. **Frozen:** the interface (scope section 4 replaces it later); the FIXES3 / ADVANCE / PERF / DEBRIS wave and the two flights wait for the new design (their briefs stay as reference).
 
 ## Open for the owner
 
-About 50 defaults the agents took are in [owner-questions.md](owner-questions.md), most important first. The top three: should a running planned burn move the pilot's throttle, so X takes over (FIXES3's default: yes)? What counts as input that "conflicts" with a program (D126)? The stress craft's shape (a core with rings of boosters, or station-like)?
+DROPPED (owner, 2026-11-03): the ~50 defaults in [owner-questions.md](owner-questions.md) stay frozen in code; only those the new design still needs get re-asked (the stress craft's shape is still open: scope section 9).
 
 ## Gotchas
 
