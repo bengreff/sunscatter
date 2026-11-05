@@ -2,7 +2,23 @@
 
 Status: research input for design session 1, not canon. Scope: a taxonomy broad enough to build any present-day launch vehicle, crewed capsule, station, satellite, probe, lander, or rover, plus near-future placeholders (NTR, NEP/SEP, fusion, sails) used only to pressure-test the taxonomy. This is not a database of real hardware.
 
-Definitions in force (scope-2026-11.md 3.1): a **part** is the smallest placeable physical object: one shape, one rigid body, one exterior. A **component** is a parameter inside a part's shape that adds mass and drives the part's internal logic; it is not placed. Rule of thumb (3.1, 5.2): if a real program buys it from a supplier or swaps it between production runs, it is a component.
+## Changes (2026-11-04)
+
+Brought into line with the owner's settled rules 1-21 in [part-schema.md](../part-schema.md) and the corrections named in [electron-worked-example.md](../electron-worked-example.md) section 5.
+
+- **Reaction wheel** moved part -> component (settled 7: it spins inside the bus, not its own exterior; its momentum torques the host part).
+- **Five avionics boxes** (`flight_computer_unit`, `data_handling_unit`, `power_distribution_unit`, `sensor_interface_unit`, `subsystem_controller`) moved part -> component, hosted in `structure.equipment_bay` (settled 21; electron-worked-example G17: "the catalog needs that correction").
+- **`tank.pressurant_copv`** moved part -> component, renamed `vessel.copv` (settled 18: pressure vessels inside a part's volume, including COPVs, are components; some are jettisonable).
+- **`mechanism.gimbal_actuator_mount`** and **`mechanism.deployment_hinge`** removed as part types. A gimbal, hinge or slider is now an articulated mount-surface kind (settled 19), not a part; their actuator/spring/latch/sensor components are re-hosted on the parts they actuate (`structure.thrust_structure`, `landing.terminal_descent_mount`, `comms.antenna_dish_parabolic`, `power.solar_array_rigid/flexible`).
+- **`mechanism.separation_system`**, **`mechanism.clamp_band_release`**, **`mechanism.docking_latch_mechanism`** removed as part types. Decoupling (and capture) is always a component (settled 9); the existing `separation_bolt.pyrotechnic`, `frangible_nut`, `clamp_band.marman`, `bolt_cutter.pyro`, `capture_latch` components already cover them, re-hosted on the structural parts that actually separate or mate (`structure.interstage`, `structure.payload_adapter`, `structure.fairing_half`, docking ports).
+- **Added components** named by electron-worked-example G19: `pump.electric_centrifugal`, `power.motor_inverter`, `diffuser.pressurant`, `conduit.feed_tunnel`.
+- **Mechanisms family** renamed from "Mechanisms and separation" to "Mechanisms" (separation devices are components now, not a part sub-family); only `deployable_boom` and `robotic_arm` remain, since both have their own exterior and move as their own body (settled 7).
+- **Boundary-cases section (3)** rewritten for reaction wheel, COPV, avionics boxes, moving joints, and decoupling/capture mechanisms to state the ruling instead of a recommendation.
+- Part and component counts updated; the Avionics *part* family is removed (its boxes are components); families count 17 -> 16.
+
+## Definitions
+
+Definitions in force (settled 7, 9, 17, 18, 19, 20, 21 in [part-schema.md](../part-schema.md)): a **part** has its own exterior and mount surface, or can separate or move as its own body (settled 7). One pressure-vessel structure is one part and may hold several fluid volumes, a common bulkhead counting as one part (settled 17). A **component** is anything inside a part's volume, including a pressure vessel (settled 18) or something that spins (settled 7); it adds mass and drives its host's internal logic, and some components are jettisonable, leaving a lump-of-mass debris object on release (settled 18). A moving joint is an articulated mount surface (hinge, gimbal or slider) with an actuator component on one side (settled 19); decoupling, and capturing at a mating interface, is always a component, with a separate decoupler/adapter part only when there is a major mechanism or a large adapter (settled 9). Trivial components (lines, hoses, wiring, fasteners, baffles, foam) have no node of their own; wall thickness and similar geometry-altering parameters are geometry, not production (settled 20). The supplier/swap test is a tiebreaker, not the primary test.
 
 Field legend (scope-2026-11.md 5.1): F1 astrodynamics & control; F2 fluid dynamics & aerothermo; F3 thermodynamics & cryogenics; F4 chemistry & electrochemistry; F5 materials science & solid mechanics; F6 process science; F7 condensed matter & electronics; F8 electromagnetism & photonics; F9 plasma physics; F10 nuclear physics; F11 fundamental & particle physics; F12 planetary science; F13 astronomy & astrophysics; F14 life sciences; F15 computing & information.
 
@@ -10,7 +26,7 @@ Sources used throughout, cited briefly inline: NASA SP-8000 series (structures/l
 
 ## 1. Part types
 
-Columns: id, what it is, key shape parameters, mount faces/ports it typically exposes, component slots it typically holds, 2-3 real examples, science fields (F#) it draws on. ~100 types across 17 families (SMAD ch.10-21 subsystem split; NASA SP-8000 structures criteria; ECSS-E/Q discipline split for the structure/mechanism/thermal boundary).
+Columns: id, what it is, key shape parameters, mount faces/ports it typically exposes, component slots it typically holds, 2-3 real examples, science fields (F#) it draws on. The "mounts/ports" column is mount surfaces (rings, hard points, truss nodes, docking standards, payload-adapter standards, and now hinge/gimbal/slider for a moving joint, settled 12, 19); each surface carries the ports listed, and joining two surfaces joins their matching ports (settled 13). ~90 types across 16 families (SMAD ch.10-21 subsystem split; NASA SP-8000 structures criteria; ECSS-E/Q discipline split for the structure/mechanism/thermal boundary). Each type also expects a class node per size regime and per alternative design, plus a node per new-in-kind material or component type (settled 15, 20); that layering is the node system's job, not a column here.
 
 ### Structure
 
@@ -19,11 +35,11 @@ Columns: id, what it is, key shape parameters, mount faces/ports it typically ex
 | structure.interstage | shell joining two stages, separates at burnout | diameter, length, wall material/thickness, taper | fwd/aft mount rings, separation joint | separation_bolt, clamp_band, pyro_cutter | Falcon 9, Electron, Saturn V S-IC/S-II | F5, F1 |
 | structure.fairing_half | payload fairing shell half, aero + jettison | ogive/biconic profile, diameter, length, acoustic lining | longitudinal split joint, base ring | separation_bolt, pyro_cutter, spring_pusher, acoustic_blanket | Falcon 9, Ariane 5, Atlas V PLF | F2, F5 |
 | structure.payload_adapter | ring/cone carrying payload loads, hosts separation | bolt-circle diameter, height, load rating | LV interface ring, payload ring | clamp_band_marman, separation_spring, separation_bolt | Falcon 9 PAF, ESPA ring | F5, F1 |
-| structure.thrust_structure | cone/cylinder carrying engine thrust into airframe | diameter, cone angle, material, engine pattern | engine mounts (xN), tank interface | gimbal_bearing_ring, load_cell, strut | Falcon 9 octaweb, Saturn V thrust structure | F5, F1 |
+| structure.thrust_structure | cone/cylinder carrying engine thrust into airframe | diameter, cone angle, material, engine pattern | engine mounts (xN, gimbal-kind where TVC, settled 19), tank interface | gimbal_bearing_ring, load_cell, strut, hydraulic_actuator or electromechanical_actuator | Falcon 9 octaweb, Saturn V thrust structure | F5, F1 |
 | structure.truss_strut | open lattice primary/secondary load member | length, cross-section, material, end fitting | two end mount faces | fastener_bolted_joint, damper_isolator | ISS truss segment, sat bus struts | F5 |
 | structure.panel_sandwich | flat/curved honeycomb or composite skin panel | face sheet material, core density, thickness | edge mounts to frame | insert_potted, doubler_reinforcement | sat bus panel, CubeSat frame | F5, F6 |
 | structure.ring_frame | circumferential stiffening ring inside a shell | diameter, section modulus, material | bonded/riveted to shell, hard points | fastener_bolted_joint | tank stiffening rings, fuselage frames | F5 |
-| structure.equipment_bay | generic enclosure hosting electronics/power/small fluid parts | internal volume, envelope, shielding | structural mount, power/data/thermal ports | flight_computer_card, battery_cell_pack, dc_dc_converter, pcu, coldplate | sat avionics bay, Dragon trunk pallet, CubeSat bus | F7, F15, F5 |
+| structure.equipment_bay | generic enclosure hosting electronics/power/small fluid parts | internal volume, envelope, shielding | structural mount, power/data/thermal ports | avionics.flight_computer_unit, avionics.data_handling_unit, avionics.power_distribution_unit, avionics.sensor_interface_unit, avionics.subsystem_controller, battery.cell_pack, dc_dc_converter, power_conditioning_unit, coldplate.component_mount | sat avionics bay, Dragon trunk pallet, CubeSat bus | F7, F15, F5 |
 
 ### Tankage
 
@@ -33,8 +49,9 @@ Columns: id, what it is, key shape parameters, mount faces/ports it typically ex
 | tank.spherical | spherical vessel, best strength/mass | diameter, wall thickness, material | polar/equatorial ports | pmd_screen, pressure_transducer | Apollo SM helium spheres, Gemini tanks | F5 |
 | tank.toroidal | donut tank fit around other structure | major/minor radius, wall thickness | feed ports around circumference | baffle_antislosh | Centaur toroidal-tank studies | F5, F2 |
 | tank.conformal | non-axisymmetric tank fit to free volume | free-form shell surface, thickness map | as placed | pmd_screen, pressure_transducer | sat bus conformal prop tanks | F5, F6 |
-| tank.pressurant_copv | composite overwrapped high-pressure vessel | diameter, liner material, overwrap layup, burst pressure, cycle life | fill/vent port(s) | pressure_transducer, burst_disk, fill_valve | Falcon 9 COPVs, ISS He/N2 COPVs | F5, F6 |
 | tank.cryo_vacuum_jacketed | double-wall tank, insulated annulus for cryogens | shell geometry, MLI layers, vacuum annulus, boil-off target | fill/drain, vent, feed, instrumentation | mli_blanket, vacuum_getter_pump, cryo_valve, level_sensor_cryo | Centaur LH2 tank, Shuttle ET, Starship | F3, F5 |
+
+A pressurant COPV is a component (`vessel.copv`, section 2) hosted inside the tank or bay it pressurises, not a part of its own (settled 18). A common bulkhead between two propellant volumes does not split a tank into two parts: the wound structure with its shared wall is one `tank.cylindrical` (or spherical) part carrying both volumes, per settled 17.
 
 ### Propulsion, primary
 
@@ -60,8 +77,8 @@ Columns: id, what it is, key shape parameters, mount faces/ports it typically ex
 
 | id | what | key params | mounts/ports | component slots | examples | fields |
 |---|---|---|---|---|---|---|
-| power.solar_array_rigid | flat rigid PV panel, fixed/gimballed yoke | area, cell type/efficiency, substrate, deploy axis | hinge/yoke mount (to a boom part), power out | solar_cell_photovoltaic, bypass_diode, slip_ring_rotary | ISS array panel, many GEO sats | F7, F5, F1 |
-| power.solar_array_flexible | roll-out/fold-out thin-film array | stowed/deployed area, cell type | root port to a deployable_boom part, power out | solar_cell_photovoltaic, bypass_diode | ROSA, MegaFlex | F7, F5, F6 |
+| power.solar_array_rigid | flat rigid PV panel, fixed/gimballed yoke | area, cell type/efficiency, substrate, deploy axis | hinge-kind mount surface (to a boom part or bus, settled 19), power out | solar_cell_photovoltaic, bypass_diode, slip_ring_rotary, torsion_spring, latch_mechanism, position_sensor, drive_motor | ISS array panel, many GEO sats | F7, F5, F1 |
+| power.solar_array_flexible | roll-out/fold-out thin-film array | stowed/deployed area, cell type | root port to a deployable_boom part, power out | solar_cell_photovoltaic, bypass_diode, drive_motor, position_sensor | ROSA, MegaFlex | F7, F5, F6 |
 | power.battery_module_housing | structural box/mount for battery cells (cells are components) | envelope, mount pattern, thermal interface | power bus port, thermal port | battery_cell_pack, battery_management_unit, fuse_power | Dragon trunk battery pallet, sat battery box | F4, F3, F7 |
 | power.fuel_cell_module | housing for a fuel-cell stack, reactant interface | envelope, reactant ports, coolant interface | H2/O2 feed, power out, coolant | fuel_cell_pem_stack, dc_dc_converter | Gemini/Apollo/Shuttle fuel cells | F4, F3 |
 | power.rtg | self-contained radioisotope-to-power unit | isotope loading, couple count, output/decay curve | structural mount, power out, radiator interface | thermoelectric_module, radioisotope_heat_source | MMRTG (Curiosity, Perseverance), GPHS-RTG (Voyager) | F10, F3, F7 |
@@ -78,22 +95,14 @@ Columns: id, what it is, key shape parameters, mount faces/ports it typically ex
 | thermal.heatshield_ablative | fixed-geometry entry heatshield, ablative/charring material | outer mold line, material layup, char-depth margin | structural mount, sensor penetrations | ablator_tile, thermocouple_sensor, strain_gauge | Dragon PICA-X, Apollo/Orion AVCOAT | F2, F5, F3 |
 | thermal.heatshield_reusable_tps | reusable tile/blanket TPS system | tile grid, material (RCC/ceramic), attachment | structural mount, gap-filler interfaces | tps_tile_ceramic, strain_isolation_pad, gap_filler | Shuttle orbiter tiles/RCC | F2, F5 |
 
-### Avionics
-
-| id | what | key params | mounts/ports | component slots | examples | fields |
-|---|---|---|---|---|---|---|
-| avionics.flight_computer_unit | primary flight/guidance computer box | throughput, redundancy (TMR), rad-hardness, I/O count | structural mount, data bus (xN), power | flight_computer_card, memory_module_radhard, watchdog_timer | Falcon 9 flight computer, Orion VMC | F15, F7 |
-| avionics.data_handling_unit | payload/subsystem data concentrator and recorder | channel count, storage, interface standards | data bus, power, sensor inputs | solid_state_recorder, data_bus_node, fpga_card | sat C&DH unit, probe CDH box | F15, F7 |
-| avionics.power_distribution_unit | switches and protects power to loads | channel count, current rating, switching type | power bus in, power out (xN), data | relay_power_switch, fuse_power, current_sensor | PDU on most LVs/sats | F7, F15 |
-| avionics.sensor_interface_unit | signal conditioning/ADC between analog sensors and bus | channel count, sample rate, resolution | sensor inputs, data bus | adc_card, signal_conditioning_card | flight test instrumentation units | F15, F7 |
-| avionics.subsystem_controller | generic programmable controller (valves, heaters) | I/O count, control loop rate | data bus, actuator/sensor lines, power | fpga_card, flight_computer_card | thermal/fluid subsystem controllers | F15, F7 |
+Avionics boxes (flight computer, data handling unit, PDU, sensor interface unit, subsystem controller) are components, not parts: they sit inside a part's volume (the equipment bay, or any part with internal volume), same as any other internal box (settled 7, 21; electron-worked-example G17). See section 2, Data and power graphs.
 
 ### Comms
 
 | id | what | key params | mounts/ports | component slots | examples | fields |
 |---|---|---|---|---|---|---|
 | comms.transponder_unit | RF transceiver box for telemetry/command/tracking | frequency band, power out, modulation/coding | RF to antenna, data bus, power | power_amplifier_rf, software_defined_radio_card | LV telemetry transponder, Small Deep Space Transponder | F8, F15 |
-| comms.antenna_dish_parabolic | fixed/gimballed high-gain reflector | diameter, focal ratio, surface accuracy, gimbal range | RF feed, gimbal mount (to a gimbal_actuator_mount part) | rf_feed_horn | Voyager HGA, New Horizons HGA | F8, F5 |
+| comms.antenna_dish_parabolic | fixed/gimballed high-gain reflector | diameter, focal ratio, surface accuracy, gimbal range | RF feed, gimbal-kind mount surface (settled 19) | rf_feed_horn, hydraulic_actuator or electromechanical_actuator, position_sensor | Voyager HGA, New Horizons HGA | F8, F5 |
 | comms.antenna_omni_patch | low-gain omni/patch antenna | frequency, pattern, mounting | RF connector, structural mount | rf_feed_horn | CubeSat patch antennas, LV telemetry omnis | F8 |
 | comms.laser_terminal_optical | optical comms terminal (near-term) | aperture, pointing accuracy, data rate | optical bench mount, gimbal, data bus | laser_diode_module, fine_steering_mirror, optical_detector_array | LLCD, TBIRD, Starlink laser links | F8, F15, F7 |
 | comms.relay_crosslink_unit | inter-satellite RF/optical crosslink unit | band, range, pointing | RF/optical, data bus | software_defined_radio_card, laser_diode_module | TDRSS crosslink, Starlink laser crosslink | F8, F15 |
@@ -108,20 +117,18 @@ Columns: id, what it is, key shape parameters, mount faces/ports it typically ex
 | gnc.horizon_sensor | Earth/planet horizon crossing sensor | FOV, spectral band, accuracy | structural mount, data, power | optical_detector_array | IR horizon sensors on GEO sats | F1, F8 |
 | gnc.gnss_receiver | satellite-navigation receiver | channel count, dynamics limits, accuracy | antenna RF in, data, power | rf_frontend_card, processing_card | LV GPS units, ISS GPS receivers | F1, F8, F15 |
 | gnc.radar_altimeter_lidar | ranging sensor for landing/rendezvous/altimetry | range, accuracy, beam pattern, type | aperture mount, data, power | rf_transceiver_card or laser_diode_module, optical_detector_array | Mars lander terminal descent radar, rendezvous lidar | F1, F8, F12 |
-| gnc.reaction_wheel | spinning-rotor momentum-storage actuator | max momentum, max torque, rotor inertia, bearing life | structural mount, power, data | motor_winding, bearing_rotary_assembly, tachometer | Honeywell HR-series, RSI wheels | F1, F5, F7 |
 | gnc.magnetic_torquer | electromagnet producing torque against planetary field | dipole moment, coil geometry, power draw | structural mount, power, data | coil_winding_core | torque rods on LEO cubesats/sats | F1, F8, F7 |
 
-### Mechanisms and separation
+A reaction wheel is a component (`gnc.reaction_wheel`, section 2), not a part: it spins inside the bus's volume, same as a turbopump inside an engine (settled 7). Its rotor momentum is component state that torques the host part directly.
+
+### Mechanisms
+
+Only two types remain here: each has its own exterior and moves as its own body (settled 7). A gimbal, hinge or slider joint is a mount-surface kind on the part it moves (settled 19), not a part of its own; a separation or capture device is a component on the mating surface (settled 9). See section 2 for both.
 
 | id | what | key params | mounts/ports | component slots | examples | fields |
 |---|---|---|---|---|---|---|
-| mechanism.deployment_hinge | rotary joint deploying a panel/antenna, spring/motor driven | range of motion, torque/spring rate, latch type | two mount faces (stowed/deployed side) | torsion_spring, latch_mechanism, position_sensor, drive_motor | solar array hinge, antenna deployment hinge | F5, F1 |
-| mechanism.deployable_boom | telescoping/coilable boom extending a sensor/antenna/array | stowed/deployed length, cross-section, material | root mount, tip mount for payload | drive_motor, position_sensor | magnetometer booms, STACER/Bi-STEM | F5, F6 |
-| mechanism.separation_system | pyro/non-pyro device releasing two mated parts | release force, actuation type, shock output | two mating ports | separation_bolt_pyro, frangible_nut, pyro_cutter | stage separation systems | F5, F6 |
-| mechanism.clamp_band_release | circumferential band joint with release (Marman-type) | band tension, release type | two ring mating faces | clamp_band_marman, bolt_cutter_pyro | payload adapter clamp bands | F5 |
+| mechanism.deployable_boom | telescoping/coilable boom extending a sensor/antenna/array | stowed/deployed length, cross-section, material | root mount (hinge/telescoping-kind), tip mount for payload | drive_motor, position_sensor, latch_mechanism | magnetometer booms, STACER/Bi-STEM | F5, F6 |
 | mechanism.robotic_arm | multi-joint manipulator for grapple/assembly/sampling | reach, joint count, payload capacity, end-effector type | base mount, end-effector port | joint_actuator_robotic, encoder_position, end_effector_tool | Canadarm2, OSIRIS-REx TAGSAM arm | F1, F5, F15 |
-| mechanism.gimbal_actuator_mount | actuated mount letting an engine/antenna/instrument pivot | range of motion, torque, response rate | fixed base mount, moving payload mount | hydraulic_actuator or electromechanical_actuator, position_sensor | engine TVC mounts, antenna gimbal mounts | F1, F5 |
-| mechanism.docking_latch_mechanism | captures and rigidizes a docking interface after soft capture | capture envelope, retraction force, alignment tolerance | docking interface port | capture_latch, load_limiter_strut, umbilical_connector | NASA Docking System, CBM latches | F5, F1 |
 
 ### Recovery and entry
 
@@ -177,7 +184,7 @@ Columns: id, what it is, key shape parameters, mount faces/ports it typically ex
 | landing.rover_wheel | wheel for planetary surface mobility | diameter, width, tread pattern, material | axle/hub mount | motor_wheel_hub, suspension_strut | Curiosity/Perseverance wheels, Lunokhod | F5, F12, F6 |
 | landing.suspension_rocker_bogie | rocker-bogie or similar passive suspension linkage | linkage geometry, travel, load distribution | chassis mount, wheel mounts (xN) | pivot_bearing, differential_linkage | Mars rover rocker-bogie suspension | F5, F12 |
 | landing.anchoring_harpoon_foot | surface anchoring device for low-gravity bodies | penetration force, hold force, deployment type | structural mount, ground interface | harpoon_pyro, tether_winch | Philae harpoons/ice screws | F5, F12 |
-| landing.terminal_descent_mount | structure carrying small throttleable descent engines plus legs | engine mount pattern, leg attach points | engine mounts (xN), leg mounts (xN) | load_cell, gimbal_bearing_ring | lunar module descent stage, Mars lander descent stage | F5, F1 |
+| landing.terminal_descent_mount | structure carrying small throttleable descent engines plus legs | engine mount pattern, leg attach points | engine mounts (xN, gimbal-kind where TVC), leg mounts (xN) | load_cell, gimbal_bearing_ring, hydraulic_actuator or electromechanical_actuator | lunar module descent stage, Mars lander descent stage | F5, F1 |
 
 ### Ground support interfaces
 
@@ -203,7 +210,7 @@ Added only to test that the taxonomy extends without a new family. See section 4
 | power.sail_magnetic_plasma | large superconducting loop deflecting the solar wind for thrust | loop radius, current/field strength, deployment type | loop deployment root, bus mount | magnet_coil_hts | concept studies (MagSail, M2P2) | F9, F7, F5 |
 | propulsion.sep_thruster_cluster_mount | structural mount for a gimballed cluster of SEP thrusters | thruster count, gimbal range, thermal interface | thruster mounts (xN), power bus | gimbal_actuator, power_processing_unit | proposed high-power SEP cargo tugs (concept) | F9, F7, F1 |
 
-**Count: 102 part types** across the 16 named families plus the advanced-placeholder group, inside the 60-120 target.
+**Count: 90 part types** across the 15 named families plus the advanced-placeholder group (16 total; the Avionics part family is removed, its boxes are components, section 2), inside the 60-120 target.
 
 ## 2. Component types
 
@@ -216,22 +223,26 @@ Columns: id, what it is, key parameters, part types that typically host it, the 
 | valve.ball | on/off or throttling ball valve | Cv, actuation type, seat material | tank, engine, feed lines | fluid | Falcon 9 prevalves |
 | valve.poppet | fast-acting poppet valve | response time, seat leak rate | engine, RCS thruster | fluid | engine main valves |
 | valve.check | one-way flow valve | cracking pressure, reverse leak rate | feed/pressurant lines | fluid | feed check valves |
-| valve.relief_pressure | opens above set pressure to protect a vessel | set pressure, reseat pressure, flow capacity | tank, COPV | fluid | tank relief valves |
+| valve.relief_pressure | opens above set pressure to protect a vessel | set pressure, reseat pressure, flow capacity | tank.cylindrical/spherical, vessel.copv | fluid | tank relief valves |
 | valve.pyro_normally_closed | one-shot pyro valve, opens once | seal burst pressure, actuation energy | engine/pressurant lines | fluid, structural | Shuttle pyro valves |
 | valve.pyro_normally_open | one-shot pyro valve, closes once (guillotine) | cut force, seal retention | safety isolation lines | fluid, structural | pyro guillotine valves |
 | valve.solenoid | electrically actuated on/off valve | response time, coil power, leak rate | RCS thrusters, small lines | fluid, power, data | RCS solenoid valves |
 | valve.cryogenic_shutoff | shutoff valve rated for cryo service | cryo seal material, thermal gradient tolerance | cryo tank, cryo feed line | fluid, thermal | LH2/LOX shutoffs |
-| valve.burst_disk | passive overpressure relief, bursts once | burst pressure tolerance | COPV, pressurant tank | fluid, structural | COPV burst disks |
+| valve.burst_disk | passive overpressure relief, bursts once | burst pressure tolerance | vessel.copv, pressurant tank | fluid, structural | COPV burst disks |
 | regulator.pressure | reduces/holds downstream pressure | set pressure, flow capacity, droop | pressurant feed system | fluid | He pressure regulators |
+| diffuser.pressurant | breaks up incoming pressurant jet to avoid disturbing the fluid surface | inlet geometry, diffusion pattern, pressure drop | tank.cylindrical/spherical (pressurant inlet) | fluid | Electron's LOX tank pressurant diffuser (electron-worked-example G19) |
 | orifice.flow_restrictor | fixed flow restriction | diameter, discharge coefficient | feed lines, injector | fluid | flow trim orifices |
 | filter.inline_mesh | traps particulates from flow | mesh rating, pressure drop, dirt capacity | feed lines, pump inlet | fluid | propellant filters |
 | line.tube_rigid | rigid routed tube segment | diameter, wall thickness, bend radius, material | any part with internal routing | fluid, structural | propellant lines |
+| conduit.feed_tunnel | protected structural conduit routing a line through another tank's volume | diameter, length, material, pressure rating | tank.cylindrical (feed tunnel through another tank), thrust_structure | fluid, structural | Electron's stage-1 LOX feed tunnel through the RP-1 tank (electron-worked-example G19) |
 | line.flex_hose | flexible hose/bellows crossing a joint | diameter, flex life, burst pressure | gimballed engine feed, umbilicals | fluid, structural | gimbal flex lines |
 | line.bellows_compensator | absorbs thermal expansion/motion in a line | stroke, spring rate, cycle life | cryo lines, gimbal interfaces | fluid, structural, thermal | cryo line bellows |
 | coupling.quick_disconnect_fluid | mates/demates a fluid line without tools | flow capacity, mate/demate force, leak rate | umbilicals, docking ports | fluid | fueling QDs |
 | accumulator.hydraulic | stores hydraulic fluid under pressure | volume, precharge pressure | TVC hydraulic system | fluid, structural | engine TVC accumulators |
+| vessel.copv | composite overwrapped high-pressure vessel, hosted inside a part's volume (settled 18); some are jettisonable | diameter, liner material, overwrap layup, burst pressure, cycle life | tank.cylindrical, tank.spherical, structure.equipment_bay, crew.pressurized_module_shell | fluid, structural | Falcon 9 COPVs, ISS He/N2 COPVs |
 | pump.centrifugal | rotodynamic pump for fluid transfer | flow rate, head rise, efficiency | transfer systems, coolant loops | fluid, power | transfer pumps |
 | pump.turbopump_assembly | turbine-driven pump feeding an engine | flow rate, head rise, turbine power, shaft speed | liquid bipropellant engine | fluid, structural, thermal | Merlin/Rutherford turbopumps |
+| pump.electric_centrifugal | battery/motor-driven centrifugal pump feeding an engine (electric-pump cycle) | flow rate, head rise, motor power, shaft speed | liquid bipropellant engine | fluid, power, structural | Rutherford e-pump (electron-worked-example G19) |
 | injector.element_pattern | meters/atomizes propellant into the chamber | element count/pattern, pressure drop | liquid/hybrid engine | fluid, structural | engine injector plates |
 | igniter.pyrotechnic | one-shot pyrotechnic igniter | energy output, burn time | solid motor, engine startup | fluid, structural | SRM igniters |
 | igniter.torch | repeatable spark/torch igniter | spark energy, duty cycle | restartable liquid engines | fluid, power | spark-torch igniters |
@@ -285,6 +296,7 @@ Columns: id, what it is, key parameters, part types that typically host it, the 
 | bypass_diode | protects a solar string from a shaded/failed cell | forward voltage, current rating | solar array panel | power | array bypass diodes |
 | blocking_diode | prevents reverse current into a string/source | voltage/current rating | solar array, battery bus | power | array blocking diodes |
 | dc_dc_converter | converts bus voltage between levels | input/output voltage, power, efficiency | equipment bay, fuel cell module | power | point-of-load converters |
+| power.motor_inverter | converts battery DC to the AC/commutated drive feeding an electric pump or fan motor | input voltage, output power, switching frequency, efficiency | liquid bipropellant engine (electric-pump cycle) | power, data | Rutherford e-pump inverter (electron-worked-example G19) |
 | power_conditioning_unit | conditions/distributes raw power to a bus standard | input source, output regulation, fault handling | equipment bay, electric thruster mount | power, data | spacecraft PCUs |
 | charge_controller_mppt | tracks max power point charging a battery from an array | tracking algorithm, voltage range | battery_module_housing | power, data | MPPT charge controllers |
 | bus_regulator_shunt | dissipates excess array power to hold bus voltage | shunt stages, dissipation capacity | equipment bay | power | sequential shunt units |
@@ -309,19 +321,24 @@ Columns: id, what it is, key parameters, part types that typically host it, the 
 
 | id | what | key params | hosting parts | graph(s) | examples |
 |---|---|---|---|---|---|
-| flight_computer_card | processing card inside a flight computer | clock speed, rad-hardness, memory | flight_computer_unit, subsystem_controller | data, power | RAD750-class cards |
-| memory_module_radhard | radiation-hardened memory module | capacity, error correction | flight computer, data handling unit | data | rad-hard SDRAM modules |
-| solid_state_recorder | mass data storage recorder | capacity, read/write rate | data_handling_unit | data, power | instrument data recorders |
-| fpga_card.processing | reconfigurable processing card | gate count, I/O count | data handling unit, subsystem controller | data, power | instrument FPGA boards |
+| avionics.flight_computer_unit | primary flight/guidance computer box (moved from parts, settled 21; G17) | throughput, redundancy (TMR), rad-hardness, I/O count | structure.equipment_bay, or any part with internal volume | data, power | Falcon 9 flight computer, Orion VMC |
+| avionics.data_handling_unit | payload/subsystem data concentrator and recorder (moved from parts, settled 21; G17) | channel count, storage, interface standards | structure.equipment_bay | data, power | sat C&DH unit, probe CDH box |
+| avionics.power_distribution_unit | switches and protects power to loads (moved from parts, settled 21; G17) | channel count, current rating, switching type | structure.equipment_bay | power, data | PDU on most LVs/sats |
+| avionics.sensor_interface_unit | signal conditioning/ADC between analog sensors and bus (moved from parts, settled 21; G17) | channel count, sample rate, resolution | structure.equipment_bay | data | flight test instrumentation units |
+| avionics.subsystem_controller | generic programmable controller for valves/heaters (moved from parts, settled 21; G17) | I/O count, control loop rate | structure.equipment_bay | data, power | thermal/fluid subsystem controllers |
+| flight_computer_card | processing card inside a flight computer | clock speed, rad-hardness, memory | avionics.flight_computer_unit, avionics.subsystem_controller | data, power | RAD750-class cards |
+| memory_module_radhard | radiation-hardened memory module | capacity, error correction | avionics.flight_computer_unit, avionics.data_handling_unit | data | rad-hard SDRAM modules |
+| solid_state_recorder | mass data storage recorder | capacity, read/write rate | avionics.data_handling_unit | data, power | instrument data recorders |
+| fpga_card.processing | reconfigurable processing card | gate count, I/O count | avionics.data_handling_unit, avionics.subsystem_controller | data, power | instrument FPGA boards |
 | data_bus_node | interface node on a vehicle data bus | protocol (1553/SpaceWire/CAN), address | any avionics-hosting part | data | 1553 remote terminals |
-| adc_card | analog-to-digital conversion card | channel count, resolution, sample rate | sensor_interface_unit | data | instrumentation ADC cards |
-| signal_conditioning_card | amplifies/filters sensor signals before digitizing | gain range, filter bandwidth | sensor_interface_unit | data | strain/thermocouple conditioners |
+| adc_card | analog-to-digital conversion card | channel count, resolution, sample rate | avionics.sensor_interface_unit | data | instrumentation ADC cards |
+| signal_conditioning_card | amplifies/filters sensor signals before digitizing | gain range, filter bandwidth | avionics.sensor_interface_unit | data | strain/thermocouple conditioners |
 | rf_frontend_card | RF receive/transmit front end | frequency band, noise figure, power | transponder, gnss_receiver | data, power | RF front-end boards |
 | software_defined_radio_card | programmable RF modem | waveform flexibility, data rate | transponder, laser terminal, relay unit | data, power | SDR cards |
 | processing_card.instrument | dedicated processing for an instrument's raw data | throughput, interfaces | imaging/spectrometer instruments | data, power | instrument DPU cards |
-| watchdog_timer | resets a computer on hang detection | timeout window | flight computer unit | data | computer watchdogs |
-| encoder_position | measures a mechanism's position | resolution, interface | robotic arm, gimbal mount, hinge | data, structural | joint encoders |
-| tachometer | measures rotational speed | range, accuracy | reaction wheel, turbopump | data | wheel/turbopump tachometers |
+| watchdog_timer | resets a computer on hang detection | timeout window | avionics.flight_computer_unit | data | computer watchdogs |
+| encoder_position | measures a mechanism's position | resolution, interface | robotic_arm joint, gimbal/hinge-kind mount surface | data, structural | joint encoders |
+| tachometer | measures rotational speed | range, accuracy | gnc.reaction_wheel, pump.turbopump_assembly | data | wheel/turbopump tachometers |
 | dosimeter | measures accumulated radiation dose | sensitivity, range | radiation shelter, particle detector, EVA suit | data, F14 | crew dosimeters |
 
 ### Structural graph
@@ -329,21 +346,24 @@ Columns: id, what it is, key parameters, part types that typically host it, the 
 | id | what | key params | hosting parts | graph(s) | examples |
 |---|---|---|---|---|---|
 | fastener.bolted_joint | threaded mechanical fastener joint | size, preload, material | any two mating structural parts | structural | standard aerospace bolts |
-| separation_bolt.pyrotechnic | bolt with pyro-severed shank | preload, sever energy | separation_system, payload_adapter | structural | stage separation bolts |
-| clamp_band.marman | circumferential V-band clamp joint | tension, segment count | clamp_band_release, payload_adapter | structural | Marman clamp bands |
-| frangible_nut | nut that fractures on command to release a bolt | preload, fracture energy | separation_system | structural | frangible nut separation |
-| pyro_cutter.cable | pyro device severing a cable/strap | cable size, cut energy | fairing separation, chute riser cutters | structural | cable cutters |
-| bolt_cutter.pyro | pyro device severing a bolt or band | bolt size, cut energy | clamp_band_release | structural | Marman band bolt cutters |
+| gnc.reaction_wheel | spinning-rotor momentum-storage actuator (moved from parts, settled 7: spins inside the host, same as a turbopump; its rotor momentum torques the host part) | max momentum, max torque, rotor inertia, bearing life | structure.equipment_bay, or any part with internal volume | structural, power, data | Honeywell HR-series, RSI wheels |
+| separation_bolt.pyrotechnic | bolt with pyro-severed shank; decoupling is always a component (settled 9) | preload, sever energy | structure.interstage, structure.payload_adapter, structure.fairing_half | structural | stage separation bolts |
+| clamp_band.marman | circumferential V-band clamp joint; decoupling is always a component (settled 9) | tension, segment count | structure.payload_adapter | structural | Marman clamp bands |
+| frangible_nut | nut that fractures on command to release a bolt; decoupling is always a component (settled 9) | preload, fracture energy | structure.interstage, structure.payload_adapter | structural | frangible nut separation |
+| pyro_cutter.cable | pyro device severing a cable/strap | cable size, cut energy | structure.fairing_half, recovery.parachute_canister | structural | cable cutters |
+| bolt_cutter.pyro | pyro device severing a bolt or band holding a clamp-band joint | bolt size, cut energy | structure.payload_adapter | structural | Marman band bolt cutters |
 | bracket.mounting | structural mounting bracket for a component | load rating, material | equipment_bay, any component-hosting part | structural | component mounting brackets |
 | damper.vibration_isolator | isolates a component from structural vibration | stiffness, damping ratio | equipment_bay, instrument mounts | structural | wire-rope/elastomer isolators |
-| spring.preload_or_release | mechanical spring storing/releasing energy | spring rate, preload, stroke | separation_system, deployment_hinge | structural | separation push-off springs |
-| torsion_spring | rotational spring driving a hinge | torque curve, windup angle | deployment_hinge | structural | solar panel hinge springs |
-| latch_mechanism | mechanical latch holding a deployed/mated state | holding force, release trigger | deployment_hinge, docking_latch, landing legs | structural, data | deployment latches |
-| position_sensor | detects a mechanism's end position (deployed/stowed) | type (microswitch/Hall), accuracy | deployment_hinge, landing legs, valves | data, structural | deployment limit switches |
-| drive_motor.mechanism | electric motor driving a deployment/rotation mechanism | torque, speed, power | deployment_hinge, deployable_boom, arm joint | power, structural | mechanism drive motors |
-| joint.hinge_pin | simple mechanical rotational joint pin | diameter, material, bearing surface | deployment_hinge, suspension | structural | hinge pins |
-| bearing.rotary_assembly | rolling-element bearing for a rotating joint | load rating, life, lubrication | reaction_wheel, slip_ring, rotary structures | structural | wheel/gimbal bearings |
-| motor_winding | electromagnetic winding driving a rotary actuator | turns, resistance, torque constant | reaction_wheel, torquer, drive motors | power, structural | BLDC motor windings |
+| spring.preload_or_release | mechanical spring storing/releasing energy | spring rate, preload, stroke | structure.interstage, structure.payload_adapter, structure.fairing_half | structural | separation push-off springs |
+| torsion_spring | rotational spring driving a hinge-kind mount surface (settled 19) | torque curve, windup angle | power.solar_array_rigid, comms.antenna_dish_parabolic | structural | solar panel hinge springs |
+| latch_mechanism | mechanical latch holding a deployed/mated state | holding force, release trigger | hinge-kind mount surfaces (solar array, antenna, boom), docking ports, landing legs | structural, data | deployment latches |
+| position_sensor | detects a mechanism's end position (deployed/stowed) | type (microswitch/Hall), accuracy | hinge/gimbal-kind mount surfaces, landing legs, valves | data, structural | deployment limit switches |
+| drive_motor.mechanism | electric motor driving a deployment/rotation mechanism | torque, speed, power | hinge-kind mount surfaces, mechanism.deployable_boom, robotic_arm joint | power, structural | mechanism drive motors |
+| joint.hinge_pin | simple mechanical rotational joint pin | diameter, material, bearing surface | hinge-kind mount surfaces, suspension | structural | hinge pins |
+| bearing.rotary_assembly | rolling-element bearing for a rotating joint | load rating, life, lubrication | gnc.reaction_wheel, slip_ring, rotary structures | structural | wheel/gimbal bearings |
+| motor_winding | electromagnetic winding driving a rotary actuator | turns, resistance, torque constant | gnc.reaction_wheel, gnc.magnetic_torquer, drive motors | power, structural | BLDC motor windings |
+| hydraulic_actuator | hydraulic linear/rotary actuator at a gimbal-kind mount surface (settled 19) | stroke/torque, pressure, response rate | structure.thrust_structure, landing.terminal_descent_mount | fluid, structural, power | TVC hydraulic actuators |
+| electromechanical_actuator | motor-driven linear/rotary actuator at a gimbal-kind mount surface (settled 19) | stroke/torque, speed, power | structure.thrust_structure, comms.antenna_dish_parabolic, robotic_arm joints | power, structural, data | EMA gimbal actuators |
 | gyroscope_element | inertial rate-sensing element | type (MEMS/RLG/FOG), bias, scale factor | imu_inertial | data, structural | gyro elements |
 | accelerometer_element | inertial acceleration-sensing element | range, bias, scale factor | imu_inertial | data, structural | accelerometer elements |
 | crush_core.honeycomb | sacrificial energy-absorbing core | crush strength, stroke | landing legs, seat couch | structural | aluminum honeycomb crush cores |
@@ -363,8 +383,6 @@ Columns: id, what it is, key parameters, part types that typically host it, the 
 | hold_down_release | releases a vehicle from its launch mount | holding force, release time | transporter_erector_interface | structural | hold-down release mechanisms |
 | load_cell | measures force/load at a structural interface | range, accuracy | thrust_structure, terminal_descent_mount | data, structural | engine thrust load cells |
 | gimbal_bearing_ring | bearing ring letting an engine/mount pivot | range of motion, load rating | thrust_structure, terminal_descent_mount | structural | engine gimbal bearings |
-| hydraulic_actuator | hydraulic linear/rotary actuator | stroke/torque, pressure, response rate | gimbal_actuator_mount | fluid, structural, power | TVC hydraulic actuators |
-| electromechanical_actuator | motor-driven linear/rotary actuator | stroke/torque, speed, power | gimbal_actuator_mount, robotic joints | power, structural, data | EMA gimbal actuators |
 | insert.potted | load-carrying insert bonded into a sandwich panel | pull-out strength, material | panel_sandwich | structural | honeycomb panel inserts |
 | doubler.reinforcement | local reinforcement patch at a stress concentration | material, thickness, extent | panel_sandwich, ring_frame | structural | panel doublers |
 
@@ -427,29 +445,31 @@ Columns: id, what it is, key parameters, part types that typically host it, the 
 | membrane_reflective_film | ultra-thin reflective membrane material | areal density, reflectivity, tear resistance | sail_photon_solar | structural (flagged, sec.4) | Kapton/CP1 sail film |
 | tensioning_cable | cable maintaining tension across a deployed membrane/boom | tension, material, length | sail_photon_solar, solar_array_flexible | structural | sail/array tensioning cables |
 
-**Count: 170 component types** across the five system graphs, inside the 100-200 target.
+**Count: 181 component types** across the five system graphs, inside the 100-200 target.
 
-## 3. Boundary cases: part or component?
+## 3. Boundary cases: part or component? (ruling)
 
-The owner's rule of thumb (3.1, 5.2) is "if a real program buys it from a supplier or swaps it between production runs, it's a component." Taken alone this would make engines components, since engines are bought/supplier items too — but 3.1 explicitly makes the whole Rutherford a part ("Rutherford x9, each Rutherford one part") while its pumps/valves/igniter are its components. The rule that actually survives contact with the owner's own example is narrower: **a thing is a part if it needs its own rigid-body/physics state and its own exterior, placed at a mount face; it is a component if it only adds mass and drives its host's internal logic.** The supplier/swap test still matters, but as a tiebreaker, not the primary test. Applied below:
+These were open recommendations; they are now settled against part-schema.md rules 1-21, in particular settled 7: **a part has its own exterior and mount surface, or can separate or move as its own body; anything inside a part's volume is a component, even if it spins or moves.** The supplier/swap test (3.1, 5.2 — "if a real program buys it or swaps it between production runs, it's a component") is a tiebreaker only, not the primary test: it is what makes an engine a part despite being bought, because the owner's own example overrides it ("Rutherford x9, each Rutherford one part," pumps/valves/igniter its components).
 
-| Item | Recommendation | Why |
+| Item | Ruling | Why |
 |---|---|---|
-| Reaction wheel | **Part** | Its spinning rotor is a real angular-momentum store with its own gyroscopic physics that the craft's attitude dynamics must see directly; it mounts at its own mount face, same pattern as an engine. Its windings/bearings/tachometer are its components. |
-| Battery pack | **Component** | No separate exterior or rigid-body behaviour the craft needs; it only adds mass and feeds the power graph. 3.1 itself lists `battery.cell_pack` in the same breath as `valve.ball` and `line.tube` as a typed, parameterized item, not alongside `tank.cylindrical` as a part (line 41). It is hosted inside a `power.battery_module_housing` or `structure.equipment_bay` part. |
-| RCS quad/pod | **Split: each thruster is a part, the bracket is a part, the "quad" is a group** | Each thruster has its own small rigid body and nozzle exterior, same logic as "each Rutherford is one part." A shared mounting bracket is its own small structure part exposing 4 mount faces. "Quad" is a 3.1 *group*: editor/staging label only, no physics, so engine count can change (composability test, line 45) without new code. |
-| Solar array wing | **Split: each rigid/semi-rigid panel segment is a part, the deployment boom/hinge is a part, the cells are components** | A wing is really several parts joined at ports (panel segments, yoke, boom, hinge), consistent with "joining parts joins their ports" (3.1 line 34). The PV cells, diodes, and harness inside a panel are components. Treating the whole wing as one part would hide a real joint (the hinge) that the structural-load graph needs to resolve separately. |
+| Reaction wheel | **Component** | Settled 7 names this exactly: "a reaction wheel in the bus" is a component even though it spins, same as a turbopump in an engine. Its rotor momentum is component state that torques the host part directly; it has no exterior of its own in ship view. Catalogued as `gnc.reaction_wheel` in section 2. |
+| Battery pack | **Component** | No separate exterior or rigid-body behaviour the craft needs; it only adds mass and feeds the power graph. Hosted inside a `power.battery_module_housing` or `structure.equipment_bay` part. A pack that is jettisoned mid-flight (electron-worked-example G3, e.g. two of Electron's three stage-2 HVBs) leaves as a lump-of-mass debris object on release (settled 18); it does not become a part for that reason. |
+| RCS quad/pod | **Split: each thruster is a part, the bracket is a part, the "quad" is a group** | Each thruster has its own small rigid body and nozzle exterior, same logic as "each Rutherford is one part." A shared mounting bracket is its own small structure part exposing 4 mount faces. "Quad" is a group: editor/staging label only, no physics, so engine count can change without new code. A pod with a shared exterior housing several thrusters (electron-worked-example G16, the Kick Stage RCS pod) is itself one part with the thrusters as its components, rather than a group of separate thruster parts. |
+| Solar array wing | **Split: each rigid/semi-rigid panel segment is a part, the deployment boom is a part, the hinge joining them is an articulated mount surface, the cells are components** | A wing is really several parts joined at ports (panel segments, yoke, boom), each with its own exterior. The hinge between them is not itself a part (settled 19) — it is a hinge-kind mount surface on the panel or boom, with a torsion spring or drive motor as the actuator component. The PV cells, diodes, and harness inside a panel are components. |
 | Parachute | **Part, but flagged for a two-model split (section 4)** | Packed, it is one placeable object (canister) with components (riser, pilot chute, mortar). Deployed, it is not rigid and needs a membrane/aero model unlike anything else in the catalog — see section 4, this is the clearest "split it" case in the catalog. |
-| COPV | **Part** | 3.1 names the COPV directly as an example of whole-part pressure-vessel failure ("a COPV burst is one event," line 36), which only makes sense if a COPV is itself a part with its own structural-cell mesh, not a component hidden inside a tank's parameter list. |
-| Engine turbopump | **Component** | 3.1 says this explicitly: "A Rutherford's e-pumps, main valves, gimbal actuators and igniter are its components" (line 31). It adds mass and drives the engine part's internal fluid/structural logic; it has no exterior of its own in ship view. |
-| Docking port | **Part** | It has its own exterior, its own mount face/port definition (3.1 line 34: "ports on mount faces: fluid couplings, connectors, umbilicals"), and different standards (IDSS, APAS, probe-drogue) are swapped at the vehicle's forward interface exactly like an interstage or adapter. Its latches, seals, and alignment guides are components. |
+| COPV | **Component** | Settled 18 is explicit: "anything inside a part's volume is a component, including pressure vessels... a COPV burst is a component failure that damages its host (CRS-7)." Catalogued as `vessel.copv`, hosted inside a tank, bay, or habitat part; some COPVs are jettisonable (electron-worked-example G2: Curie's tanks and COPVs sit inside the Kick Stage's structure). |
+| Engine turbopump / e-pump | **Component** | Settled 7 and rule of thumb 2 agree: "a Rutherford's e-pumps, main valves, gimbal actuators and igniter are its components." It adds mass and drives the engine part's internal fluid/structural logic; it has no exterior of its own in ship view. The electric-pump variant is `pump.electric_centrifugal` with a `power.motor_inverter`, both components (electron-worked-example G19). |
+| Docking port | **Part** | It has its own exterior and its own mount face (settled 12, 13), and different standards (IDSS, APAS, probe-drogue) are swapped at the vehicle's forward interface exactly like an interstage or adapter. Its latches, seals, and alignment guides are components; a generic "docking latch mechanism" is not a separate part alongside it (see the separation/capture-mechanism row below). |
 | Fuel cell stack | **Component** | Same logic as the battery: it is a swappable supplier stack that adds mass and drives a power-module part's logic; the housing with its reactant/coolant ports is the part. |
-| Avionics "black box" (flight computer, PDU, transponder) | **Part** | Each is bought as a sealed unit but is also the smallest placeable thing with its own exterior and mount face — matching the engine precedent, not the battery one. Its boards (`flight_computer_card`, `rf_frontend_card`) are components. |
+| Avionics "black box" (flight computer, PDU, transponder, data handling unit, subsystem controller) | **Component** | Settled 21 and electron-worked-example G17 are explicit: a box bought as a sealed unit still sits inside a part's volume (the avionics bay, or any part with internal volume) — rule 7 wins over the supplier tiebreaker, exactly as it does for a turbopump. "A box bolted to the outside of a structure on its own surface is a part" (G17) remains the exception, but none of the catalogued avionics types describe that case, so all five move to section 2. |
 | Cryocooler | **Component, hosted in a coldbox/equipment part** | It adds cooling capacity and mass to whatever part's thermal node it sits on; it rarely has an exterior that matters in ship view separate from its host box. Borderline: a very large standalone cooler mounted directly to a truss (ISS-style ORU) would push this toward "part," so flag for a size-based exception rather than a type-based one. |
-| Deployable boom / antenna | **Part** | Needs its own articulated rigid-body state (stowed vs. deployed length, tip-mass dynamics) distinct from whatever it is mounted on; this is the same reasoning as the solar-array hinge case. |
-| TPS tile / ablator patch | **Neither cleanly — see section 4** | A tile is too small and too numerous to be a part (thousands per heatshield) and too geometry-coupled to be a normal component (its "parameter" is really a cell-level material/thickness map on the heatshield part's structural/thermal mesh, per 3.1's own cell-vs-part distinction, line 32). Recommend modelling TPS as a material/thickness field over the heatshield part's cells, not as a component type at all. |
+| Deployable boom / antenna | **Part** | Needs its own articulated rigid-body state (stowed vs. deployed length, tip-mass dynamics) distinct from whatever it is mounted on, and can move as its own body (settled 7). The root joint attaching it to its host is a hinge or telescoping-kind mount surface (settled 19), not a separate part. |
+| Moving joint (gimbal, hinge, slider) | **Not a part — an articulated mount surface, with an actuator component** | Settled 19: "moving joints are articulated mount surfaces: kind hinge, gimbal or slider, with range and stiffness. The actuator is a component on one side, attached to a hard point on the other." `mechanism.gimbal_actuator_mount` and `mechanism.deployment_hinge` are removed from the part table for this reason (electron-worked-example G4 raised the gap this closes); the actuator (`hydraulic_actuator`, `electromechanical_actuator`, `drive_motor.mechanism`) is now hosted directly by the part that carries the moving surface (`structure.thrust_structure`, `landing.terminal_descent_mount`, `comms.antenna_dish_parabolic`, `power.solar_array_rigid/flexible`, `mechanism.deployable_boom`). |
+| Separation or capture mechanism (`separation_system`, `clamp_band_release`, `docking_latch_mechanism`) | **Not a part — a component on the mating surface** | Settled 9: "at the most fundamental level, the actual decoupling is always done by a component." A separate part sits in between only when there is a major mechanism or a large adapter — already covered by `structure.interstage`, `structure.payload_adapter`, and `structure.fairing_half`, which host the actual separation components (`separation_bolt.pyrotechnic`, `frangible_nut`, `clamp_band.marman`, `bolt_cutter.pyro`). A generic separation or docking-capture "mechanism" part duplicated these; removed from the part table. |
+| TPS tile / ablator patch | **Neither cleanly — see section 4** | A tile is too small and too numerous to be a part (thousands per heatshield) and too geometry-coupled to be a normal component (its "parameter" is really a cell-level material/thickness map on the heatshield part's structural/thermal mesh). Recommend modelling TPS as a material/thickness field over the heatshield part's cells, not as a component type at all. |
 
-**Pattern that emerges:** the "is it a part" test that actually matches the owner's own two examples (engine, Rutherford) is about *needing independent rigid-body/exterior state*, not about procurement. Everything that is bought from a supplier but only adds mass + logic to a host (batteries, fuel cells, turbopumps, cryocoolers) is a component; everything that is bought from a supplier and also needs its own placement, exterior, and mount face (engines, reaction wheels, docking ports, avionics boxes, booms) is a part. The few cases that resist this split (TPS tiles, large membranes) are exactly the cases flagged in section 4.
+**Pattern that emerges:** the test settled 7 states — *own exterior and mount surface, or can separate/move as its own body* — is about independent rigid-body/exterior state, not about procurement. Everything that is bought from a supplier but only adds mass and logic to a host (batteries, fuel cells, turbopumps, e-pumps, cryocoolers, COPVs, reaction wheels, avionics boxes) is a component; everything that is bought from a supplier and also needs its own placement, exterior, and mount face (engines, docking ports, booms, thrusters) is a part. Moving joints and decoupling/capture mechanisms are never parts on their own (settled 9, 19); they are mount-surface kinds and components on the parts that actually move or separate. The few cases that resist this split (TPS tiles, large membranes) are exactly the cases flagged in section 4.
 
 ## 4. Gaps and mesh checks
 
@@ -464,7 +484,7 @@ The owner's rule of thumb (3.1, 5.2) is "if a real program buys it from a suppli
 ### Types that don't map cleanly to any science field
 
 - **Ground support equipment interfaces** (`gse.*` family). Nobody researches a better umbilical mast via nuclear physics or materials science in any interesting way — GSE is industrial/mechanical engineering with no node-gated readiness curve. These part types should probably sit entirely outside the four-layer science system (5.2): always available, costed in money/mass only, never field- or node-gated. Worth a one-line carve-out in 5.2 so design-session 1 doesn't try to force GSE through the node system.
-- **Pure structural fasteners/brackets** (`fastener.bolted_joint`, `bracket.mounting`, `doubler.reinforcement`). These are parametrized entirely by F5's material/strength ranges; they don't get their own node ("better bolt" isn't a tech unlock), they just ride F5's S-curve. Not a true gap, but worth confirming in session 1 that "components with no node of their own, only a field-level parameter" is an accepted category — most fasteners, brackets, and dampers in the catalog are this way.
+- **Pure structural fasteners/brackets** (`fastener.bolted_joint`, `bracket.mounting`, `doubler.reinforcement`). These are parametrized entirely by F5's material/strength ranges; they don't get their own node ("better bolt" isn't a tech unlock), they just ride F5's S-curve. Settled 20 confirms this is the rule, not a gap: a trivial component (lines, hoses, wiring, fasteners, baffles, foam) has no node of its own, and its ranges follow field levels; a node exists only for a component type that is new in kind. Most fasteners, brackets, and dampers in the catalog are this way.
 - **Ballast / inert mass simulators** used on test flights — same bucket as GSE, no science field, pure mass+cost.
 
 ### Types that would need two very different models (split candidates)
