@@ -1,6 +1,6 @@
 # Design session 1: the part schema (working draft)
 
-Status: in session with the owner, 2026-11-04. Settled items are marked **settled** with the answer number from the [interview](../../archive/interviews/interview-2026-11-02-scope.md) or this session. Everything else is a Director proposal. Inputs: [module map](module-map.md), [type catalog](research/type-catalog.md), [Electron / Falcon 1](research/electron-falcon1.md), [F9 / Dragon breakdown](research/f9-dragon-breakdown.md).
+Status: session 1 schema rulings complete, 2026-11-04 (38 rulings). Next: consolidate into `docs/technical/craft-data-model.md` + decision entries. Settled items are marked **settled** with the answer number from the [interview](../../archive/interviews/interview-2026-11-02-scope.md) or this session. Everything else is a Director proposal. Inputs: [module map](module-map.md), [type catalog](research/type-catalog.md), [Electron / Falcon 1](research/electron-falcon1.md), [F9 / Dragon breakdown](research/f9-dragon-breakdown.md).
 
 ## Settled so far
 1. **Type > Design > Unit** (session 1, Q1).
@@ -59,6 +59,22 @@ Status: in session with the owner, 2026-11-04. Settled items are marked **settle
 27. **Power: a DC nodal circuit solve** (Q26). Buses are voltage nodes; wires get resistance from their routed length; switches, fuses and converters run on efficiency maps; batteries are equivalent circuits (OCV vs charge, internal resistance, temperature); arrays use I-V curves vs light and temperature. Sag and brownouts are real, and e-pump motors draw through it.
 28. **Data: links with bandwidth and latency, carrying streams and messages** (Q27): computers, sensors and actuators are nodes; buses (1553, Ethernet, CAN, RS-422) are links. **A computer is abstracted** to processing power, storage, power draw and bit flips: "No need for full on emulators for each and every computer on the rocket, after all everything has to run on a laptop."
 29. **Thermal: cells + contact conductance + view factors** (Q28). Each part's cells and its components are thermal nodes. Heat crosses a mount surface by contact conductance (from the joint type and preload). Radiation between surfaces uses view factors recomputed only when the craft's shape changes. The environment (Sun, planetary IR, albedo, plume, aero heating) loads the exterior cells.
+30. **Loads: a quasi-static load graph** (Q29). The craft moves as one rigid body. Each step, inertial, thrust, aero, pressure and contact forces are distributed through a graph of parts (nodes) and mount joints (edges with stiffness), solved as a sparse static system. It gives axial, bending and shear loads at every joint and a margin per part section. Flex and POGO come later.
+31. **Coupling: a fixed order with explicit hand-offs** (Q30). Each domain solves its network at its own rate in a fixed order (data > power > fluids > engine tables > thermal > loads), using the others' latest values. Tightly coupled loops (pump + motor + power bus) are solved together as one small system. This fits the warp spike's canonical grid.
+32. **Start of game** (Q31): sandbox mode has everything available, for single test missions. In the career, the world knows present-day nodes; you license or research them, which is faster for world-known nodes. Science nodes are kept distinct from part designs. The company starts with **no designs**, but can buy certain components from suppliers, run a design program on a built-in part design, or make its own.
+33. **Size regimes come from real manufacturing thresholds** (Q32): tooling, transport limits (road ~4-5 m, barge ~10 m), test facilities, launch-site handling.
+34. **Groups name parts for staging, scripts, the editor and published mass checks, and can be saved as reusable sub-designs** (Q33). A stage's published dry mass calibrates its parts as a group. Dragon saved as a group goes on another booster. Groups have no physics of their own.
+35. **Breakup comes from the failure mode, in a few physical fragments** (Q34). Each mode declares its pattern:
+    - burst: 3-8 shell fragments plus the released contents;
+    - overload split: 2 pieces at the failed ring;
+    - melt: progressive mass loss, then a split.
+    Fragment masses and velocities come from the stored energy. Each component goes with the fragment it sat in, and small fragments become short-lived debris.
+36. **Design programs cost complexity x novelty x (1 - similarity)** (Q35). The base comes from the class's complexity (a tank << an engine << a capsule). Novelty comes from its nodes (world-known is cheap, your own frontier is expensive). Similarity to designs you own reduces it. The base is calibrated on real programme cost models (NAFCOM / PCEC).
+37. **Components are one level deep; a complex component's internals are parameters and maps in its design** (Q36). An e-pump's motor, impeller and bearings live inside its design and swap as one unit.
+38. **Director calls** (architecture, reported):
+    - published masses for a stage or group (G18) calibrate the group total, spread over its parts in proportion to their derived masses;
+    - the flight termination system (G21) is a component under computing and information plus electromagnetism (no new field);
+    - Curie's undisclosed propellant (G15) is modelled with a labelled stand-in (E) whose Isp matches the published figure.
 
 ## What a part TYPE declares (proposal)
 | Field | What | Example (`tank.cylindrical`) |
