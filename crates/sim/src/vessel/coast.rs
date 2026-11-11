@@ -327,6 +327,9 @@ impl Vessel {
             let e_systems = self.systems.next().filter(|s| *s <= self.thermal.next_lattice());
             let e = e_systems.unwrap_or_else(|| self.thermal.next_lattice());
             if e.seconds_since(reach) > 0.0 {
+                // A warp stop raised at the last lattice point before
+                // `reach` ends the coast there too (its epoch's events done).
+                stopped = halt;
                 break;
             }
             // Out of budget: the vessel stops at its last lattice point, but

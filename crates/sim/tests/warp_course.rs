@@ -571,6 +571,55 @@ fn crew_dragon_on_layer_1_stops_warp_as_its_consumables_run_low() {
     assert!(free(&framed.fleet[0]), "torque-free");
 }
 
+/// Frames of `v` towards `target` until it reaches it or holds at a warp
+/// stop (the game's frame loop for one vessel).
+fn frames_until(w: &World, v: &mut Vessel, target: Epoch) -> Epoch {
+    let mut reached = v.time;
+    for _ in 0..MAX_CHUNKS {
+        reached = v.advance_frame(w, target, &Controls::default(), CHUNK_UNITS).0;
+        if target.seconds_since(reached) <= TICK || v.warp_stop().is_some() {
+            break;
+        }
+    }
+    reached
+}
+
+/// A warp stop raised at a frame's last lattice point holds the vessel at
+/// the stop's epoch, as one raised earlier in the frame does (D128: the
+/// game drops the warp there), and the course on is the same bits as one
+/// pass: Crew Dragon, four aboard, its life support switched off after its
+/// first check (+60 s, which only records the risks it starts with), in a
+/// frame that ends 30 s after the next check.
+#[test]
+fn a_warp_stop_at_a_frames_last_lattice_point_holds_the_vessel_there() {
+    let w = world();
+    let (mut framed, _) = dragon_alone(&w, &CraftId("falcon9-crew#0-7".into()), false);
+    let primed = t0().add_seconds(90.0);
+    assert_eq!(frames_until(&w, &mut framed, primed), primed);
+    assert!(framed.warp_stop().is_none(), "nothing at the first check");
+    let off = OrderKind::Command(ShipCommand::Power("dragon.eclss".into(), false));
+    framed.order_at(t0().add_seconds(91.0), off).unwrap();
+    let mut one = framed.clone();
+    let reached = frames_until(&w, &mut framed, t0().add_seconds(150.0));
+    let stop = framed.take_warp_stop().expect("a warp stop");
+    let (at, held) = (stop.at.seconds_since(t0()), reached.seconds_since(t0()));
+    println!("warp stop at +{at:.0} s, held at +{held:.0} s: {}", stop.why);
+    assert!(stop.why.contains("the life support is out"), "{}", stop.why);
+    assert_eq!(stop.at, t0().add_seconds(120.0), "at the next lattice check");
+    assert_eq!(reached, stop.at, "held at the stop's epoch");
+    let end = t0().add_seconds(600.0);
+    assert_eq!(frames_until(&w, &mut framed, end), end);
+    one.advance(&w, end, &Controls::default(), usize::MAX);
+    assert_eq!(one.take_warp_stop(), Some(stop), "one pass: the same stop");
+    if let (Some(ta), Some(tb)) = (framed.trajectory(), one.trajectory()) {
+        let until = if ta.computed_until() > tb.computed_until() { ta.computed_until() } else { tb.computed_until() };
+        framed.extend_coast(&w, until, usize::MAX);
+        one.extend_coast(&w, until, usize::MAX);
+    }
+    assert_eq!(framed.time, one.time);
+    assert!(framed == one, "the course differs: {}", first_difference(&framed, &one));
+}
+
 // ---------------------------------------------------------------------
 // Divergences (warp-invariance.md, "Divergences found"): each test asserts
 // D129 and fails today. Un-ignore with the fix.
