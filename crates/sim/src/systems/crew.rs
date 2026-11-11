@@ -7,7 +7,8 @@
 //!   (nominal: 0.82 kg O₂ in, 1.04 kg CO₂ and 1.9 kg of water vapour out per
 //!   day) and gives ~100 W of heat.
 //! * **The life support** (layer 1, D128: its own loops, from its own
-//!   stocks; falcon9.md §5.5), while it has power and its function:
+//!   stocks; falcon9.md §5.5), while it works (`systems::links::works`:
+//!   its part intact, not failed, powered and switched on):
 //!   - its scrubber's fan pushes the air through a sorbent bed that takes
 //!     a share η of the CO₂ in it each pass, so it removes η·Q·c (Q the
 //!     flow, c the CO₂'s concentration) and the cabin settles where that
@@ -272,7 +273,7 @@ pub fn step(def: &ShipDef, state: &mut ShipState, accel: Option<DVec3>, outside:
     let part = cabin.part;
     let unit = def.life_support.iter().position(|l| l.part == part).filter(|&i| i < state.life_support.len());
     let volume = unit.map_or(9.3, |i| def.life_support[i].item.cabin_volume);
-    let working = unit.filter(|&i| !state.out(def.life_support[i].owner));
+    let working = unit.filter(|&i| super::links::works(def, state, def.life_support[i].owner));
     let was_fresh = cabin.co2 < 1_000.0;
     let had = working.map(|i| state.life_support[i].clone());
     let ShipState { cabin, life_support, .. } = state;
@@ -543,6 +544,28 @@ mod tests {
         let mut empty = def.as_ref().clone();
         empty.seats.clear();
         assert_eq!(supply_left(&empty, &ShipState::initial(&empty)), None);
+    }
+
+    /// The life support works only switched on (`links::works`, the one
+    /// rule): switched off with four aboard, the CO₂ climbs from the first
+    /// minute and its stocks stay as they were.
+    #[test]
+    fn a_life_support_switched_off_stops() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/craft/falcon9-crew");
+        let def = crate::craft::load_definition(&path).unwrap().ship.unwrap();
+        let t0 = Epoch::new(845_000_000, 0.0);
+        let run = |on: bool| {
+            let mut s = ShipState::initial(&def);
+            let c = def.components.iter().position(|c| c.id == "dragon.eclss").unwrap();
+            s.power[c].on = on;
+            for k in 0..60 {
+                step(&def, &mut s, None, 293.0, 60.0, t0.add_seconds(60.0 * f64::from(k + 1)));
+            }
+            (s.cabin.unwrap().co2, s.life_support[0].clone())
+        };
+        let ((on, used), (off, kept)) = (run(true), run(false));
+        assert!(on < 250.0 && off > 600.0, "{on} Pa on, {off} Pa off");
+        assert!(used.sorbent < 60.0 && kept.sorbent == 60.0 && kept.o2 == 36.0, "{used:?} {kept:?}");
     }
 
     /// Over its limit an exposure hurts the crew once (an alarm and the

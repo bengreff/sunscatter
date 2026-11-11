@@ -49,7 +49,8 @@ pub enum Risk {
     PressureLow,
     /// A consumable of the life support will run out within the margin.
     SupplyLow,
-    /// The life support out (failed or unpowered) with crew aboard.
+    /// The life support out (failed, unpowered or switched off) with crew
+    /// aboard.
     SupportLost,
     /// A part destroyed (its `Part::id`).
     PartLost(u32),
@@ -105,8 +106,8 @@ pub struct Facts {
     pub pressure: Option<f64>,
     /// The life support's shortest time to empty (s), if it has stocks.
     pub supply_left: Option<f64>,
-    /// The life support out: each failed or unpowered (a craft without one
-    /// has none to lose).
+    /// The life support out: each not working (`links::works`: failed,
+    /// unpowered or switched off; a craft without one has none to lose).
     pub support_out: bool,
     /// The parts destroyed.
     pub destroyed: Vec<u32>,
@@ -127,7 +128,8 @@ impl Facts {
             o2: read(Quantity::CabinO2),
             pressure: read(Quantity::CabinPressure),
             supply_left,
-            support_out: !def.life_support.is_empty() && def.life_support.iter().all(|l| state.out(l.owner)),
+            support_out: !def.life_support.is_empty()
+                && def.life_support.iter().all(|l| !crate::systems::links::works(def, state, l.owner)),
             destroyed: state.parts.iter().filter(|p| p.integrity <= 0.0).map(|p| p.part).collect(),
             computing: super::health(def, state).computing(),
             shed: state.unpowered.iter().map(|l| l.owner).filter(|&o| critical(o)).collect(),
