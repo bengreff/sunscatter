@@ -29,7 +29,7 @@ Keys: Z full throttle, X cut; W/S, A/D, Q/E pitch, yaw and roll; I/K, J/L, H/N t
 2. [The systems](docs/systems/README.md): one short doc per system (motion, the world, the ship, propulsion, structure, aero and thermal, avionics, crew, failures, the game), each saying what is built, with honest status words, and what is not.
 3. [The decision log](docs/decisions.md): what has been decided, and why. The systems docs cite it by number.
 4. [The hand-off](docs/plans/HANDOFF.md): what is being worked on now and what is next.
-5. For depth: [technical/](docs/technical/) (one topic per file, starting with the [motion model](docs/technical/motion-model.md) and the [ship model](docs/technical/ship-model.md)) and [vehicles/](docs/vehicles/) (the [Falcon 9 dossier](docs/vehicles/falcon9.md), every number sourced).
+5. For depth: [technical/](docs/technical/) (one topic per file, starting with the [motion model](docs/technical/motion-model.md) and the [ship model](docs/technical/ship-model.md); the [craft data model](docs/technical/craft-data-model.md) is the spec the craft core is being rebuilt to, D130-D136) and [vehicles/](docs/vehicles/) (the [Falcon 9 dossier](docs/vehicles/falcon9.md), every number sourced).
 6. History: [archive/](docs/archive/) holds the owner's interviews, finished plans and briefs, research notes and reviews, and [lessons from v0.1](docs/archive/research/lessons-from-v0.1.md).
 
 ### For an agent, in order
