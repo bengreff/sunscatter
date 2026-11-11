@@ -412,7 +412,8 @@ fn functions(id: &str, owner: Owner, part: u32, pose: &Pose, fs: &[Function], ma
             Function::Seat(n) => ship.seats.push(owned(id, part, owner, *n)),
             Function::Solar(s) => ship.solars.push(owned(id, part, owner, *s)),
             Function::LifeSupport(l) => ship.life_support.push(owned(id, part, owner, *l)),
-            Function::Chute(_) | Function::Docking(..) | Function::Control | Function::Pad => {}
+            Function::Chute(c) => ship.chutes.push(owned(id, part, owner, c.clone())),
+            Function::Docking(..) | Function::Control | Function::Pad => {}
         }
     }
 }

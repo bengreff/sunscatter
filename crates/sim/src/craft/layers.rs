@@ -287,7 +287,35 @@ pub(super) fn check(ship: &ShipDef, command: &ShipCommand) -> Result<(), String>
         ShipCommand::Separate(s) => some(ship.joint_named(s).is_some(), "joint"),
         ShipCommand::Rcs(s, _) => some(named(s, ship.thrusters.iter().map(|v| &v.id)), "thruster block"),
         ShipCommand::Power(s, _) => some(named(s, ship.components.iter().map(|v| &v.id)), "component"),
-        ShipCommand::ReleaseClamps | ShipCommand::ArmChutes => Ok(()),
+        ShipCommand::ArmChutes => some(!ship.chutes.is_empty(), "parachute"),
+        ShipCommand::ReleaseClamps => Ok(()),
         ShipCommand::Sequence(_) => Err(format!("{command:?} edits the sequence: not a stage's command")),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// ArmChutes names the parachutes a craft holds (INTERFACE-11's finding
+    /// 71: the booster offered Parachutes): the stack and Dragon have them,
+    /// the booster and the second stage alone do not.
+    #[test]
+    fn arming_the_chutes_needs_a_parachute_aboard() {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../data/craft/falcon9-crew");
+        let def = (*super::super::load_definition(&path).unwrap().ship.unwrap()).clone();
+        let ids = |f: &dyn Fn(&str) -> bool| def.parts.iter().filter(|p| f(&p.id)).map(|p| p.part).collect::<Vec<_>>();
+        let dragon = |id: &str| id.starts_with("dragon.");
+        let s2 = |id: &str| id.starts_with("s2.");
+        // (piece, arms)
+        let cases: [(&str, ShipDef, bool); 4] = [
+            ("the stack", def.clone(), true),
+            ("Dragon", def.subset(&ids(&dragon)), true),
+            ("the booster", def.subset(&ids(&|id| !dragon(id) && !s2(id))), false),
+            ("the second stage", def.subset(&ids(&s2)), false),
+        ];
+        for (name, piece, arms) in cases {
+            assert_eq!(check(&piece, &ShipCommand::ArmChutes).is_ok(), arms, "{name}");
+        }
     }
 }

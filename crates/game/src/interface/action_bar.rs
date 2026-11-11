@@ -111,7 +111,9 @@ mod tests {
         let f = |name: &str, key: Option<&str>, pinned: bool| Stage {
             name: name.into(),
             key: key.map(str::to_string),
-            actions: vec![ShipCommand::ArmChutes],
+            // The test rocket's own legs (it has no parachute to arm:
+            // finding 71).
+            actions: vec![ShipCommand::Deploy("leg#*".into())],
             pinned,
             abort: false,
         };

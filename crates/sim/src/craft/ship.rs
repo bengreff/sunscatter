@@ -231,6 +231,11 @@ pub struct ShipDef {
     pub solars: Vec<Owned<Solar>>,
     #[serde(default)]
     pub life_support: Vec<Owned<LifeSupport>>,
+    /// The parachutes' packs (components; the craft's deploy is the
+    /// first's, `CraftFile::chute`): a piece without one has nothing to
+    /// arm.
+    #[serde(default)]
+    pub chutes: Vec<Owned<crate::chute::ChuteSpec>>,
     pub joints: Vec<JointDef>,
     pub lines: Vec<LineDef>,
     pub buses: Vec<BusDef>,
@@ -294,6 +299,7 @@ impl ShipDef {
             seats: keep(&self.seats, |v| v.part, kept).0,
             solars: keep(&self.solars, |v| v.part, kept).0,
             life_support: keep(&self.life_support, |v| v.part, kept).0,
+            chutes: keep(&self.chutes, |v| v.part, kept).0,
             joints: self.joints.iter().filter(|j| within(j.parent) && within(j.child)).cloned().collect(),
             lines: self.lines.iter().filter(|l| within(l.parts.0) && within(l.parts.1)).cloned().collect(),
             buses: (self.buses.iter())

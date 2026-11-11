@@ -197,23 +197,18 @@ mod tests {
     #[test]
     fn orders_that_arm_the_parachutes() {
         use sim::systems::OrderKind;
-        let craft = rocket();
+        // The Falcon 9 with Dragon: its parachutes (the test rocket has
+        // none to arm, finding 71).
+        let craft = sim::craft::craft_of(&sim::craft::CraftId("falcon9-crew".into()));
         let def = craft.ship.as_deref().unwrap();
         let mut state = ShipState::initial(def);
-        state.functions.push(sim::craft::command::Stage {
-            name: "Chutes".into(),
-            key: None,
-            actions: vec![ShipCommand::ArmChutes],
-            pinned: false,
-            abort: false,
-        });
         state.stages[1].actions.push(ShipCommand::ArmChutes);
         // (orders, arms)
         let table = [
             (vec![OrderKind::Command(ShipCommand::ArmChutes)], true),
             (vec![OrderKind::Command(ShipCommand::ReleaseClamps)], false),
-            (vec![OrderKind::Function("Chutes".into())], true),
-            (vec![OrderKind::Function("Legs".into())], false),
+            (vec![OrderKind::Function("Parachutes".into())], true),
+            (vec![OrderKind::Function("Landing legs".into())], false),
             (vec![OrderKind::Stage], false),
         ];
         for (kinds, want) in table {

@@ -357,9 +357,10 @@ mod tests {
             assert_eq!(has_run(booster, &stages, sequence, k), want, "{sequence} {k}");
         }
         // Functions: the booster's own and the abort (its Merlins' shutdown),
-        // which it does not offer ([`offered`]: no cabin).
+        // which it does not offer ([`offered`]: no cabin); not Dragon's
+        // parachutes (finding 71: it has none to arm).
         let named = |n: &str| function(booster, &def.functions, n).is_some();
-        assert!(named("Landing legs") && named("Launch abort") && named("Parachutes"));
-        assert!(!named("Nosecone") && !named("No such"));
+        assert!(named("Landing legs") && named("Launch abort"));
+        assert!(!named("Parachutes") && !named("Nosecone") && !named("No such"));
     }
 }

@@ -24,8 +24,8 @@ fn together(id: &str) -> String {
 /// Every command this craft takes, for the editors' pick list, in order:
 /// engine groups (ignite, shut down, select), each engine's owner, the
 /// mechanisms (deploy, retract), valves (open, close), separations, the
-/// clamps, the parachutes, thruster blocks (on, off). A pattern's copies
-/// come once, together (`leg#*`), then each.
+/// clamps, the parachutes (with one aboard), thruster blocks (on, off). A
+/// pattern's copies come once, together (`leg#*`), then each.
 pub fn catalogue(def: &ShipDef) -> Vec<ShipCommand> {
     let mut out: Vec<ShipCommand> = Vec::new();
     let mut push = |c: ShipCommand| {
@@ -61,7 +61,9 @@ pub fn catalogue(def: &ShipDef) -> Vec<ShipCommand> {
             _ => {}
         }
     }
-    push(ShipCommand::ArmChutes);
+    if !def.chutes.is_empty() {
+        push(ShipCommand::ArmChutes);
+    }
     for t in &def.thrusters {
         for s in both(&t.id) {
             push(ShipCommand::Rcs(s.clone(), true));
@@ -152,13 +154,16 @@ mod tests {
             "DEPLOY leg#*",
             "DEPLOY leg#2",
             "SEPARATE separation",
-            "ARM PARACHUTES",
             "RCS rcs#* off",
         ] {
             assert!(labels.iter().any(|l| l == want), "{want} in {labels:?}");
         }
         assert!(!labels.iter().any(|l| l.starts_with("RETRACT")), "legs that cannot retract");
         assert!(!labels.iter().any(|l| l == "RELEASE CLAMPS"), "no pad mount");
+        assert!(!labels.iter().any(|l| l == "ARM PARACHUTES"), "no parachute (finding 71)");
+        let f9 = sim::craft::craft_of(&sim::craft::CraftId("falcon9-crew".into()));
+        let with_chutes = catalogue(f9.ship.as_deref().unwrap());
+        assert!(with_chutes.contains(&ShipCommand::ArmChutes), "Dragon's parachutes");
         // Every command in the list is one the craft accepts.
         for c in &all {
             assert!(def.check(c).is_ok(), "{c:?}");
