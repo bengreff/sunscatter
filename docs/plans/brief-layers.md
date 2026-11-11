@@ -131,3 +131,13 @@ D126's config menu, editable (the lead's item: "the autopilot is a switch with a
 - **The thresholds are E** (software-layers.md §8, point 2): CO₂ 1 kPa (the crew module's alarm), O₂ 18 kPa, total 70 kPa, a day of stock.
 - **Risks present when a vessel is made or loaded do not stop warp** (only new ones do; a craft with a seat and no life support has none to lose).
 - **A piece of a split keeps the craft's notification setting.**
+
+### stash@{0} landed (sun, the Director's worker, 2026-11-10)
+
+LAYERS-4's unfinished work from `git stash@{0}` is on main, tested (sim 703 passed, game 528 passed, both clippy lines, fmt); the stash is left in place:
+- 5d16bc5 a switched-off life support counts as out (`links::works` in `crew::step` and `Facts::support_out`).
+- 2c7e7dc **a sim fix the stash's test found**: a warp stop raised at a frame's last lattice point now holds the vessel at its epoch (`coast_until` ignored `halt` there and ran on to the frame's end: a stop at +120 s held at +150 s, measured); test `a_warp_stop_at_a_frames_last_lattice_point_holds_the_vessel_there`.
+- 2c8090e MCP `run_until` ends on a warp stop (Left 4's first item); its game test now switches the life support off after the first check, which only primes.
+- a6ca66e finding 71 (the patch above, with the three game tests given other actions).
+
+Still left from Left 4: the bubble's joint tick and a landed vessel's frame holding at a stop.
