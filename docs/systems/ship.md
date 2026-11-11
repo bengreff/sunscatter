@@ -12,7 +12,7 @@ D125's universal physics holds on the parts path, with the gaps listed under Not
 
 - **Parts, components, layers** (D100, D018, D033): systems are layered on the part model, abstracted but not too far (D104): they run as behaviour, not as tables of numbers.
 - **Every part comes from a generator** (D101): properties are derived from the generator and its materials; published numbers override them, each with a source. A gap between a derived and a published total is reported as unmodelled mass, never spread. Data carries its tags (P published, E estimate, D derived, U unknown: [falcon9.md](../vehicles/falcon9.md)); missing data takes the analogue's value, marked E.
-- **Follow the real vehicle** (D115): its sensors only, published figures over derived ones, guidance only where the real vehicle flies itself (D117).
+- **Follow the real vehicle** (D115): its sensors only, guidance only where the real vehicle flies itself (D117). Data trust is now derived > published > estimate (D134, reversing D115's published-over-derived); today's code still applies the old rule until the craft core is rebuilt (D136).
 - **Physics is universal** (D125): no ship-specific models. A behaviour is modelled once, for every craft that has the parameters for it, or it is not modelled. Every part is fully described by its parameters.
 - **Rigid until it breaks** (D103, D032): mechanisms move; nothing wobbles.
 - **A vessel is what is joined by structure or by data**, and keeps its own controls (D112). Splits and merges come from the construction (F1): every piece keeps the whole program, seen through its own view.
