@@ -122,6 +122,11 @@ pub struct SimState {
     /// The warp stops taken and not yet notified (D128: a risk to a craft
     /// whose notifications are on drops the warp at its epoch). Not saved.
     pub warp_stops: Vec<(VesselId, sim::systems::ship_os::warp_stop::Stop)>,
+    /// Every warp stop taken, counted, and the last (a run ends on one:
+    /// `agent::session`, which the notifying system's order cannot race).
+    /// Not saved.
+    pub warp_stops_taken: u64,
+    pub last_warp_stop: Option<(VesselId, sim::systems::ship_os::warp_stop::Stop)>,
 }
 
 /// A new game's seed: the wall clock and the process, mixed (tests: 0, so
@@ -199,6 +204,8 @@ impl SimState {
             launch_pending: true,
             restores: 0,
             warp_stops: Vec::new(),
+            warp_stops_taken: 0,
+            last_warp_stop: None,
         }
     }
 
@@ -386,6 +393,8 @@ impl SimState {
         let stops = crate::fleet::take_warp_stops(&mut self.fleet);
         if !stops.is_empty() {
             self.warp = 0;
+            self.warp_stops_taken += stops.len() as u64;
+            self.last_warp_stop = stops.last().cloned();
             self.warp_stops.extend(stops);
         }
         clock

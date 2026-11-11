@@ -212,7 +212,8 @@ pub fn tools(dev: bool) -> Vec<Tool> {
         t(
             "run_until",
             "Run time until the first of the given stops (an epoch, or an event of the vessel as it knows it), then \
-             stop it (unless `keep_running`). Answers when it stops, with what stopped it (`reached`: `time`, a \
+             stop it (unless `keep_running`). Answers when it stops, with what stopped it (`reached`: `time`, \
+             `warp_stop` (a risk to a craft dropped the warp, D128; `warp_stop` gives the vessel, epoch and why), a \
              condition's name, `paused`, `timeout`, `vessel_gone`) and the vessel's state then, each number as its \
              sensors read it (null where none measures it; the stops compare these). A condition on something no \
              working sensor measures is refused. Physics warp is capped while engines run.",
@@ -415,6 +416,8 @@ struct Run {
     q_max: f64,
     wall: f64,
     started: Epoch,
+    /// The warp stops taken when it started (`SimState::warp_stops_taken`).
+    stops0: u64,
     /// Stopped: what stopped it and when (real s), its answer waiting for
     /// the predicted path from the stopped clock ([`answer_now`]).
     stopped: Option<(&'static str, f64)>,
@@ -717,13 +720,24 @@ impl Sample {
 }
 
 /// The first stop reached (its name), given the clock reached the stop
-/// epoch (`at_stop`), the fleet's size at the start and the peak dynamic
-/// pressure so far.
-pub fn reached(u: &Until, s: &Sample, at_stop: bool, fleet0: usize, q_max: f64) -> Option<&'static str> {
+/// epoch (`at_stop`), whether a risk to a craft dropped the warp since the
+/// start (`warp_stopped`, D128: the run ends there, at the stop's epoch,
+/// as the player's warp does), the fleet's size at the start and the peak
+/// dynamic pressure so far.
+pub fn reached(
+    u: &Until,
+    s: &Sample,
+    at_stop: bool,
+    warp_stopped: bool,
+    fleet0: usize,
+    q_max: f64,
+) -> Option<&'static str> {
     let ge = |x: Option<f64>, y: Option<f64>| matches!((x, y), (Some(x), Some(y)) if x >= y);
     let le = |x: Option<f64>, y: Option<f64>| matches!((x, y), (Some(x), Some(y)) if x <= y);
     if at_stop {
         Some("time")
+    } else if warp_stopped {
+        Some("warp_stop")
     } else if ge(s.altitude, u.altitude_above) {
         Some("altitude_above_m")
     } else if le(s.altitude, u.altitude_below) {
@@ -1041,7 +1055,18 @@ fn start(
             }
             sim.paused = false;
             let (fleet, q_max, started) = (s.fleet, s.q.unwrap_or(0.0), sim.clock);
-            Started::Job(Job::Run(Run { call, until, vessel: id, fleet, q_max, wall: 0.0, started, stopped: None }))
+            let stops0 = sim.warp_stops_taken;
+            Started::Job(Job::Run(Run {
+                call,
+                until,
+                vessel: id,
+                fleet,
+                q_max,
+                wall: 0.0,
+                started,
+                stops0,
+                stopped: None,
+            }))
         }
         "new_flight" => {
             let craft = args.get("craft").and_then(Value::as_str).unwrap_or("").to_string();
@@ -1283,7 +1308,8 @@ fn run_job(
         None => {
             r.q_max = r.q_max.max(s.q.unwrap_or(0.0));
             let at_stop = r.until.stop.is_some_and(|t| sim.clock.seconds_since(t) >= 0.0);
-            let why = reached(&r.until, &s, at_stop, r.fleet, r.q_max).or_else(|| {
+            let warp_stopped = sim.warp_stops_taken > r.stops0;
+            let why = reached(&r.until, &s, at_stop, warp_stopped, r.fleet, r.q_max).or_else(|| {
                 if r.until.timeout <= 0.0 {
                     Some("paused")
                 } else {
@@ -1312,6 +1338,9 @@ fn run_job(
         "elapsed_s": super::seconds(sim.clock.seconds_since(r.started)),
         "wall_s": r.wall, "time_stopped": sim.paused, "vessel": r.vessel.0, "state": s.json(),
         "active_vessel": sim.ship().id().0,
+        "warp_stop": (why == "warp_stop").then(|| sim.last_warp_stop.as_ref().map(|(id, stop)| {
+            json!({"vessel": id.0, "at": super::epoch_text(stop.at), "why": stop.why})
+        })).flatten(),
     });
     r.call.reply(ToolResult::Ok(out));
     None
@@ -1604,7 +1633,10 @@ mod tests {
             ("unknown altitude never stops it", Sample { altitude: None, ..s }, false, 0.0, None),
         ];
         for (case, sample, at_stop, q_max, want) in cases {
-            assert_eq!(reached(&u, &sample, at_stop, 1, q_max), want, "{case}");
+            assert_eq!(reached(&u, &sample, at_stop, false, 1, q_max), want, "{case}");
+            // A warp stop ends any run short of its time (D128).
+            let stopped = if at_stop { Some("time") } else { Some("warp_stop") };
+            assert_eq!(reached(&u, &sample, at_stop, true, 1, q_max), stopped, "{case}, a warp stop");
         }
         assert_eq!(u.unknown(&s), None);
         assert_eq!(u.unknown(&Sample { feeding: None, ..s }).map(|w| w.contains("propellant")), Some(true));

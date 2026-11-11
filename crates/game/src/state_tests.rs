@@ -297,3 +297,42 @@ fn a_prediction_is_current_for_its_own_vessel_and_clock() {
         assert_eq!(pred(from).current(id, clock, needed), want, "{from:?} {id:?} {needed}");
     }
 }
+
+/// A risk's warp stop through the game's step (D128): Crew Dragon alone in
+/// orbit, its life support switched off with four aboard (crew at risk:
+/// the life support out) after its first lattice check (+60 s, which only
+/// records the risks a vessel starts with: `Watch::primed`). The warp drops
+/// at the next check, the clock held at the stop's epoch, and the stop is
+/// counted with its vessel and why, for a run to end on
+/// (`agent::session::reached`'s `warp_stop`) whatever the notification's
+/// order.
+#[test]
+fn a_warp_stop_drops_the_warp_holds_the_clock_and_is_counted() {
+    use sim::craft::command::ShipCommand;
+    use sim::systems::OrderKind;
+    bevy::tasks::ComputeTaskPool::get_or_init(bevy::tasks::TaskPool::default);
+    let mut sim = SimState::new();
+    let dragon = sim::craft::craft_of(&sim::craft::CraftId("falcon9-crew#0-7".into()));
+    let id = sim.spawn_in_orbit(&dragon, 1)[0];
+    let i = sim.index_of(id).unwrap();
+    let primed = sim.clock.add_seconds(90.0);
+    sim.step(primed, |_| None, None);
+    assert_eq!((sim.warp_stops_taken, sim.clock), (0, primed), "nothing at the first check");
+    let off = OrderKind::Command(ShipCommand::Power("dragon.eclss".into(), false));
+    sim.fleet[i].order_at(sim.clock.add_seconds(1.0), off).unwrap();
+    let from = sim.clock;
+    sim.warp = 7;
+    for k in 1..=10 {
+        sim.step(from.add_seconds(60.0 * f64::from(k)), |_| None, None);
+        if sim.warp_stops_taken > 0 {
+            break;
+        }
+    }
+    let (who, stop) = sim.last_warp_stop.clone().expect("a warp stop");
+    println!("warp stop at +{:.0} s: {}", stop.at.seconds_since(from), stop.why);
+    assert_eq!((sim.warp_stops_taken, who, sim.warp), (1, id, 0));
+    assert!(stop.why.contains("the life support is out"), "{}", stop.why);
+    assert_eq!(sim.clock, stop.at, "the clock held at the stop");
+    assert!(stop.at.seconds_since(from) <= 60.0, "the next lattice check");
+    assert_eq!(sim.warp_stops.len(), 1, "for the toast");
+}
